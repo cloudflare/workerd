@@ -152,6 +152,76 @@ struct SerTestContext: public ContextGlobalObject {
     return result;
   }
 
+  // A serializer outside C++ JSG: its own delegates drive V8's serializer, and API objects go
+  // through writeApiObject() and readApiObject().
+  struct ForeignSerializer final: public v8::ValueSerializer::Delegate {
+    explicit ForeignSerializer(v8::Isolate* isolate): isolate(isolate), ser(isolate, this) {
+      ser.WriteHeader();
+    }
+    void ThrowDataCloneError(v8::Local<v8::String> message) override {
+      v8::Local<v8::Value> exception;
+      if (newDataCloneError(isolate, message).ToLocal(&exception)) {
+        isolate->ThrowException(exception);
+      }
+    }
+    v8::Maybe<bool> WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) override {
+      return writeApiObject(isolate, ser, object);
+    }
+    v8::Isolate* isolate;
+    v8::ValueSerializer ser;
+  };
+
+  struct ForeignDeserializer final: public v8::ValueDeserializer::Delegate {
+    ForeignDeserializer(v8::Isolate* isolate, kj::ArrayPtr<const kj::byte> data)
+        : deser(isolate, data.begin(), data.size(), this) {}
+    v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override {
+      uint32_t tag;
+      KJ_ASSERT(deser.ReadUint32(&tag));
+      return readApiObject(isolate, deser, tag);
+    }
+    v8::ValueDeserializer deser;
+  };
+
+  kj::Array<kj::byte> foreignSerialize(Lock& js, JsValue in) {
+    ForeignSerializer ser(js.v8Isolate);
+    check(ser.ser.WriteValue(js.v8Context(), in));
+    auto [data, size] = ser.ser.Release();
+    return kj::Array<kj::byte>(data, size, SERIALIZED_BUFFER_DISPOSER);
+  }
+
+  JsValue foreignDeserialize(Lock& js, kj::ArrayPtr<const kj::byte> data) {
+    ForeignDeserializer deser(js.v8Isolate, data);
+    check(deser.deser.ReadHeader(js.v8Context()));
+    return JsValue(check(deser.deser.ReadValue(js.v8Context())));
+  }
+
+  // Round-trips `in` through the foreign serializer and deserializer.
+  JsValue foreignRoundTrip(Lock& js, JsValue in) {
+    auto data = foreignSerialize(js, in);
+    return foreignDeserialize(js, data);
+  }
+
+  // Whether the foreign serializer writes `in` exactly as Serializer does.
+  bool foreignMatchesSerializer(Lock& js, JsValue in) {
+    auto foreign = foreignSerialize(js, in);
+    Serializer ser(js);
+    ser.write(js, in);
+    return foreign == ser.release().data;
+  }
+
+  // Reads with Deserializer what the foreign serializer wrote, and the other way round.
+  JsValue foreignToSerializer(Lock& js, JsValue in) {
+    auto data = foreignSerialize(js, in);
+    Deserializer deser(js, data);
+    return deser.readValue(js);
+  }
+  JsValue serializerToForeign(Lock& js, JsValue in) {
+    Serializer ser(js);
+    ser.write(js, in);
+    auto released = ser.release();
+    return foreignDeserialize(js, released.data);
+  }
+
   // Mirror of the global `structuredClone(value, { transfer })`, for testing transfer handling.
   JsValue structuredCloneWithTransfer(
       Lock& js, JsValue value, jsg::Optional<kj::Array<JsValue>> transfer) {
@@ -168,6 +238,10 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Baz);
     JSG_NESTED_TYPE(Qux);
     JSG_METHOD(roundTrip);
+    JSG_METHOD(foreignRoundTrip);
+    JSG_METHOD(foreignMatchesSerializer);
+    JSG_METHOD(foreignToSerializer);
+    JSG_METHOD(serializerToForeign);
     JSG_METHOD(structuredCloneWithTransfer);
   }
 };
@@ -365,6 +439,39 @@ KJ_TEST("serialization") {
                 "obj.bar = bar;\n"
                 "roundTrip(obj).bar.val.bar.val.bar.val.i",
       "number", "321");
+}
+
+KJ_TEST("serialization of API objects by a serializer outside C++ JSG") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  e.expectEval("foreignRoundTrip(new Foo(123)).i", "number", "125");
+  e.expectEval("foreignRoundTrip(new Bar(\"hello\")).text", "string", "hello!");
+  e.expectEval("foreignRoundTrip(new Qux(\"hello\")).text", "string", "hello?");
+  e.expectEval(
+      "foreignRoundTrip({ foo: new Foo(1), qux: [new Qux(\"a\")] }).qux[0].text", "string", "a?");
+
+  // Values an API object writes go back through the foreign serializer's delegate.
+  e.expectEval("let obj = {i: 321};\n"
+               "obj.qux = new Qux(\"x\");\n"
+               "foreignRoundTrip(obj).qux.text",
+      "string", "x?");
+
+  // The bytes and the format are those of Serializer and Deserializer.
+  e.expectEval("foreignMatchesSerializer({ foo: new Foo(7), bar: new Bar(\"b\"), n: [1, 'x'] })",
+      "boolean", "true");
+  e.expectEval("foreignToSerializer(new Bar(\"to\")).text", "string", "to!");
+  e.expectEval("serializerToForeign(new Bar(\"from\")).text", "string", "from!");
+
+  // What a type's serializer or deserializer throws reaches the caller.
+  e.expectEval("foreignRoundTrip(new Baz(true))", "throws", "Error: throw from serialize()");
+  e.expectEval("foreignRoundTrip(new Baz(false))", "throws", "Error: throw from deserialize()");
+
+  // An object that is not a serializable API object, and a value V8 can't clone, throw a
+  // DataCloneError, as Serializer does.
+  e.expectEval("try { foreignRoundTrip(() => 1); } catch (e) { `${e.name}: ${e.message}` }",
+      "string", "DataCloneError: () => 1 could not be cloned.");
+  e.expectEval(
+      "try { foreignRoundTrip(roundTrip); } catch (e) { e.name }", "string", "DataCloneError");
 }
 
 KJ_TEST("recursive structuredClone with transfer") {

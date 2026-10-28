@@ -18,7 +18,7 @@ fn register(mut registry: Pin<&mut v8::ffi::ModuleRegistry>) {
         |lock| {
             let exports = lock.new_object();
             let value = "exported".to_js(lock)?;
-            exports.set(lock, "value", value);
+            exports.set(lock, "value", value)?;
             Ok(exports.into())
         },
         ModuleType::Internal,

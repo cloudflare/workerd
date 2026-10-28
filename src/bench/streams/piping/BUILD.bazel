@@ -7,6 +7,7 @@ load("//:build/wd_bench.bzl", "wd_bench")
 piping_bench_srcs = glob(["*.js"]) + ["piping-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "piping-cpp.wd-bench",
     data = piping_bench_srcs,
 )

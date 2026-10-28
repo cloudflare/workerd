@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! `BigInt` and `Date` handles, and the `i64` and `SystemTime` conversions built on them, which
-//! match C++ JSG's `int64_t` and `kj::Date` (`jsg/value.h`).
+//! `BigInt` and `Date` handles, and the `i64`, `u64` and `SystemTime` conversions built on them,
+//! which match C++ JSG's `int64_t`, `uint64_t` and `kj::Date` (`jsg/value.h`).
 
 use std::time::Duration;
 use std::time::SystemTime;
@@ -67,6 +67,15 @@ fn big_int_handles() {
                 .int64_value(),
             None
         );
+
+        let as_u64 = |lock: &mut jsg::Lock<'_>, expr: &str| {
+            v8::Local::<v8::BigInt>::try_from(ctx.eval_raw(lock, expr).unwrap())
+                .unwrap()
+                .uint64_value()
+        };
+        assert_eq!(as_u64(lock, "2n ** 64n - 1n"), Some(u64::MAX));
+        assert_eq!(as_u64(lock, "-1n"), None);
+        assert_eq!(as_u64(lock, "2n ** 64n"), None);
 
         assert!(v8::Local::<v8::BigInt>::try_from(ctx.eval_raw(lock, "5").unwrap()).is_err());
         Ok(())
@@ -140,6 +149,58 @@ fn i64_rejects_what_cpp_jsg_rejects() {
              (inclusive).",
         );
         assert_type_error::<i64>(
+            lock,
+            ctx,
+            "Symbol()",
+            "Cannot convert a Symbol value to a number",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn u64_converts_big_ints_and_numbers() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(convert::<u64>(lock, ctx, "5n").unwrap(), 5);
+        assert_eq!(
+            convert::<u64>(lock, ctx, "2n ** 64n - 1n").unwrap(),
+            u64::MAX
+        );
+        assert_eq!(convert::<u64>(lock, ctx, "1.9").unwrap(), 1);
+        assert_eq!(convert::<u64>(lock, ctx, "'12'").unwrap(), 12);
+        assert_eq!(convert::<u64>(lock, ctx, "null").unwrap(), 0);
+        assert_eq!(
+            convert::<u64>(lock, ctx, "2 ** 63").unwrap(),
+            9_223_372_036_854_775_808
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn u64_rejects_what_cpp_jsg_rejects() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let truncated = "The value cannot be converted because it is either negative and this \
+                         API expects a positive bigint, or the value would be truncated.";
+        assert_type_error::<u64>(lock, ctx, "-1n", truncated);
+        assert_type_error::<u64>(lock, ctx, "2n ** 64n", truncated);
+        let not_an_integer = "The value cannot be converted because it is not an integer.";
+        assert_type_error::<u64>(lock, ctx, "NaN", not_an_integer);
+        assert_type_error::<u64>(lock, ctx, "Infinity", not_an_integer);
+        assert_type_error::<u64>(lock, ctx, "undefined", not_an_integer);
+        let negative = "The value cannot be converted because it is negative and this API \
+                        expects a positive bigint.";
+        assert_type_error::<u64>(lock, ctx, "-1", negative);
+        assert_type_error::<u64>(lock, ctx, "-0.5", negative);
+        assert_type_error::<u64>(
+            lock,
+            ctx,
+            "2e19",
+            "Value out of range. Must be less than or equal to 18446744073709551615.",
+        );
+        assert_type_error::<u64>(
             lock,
             ctx,
             "Symbol()",
@@ -237,6 +298,48 @@ fn big_ints_are_created_exactly() {
             eval_with(lock, ctx, value, "String(v === 2n ** 64n - 1n)"),
             "true"
         );
+        Ok(())
+    });
+}
+
+/// Like C++ JSG's `int64_t`, an `i64` converts to a `BigInt`.
+#[test]
+fn i64_converts_to_a_big_int() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(
+            eval_with(
+                lock,
+                ctx,
+                i64::MAX,
+                "String(typeof v === 'bigint' && v === 2n ** 63n - 1n)"
+            ),
+            "true"
+        );
+        assert_eq!(
+            eval_with(lock, ctx, i64::MIN, "String(v === -(2n ** 63n))"),
+            "true"
+        );
+        assert_eq!(eval_with(lock, ctx, 0i64, "String(v === 0n)"), "true");
+        Ok(())
+    });
+}
+
+/// Like C++ JSG's `uint64_t`, a `u64` converts to a `BigInt`.
+#[test]
+fn u64_converts_to_a_big_int() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        assert_eq!(
+            eval_with(
+                lock,
+                ctx,
+                u64::MAX,
+                "String(typeof v === 'bigint' && v === 2n ** 64n - 1n)"
+            ),
+            "true"
+        );
+        assert_eq!(eval_with(lock, ctx, 0u64, "String(v === 0n)"), "true");
         Ok(())
     });
 }

@@ -6,6 +6,7 @@ import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
 import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
 import { Buffer } from 'node-internal:internal_buffer';
+import { MIMEParams, MIMEType } from 'node-internal:internal_mime';
 
 import {
   validateFunction,
@@ -101,7 +102,7 @@ export function isArray(val: unknown): boolean {
 export { callbackify, parseEnv } from 'node-internal:internal_utils';
 export const types = internalTypes;
 
-export const { MIMEParams, MIMEType } = utilImpl;
+export { MIMEParams, MIMEType };
 
 const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
 const kCustomPromisifyArgsSymbol = Symbol.for(

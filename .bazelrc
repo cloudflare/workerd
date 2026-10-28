@@ -1,6 +1,7 @@
 common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default,-requires-container-engine
+build --//build/config:container_test_images
 # block network access by default
 build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
@@ -15,6 +16,9 @@ build:regenerate-snapshots --//build/config:python_snapshots=false
 # is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
 # at the same time.
 test --local_resources=socket=1
+# Tests that start a wptserve sidecar (wpt_test with start_server = True) are tagged
+# "resources:wptserve:1", so that at most one wptserve runs at a time.
+test --local_resources=wptserve=1
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
 # corresponds to small,medium,large,enormous tests (medium is default)
@@ -93,6 +97,11 @@ build:perfetto --@v8//:v8_use_perfetto=True
 build:no-perfetto --//src/workerd/util:use_perfetto=False
 build:no-perfetto --@v8//:v8_use_perfetto=False
 build:unix --config=perfetto
+
+# Build V8's Temporal implementation on the temporal_capi crate from crates_vendor.
+# NOTE: Temporal is still disabled at runtime for now
+build --@v8//:v8_enable_temporal_support=True
+build --@v8//:v8_temporal_capi=//deps/rust:temporal_capi
 
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
@@ -625,10 +634,10 @@ common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
 common:bazelflare --spawn_strategy=remote --remote_local_fallback=false
 # V8 marks its inspector code generator `local = 1`; it runs fine remotely.
 common:bazelflare --modify_execution_info=Genrule=-local
-# Executors have neither internet nor a container engine, so targets that need them, or that must
-# run on the client, are skipped. Filters don't change action keys.
-common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
-test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+# Targets that must run on the client are skipped; unlike the default filters, these keep the
+# container tests. Filters don't change action keys.
+common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-fuzzilli
+test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-fuzzilli
 common:bazelflare --remote_download_minimal
 common:bazelflare --remote_cache_compression --remote_timeout=600
 # bazelflare sends nothing while an action runs, so only pings notice a connection that died

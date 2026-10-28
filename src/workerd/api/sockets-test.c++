@@ -173,8 +173,8 @@ KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
 }
 
 // The output-gate write test body, run against both stream backends: with useTsStreams
-// the typescript_implemented_streams compat flag (plus the bootstrap autogate) is enabled
-// and the socket's streams are TypeScript-implemented.
+// the typescript_implemented_streams compat flag is enabled and the socket's streams are
+// TypeScript-implemented.
 void runSocketWriteOutputGateTest(bool useTsStreams) {
   bool connectCalled = false;
   kj::HttpHeaderTable headerTable;
@@ -187,8 +187,6 @@ void runSocketWriteOutputGateTest(bool useTsStreams) {
   Worker::Actor::Id actorId = kj::str("test-actor-write");
   TestFixture fixture(TestFixture::SetupParams{
     .featureFlags = flags.asReader(),
-    .autogates = useTsStreams ? kj::Maybe(kj::arr("per-isolate-javascript-bootstrap"_kj))
-                              : kj::Maybe<kj::Array<kj::StringPtr>>(kj::none),
     .actorId = kj::mv(actorId),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(

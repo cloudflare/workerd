@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import { globSync } from 'node:fs';
 import http from 'node:http';
 import { env } from 'node:process';
 import { test } from 'node:test';
@@ -70,6 +72,12 @@ async function removeTestContainers() {
 }
 
 test('graceful shutdown removes application and sidecar containers', async () => {
+  // The images the containers run, as tarballs among the test's runfiles.
+  for (const tarball of globSync('images/**/tarball.tar')) {
+    execFileSync('docker', ['load', '--quiet', '--input', tarball], {
+      stdio: 'inherit',
+    });
+  }
   await removeTestContainers();
 
   const workerd = new WorkerdServerHarness({

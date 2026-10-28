@@ -3,13 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use jsg::Number;
-use jsg::v8::ToLocalValue;
+use jsg::ToJS;
 
 #[test]
 fn v8_is_string_returns_true_for_strings() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let str_val = "hello".to_local(lock);
+        let str_val = "hello".to_js(lock)?;
         assert!(str_val.is_string());
         Ok(())
     });
@@ -19,10 +19,10 @@ fn v8_is_string_returns_true_for_strings() {
 fn v8_is_boolean_returns_true_for_booleans() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let bool_true = true.to_local(lock);
+        let bool_true = true.to_js(lock)?;
         assert!(bool_true.is_boolean());
 
-        let bool_false = false.to_local(lock);
+        let bool_false = false.to_js(lock)?;
         assert!(bool_false.is_boolean());
         Ok(())
     });
@@ -32,13 +32,13 @@ fn v8_is_boolean_returns_true_for_booleans() {
 fn v8_is_number_returns_true_for_numbers() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let float_val = Number::new(2.5).to_local(lock);
+        let float_val = Number::new(2.5).to_js(lock)?;
         assert!(float_val.is_number());
 
-        let int_val = 42u32.to_local(lock);
+        let int_val = 42u32.to_js(lock)?;
         assert!(int_val.is_number());
 
-        let num_u8 = 255u8.to_local(lock);
+        let num_u8 = 255u8.to_js(lock)?;
         assert!(num_u8.is_number());
         Ok(())
     });
@@ -49,15 +49,15 @@ fn v8_type_checks_are_mutually_exclusive() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // String is only string
-        let s = "test".to_local(lock);
+        let s = "test".to_js(lock)?;
         assert!(s.is_string() && !s.is_boolean() && !s.is_number());
 
         // Boolean is only boolean
-        let b = true.to_local(lock);
+        let b = true.to_js(lock)?;
         assert!(!b.is_string() && b.is_boolean() && !b.is_number());
 
         // Number is only number
-        let n = Number::new(42.0).to_local(lock);
+        let n = Number::new(42.0).to_js(lock)?;
         assert!(!n.is_string() && !n.is_boolean() && n.is_number());
         Ok(())
     });
@@ -67,13 +67,13 @@ fn v8_type_checks_are_mutually_exclusive() {
 fn v8_unwrap_boolean_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let bool_true = true.to_local(lock);
+        let bool_true = true.to_js(lock)?;
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_true =
             unsafe { jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_true.into_ffi()) };
         assert!(unwrapped_true);
 
-        let bool_false = false.to_local(lock);
+        let bool_false = false.to_js(lock)?;
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
         let unwrapped_false =
             unsafe { jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_false.into_ffi()) };
@@ -87,7 +87,7 @@ fn v8_unwrap_number_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         for expected in [2.5, 0.0, -42.5] {
-            let num = Number::new(expected).to_local(lock);
+            let num = Number::new(expected).to_js(lock)?;
             let mut unwrapped = f64::NAN;
             // SAFETY: The isolate is locked and the value is a valid V8 local handle.
             let ok = unsafe {
@@ -105,7 +105,7 @@ fn v8_unwrap_string_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         for expected in ["hello world", "", "こんにちは"] {
-            let s = expected.to_local(lock);
+            let s = expected.to_js(lock)?;
             let mut unwrapped = String::new();
             // SAFETY: The isolate is locked and the value is a valid V8 local handle.
             let ok = unsafe {
