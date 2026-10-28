@@ -266,7 +266,7 @@ impl<'s> FromJS<'s> for Error {
     /// Creates an Error from a V8 value (typically an exception).
     ///
     /// A native error contributes its `name` and `message` properties. A
-    /// `DOMException` contributes its name and message as C++ JSG stores them,
+    /// `DOMException` contributes the name and message it was created with,
     /// as [`Error::new_dom_exception`] takes them. Any other value is rejected
     /// with a `TypeError`.
     ///
@@ -304,8 +304,8 @@ impl<'s> FromJS<'s> for Error {
             });
         }
 
-        // A DOMException is not a native error: it is a JSG resource whose
-        // prototype chain includes Error.prototype.
+        // A DOMException is not a native error, though its prototype chain includes
+        // Error.prototype; it is recognized by its brand.
         let mut dom_name = String::new();
         let mut dom_message = String::new();
         // SAFETY: Lock guarantees the isolate is valid and locked, and `value`
@@ -413,11 +413,10 @@ impl Error {
     ///
     /// # Errors
     ///
-    /// Creating a `DOMException` can fail. Then this returns an error for which
-    /// [`Error::is_pending`] is true if V8 has an exception pending, and an internal error
-    /// otherwise. It also returns such a pending error,
-    /// and creates nothing, while execution is terminating, because creating a `DOMException`
-    /// clears V8's pending exception, and with it the termination.
+    /// Creating a `DOMException` can fail with an exception pending, such as a stack overflow.
+    /// Then this returns an error for which [`Error::is_pending`] is true. It also returns such
+    /// a pending error, and creates nothing, while execution is terminating, because capturing
+    /// the `DOMException`'s stack trace then fails a V8 debug check.
     #[expect(
         unsafe_code,
         reason = "creates the V8 exception object through the FFI"
@@ -430,17 +429,10 @@ impl Error {
                 return Err(Self::pending());
             }
             // SAFETY: isolate is valid and locked (guaranteed by caller).
-            return match unsafe {
-                v8::ffi::dom_exception_create(isolate.as_ffi(), name, &self.message)
-            } {
-                // SAFETY: the exception was created in the caller's handle scope.
-                Ok(exception) => Ok(unsafe { v8::Local::from_ffi(exception) }),
-                // SAFETY: isolate is valid and locked (guaranteed by caller).
-                Err(_) if unsafe { v8::ffi::isolate_has_pending_exception(isolate.as_ffi()) } => {
-                    Err(Self::pending())
-                }
-                Err(failure) => Err(failure.into()),
-            };
+            let exception =
+                unsafe { v8::ffi::dom_exception_create(isolate.as_ffi(), name, &self.message) }?;
+            // SAFETY: the exception was created in the caller's handle scope.
+            return unsafe { v8::Local::from_ffi_maybe(exception) }.ok_or_else(Self::pending);
         }
         let message = self.message.as_bytes();
         // Strings longer than i32::MAX bytes are truncated to satisfy V8's

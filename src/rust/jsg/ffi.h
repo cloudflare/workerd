@@ -491,9 +491,11 @@ MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data
 // DOM-prefixed exception types with dom_exception_create() instead.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
-Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message);
-// Stores the name and message of a DOMException (or of an object with one on its
-// prototype chain) and returns true; returns false for any other value.
+// Creates a DOMException without running JavaScript (jsg::newDOMException()), or returns none
+// with an exception pending.
+MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message);
+// Stores the name and message of a DOMException, by its brand (jsg::tryGetDOMExceptionFields()),
+// and returns true; returns false for any other value. Runs no JavaScript.
 bool local_try_unwrap_dom_exception(
     Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs

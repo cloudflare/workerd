@@ -256,7 +256,7 @@ fn script_created_dom_exceptions_convert() {
             assert_eq!(err.message, "m", "{name}");
         }
 
-        // The name and message C++ stores, not the configurable JS properties.
+        // The name and message it was created with, not the configurable JS properties.
         let err = convert(
             lock,
             "(() => {
@@ -270,7 +270,7 @@ fn script_created_dom_exceptions_convert() {
         assert_eq!(err.name, ExceptionType::DOMDataError);
         assert_eq!(err.message, "m");
 
-        // A subclass instance has a DOMException on its prototype chain.
+        // A subclass instance is a DOMException too.
         let err = convert(
             lock,
             "(() => { class Sub extends DOMException {} return new Sub('m', 'NotFoundError'); })()",

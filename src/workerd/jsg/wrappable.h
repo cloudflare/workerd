@@ -81,6 +81,9 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO,
   CONSOLE_ORIGINAL_LOG,
   CONSOLE_ORIGINAL_WARN,
+  // The prototype of the DOMExceptions that native code creates; see setDOMExceptionPrototype()
+  // in dom-exception.h. Rust JSG reads it too (src/rust/jsg/ffi.c++).
+  DOM_EXCEPTION_PROTOTYPE,
 };
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting

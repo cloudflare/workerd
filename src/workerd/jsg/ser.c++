@@ -206,18 +206,15 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
-  // By default, V8 will call WriteHostObject() for objects that have internal fields. We only need
-  // to override IsHostObject() if we want to treat pure-JS objects differently, which we do if
-  // treatClassInstancesAsPlainObjects is false, or if treatErrorsAsHostObjects is true.
-  return !treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects;
+  // By default, V8 will call WriteHostObject() only for objects that have internal fields. A
+  // DOMException is a host object whether or not it has them.
+  return true;
 }
 
 v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  // This is only called if HasCustomHostObject() returned true.
-  KJ_ASSERT(!treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects);
-
-  // Any object with internal fields is DEFINITELY a host object!
-  if (object->InternalFieldCount() > 0) {
+  // Any object with internal fields is DEFINITELY a host object, and so is a DOMException, which
+  // writeApiObject() writes by its brand.
+  if (object->InternalFieldCount() > 0 || tryGetDOMExceptionFields(isolate, object) != kj::none) {
     return v8::Just(true);
   }
 
@@ -302,6 +299,14 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
 }
 
 void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
+  KJ_IF_SOME(fields, tryGetDOMExceptionFields(js.v8Isolate, object)) {
+    // Whichever class created it, a DOMException is written as the C++ class's serializer always
+    // wrote it, so that both read it back.
+    writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
+    serializeDOMException(js, *this, object, fields);
+    return;
+  }
+
   if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
       !Wrappable::isWorkerdApiObject(object)) {
     KJ_IF_SOME(eh, externalHandler) {

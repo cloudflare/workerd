@@ -30,6 +30,8 @@ namespace workerd::jsg {
 class Serializer;
 class Deserializer;
 
+// The functions that create and recognize DOMExceptions are declared in jsg.h.
+
 // JSG allows DOMExceptions to be tunneled through kj::Exceptions (see exceptionToJs() for
 // details). While this feature is activated conditionally at run-time, and thus does not depend
 // on any specific concrete C++ type, JSG needs to be able to unit test the tunneled exception
@@ -82,7 +84,6 @@ class DOMException: public Object {
       set stack(value: any);
     });
   }
-  JSG_REFLECTION(stack);
 
 #undef JSG_DOM_EXCEPTION_CONSTANT_CXX
 #undef JSG_DOM_EXCEPTION_CONSTANT_JS
@@ -106,7 +107,6 @@ class DOMException: public Object {
  private:
   kj::String message;
   kj::String name;
-  PropertyReflection<kj::String> stack;
 };
 
 }  // namespace workerd::jsg

@@ -4,7 +4,6 @@
 
 #include "ffi.h"
 
-#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -806,6 +805,17 @@ Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappa
 
 // Unwrappers
 
+namespace {
+::rust::String rustStringFromV8(Isolate* isolate, v8::Local<v8::String> string) {
+  v8::String::ValueView view(isolate, string);
+  if (!view.is_one_byte()) {
+    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
+    return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+  }
+  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+}
+}  // namespace
+
 bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw. (String wrapper objects are
@@ -816,13 +826,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
     return false;
   }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  } else {
-    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-  }
+  result = rustStringFromV8(isolate, v8Str);
   return true;
 }
 
@@ -1535,25 +1539,20 @@ Local exception_create_from_bytes(
   return exceptionCreateFromMessage(exception_type, message);
 }
 
-// These two shims use C++ JSG (jsg::Lock, jsg::Ref), because only the DOMException template that
-// C++ JSG registers in the isolate can create a DOMException or recognize one exactly.
-// TODO(cleanup): Create and recognize DOMExceptions without C++ JSG.
-Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  return to_ffi(v8::Local<v8::Value>(js.domException(
-      kj::heapString(name.data(), name.size()), kj::heapString(message.data(), message.size()))));
+MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(::workerd::jsg::newDOMException(isolate,
+      isolate->GetCurrentContext(),
+      newUtf8String(isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kNormal),
+      newUtf8String(
+          isolate, kj::arrayPtr(message.data(), message.size()), v8::NewStringType::kNormal))));
 }
 
 bool local_try_unwrap_dom_exception(
     Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  // DOMException is registered in every isolate (see JSG_DECLARE_ISOLATE_TYPE).
-  auto& handler =
-      KJ_ASSERT_NONNULL(js.tryGetTypeHandler<::workerd::jsg::Ref<::workerd::jsg::DOMException>>());
-  KJ_IF_SOME(exception, handler.tryUnwrap(js, local_from_ffi<v8::Value>(kj::mv(value)))) {
-    name = ::rust::String::lossy(exception->getName().begin(), exception->getName().size());
-    message =
-        ::rust::String::lossy(exception->getMessage().begin(), exception->getMessage().size());
+  KJ_IF_SOME(fields,
+      ::workerd::jsg::tryGetDOMExceptionFields(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    name = rustStringFromV8(isolate, fields.name);
+    message = rustStringFromV8(isolate, fields.message);
     return true;
   }
   return false;

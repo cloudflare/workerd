@@ -651,15 +651,17 @@ pub mod ffi {
             data: *const u8,
             length: i32,
         ) -> Local;
-        /// Creates a `DOMException` with the given name.
+        /// Creates a `DOMException` with the given name, running no JavaScript, or returns
+        /// none with an exception pending. Fallible: the context must have a DOMException
+        /// prototype, which every JSG context has.
         pub unsafe fn dom_exception_create(
             isolate: *mut Isolate,
             name: &str,
             message: &str,
-        ) -> Result<Local>;
-        /// If `value` is a `DOMException` (or an object with one on its prototype
-        /// chain, as C++ JSG unwraps it), stores its name and message and returns
-        /// `true`; otherwise leaves them untouched and returns `false`.
+        ) -> Result<MaybeLocal>;
+        /// If `value` is a `DOMException`, stores the name and message it was created with
+        /// and returns `true`; otherwise leaves them untouched and returns `false`. Runs no
+        /// JavaScript. Fallible: it constructs `rust::String`s.
         pub unsafe fn local_try_unwrap_dom_exception(
             isolate: *mut Isolate,
             value: Local,

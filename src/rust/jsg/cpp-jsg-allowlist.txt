@@ -6,8 +6,6 @@
 #
 # Format: <path from the repository root> <construct> <count>
 
-src/rust/jsg/ffi.c++ jsg::Lock 2
-src/rust/jsg/ffi.c++ jsg::Ref 1
 src/rust/jsg/ffi.c++ jsg::check 1
 src/rust/jsg/ffi.c++ makeInternalError 1
 src/rust/jsg/jsg.h jsg::Lock 3
