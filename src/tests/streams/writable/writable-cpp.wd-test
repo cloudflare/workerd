@@ -39,6 +39,12 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  # For gc.js.
-  v8Flags = ["--expose-gc"],
+  # For gc.js. Maglev tiers up after a few calls, so the sink algorithms
+  # run optimized well before gc.js: optimized code must not keep an ended
+  # stream's sink reachable (sinkReleasedOnceEnded).
+  v8Flags = [
+    "--expose-gc",
+    "--invocation-count-for-maglev=5",
+    "--minimum-invocations-after-ic-update=2",
+  ],
 );
