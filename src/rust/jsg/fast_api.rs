@@ -68,25 +68,28 @@ impl FastApiArg for f64 {
     }
 }
 
-// Integers come from V8 as doubles, so that their range checks and truncation are the slow path's.
+// Integers come from V8 as doubles, so that their range checks and truncation are the slow
+// path's. V8's own integer argument types convert differently: by default with `ToInt32`'s
+// wrapping, and with `kEnforceRangeBit` they truncate before the range check, so that
+// `2 ** 31 - 0.5` is an `int32_t` and `-0.5` a `uint32_t`, where C++ JSG and `from_number`
+// check the range first and throw a `TypeError` for both.
 
-impl private::Sealed for i32 {}
-impl FastApiArg for i32 {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Self::from_number(raw)
-    }
+macro_rules! impl_fast_api_integer_arg {
+    ($($type:ty),*) => {
+        $(
+            impl private::Sealed for $type {}
+            impl FastApiArg for $type {
+                type Raw = f64;
+                const TYPE: FastApiType = FastApiType::Float64;
+                fn from_raw(raw: f64) -> Result<Self, Error> {
+                    Self::from_number(raw)
+                }
+            }
+        )*
+    };
 }
 
-impl private::Sealed for u32 {}
-impl FastApiArg for u32 {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Self::from_number(raw)
-    }
-}
+impl_fast_api_integer_arg!(i8, i16, i32, u8, u16, u32);
 
 // Return values
 
@@ -105,6 +108,32 @@ impl FastApiReturn for f64 {
         self
     }
 }
+
+// Integers go back to V8 as its `int32_t` or `uint32_t`, which it turns into the same number
+// as `Integer::New` does on the slow path. The narrower types widen to one of the two.
+
+macro_rules! impl_fast_api_integer_return {
+    ($($type:ty => $raw:ty, $variant:ident);* $(;)?) => {
+        $(
+            impl FastApiReturn for $type {
+                type Raw = $raw;
+                const TYPE: FastApiType = FastApiType::$variant;
+                fn into_raw(self) -> $raw {
+                    self.into()
+                }
+            }
+        )*
+    };
+}
+
+impl_fast_api_integer_return!(
+    i8 => i32, Int32;
+    i16 => i32, Int32;
+    i32 => i32, Int32;
+    u8 => u32, Uint32;
+    u16 => u32, Uint32;
+    u32 => u32, Uint32;
+);
 
 impl private::Sealed for () {}
 impl FastApiReturn for () {

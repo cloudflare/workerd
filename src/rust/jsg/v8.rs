@@ -731,10 +731,15 @@ pub mod ffi {
         length: u32,
     }
 
+    /// The C types of a fast callback's arguments and result. `Int32` and `Uint32` are result
+    /// types only: an integer argument is a `Float64`, converted with the slow path's checks
+    /// (see `fast_api.rs`).
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum FastApiType {
         Void,
         Bool,
+        Int32,
+        Uint32,
         Float64,
     }
 

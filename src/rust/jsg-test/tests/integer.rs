@@ -14,6 +14,7 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_struct;
 
 /// Evaluates `expr` and converts it to `T`, as an argument would be.
 fn convert<'s, T: FromJS<'s>>(
@@ -145,6 +146,36 @@ fn integers_convert_to_numbers() {
     });
 }
 
+/// An integer returned in an `Option`, a `Nullable`, a `Vec` or a `#[jsg_struct]` field is a
+/// number too.
+#[test]
+fn integers_in_containers_convert_to_numbers() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        install(lock, ctx);
+        assert!(ctx.eval::<bool>(lock, "r.first([7, 8]) === 7").unwrap());
+        assert!(
+            ctx.eval::<bool>(lock, "r.first([-(2 ** 31)]) === -2147483648")
+                .unwrap()
+        );
+        assert!(ctx.eval::<bool>(lock, "r.first([]) === undefined").unwrap());
+        assert!(
+            ctx.eval::<bool>(lock, "r.max([1, 2 ** 32 - 1]) === 4294967295")
+                .unwrap()
+        );
+        assert!(ctx.eval::<bool>(lock, "r.max([]) === null").unwrap());
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "const b = r.bounds();
+             b.min === -2147483648 && b.max === 4294967295 && b.small === -1"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// A `Vec` or slice of integers converts from an `Array` whose elements convert, and not from a
 /// typed array, which is a `Local<Uint8Array>` and the like.
 #[test]
@@ -248,6 +279,13 @@ fn non_coercible_integers_require_a_number() {
     });
 }
 
+#[jsg_struct]
+struct Bounds {
+    pub min: i32,
+    pub max: u32,
+    pub small: i8,
+}
+
 #[jsg_resource]
 struct Integers;
 
@@ -266,6 +304,25 @@ impl Integers {
     #[jsg_method]
     pub fn integer(&self, value: v8::Local<'_, v8::Integer>) -> i64 {
         value.value()
+    }
+
+    #[jsg_method]
+    pub fn first(&self, values: Vec<i32>) -> Option<i32> {
+        values.first().copied()
+    }
+
+    #[jsg_method]
+    pub fn max(&self, values: Vec<u32>) -> jsg::Nullable<u32> {
+        values.iter().max().copied().into()
+    }
+
+    #[jsg_method]
+    pub fn bounds(&self) -> Bounds {
+        Bounds {
+            min: i32::MIN,
+            max: u32::MAX,
+            small: -1,
+        }
     }
 
     #[jsg_method]

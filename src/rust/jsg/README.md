@@ -883,6 +883,9 @@ Each nested type's constructor is a property of the prototype, named after the t
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
+An integer argument reaches the callback as a `double` and converts with the slow path's checks;
+an integer of up to 32 bits returns as an `int32_t` or a `uint32_t`, while a method that returns an
+`i64` or a `u64` has no fast callback.
 
 ## FFI Functions with Raw Pointers
 

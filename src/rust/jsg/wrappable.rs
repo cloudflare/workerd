@@ -54,8 +54,8 @@
 //!
 //! ## Integers
 //!
-//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number`, and from
-//! JavaScript like C++ JSG's integers:
+//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number` with
+//! `Integer::New`, as C++ JSG's do, and from JavaScript like C++ JSG's integers:
 //!
 //! - Values out of the type's range, checked before truncation, are a
 //!   `TypeError` (e.g., `256` or `255.5` for `u8`)
@@ -661,10 +661,10 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
 }
 
 // Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
-// to 32 bits is a number, and an i64 or u64 is a BigInt. From JavaScript, a value out
-// of the type's range, checked before truncation, is a TypeError, and so is a
-// non-finite one, except that i32 reads it as 0. In-range values truncate
-// toward zero.
+// to 32 bits is a number, made with `Integer::New` as in C++ JSG, and an i64 or
+// u64 is a BigInt. From JavaScript, a value out of the type's range, checked
+// before truncation, is a TypeError, and so is a non-finite one, except that i32
+// reads it as 0. In-range values truncate toward zero.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
@@ -672,7 +672,7 @@ pub trait FromNumber: Sized {
 }
 
 macro_rules! impl_integer {
-    ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
+    ($($type:ty => $name:literal, $new:ident, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
             impl Type for $type {
                 fn class_name() -> &'static str {
@@ -687,7 +687,7 @@ macro_rules! impl_integer {
             impl<'s> ToJS<'s> for $type {
                 #[inline]
                 fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-                    f64::from(self).to_js(lock)
+                    Ok(v8::Integer::$new(lock, self.into()).into())
                 }
             }
 
@@ -772,12 +772,12 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
 }
 
 impl_integer!(
-    u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
-    u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
-    u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
-    i8 => "byte", not_an_integer(), signed_range(i8::MIN, i8::MAX);
-    i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
-    i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
+    u8 => "octet", new_from_unsigned, not_an_integer(), unsigned_range(u8::MAX);
+    u16 => "unsigned short integer", new_from_unsigned, not_an_integer(), unsigned_range(u16::MAX);
+    u32 => "unsigned integer", new_from_unsigned, not_an_integer(), unsigned_range(u32::MAX);
+    i8 => "byte", new, not_an_integer(), signed_range(i8::MIN, i8::MAX);
+    i16 => "short integer", new, not_an_integer(), signed_range(i16::MIN, i16::MAX);
+    i32 => "integer", new, Ok(0), signed_range(i32::MIN, i32::MAX);
 );
 
 impl Type for i64 {

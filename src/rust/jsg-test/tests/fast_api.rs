@@ -44,6 +44,44 @@ impl FastResource {
     }
 
     #[jsg_method]
+    pub fn id_u8(&self, x: u8) -> u8 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_i8(&self, x: i8) -> i8 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_u16(&self, x: u16) -> u16 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_i16(&self, x: i16) -> i16 {
+        x
+    }
+
+    /// Saturates, so that the boundary values of `i32` come out of a fast callback.
+    #[jsg_method]
+    #[expect(clippy::cast_possible_truncation, reason = "saturation is the point")]
+    pub fn to_i32(&self, x: f64) -> i32 {
+        x as i32
+    }
+
+    /// Saturates, so that the boundary values of `u32` come out of a fast callback.
+    #[jsg_method]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "saturation is the point"
+    )]
+    pub fn to_u32(&self, x: f64) -> u32 {
+        x as u32
+    }
+
+    #[jsg_method]
     pub fn touch(&self) {
         self.touched.set(self.touched.get() + 1);
     }
@@ -54,9 +92,9 @@ impl FastResource {
     }
 
     #[jsg_method]
-    pub fn panic_on(&self, code: i32) -> f64 {
-        assert!(code <= 0, "intentional panic in a fast callback");
-        f64::from(code)
+    pub fn panic_on(&self, code: u32) -> u32 {
+        assert!(code == 0, "intentional panic in a fast callback");
+        code
     }
 
     #[jsg_method]
@@ -225,6 +263,23 @@ fn fast_and_slow_paths_agree() {
         ("idU32", "1", "-1", true),
         ("idU32", "1", "-0.5", true),
         ("idU32", "1", "NaN", true),
+        ("idU8", "1", "255", true),
+        ("idU8", "1", "255.5", true),
+        ("idU8", "1", "256", true),
+        ("idU8", "1", "-1", true),
+        ("idU8", "1", "-0.5", true),
+        ("idU8", "1", "NaN", true),
+        ("idU8", "1", "'7'", false),
+        ("idI16", "1", "-32768", true),
+        ("idI16", "1", "-32769", true),
+        ("idI16", "1", "1.9", true),
+        ("idI16", "1", "Infinity", true),
+        ("idI8", "1", "-128", true),
+        ("idI8", "1", "-128.5", true),
+        ("idI8", "1", "128", true),
+        ("idU16", "1", "65535", true),
+        ("idU16", "1", "65536", true),
+        ("idU16", "1", "-1", true),
         ("idF64", "0.5", "-2.25", true),
         ("idF64", "0.5", "NaN", true),
         ("idF64", "0.5", "-Infinity", true),
@@ -264,6 +319,51 @@ fn fast_and_slow_paths_agree() {
                     "{method}({arg}): fast path taken = {took_fast_path}"
                 );
             }
+            Ok(())
+        });
+    }
+}
+
+/// An integer comes out of a fast callback as V8's `int32_t` or `uint32_t`, which makes the
+/// same number as the slow path does, over the whole range of the type: `i32::MIN`, `u32::MAX`
+/// and the other values beyond the Smi range included.
+#[test]
+fn integer_returns_take_fast_path() {
+    let cases = [
+        ("toI32", "-(2 ** 31)", "-2147483648"),
+        ("toI32", "2 ** 31 - 1", "2147483647"),
+        ("toI32", "2 ** 40", "2147483647"),
+        ("toI32", "-7.9", "-7"),
+        ("toU32", "2 ** 32 - 1", "4294967295"),
+        ("toU32", "2 ** 31", "2147483648"),
+        ("toU32", "-5", "0"),
+        ("idU8", "255", "255"),
+        ("idU8", "0", "0"),
+        ("idI16", "-32768", "-32768"),
+        ("idI16", "32767", "32767"),
+        ("idI8", "-128", "-128"),
+        ("idI8", "127", "127"),
+        ("idU16", "65535", "65535"),
+        ("idU16", "0", "0"),
+    ];
+    for (method, arg, expected) in cases {
+        let harness = crate::Harness::with_fast_api();
+        harness.run_in_context(|lock, ctx| {
+            set_resource(lock, ctx, 0);
+            let (result, fast_calls) = count_fast_calls(|| {
+                ctx.eval::<String>(
+                    lock,
+                    &optimized(
+                        "x",
+                        &format!("const v = r.{method}(x); return typeof v + ' ' + String(v);"),
+                        "1",
+                        arg,
+                    ),
+                )
+                .unwrap()
+            });
+            assert_eq!(result, format!("number {expected}"), "{method}({arg})");
+            assert_ne!(fast_calls, Some(0), "{method}({arg})");
             Ok(())
         });
     }
@@ -325,7 +425,7 @@ fn panic_in_fast_callback_is_an_internal_error() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (err, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<f64>(
+            ctx.eval::<u32>(
                 lock,
                 &optimized("code", "return r.panicOn(code);", "0", "1"),
             )
