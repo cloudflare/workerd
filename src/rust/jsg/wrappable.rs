@@ -166,10 +166,13 @@ impl_traced_noop!(
     crate::v8::Float64Array,
     crate::v8::Int8Array,
     crate::v8::Int16Array,
+    crate::v8::Int32,
     crate::v8::Int32Array,
+    crate::v8::Integer,
     crate::v8::Number,
     crate::v8::Uint8Array,
     crate::v8::Uint16Array,
+    crate::v8::Uint32,
     crate::v8::Uint32Array,
     &str,
 );

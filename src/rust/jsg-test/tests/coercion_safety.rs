@@ -667,6 +667,9 @@ fn coercion_exception_propagates_through_method() {
 enum Conversion {
     String,
     Number,
+    Int32,
+    Uint32,
+    Integer,
     Get,
     Has,
     Iterate,
@@ -678,9 +681,12 @@ enum Conversion {
 }
 
 impl Conversion {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 13] = [
         Self::String,
         Self::Number,
+        Self::Int32,
+        Self::Uint32,
+        Self::Integer,
         Self::Get,
         Self::Has,
         Self::Iterate,
@@ -696,6 +702,9 @@ impl Conversion {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
             Self::Number => f64::from_js(lock, value).map(drop),
+            Self::Int32 => value.int32_value(lock).map(drop),
+            Self::Uint32 => value.uint32_value(lock).map(drop),
+            Self::Integer => value.integer_value(lock).map(drop),
             Self::Get => v8::Local::<v8::Object>::try_from(value)
                 .unwrap()
                 .get(lock, "x")
@@ -727,7 +736,9 @@ impl Conversion {
     fn value_calling(self, f: &str) -> String {
         match self {
             Self::String => format!("({{ toString: {f} }})"),
-            Self::Number => format!("({{ valueOf: {f} }})"),
+            Self::Number | Self::Int32 | Self::Uint32 | Self::Integer => {
+                format!("({{ valueOf: {f} }})")
+            }
             Self::Get | Self::DictValue => format!("({{ get x() {{ return ({f})(); }} }})"),
             Self::Has => format!("new Proxy({{}}, {{ has: {f} }})"),
             Self::Iterate => {

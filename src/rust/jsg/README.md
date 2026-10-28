@@ -562,7 +562,11 @@ that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
 `BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
-to a number, which must be finite and in range, and truncates toward zero.
+to a number, which must be finite and in range, and truncates toward zero. An integer that stays
+on the V8 heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which
+accepts only an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
+`Local<Value>::int32_value`, `uint32_value` and `integer_value` convert any value with
+JavaScript's `ToInt32`, `ToUint32` and `ToInteger`, as the V8 methods of those names do.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
