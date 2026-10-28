@@ -382,12 +382,15 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
       : storage(kj::mv(storage)),
         actor(kj::mv(actor)) {}
 
+  void checkAlarm(kj::Maybe<kj::Date> newAlarmTime) override {
+    // TODO(cluster): an alarm must follow its object between instances.
+    JSG_REQUIRE(newAlarmTime == kj::none || !storage->actors->replicated(), Error,
+        "Alarms are not yet supported in cluster mode.");
+  }
+
   kj::Promise<void> scheduleRun(
       kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
     KJ_IF_SOME(scheduledTime, newAlarmTime) {
-      // TODO(cluster): an alarm must follow its object between instances.
-      JSG_REQUIRE(
-          !storage->actors->replicated(), Error, "Alarms are not yet supported in cluster mode.");
       storage->alarmScheduler->setAlarm(actor, scheduledTime);
     } else {
       storage->alarmScheduler->deleteAlarm(actor);

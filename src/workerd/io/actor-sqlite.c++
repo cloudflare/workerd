@@ -824,6 +824,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) {
   requireNotBroken();
+  hooks.checkAlarm(newAlarmTime);
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
 
