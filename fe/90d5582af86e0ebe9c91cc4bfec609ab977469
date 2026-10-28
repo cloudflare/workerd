@@ -1,0 +1,181 @@
+.github/bonk/specialists/rust-first.md
+  s_dadaf0660bfcbe::t_cd14331d1ebb5e 11
+AGENTS.md
+  s_dadaf0660bfcbe::t_c9225c6cf99bf5 165,173,192
+build/wd_rust_crate.bzl
+  s_dadaf0660bfcbe::t_ee0e32157ef590 80,108-109,150-152
+clippy.toml
+  s_dadaf0660bfcbe::t_125e612868e71e 5-6
+deps/rust/Cargo.lock
+  s_dadaf0660bfcbe::t_6b9baa22c2d42c 529,535,539,542,548,573,874-879,1150-1155
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_fe54ec961e406a 52-61
+docs/jsg.md
+  s_dadaf0660bfcbe::t_363411cc640f59 348,351-355,358,361-364
+docs/reference/detail/new-module-registry.md
+  s_dadaf0660bfcbe::t_330fb9a06c123e 717
+justfile
+  s_dadaf0660bfcbe::t_0f10a0434687e4 49
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_e17775aec693fd 7,25,51
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_47019594d60f99 46-50,52
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_0f697d5b1e3b91 187,226-228,236,368,375,486,556-560,574-575
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_46085c68306b28 167,172,176
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_91277b9ba5b4b4 231-237
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_4ecc6fe0132683 186-187,190,281
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_240455aace0621 35,37,61,71-72,81,114-116
+src/rust/cxx/kj-rs-io/net-test.rs
+  s_dadaf0660bfcbe::t_18024a1a172ff1 17,54-55,61
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_10493919d511b9 43-49,445,482-499,552,575-585,620,647,675,749-753,764-769,774,911-912,914-922,924,940,955-964,969,976-977,1007-1008
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_2cea3c035b1cd5 96-100
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_de30b4e241f8fb 1313
+src/workerd/api/restore.c++
+  s_dadaf0660bfcbe::t_1164f826c66937 184-188
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_8dfea11cf548ee 5-25,29,31-48,50,52-94,96-101,105-125,134-135
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_5ffb625a1fa480 67-68,80-81,86-87,89,93,96,99,101,103,108,259,291,301-305,349-353,379,406,416-418,426
+src/workerd/server/channel-token.h
+  s_dadaf0660bfcbe::t_1af7430f7541ab 16-18,24,29,51
+src/workerd/server/cli/args.rs
+  s_dadaf0660bfcbe::t_1f8b0f29a3db16 11,384-389,392-393,396,403-404,407-408,428-429,435
+src/workerd/server/cli/bridge.rs
+  s_dadaf0660bfcbe::t_a26c7ebe25658c 2-3,5,34
+src/workerd/server/cli/lib.rs
+  s_dadaf0660bfcbe::t_cd94851e389289 5-7,28-31,69-70,76,86,95-98,100-102,106,109,120-121,123-124,126-128,151,153-154,156-160,171,173-174,176-180,190,228,232-236,238,243,245-248,404-406,409-410,417,428,431,434-443,448-457,460-478
+src/workerd/server/cli/socket_fd.rs
+  s_dadaf0660bfcbe::t_e5163e53736a5a 2,4-7,45
+src/workerd/server/cli/socket_fd/unix-test.rs
+  s_dadaf0660bfcbe::t_bed3c62da77d50 13-16
+src/workerd/server/cli/socket_fd/unix.rs
+  s_dadaf0660bfcbe::t_2c6f833d4706e1 49-51,55-65
+src/workerd/server/cli/socket_fd/windows.rs
+  s_dadaf0660bfcbe::t_9ed8f9a27ba6a6 19-46,48-50
+src/workerd/server/compiled-bindings.capnp
+  s_dadaf0660bfcbe::t_65cf51257f68ed 1-107
+src/workerd/server/container-client.c++
+  s_dadaf0660bfcbe::t_c7153ba157bba4 1076
+src/workerd/server/container-client.h
+  s_dadaf0660bfcbe::t_8d0941ce5ba497 242
+src/workerd/server/factory/BUILD.bazel
+  s_dadaf0660bfcbe::t_bde6e93e0fd598 1-115
+src/workerd/server/factory/bootstrap.c++
+  s_dadaf0660bfcbe::t_a156f28cbe1c6b 5,7,14,19-20,28-29,33-37,106-111,113-116,118-125,127-131,136,138-145,148-151,154-164,166-167,173-177,180,183-185,191-198,200-201,203-206,208-209,211,213-227,231-234,236-237,271-285,288,290-312
+src/workerd/server/factory/bootstrap.h
+  s_dadaf0660bfcbe::t_b3f9f9b66f172a 8-12,14,18-28,39-42,44-48
+src/workerd/server/factory/worker-factory-actor.c++
+  s_dadaf0660bfcbe::t_8d402eb125b87f 1-504
+src/workerd/server/factory/worker-factory-impl.h
+  s_dadaf0660bfcbe::t_77de782bee4784 1-281
+src/workerd/server/factory/worker-factory-listen.c++
+  s_dadaf0660bfcbe::t_9b8e6de8457258 1-144
+src/workerd/server/factory/worker-factory-rpc.c++
+  s_dadaf0660bfcbe::t_553ea523a07821 1-420
+src/workerd/server/factory/worker-factory.c++
+  s_dadaf0660bfcbe::t_4b69af88abff5b 1,5,16,21,23-24,34-99,101-102,104,106-107,110-112,114-164,166-172,175-182,184-192,194-199,201-209,211-221,224-233,236-246,249-250,253-255,257-266,269,271,273,275-276,278-286,288-315,317-322,325,327-346,349-350,352-356,358-359,361,363-364,366-367,369-372,374,378-381,383,386-389,393-432,434-437,439-447,449-450,452-457,459-464,466-468,470-473,475-483,485-488,490-497,499-503,505-507,509-510,512-516,518,520-521,523-524,526-539,541-542,544-547,549-550,552-557,560-565,569,571-574,576-584,588,590-591,595,597-612,614-615,617-621,623-628,630-632,634-638,642-643,646-648,650-655,657-670,674-676,679-685,687-702,705-711,713-719,721-731,733-734,737-739,741-744,746-748,750-755,757-761,763,765-773,775-782,784-785,787-804,806-807,810-813,815-819,821-822,825-827,830-842,844-850,852-861,863-888,890-892,894-906,908-926,928-934,936-946,948-955,957-959,961-984,987-991,993-995,997,999-1066,1068-1069,1071-1077,1079-1086,1088,1090-1126,1128-1129,1131,1133-1140,1142,1144-1145,1147-1150,1152-1159,1161-1162,1167-1184,1187-1192,1196-1205,1208-1210,1212-1217,1219-1236,1238-1244,1246-1247,1250-1260,1263-1264,1266-1270,1272-1274,1276-1280,1282,1284-1290,1292-1293,1295-1302,1305-1306,1308-1312,1315-1329,1331,1333-1335,1338-1349,1351-1358,1360,1362-1363,1365-1372,1374-1384,1386-1417,1419-1425,1427-1434,1436-1439,1441,1443-1487,1489,1491-1492,1494-1518,1520,1522-1544,1547-1594,1596-1627,1631-1632,1636-1671,1673-1701
+src/workerd/server/factory/worker-factory.h
+  s_dadaf0660bfcbe::t_80b9bc7ed99038 1,7-17,21-22,24-26,29-32,41-45,48-102,104-105,107-119,124-128,130-131,134-135,149,151-174,176,178-221,223-226,229-402
+src/workerd/server/json-logger.h
+  s_dadaf0660bfcbe::t_bf4d286623a5c5 14-17
+src/workerd/server/server-test.c++
+  s_dadaf0660bfcbe::t_5d964e99b49ec8 7-8,12-13,16,22,334-383,385-428,430-487,496,500,521-524,533-535,569,572-584,586,591-592,594-597,601-602,607,610,632-647,649,651-652,665-678,680-684,686,689-690,693-698,701,704,707,710,723,727,734,754-765,768-770,772-780,3237,3243-3244,3263-3267,3292-3293,3367,3374-3375,3390-3391,3805,3809-3810,4252-4256,4636-4637,4651-4652,4900-4902,4904,4906-4908,4910,4912,5320-5321,5368,5370,5372,6560-6595,7086,7092,7134,7350,7355,7404,7414-7445,9098-9131
+src/workerd/server/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_10f7c19818cec8 1-58
+src/workerd/server/server/actor.rs
+  s_dadaf0660bfcbe::t_183f6d88233797 1-1153
+src/workerd/server/server/bindings-test.rs
+  s_dadaf0660bfcbe::t_3a4f5f1d41cd24 1-671
+src/workerd/server/server/bindings.rs
+  s_dadaf0660bfcbe::t_eced8dfd403671 1-837
+src/workerd/server/server/bridge.rs
+  s_dadaf0660bfcbe::t_cbb15e74ae0994 1-847
+src/workerd/server/server/channels.rs
+  s_dadaf0660bfcbe::t_a9ec2313e129ad 1-280
+src/workerd/server/server/config-test.rs
+  s_dadaf0660bfcbe::t_d196a94988a685 1-281
+src/workerd/server/server/config.rs
+  s_dadaf0660bfcbe::t_6fe875e5ebe64c 1-1466
+src/workerd/server/server/entry.rs
+  s_dadaf0660bfcbe::t_8d94b896195cd4 1-256
+src/workerd/server/server/in_process.rs
+  s_dadaf0660bfcbe::t_7232e75208a4fd 1-122
+src/workerd/server/server/lib.rs
+  s_dadaf0660bfcbe::t_4ea2bc5469ac82 1-29
+src/workerd/server/server/listen/loopback-test.rs
+  s_dadaf0660bfcbe::t_19fc3063d0f3d7 1-85
+src/workerd/server/server/listen/loopback.rs
+  s_dadaf0660bfcbe::t_9fbc4580778e37 1-4,7-11,13-14,16,18,21,24-47,49-60,62-70,73-77,80-87,90-97,99-100,103-104,106-112,114-136,138,141-143,146-150,153-155,158-163,165-173,176-184,187-194,197,199-205,208-211
+src/workerd/server/server/listen/mod-test.rs
+  s_dadaf0660bfcbe::t_b6d38308cda8cf 1-65
+src/workerd/server/server/listen/mod.rs
+  s_dadaf0660bfcbe::t_3398e985a09e51 1-661
+src/workerd/server/server/listen/udp-test.rs
+  s_dadaf0660bfcbe::t_704d69440367b3 1-37
+src/workerd/server/server/listen/udp.rs
+  s_dadaf0660bfcbe::t_d3703e2c4c7074 1-243
+src/workerd/server/server/loader.rs
+  s_dadaf0660bfcbe::t_08aee2015759a9 1-338
+src/workerd/server/server/log.rs
+  s_dadaf0660bfcbe::t_db2934ed8c542c 1-116
+src/workerd/server/server/run.rs
+  s_dadaf0660bfcbe::t_d8a13379ea3d3c 1-465
+src/workerd/server/server/services/disk-test.rs
+  s_dadaf0660bfcbe::t_a49ae07183bb3f 1-76
+src/workerd/server/server/services/disk.rs
+  s_dadaf0660bfcbe::t_c431837fbd8cb9 1-533
+src/workerd/server/server/services/mod.rs
+  s_dadaf0660bfcbe::t_79df54f2bd2944 1-640
+src/workerd/server/server/services/network-test.rs
+  s_dadaf0660bfcbe::t_f041e581e89887 1-91
+src/workerd/server/server/services/network.rs
+  s_dadaf0660bfcbe::t_587eb40fc780e1 1-143,145-157,159-177,179-184,187-190
+src/workerd/server/server/services/rewriter-test.rs
+  s_dadaf0660bfcbe::t_6c2ac66b7ea86a 1-106
+src/workerd/server/server/services/rewriter.rs
+  s_dadaf0660bfcbe::t_c4336f260f7394 1-240
+src/workerd/server/server/tasks.rs
+  s_dadaf0660bfcbe::t_04d0b9f719e922 1-59
+src/workerd/server/server/worker.rs
+  s_dadaf0660bfcbe::t_1e21bd623aaa70 1-1093
+src/workerd/server/tests/server-harness.mjs
+  s_dadaf0660bfcbe::t_9fd3568b5511f5 66-83,89,101
+src/workerd/server/tests/udp-connect-ts-streams/config.capnp
+  s_dadaf0660bfcbe::t_134076b67189b1 9
+src/workerd/server/tests/udp-connect/config.capnp
+  s_dadaf0660bfcbe::t_794288194744c9 9
+src/workerd/server/tests/udp-datagram-drop/config.capnp
+  s_dadaf0660bfcbe::t_0203a534d556db 9
+src/workerd/server/workerd-api.c++
+  s_dadaf0660bfcbe::t_fecb1b5c2a8c15 572,581,592-594,596-599,601-603,605-608,610-612,614,617-618,620-621,623-630,633,637,639-641,644-650,652-654,658-660,662-666,668-690,694-695,697,699,702-703,705-706,708-710,712,715-718,722-723,727-730,733,736,738-739,743-748,751-755,757-762,764,766-767,769,772-773,779,783,785
+src/workerd/server/workerd-api.h
+  s_dadaf0660bfcbe::t_5877805072b8ab 12,89-91
+src/workerd/util/setup-async-io-test.c++
+  s_dadaf0660bfcbe::t_e5d2db8da66c65 5-7
+src/workerd/util/setup-async-io.c++
+  s_dadaf0660bfcbe::t_0ba2e7e13bc343 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe90d5582af86e0ebe9c91cc4bfec609ab977469",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

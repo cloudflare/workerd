@@ -1,0 +1,22 @@
+src/workerd/api/sql.c++
+  s_7d03d8f3981d9e::t_84dff240df1698 214-215
+  s_7d03d8f3981d9e::t_aa1df5974a10df 8,76-77,87-88,91-92,203-204,206-207,209-211
+src/workerd/util/sqlite-kv.c++
+  s_7d03d8f3981d9e::t_c8a563215ce649 98-100,104-105,107-108,112-113,115-116,123,126,130-131,133-134,160,162-163,171,175-176,180,184,196,203-208,250-251,267-269,271,274-275,288-290,292-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a7fad3eecffa9d6aefb6646d65f55f8c438634a2",
+  "prompts": {},
+  "sessions": {
+    "s_7d03d8f3981d9e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee98466faffejVSpgrbYDs0Ut0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "frostzt <aidenfrostbite@gmail.com>"
+    }
+  }
+}

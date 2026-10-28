@@ -1,0 +1,19 @@
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_5fb7a8f21849bc 132-133,137,142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a2c0c946a0b95efdd477e41515b022de516d5c8b",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

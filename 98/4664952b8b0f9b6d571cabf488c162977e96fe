@@ -1,0 +1,23 @@
+src/rust/jsg/ffi.c++
+  s_a55c0a90d37cb7::t_731db657e91578 987-992
+src/rust/jsg/ffi.h
+  s_a55c0a90d37cb7::t_b20074b5b9fdf2 325-326
+src/rust/jsg/v8.rs
+  s_a55c0a90d37cb7::t_6756662008ff2c 528-534
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "984664952b8b0f9b6d571cabf488c162977e96fe",
+  "prompts": {},
+  "sessions": {
+    "s_a55c0a90d37cb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621b9b26-6a6e-418b-a29a-f76846865eaf",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
