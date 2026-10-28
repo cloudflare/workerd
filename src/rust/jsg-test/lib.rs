@@ -148,6 +148,13 @@ mod ffi {
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
+        /// Configures the process's autogates to exactly `names`, each in kebab-case without
+        /// the `workerd-autogate-` prefix, whatever `WORKERD_ALL_AUTOGATES` says. See
+        /// `set_autogates`.
+        pub fn set_autogates_for_test(names: &[&str]);
+        /// Leaves no autogates configured, as before `set_autogates_for_test`.
+        pub fn deinit_autogates_for_test();
+
         /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
         /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
         /// Then resets the `Global` and runs a full GC again. See `hold_across_gc` in `ffi.h`.
@@ -160,6 +167,27 @@ mod ffi {
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+/// The process's autogate configuration that [`set_autogates`] made. Dropping it leaves no
+/// autogates configured, as before.
+#[must_use = "the autogates are reset when this is dropped"]
+pub struct Autogates(());
+
+impl Drop for Autogates {
+    fn drop(&mut self) {
+        ffi::deinit_autogates_for_test();
+    }
+}
+
+/// Configures the process's autogates to exactly `names`, each in kebab-case without the
+/// `workerd-autogate-` prefix (`"jsg-integer-enforce-range"` for
+/// `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`), for as long as the returned guard lives; an empty
+/// slice disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are
+/// process-wide and the tests run serially, so a test holds the guard for its duration.
+pub fn set_autogates(names: &[&str]) -> Autogates {
+    ffi::set_autogates_for_test(names);
+    Autogates(())
+}
 
 pub struct EvalContext<'a> {
     inner: &'a ffi::EvalContext,

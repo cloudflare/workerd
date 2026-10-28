@@ -48,6 +48,8 @@ namespace workerd::util {
 //    config option in the test's config file.
 // 4. You can set the `WORKERD_ALL_AUTOGATES=1` environment variable to enable
 //    all gates for a test run.
+// 5. In a Rust test, `jsg_test::set_autogates(&["my-new-feature"])` configures exactly the
+//    named gates for as long as the returned guard lives.
 //
 // Removing the gate after rollout:
 //
@@ -128,7 +130,13 @@ namespace workerd::util {
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)
+  V(NODEJS_I18N_RUST)                                                                              \
+  /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
+     before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
+     arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
+     uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
+     fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
+  V(JSG_INTEGER_ENFORCE_RANGE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

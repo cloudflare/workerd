@@ -11,6 +11,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 
 #include <kj-rs/convert.h>
 
@@ -1561,6 +1562,12 @@ void function_template_set_nested_type(
   auto local_nested = v8::Local<v8::FunctionTemplate>::New(
       isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(nested));
   local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
+}
+
+// Autogates
+bool integer_enforce_range_autogate_enabled() {
+  return ::workerd::util::Autogate::isEnabled(
+      ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
 }
 
 // Realm

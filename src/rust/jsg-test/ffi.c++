@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 
 #include <cppgc/common.h>
 #include <v8-cppgc.h>
@@ -290,6 +291,22 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
 
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
+}
+
+void set_autogates_for_test(::rust::Slice<const ::rust::Str> names) {
+  kj::Vector<kj::String> owned(names.size());
+  for (auto name: names) {
+    owned.add(kj::str(name));
+  }
+  kj::Vector<kj::StringPtr> ptrs(owned.size());
+  for (auto& name: owned) {
+    ptrs.add(name);
+  }
+  util::Autogate::initAutogateNamesForTest(ptrs.asPtr(), util::IgnoreAllAutogatesEnv::YES);
+}
+
+void deinit_autogates_for_test() {
+  util::Autogate::deinitAutogate();
 }
 
 void hold_across_gc(Isolate* isolate,

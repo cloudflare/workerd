@@ -56,6 +56,8 @@ fn integers_truncate_toward_zero() {
 
 #[test]
 fn integers_out_of_range_are_type_errors() {
+    // Without the JSG_INTEGER_ENFORCE_RANGE autogate, a fraction past a limit is out of range.
+    let _autogates = crate::set_autogates(&[]);
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let below = "Value out of range. Must be less than or equal to";
@@ -90,6 +92,8 @@ fn integers_out_of_range_are_type_errors() {
 
 #[test]
 fn unsigned_integers_reject_negatives() {
+    // Without the JSG_INTEGER_ENFORCE_RANGE autogate, `-0.5` is negative, not `0`.
+    let _autogates = crate::set_autogates(&[]);
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let message = "The value cannot be converted because it is negative and this API \
@@ -98,6 +102,80 @@ fn unsigned_integers_reject_negatives() {
         assert_type_error::<u32>(lock, ctx, "-0.5", message);
         Ok(())
     });
+}
+
+/// A fraction just past a range limit is out of range without the `JSG_INTEGER_ENFORCE_RANGE`
+/// autogate and truncates with it, as in C++ JSG (`jsg/value.h`). What is out of range either
+/// way, and what is not finite, converts the same in both states.
+#[test]
+fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
+    let negative = "The value cannot be converted because it is negative and this API \
+                    expects a positive number.";
+    let not_an_integer = "The value cannot be converted because it is not an integer.";
+    let at_most = |max: u32| format!("Value out of range. Must be less than or equal to {max}.");
+    let between = |min: i32, max: i32| {
+        format!("Value out of range. Must be between {min} and {max} (inclusive).")
+    };
+    let harness = crate::Harness::new();
+
+    {
+        let _autogates = crate::set_autogates(&[]);
+        harness.run_in_context(|lock, ctx| {
+            assert_type_error::<u8>(lock, ctx, "255.5", &at_most(255));
+            assert_type_error::<u8>(lock, ctx, "-0.5", negative);
+            assert_type_error::<u16>(lock, ctx, "65535.5", &at_most(65535));
+            assert_type_error::<u16>(lock, ctx, "-0.5", negative);
+            assert_type_error::<u32>(lock, ctx, "2 ** 32 - 0.5", &at_most(u32::MAX));
+            assert_type_error::<u32>(lock, ctx, "-0.5", negative);
+            assert_type_error::<i8>(lock, ctx, "127.5", &between(-128, 127));
+            assert_type_error::<i8>(lock, ctx, "-128.5", &between(-128, 127));
+            assert_type_error::<i16>(lock, ctx, "32767.5", &between(-32768, 32767));
+            assert_type_error::<i16>(lock, ctx, "-32768.5", &between(-32768, 32767));
+            assert_type_error::<i32>(lock, ctx, "2 ** 31 - 0.5", &between(i32::MIN, i32::MAX));
+            assert_type_error::<i32>(lock, ctx, "-(2 ** 31) - 0.5", &between(i32::MIN, i32::MAX));
+            Ok(())
+        });
+    }
+
+    {
+        let _autogates = crate::set_autogates(&["jsg-integer-enforce-range"]);
+        harness.run_in_context(|lock, ctx| {
+            assert_eq!(convert::<u8>(lock, ctx, "255.5").unwrap(), 255);
+            assert_eq!(convert::<u8>(lock, ctx, "-0.5").unwrap(), 0);
+            assert_eq!(convert::<u16>(lock, ctx, "65535.5").unwrap(), 65535);
+            assert_eq!(convert::<u16>(lock, ctx, "-0.5").unwrap(), 0);
+            assert_eq!(
+                convert::<u32>(lock, ctx, "2 ** 32 - 0.5").unwrap(),
+                u32::MAX
+            );
+            assert_eq!(convert::<u32>(lock, ctx, "-0.5").unwrap(), 0);
+            assert_eq!(convert::<i8>(lock, ctx, "127.5").unwrap(), 127);
+            assert_eq!(convert::<i8>(lock, ctx, "-128.5").unwrap(), -128);
+            assert_eq!(convert::<i16>(lock, ctx, "32767.5").unwrap(), 32767);
+            assert_eq!(convert::<i16>(lock, ctx, "-32768.5").unwrap(), -32768);
+            assert_eq!(
+                convert::<i32>(lock, ctx, "2 ** 31 - 0.5").unwrap(),
+                i32::MAX
+            );
+            assert_eq!(
+                convert::<i32>(lock, ctx, "-(2 ** 31) - 0.5").unwrap(),
+                i32::MIN
+            );
+            assert_eq!(convert::<i32>(lock, ctx, "-0.5").unwrap(), 0);
+
+            // Unchanged by the autogate.
+            assert_eq!(convert::<u8>(lock, ctx, "3.7").unwrap(), 3);
+            assert_type_error::<u8>(lock, ctx, "256", &at_most(255));
+            assert_type_error::<u8>(lock, ctx, "-1", negative);
+            assert_type_error::<i32>(lock, ctx, "2 ** 31", &between(i32::MIN, i32::MAX));
+            assert_type_error::<i32>(lock, ctx, "-(2 ** 31) - 1", &between(i32::MIN, i32::MAX));
+            assert_type_error::<u32>(lock, ctx, "NaN", not_an_integer);
+            assert_type_error::<i16>(lock, ctx, "-Infinity", not_an_integer);
+            assert_eq!(convert::<i32>(lock, ctx, "NaN").unwrap(), 0);
+            assert_eq!(convert::<i32>(lock, ctx, "Infinity").unwrap(), 0);
+            Ok(())
+        });
+    }
 }
 
 #[test]
