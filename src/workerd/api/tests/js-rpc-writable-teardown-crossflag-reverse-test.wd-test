@@ -36,7 +36,6 @@ const unitTests :Workerd.Config = (
     ),
   ],
   autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
     "workerd-autogate-rpc-externals-hydration",
   ],
 );

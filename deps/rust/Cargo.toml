@@ -89,6 +89,15 @@ rustls-webpki = { version = "0.103", default-features = false }
 # param_extractor depends on unbounded_depth feature
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde = { version = "1", features = ["derive"] }
+# V8's Temporal implementation (//deps/rust:temporal_capi). V8 compiles against temporal_capi's
+# generated C++ headers, so both crates should be pinned to the versions and features the V8
+# release expects: those in Chromium's third_party/rust/chromium_crates_io/Cargo.toml, at the
+# third_party/rust revision pinned in V8's DEPS.
+temporal_capi = { version = "=0.2.6", features = ["zoneinfo64"] }
+temporal_rs = { version = "=0.2.6", default-features = false, features = ["float64_representable_durations"] }
+# temporal_rs 0.2.6 accepts icu_calendar 2.3, but Chromium builds it with 2.2.1; this pin keeps
+# its ICU4X data on the 2.2 line with the rest of the graph.
+icu_calendar = { version = "=2.2.1", default-features = false }
 thiserror = "2"
 tower-service = "0.3"
 # tokio is huge, let's enable only features when we actually need them.

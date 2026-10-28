@@ -125,7 +125,7 @@ jobs:
       suffix: ''
       bazelflare: true
       developer_flags: '--config=bazelflare'
-      extra_bazel_args: '--config=ci-test --config=ci-download-workerd --config=wpt-report --config=ci-bazelflare --config=ci-bazelflare-runner-tests'
+      extra_bazel_args: '--config=ci-test --config=ci-download-workerd --config=wpt-report --config=ci-bazelflare'
       runner_extra_bazel_args: '--config=ci-test --config=ci-linux --config=wpt-report'
       upload_test_logs: true
       upload_binary: true
@@ -179,7 +179,7 @@ jobs:
       - name: Check CI's flags against a developer's
         run: |
           # test-linux
-          bash build/check_ci_flags.sh '--config=bazelflare' --config=ci --config=ci-test --config=ci-download-workerd --config=wpt-report --config=ci-bazelflare --config=ci-bazelflare-runner-tests
+          bash build/check_ci_flags.sh '--config=bazelflare' --config=ci --config=ci-test --config=ci-download-workerd --config=wpt-report --config=ci-bazelflare
           # test (linux, -asan)
           bash build/check_ci_flags.sh '--config=bazelflare-asan' --config=ci --config=ci-test --config=ci-bazelflare
           # test-tsan

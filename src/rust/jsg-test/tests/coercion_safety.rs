@@ -196,10 +196,10 @@ fn typed_array_from_wrong_type_returns_err() {
         // Not a Uint8Array: a plain array, a number, and a Symbol.
         for expr in ["[1, 2, 3]", "42", "Symbol('s')"] {
             let value = ctx.eval_raw(lock, expr).expect("should evaluate");
-            let result = <Vec<u8> as FromJS>::from_js(lock, value);
+            let result = <v8::Local<v8::Uint8Array> as FromJS>::from_js(lock, value);
             assert!(
                 result.as_ref().is_err_and(|err| !err.is_pending()),
-                "Vec::<u8>::from_js({expr}) should be a non-pending Err, got {result:?}"
+                "Local::<Uint8Array>::from_js({expr}) should be a non-pending Err, got {result:?}"
             );
         }
         Ok(())
@@ -576,6 +576,65 @@ fn object_has_from_throwing_proxy_returns_err() {
     });
 }
 
+/// `Object::set` throws what a setter, on the object or its prototype chain, or a Proxy `set`
+/// trap threw.
+#[test]
+fn object_set_from_throwing_setter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "({ set x(v) { throw thrown; } })",
+            "Object.create({ set x(v) { throw thrown; } })",
+            "new Proxy({}, { set() { throw thrown; } })",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+            let one = Number::new(1.0).to_js(lock)?;
+            let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let obj: v8::Local<'_, v8::Object> =
+            ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
+        let one = Number::new(1.0).to_js(lock)?;
+        obj.set(lock, "x", one)?;
+        let x = obj.get(lock, "x")?;
+        assert!((Number::from_js(lock, x)?.value() - 1.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// `Array::set` throws what an element's setter, on the array or `Array.prototype`, threw.
+#[test]
+fn array_set_from_throwing_setter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "Object.defineProperty([0], 0, { set(v) { throw thrown; } })",
+            "Object.setPrototypeOf([], Object.create(Array.prototype, \
+                 { 0: { set(v) { throw thrown; } } }))",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
+            let one = Number::new(1.0).to_js(lock)?;
+            let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
+        let one = Number::new(1.0).to_js(lock)?;
+        array.set(lock, 2, one)?;
+        assert_eq!(array.len(), 3);
+        Ok(())
+    });
+}
+
 /// What an argument's coercion throws reaches the JavaScript caller of a method unchanged.
 #[test]
 fn coercion_exception_propagates_through_method() {
@@ -612,18 +671,22 @@ enum Conversion {
     Get,
     Has,
     Iterate,
+    Set,
+    SetElement,
 }
 
 impl Conversion {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 7] = [
         Self::String,
         Self::Number,
         Self::Get,
         Self::Has,
         Self::Iterate,
+        Self::Set,
+        Self::SetElement,
     ];
 
-    /// Converts `value`, or reads its property `x`.
+    /// Converts `value`, reads or sets its property `x`, or sets its element 0.
     fn run<'s>(self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<()> {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
@@ -637,10 +700,22 @@ impl Conversion {
                 .has(lock, "x")
                 .map(drop),
             Self::Iterate => Vec::<Number>::from_js(lock, value).map(drop),
+            Self::Set => {
+                let undefined = lock.undefined();
+                v8::Local::<v8::Object>::try_from(value)
+                    .unwrap()
+                    .set(lock, "x", undefined)
+            }
+            Self::SetElement => {
+                let undefined = lock.undefined();
+                v8::Local::<v8::Array>::try_from(value)
+                    .unwrap()
+                    .set(lock, 0, undefined)
+            }
         }
     }
 
-    /// A value whose conversion, or whose property `x`, calls `f`.
+    /// A value whose conversion, property `x` or element 0 calls `f`.
     fn value_calling(self, f: &str) -> String {
         match self {
             Self::String => format!("({{ toString: {f} }})"),
@@ -650,6 +725,12 @@ impl Conversion {
             Self::Iterate => {
                 format!(
                     "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ get: {f} }}); return a; }})()"
+                )
+            }
+            Self::Set => format!("({{ set x(v) {{ ({f})(); }} }})"),
+            Self::SetElement => {
+                format!(
+                    "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ set: {f} }}); return a; }})()"
                 )
             }
         }

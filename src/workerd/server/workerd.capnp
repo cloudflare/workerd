@@ -847,6 +847,19 @@ struct Worker {
     # This sidecar intercepts outbound traffic from containers and routes it
     # through workerd for egress mappings (setEgressHttp bindings).
     # You can find this image in repositories like DockerHub: https://hub.docker.com/r/cloudflare/proxy-everything
+
+    sessionId @2 :Text;
+    # Scopes the Docker resources workerd creates to a session chosen by the program that
+    # supervises workerd, such as Miniflare. May contain only the characters Docker allows in
+    # container names: letters, digits, `_`, `.` and `-`.
+    #
+    # When set, container and sidecar names include the session ID, so different sessions never
+    # share or adopt each other's containers, while a workerd process started with the same
+    # session adopts the containers an earlier one left running. Resources that do not outlive
+    # the session carry the label `dev.workerd.session=<sessionId>`: application containers,
+    # sidecars, snapshot helper containers, and snapshot clone volumes. The supervisor can remove
+    # them by that label once the session ends. Snapshot volumes and container snapshot images
+    # outlive sessions and are not labelled.
   }
 
   accessBlobHeader @18 :Text;

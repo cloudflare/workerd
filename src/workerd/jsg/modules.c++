@@ -492,6 +492,14 @@ v8::Local<v8::Module> createSyntheticModule(
 }
 }  // namespace
 
+kj::Array<int> getProducedCompileHints(jsg::Lock& js, v8::Local<v8::Module> module) {
+  auto positions =
+      module->GetUnboundModuleScript()->GetCompileHintsCollector()->GetCompileHints(js.v8Isolate);
+  std::sort(positions.begin(), positions.end());
+  positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+  return kj::heapArray<int>(positions.data(), positions.size());
+}
+
 intptr_t getSyntheticModuleEvalRef() {
   return reinterpret_cast<intptr_t>(&evaluateSyntheticModuleCallback);
 }
@@ -505,27 +513,36 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     const CompilationObserver& observer,
-    kj::ArrayPtr<const int> compileHints)
-    : ModuleInfo(js, name, content, nullptr, observer, compileHints) {}
+    kj::ArrayPtr<const int> compileHints,
+    ProduceCompileHints produceCompileHints)
+    : ModuleInfo(js, name, content, nullptr, observer, compileHints, produceCompileHints) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     kj::ArrayPtr<const kj::byte> compileCache,
     const CompilationObserver& observer,
-    kj::ArrayPtr<const int> compileHints)
+    kj::ArrayPtr<const int> compileHints,
+    ProduceCompileHints produceCompileHints)
     : ModuleInfo(js,
           compileEsmModule(js,
               name,
               ModuleInfoCompileOption::BUNDLE,
               observer,
               [&](const v8::ScriptOrigin& origin) {
+                if (produceCompileHints) {
+                  v8::ScriptCompiler::Source source(jsg::v8Str(js.v8Isolate, content), origin);
+                  return v8::ScriptCompiler::CompileModule(
+                      js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints);
+                }
                 if (compileCache.size() > 0) {
                   return compileWithStaticCache(
                       js, jsg::v8Str(js.v8Isolate, content), origin, compileCache);
                 }
                 return compileBundleModule(js, content, origin, observer, compileHints);
-              })) {}
+              })) {
+  producesCompileHints = produceCompileHints;
+}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
@@ -576,8 +593,10 @@ ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
     : fileScope(kj::mv(fileScope)),
       topLevelDecls(kj::mv(topLevelDecls)) {}
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(
-    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer) {
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl) {
   // destroy the observer after compilation finishes to indicate the end of the process.
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
@@ -585,6 +604,11 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   if (js.isWasmEsmIntegrationBuiltinsEnabled()) {
     options.builtins = v8::WasmModuleObject::CompileOptions::Builtins::kJsString;
     options.imported_string_constants_module = "wasm:js/string-constants";
+  }
+  KJ_IF_SOME(url, sourceUrl) {
+    if (js.isWasmSourceUrlSupportEnabled()) {
+      options.source_url = std::string_view(url.begin(), url.size());
+    }
   }
   return jsg::check(v8::WasmModuleObject::Compile(
       js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));

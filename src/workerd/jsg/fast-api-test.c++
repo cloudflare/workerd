@@ -521,6 +521,11 @@ KJ_TEST("isFastApiNoScope Detection") {
 
   static_assert(isFastApiNoScope<void (FastMethodContext::*)(jsg::Lock&, kj::String, kj::String)>);
 
+  // Static methods and properties arrive as plain function pointers.
+  static_assert(isFastApiNoScope<uint32_t (*)(uint32_t)>);
+  static_assert(isFastApiNoScope<void (*)(jsg::Lock&, kj::String)>);
+  static_assert(!isFastApiNoScope<kj::String (*)(int32_t)>);
+
   // Compatible but not no-scope: the argument still needs unwrapping.
   static_assert(isFastApiCompatible<int32_t (FastMethodContext::*)(v8::Local<v8::Value>)>);
   static_assert(!isFastApiNoScope<int32_t (FastMethodContext::*)(v8::Local<v8::Value>)>);

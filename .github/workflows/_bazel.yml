@@ -205,16 +205,6 @@ jobs:
           sudo mkdir -p /etc/docker
           echo '{"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
-      - name: Build and load container images
-        if: inputs.build_container_images
-        run: |
-          docker context use default
-          echo "Docker info:"
-          docker info
-          echo "Docker version:"
-          docker version
-          # Its own profile, so that it leaves the build's for the upload below.
-          bazel run ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} --profile=images.bazel-profile.gz //images:load_all
       - name: Bazel test
         if: inputs.run_tests
         run: |

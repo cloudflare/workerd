@@ -25,9 +25,6 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-  ],
   # For gc.js (added with the expansion pass).
   v8Flags = ["--expose-gc"],
 );
