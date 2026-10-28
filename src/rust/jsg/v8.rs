@@ -436,6 +436,17 @@ pub mod ffi {
             object: &Local,
             key: &str,
         ) -> Result<MaybeLocal>;
+        // Like the three above, but infallible: they neither intern nor check.
+        pub unsafe fn local_object_get_property_by_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_object_get_own_property_names(
+            isolate: *mut Isolate,
+            object: &Local,
+            names: &mut Vec<Local>,
+        ) -> bool;
 
         // Local<Promise>
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
@@ -1843,11 +1854,14 @@ impl<'s> Local<'s, Function> {
 }
 
 /// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
+/// A call that runs no JavaScript but that V8 doesn't allow while execution is terminating, such
+/// as `CreateDataProperty`, goes through here too, and its `shim` never returns `None`.
 ///
-/// Every such call goes through here, so that all of them handle exceptions and termination
-/// alike. `shim` returns `None` if JavaScript threw, leaving the exception pending (see `ffi.h`);
-/// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
-/// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
+/// Every call that can run JavaScript goes through here, so that all of them handle exceptions
+/// and termination alike. `shim` returns `None` if JavaScript threw, leaving the exception pending
+/// (see `ffi.h`); that becomes an error for which [`Error::is_pending`] is true. While execution
+/// is terminating, `shim` is not run and the error is the same: calling into V8 then would clear
+/// the termination.
 /// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
 ///
 /// The one exception is `wrap_resource`, which checks for termination itself, so that its common
@@ -3421,7 +3435,9 @@ impl Object {
     ///
     /// # Errors
     ///
-    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it.
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it. While execution
+    /// is terminating, it creates nothing, and the error is one for which [`Error::is_pending`]
+    /// is true, as for [`Local::<Object>::set`].
     pub fn with_data_properties<'s>(
         lock: &mut Lock<'s>,
         properties: &[(&str, Local<'s, Value>)],
@@ -3433,17 +3449,22 @@ impl Object {
                 (*key, *value)
             })
             .unzip();
-        // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
-        // is active; the values are valid handles in it. The result belongs to that scope.
-        let object = unsafe {
-            ffi::object_new_with_data_properties(
-                lock.isolate().as_ffi(),
-                &keys,
-                Local::raw_slice(&values),
-            )
-        }?;
-        // SAFETY: as above.
-        Ok(unsafe { Local::from_ffi(object) })
+        // No JavaScript runs, but V8 doesn't allow `CreateDataProperty` while execution is
+        // terminating (a debug check fails), which `call_into_js` checks for.
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked, a context is entered and a
+            // HandleScope is active; the values are valid handles in it. The result belongs to
+            // that scope.
+            let object = unsafe {
+                ffi::object_new_with_data_properties(
+                    lock.isolate().as_ffi(),
+                    &keys,
+                    Local::raw_slice(&values),
+                )
+            }?;
+            // SAFETY: as above.
+            Ok(Some(unsafe { Local::from_ffi(object) }))
+        })
     }
 }
 
@@ -3510,6 +3531,63 @@ impl<'s> Local<'s, Object> {
                 )?)
             })
         })
+    }
+
+    /// Reads the property named `name`, like [`get`](Self::get) but with the key as a handle,
+    /// so that any string or symbol can be the key.
+    ///
+    /// # Errors
+    ///
+    /// As for [`get`](Self::get).
+    pub fn get_by_name(
+        self,
+        lock: &mut Lock<'s>,
+        name: Local<'s, Name>,
+    ) -> crate::Result<Local<'s, Value>> {
+        name.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); both handles are valid.
+            // The result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_object_get_property_by_name(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    name.raw(),
+                ))
+            })
+        })
+    }
+
+    /// Returns the names of the object's own enumerable properties that are not symbols, in
+    /// property order, like JS `Object.keys(obj)`. An integer-like name comes as a string.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `ownKeys` or `getOwnPropertyDescriptor` trap throws, or execution is
+    /// terminating, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn keys(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, String>>> {
+        let names = call_into_js(lock, |lock| {
+            let mut names = Vec::new();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_get_own_property_names(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    &mut names,
+                )
+            };
+            Ok(ok.then_some(names))
+        })?;
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                // SAFETY: V8 created the names in the current HandleScope, as strings.
+                let name: Local<'s, String> = unsafe { Local::from_ffi(name) };
+                debug_assert!(Local::<Value>::from(name).is_string());
+                name
+            })
+            .collect())
     }
 }
 

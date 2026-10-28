@@ -489,7 +489,7 @@ Local object_new_with_data_properties(
   for (size_t i = 0; i < keys.size(); i++) {
     // Unlike Set(), CreateDataProperty() doesn't look up the prototype chain, so no setter runs,
     // and on an ordinary object no Proxy trap runs either: nothing here runs JavaScript, so it
-    // can't throw.
+    // can't throw. V8 doesn't allow it while execution is terminating, which the caller checks.
     auto defined = object->CreateDataProperty(
         context, makeInternedStr(isolate, keys[i]), local_as_ref_from_ffi<v8::Value>(values[i]));
     KJ_ASSERT(defined.FromMaybe(false), "defining a property of a new object failed", keys[i]);
@@ -519,6 +519,39 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
   return maybe_local_to_ffi(v8_obj->Get(context, v8_key));
+}
+
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name) {
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
+}
+
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  // The filter of GetOwnPropertyNames(context), with the names as strings.
+  v8::Local<v8::Array> array;
+  if (!v8_obj
+           ->GetOwnPropertyNames(context,
+               static_cast<v8::PropertyFilter>(v8::ONLY_ENUMERABLE | v8::SKIP_SYMBOLS),
+               v8::KeyConversionMode::kConvertToString)
+           .ToLocal(&array)) {
+    return false;
+  }
+  names.reserve(array->Length());
+  for (uint32_t i = 0; i < array->Length(); i++) {
+    // The elements are the array's own, so reading them runs no JavaScript.
+    v8::Local<v8::Value> name;
+    if (!array->Get(context, i).ToLocal(&name)) {
+      names.clear();
+      return false;
+    }
+    names.push_back(to_ffi(kj::mv(name)));
+  }
+  return true;
 }
 
 // Local<Promise>

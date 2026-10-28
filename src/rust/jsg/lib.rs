@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 mod buffer;
+mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -25,6 +26,7 @@ mod wrappable;
 
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
+pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;

@@ -672,10 +672,13 @@ enum Conversion {
     Iterate,
     Set,
     SetElement,
+    DictKeys,
+    DictValue,
+    DictValueCoercion,
 }
 
 impl Conversion {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 10] = [
         Self::String,
         Self::Number,
         Self::Get,
@@ -683,6 +686,9 @@ impl Conversion {
         Self::Iterate,
         Self::Set,
         Self::SetElement,
+        Self::DictKeys,
+        Self::DictValue,
+        Self::DictValueCoercion,
     ];
 
     /// Converts `value`, reads or sets its property `x`, or sets its element 0.
@@ -711,6 +717,9 @@ impl Conversion {
                     .unwrap()
                     .set(lock, 0, undefined)
             }
+            Self::DictKeys | Self::DictValue | Self::DictValueCoercion => {
+                jsg::Dict::<Number>::from_js(lock, value).map(drop)
+            }
         }
     }
 
@@ -719,7 +728,7 @@ impl Conversion {
         match self {
             Self::String => format!("({{ toString: {f} }})"),
             Self::Number => format!("({{ valueOf: {f} }})"),
-            Self::Get => format!("({{ get x() {{ return ({f})(); }} }})"),
+            Self::Get | Self::DictValue => format!("({{ get x() {{ return ({f})(); }} }})"),
             Self::Has => format!("new Proxy({{}}, {{ has: {f} }})"),
             Self::Iterate => {
                 format!(
@@ -732,6 +741,8 @@ impl Conversion {
                     "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ set: {f} }}); return a; }})()"
                 )
             }
+            Self::DictKeys => format!("new Proxy({{}}, {{ ownKeys: {f} }})"),
+            Self::DictValueCoercion => format!("({{ x: {{ valueOf: {f} }} }})"),
         }
     }
 }

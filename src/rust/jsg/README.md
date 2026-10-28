@@ -246,6 +246,7 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `Vec<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` in the vec |
 | `HashMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
 | `BTreeMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
+| `jsg::Dict<jsg::Rc<T>>` | Yes — each value | Visits the value of every entry |
 | `HashSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `BTreeSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `Cell` variant of above |
@@ -523,7 +524,7 @@ propagating. As with the functions C++ JSG wraps, the function's `name` is empty
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
 Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element. These conversions fail only with pending errors. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
@@ -565,6 +566,17 @@ to a number, which must be finite and in range, and truncates toward zero.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
+
+`jsg::Dict<V>` is C++ JSG's `jsg::Dict<V>`, Web IDL's `record<DOMString, V>`: a plain object used
+as a map from strings to values. It holds its entries in order, in a `Vec<(String, V)>`. From
+JavaScript, it takes any object other than an array, and reads its own enumerable properties
+that are not symbols, as `Object.keys()` lists them; a value that is not a `V` is a `TypeError`
+naming its key. To JavaScript, it is a new plain object with each entry as an own data property
+(`Object::with_data_properties`), as Web IDL defines a record. C++ JSG's `DictWrapper` sets the
+entries instead, so with it a setter on `Object.prototype` runs and a `__proto__` entry replaces
+the prototype or is dropped; with Rust JSG, no JavaScript runs and `__proto__` is an own property,
+as with `Object.fromEntries()`. `Local<Object>::keys()` and
+`get_by_name()` list and read properties the same way.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
 

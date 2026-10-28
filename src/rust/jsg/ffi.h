@@ -252,6 +252,14 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 // Returns the value of `key`, or none if a getter or Proxy trap threw, leaving the exception
 // pending.
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+// The same for a `v8::Name` key.
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name);
+// Appends the names of the own enumerable string-keyed properties, converted to strings, to
+// `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
+// the exception pending.
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
 
 // Local<Promise>
 PromiseState local_promise_state(const Local& promise);
