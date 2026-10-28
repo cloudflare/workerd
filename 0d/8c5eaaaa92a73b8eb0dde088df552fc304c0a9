@@ -1,0 +1,25 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_b4107293f06e5d 621-624
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_0a42299dece12d 73,92
+build/bazelflare/BUILD.bazel
+  s_1b9ab9fb100cf8::t_f5b9540a02dada 20-34
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_300f047c82cf1c 125-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0d8c5eaaaa92a73b8eb0dde088df552fc304c0a9",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
