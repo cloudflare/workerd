@@ -3104,15 +3104,21 @@ KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-n
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // A queued byte stream declaring the (identity) expectedLength extension: the identity
-    // query reports it, but an encoded query must NOT (an identity byte count is never a
-    // valid encoded length).
+    // Queued streams declaring the (identity) expectedLength extension, from a byte source
+    // or a default one: the identity query reports it, but an encoded query must NOT (an
+    // identity byte count is never a valid encoded length).
     auto underlying = js.obj();
     underlying.set(js, "type"_kj, js.str("bytes"_kj));
     underlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(11)));
     auto queued = makeTsStream(js, jsg::JsValue(underlying));
     KJ_EXPECT(KJ_ASSERT_NONNULL(queued.tryGetLength(js)) == 11);
     KJ_EXPECT(queued.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+
+    auto defaultUnderlying = js.obj();
+    defaultUnderlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(7)));
+    auto queuedDefault = makeTsStream(js, jsg::JsValue(defaultUnderlying));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(queuedDefault.tryGetLength(js)) == 7);
+    KJ_EXPECT(queuedDefault.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
 
     // Buffer-backed streams sit on the in-memory source, which is identity-only.
     JsReadableStream buffered(js, kj::str(kData));
