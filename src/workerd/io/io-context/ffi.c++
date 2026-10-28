@@ -21,18 +21,20 @@ static_assert(std::is_trivially_copyable_v<IoContext::Id>);
 // The current IoContext, which must be the one `id` identifies.
 IoContext& currentWithId(uint64_t id) {
   auto& context = KJ_REQUIRE_NONNULL(IoContext::tryCurrent(), "there is no current request");
-  KJ_REQUIRE(io_context_id(context) == id, "the IoContext is not the one of the current request");
+  KJ_REQUIRE(context.getId() == std::bit_cast<IoContext::Id>(id),
+      "the IoContext is not the one of the current request");
   return context;
 }
 
 }  // namespace
 
-kj::Maybe<IoContext&> io_context_try_current() {
-  return IoContext::tryCurrent();
+::rust::Str io_context_no_request_message() {
+  return IoContext::NO_REQUEST_MESSAGE.cStr();
 }
 
-uint64_t io_context_id(const IoContext& context) {
-  return std::bit_cast<uint64_t>(context.getId());
+kj::Maybe<uint64_t> io_context_try_current_id() {
+  return IoContext::tryGetCurrentId().map(
+      [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
 }
 
 int64_t io_context_now(uint64_t id) {

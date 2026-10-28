@@ -16,11 +16,11 @@
 // reach another request's IoContext, or one that has been destroyed.
 namespace workerd::io_context {
 
-// IoContext::tryCurrent().
-kj::Maybe<IoContext&> io_context_try_current();
+// The message of the error IoContext::current() throws outside a request.
+::rust::Str io_context_no_request_message();
 
-// IoContext::getId(), as a uint64_t.
-uint64_t io_context_id(const IoContext& context);
+// IoContext::tryGetCurrentId(), as a uint64_t.
+kj::Maybe<uint64_t> io_context_try_current_id();
 
 // IoContext::now(), in nanoseconds since the Unix epoch.
 int64_t io_context_now(uint64_t id);

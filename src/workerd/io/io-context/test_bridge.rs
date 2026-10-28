@@ -46,7 +46,6 @@ mod ffi {
         fn take_probe_observation() -> ProbeObservation;
 
         unsafe fn has_current(isolate: usize) -> bool;
-        unsafe fn current_error(isolate: usize) -> String;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
     }
@@ -57,16 +56,6 @@ unsafe fn has_current(isolate: usize) -> bool {
     // SAFETY: see the module documentation.
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     IoContext::try_current(lock).is_some()
-}
-
-/// The message of the error `IoContext::current()` fails with, or "" if it succeeds.
-unsafe fn current_error(isolate: usize) -> String {
-    // SAFETY: see the module documentation.
-    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
-    IoContext::current(lock)
-        .err()
-        .map(|err| err.message)
-        .unwrap_or_default()
 }
 
 /// `IoContext::current()?.now()`, in nanoseconds since the Unix epoch.
@@ -110,7 +99,7 @@ fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
                 ffi::ProbeObservation::NoRequest
             };
             PROBE_OBSERVATION.with(|cell| cell.set(observation));
-            Vec::<jsg::Number>::new().to_js(lock)
+            Vec::<f64>::new().to_js(lock)
         },
         jsg::modules::ModuleType::Internal,
     );

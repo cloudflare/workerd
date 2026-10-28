@@ -17,14 +17,6 @@ use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
 
-/// The message of the error C++ `IoContext::current()` throws outside a request.
-// A copy of `kAsyncIoErrorMessage` in src/workerd/io/io-context.c++. When changing this message,
-// also change that one. io-context-test.c++ checks that the two match.
-const NO_REQUEST_MESSAGE: &str = "Disallowed operation called within global scope. Asynchronous \
-     I/O (ex: fetch() or connect()), setting a timeout, and generating random values are not \
-     allowed within global scope. To fix this error, perform this operation within a handler. \
-     https://developers.cloudflare.com/workers/runtime-apis/handlers/";
-
 /// The `IoContext` of the current request.
 ///
 /// It holds the process-unique id of the C++ `IoContext` (`IoContext::getId()`), not a reference
@@ -47,13 +39,14 @@ impl<'s> IoContext<'s> {
     /// Outside a request, such as in a Worker's global scope, fails with the error that C++
     /// `IoContext::current()` throws, which explains that the operation needs a request.
     pub fn current(lock: &mut jsg::Lock<'s>) -> jsg::Result<Self> {
-        Self::try_current(lock).ok_or_else(|| jsg::Error::new_error(NO_REQUEST_MESSAGE))
+        Self::try_current(lock)
+            .ok_or_else(|| jsg::Error::new_error(bridge::io_context_no_request_message()))
     }
 
     /// Returns the `IoContext` of the current request, or `None` outside a request.
     #[must_use]
     pub fn try_current(_lock: &mut jsg::Lock<'s>) -> Option<Self> {
-        ffi::current_id().map(|id| Self {
+        Option::from(bridge::io_context_try_current_id()).map(|id| Self {
             id,
             _lock: PhantomData,
         })

@@ -17,7 +17,7 @@ fn outside_a_request_there_is_no_io_context() {
             panic!("there should be no IoContext outside a request");
         };
         assert_eq!(err.name, jsg::ExceptionType::Error);
-        assert_eq!(err.message, NO_REQUEST_MESSAGE);
+        assert_eq!(err.message, bridge::io_context_no_request_message());
         Ok(())
     });
 }

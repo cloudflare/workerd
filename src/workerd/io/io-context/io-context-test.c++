@@ -16,11 +16,17 @@
 #include <capnp/serialize.h>
 #include <kj/test.h>
 
+#include <bit>
+
 namespace workerd::io_context::test {
 namespace {
 
 uintptr_t isolateOf(const TestFixture::V8Environment& env) {
   return reinterpret_cast<uintptr_t>(env.isolate);
+}
+
+uint64_t idOf(const IoContext& context) {
+  return std::bit_cast<uint64_t>(context.getId());
 }
 
 int64_t nanosNow(IoContext& context) {
@@ -73,28 +79,10 @@ TestFixture::SetupParams recordingParams(
   };
 }
 
-KJ_TEST("outside a request, current() fails with the error C++ IoContext::current() throws") {
-  TestFixture fixture;
-  fixture.enterWorkerLock([&](Worker::Lock& lock) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      KJ_EXPECT(!has_current(reinterpret_cast<uintptr_t>(js.v8Isolate)));
-      auto rustMessage = current_error(reinterpret_cast<uintptr_t>(js.v8Isolate));
-      js.tryCatch([&]() {
-        IoContext::current();
-        KJ_FAIL_EXPECT("IoContext::current() should throw outside a request");
-      }, [&](jsg::Value exception) {
-        auto message = jsg::JsValue(exception.getHandle(js)).toString(js);
-        KJ_EXPECT(message == kj::str("Error: ", rustMessage.c_str()), message, rustMessage.c_str());
-      });
-    });
-  });
-}
-
 KJ_TEST("inside a request, current() finds it, and now() is its clock") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     KJ_EXPECT(has_current(isolateOf(env)));
-    KJ_EXPECT(current_error(isolateOf(env)) == ::rust::String());
     // The clock can advance between reads.
     auto before = nanosNow(env.context);
     auto now = now_nanos(isolateOf(env));
@@ -159,7 +147,7 @@ KJ_TEST("an IoContext id works only while its IoContext is current") {
   auto first = fixture.newIncomingRequest();
   uint64_t firstId = 0;
   fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
-    firstId = io_context_id(env.context);
+    firstId = idOf(env.context);
     auto before = nanosNow(env.context);
     auto now = io_context_now(firstId);
     KJ_EXPECT(before <= now && now <= nanosNow(env.context), before, now);
@@ -167,7 +155,7 @@ KJ_TEST("an IoContext id works only while its IoContext is current") {
 
   auto second = fixture.newIncomingRequest();
   fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
-    KJ_EXPECT(io_context_id(env.context) != firstId);
+    KJ_EXPECT(idOf(env.context) != firstId);
     KJ_EXPECT_THROW_MESSAGE("not the one of the current request", io_context_now(firstId));
   });
 
