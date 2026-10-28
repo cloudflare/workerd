@@ -117,13 +117,13 @@ fn function_lengths_follow_compat_flag_with_fast_api_enabled() {
                 .unwrap();
             assert_eq!(lengths, expected);
             let (result, fast_calls) = count_fast_calls(|| {
-                ctx.eval::<Number>(
+                ctx.eval::<f64>(
                     lock,
                     &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
                 )
                 .unwrap()
             });
-            assert!((result.value() - 7.0).abs() < f64::EPSILON);
+            assert!((result - 7.0).abs() < f64::EPSILON);
             assert_ne!(fast_calls, Some(0));
             Ok(())
         });
