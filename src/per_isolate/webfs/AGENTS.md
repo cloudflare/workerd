@@ -65,8 +65,8 @@ Parts of the contract that are easy to break:
   a method body runs, so a bad option bag is a synchronous throw while a file
   that cannot be opened is a rejection. `createWritable` is therefore
   deliberately **not** an `async function` — that would turn the former into a
-  rejection too. It classifies by exception type: a DOMException becomes a
-  rejection, anything else is rethrown. `badOptionsThrowSynchronously` and
+  rejection too. It classifies by exception type: a DOMException (by its brand,
+  `utils.isDOMException()`) becomes a rejection, anything else is rethrown. `badOptionsThrowSynchronously` and
   `createWritableRejectsForeignReceiver` hold the two apart.
 - **The option bag is coerced, not type-checked.** JSG unwraps
   `jsg::Optional<bool>` with ToBoolean, so `{keepExistingData: 'false'}` opts

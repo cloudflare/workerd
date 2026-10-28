@@ -32,6 +32,12 @@ class Deserializer;
 
 // The functions that create and recognize DOMExceptions are declared in jsg.h.
 
+// In a Worker, the per-isolate bootstrap replaces this class as the global DOMException with a
+// TypeScript class of the same shape (src/per_isolate/dom-exception.ts), and native code creates
+// instances of that. This class remains the DOMException of isolates that run no bootstrap, such
+// as those of JSG's and Rust JSG's tests, and supplies the deserializer for its serialization
+// tags.
+//
 // JSG allows DOMExceptions to be tunneled through kj::Exceptions (see exceptionToJs() for
 // details). While this feature is activated conditionally at run-time, and thus does not depend
 // on any specific concrete C++ type, JSG needs to be able to unit test the tunneled exception

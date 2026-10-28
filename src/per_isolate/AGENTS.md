@@ -18,6 +18,12 @@ at context creation, before any user code. C++ entry point:
   `view-extent`).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
+- `main.ts` first installs the TypeScript `DOMException` (`dom-exception.ts`),
+  which replaces the C++ class with one of the same shape. Native code creates
+  instances of it without running its constructor, and recognizes one by the
+  brand in its V8 private properties (`newDOMException()` and
+  `tryGetDOMExceptionFields()` in `src/workerd/jsg/jsg.h`); bootstrap code checks
+  for one with `utils.isDOMException()`, never `instanceof`.
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under

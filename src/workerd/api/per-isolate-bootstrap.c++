@@ -214,6 +214,34 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// Gives a DOMException being constructed by the TypeScript DOMException its brand and its own
+// `code`, `name` and `message` properties (jsg::initDOMException()). The caller passes the
+// object it is constructing and the converted strings.
+static void InitDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto isolate = args.GetIsolate();
+  jsg::liftKj(isolate, [&] {
+    KJ_ASSERT(args[0]->IsObject() && args[1]->IsString() && args[2]->IsString());
+    // A failure leaves its exception pending, which propagates to the constructor's caller.
+    (void)jsg::initDOMException(isolate, isolate->GetCurrentContext(), args[0].As<v8::Object>(),
+        args[1].As<v8::String>(), args[2].As<v8::String>());
+  });
+}
+
+// Returns whether a value is a DOMException, by its brand.
+static void IsDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  args.GetReturnValue().Set(jsg::tryGetDOMExceptionFields(args.GetIsolate(), args[0]) != kj::none);
+}
+
+// Hands native code the prototype of the TypeScript DOMException, for the DOMExceptions it
+// creates (jsg::setDOMExceptionPrototype()).
+static void SetDOMExceptionPrototype(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto isolate = args.GetIsolate();
+  jsg::liftKj(isolate, [&] {
+    KJ_ASSERT(args[0]->IsObject());
+    jsg::setDOMExceptionPrototype(isolate->GetCurrentContext(), args[0].As<v8::Object>());
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -244,6 +272,10 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
   return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect);
 }
 
+v8::Local<v8::Value> getMethodNoSideEffect(jsg::Lock& js, v8::FunctionCallback callback) {
+  return makeMethod(js, callback, v8::SideEffectType::kHasNoSideEffect);
+}
+
 // Creates an object with methods for performing fast type checks on JS values.
 // Because we are not fully bootstrapped at this point, we don't want to rely
 // on jsg::Object and the type wrapper system, etc. Instead, just use a plain
@@ -265,6 +297,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "initDOMException",
+    "isDOMException",
+    "setDOMExceptionPrototype",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -279,6 +314,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    getMethod(js, InitDOMException),
+    getMethodNoSideEffect(js, IsDOMException),
+    getMethod(js, SetDOMExceptionPrototype),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

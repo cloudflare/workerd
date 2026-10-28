@@ -42,7 +42,6 @@ import type {
 } from '../webstreams/types';
 
 const {
-  DOMException: NativeDOMException,
   ObjectDefineProperties,
   PromiseReject,
   PromiseResolve,
@@ -50,7 +49,7 @@ const {
   TypeError,
 } = primordials;
 
-const { createFileSystemWriteContext } = utils;
+const { createFileSystemWriteContext, isDOMException } = utils;
 
 const {
   WritableStream,
@@ -196,7 +195,7 @@ function createWritable(
     // A DOMException means the file could not be opened, which createWritable
     // reports by rejecting. Anything else is the receiver check failing, which
     // JSG performs before the method body runs and so throws.
-    if (err instanceof NativeDOMException) {
+    if (isDOMException(err)) {
       return PromiseReject(err);
     }
     throw err;

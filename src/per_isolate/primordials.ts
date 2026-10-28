@@ -78,6 +78,15 @@ const WeakSetCtor = WeakSet;
 // Function
 const FunctionPrototypeBind = uncurryThis(FunctionPrototype.bind);
 
+// Error
+const ErrorPrototype = ErrorCtor.prototype;
+// V8's Error.captureStackTrace(), which the standard library types leave out.
+const ErrorCaptureStackTrace = (
+  ErrorCtor as unknown as {
+    captureStackTrace(target: object, constructorOpt?: Function): void;
+  }
+).captureStackTrace;
+
 // Object
 const ObjectCreate = Object.create;
 const ObjectDefineProperty = Object.defineProperty;
@@ -635,7 +644,6 @@ const EventTargetRemoveEventListener = uncurryThis(
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
-const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -700,6 +708,10 @@ module.exports = ObjectFreeze({
   FunctionPrototype,
   FunctionPrototypeBind,
 
+  // Error
+  ErrorPrototype,
+  ErrorCaptureStackTrace,
+
   // Object
   ObjectPrototype,
   ObjectCreate,
@@ -737,9 +749,6 @@ module.exports = ObjectFreeze({
   ArrayPrototypeShift,
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
-
-  // DOMException
-  DOMException,
 
   // Map
   MapPrototypeGet,
