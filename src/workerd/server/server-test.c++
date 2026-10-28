@@ -918,9 +918,12 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
   }
 }
 
-KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
-  TestServer test(singleWorker(R"((
+// `compatibilityFlags` is a config list literal.
+void testClientDisconnectCancelsResponseBody(kj::StringPtr compatibilityFlags) {
+  TestServer test(singleWorker(kj::str(R"((
     compatibilityDate = "2024-10-01",
+    compatibilityFlags = )"_kj,
+      compatibilityFlags, R"(,
     modules = [
       ( name = "worker",
         esModule =
@@ -941,8 +944,9 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
           `}
       )
     ]
-  ))"_kj));
+  ))"_kj)));
 
+  test.server.allowExperimental();
   test.start();
 
   {
@@ -960,6 +964,14 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/state", "canceled:undefined");
+}
+
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody("[]");
+}
+
+KJ_TEST("Server: client disconnect cancels a TypeScript-implemented ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody(R"(["typescript_implemented_streams"])");
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
