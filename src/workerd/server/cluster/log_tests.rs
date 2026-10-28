@@ -450,6 +450,26 @@ fn a_corrupt_file_fails_to_restore() {
 }
 
 #[test]
+fn a_truncated_file_fails_to_restore() {
+    // The LZ4 decoder takes a frame without its end mark, or no frame at
+    // all, for a whole one.
+    let dir = scratch("truncated");
+    let app = open_app(&dir.join("app.db"));
+    insert(&app, 0, 100);
+    let (file, path) = batch(&dir, 0, last());
+    let bytes = std::fs::read(&path).unwrap();
+    for cut in [&bytes[..bytes.len() - 8], &[]] {
+        let store = Bucket::memory("");
+        std::fs::write(&path, cut).unwrap();
+        runtime().block_on(log(&store).put(&file, &path)).unwrap();
+        let out = dir.join("restored.db");
+        let _ = std::fs::remove_file(&out);
+        let restored = runtime().block_on(restore(&log(&store), 0, &out));
+        assert!(restored.is_err(), "{restored:?}");
+    }
+}
+
+#[test]
 fn a_rolled_back_transaction_leaves_nothing() {
     let dir = scratch("rollback");
     let app = open_app(&dir.join("app.db"));

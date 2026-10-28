@@ -163,8 +163,39 @@ fn encoder<W: Write>(w: W) -> lz4_flex::frame::FrameEncoder<W> {
     lz4_flex::frame::FrameEncoder::with_frame_info(info, w)
 }
 
+/// Bounds a message, so that a corrupt one fails rather than allocating
+/// whatever its segment table claims: 1 GiB, far more than a batch holds.
 fn options() -> capnp::message::ReaderOptions {
-    *capnp::message::ReaderOptions::new().traversal_limit_in_words(None)
+    *capnp::message::ReaderOptions::new().traversal_limit_in_words(Some(1 << 27))
+}
+
+/// Fails unless `file` is one whole LZ4 frame, through its end mark and
+/// checksum: the decoder takes a frame cut at a block boundary for a
+/// whole, shorter one.
+fn check_whole(file: &mut std::fs::File) -> Result<()> {
+    let truncated = || Error::Replica("a truncated file".into());
+    let len = file.metadata()?.len();
+    let mut header = [0u8; 6];
+    file.read_exact(&mut header).map_err(|_| truncated())?;
+    let flags = header[4];
+    let bit = |mask: u8, n: u64| if flags & mask != 0 { n } else { 0 };
+    let mut at = 7 + bit(0x08, 8) + bit(0x01, 4);
+    loop {
+        let mut size = [0u8; 4];
+        file.seek(SeekFrom::Start(at))?;
+        file.read_exact(&mut size).map_err(|_| truncated())?;
+        at += 4;
+        let size = u32::from_le_bytes(size) & 0x7fff_ffff;
+        if size == 0 {
+            break;
+        }
+        at += u64::from(size) + bit(0x10, 4);
+    }
+    if at + bit(0x04, 4) != len {
+        return Err(truncated());
+    }
+    file.seek(SeekFrom::Start(0))?;
+    Ok(())
 }
 
 /// The database lane, replayed into a file.
@@ -194,7 +225,8 @@ impl Replay {
     /// Applies `f`, the local copy at `path`. A batch that does not reach
     /// back to the next frame is skipped: a later, wider one covers it.
     pub fn apply(&mut self, f: &File, path: &Path) -> Result<()> {
-        let file = std::fs::File::open(path)?;
+        let mut file = std::fs::File::open(path)?;
+        check_whole(&mut file)?;
         let size = file.metadata()?.len();
         let mut r = BufReader::new(lz4_flex::frame::FrameDecoder::new(file));
         if f.snapshot {
@@ -236,9 +268,18 @@ impl Replay {
         }
         for lane in lanes {
             if let snapshot_header::lane::Sqlite(sqlite) = lane.which()? {
-                std::io::copy(&mut r.take(sqlite.get_database_size()), &mut self.db)?;
+                let size = sqlite.get_database_size();
+                if std::io::copy(&mut r.take(size), &mut self.db)? != size {
+                    return Err(Error::Replica(
+                        "a snapshot shorter than its database".into(),
+                    ));
+                }
                 self.live = true;
             }
+        }
+        // Read to the frame's end, where the decoder checks the checksum.
+        if std::io::copy(r, &mut std::io::sink())? != 0 {
+            return Err(Error::Replica("a snapshot longer than its lanes".into()));
         }
         Ok(())
     }
