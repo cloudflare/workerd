@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -42,6 +43,12 @@ RUST_ICU_VERSION_PINS = (
     ROOT / "src/rust/i18n/BUILD.bazel",
 )
 RUST_ICU_VERSION = re.compile(r'(?<="RUST_ICU_MAJOR_VERSION_NUMBER": ")\d+(?=")')
+
+# V8 builds these crates from Chromium's third_party/rust. Every crate in their
+# runtime dependency trees must resolve to the version Chromium builds V8 with.
+CHROMIUM_CRATE_ROOTS = ("temporal_capi",)
+CARGO_TOML = ROOT / "deps/rust/Cargo.toml"
+CARGO_PIN = re.compile(r'^([\w-]+) = \{ version = "=([^"]+)"', re.MULTILINE)
 
 
 def run(args, *, cwd=ROOT, check=True, env=None, stdout=None):
@@ -101,6 +108,14 @@ def changed_dependencies(old, target):
     )
 
 
+def _v8_deps_from_gitiles(tag):
+    with urlopen(
+        f"https://chromium.googlesource.com/v8/v8/+/refs/tags/{tag}/DEPS?format=TEXT",
+        timeout=30,
+    ) as response:
+        return base64.b64decode(response.read()).decode()
+
+
 def _update_aligned_dependencies():
     doc = jsonc.loads(DEPS.read_text())
     repositories = {repo["name"]: repo for repo in doc.data["repositories"]}
@@ -143,6 +158,91 @@ def _update_rust_icu_version():
         print(
             f"Updated RUST_ICU_MAJOR_VERSION_NUMBER to {version}. Check that the pinned "
             f"rust_icu_sys provides bindgen/lib_{version}.rs; update the crate if it does not."
+        )
+
+
+def _chromium_crate_versions(commit):
+    with urlopen(
+        "https://chromium.googlesource.com/chromium/src/third_party/rust/+/"
+        f"{commit}/chromium_crates_io/Cargo.lock?format=TEXT",
+        timeout=30,
+    ) as response:
+        lock = tomllib.loads(base64.b64decode(response.read()).decode())
+    versions = {}
+    for package in lock["package"]:
+        versions.setdefault(package["name"], []).append(package["version"])
+    return versions
+
+
+def _semver_compatible(a, b):
+    # Cargo's default (caret) compatibility: same major version, or same minor
+    # version for 0.x.
+    a, b = a.split("."), b.split(".")
+    return a[:1] == b[:1] if a[0] != "0" else a[:2] == b[:2]
+
+
+def _chromium_version(chromium, name, version):
+    versions = chromium.get(name, [])
+    if len(versions) == 1:
+        return versions[0]
+    compatible = [v for v in versions if _semver_compatible(v, version)]
+    return compatible[0] if len(compatible) == 1 else None
+
+
+def _cargo(*args, check=True, stdout=None):
+    return run(
+        ["cargo", *args, "--manifest-path", CARGO_TOML], check=check, stdout=stdout
+    ).stdout
+
+
+def _chromium_crate_tree():
+    """Return {name: version} for the runtime dependencies of CHROMIUM_CRATE_ROOTS."""
+    args = ["tree", "--target=all", "--edges=normal,no-proc-macro"]
+    for root in CHROMIUM_CRATE_ROOTS:
+        args += ["--package", root]
+    tree = _cargo(*args, "--prefix=none", "--format={p}", stdout=subprocess.PIPE)
+    packages = (line.split()[:2] for line in tree.splitlines() if line)
+    return {name: version.removeprefix("v") for name, version in packages}
+
+
+def _update_chromium_crates(v8_deps):
+    commit = _v8_dependency_commit("third_party/rust", v8_deps)
+    chromium = _chromium_crate_versions(commit)
+    tree = _chromium_crate_tree()
+
+    # Exact pins in Cargo.toml hold crates that Cargo would otherwise resolve
+    # newer than Chromium's versions. Update them first, since moving a pinned
+    # crate can move others along with it.
+    repinned = []
+
+    def repin(match):
+        name, version = match.groups()
+        target = _chromium_version(chromium, name, version)
+        if name not in tree or target in (None, version):
+            return match.group()
+        repinned.append(name)
+        return match.group().replace(f'"={version}"', f'"={target}"')
+
+    CARGO_TOML.write_text(CARGO_PIN.sub(repin, CARGO_TOML.read_text()))
+    if repinned:
+        _cargo("update", *repinned)
+
+    # Cargo.lock alone holds the rest.
+    for name, version in _chromium_crate_tree().items():
+        target = _chromium_version(chromium, name, version)
+        if target not in (None, version):
+            _cargo("update", f"{name}@{version}", "--precise", target, check=False)
+
+    mismatched = [
+        f"{name} {version} (Chromium: {target or 'none'})"
+        for name, version in _chromium_crate_tree().items()
+        if (target := _chromium_version(chromium, name, version)) != version
+    ]
+    if mismatched:
+        raise ValueError(
+            f"Crates differ from Chromium's third_party/rust at {commit}: "
+            f"{', '.join(mismatched)}. If Cargo cannot downgrade a crate by itself, "
+            f'pin it with `<crate> = {{ version = "=<version>" }}` in {CARGO_TOML}.'
         )
 
 
@@ -273,6 +373,7 @@ def finish_update(target):
         ]
     )
     _update_rust_icu_version()
+    _update_chromium_crates((CHECKOUT / "DEPS").read_text())
 
 
 def parse_args():
@@ -284,6 +385,10 @@ def parse_args():
         "check-update", help="check Chrome Beta for a V8 update"
     )
     check.add_argument("--machine-readable", action="store_true")
+    commands.add_parser(
+        "rust-crates",
+        help="align the Rust crates V8 builds with the current V8 version's Chromium",
+    )
     for name in ("update", "finish"):
         command = commands.add_parser(name)
         command.add_argument("version", metavar="VERSION")
@@ -301,6 +406,9 @@ def main():
         return 1
     if args.command == "update":
         return 0 if prepare_update(args.version) else 1
+    if args.command == "rust-crates":
+        _update_chromium_crates(_v8_deps_from_gitiles(read_version()))
+        return 0
     if args.command == "finish":
         finish_update(args.version)
         return 0

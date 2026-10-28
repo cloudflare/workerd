@@ -92,7 +92,8 @@ serde = { version = "1", features = ["derive"] }
 # V8's Temporal implementation (//deps/rust:temporal_capi). V8 compiles against temporal_capi's
 # generated C++ headers, so both crates should be pinned to the versions and features the V8
 # release expects: those in Chromium's third_party/rust/chromium_crates_io/Cargo.toml, at the
-# third_party/rust revision pinned in V8's DEPS.
+# third_party/rust revision pinned in V8's DEPS. `python3 ci/v8_update.py rust-crates` updates
+# the versions of these and other exact pins in temporal_capi's dependency tree.
 temporal_capi = { version = "=0.2.6", features = ["zoneinfo64"] }
 temporal_rs = { version = "=0.2.6", default-features = false, features = ["float64_representable_durations"] }
 thiserror = "2"
