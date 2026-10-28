@@ -6,11 +6,12 @@ Subject: Build Temporal in the V8 Bazel build
 Adds --//:v8_enable_temporal_support, which defines V8_TEMPORAL_SUPPORT
 and builds the Temporal sources, and --//:v8_temporal_capi, the label
 of a target that links the temporal_capi Rust crate and exports its
-diplomat-generated C++ headers. The embedder supplies that target, as
-GN's v8_maybe_temporal depends on //third_party/rust/temporal_capi.
+generated C++ bindings.
 
 Without ICU, Temporal bakes ICU's tzres/zoneinfo64.res into V8, as
-GN's make_temporal_zoneinfo_cpp action does.
+GN's make_temporal_zoneinfo_cpp action does. We don't use this
+ourselves, but this will make it easier to potentially upstream the
+patch to V8.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
 index 166c685a0a3cd70ca405d68847f75619b120a615..e6e8947964fc4f200225a51739de43d1e5062c90 100644
