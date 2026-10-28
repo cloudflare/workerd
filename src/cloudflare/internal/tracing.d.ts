@@ -129,6 +129,16 @@ declare const tracing: {
   // outside an invocation or when execution is detached into the root async context.
   getActiveSpan(): Span | undefined;
 
+  // Makes `span` the active span while invoking `callback(...args)`, then restores the previous
+  // active span. Returns the callback result as-is and does not end the span. User spans and
+  // built-in instrumentation created inside the callback, including after `await`, are children
+  // of `span`.
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;
