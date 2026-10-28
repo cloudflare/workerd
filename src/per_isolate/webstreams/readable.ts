@@ -2814,6 +2814,52 @@ function convertAndCheckPipe<R>(
   return converted;
 }
 
+// Finishes a native+native pipe once the sink's pipeFrom hook, which ran it
+// at the C++ layer, has settled. Both endpoints were extracted, so neither
+// stream's own algorithms took part in the pipe. As pipeToInternal's
+// shutdown and finalize would, the destination is closed (the pipe
+// succeeded) or aborted with the pipe's error, through the writer
+// extraction locked it with; then both endpoints are unlocked. The
+// extracted sink's hooks no longer reach the C++ sink, which the pipe has
+// already ended or aborted. The source has been closed since its
+// extraction (see HANDED-OFF STREAMS in webstreams/AGENTS.md) and stays
+// closed, whatever the outcome.
+function finishNativePipe<R>(
+  piped: Promise<void>,
+  reader: object,
+  destination: WritableStreamType<R>,
+  writer: WritableStreamDefaultWriterType<R>
+): Promise<void> {
+  const finalize = (): void => {
+    writableInternals.writerRelease(writer);
+    readableStreamReaderGenericRelease(reader);
+  };
+  return PromisePrototypeThen(
+    piped,
+    () =>
+      PromisePrototypeThen(
+        writableInternals.writerCloseWithErrorPropagation(writer),
+        finalize,
+        (error: unknown) => {
+          finalize();
+          throw error;
+        }
+      ),
+    (error: unknown) =>
+      PromisePrototypeThen(
+        writableInternals.writableStreamAbort(destination, error),
+        () => {
+          finalize();
+          throw error;
+        },
+        (abortError: unknown) => {
+          finalize();
+          throw abortError;
+        }
+      )
+  ) as Promise<void>;
+}
+
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
 // ends — locks are held for the duration. Chunks are read only while the
 // destination desires them: the pump moves buffered chunks until
@@ -3549,8 +3595,10 @@ function forkQueuedCursors<R>(
 // Marks a stream whose data has moved to another stream (tee, detach,
 // extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md). It is
 // disturbed, as the legacy C++ streams leave it, so a body that was teed
-// reports bodyUsed and cannot become another body. It stays locked for good,
-// by an internal reader that is never exposed and so never released.
+// reports bodyUsed and cannot become another body. It is locked by an
+// internal reader that is never exposed: for good, except after a
+// native+native pipe, which releases it once the pipe settles
+// (finishNativePipe), as a pipe releases its reader.
 function markHandedOff<R>(stream: ReadableStream<R>): void {
   setReadableStreamDisturbed(stream);
   acquireReadableStreamDefaultReader(stream);
@@ -3862,7 +3910,17 @@ class ReadableStream<R> {
               'Native sink is missing the required pipeFrom hook'
             );
           }
-          return uncurryThis(pipeFrom)(nativeSink, nativeSource, converted);
+          // Extraction locked both endpoints with internal handles.
+          const reader = source.#reader as object;
+          const writer = writableInternals.getWriter(
+            destination
+          ) as WritableStreamDefaultWriterType<R>;
+          return finishNativePipe(
+            uncurryThis(pipeFrom)(nativeSink, nativeSource, converted),
+            reader,
+            destination,
+            writer
+          );
         }
         return readableStreamPipeThroughTo(source, destination, converted);
       } catch (e) {

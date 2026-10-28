@@ -15,6 +15,10 @@
 // closed promise resolves; C++ resolves closed first and rejects the writes
 // an event-loop turn later, once the canceled write's I/O reports back
 // (detachRejectsPendingWrites).
+//
+// The source's state once a native-to-native pipe settles diverges:
+// TypeScript's reads done, C++ errors it when the pipe is aborted or the
+// source fails (nativePipeReleasesEndpoints).
 
 import { connect } from 'cloudflare:sockets';
 import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
@@ -342,6 +346,115 @@ export const pipeBehindWriteBeforeStart = {
   },
 };
 
+async function settled(promise) {
+  return promise.then(
+    () => 'resolved',
+    (e) => `rejected ${e.message}`
+  );
+}
+
+// What a read on the unlocked source settles with: 'done', 'value', or
+// the rejection.
+async function sourceOutcome(source) {
+  const reader = source.getReader();
+  const outcome = await reader.read().then(
+    ({ done }) => (done ? 'done' : 'value'),
+    (e) => `rejected ${e.message}`
+  );
+  reader.releaseLock();
+  return outcome;
+}
+
+// How the unlocked writable's writer.closed settles, 'pending' if it has
+// not within 50 ms.
+async function writableOutcome(writable) {
+  const writer = writable.getWriter();
+  const outcome = await Promise.race([
+    settled(writer.closed),
+    scheduler.wait(50).then(() => 'pending'),
+  ]);
+  writer.releaseLock();
+  return outcome;
+}
+
+async function pipeOutcome(source, writable, options) {
+  const pipe = await settled(source.pipeTo(writable, options));
+  strictEqual(source.locked, false, 'source locked');
+  strictEqual(writable.locked, false, 'writable locked');
+  return {
+    pipe,
+    source: await sourceOutcome(source),
+    writable: await writableOutcome(writable),
+  };
+}
+
+// A native-to-native pipe into a socket writable unlocks both endpoints
+// once it settles, however it settles.
+//
+// DIVERGENCE: the source's final state. TypeScript extracts the source's
+// native half at the start, closing it (pipeSocketToSocketClosesSource),
+// so it reads done whatever the outcome; this follows the spec when the
+// pipe is aborted, which cancels the source. C++ errors the source with
+// the pipe's error when it is aborted or the source fails, and with an
+// already-aborted signal touches neither endpoint.
+export const nativePipeReleasesEndpoints = {
+  async test(ctrl, env) {
+    {
+      const socket = connect(echoAddress(env));
+      const echoed = drainToBytes(socket.readable);
+      deepStrictEqual(
+        await pipeOutcome(new Response('BODY').body, socket.writable),
+        { pipe: 'resolved', source: 'done', writable: 'resolved' }
+      );
+      strictEqual(dec.decode(await echoed), 'BODY');
+      await socket.close();
+    }
+    {
+      const idle = connect(echoAddress(env));
+      const socket = connect(echoAddress(env));
+      const ac = new AbortController();
+      const outcome = pipeOutcome(idle.readable, socket.writable, {
+        signal: ac.signal,
+      });
+      await scheduler.wait(20);
+      ac.abort(new Error('stop'));
+      deepStrictEqual(await outcome, {
+        pipe: 'rejected stop',
+        source: usingTsImpl ? 'done' : 'rejected stop',
+        writable: 'rejected stop',
+      });
+      await Promise.all([idle.close(), socket.close()]);
+    }
+    {
+      const socket = connect(echoAddress(env));
+      const signal = AbortSignal.abort(new Error('early'));
+      deepStrictEqual(
+        await pipeOutcome(new Response('BODY').body, socket.writable, {
+          signal,
+        }),
+        usingTsImpl
+          ? {
+              pipe: 'rejected early',
+              source: 'done',
+              writable: 'rejected early',
+            }
+          : { pipe: 'rejected early', source: 'value', writable: 'pending' }
+      );
+      await socket.close();
+    }
+    {
+      const socket = connect(echoAddress(env));
+      const body = (await env.SELF.fetch('http://self/failing')).body;
+      deepStrictEqual(await pipeOutcome(body, socket.writable), {
+        pipe: 'rejected the body failed',
+        source: usingTsImpl ? 'done' : 'rejected the body failed',
+        writable: 'rejected the body failed',
+      });
+      await socket.close();
+    }
+  },
+};
+
 // A pipe reads its options before it checks the locks, so an option
 // getter that locks an endpoint of a native-to-native pipe fails the pipe
 // before it takes either endpoint's native half. That matters most for
@@ -550,6 +663,25 @@ export const largeEchoVolume = {
 // and socket.close() aborts it. Whatever a later writer's closed promise then
 // reports must be a real error, never undefined.
 export default {
+  // /failing: a body that delivers one chunk and then errors, for the
+  // native pipes whose source fails.
+  async fetch(request) {
+    let sent = false;
+    return new Response(
+      new ReadableStream({
+        async pull(c) {
+          if (!sent) {
+            sent = true;
+            c.enqueue(enc.encode('PART|'));
+            return;
+          }
+          await scheduler.wait(10);
+          c.error(new Error('the body failed'));
+        },
+      })
+    );
+  },
+
   async connect(socket, env) {
     const { localAddress } = await socket.opened;
     if (localAddress.startsWith('echo:')) {

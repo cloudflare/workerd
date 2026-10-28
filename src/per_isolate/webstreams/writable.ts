@@ -164,6 +164,9 @@ let setWritableStreamWriter: <W>(
   stream: WritableStream<W>,
   writer: WritableStreamDefaultWriter<W> | undefined
 ) => void;
+let getWritableStreamWriter: <W>(
+  stream: WritableStream<W>
+) => WritableStreamDefaultWriter<W> | undefined;
 let writableStreamAbort: StreamOp<[reason?: unknown], Promise<void>>;
 let writableStreamCloseInternal: StreamOp<[], Promise<void>>;
 let writableStreamAddWriteRequest: StreamOp<[], Promise<void>>;
@@ -389,6 +392,7 @@ class WritableStream<W = unknown> {
     setWritableStreamWriter = (stream, writer) => {
       stream.#writer = writer;
     };
+    getWritableStreamWriter = (stream) => stream.#writer;
     getWritableStreamController = (stream) => stream.#controller;
 
     // JS-to-C++ extraction for native-backed writable streams.
@@ -405,8 +409,9 @@ class WritableStream<W = unknown> {
       if (sink === undefined) {
         throw new TypeError('This stream is not backed by a native sink');
       }
-      // Permanently lock via an internal writer (never exposed, never
-      // released) — same pattern as readable-side extraction.
+      // Lock via an internal writer, never exposed. The native+native pipe,
+      // which extracts the sink, closes or aborts the stream through it and
+      // releases it once the pipe settles (readableStreamPipeTo).
       new WritableStreamDefaultWriter<W>(this);
       return sink;
     };
@@ -1798,6 +1803,9 @@ module.exports = {
     writerCloseWithErrorPropagation,
     writerRelease: <W>(writer: WritableStreamDefaultWriter<W>) =>
       writerReleaseInternal(writer),
+    // The writer holding the stream's lock, if any.
+    getWriter: <W>(stream: WritableStream<W>) =>
+      getWritableStreamWriter(stream),
     writableStreamAbort: <W>(stream: WritableStream<W>, reason: unknown) =>
       writableStreamAbort(stream, reason),
     getState: <W>(stream: WritableStream<W>) => getWritableStreamState(stream),
