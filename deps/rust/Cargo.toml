@@ -96,6 +96,9 @@ serde = { version = "1", features = ["derive"] }
 # the versions of these and other exact pins in temporal_capi's dependency tree.
 temporal_capi = { version = "=0.2.6", features = ["zoneinfo64"] }
 temporal_rs = { version = "=0.2.6", default-features = false, features = ["float64_representable_durations"] }
+# temporal_rs accepts a newer icu_calendar than Chromium builds it with, and Cargo cannot
+# downgrade it without moving the other ICU4X crates that share its version line.
+icu_calendar = { version = "=2.2.1", default-features = false }
 thiserror = "2"
 tower-service = "0.3"
 # tokio is huge, let's enable only features when we actually need them.
