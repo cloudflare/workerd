@@ -2024,6 +2024,60 @@ KJ_TEST("HibernationManager: in-flight auto-response finishes before close acros
   fixture.drainAndDestroy(kj::mv(request2));
 }
 
+// Accepts a hibernatable WebSocket in the actor's own IoContext, as a real Durable Object request
+// does, so the WebSocket's IoOwn state is freed when the actor's IoContext is destroyed.
+kj::Own<kj::WebSocket> acceptInActorIoContext(
+    TestFixture& fixture, Worker::Actor::HibernationManager& hm) {
+  auto context = fixture.newIoContext();
+  fixture.getActor().setIoContext(kj::addRef(*context));
+  auto request = fixture.newIncomingRequest(*context);
+  auto end = acceptNewWebSocket(fixture, *request, hm);
+  fixture.drainAndDestroy(kj::mv(request));
+  return end;
+}
+
+// Sends the auto-response request on `end` and expects the reply without a dispatch to the worker.
+void expectPong(TestFixture& fixture, DispatchStats& stats, kj::WebSocket& end) {
+  end.send("ping"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  auto pong = end.receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(pong.is<kj::String>() && pong.get<kj::String>() == "pong"_kj);
+  KJ_ASSERT(stats.customEventCalls == 0, "auto-response should not dispatch to worker",
+      stats.customEventCalls);
+}
+
+// Destroying an actor's IoContext frees the IoOwn state of every api::WebSocket accepted in it.
+// Anything else still holding the actor's HibernationManager keeps the manager, its readLoop and
+// those WebSockets alive, and the WebSockets stay active unless hibernateWebSockets() packaged
+// them. An auto-response request arriving then must not touch the freed state. The tests below
+// hold `hm` the way such a holder would.
+
+KJ_TEST("HibernationManager: auto-response after actor abort destroyed the IoContext") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("autoresp-after-abort")));
+  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
+  auto end = acceptInActorIoContext(fixture, *hm);
+
+  // Worker::Actor::abort() destroys the IoContext at once.
+  fixture.getActor().abort(KJ_EXCEPTION(DISCONNECTED, "test abort"));
+
+  expectPong(fixture, stats, *end);
+}
+
+KJ_TEST("HibernationManager: auto-response after actor reset without hibernating") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("autoresp-after-reset")));
+  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
+  fixture.getActor().setHibernationManager(hm.addRef());
+  auto end = acceptInActorIoContext(fixture, *hm);
+
+  // Replace the actor without hibernating its WebSockets first, as resetting an actor that never
+  // went idle does.
+  fixture.resetActor();
+
+  expectPong(fixture, stats, *end);
+}
+
 KJ_TEST("HibernationManager: DO send waits for the actor's output gate") {
   // The pump calls IoContext::waitForOutputLocksIfNecessary() before each kj::WebSocket::send.
   // Locking the actor's OutputGate should hold a DO-side message until the gate releases.
