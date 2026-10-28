@@ -22,6 +22,7 @@ use cluster::Route;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
+use futures::future::Shared;
 use kj::http::Headers;
 use kj::http::HeadersRef;
 use kj::http::Method;
@@ -55,8 +56,8 @@ const TUNNEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 pub struct ClusterNode {
     pub cluster: Rc<Cluster>,
     factory: Rc<Factory>,
-    /// One session per peer address, dropped when it disconnects.
-    sessions: Rc<RefCell<HashMap<String, Rc<RpcConnection>>>>,
+    /// One session per peer address, dialing or open, dropped when it disconnects.
+    sessions: Rc<RefCell<HashMap<String, Session>>>,
     /// The address peers dial, which their CONNECTs are bound to.
     advertise: String,
     /// The nonces of CONNECTs accepted within twice the window, by timestamp.
@@ -64,6 +65,9 @@ pub struct ClusterNode {
 }
 
 pub struct RpcConnection(KjOwn<ffi::RpcClient>);
+
+/// A session to a peer, shared by the requests that wait for its dial.
+type Session = Shared<LocalBoxFuture<'static, std::result::Result<Rc<RpcConnection>, String>>>;
 
 /// Binds the cluster port, before the services start.
 /// Returns the listener and the address to advertise.
@@ -204,67 +208,81 @@ impl ClusterNode {
         ))))
     }
 
-    /// The session to the peer at `address`: the open one, or a new one.
+    /// The session to the peer at `address`: the open one, the one being
+    /// dialed, or a new one.
     async fn session(&self, address: &str) -> std::io::Result<Rc<RpcConnection>> {
-        if let Some(session) = self.sessions.borrow().get(address) {
-            return Ok(Rc::clone(session));
-        }
-        // A stalled peer accepts the connection and never answers.
-        let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, self.tunnel(address));
-        let stream = tunnel.await.map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::TimedOut, "no answer to CONNECT")
-        })??;
-        let session = Rc::new(RpcConnection(ffi::new_rpc_client(
-            self.factory.raw(),
-            Dialed::from(stream).into_kj(),
-        )));
-        let replaced = self
-            .sessions
-            .borrow_mut()
-            .insert(address.to_owned(), Rc::clone(&session));
-        drop(replaced);
-        let (sessions, address, watched) = (
-            Rc::clone(&self.sessions),
-            address.to_owned(),
-            Rc::clone(&session),
-        );
-        self.factory.spawn_detached(async move {
-            let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
-            let mut sessions = sessions.borrow_mut();
-            if sessions
-                .get(&address)
-                .is_some_and(|s| Rc::ptr_eq(s, &watched))
-            {
-                sessions.remove(&address);
-            }
+        let session = self.sessions.borrow().get(address).cloned();
+        let session = session.unwrap_or_else(|| {
+            let session = self.dial(address);
+            let mut sessions = self.sessions.borrow_mut();
+            sessions.insert(address.to_owned(), session.clone());
+            session
         });
-        Ok(session)
+        let result = session.clone().await;
+        if result.is_err() {
+            // The next request dials again.
+            let mut sessions = self.sessions.borrow_mut();
+            if sessions.get(address).is_some_and(|s| s.ptr_eq(&session)) {
+                sessions.remove(address);
+            }
+        }
+        result.map_err(std::io::Error::other)
     }
 
-    /// A TCP connection to the peer at `address`, through its CONNECT for a session.
-    async fn tunnel(&self, address: &str) -> std::io::Result<TcpStream> {
-        let mut stream = TcpStream::connect(address).await?;
-        stream.set_nodelay(true)?;
-        let ms = cluster::now_ms();
-        let nonce = cluster::hex(&rand::random::<[u8; 16]>());
-        let mac = cluster::hex(&connect_mac(&self.cluster, address, ms, &nonce));
-        let auth = format!("{AUTH_HEADER}: {ms}.{nonce}.{mac}");
-        let request = format!("CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\n{auth}\r\n\r\n");
-        stream.write_all(request.as_bytes()).await?;
-        // The response head, read a byte at a time so that nothing past it is consumed.
-        let mut head = Vec::new();
-        while !head.ends_with(b"\r\n\r\n") {
-            if head.len() > 4096 {
-                return Err(std::io::Error::other("response head too long"));
-            }
-            head.push(stream.read_u8().await?);
+    fn dial(&self, address: &str) -> Session {
+        let cluster = Rc::clone(&self.cluster);
+        let factory = Rc::clone(&self.factory);
+        let sessions = Rc::clone(&self.sessions);
+        let address = address.to_owned();
+        async move {
+            // A stalled peer accepts the connection and never answers.
+            let tunnel = tokio::time::timeout(TUNNEL_TIMEOUT, tunnel(&cluster, &address));
+            let stream = tunnel
+                .await
+                .map_err(|_| "no answer to CONNECT".to_owned())?
+                .map_err(|e| e.to_string())?;
+            let session = Rc::new(RpcConnection(ffi::new_rpc_client(
+                factory.raw(),
+                Dialed::from(stream).into_kj(),
+            )));
+            let watched = Rc::clone(&session);
+            factory.spawn_detached(async move {
+                let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
+                let mut sessions = sessions.borrow_mut();
+                let open = |s: &Session| matches!(s.peek(), Some(Ok(c)) if Rc::ptr_eq(c, &watched));
+                if sessions.get(&address).is_some_and(open) {
+                    sessions.remove(&address);
+                }
+            });
+            Ok(session)
         }
-        if !head.starts_with(b"HTTP/1.1 200") {
-            let status = String::from_utf8_lossy(head.split(|&b| b == b'\r').next().unwrap_or(&[]));
-            return Err(std::io::Error::other(format!("refused: {status}")));
-        }
-        Ok(stream)
+        .boxed_local()
+        .shared()
     }
+}
+
+async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
+    let mut stream = TcpStream::connect(address).await?;
+    stream.set_nodelay(true)?;
+    let ms = cluster::now_ms();
+    let nonce = cluster::hex(&rand::random::<[u8; 16]>());
+    let mac = cluster::hex(&connect_mac(node, address, ms, &nonce));
+    let auth = format!("{AUTH_HEADER}: {ms}.{nonce}.{mac}");
+    let request = format!("CONNECT cluster:1 HTTP/1.1\r\nhost: cluster:1\r\n{auth}\r\n\r\n");
+    stream.write_all(request.as_bytes()).await?;
+    // The response head, read a byte at a time so that nothing past it is consumed.
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        if head.len() > 4096 {
+            return Err(std::io::Error::other("response head too long"));
+        }
+        head.push(stream.read_u8().await?);
+    }
+    if !head.starts_with(b"HTTP/1.1 200") {
+        let status = String::from_utf8_lossy(head.split(|&b| b == b'\r').next().unwrap_or(&[]));
+        return Err(std::io::Error::other(format!("refused: {status}")));
+    }
+    Ok(stream)
 }
 
 /// Where a Durable Object runs, for a request about to start on it.
