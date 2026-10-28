@@ -175,11 +175,10 @@ ActorStorage::Impl::Impl(const WorkerFactory& factory,
               ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
               : vfsDirectory->clone()),
       vfs(*sqliteDirectory),
-      schedulerVfs(*vfsDirectory),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
-          schedulerVfs,
+          vfs,
           kj::Path({"metadata.sqlite"}),
           [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
             // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.

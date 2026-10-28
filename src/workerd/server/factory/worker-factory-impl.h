@@ -219,12 +219,10 @@ class ActorStorage::Impl final: public kj::Refcounted {
   ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
-  // What actors' SQLite opens files through: `vfsDirectory`, or in a cluster a wrapper that
-  // fences opens on the lease and reports WAL writes.
+  // What SQLite opens files through: `vfsDirectory`, or in a cluster a wrapper that fences opens
+  // on the lease and reports WAL writes, which the cluster ignores for the scheduler's database.
   kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
-  // The scheduler's database is no actor's, so it opens outside the cluster's wrapper.
-  SqliteDatabase::Vfs schedulerVfs;
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
 
