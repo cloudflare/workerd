@@ -564,7 +564,7 @@ fn a_batch_the_log_already_covers_is_not_applied() {
 }
 
 #[test]
-fn a_missing_batch_fails_to_restore() {
+fn a_missing_batch_fails_to_restore_or_compact() {
     // The batch after a lost one starts past the frame the log reached,
     // and no wider one covers it.
     let dir = scratch("missing");
@@ -580,6 +580,10 @@ fn a_missing_batch_fails_to_restore() {
     let out = dir.join("restored.db");
     let restored = runtime().block_on(restore(&log(&store), 0, &out));
     assert!(restored.is_err(), "{restored:?}");
+    // Nor does compaction snapshot it, then delete the batches.
+    let files = [batch(&dir, 0, ends[0]), batch(&dir, ends[1], ends[2])];
+    let compacted = crate::log::compact(&files, &dir);
+    assert!(compacted.is_err(), "{compacted:?}");
 }
 
 #[test]
