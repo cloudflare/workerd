@@ -232,6 +232,35 @@ struct SerTestContext: public ContextGlobalObject {
     return jsg::structuredClone(js, value, kj::mv(maybeTransfer));
   }
 
+  // The bytes Serializer writes for `value`.
+  kj::Array<kj::byte> serializeBytes(Lock& js, JsValue value) {
+    Serializer ser(js);
+    ser.write(js, value);
+    return ser.release().data;
+  }
+
+  // Reads `data` with Deserializer, given an empty list of SharedArrayBuffers.
+  JsValue deserializeWithoutSharedArrayBuffers(Lock& js, kj::Array<kj::byte> data) {
+    Deserializer deser(js, data, kj::none, kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>());
+    return deser.readValue(js);
+  }
+
+  // Reads `data` with Deserializer.
+  JsValue deserializeBytes(Lock& js, kj::Array<kj::byte> data) {
+    Deserializer deser(js, data);
+    return deser.readValue(js);
+  }
+
+  // How many buffers Serializer transfers when it writes `value` with `transfer`.
+  uint32_t transferredBufferCount(Lock& js, JsValue value, kj::Array<JsValue> transfer) {
+    Serializer ser(js);
+    for (auto& item: transfer) {
+      ser.transfer(js, item);
+    }
+    ser.write(js, value);
+    return ser.release().transferredArrayBuffers.size();
+  }
+
   JSG_RESOURCE_TYPE(SerTestContext) {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
@@ -243,6 +272,10 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(foreignToSerializer);
     JSG_METHOD(serializerToForeign);
     JSG_METHOD(structuredCloneWithTransfer);
+    JSG_METHOD(transferredBufferCount);
+    JSG_METHOD(deserializeBytes);
+    JSG_METHOD(serializeBytes);
+    JSG_METHOD(deserializeWithoutSharedArrayBuffers);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
@@ -494,5 +527,61 @@ KJ_TEST("recursive structuredClone with transfer") {
                "`${buf.byteLength},${outer.nested[0]}`",
       "string", "0,42");
 }
+
+KJ_TEST("malformed native errors throw") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // A header, V8's tag for a host object, and the native error tag.
+  constexpr auto prefix = "const prefix = [0xff, 0x0f, 0x5c, 0x0a];\n"_kj;
+
+  // Cut short before its type: an internal error.
+  {
+    KJ_EXPECT_LOG(ERROR, "deserialization failure, possible corruption");
+    e.expectEval(kj::str(prefix,
+                     "try { deserializeBytes(new Uint8Array(prefix)); } catch (e) {\n"
+                     "  e.message.startsWith('internal error; reference = ')\n"
+                     "}"),
+        "boolean", "true");
+  }
+
+  // A message that is not a string: a DataCloneError.
+  e.expectEval(kj::str(prefix,
+                   "try { deserializeBytes(new Uint8Array([...prefix, 0x01, 0x5f])); }\n"
+                   "catch (e) { `${e.name}: ${e.message}` }"),
+      "string", "DataCloneError: Deserialization failed: error message is not a string");
+}
+
+KJ_TEST("transfer transfers each buffer once") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // A view and its buffer, and two views of one buffer, each transfer the buffer once.
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "const u = new Uint8Array(b); u[0] = 7;\n"
+               "transferredBufferCount({ u, b }, [u, b])",
+      "number", "1");
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "transferredBufferCount([], [new Uint8Array(b), new Uint8Array(b, 4)])",
+      "number", "1");
+  e.expectEval(
+      "transferredBufferCount([], [new ArrayBuffer(1), new ArrayBuffer(1)])", "number", "2");
+
+  // The clone keeps the view on the buffer.
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "const u = new Uint8Array(b, 4); u[0] = 7;\n"
+               "const out = structuredCloneWithTransfer({ u, b }, [u, b]);\n"
+               "`${b.byteLength},${out.u[0]},${out.u.buffer === out.b}`",
+      "string", "0,7,true");
+}
+
+KJ_TEST("a SharedArrayBuffer beyond the given list is corrupt data") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  KJ_EXPECT_LOG(ERROR, "deserialization failure, possible corruption");
+  e.expectEval("const data = serializeBytes(new SharedArrayBuffer(1));\n"
+               "try { deserializeWithoutSharedArrayBuffers(data); } catch (e) {\n"
+               "  e.message.startsWith('internal error; reference = ')\n"
+               "}",
+      "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

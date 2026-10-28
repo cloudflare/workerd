@@ -269,21 +269,68 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Serializer serializer(js);
-  serializer.write(
-      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
-  ::rust::Vec<uint8_t> result;
-  for (auto byte: serializer.release().data) {
-    result.push_back(byte);
+namespace {
+
+void releaseBackingStores(
+    kj::Array<std::shared_ptr<v8::BackingStore>>& stores, ::rust::Vec<size_t>& addresses) {
+  for (auto& store: stores) {
+    addresses.push_back(
+        reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(kj::mv(store))));
   }
-  return result;
 }
 
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+kj::Array<std::shared_ptr<v8::BackingStore>> copyBackingStores(
+    ::rust::Slice<const size_t> addresses) {
+  return KJ_MAP(address, addresses) {
+    return *reinterpret_cast<const std::shared_ptr<v8::BackingStore>*>(address);
+  };
+}
+
+}  // namespace
+
+void cpp_serialize(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    const ::workerd::rust::jsg::SerializeOptions& options,
+    ::rust::Slice<const ::workerd::rust::jsg::Local> transfer,
+    ::workerd::rust::jsg::Serialized& result) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+  ::workerd::jsg::Serializer::Options cppOptions{
+    .omitHeader = options.omit_header,
+    .treatClassInstancesAsPlainObjects = options.class_instances_as_plain_objects,
+  };
+  if (options.has_version) cppOptions.version = options.version;
+  ::workerd::jsg::Serializer serializer(js, kj::mv(cppOptions));
+  for (auto& item: transfer) {
+    serializer.transfer(
+        js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_as_ref_from_ffi<v8::Value>(item)));
+  }
+  serializer.write(
+      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  auto released = serializer.release();
+  for (auto byte: released.data) {
+    result.data.push_back(byte);
+  }
+  releaseBackingStores(released.sharedArrayBuffers, result.shared_array_buffers);
+  releaseBackingStores(released.transferredArrayBuffers, result.transferred_array_buffers);
+}
+
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const ::workerd::rust::jsg::DeserializeOptions& options,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Deserializer::Options cppOptions{
+    .readHeader = options.read_header,
+    .preserveStackInErrors = options.preserve_stack_in_errors,
+  };
+  if (options.has_version) cppOptions.version = options.version;
+  auto transferred = copyBackingStores(transferred_array_buffers);
+  auto shared = copyBackingStores(shared_array_buffers);
+  kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> maybeShared;
+  if (options.has_shared_array_buffers) maybeShared = shared.asPtr();
+  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()),
+      transferred.asPtr(), kj::mv(maybeShared), kj::mv(cppOptions));
   v8::Local<v8::Value> result = deserializer.readValue(js);
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }

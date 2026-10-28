@@ -106,12 +106,23 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
-// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
-// exception if serialization throws.
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
-// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
-// deserialization throws.
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's, with the
+// options of `options` other than errors_are_host_objects, which comes from the isolate, after
+// transferring each value of `transfer`. Stores what jsg::Serializer::release() returns in `result`,
+// each backing store as a heap-allocated std::shared_ptr that Rust owns. Throws a KJ exception if
+// serialization throws.
+void cpp_serialize(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    const ::workerd::rust::jsg::SerializeOptions& options,
+    ::rust::Slice<const ::workerd::rust::jsg::Local> transfer,
+    ::workerd::rust::jsg::Serialized& result);
+// Deserializes `data` with C++ JSG's jsg::Deserializer, `options` and the given backing stores
+// (borrowed std::shared_ptr addresses). Throws a KJ exception if deserialization throws.
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const ::workerd::rust::jsg::DeserializeOptions& options,
+    ::rust::Slice<const size_t> transferred_array_buffers,
+    ::rust::Slice<const size_t> shared_array_buffers);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
