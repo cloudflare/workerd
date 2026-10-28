@@ -1522,5 +1522,10 @@ fn make_cluster(
         return Ok(None);
     }
     let conf = config.get_cluster().map_err(capnp_error)?;
+    // The MAC's other inputs cross the wire, so a short key falls to an offline search.
+    if text(conf.get_key())?.len() < 32 {
+        report.error("cluster.key must be at least 32 bytes.".to_owned());
+        return Ok(None);
+    }
     Ok(Some(ClusterNode::new(Rc::clone(factory), conf, address)?))
 }

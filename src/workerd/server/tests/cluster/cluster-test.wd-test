@@ -48,6 +48,6 @@ const config :Workerd.Config = (
       "aws_secret_access_key=wdtest-secret",
     ],
     address = "127.0.0.1:0",
-    key = "test-cluster-shared-secret",
+    key = "test-cluster-shared-secret-of-32-bytes",
   ),
 );

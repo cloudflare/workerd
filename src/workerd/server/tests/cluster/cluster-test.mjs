@@ -751,7 +751,7 @@ async function clusterConnect(port, auth) {
 // test config's key makes it.
 function clusterAuth(target, ms = Date.now(), nonce = randomBytes(16)) {
   const n = nonce.toString('hex');
-  const mac = createHmac('sha256', 'test-cluster-shared-secret')
+  const mac = createHmac('sha256', 'test-cluster-shared-secret-of-32-bytes')
     .update(`workerd cluster connect v1\n${target}\n${ms}\n${n}`)
     .digest('hex');
   return `${ms}.${n}.${mac}`;

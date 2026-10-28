@@ -143,7 +143,8 @@ struct ClusterConfig {
   # `--cluster-advertise`. A public IP is refused unless `unsafePublicAddress` is set.
 
   key @3 :Text;
-  # A secret known only to members of the cluster. Each connection between instances opens with
+  # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
+  # of `openssl rand -hex 32`. Each connection between instances opens with
   # a MAC keyed by it, over the target, a timestamp and a nonce, so a header seen on the wire
   # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
   # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
