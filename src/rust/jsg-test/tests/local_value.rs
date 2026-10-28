@@ -144,3 +144,24 @@ fn stored_value_round_trips_through_traced_global() {
         Ok(())
     });
 }
+
+#[test]
+fn to_detail_string_describes_a_value_without_running_javascript() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let cases = [
+            ("new TypeError('bad')", "TypeError: bad"),
+            ("'text'", "text"),
+            ("42", "42"),
+            ("undefined", "undefined"),
+            (
+                "({ toString() { throw new Error('ran'); } })",
+                "[object Object]",
+            ),
+        ];
+        for (code, expected) in cases {
+            let value = ctx.eval_raw(lock, code).unwrap();
+            assert_eq!(value.to_detail_string(lock)?, expected, "{code}");
+        }
+        Ok(())
+    });
+}

@@ -164,6 +164,7 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
