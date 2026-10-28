@@ -1909,7 +1909,7 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
             js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
       auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
       auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, js.str("not bytes"_kj));
+      enqueue.call(js, controller, js.num(42));
     })));
 
     auto stream = makeTsStream(js, underlying);
@@ -2078,6 +2078,35 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped in IoCont
   fixture.drainAndDestroy(kj::mv(request));
   KJ_EXPECT(cancels.count == 0);
   KJ_EXPECT(!ended);
+}
+
+KJ_TEST("JsReadableStream pumpTo writes a queued stream's string chunks as UTF-8") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Bytes, then strings, in one batch, as the legacy pump's valueToBytes() writes them.
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "ab"_kjb));
+      enqueue.call(js, controller, js.str("cd"_kj));
+      enqueue.call(js, controller, js.str("\xc3\xa9"_kj));
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    })));
+
+    auto stream = makeTsStream(js, underlying);
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == "abcd\xc3\xa9"_kjb);
+  KJ_EXPECT(ended);
 }
 
 KJ_TEST("JsReadableStream text() over the limit cancels a queued TypeScript stream") {

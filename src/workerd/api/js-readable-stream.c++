@@ -545,9 +545,10 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
         "ReadableStreamDrainingReader.read() promise did not resolve to an object "
         "with a chunks array.");
 
-    // Only ArrayBuffer/ArrayBufferView chunks are usable as bytes. Everything else
-    // (including strings) rejects, matching the legacy pump's historical behavior and
-    // error text exactly.
+    // ArrayBuffer/ArrayBufferView chunks are written as their bytes, and strings as their
+    // UTF-8 encoding (lone surrogates replaced with U+FFFD), as the legacy pump's
+    // valueToBytes() writes them. Everything else rejects. JS body consumption (text() and
+    // the like) rejects strings in both implementations; only pumps encode them.
     auto pieces = kj::Vector<kj::Array<const kj::byte>>(chunks.size());
     for (uint32_t i = 0; i < chunks.size(); i++) {
       auto chunk = chunks.get(js, i);
@@ -555,6 +556,8 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
         pieces.add(jsg::JsBufferSource(view).copy());
       } else KJ_IF_SOME(buffer, JSG_TRY_CAST_ARRAYBUFFER(chunk)) {
         pieces.add(jsg::JsBufferSource(buffer).copy());
+      } else KJ_IF_SOME(str, chunk.tryCast<jsg::JsString>()) {
+        pieces.add(webstreams::stringToBytes(str.toUSVString(js)));
       } else {
         JSG_FAIL_REQUIRE(TypeError, "This ReadableStream did not return bytes.");
       }
