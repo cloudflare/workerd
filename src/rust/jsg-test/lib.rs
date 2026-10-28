@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
 use jsg::feature_flags::compatibility_flags;
@@ -152,7 +154,8 @@ mod ffi {
         /// the `workerd-autogate-` prefix, whatever `WORKERD_ALL_AUTOGATES` says. See
         /// `set_autogates`.
         pub fn set_autogates_for_test(names: &[&str]);
-        /// Leaves no autogates configured, as before `set_autogates_for_test`.
+        /// Deinitializes the configuration that `set_autogates_for_test` made, so that the
+        /// gates follow `WORKERD_ALL_AUTOGATES` again.
         pub fn deinit_autogates_for_test();
 
         /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
@@ -168,23 +171,41 @@ mod ffi {
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
 
-/// The process's autogate configuration that [`set_autogates`] made. Dropping it leaves no
-/// autogates configured, as before.
+/// The process's autogate configuration that [`set_autogates`] made.
+///
+/// Dropping it deinitializes the configuration, so that the gates follow `WORKERD_ALL_AUTOGATES`
+/// again.
 #[must_use = "the autogates are reset when this is dropped"]
 pub struct Autogates(());
+
+/// Whether an [`Autogates`] guard is alive.
+///
+/// The guards do not nest: an inner one would replace the outer configuration and its drop would
+/// discard it, so `set_autogates` refuses one.
+static AUTOGATES_SET: AtomicBool = AtomicBool::new(false);
 
 impl Drop for Autogates {
     fn drop(&mut self) {
         ffi::deinit_autogates_for_test();
+        AUTOGATES_SET.store(false, Ordering::SeqCst);
     }
 }
 
-/// Configures the process's autogates to exactly `names`, each in kebab-case without the
-/// `workerd-autogate-` prefix (`"jsg-integer-enforce-range"` for
-/// `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`), for as long as the returned guard lives; an empty
-/// slice disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are
-/// process-wide and the tests run serially, so a test holds the guard for its duration.
+/// Configures the process's autogates to exactly `names` for as long as the returned guard lives.
+///
+/// Each name is in kebab-case without the `workerd-autogate-` prefix
+/// (`"jsg-integer-enforce-range"` for `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`). An empty slice
+/// disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and
+/// the tests run serially, so a test holds the guard for its duration.
+///
+/// # Panics
+///
+/// Panics if another guard is alive; the guards do not nest.
 pub fn set_autogates(names: &[&str]) -> Autogates {
+    assert!(
+        !AUTOGATES_SET.swap(true, Ordering::SeqCst),
+        "an Autogates guard is already alive; drop it before configuring the autogates again"
+    );
     ffi::set_autogates_for_test(names);
     Autogates(())
 }

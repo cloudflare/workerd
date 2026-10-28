@@ -294,14 +294,8 @@ bool isolates_share_group(Isolate* a, Isolate* b) {
 }
 
 void set_autogates_for_test(::rust::Slice<const ::rust::Str> names) {
-  kj::Vector<kj::String> owned(names.size());
-  for (auto name: names) {
-    owned.add(kj::str(name));
-  }
-  kj::Vector<kj::StringPtr> ptrs(owned.size());
-  for (auto& name: owned) {
-    ptrs.add(name);
-  }
+  auto owned = KJ_MAP(name, names) { return kj::str(name); };
+  auto ptrs = KJ_MAP(name, owned) -> kj::StringPtr { return name; };
   util::Autogate::initAutogateNamesForTest(ptrs.asPtr(), util::IgnoreAllAutogatesEnv::YES);
 }
 

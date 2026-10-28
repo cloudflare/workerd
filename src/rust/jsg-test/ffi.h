@@ -119,7 +119,7 @@ bool isolates_share_group(Isolate* a, Isolate* b);
 // Configures the process's autogates to exactly `names`, each without the `workerd-autogate-`
 // prefix, ignoring WORKERD_ALL_AUTOGATES.
 void set_autogates_for_test(::rust::Slice<const ::rust::Str> names);
-// Leaves no autogates configured.
+// Deinitializes the autogate configuration, so that the gates follow WORKERD_ALL_AUTOGATES again.
 void deinit_autogates_for_test();
 
 // Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result

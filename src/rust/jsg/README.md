@@ -563,9 +563,9 @@ Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` conve
 and from a value converted to a number, which must be in range; whether a fraction just past a
 range limit (`255.5` or `-0.5` for `u8`) is truncated before that check, as Web IDL's
 `[EnforceRange]` does, or is out of range depends on the `JSG_INTEGER_ENFORCE_RANGE` autogate (see
-the module docs of `wrappable.rs`). `i64` and `u64` convert to a
-`BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
-to a number, which must be finite and in range, and truncates toward zero. An integer that stays
+the module docs of `wrappable.rs`). `i64` and `u64` convert to a `BigInt`, like `int64_t` and
+`uint64_t`, and from a `BigInt` that fits, or any other value converted to a number, which must be
+finite and in range (the autogate does not apply), and truncates toward zero. An integer that stays
 on the V8 heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which
 accepts only an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
 `Local<Value>::int32_value`, `uint32_value` and `integer_value` convert any value with
@@ -697,6 +697,13 @@ harness.run_in_context(|lock, _ctx| {
     Ok(())
 });
 ```
+
+Autogates (`src/workerd/util/autogate.h`) are process-wide, not per harness.
+`jsg_test::set_autogates(&["jsg-integer-enforce-range"])` configures exactly the named gates
+(kebab-case, without the `workerd-autogate-` prefix) for as long as the returned guard lives, and
+an empty slice disables them all, whatever `WORKERD_ALL_AUTOGATES` says. Dropping the guard
+deinitializes the configuration, so the gates follow `WORKERD_ALL_AUTOGATES` again. The tests run
+serially, so a test holds the guard for its duration; the guards do not nest.
 
 Use `Harness::with_fast_api_and_flags()` to combine compatibility flags with V8 Fast API callbacks.
 
@@ -887,9 +894,9 @@ Each nested type's constructor is a property of the prototype, named after the t
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
 An integer argument reaches the callback as a `double` and converts with the slow path's checks,
-including the `JSG_INTEGER_ENFORCE_RANGE` autogate's;
-an integer of up to 32 bits returns as an `int32_t` or a `uint32_t`, while a method that returns an
-`i64` or a `u64` has no fast callback.
+following the `JSG_INTEGER_ENFORCE_RANGE` autogate as the slow path does; an integer of up to 32
+bits returns as an `int32_t` or a `uint32_t`, while a method that returns an `i64` or a `u64` has
+no fast callback.
 
 ## FFI Functions with Raw Pointers
 
