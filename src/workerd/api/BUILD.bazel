@@ -671,6 +671,7 @@ kj_test(
         ":memory-cache",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:thread-scopes",
     ],
 )
 

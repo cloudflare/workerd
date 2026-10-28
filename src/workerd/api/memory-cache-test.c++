@@ -6,9 +6,12 @@
 
 #include <workerd/io/trace.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <kj/test.h>
 #include <kj/thread.h>
+
+#include <algorithm>
 
 namespace workerd::api {
 namespace {
@@ -207,6 +210,110 @@ KJ_TEST("fallback callback stores the value and survives binding destruction") {
       });
     });
   });
+}
+
+// Records the spans of a request as they end, each as "name <- parent: key=type:value ...", with
+// its tags in key order.
+class SpanRecorder final: public SpanObserver {
+ public:
+  SpanRecorder(kj::Vector<kj::String>& spans, kj::StringPtr parent)
+      : spans(spans),
+        parent(kj::str(parent)) {}
+
+  kj::Rc<SpanObserver> newChild() override {
+    return kj::rc<SpanRecorder>(spans, name);
+  }
+  void onOpen(kj::ConstString operationName, kj::Date) override {
+    name = kj::str(operationName);
+  }
+  void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
+    auto entries = KJ_MAP(entry, tags) {
+      KJ_SWITCH_ONEOF(entry.value) {
+        KJ_CASE_ONEOF(str, kj::ConstString) {
+          return kj::str(entry.key, "=str:", str);
+        }
+        KJ_CASE_ONEOF(b, bool) {
+          return kj::str(entry.key, "=bool:", b);
+        }
+        KJ_CASE_ONEOF(d, double) {
+          return kj::str(entry.key, "=float:", d);
+        }
+        KJ_CASE_ONEOF(i, int64_t) {
+          return kj::str(entry.key, "=int:", i);
+        }
+      }
+      KJ_UNREACHABLE;
+    };
+    std::sort(entries.begin(), entries.end());
+    spans.add(kj::str(name, " <- ", parent, ": ", kj::strArray(entries, " ")));
+  }
+
+ private:
+  kj::Vector<kj::String>& spans;
+  kj::String parent;
+  kj::String name;
+};
+
+class SpanRequestObserver final: public RequestObserver {
+ public:
+  explicit SpanRequestObserver(kj::Vector<kj::String>& spans)
+      : span(kj::rc<SpanRecorder>(spans, "none"_kj), "request"_kjc) {}
+
+  SpanParent getSpan() override {
+    return SpanParent(span);
+  }
+
+ private:
+  SpanBuilder span;
+};
+
+KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
+  // In predictable mode, overwriting a span's tag logs an error, which fails this test. It logs
+  // only the first overwrite in the process, so no other test here may overwrite one.
+  setPredictableModeForTest();
+  MemoryCacheProvider provider;
+  kj::Vector<kj::String> spans;
+  TestFixture fixture({
+    .mainModuleSource = R"SCRIPT(
+      export default {
+        async fetch() {
+          const settle = (promise) => promise.then(() => {}, () => {});
+          await settle(globalThis.CACHE.read("nan", () => ({ value: 1, expiration: NaN })));
+          await settle(globalThis.CACHE.read("function", () => ({ value: () => {} })));
+          return new Response("ok");
+        }
+      };
+    )SCRIPT"_kj,
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&spans]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<SpanRequestObserver>(spans);
+  }),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
+    auto cache =
+        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
+    jsg::check(
+        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
+  });
+  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
+  KJ_EXPECT(response.statusCode == 200, response.body);
+
+  kj::Vector<kj::StringPtr> fallbacks;
+  for (auto& span: spans) {
+    if (span.startsWith("memory_cache_fallback ")) fallbacks.add(span);
+  }
+  KJ_ASSERT(fallbacks.size() == 2, kj::strArray(spans, "\n"));
+  KJ_EXPECT(fallbacks[0] ==
+          "memory_cache_fallback <- memory_cache_read: "
+          "fallback_error=str:TypeError: Expiration time must not be NaN. "
+          "fallback_result_size=float:4 fallback_success=bool:false key=str:nan",
+      fallbacks[0]);
+  // kj::str() of the DOMException that serialization throws is empty.
+  KJ_EXPECT(fallbacks[1] ==
+          "memory_cache_fallback <- memory_cache_read: fallback_error=str: "
+          "fallback_success=bool:false key=str:function",
+      fallbacks[1]);
 }
 
 }  // namespace
