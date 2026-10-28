@@ -1,0 +1,29 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_d013ba721f0b5e 631-634
+build/bazelflare/exec_properties.bzl
+  s_1b9ab9fb100cf8::t_aa679073204c99 9-12,14,16-24
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_0dda2231790345 133
+docs/development.md
+  s_1b9ab9fb100cf8::t_07052545003527 41
+src/workerd/api/node/tests/BUILD.bazel
+  s_1b9ab9fb100cf8::t_fd0f99048ad7fb 430-431,561-562
+src/workerd/api/tests/BUILD.bazel
+  s_1b9ab9fb100cf8::t_e8034baa25b2a1 1477-1478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "31874925b373b6f28dc9cea35cae8b72c4ae7b33",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
