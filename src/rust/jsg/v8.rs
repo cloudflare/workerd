@@ -313,6 +313,7 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
+        pub unsafe fn local_to_detail_string(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -428,16 +429,6 @@ pub mod ffi {
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
         pub unsafe fn local_promise_result(promise: &Local) -> Local;
         pub unsafe fn local_promise_mark_as_handled(promise: &Local);
-        pub unsafe fn local_promise_then(
-            isolate: *mut Isolate,
-            promise: &Local,
-            on_fulfilled: &Local,
-        ) -> MaybeLocal;
-        pub unsafe fn local_promise_catch(
-            isolate: *mut Isolate,
-            promise: &Local,
-            on_rejected: &Local,
-        ) -> MaybeLocal;
         pub unsafe fn local_promise_then_or_catch(
             isolate: *mut Isolate,
             promise: &Local,
@@ -1607,6 +1598,31 @@ impl<'s, T> Local<'s, T> {
         // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the current
         // HandleScope.
         unsafe { ffi::local_type_of(lock.isolate().as_ffi(), self.raw()) }
+    }
+
+    /// Describes the value for a log or a trace, as C++ `kj::str()` of a `v8::Local` does: an
+    /// error as `"TypeError: message"`, a string as itself, and a plain object as
+    /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
+    /// method.
+    ///
+    /// Corresponds to `v8::Value::ToDetailString()`.
+    ///
+    /// # Errors
+    ///
+    /// If V8 fails, which only happens if execution is terminating, the error is one for which
+    /// [`Error::is_pending`] is true.
+    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> crate::Result<std::string::String> {
+        let detail: Local<'s, String> = call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a string V8 created in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_to_detail_string(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                ))
+            })
+        })?;
+        Ok(detail.to_string(lock))
     }
 }
 

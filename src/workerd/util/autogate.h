@@ -130,7 +130,10 @@ namespace workerd::util {
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)
+  V(NODEJS_I18N_RUST)                                                                              \
+  /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
+     (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
+  V(RUST_MEMORY_CACHE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

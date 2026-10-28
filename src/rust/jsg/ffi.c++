@@ -302,6 +302,11 @@ bool local_is_shared_array_buffer(const Local& val) {
   return ::rust::String(*utf8, utf8.length());
 }
 
+MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::Value>(val)->ToDetailString(isolate->GetCurrentContext()));
+}
+
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
   auto* v = new v8::String::Utf8Value(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
@@ -533,18 +538,6 @@ bool exceptionPending(Isolate* isolate) {
   return isolate->IsExecutionTerminating() || isolate->HasPendingException();
 }
 }  // namespace
-
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled)));
-}
-
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Catch(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_rejected)));
-}
 
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {

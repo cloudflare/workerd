@@ -22,6 +22,7 @@
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
@@ -56,6 +57,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
@@ -651,13 +653,18 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       // A cache without an id is not shared.
       kj::Maybe<kj::StringPtr> cacheId;
       if (cache.getCacheId().size() > 0) cacheId = cache.getCacheId();
-      return lock.wrap(context,
-          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId,
-              {
-                .maxKeys = cache.getMaxKeys(),
-                .maxValueSize = cache.getMaxValueSize(),
-                .maxTotalValueSize = cache.getMaxTotalValueSize(),
-              })));
+      api::MemoryCacheLimits limits{
+        .maxKeys = cache.getMaxKeys(),
+        .maxValueSize = cache.getMaxValueSize(),
+        .maxTotalValueSize = cache.getMaxTotalValueSize(),
+      };
+      if (util::Autogate::isEnabled(util::AutogateKey::RUST_MEMORY_CACHE)) {
+        return jsg::check(
+            ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(api::memory_cache_new(
+                lock.v8Isolate, memoryCacheProvider.bindForRust(cacheId, limits))));
+      }
+      return lock.wrap(
+          context, lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId, limits)));
     }
 
     case Global::EPHEMERAL_ACTOR_NAMESPACE:

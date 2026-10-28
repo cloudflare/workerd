@@ -6,6 +6,7 @@ wd_rust_crate(
         "@capnp-cpp//src/kj:kj-async-io",
     ],
     cxx_bridge_src = "lib.rs",
+    cxx_bridge_visibility = ["//visibility:public"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/memory-cache",

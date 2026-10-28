@@ -1,8 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual } from 'node:assert';
+import { rejects, strictEqual } from 'node:assert';
+import { DurableObject } from 'cloudflare:workers';
 import unsafe from 'workerd:unsafe';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export const basic = {
   async test(ctrl, env) {
@@ -330,5 +332,98 @@ export const fallbackNotLocked = {
     );
     const raced = await Promise.race(promises);
     strictEqual(raced, 'bbb');
+  },
+};
+
+export default {
+  // Runs a fallback that never settles, and ends the request once it has started. Its promise
+  // stays reachable, so that the garbage collector does not drop the reactions to it.
+  async fetch(request, env) {
+    const { promise: started, resolve } = Promise.withResolvers();
+    env.CACHE.read('abandoned', () => {
+      resolve();
+      globalThis.neverSettles = new Promise(() => {});
+      return globalThis.neverSettles;
+    });
+    await started;
+    return new Response('started');
+  },
+};
+
+export const fallbackAbandonedWhenRequestEnds = {
+  async test(ctrl, env) {
+    const response = await env.SELF.fetch('http://example.com/');
+    strictEqual(await response.text(), 'started');
+    // The fallback of the request that ended is abandoned with it, rather than when the garbage
+    // collector drops its promise, so this read runs its own fallback.
+    const value = await Promise.race([
+      env.CACHE.read('abandoned', () => ({ value: 'taken over' })),
+      scheduler.wait(1000).then(() => 'still waiting'),
+    ]);
+    strictEqual(value, 'taken over');
+  },
+};
+
+export const fallbackRunsInAsyncContextOfRead = {
+  async test(ctrl, env) {
+    const storage = new AsyncLocalStorage();
+    const value = await storage.run('of the read', () =>
+      env.CACHE.read('asyncContext', () => ({
+        value: storage.getStore() ?? 'none',
+      }))
+    );
+    strictEqual(value, 'of the read');
+  },
+};
+
+export const fallbackGetsKeyAsCacheHoldsIt = {
+  async test(ctrl, env) {
+    // The cache holds keys as UTF-8, with a lone surrogate encoded as such, and passes the key to
+    // the fallback decoded from it: each of the surrogate's three bytes becomes U+FFFD.
+    let fallbackKey;
+    await env.CACHE.read('lone \udbff', (key) => {
+      fallbackKey = key;
+      return { value: 'unused' };
+    });
+    strictEqual(fallbackKey, 'lone \ufffd\ufffd\ufffd');
+    env.CACHE.delete('lone \udbff');
+  },
+};
+
+export const nanExpirationRejected = {
+  async test(ctrl, env) {
+    await rejects(
+      env.CACHE.read('nanExpiration', () => ({ value: 1, expiration: NaN })),
+      { name: 'TypeError', message: 'Expiration time must not be NaN.' }
+    );
+    // The value is not cached, and the next read runs its own fallback.
+    strictEqual(
+      await env.CACHE.read('nanExpiration', () => ({ value: 'next' })),
+      'next'
+    );
+    env.CACHE.delete('nanExpiration');
+  },
+};
+
+export class CacheReader extends DurableObject {
+  // Reads with a fallback inside blockConcurrencyWhile(). The read resumes inside the critical
+  // section; if it waited for the input gate instead, which the critical section holds, it would
+  // never resume.
+  async fetch() {
+    const value = await this.ctx.blockConcurrencyWhile(() =>
+      this.env.CACHE.read('criticalSection', () => ({ value: 'in section' }))
+    );
+    return new Response(value);
+  }
+}
+
+export const fallbackInDurableObjectCriticalSection = {
+  async test(ctrl, env) {
+    const reader = env.READER.get(env.READER.idFromName('reader'));
+    const value = await Promise.race([
+      reader.fetch('http://reader/').then((response) => response.text()),
+      scheduler.wait(5000).then(() => 'never resumed'),
+    ]);
+    strictEqual(value, 'in section');
   },
 };
