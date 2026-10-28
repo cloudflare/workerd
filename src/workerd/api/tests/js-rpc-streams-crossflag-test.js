@@ -37,6 +37,17 @@ function makeConstructorBackedEchoPair() {
   return { readable, writable };
 }
 
+// Bytes, then a string chunk, which the sender writes as its UTF-8 encoding.
+function stringChunkReadable() {
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode('ab'));
+      c.enqueue('cd\u00e9');
+      c.close();
+    },
+  });
+}
+
 async function isCrossImplementationRunner(env) {
   if (env.PEER === undefined) return false;
   assert.notStrictEqual(usingTsImpl, await env.PEER.usesTypeScriptStreams());
@@ -90,6 +101,10 @@ export class Peer extends WorkerEntrypoint {
 
   inspectLength(stream) {
     return inspectLength(stream, this.env.HTTP);
+  }
+
+  makeStringChunkReadable() {
+    return stringChunkReadable();
   }
 
   // Returns a peer-created readable.
@@ -231,6 +246,20 @@ export default {
       await writer.close();
       assert.strictEqual(await text, 'round-tripped across implementations');
     }
+  },
+};
+
+// The sender writes a string chunk as its UTF-8 encoding, whichever implementation sends it and
+// whichever receives it (the two configs swap them).
+export const stringChunksCrossAsUtf8 = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+    assert.strictEqual(
+      await env.PEER.readFrom(stringChunkReadable()),
+      'abcd\u00e9'
+    );
+    const returned = await env.PEER.makeStringChunkReadable();
+    assert.strictEqual(await new Response(returned).text(), 'abcd\u00e9');
   },
 };
 

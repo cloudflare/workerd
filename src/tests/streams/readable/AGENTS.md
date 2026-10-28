@@ -106,6 +106,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `streams_enable_constructors` (2022-11-30) | yes (the suite's subject) | `readable-cpp-legacy` cell: ctor and .from() throw plain Errors naming the flag; ReadableStreamDefaultController not exposed; native-backed streams (Response bodies) fully usable incl. tee() |
 | `transformstream_enable_standard_constructor` | yes (tee-reentrancy drives tee through TransformStreams) | transform suite's legacy cells |
 | `capture_async_api_throws`, `workers_api_getters_setters_on_prototype`, `set_tostring_tag`, `fixup-transform-stream-backpressure`, `writable_stream_spec_compliant_writer` | yes | other suites' legacy cells |
+| `fetch_iterable_type_support` (2026-02-19) | yes (string-chunks.js sends an async generator as a request body) | not exercised here: iterable bodies are fetch's surface, not this suite's |
 | `pedantic_wpt` (dateless opt-in) | `readable-cpp-pedantic` cell | zero observable deltas on this suite's probed surface (cpp == pedantic in every probe) |
 
 ## Module map
@@ -138,6 +139,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `data-volumes.js` | value-stream volume axes: 4096-chunk counts, a 1 MiB single string chunk, 8 MiB aggregate (128 × 64 KiB), and 1 MiB through tee on both branches — every chunk index-encoded |
 | `pollution.js` | prototype pollution neither implementation observes: a patched array iterator or replaced Number global leaves bodies intact; a patched controller error() still errors the stream; omitted dictionaries read nothing from Object.prototype, nor does from() for the source and strategy it builds; @@asyncIterator shape (TS: the values() function object, per WebIDL; C++: a separate function) and for-await ignoring a patched values() |
 | `unhandled-rejection.js` | a reader's closed promise is marked handled where it is made (on a readable stream, on an errored stream; replaced at release from a closed stream): rejected with nothing looking at it, it reports no unhandledrejection (parity) |
+| `string-chunks.js` | string chunks in a body the runtime sends on (a fetch request body, in one batch and one chunk per pull; an async-generator request body; a response the fetch handler returns, served by SELF at `/strings`) go out as their UTF-8 encoding beside the byte chunks, lone surrogates replaced with U+FFFD and embedded NULs kept (parity; a body read in JavaScript rejects them, `integration-body.js`) |
 
 Consumed sources: streams-async-iterator-test.js (deleted),
 streams-tee-edge-cases-test.js (value half), streams-test.js (from/

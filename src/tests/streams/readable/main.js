@@ -9,9 +9,11 @@
 // tests: it echoes the request body back, letting tests round-trip a
 // ReadableStream through the fetch machinery in both directions, and
 // reports the Content-Length the request carried. /gzip and /short serve
-// expected-length.js's compressed and short responses instead.
+// expected-length.js's compressed and short responses, and /strings
+// string-chunks.js's response, instead.
 
 import { compressedResponse, shortResponse } from 'expected-length';
+import { stringsResponse } from 'string-chunks';
 
 export default {
   async fetch(request) {
@@ -21,6 +23,9 @@ export default {
     }
     if (url.pathname === '/short') {
       return shortResponse(url);
+    }
+    if (url.pathname === '/strings') {
+      return stringsResponse();
     }
     return new Response(request.body, {
       headers: {
@@ -307,3 +312,9 @@ export {
 } from 'pollution';
 
 export { readerClosedIsMarkedHandled } from 'unhandled-rejection';
+
+export {
+  stringChunksInRequestBody,
+  stringChunksInIterableRequestBody,
+  stringChunksInReturnedResponse,
+} from 'string-chunks';
