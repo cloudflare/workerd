@@ -1540,9 +1540,8 @@ Local exception_create_from_bytes(
 // TODO(cleanup): Create and recognize DOMExceptions without C++ JSG.
 Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  auto exception = js.domException(
-      kj::heapString(name.data(), name.size()), kj::heapString(message.data(), message.size()));
-  return to_ffi(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+  return to_ffi(v8::Local<v8::Value>(js.domException(
+      kj::heapString(name.data(), name.size()), kj::heapString(message.data(), message.size()))));
 }
 
 bool local_try_unwrap_dom_exception(

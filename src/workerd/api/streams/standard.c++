@@ -1408,9 +1408,8 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   // when no reason is provided, but the stored error should remain as the original reason.
   auto signalReason = [&]() -> jsg::JsValue {
     if (reason.isUndefined() && FeatureFlags::get(js).getPedanticWpt()) {
-      auto ex = js.domException(
+      return js.domException(
           kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
-      return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
     }
     return reason;
   }();

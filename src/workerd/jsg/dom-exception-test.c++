@@ -51,16 +51,11 @@ KJ_TEST("jsg::Lock domException") {
     JSG_WITHIN_CONTEXT_SCOPE(lock,
         lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
         [&](jsg::Lock& js) {
-      Ref<DOMException> exception = js.domException(kj::str("foo"), kj::str("bar"));
+      auto exception = js.domException(kj::str("foo"), kj::str("bar"));
 
-      // The DOMException object should have the JS handle created already.
-      auto handle = JsObject(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
-
-      // And it will have the stack.
-      KJ_ASSERT(handle.has(js, "stack"_kj));
-
-      KJ_ASSERT(exception->getName() == "foo"_kj);
-      KJ_ASSERT(exception->getMessage() == "bar"_kj);
+      KJ_ASSERT(exception.has(js, "stack"_kj));
+      KJ_ASSERT(exception.get(js, "name"_kj).toString(js) == "foo"_kj);
+      KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "bar"_kj);
     });
   });
 }

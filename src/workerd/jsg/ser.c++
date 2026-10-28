@@ -194,8 +194,7 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   auto message = kj::str("Could not serialize object of type \"", obj->GetConstructorName(),
       "\". This type does "
       "not support serialization.");
-  auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
-  js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
+  js.throwException(js.domException(kj::str("DataCloneError"), kj::mv(message)));
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
@@ -675,8 +674,7 @@ v8::MaybeLocal<v8::Object> readApiObject(
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
   auto& js = Lock::from(isolate);
   try {
-    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+    return v8::Local<v8::Value>(js.domException(kj::str("DataCloneError"), kj::str(message)));
   } catch (JsExceptionThrown&) {
     // Creating the DOMException threw, most likely because execution is terminating; that
     // exception stays pending.

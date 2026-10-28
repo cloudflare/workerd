@@ -80,8 +80,7 @@ void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
-jsg::Ref<DOMException> DOMException::deserialize(
-    jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+jsg::JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
   switch (tag) {
     case SERIALIZATION_TAG_V2: {
       kj::String name = deserializer.readLengthDelimitedString();

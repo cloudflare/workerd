@@ -101,8 +101,7 @@ class DOMException: public Object {
   JSG_SERIALIZABLE(SERIALIZATION_TAG_V2, SERIALIZATION_TAG);
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<DOMException> deserialize(
-      jsg::Lock& js, uint tag, jsg::Deserializer& deserializer);
+  static jsg::JsObject deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& deserializer);
 
  private:
   kj::String message;
