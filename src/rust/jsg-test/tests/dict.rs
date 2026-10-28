@@ -431,6 +431,10 @@ fn dicts_round_trip() {
 }
 
 #[test]
+#[expect(
+    clippy::float_cmp,
+    reason = "the values are small integers, exactly representable"
+)]
 fn get_by_name_and_keys() {
     with_records(|lock, ctx| {
         let value = ctx
