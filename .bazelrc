@@ -628,10 +628,10 @@ common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
 common:bazelflare --spawn_strategy=remote --remote_local_fallback=false
 # V8 marks its inspector code generator `local = 1`; it runs fine remotely.
 common:bazelflare --modify_execution_info=Genrule=-local
-# Executors have neither internet nor a container engine, so targets that need them, or that must
-# run on the client, are skipped. Filters don't change action keys.
-common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
-test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+# Executors have no container engine, so targets that need one, or that must run on the client, are
+# skipped. Filters don't change action keys.
+common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-container-engine,-requires-fuzzilli
+test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-container-engine,-requires-fuzzilli
 common:bazelflare --remote_download_minimal
 common:bazelflare --remote_cache_compression --remote_timeout=600
 # bazelflare sends nothing while an action runs, so only pings notice a connection that died

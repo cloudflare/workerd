@@ -130,7 +130,7 @@ build:ci-download-workerd --remote_download_regex=".*src/workerd/server/workerd.
 build:ci-download-types --remote_download_regex=".*/bin/types/definitions/.*"
 build:ci-download-types-worker --remote_download_regex=".*/bin/types/dist/.*"
 # The test-linux job also runs, on its runner, the tests that bazelflare's executors can't: those
-# that need the network or the container engine, whose images it loads. A developer's bazelflare
+# that need the container engine, whose images it loads. A developer's bazelflare
 # config skips them, since it builds for Linux from any workstation.
 build:ci-bazelflare-runner-tests --spawn_strategy=remote,worker,sandboxed,local
 build:ci-bazelflare-runner-tests --build_tag_filters=-off-by-default,-requires-fuzzilli
