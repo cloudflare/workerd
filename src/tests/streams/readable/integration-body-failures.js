@@ -7,8 +7,8 @@
 // with the failure, so the source's cancel() runs and pulls stop, and the
 // stream stays locked (PARITY). DIVERGENCE (ledger #21): a default source
 // or a TransformStream readable declaring `expectedLength` and delivering
-// more is such a failure in TypeScript; C++ consumption ignores the
-// declaration.
+// more, or closing short of it, is such a failure in TypeScript; C++
+// consumption ignores the declaration.
 
 import { strictEqual, deepStrictEqual, ok, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -221,5 +221,45 @@ export const sourceExpectedLengthOverflow = {
       strictEqual(await consumed, 'hello');
       strictEqual(cancelReason, undefined);
     }
+  },
+};
+
+// Ledger #21 for a body that closes short of its declared expectedLength,
+// from a default source and from a TransformStream readable: TypeScript
+// rejects the consumer with a RangeError naming the declaration; C++
+// returns what arrived. The stream has already closed, so there is nothing
+// to cancel: the source's cancel() does not run, and the writable side
+// closes cleanly.
+export const expectedLengthUnderflow = {
+  async test() {
+    let cancelled = false;
+    const rs = new ReadableStream({
+      expectedLength: 5,
+      start(c) {
+        c.enqueue(enc.encode('hi'));
+        c.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const ts = new TransformStream({ expectedLength: 5 });
+    const writer = ts.writable.getWriter();
+    writer.write(enc.encode('hi'));
+    const closed = writer.close();
+    for (const stream of [rs, ts.readable]) {
+      const consumed = new Response(stream).text();
+      if (usingTsImpl) {
+        await rejects(consumed, {
+          name: 'RangeError',
+          message:
+            'stream delivered fewer bytes than its declared expectedLength',
+        });
+      } else {
+        strictEqual(await consumed, 'hi');
+      }
+    }
+    await closed;
+    strictEqual(cancelled, false);
   },
 };

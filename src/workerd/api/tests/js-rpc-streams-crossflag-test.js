@@ -322,8 +322,9 @@ export const readableLength = {
     });
 
     // A stream read from before the transfer has only part of its declared total left. A
-    // TypeScript origin sends it with no length. A C++ origin still declares the total, so the
-    // body the peer forwards falls short and reading it fails.
+    // TypeScript origin sends it with no length. A C++ origin still declares the total, a defect
+    // (the streams readable suite's ledger #36), so the body the peer forwards falls short and
+    // reading it fails.
     for (const type of [undefined, 'bytes']) {
       const partlyRead = new ReadableStream({
         type,

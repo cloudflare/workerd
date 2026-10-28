@@ -394,12 +394,12 @@ let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 // ReadableStream's static block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
-// The non-standard expectedLength pass-through for the DrainingReader
-// (and the C++ bridge). Chained like the other controller helpers, each
-// reporting the value its underlying source declared, cached at
-// construction: default and queued byte (a TransformStream's readable
-// declares its transformer's), and native (joined in ReadableStream's
-// static block).
+// The non-standard expectedLength pass-through behind
+// getReadableStreamExpectedLength. Chained like the other controller
+// helpers, each reporting the value its underlying source declared,
+// cached at construction: default and queued byte (a TransformStream's
+// readable declares its transformer's), and native (joined in
+// ReadableStream's static block).
 let getControllerExpectedLength: (
   controller: AnyReadableController
 ) => bigint | undefined;
@@ -2703,18 +2703,14 @@ class ReadableStreamDrainingReader<R> {
     }
   }
 
-  // The non-standard expectedLength the underlying source declared: the
-  // TOTAL bytes it will produce (undefined = unknown). A construction-time
-  // value, cached on the controller; backend-blind via the chained helper.
-  // The C++ bridge asks the stream instead (getReadableStreamExpectedLength),
-  // which also accounts for reads. Returns undefined after release.
+  // The non-standard expectedLength: the bytes the stream still has to
+  // deliver, if known (undefined = unknown), as the C++ bridge sees it
+  // (getReadableStreamExpectedLength). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
-    const controller = getReadableStreamController(stream);
-    if (controller === undefined) return undefined;
-    return getControllerExpectedLength(controller);
+    return getReadableStreamExpectedLength(stream);
   }
 
   cancel(reason?: unknown): Promise<void> {
@@ -4584,9 +4580,10 @@ class ReadableStream<R> {
 
 // Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
 // byte bounds apply: the caller's memory limit, capped at 128 MB, and the
-// stream's declared expectedLength. A breach names its cause and cancels
-// the stream with it, as the C++ AllReader does; a declaration the limit
-// cannot hold is refused before a byte is read.
+// stream's declared expectedLength, an exact total that a stream closing
+// short of also breaches. A breach names its cause and cancels the stream
+// with it, as the C++ AllReader does; a declaration the limit cannot hold
+// is refused before a byte is read.
 const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
@@ -4766,7 +4763,17 @@ async function collectChunks<R>(
       }
       collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) return collected;
+    if (result.done) {
+      if (declaredBinds && collected.length < bound) {
+        return failCollect(
+          reader,
+          new RangeError(
+            'stream delivered fewer bytes than its declared expectedLength'
+          )
+        );
+      }
+      return collected;
+    }
   }
 }
 

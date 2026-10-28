@@ -217,6 +217,7 @@ export {
   transformExpectedLengthOverflow,
   transformExpectedLengthMet,
   sourceExpectedLengthOverflow,
+  expectedLengthUnderflow,
 } from 'integration-body-failures';
 
 export {
@@ -277,6 +278,7 @@ export {
   drainingReaderCancelReachesSource,
   drainingReaderLockExclusivity,
   drainingReaderReportsDeclaredLength,
+  drainingReaderReportsNoLengthAfterRead,
 } from 'draining-reader';
 
 export {

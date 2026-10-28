@@ -19,7 +19,8 @@
 // closes it as it takes the last chunk; value chunks pass through the
 // conduit UNTOUCHED (object identity included); a JS stream's
 // expectedLength is its source's declaration, undefined if it declares
-// none; cancel and error propagate through the conduit like a default
+// none, or once the stream (or, before the fork, the stream it was forked
+// from) has been read from; cancel and error propagate through the conduit like a default
 // reader's.
 
 /* global ReadableStreamDrainingReader */
@@ -233,5 +234,39 @@ export const drainingReaderReportsDeclaredLength = {
     strictEqual(reader.expectedLength, 5n);
     reader.releaseLock();
     strictEqual(reader.expectedLength, undefined);
+  },
+};
+
+// The length the C++ bridge sees (#35 has the Content-Length): none once
+// the stream has been read from, nor on a tee branch forked after that
+// read, while a branch forked before it keeps the declaration.
+export const drainingReaderReportsNoLengthAfterRead = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    function lengthOf(stream) {
+      const reader = new ReadableStreamDrainingReader(stream);
+      const length = reader.expectedLength;
+      reader.releaseLock();
+      return length;
+    }
+    const rs = new ReadableStream({
+      expectedLength: 2,
+      start(c) {
+        c.enqueue(new Uint8Array(1));
+        c.enqueue(new Uint8Array(1));
+        c.close();
+      },
+    });
+    const [early, read] = rs.tee();
+    const reader = read.getReader();
+    await reader.read();
+    reader.releaseLock();
+    strictEqual(lengthOf(read), undefined);
+    const [late] = read.tee();
+    strictEqual(lengthOf(early), 2n);
+    strictEqual(lengthOf(late), undefined);
   },
 };
