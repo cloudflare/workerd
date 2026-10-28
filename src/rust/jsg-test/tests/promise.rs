@@ -354,6 +354,8 @@ impl jsg::Traced for DropCounter {}
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
+/// As in C++ JSG, reaction data is dropped once a reaction has run, without waiting for the
+/// garbage collector, while the promise stays reachable.
 #[test]
 fn then_data_is_dropped_once_the_promise_settles() {
     let harness = crate::Harness::new();
@@ -375,11 +377,45 @@ fn then_data_is_dropped_once_the_promise_settles() {
         let value = lock.undefined();
         resolver.resolve(lock, value)?;
         crate::Harness::run_microtasks(lock);
+        assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+static PASSED_THROUGH_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// The data of `then` is dropped when a rejection passes through, that of `catch` when a
+/// fulfillment does, and that of a callback that fails once it has returned.
+#[test]
+fn reaction_data_is_dropped_whichever_way_the_promise_settles() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let reason = lock.undefined();
+        let rejected = v8::Promise::rejected(lock, reason)?;
+        let passed = rejected.then(lock, DropCounter(&PASSED_THROUGH_DROPS), |lock, _, _| {
+            Ok(lock.undefined())
+        })?;
+        passed.mark_as_handled();
+        let value = lock.undefined();
+        let fulfilled = v8::Promise::resolved(lock, value)?;
+        fulfilled.catch(lock, DropCounter(&PASSED_THROUGH_DROPS), |lock, _, _| {
+            Ok(lock.undefined())
+        })?;
+        let value = lock.undefined();
+        let fulfilled = v8::Promise::resolved(lock, value)?;
+        let failed = fulfilled.then(lock, DropCounter(&PASSED_THROUGH_DROPS), |_, _, _| {
+            Err(jsg::Error::new_type_error("failed"))
+        })?;
+        failed.mark_as_handled();
+        // All three stay reachable, so only their reactions can have dropped the data.
+        ctx.set_global(lock, "passed", passed);
+        ctx.set_global(lock, "failed", failed);
+        crate::Harness::run_microtasks(lock);
+        assert_eq!(PASSED_THROUGH_DROPS.load(Ordering::SeqCst), 3);
         Ok(())
     });
 }

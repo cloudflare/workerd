@@ -534,18 +534,6 @@ bool exceptionPending(Isolate* isolate) {
 }
 }  // namespace
 
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled)));
-}
-
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Catch(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_rejected)));
-}
-
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());

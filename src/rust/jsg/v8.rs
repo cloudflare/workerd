@@ -428,16 +428,6 @@ pub mod ffi {
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
         pub unsafe fn local_promise_result(promise: &Local) -> Local;
         pub unsafe fn local_promise_mark_as_handled(promise: &Local);
-        pub unsafe fn local_promise_then(
-            isolate: *mut Isolate,
-            promise: &Local,
-            on_fulfilled: &Local,
-        ) -> MaybeLocal;
-        pub unsafe fn local_promise_catch(
-            isolate: *mut Isolate,
-            promise: &Local,
-            on_rejected: &Local,
-        ) -> MaybeLocal;
         pub unsafe fn local_promise_then_or_catch(
             isolate: *mut Isolate,
             promise: &Local,
