@@ -8,7 +8,6 @@ wd_test(
     container_images = CONTAINER_TEST_IMAGES,
     data = ["test.js"],
     tags = [
-        "no-remote-exec",
         "requires-container-engine",
         "requires-network",  # Accesses unix://var/run/docker.sock
     ],
