@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "33898b4c3fe680c38aa89fe347f491daec819d6fc982c720d95288722a69dde1",
+  "checksum": "4f7c905fb454b3d367e5ae35edc0a5d3b38300d86a842ca721465a1cb99a6cc0",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -2989,10 +2989,6 @@
           {
             "id": "lol_html_c_api 1.4.0",
             "target": "lolhtml"
-          },
-          {
-            "id": "lz4_flex 0.11.6",
-            "target": "lz4_flex"
           },
           {
             "id": "nix 0.31.3",
@@ -7061,46 +7057,6 @@
         }
       ],
       "version": "1.4.0"
-    },
-    "lz4_flex 0.11.6": {
-      "common_attrs": {
-        "crate_features": [
-          "frame",
-          "safe-decode",
-          "safe-encode",
-          "std"
-        ],
-        "deps": [
-          {
-            "id": "twox-hash 2.1.5",
-            "target": "twox_hash"
-          }
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "lz4_flex",
-      "license": "MIT",
-      "license_file": "LICENSE",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "lz4_flex",
-      "package_url": "https://github.com/pseitz/lz4_flex",
-      "repository": {
-        "Http": {
-          "sha256": "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a",
-          "url": "https://static.crates.io/crates/lz4_flex/0.11.6/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "lz4_flex",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "0.11.6"
     },
     "memchr 2.8.3": {
       "common_attrs": {
@@ -13885,37 +13841,6 @@
       ],
       "version": "0.2.5"
     },
-    "twox-hash 2.1.5": {
-      "common_attrs": {
-        "crate_features": [
-          "xxhash32"
-        ],
-        "edition": "2021"
-      },
-      "library_target_name": "twox_hash",
-      "license": "MIT",
-      "license_file": "LICENSE.txt",
-      "license_ids": [
-        "MIT"
-      ],
-      "name": "twox-hash",
-      "package_url": "https://github.com/shepmaster/twox-hash",
-      "repository": {
-        "Http": {
-          "sha256": "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2",
-          "url": "https://static.crates.io/crates/twox-hash/2.1.5/download"
-        }
-      },
-      "targets": [
-        {
-          "Library": {
-            "crate_name": "twox_hash",
-            "crate_root": "src/lib.rs"
-          }
-        }
-      ],
-      "version": "2.1.5"
-    },
     "typenum 1.20.1": {
       "common_attrs": {
         "crate_features": [
@@ -16090,7 +16015,6 @@
     "libm 0.2.16",
     "libz-rs-sys 0.6.8",
     "lol_html_c_api 1.4.0",
-    "lz4_flex 0.11.6",
     "nix 0.31.3",
     "notify 8.2.1",
     "percent-encoding 2.3.2",

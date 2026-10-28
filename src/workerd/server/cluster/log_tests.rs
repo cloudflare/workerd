@@ -451,14 +451,15 @@ fn a_corrupt_file_fails_to_restore() {
 
 #[test]
 fn a_truncated_file_fails_to_restore() {
-    // The LZ4 decoder takes a frame without its end mark, or no frame at
-    // all, for a whole one.
+    // Cut anywhere, including before the trailer that holds the checksum,
+    // or empty.
     let dir = scratch("truncated");
     let app = open_app(&dir.join("app.db"));
     insert(&app, 0, 100);
     let (file, path) = batch(&dir, 0, last());
     let bytes = std::fs::read(&path).unwrap();
-    for cut in [&bytes[..bytes.len() - 8], &[]] {
+    let len = bytes.len();
+    for cut in [&bytes[..len - 1], &bytes[..len - 8], &bytes[..len / 2], &[]] {
         let store = Bucket::memory("");
         std::fs::write(&path, cut).unwrap();
         runtime().block_on(log(&store).put(&file, &path)).unwrap();

@@ -6,7 +6,7 @@
 //! relay's: one `sqlitePages` lane, the database, whose frames are the
 //! pages each commit wrote.
 //!
-//! Under `do/<namespace>/<actor>/`, each file one LZ4 frame:
+//! Under `do/<namespace>/<actor>/`, each file gzipped:
 //!
 //! - `log/<session>/<end>`: a batch, the frames of a run of commits up to
 //!   frame `end`, each run of page frames merged to one.
@@ -149,53 +149,24 @@ pub fn merge(batch: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// LZ4-frames `bytes`, as every file in the bucket is.
+/// Gzips `bytes`, as every file in the bucket is.
 pub fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = encoder(Vec::new());
     encoder.write_all(bytes)?;
-    encoder.finish().map_err(|e| Error::Replica(e.to_string()))
+    Ok(encoder.finish()?)
 }
 
-/// An LZ4 frame with a checksum of its content, which the decoder checks:
-/// a corrupt copy fails to replay rather than replaying wrong.
-fn encoder<W: Write>(w: W) -> lz4_flex::frame::FrameEncoder<W> {
-    let info = lz4_flex::frame::FrameInfo::new().content_checksum(true);
-    lz4_flex::frame::FrameEncoder::with_frame_info(info, w)
+/// Gzip ends with the content's CRC-32 and length, which the decoder
+/// checks: a corrupt or truncated copy fails to replay rather than
+/// replaying wrong or short.
+fn encoder<W: Write>(w: W) -> flate2::write::GzEncoder<W> {
+    flate2::write::GzEncoder::new(w, flate2::Compression::fast())
 }
 
 /// Bounds a message, so that a corrupt one fails rather than allocating
 /// whatever its segment table claims: 1 GiB, far more than a batch holds.
 fn options() -> capnp::message::ReaderOptions {
     *capnp::message::ReaderOptions::new().traversal_limit_in_words(Some(1 << 27))
-}
-
-/// Fails unless `file` is one whole LZ4 frame, through its end mark and
-/// checksum: the decoder takes a frame cut at a block boundary for a
-/// whole, shorter one.
-fn check_whole(file: &mut std::fs::File) -> Result<()> {
-    let truncated = || Error::Replica("a truncated file".into());
-    let len = file.metadata()?.len();
-    let mut header = [0u8; 6];
-    file.read_exact(&mut header).map_err(|_| truncated())?;
-    let flags = header[4];
-    let bit = |mask: u8, n: u64| if flags & mask != 0 { n } else { 0 };
-    let mut at = 7 + bit(0x08, 8) + bit(0x01, 4);
-    loop {
-        let mut size = [0u8; 4];
-        file.seek(SeekFrom::Start(at))?;
-        file.read_exact(&mut size).map_err(|_| truncated())?;
-        at += 4;
-        let size = u32::from_le_bytes(size) & 0x7fff_ffff;
-        if size == 0 {
-            break;
-        }
-        at += u64::from(size) + bit(0x10, 4);
-    }
-    if at + bit(0x04, 4) != len {
-        return Err(truncated());
-    }
-    file.seek(SeekFrom::Start(0))?;
-    Ok(())
 }
 
 /// The database lane, replayed into a file.
@@ -229,10 +200,9 @@ impl Replay {
     /// Applies `f`, the local copy at `path`. A batch that does not reach
     /// back to the next frame is skipped: a later, wider one must cover it.
     pub fn apply(&mut self, f: &File, path: &Path) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
-        check_whole(&mut file)?;
+        let file = std::fs::File::open(path)?;
         let size = file.metadata()?.len();
-        let mut r = BufReader::new(lz4_flex::frame::FrameDecoder::new(file));
+        let mut r = BufReader::new(flate2::read::GzDecoder::new(file));
         if f.snapshot {
             return self.snapshot(&mut r);
         }
@@ -283,7 +253,7 @@ impl Replay {
                 self.live = true;
             }
         }
-        // Read to the frame's end, where the decoder checks the checksum.
+        // Read to the end, where the decoder checks the checksum.
         if std::io::copy(r, &mut std::io::sink())? != 0 {
             return Err(Error::Replica("a snapshot longer than its lanes".into()));
         }
@@ -397,9 +367,7 @@ fn write_snapshot(
     let mut encoder = encoder(std::io::BufWriter::new(std::fs::File::create(&tmp)?));
     capnp::serialize::write_message(&mut encoder, &message)?;
     payload(&mut encoder)?;
-    let mut w = encoder
-        .finish()
-        .map_err(|e| Error::Replica(e.to_string()))?;
+    let mut w = encoder.finish()?;
     w.flush()?;
     drop(w);
     std::fs::rename(&tmp, &out)?;
