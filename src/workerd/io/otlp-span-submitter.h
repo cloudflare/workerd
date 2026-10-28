@@ -23,10 +23,12 @@ namespace workerd {
 // Whether the query is cut from `url.full` and `url.query` left out.
 WD_STRONG_BOOL(RedactQueryString);
 
-// Where an OtlpSpanSubmitter's spans go, and which spans it takes. Refcounted because the
-// submitters of one invocation share it and may outlive the tracer.
-class OtlpSpanExporter: public kj::Refcounted {
+// Where an OtlpSpanSubmitter's spans go, and which spans it takes. Submitters share ownership
+// through kj::Rc because they may outlive the tracer.
+class OtlpSpanExporter {
  public:
+  virtual ~OtlpSpanExporter() noexcept(false) = default;
+
   // `request` is an encoded ExportTraceServiceRequest holding `spanCount` spans. Failures are the
   // exporter's to handle: this is called while spans close, including from the submitter's
   // destructor.
@@ -102,7 +104,7 @@ class OtlpSpanSubmitter final: public SpanSubmitter {
   // takes the first span id if that is null; see getRootSpanId(). `options` is only read during
   // construction.
   OtlpSpanSubmitter(kj::EntropySource& entropySource,
-      kj::Own<OtlpSpanExporter> exporter,
+      kj::Rc<OtlpSpanExporter> exporter,
       const tracing::SpanContext& context,
       Options options,
       tracing::SpanId rootSpanId = tracing::SpanId::nullId);
@@ -142,7 +144,7 @@ class OtlpSpanSubmitter final: public SpanSubmitter {
 
   kj::EntropySource& entropySource;
   uint64_t predictableSpanId;
-  kj::Own<OtlpSpanExporter> exporter;
+  kj::Rc<OtlpSpanExporter> exporter;
   tracing::SpanId rootSpanId;
   ::rust::Box<rust::otlp::SpanBuffer> buffer;
 };
@@ -153,7 +155,7 @@ class OtlpSpanSubmitter final: public SpanSubmitter {
 // already has one, as an invocation's does (see BaseTracer::setStartInvocationSpanFunc()).
 // `entropySource` must outlive every one of those spans.
 SpanBuilder startExportedUserSpan(kj::EntropySource& entropySource,
-    kj::Own<OtlpSpanExporter> exporter,
+    kj::Rc<OtlpSpanExporter> exporter,
     const tracing::SpanContext& context,
     const OtlpSpanSubmitter::Options& options,
     kj::ConstString operationName,
