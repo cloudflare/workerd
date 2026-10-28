@@ -139,13 +139,17 @@ impl ClusterNode {
         address: String,
     ) -> Result<Rc<Self>> {
         let options = conf.get_bucket_options().map_err(|e| capnp(&e))?;
+        let key = text(conf.get_key())?.into_bytes();
+        if key.is_empty() {
+            return Err(kj::failed!("cluster.key must be set"));
+        }
         let setup = cluster::Setup {
             url: text(conf.get_bucket())?,
             options: options.iter().map(text).collect::<Result<_>>()?,
             node: cluster::hex(&rand::random::<[u8; 16]>()),
             address: address.clone(),
             ttl_ms: cluster_logic::lease::LEASE_MS,
-            key: text(conf.get_key())?.into_bytes(),
+            key,
         };
         let cluster = Cluster::new(setup).map_err(|e| kj::failed!("cluster: {e}"))?;
         Ok(Rc::new(Self {
