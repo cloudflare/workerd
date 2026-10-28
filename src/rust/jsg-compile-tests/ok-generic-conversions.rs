@@ -18,5 +18,5 @@ pub fn owned<T: for<'s> FromJS<'s, ResultType = T>>() {}
 
 pub fn t() {
     owned::<String>();
-    owned::<Vec<jsg::Number>>();
+    owned::<Vec<f64>>();
 }

@@ -97,46 +97,45 @@ kj::Maybe<uint64_t> getReadableStreamExpectedLength(jsg::Lock& js, jsg::JsObject
   return kj::none;
 }
 
+// Starts collecting the stream's bytes. Every body consumption of a TypeScript stream builds its
+// result from them in C++, as the legacy implementation does from readAllBytes() and
+// readAllText(). The promise resolves with a null-prototype record holding an ArrayBuffer, not
+// with the ArrayBuffer itself: resolving a promise with an object looks up its then, which a
+// patched Object.prototype.then would supply. Unwrap the record with consumedBuffer().
+jsg::Promise<jsg::Value> consumeReadableStreamBuffer(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  jsg::JsValue result = webstreams::dispatchCall(
+      js, "consumeReadableStreamAsArrayBufferRecord", obj, js.bigInt(limit));
+  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
+  return js.toPromise(promise);
+}
+
+jsg::JsArrayBuffer consumedBuffer(jsg::Lock& js, jsg::Value& record) {
+  // If it throws, it manifests as an internal error. That's intended.
+  auto obj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(jsg::JsValue(record.getHandle(js))));
+  return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(obj.get(js, "buffer"_kj)));
+}
+
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> getReadableStreamArrayBuffer(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  jsg::JsValue result =
-      webstreams::dispatchCall(js, "consumeReadableStreamAsArrayBuffer", obj, js.bigInt(limit));
-  // The result must be a promise for an Arraybuffer
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
-  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
-    auto value = jsg::JsValue(ref.getHandle(js));
-    // If it throws, it manifests as an internal error. That's intended.
-    auto ab = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(value));
-    return ab.addRef(js);
+  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
+    return consumedBuffer(js, record).addRef(js);
   });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  jsg::JsValue result =
-      webstreams::dispatchCall(js, "consumeReadableStreamAsUint8Array", obj, js.bigInt(limit));
-  // The result must be a promise for an Uint8Array
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
-  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
-    auto value = jsg::JsValue(ref.getHandle(js));
-    // If it throws, it manifests as an internal error. That's intended.
-    auto ab = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_UINT8ARRAY(value));
-    return ab.addRef(js);
+  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
+    auto buffer = consumedBuffer(js, record);
+    return jsg::JsUint8Array::create(js, buffer).addRef(js);
   });
 }
 
 jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
   // Collects bytes rather than decoded text, matching the legacy readAllText(): see
   // JsReadableStream::text().
-  jsg::JsValue result = webstreams::dispatchCall(
-      js, "consumeReadableStreamAsArrayBufferRecord", obj, js.bigInt(limit));
-  // The result must be a promise for a record holding an ArrayBuffer
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
-  return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
-    // If it throws, it manifests as an internal error. That's intended.
-    auto record = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(jsg::JsValue(ref.getHandle(js))));
-    auto ab = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(record.get(js, "buffer"_kj)));
-    kj::ArrayPtr<const kj::byte> bytes = ab.asArrayPtr();
+  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
+    kj::ArrayPtr<const kj::byte> bytes = consumedBuffer(js, record).asArrayPtr();
     if (hasUtf8Bom(bytes)) {
       bytes = bytes.slice(UTF8_BOM_SIZE);
     }
@@ -146,26 +145,18 @@ jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj,
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  jsg::JsValue result =
-      webstreams::dispatchCall(js, "consumeReadableStreamAsJSON", obj, js.bigInt(limit));
-  // The result must be a promise for a JS value
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
-  return js.toPromise(promise).then(
-      js, [](jsg::Lock& js, jsg::Value ref) { return jsg::JsValue(ref.getHandle(js)).addRef(js); });
+  // Parses text(), as the legacy arm parses readAllText() and Body::json() parses text().
+  return getReadableStreamText(js, obj, limit).then(js, [](jsg::Lock& js, kj::String text) {
+    auto parsed = js.parseJson(text);
+    return jsg::JsValue(parsed.getHandle(js)).addRef(js);
+  });
 }
 
 jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit, kj::String contentType) {
-  jsg::JsValue result =
-      webstreams::dispatchCall(js, "consumeReadableStreamAsArrayBuffer", obj, js.bigInt(limit));
-  // The result must be a promise for an Arraybuffer
-  jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
-  return js.toPromise(promise).then(
-      js, [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::Value ref) mutable {
-    auto value = jsg::JsValue(ref.getHandle(js));
-    // If it throws, it manifests as an internal error. That's intended.
-    auto ab = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(value));
-    return js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::mv(contentType));
+  return consumeReadableStreamBuffer(js, obj, limit)
+      .then(js, [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::Value record) mutable {
+    return js.alloc<Blob>(js, jsg::JsBufferSource(consumedBuffer(js, record)), kj::mv(contentType));
   });
 }
 
@@ -554,9 +545,10 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
         "ReadableStreamDrainingReader.read() promise did not resolve to an object "
         "with a chunks array.");
 
-    // Only ArrayBuffer/ArrayBufferView chunks are usable as bytes. Everything else
-    // (including strings) rejects, matching the legacy pump's historical behavior and
-    // error text exactly.
+    // ArrayBuffer/ArrayBufferView chunks are written as their bytes, and strings as their
+    // UTF-8 encoding (lone surrogates replaced with U+FFFD), as the legacy pump's
+    // valueToBytes() writes them. Everything else rejects. JS body consumption (text() and
+    // the like) rejects strings in both implementations; only pumps encode them.
     auto pieces = kj::Vector<kj::Array<const kj::byte>>(chunks.size());
     for (uint32_t i = 0; i < chunks.size(); i++) {
       auto chunk = chunks.get(js, i);
@@ -564,6 +556,8 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
         pieces.add(jsg::JsBufferSource(view).copy());
       } else KJ_IF_SOME(buffer, JSG_TRY_CAST_ARRAYBUFFER(chunk)) {
         pieces.add(jsg::JsBufferSource(buffer).copy());
+      } else KJ_IF_SOME(str, chunk.tryCast<jsg::JsString>()) {
+        pieces.add(webstreams::stringToBytes(str.toUSVString(js)));
       } else {
         JSG_FAIL_REQUIRE(TypeError, "This ReadableStream did not return bytes.");
       }

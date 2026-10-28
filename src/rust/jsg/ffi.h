@@ -135,6 +135,8 @@ bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
+bool local_is_int32(const Local& val);
+bool local_is_uint32(const Local& val);
 bool local_is_null(const Local& val);
 bool local_is_undefined(const Local& val);
 bool local_is_null_or_undefined(const Local& val);
@@ -164,6 +166,12 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+// Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
+// result in `result` and return true, or return false if the coercion threw, leaving the exception
+// pending.
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -203,6 +211,19 @@ int32_t local_name_get_identity_hash(const Local& value);
 Local local_symbol_new(Isolate* isolate);
 Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
+
+// Local<Boolean>
+bool local_boolean_value(const Local& value);
+
+// Local<Number>
+double local_number_value(const Local& value);
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value);
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value);
+int64_t local_integer_value(const Local& value);
+int32_t local_int32_value(const Local& value);
+uint32_t local_uint32_value(const Local& value);
 
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value);
@@ -246,6 +267,14 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 // Returns the value of `key`, or none if a getter or Proxy trap threw, leaving the exception
 // pending.
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+// The same for a `v8::Name` key.
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name);
+// Appends the names of the own enumerable string-keyed properties, converted to strings, to
+// `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
+// the exception pending.
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
 
 // Local<Promise>
 PromiseState local_promise_state(const Local& promise);

@@ -90,9 +90,12 @@ are ignored.
   comparison for the other GC cases.
 - Both buffer-copy implementations allocate new storage and copy the bytes. The length and sum
   cases read existing storage. String sizes are in UTF-16 code units; native strings are UTF-8.
-  Ordinary numeric arrays use Rust `Vec<Number>` and C++ `kj::Array<double>`.
-- Numeric results use Rust `Number` and C++ `double`; integer inputs, storage, and arithmetic
-  remain integer-typed in both. The Rust callback checks and casts `Local<Value>` to `Function`.
+  Ordinary numeric arrays use Rust `Vec<f64>` and C++ `kj::Array<double>`.
+- Integer results, such as lengths, counts and sums of bytes, use Rust `u32` and C++ `uint32_t`;
+  results that are numbers in general (`number`, `union`, the array and struct cases, and the
+  callback) use `f64` and `double`. A fast integer argument reaches Rust as a `double` and
+  converts with the slow path's checks, while C++ JSG receives it as a `uint32_t`, so the
+  `dispatch/u32` cases compare different argument conversions as well. The Rust callback checks and casts `Local<Value>` to `Function`.
   The C++ callback benchmark calls V8 directly, not through `jsg::Function`.
 - `allocate-collect/N` times the creation of N objects followed by garbage collection. Other
   collection benchmarks keep objects alive. `native/lifetime/N` times the creation of one

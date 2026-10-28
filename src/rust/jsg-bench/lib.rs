@@ -5,7 +5,6 @@
 use std::cell::Cell;
 use std::hint::black_box;
 
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_constructor;
@@ -42,25 +41,25 @@ mod ffi {
 
 #[jsg_struct]
 struct Pair {
-    pub a: Number,
-    pub b: Number,
+    pub a: f64,
+    pub b: f64,
 }
 
 #[jsg_struct]
 struct Octet {
-    pub a: Number,
-    pub b: Number,
-    pub c: Number,
-    pub d: Number,
-    pub e: Number,
-    pub f: Number,
-    pub g: Number,
-    pub h: Number,
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub e: f64,
+    pub f: f64,
+    pub g: f64,
+    pub h: f64,
 }
 
 #[jsg_oneof]
 enum NumberOrString {
-    Number(Number),
+    Number(f64),
     String(String),
 }
 
@@ -81,8 +80,8 @@ impl Node {
     }
 
     #[jsg_property(prototype)]
-    fn get_value(&self) -> Number {
-        self.value.get().into()
+    fn get_value(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_method]
@@ -113,18 +112,18 @@ impl Target {
     fn static_noop() {}
 
     #[jsg_method]
-    fn add(&self, a: u32) -> Number {
-        (a + 1).into()
+    fn add(&self, a: u32) -> u32 {
+        a + 1
     }
 
     #[jsg_method]
-    fn add_four(&self, a: u32, b: u32, c: u32, d: u32) -> Number {
-        (a + b + c + d).into()
+    fn add_four(&self, a: u32, b: u32, c: u32, d: u32) -> u32 {
+        a + b + c + d
     }
 
     #[jsg_method]
-    fn number(&self, a: Number) -> Number {
-        Number::new(a.value() + 0.5)
+    fn number(&self, a: f64) -> f64 {
+        a + 0.5
     }
 
     #[jsg_method]
@@ -138,8 +137,8 @@ impl Target {
     }
 
     #[jsg_property(prototype)]
-    fn get_value(&self) -> Number {
-        self.value.get().into()
+    fn get_value(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_property(prototype)]
@@ -148,8 +147,8 @@ impl Target {
     }
 
     #[jsg_property(instance)]
-    fn get_own(&self) -> Number {
-        self.value.get().into()
+    fn get_own(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_property(instance)]
@@ -158,12 +157,12 @@ impl Target {
     }
 
     #[jsg_method]
-    fn optional(&self, a: Option<u32>) -> Number {
-        a.unwrap_or(7).into()
+    fn optional(&self, a: Option<u32>) -> u32 {
+        a.unwrap_or(7)
     }
 
     #[jsg_method]
-    fn union(&self, a: NumberOrString) -> Number {
+    fn union(&self, a: NumberOrString) -> f64 {
         match a {
             NumberOrString::Number(n) => n,
             NumberOrString::String(s) => (s.len() as u32).into(),
@@ -171,8 +170,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn string_len(&self, a: String) -> Number {
-        (a.len() as u32).into()
+    fn string_len(&self, a: String) -> u32 {
+        a.len() as u32
     }
 
     #[jsg_method]
@@ -181,23 +180,23 @@ impl Target {
     }
 
     #[jsg_method]
-    fn array_sum(&self, a: Vec<Number>) -> Number {
-        Number::new(a.iter().map(Number::value).sum())
+    fn array_sum(&self, a: Vec<f64>) -> f64 {
+        a.iter().copied().sum()
     }
 
     #[jsg_method]
-    fn array_echo(&self, a: Vec<Number>) -> Vec<Number> {
+    fn array_echo(&self, a: Vec<f64>) -> Vec<f64> {
         a
     }
 
     #[jsg_method]
-    fn array_make(&self, n: u32) -> Vec<Number> {
-        (0..n).map(|i| Number::new(f64::from(i))).collect()
+    fn array_make(&self, n: u32) -> Vec<f64> {
+        (0..n).map(f64::from).collect()
     }
 
     #[jsg_method]
-    fn pair_sum(&self, a: Pair) -> Number {
-        Number::new(a.a.value() + a.b.value())
+    fn pair_sum(&self, a: Pair) -> f64 {
+        a.a + a.b
     }
 
     #[jsg_method]
@@ -206,52 +205,39 @@ impl Target {
     }
 
     #[jsg_method]
-    fn octet_sum(&self, a: Octet) -> Number {
-        Number::new(
-            a.a.value()
-                + a.b.value()
-                + a.c.value()
-                + a.d.value()
-                + a.e.value()
-                + a.f.value()
-                + a.g.value()
-                + a.h.value(),
-        )
+    fn octet_sum(&self, a: Octet) -> f64 {
+        a.a + a.b + a.c + a.d + a.e + a.f + a.g + a.h
     }
 
     #[jsg_method]
     fn octet_make(&self) -> Octet {
         Octet {
-            a: 1.into(),
-            b: 2.into(),
-            c: 3.into(),
-            d: 4.into(),
-            e: 5.into(),
-            f: 6.into(),
-            g: 7.into(),
-            h: 8.into(),
+            a: 1.0,
+            b: 2.0,
+            c: 3.0,
+            d: 4.0,
+            e: 5.0,
+            f: 6.0,
+            g: 7.0,
+            h: 8.0,
         }
     }
 
     #[jsg_method]
-    fn bytes_len(&self, a: v8::Local<'_, v8::Uint8Array>) -> Number {
-        (a.byte_length() as u32).into()
+    fn bytes_len(&self, a: v8::Local<'_, v8::Uint8Array>) -> u32 {
+        a.byte_length() as u32
     }
 
     #[jsg_method]
-    fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> Number {
+    fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
         let a = a.as_slice(lock).to_vec();
         black_box(&a);
-        (a.len() as u32).into()
+        a.len() as u32
     }
 
     #[jsg_method]
-    fn bytes_sum<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> Number {
-        a.as_slice(lock)
-            .iter()
-            .map(|&x| u32::from(x))
-            .sum::<u32>()
-            .into()
+    fn bytes_sum<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
+        a.as_slice(lock).iter().map(|&x| u32::from(x)).sum()
     }
 
     #[jsg_method]
@@ -265,8 +251,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn take_node(&self, a: jsg::Rc<Node>) -> Number {
-        a.value.get().into()
+    fn take_node(&self, a: jsg::Rc<Node>) -> u32 {
+        a.value.get()
     }
 
     #[jsg_method]
@@ -274,13 +260,13 @@ impl Target {
         &self,
         lock: &mut jsg::Lock<'s>,
         a: v8::Local<'s, v8::Value>,
-        n: Number,
-    ) -> Result<Number, jsg::Error> {
+        n: f64,
+    ) -> Result<f64, jsg::Error> {
         let a: v8::Local<'s, v8::Function> = a
             .try_into()
             .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
         let n = n.to_js(lock)?;
-        a.call::<Number>(lock, None, &[n])
+        a.call::<f64>(lock, None, &[n])
     }
 
     #[jsg_method]

@@ -13,7 +13,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use jsg::ExceptionType;
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_constructor;
@@ -59,8 +58,8 @@ impl DirectReturnResource {
     }
 
     #[jsg_method]
-    pub fn get_counter(&self) -> jsg::Number {
-        jsg::Number::from(self.counter.get())
+    pub fn get_counter(&self) -> u32 {
+        self.counter.get()
     }
 
     #[jsg_method]
@@ -155,8 +154,7 @@ fn resource_method_returns_non_result_values() {
         assert!(result);
 
         // Test getCounter returns number
-        let result: Number = ctx.eval(lock, "resource.getCounter()").unwrap();
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.getCounter()").unwrap(), 42);
 
         // Test incrementCounter returns undefined (we just check it doesn't error)
         let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()").unwrap();
@@ -175,8 +173,8 @@ struct MathResource;
 #[jsg_resource]
 impl MathResource {
     #[jsg_method]
-    pub fn add(a: Number, b: Number) -> Number {
-        Number::new(a.value() + b.value())
+    pub fn add(a: i32, b: i32) -> i32 {
+        a + b
     }
 
     #[jsg_method]
@@ -185,11 +183,11 @@ impl MathResource {
     }
 
     #[jsg_method]
-    pub fn divide(a: Number, b: Number) -> Result<Number, jsg::Error> {
-        if b.value() == 0.0 {
+    pub fn divide(a: f64, b: f64) -> Result<f64, jsg::Error> {
+        if b == 0.0 {
             return Err(jsg::Error::new_range_error("Division by zero"));
         }
-        Ok(Number::new(a.value() / b.value()))
+        Ok(a / b)
     }
 
     #[jsg_method]
@@ -206,8 +204,7 @@ fn static_method_callable_on_class() {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock);
         ctx.set_global(lock, "MathResource", constructor);
 
-        let result: Number = ctx.eval(lock, "MathResource.add(2, 3)").unwrap();
-        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<i32>(lock, "MathResource.add(2, 3)").unwrap(), 5);
 
         let result: String = ctx.eval(lock, "MathResource.greet('World')").unwrap();
         assert_eq!(result, "Hello, World!");
@@ -234,8 +231,10 @@ fn instance_and_static_methods_coexist() {
         assert_eq!(result, "math");
 
         // Static method works on the class
-        let result: Number = ctx.eval(lock, "MathResource.add(10, 20)").unwrap();
-        assert!((result.value() - 30.0).abs() < f64::EPSILON);
+        assert_eq!(
+            ctx.eval::<i32>(lock, "MathResource.add(10, 20)").unwrap(),
+            30
+        );
 
         // Static methods are NOT on the instance
         let is_undefined: bool = ctx.eval(lock, "typeof math.add === 'undefined'").unwrap();
@@ -267,12 +266,12 @@ fn static_method_throws_exception() {
         ctx.set_global(lock, "MathResource", constructor);
 
         // Valid call succeeds
-        let result: Number = ctx.eval(lock, "MathResource.divide(10, 2)").unwrap();
-        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "MathResource.divide(10, 2)").unwrap();
+        assert!((result - 5.0).abs() < f64::EPSILON);
 
         // Division by zero throws a RangeError
         let err = ctx
-            .eval::<Number>(lock, "MathResource.divide(1, 0)")
+            .eval::<f64>(lock, "MathResource.divide(1, 0)")
             .unwrap_err()
             .unwrap_jsg_err(lock);
         assert_eq!(err.name, ExceptionType::RangeError);
@@ -334,17 +333,22 @@ fn static_constant_accessible_on_constructor() {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global(lock, "ConstantResource", constructor);
 
-        let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
-        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        assert_eq!(
+            ctx.eval::<u32>(lock, "ConstantResource.MAX_SIZE").unwrap(),
+            1024
+        );
+        assert_eq!(
+            ctx.eval::<i32>(lock, "ConstantResource.STATUS_OK").unwrap(),
+            0
+        );
+        assert_eq!(
+            ctx.eval::<i32>(lock, "ConstantResource.STATUS_ERROR")
+                .unwrap(),
+            -1
+        );
 
-        let result: Number = ctx.eval(lock, "ConstantResource.STATUS_OK").unwrap();
-        assert!((result.value() - 0.0).abs() < f64::EPSILON);
-
-        let result: Number = ctx.eval(lock, "ConstantResource.STATUS_ERROR").unwrap();
-        assert!((result.value() - (-1.0)).abs() < f64::EPSILON);
-
-        let result: Number = ctx.eval(lock, "ConstantResource.SCALE_FACTOR").unwrap();
-        assert!((result.value() - 2.5).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "ConstantResource.SCALE_FACTOR").unwrap();
+        assert!((result - 2.5).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -358,11 +362,8 @@ fn static_constant_accessible_on_instance() {
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
-        let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
-        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
-
-        let result: Number = ctx.eval(lock, "obj.STATUS_OK").unwrap();
-        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "obj.MAX_SIZE").unwrap(), 1024);
+        assert_eq!(ctx.eval::<i32>(lock, "obj.STATUS_OK").unwrap(), 0);
         Ok(())
     });
 }
@@ -377,13 +378,13 @@ fn static_constant_is_read_only() {
 
         // Attempt to overwrite should silently fail (strict mode would throw).
         // The value should remain unchanged.
-        let result: Number = ctx
+        let result: u32 = ctx
             .eval(
                 lock,
                 "ConstantResource.MAX_SIZE = 9999; ConstantResource.MAX_SIZE",
             )
             .unwrap();
-        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        assert_eq!(result, 1024);
         Ok(())
     });
 }
@@ -406,12 +407,13 @@ fn static_constant_coexists_with_methods() {
         assert_eq!(result, "constant_resource");
 
         // Static constant works on constructor
-        let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
-        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        assert_eq!(
+            ctx.eval::<u32>(lock, "ConstantResource.MAX_SIZE").unwrap(),
+            1024
+        );
 
         // Static constant works on instance
-        let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
-        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "obj.MAX_SIZE").unwrap(), 1024);
         Ok(())
     });
 }
@@ -995,8 +997,12 @@ fn resource_without_constructor_throws() {
         let constructor = jsg::resource::function_template_of::<EchoResource>(lock);
         ctx.set_global(lock, "EchoResource", constructor);
 
-        let result: Result<Number, _> = ctx.eval(lock, "new EchoResource('hi')");
-        assert!(result.is_err(), "should throw illegal constructor");
+        let err = ctx
+            .eval::<jsg::Rc<EchoResource>>(lock, "new EchoResource('hi')")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "Illegal constructor");
         Ok(())
     });
 }
@@ -1078,18 +1084,18 @@ fn constructor_instanceof_works() {
 
 #[jsg_resource]
 struct Counter {
-    value: Number,
+    value: u32,
 }
 
 #[jsg_resource]
 impl Counter {
     #[jsg_constructor]
-    fn constructor(_lock: &mut jsg::Lock, value: Number) -> Self {
+    fn constructor(_lock: &mut jsg::Lock, value: u32) -> Self {
         Self { value }
     }
 
     #[jsg_method]
-    fn get_value(&self) -> Number {
+    fn get_value(&self) -> u32 {
         self.value
     }
 }
@@ -1102,8 +1108,10 @@ fn constructor_with_lock_parameter() {
         let constructor = jsg::resource::function_template_of::<Counter>(lock);
         ctx.set_global(lock, "Counter", constructor);
 
-        let result: Number = ctx.eval(lock, "new Counter(99).getValue()").unwrap();
-        assert!((result.value() - 99.0).abs() < f64::EPSILON);
+        assert_eq!(
+            ctx.eval::<u32>(lock, "new Counter(99).getValue()").unwrap(),
+            99
+        );
         Ok(())
     });
 }
@@ -1148,25 +1156,23 @@ fn constructor_with_wrong_resource_type_throws_type_error() {
 
 #[jsg_resource]
 struct Positive {
-    value: f64,
+    value: i32,
 }
 
 #[jsg_resource]
 impl Positive {
     #[jsg_constructor]
-    fn constructor(value: Number) -> jsg::Result<Self> {
-        if value.value() > 0.0 {
-            Ok(Self {
-                value: value.value(),
-            })
+    fn constructor(value: i32) -> jsg::Result<Self> {
+        if value > 0 {
+            Ok(Self { value })
         } else {
             Err(jsg::Error::new_range_error("value must be positive"))
         }
     }
 
     #[jsg_method]
-    fn get_value(&self) -> Number {
-        Number::new(self.value)
+    fn get_value(&self) -> i32 {
+        self.value
     }
 }
 
@@ -1235,14 +1241,14 @@ fn fallible_constructor_err_throws() {
         ctx.set_global(lock, "Label", label);
 
         let err = ctx
-            .eval::<Number>(lock, "new Positive(-1)")
+            .eval::<jsg::Rc<Positive>>(lock, "new Positive(-1)")
             .unwrap_err()
             .unwrap_jsg_err(lock);
         assert_eq!(err.name, ExceptionType::RangeError);
         assert_eq!(err.message, "value must be positive");
 
         let err = ctx
-            .eval::<Number>(lock, "new Label('')")
+            .eval::<jsg::Rc<Label>>(lock, "new Label('')")
             .unwrap_err()
             .unwrap_jsg_err(lock);
         assert_eq!(err.name, ExceptionType::TypeError);

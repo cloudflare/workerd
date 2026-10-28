@@ -36,6 +36,12 @@ export interface UnderlyingDefaultSource<R = unknown> {
   ) => void | Promise<void>;
   cancel?: (reason?: unknown) => void | Promise<void>;
   type?: undefined;
+  // Non-standard workerd extension: the TOTAL bytes this source promises
+  // to produce (undefined = unknown), converted as on a byte source. Used
+  // by the C++ bridge to set Content-Length instead of chunked encoding.
+  // Chunks need not be bytes, so the controller does not enforce it; body
+  // consumption rejects a delivery past it.
+  expectedLength?: bigint | number | undefined;
 }
 
 export interface UnderlyingByteSource {

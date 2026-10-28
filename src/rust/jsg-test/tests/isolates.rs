@@ -299,7 +299,7 @@ fn local_of_another_isolate_panics_in_debug_builds() {
     let b = crate::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
-        let number = jsg::Number::new(1.0).to_js(lock_a)?;
+        let number = 1_u32.to_js(lock_a)?;
         // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
         // handle of A is rejected before it reaches V8.
         unsafe {
@@ -311,9 +311,7 @@ fn local_of_another_isolate_panics_in_debug_builds() {
                     // A Smi belongs to no isolate.
                     let global = v8::TracedGlobal::new(lock_b, number);
                     let local = global.as_local(lock_b);
-                    assert!(
-                        (jsg::Number::from_js(lock_b, local)?.value() - 1.0).abs() < f64::EPSILON
-                    );
+                    assert_eq!(u32::from_js(lock_b, local)?, 1);
                     Ok(())
                 });
             });
@@ -345,7 +343,7 @@ fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
                         .try_into()
                         .unwrap();
                     assert_isolate_check_panics("calling B's function with A's object", || {
-                        let _ = func.call::<jsg::Number>(lock_b, None, &[object]);
+                        let _ = func.call::<u32>(lock_b, None, &[object]);
                     });
                     Ok(())
                 });

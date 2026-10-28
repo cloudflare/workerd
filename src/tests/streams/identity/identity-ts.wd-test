@@ -29,6 +29,9 @@ const unitTests :Workerd.Config = (
           "expose_draining_reader",
           "experimental",
         ],
+        bindings = [
+          ( name = "SELF", service = "streams-identity-ts" ),
+        ],
       )
     ),
   ],

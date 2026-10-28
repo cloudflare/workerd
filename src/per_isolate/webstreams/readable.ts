@@ -56,7 +56,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  JSONParse,
   MathMax,
   MathMin,
   Number,
@@ -79,8 +78,6 @@ const {
   SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
-  TextDecoder,
-  TextDecoderDecode,
   TypeError,
   TypedArrayCtorByName,
   TypedArrayPrototypeGetBuffer,
@@ -397,12 +394,12 @@ let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 // ReadableStream's static block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
-// The non-standard expectedLength pass-through for the DrainingReader
-// (and the C++ bridge). Chained like the other controller helpers:
-// default → the value installed by the TransformStream expectedLength
-// extension (undefined otherwise); queued byte → cached construction
-// value; native → cached construction value (joined in ReadableStream's
-// static block).
+// The non-standard expectedLength pass-through behind
+// getReadableStreamExpectedLength. Chained like the other controller
+// helpers, each reporting the value its underlying source declared,
+// cached at construction: default and queued byte (a TransformStream's
+// readable declares its transformer's), and native (joined in
+// ReadableStream's static block).
 let getControllerExpectedLength: (
   controller: AnyReadableController
 ) => bigint | undefined;
@@ -413,10 +410,6 @@ let byteControllerEnqueueBatch: (
 let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
   hook: (() => void) | undefined
-) => void;
-let setDefaultControllerExpectedLength: <R>(
-  controller: ReadableStreamDefaultController<R>,
-  length: bigint | undefined
 ) => void;
 let defaultControllerCanCloseOrEnqueue: <R>(
   controller: ReadableStreamDefaultController<R>
@@ -1696,12 +1689,11 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #core: QueuedControllerCore<R, R>;
-  // The non-standard expectedLength pass-through (undefined = unknown).
-  // Default controllers never read it from an underlying source — it is
-  // set ONLY through the internal setter, by the TransformStream
-  // constructor's workerd `expectedLength` extension, so the C++ bridge
-  // can derive Content-Length for bodies built from such transforms.
-  #expectedLength: bigint | undefined = undefined;
+  // The non-standard expectedLength the source declared (undefined =
+  // unknown): the TOTAL bytes the stream will deliver, from which the C++
+  // bridge derives a body's Content-Length. Chunks need not be bytes, so
+  // the controller does not enforce it; body consumption does.
+  #expectedLength: bigint | undefined;
 
   static {
     assertIsReadableStreamDefaultController = function <R>(
@@ -1729,17 +1721,10 @@ class ReadableStreamDefaultController<
       queuedCoreOf(controller)?.callPullIfNeeded();
     };
 
-    // Default controllers never read expectedLength from an underlying
-    // source (silently ignored if declared); it is populated only via the
-    // internal setter (the TransformStream `expectedLength` extension).
     // The byte and native arms of this chain report their own cached
     // values.
     getControllerExpectedLength = (controller) =>
       (controller as ReadableStreamDefaultController).#expectedLength;
-
-    setDefaultControllerExpectedLength = (controller, length) => {
-      controller.#expectedLength = length;
-    };
 
     defaultControllerCanCloseOrEnqueue = (controller) =>
       controller.#core.canCloseOrEnqueue();
@@ -1787,7 +1772,13 @@ class ReadableStreamDefaultController<
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
+    const {
+      cancel: cancelFn,
+      expectedLength,
+      pull: pullFn,
+      start: startFn,
+    } = sourceDict;
+    this.#expectedLength = expectedLength;
     // Strategy already extracted by caller (WebIDL conversion order).
     const core = new QueuedControllerCore<R, R>(
       stream,
@@ -2136,10 +2127,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       throw new TypeError('autoAllocateChunkSize cannot be zero');
     }
     this.#autoAllocateChunkSize = autoAllocateChunkSize;
-    // Non-standard extension, used by byte streams only: the TOTAL bytes
-    // this source promises to produce. This controller enforces the
-    // contract at enqueue/respond (overflow) and close() (underflow).
-    // Exposed to the C++ bridge via the DrainingReader.
+    // Non-standard extension: the TOTAL bytes this source promises to
+    // produce, from which the C++ bridge derives a body's Content-Length.
+    // This controller enforces the contract at enqueue/respond (overflow)
+    // and close() (underflow).
     this.#expectedLength = expectedLength;
 
     // Strategy already extracted by caller (WebIDL conversion order).
@@ -2712,20 +2703,14 @@ class ReadableStreamDrainingReader<R> {
     }
   }
 
-  // The non-standard expectedLength pass-through for the C++ bridge: the
-  // TOTAL bytes the underlying source declared it will produce
-  // (undefined = unknown → chunked encoding). A construction-time value,
-  // cached on the controller; backend-blind via the chained helper
-  // (byte/native report their cached value; a default controller the
-  // value the TransformStream expectedLength extension installed, if
-  // any). Returns undefined after release.
+  // The non-standard expectedLength: the bytes the stream still has to
+  // deliver, if known (undefined = unknown), as the C++ bridge sees it
+  // (getReadableStreamExpectedLength). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
-    const controller = getReadableStreamController(stream);
-    if (controller === undefined) return undefined;
-    return getControllerExpectedLength(controller);
+    return getReadableStreamExpectedLength(stream);
   }
 
   cancel(reason?: unknown): Promise<void> {
@@ -3591,6 +3576,10 @@ class ReadableStream<R> {
   // teed again is closed at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
+  // Whether this stream is a tee branch or detached copy (makeShell) of a
+  // stream that had been read from, or was itself such a copy, before the
+  // fork (see getReadableStreamExpectedLength).
+  #forkedAfterRead: boolean = false;
   #state: ReadableStreamState = 'readable';
   #storedError?: unknown;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
@@ -3660,9 +3649,23 @@ class ReadableStream<R> {
       return promise;
     };
 
+    // The total the stream still has to deliver, if known: the C++ bridge's
+    // length query (a body's Content-Length). A queued source's declaration
+    // is its stream's total, and the controller, shared by every tee branch,
+    // does not count what a stream has already passed. So a queued stream
+    // reports it only while nothing has been read from it, nor, for a tee
+    // branch or detached copy, before the fork. A native stream's forks are
+    // fresh streams over sources that count what is left, and a disturbed
+    // native stream cannot be pumped (extraction rejects it).
     getReadableStreamExpectedLength = <R>(stream: ReadableStream<R>) => {
       const controller = stream.#controller;
       if (controller === undefined) return undefined;
+      if (
+        !isNativeController(controller) &&
+        (stream.#disturbed || stream.#forkedAfterRead)
+      ) {
+        return undefined;
+      }
       return getControllerExpectedLength(controller);
     };
 
@@ -3904,8 +3907,10 @@ class ReadableStream<R> {
 
     // A shell carries another stream's state forward: a tee branch, or the
     // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, and shares `controller`, if any; the caller gives it a
-    // consumer when it has data to read.
+    // pending closure, records whether anything was read before the fork,
+    // and shares `controller`, if any; the caller gives it a consumer when
+    // it has data to read. Callers make shells before handing `from` off,
+    // which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -3914,6 +3919,7 @@ class ReadableStream<R> {
       shell.#state = from.#state;
       shell.#storedError = from.#storedError;
       shell.#pendingClosure = from.#pendingClosure;
+      shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
       return shell;
     };
@@ -4574,9 +4580,10 @@ class ReadableStream<R> {
 
 // Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
 // byte bounds apply: the caller's memory limit, capped at 128 MB, and the
-// stream's declared expectedLength. A breach names its cause and cancels
-// the stream with it, as the C++ AllReader does; a declaration the limit
-// cannot hold is refused before a byte is read.
+// stream's declared expectedLength, an exact total that a stream closing
+// short of also breaches. A breach names its cause and cancels the stream
+// with it, as the C++ AllReader does; a declaration the limit cannot hold
+// is refused before a byte is read.
 const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
@@ -4591,7 +4598,6 @@ function acquireReadableStreamDrainingReader<R>(
 // is allocated whole up front, so a body that meets it fills exactly one
 // block and is handed over without a further copy.
 const kCollectBlockSize = 1024 * 1024;
-const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
 
 class CollectedBytes {
   #blocks: Uint8Array[] = []; // full
@@ -4680,18 +4686,6 @@ class CollectedBytes {
     }
     return result;
   }
-
-  toText(): string {
-    if (this.#length === 0) return '';
-    const decoder = new TextDecoder();
-    const views = this.#views();
-    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
-    let result = '';
-    for (let i = 0; i < views.length; i++) {
-      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
-    }
-    return result + TextDecoderDecode(decoder);
-  }
 }
 // collectChunks() is async, so its result is resolved through a thenable
 // check; off the Object.prototype chain, a patched Object.prototype.then
@@ -4769,50 +4763,31 @@ async function collectChunks<R>(
       }
       collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) return collected;
+    if (result.done) {
+      if (declaredBinds && collected.length < bound) {
+        return failCollect(
+          reader,
+          new RangeError(
+            'stream delivered fewer bytes than its declared expectedLength'
+          )
+        );
+      }
+      return collected;
+    }
   }
 }
 
-async function consumeReadableStreamAsArrayBuffer<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<ArrayBuffer> {
-  return (await collectChunks(stream, limit)).toArrayBuffer();
-}
-
-async function consumeReadableStreamAsUint8Array<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<Uint8Array> {
-  return new Uint8Array(
-    await consumeReadableStreamAsArrayBuffer(stream, limit)
-  );
-}
-
-// The bytes behind the C++ bridge's text(), which hands them back undecoded.
-// They resolve in a null-prototype record: resolving with the ArrayBuffer
-// itself would look up its then, which a patched Object.prototype.then
-// supplies.
+// The bytes behind every body consumption of the C++ bridge (arrayBuffer(),
+// bytes(), blob(), text(), json()), which builds each result from them
+// itself. They resolve in a null-prototype record: resolving with the
+// ArrayBuffer itself would look up its then, which a patched
+// Object.prototype.then supplies.
 async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<{ buffer: ArrayBuffer }> {
   const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
   return { __proto__: null, buffer } as { buffer: ArrayBuffer };
-}
-
-async function consumeReadableStreamAsText<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<string> {
-  return (await collectChunks(stream, limit)).toText();
-}
-
-async function consumeReadableStreamAsJSON<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<unknown> {
-  return JSONParse(await consumeReadableStreamAsText(stream, limit));
 }
 
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
@@ -4924,10 +4899,7 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
-  consumeReadableStreamAsArrayBuffer,
   consumeReadableStreamAsArrayBufferRecord,
-  consumeReadableStreamAsJSON,
-  consumeReadableStreamAsUint8Array,
   detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamNativeSource,
@@ -4954,8 +4926,8 @@ module.exports = {
   ReadableStreamDrainingReader,
   // Internal operations consumed by the transform pairs (transform.ts,
   // identity.ts, compression.ts): the TransformStream cancel/flush
-  // coordination (finishPromise guard), the workerd expectedLength
-  // extension, and the interop error hook. Unreachable from user code.
+  // coordination (finishPromise guard) and the interop error hook.
+  // Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
@@ -4978,14 +4950,6 @@ module.exports = {
       byteControllerSetConsumptionHook(
         controller as ReadableByteStreamController,
         hook
-      ),
-    setControllerExpectedLength: <R>(
-      controller: object,
-      length: bigint | undefined
-    ) =>
-      setDefaultControllerExpectedLength(
-        controller as ReadableStreamDefaultController<R>,
-        length
       ),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the

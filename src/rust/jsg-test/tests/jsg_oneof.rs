@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use jsg::ExceptionType;
-use jsg::Number;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_oneof;
@@ -13,13 +12,13 @@ use jsg_macros::jsg_resource;
 #[derive(Debug, Clone, PartialEq)]
 enum StringOrNumber {
     String(String),
-    Number(Number),
+    Number(f64),
 }
 
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum NumberOrString {
-    Number(Number),
+    Number(f64),
     String(String),
 }
 
@@ -34,7 +33,7 @@ enum StringOrBool {
 #[derive(Debug, Clone, PartialEq)]
 enum ThreeTypes {
     String(String),
-    Number(Number),
+    Number(f64),
     Bool(bool),
 }
 

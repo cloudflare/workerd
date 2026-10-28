@@ -7,7 +7,6 @@
 use std::cell::Cell;
 
 use jsg::ExceptionType;
-use jsg::Number;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
@@ -20,22 +19,22 @@ struct FastResource {
 #[jsg_resource]
 impl FastResource {
     #[jsg_method]
-    pub fn add(&self, a: i32, b: i32) -> Number {
-        Number::new(f64::from(self.base) + f64::from(a) + f64::from(b))
+    pub fn add(&self, a: i32, b: i32) -> i32 {
+        self.base + a + b
     }
 
     #[jsg_method]
-    pub fn id_i32(&self, x: i32) -> Number {
-        Number::new(f64::from(x))
+    pub fn id_i32(&self, x: i32) -> i32 {
+        x
     }
 
     #[jsg_method]
-    pub fn id_u32(&self, x: u32) -> Number {
-        Number::new(f64::from(x))
+    pub fn id_u32(&self, x: u32) -> u32 {
+        x
     }
 
     #[jsg_method]
-    pub fn id_number(&self, x: Number) -> Number {
+    pub fn id_f64(&self, x: f64) -> f64 {
         x
     }
 
@@ -45,24 +44,58 @@ impl FastResource {
     }
 
     #[jsg_method]
+    pub fn id_u8(&self, x: u8) -> u8 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_i8(&self, x: i8) -> i8 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_u16(&self, x: u16) -> u16 {
+        x
+    }
+
+    #[jsg_method]
+    pub fn id_i16(&self, x: i16) -> i16 {
+        x
+    }
+
+    /// Saturates, so that the boundary values of `i32` come out of a fast callback.
+    #[jsg_method]
+    #[expect(clippy::cast_possible_truncation, reason = "saturation is the point")]
+    pub fn to_i32(&self, x: f64) -> i32 {
+        x as i32
+    }
+
+    /// Saturates, so that the boundary values of `u32` come out of a fast callback.
+    #[jsg_method]
+    #[expect(clippy::cast_possible_truncation, reason = "saturation is the point")]
+    pub fn to_u32(&self, x: f64) -> u32 {
+        u32::try_from(x as i64).unwrap_or(if x < 0.0 { 0 } else { u32::MAX })
+    }
+
+    #[jsg_method]
     pub fn touch(&self) {
         self.touched.set(self.touched.get() + 1);
     }
 
     #[jsg_method]
-    pub fn touched(&self) -> Number {
-        Number::from(self.touched.get())
+    pub fn touched(&self) -> u32 {
+        self.touched.get()
     }
 
     #[jsg_method]
-    pub fn panic_on(&self, code: i32) -> Number {
-        assert!(code <= 0, "intentional panic in a fast callback");
-        Number::new(f64::from(code))
+    pub fn panic_on(&self, code: u32) -> u32 {
+        assert!(code == 0, "intentional panic in a fast callback");
+        code
     }
 
     #[jsg_method]
-    pub fn hypot(a: Number, b: Number) -> Number {
-        Number::new(a.value().hypot(b.value()))
+    pub fn hypot(a: f64, b: f64) -> f64 {
+        a.hypot(b)
     }
 }
 
@@ -103,18 +136,47 @@ fn set_resource(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, base: i32) {
 }
 
 #[test]
+fn function_lengths_follow_compat_flag_with_fast_api_enabled() {
+    for (enabled, expected) in [(false, "0,0,0,0"), (true, "2,1,0,2")] {
+        let harness = crate::Harness::with_fast_api_and_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        });
+        harness.run_in_context(|lock, ctx| {
+            set_resource(lock, ctx, 0);
+            let lengths = ctx
+                .eval::<String>(
+                    lock,
+                    "[r.add.length, r.idI32.length, r.touch.length, FastResource.hypot.length].join()",
+                )
+                .unwrap();
+            assert_eq!(lengths, expected);
+            let (result, fast_calls) = count_fast_calls(|| {
+                ctx.eval::<i32>(
+                    lock,
+                    &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
+                )
+                .unwrap()
+            });
+            assert_eq!(result, 7);
+            assert_ne!(fast_calls, Some(0));
+            Ok(())
+        });
+    }
+}
+
+#[test]
 fn instance_method_takes_fast_path() {
     let harness = crate::Harness::with_fast_api();
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 100);
         let (result, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
             )
             .unwrap()
         });
-        assert!((result.value() - 107.0).abs() < f64::EPSILON);
+        assert_eq!(result, 107);
         assert_ne!(fast_calls, Some(0));
         Ok(())
     });
@@ -126,13 +188,13 @@ fn void_method_takes_fast_path() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (touched, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<u32>(
                 lock,
                 &format!("{}; r.touched()", optimized("", "r.touch();", "", "")),
             )
             .unwrap()
         });
-        assert!((touched.value() - 2.0).abs() < f64::EPSILON);
+        assert_eq!(touched, 2);
         assert_ne!(fast_calls, Some(0));
         Ok(())
     });
@@ -144,13 +206,13 @@ fn static_method_takes_fast_path() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (result, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<f64>(
                 lock,
                 &optimized("a, b", "return FastResource.hypot(a, b);", "1, 1", "3, 4"),
             )
             .unwrap()
         });
-        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+        assert!((result - 5.0).abs() < f64::EPSILON);
         assert_ne!(fast_calls, Some(0));
         Ok(())
     });
@@ -162,13 +224,13 @@ fn no_fast_path_unless_enabled() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 100);
         let (result, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
             )
             .unwrap()
         });
-        assert!((result.value() - 107.0).abs() < f64::EPSILON);
+        assert_eq!(result, 107);
         assert_eq!(fast_calls.unwrap_or(0), 0);
         Ok(())
     });
@@ -197,10 +259,28 @@ fn fast_and_slow_paths_agree() {
         ("idU32", "1", "-1", true),
         ("idU32", "1", "-0.5", true),
         ("idU32", "1", "NaN", true),
-        ("idNumber", "0.5", "-2.25", true),
-        ("idNumber", "0.5", "NaN", true),
-        ("idNumber", "0.5", "-Infinity", true),
-        ("idNumber", "0.5", "'2.5'", false),
+        ("idU8", "1", "255", true),
+        ("idU8", "1", "255.5", true),
+        ("idU8", "1", "256", true),
+        ("idU8", "1", "-1", true),
+        ("idU8", "1", "-0.5", true),
+        ("idU8", "1", "NaN", true),
+        ("idU8", "1", "'7'", false),
+        ("idI16", "1", "-32768", true),
+        ("idI16", "1", "-32769", true),
+        ("idI16", "1", "1.9", true),
+        ("idI16", "1", "Infinity", true),
+        ("idI8", "1", "-128", true),
+        ("idI8", "1", "-128.5", true),
+        ("idI8", "1", "128", true),
+        ("idU16", "1", "65535", true),
+        ("idU16", "1", "65536", true),
+        ("idU16", "1", "-1", true),
+        ("idF64", "0.5", "-2.25", true),
+        ("idF64", "0.5", "NaN", true),
+        ("idF64", "0.5", "-Infinity", true),
+        ("idF64", "0.5", "'2.5'", false),
+        ("idF64", "0.5", "undefined", false),
         ("idBool", "true", "false", true),
         ("idBool", "true", "0", true),
         ("idBool", "true", "'yes'", true),
@@ -240,6 +320,70 @@ fn fast_and_slow_paths_agree() {
     }
 }
 
+/// An integer comes out of a fast callback as V8's `int32_t` or `uint32_t`, which makes the
+/// same number as the slow path does, over the whole range of the type: `i32::MIN`, `u32::MAX`
+/// and the other values beyond the Smi range included.
+#[test]
+fn integer_returns_take_fast_path() {
+    let cases = [
+        ("toI32", "-(2 ** 31)", "-2147483648"),
+        ("toI32", "2 ** 31 - 1", "2147483647"),
+        ("toI32", "2 ** 40", "2147483647"),
+        ("toI32", "-7.9", "-7"),
+        ("toU32", "2 ** 32 - 1", "4294967295"),
+        ("toU32", "2 ** 31", "2147483648"),
+        ("toU32", "-5", "0"),
+        ("idU8", "255", "255"),
+        ("idU8", "0", "0"),
+        ("idI16", "-32768", "-32768"),
+        ("idI16", "32767", "32767"),
+        ("idI8", "-128", "-128"),
+        ("idI8", "127", "127"),
+        ("idU16", "65535", "65535"),
+        ("idU16", "0", "0"),
+    ];
+    for (method, arg, expected) in cases {
+        let harness = crate::Harness::with_fast_api();
+        harness.run_in_context(|lock, ctx| {
+            set_resource(lock, ctx, 0);
+            let (result, fast_calls) = count_fast_calls(|| {
+                ctx.eval::<String>(
+                    lock,
+                    &optimized(
+                        "x",
+                        &format!("const v = r.{method}(x); return typeof v + ' ' + String(v);"),
+                        "1",
+                        arg,
+                    ),
+                )
+                .unwrap()
+            });
+            assert_eq!(result, format!("number {expected}"), "{method}({arg})");
+            assert_ne!(fast_calls, Some(0), "{method}({arg})");
+            Ok(())
+        });
+    }
+}
+
+/// A fast callback passes an `f64` through as V8's `double`, so `-0` keeps its sign.
+#[test]
+fn f64_keeps_negative_zero_on_the_fast_path() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (negative, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<bool>(
+                lock,
+                &optimized("x", "return Object.is(r.idF64(x), -0);", "1", "-0"),
+            )
+            .unwrap()
+        });
+        assert!(negative);
+        assert_ne!(fast_calls, Some(0));
+        Ok(())
+    });
+}
+
 /// V8 checks the receiver against the method's signature before a fast call, so a wrong receiver
 /// goes to the slow callback, which throws.
 #[test]
@@ -248,7 +392,7 @@ fn wrong_receiver_takes_slow_path_and_throws() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (err, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized(
                     "o",
@@ -277,7 +421,7 @@ fn panic_in_fast_callback_is_an_internal_error() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (err, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<Number>(
+            ctx.eval::<u32>(
                 lock,
                 &optimized("code", "return r.panicOn(code);", "0", "1"),
             )

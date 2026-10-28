@@ -11,8 +11,18 @@
 
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_struct;
+
+#[jsg_struct]
+struct Point {
+    pub x: u32,
+}
 
 thread_local! {
+    /// Whether converting the struct in `terminate_then_return_struct` failed with a pending
+    /// error.
+    static STRUCT_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
     /// Whether converting the array in `terminate_then_return_dates` failed with a pending error.
     static DATES_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
         const { std::cell::Cell::new(None) };
@@ -73,6 +83,18 @@ impl Terminator {
         result
     }
 
+    /// Is terminated and then converts a `#[jsg_struct]`.
+    #[jsg_method]
+    fn terminate_then_return_struct<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = jsg::ToJS::to_js(Point { x: 1 }, lock);
+        STRUCT_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
+        result
+    }
+
     /// Is terminated and then wraps a new resource, which creates its wrapper.
     #[jsg_method]
     fn terminate_then_return_resource<'s>(
@@ -120,7 +142,12 @@ impl Terminator {
 /// termination reaches the harness: the script fails without a catchable exception, and neither
 /// the `catch` block nor the code after it runs.
 fn termination_survives(method: &str) {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    termination_survives_in(&crate::Harness::new(), method);
+}
+
+/// [`termination_survives`] in `harness`.
+fn termination_survives_in(harness: &crate::Harness, method: &str) {
+    harness.run_in_context(|lock, ctx| {
         ctx.set_global(lock, "obj", jsg::Rc::new(Terminator));
         let script = format!(
             "globalThis.caught = 'nothing'; globalThis.after = false;
@@ -183,6 +210,22 @@ fn returning_dates_while_terminating_keeps_the_termination() {
     DATES_CONVERSION_PENDING.set(None);
     termination_survives("terminateThenReturnDates");
     assert_eq!(DATES_CONVERSION_PENDING.get(), Some(true));
+}
+
+/// With `fast_jsg_struct`, the fields are defined as data properties, which V8 doesn't allow
+/// while execution is terminating; without it, they are set.
+#[test]
+fn returning_a_struct_while_terminating_keeps_the_termination() {
+    for fast in [false, true] {
+        STRUCT_CONVERSION_PENDING.set(None);
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        termination_survives_in(&harness, "terminateThenReturnStruct");
+        assert_eq!(
+            STRUCT_CONVERSION_PENDING.get(),
+            Some(true),
+            "fast_jsg_struct = {fast}"
+        );
+    }
 }
 
 #[test]

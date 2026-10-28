@@ -37,6 +37,17 @@ function makeConstructorBackedEchoPair() {
   return { readable, writable };
 }
 
+// Bytes, then a string chunk, which the sender writes as its UTF-8 encoding.
+function stringChunkReadable() {
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode('ab'));
+      c.enqueue('cd\u00e9');
+      c.close();
+    },
+  });
+}
+
 async function isCrossImplementationRunner(env) {
   if (env.PEER === undefined) return false;
   assert.notStrictEqual(usingTsImpl, await env.PEER.usesTypeScriptStreams());
@@ -90,6 +101,10 @@ export class Peer extends WorkerEntrypoint {
 
   inspectLength(stream) {
     return inspectLength(stream, this.env.HTTP);
+  }
+
+  makeStringChunkReadable() {
+    return stringChunkReadable();
   }
 
   // Returns a peer-created readable.
@@ -234,6 +249,20 @@ export default {
   },
 };
 
+// The sender writes a string chunk as its UTF-8 encoding, whichever implementation sends it and
+// whichever receives it (the two configs swap them).
+export const stringChunksCrossAsUtf8 = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+    assert.strictEqual(
+      await env.PEER.readFrom(stringChunkReadable()),
+      'abcd\u00e9'
+    );
+    const returned = await env.PEER.makeStringChunkReadable();
+    assert.strictEqual(await new Response(returned).text(), 'abcd\u00e9');
+  },
+};
+
 export const readableLength = {
   async test(controller, env) {
     if (!(await isCrossImplementationRunner(env))) return;
@@ -248,7 +277,8 @@ export const readableLength = {
       assert.deepStrictEqual(await inspectLength(returned, env.HTTP), expected);
     }
 
-    // Native HTTP bodies and the two queued controller types supply lengths differently.
+    // Native HTTP bodies, a TransformStream's readable, and default and byte sources each
+    // declare their length.
     const text = 'known length';
     const bytes = enc.encode(text);
     const expected = { length: String(bytes.byteLength), text };
@@ -266,6 +296,16 @@ export const readableLength = {
           .body,
       ],
       ['value', valueStream.readable],
+      [
+        'source',
+        new ReadableStream({
+          expectedLength: bytes.byteLength,
+          start(c) {
+            c.enqueue(bytes.slice());
+            c.close();
+          },
+        }),
+      ],
       [
         'bytes',
         new ReadableStream({
@@ -309,6 +349,43 @@ export const readableLength = {
       length: null,
       text: 'unsized',
     });
+
+    // A stream read from before the transfer has only part of its declared total left. A
+    // TypeScript origin sends it with no length. A C++ origin still declares the total, a defect
+    // (the streams readable suite's ledger #36), so the body the peer forwards falls short and
+    // reading it fails.
+    for (const type of [undefined, 'bytes']) {
+      const partlyRead = new ReadableStream({
+        type,
+        expectedLength: bytes.byteLength,
+        start(c) {
+          c.enqueue(bytes.slice(0, 5));
+          c.enqueue(bytes.slice(5));
+          c.close();
+        },
+      });
+      // The byte stream is read through a BYOB reader, as a default read of a C++ byte stream
+      // takes every queued chunk.
+      const byob = type === 'bytes';
+      const reader = partlyRead.getReader(byob ? { mode: 'byob' } : {});
+      const { value } = await reader.read(byob ? new Uint8Array(5) : undefined);
+      assert.strictEqual(new TextDecoder().decode(value), 'known');
+      reader.releaseLock();
+      const inspected = env.PEER.inspectLength(partlyRead);
+      if (usingTsImpl) {
+        assert.deepStrictEqual(
+          await inspected,
+          { length: null, text: ' length' },
+          String(type)
+        );
+      } else {
+        await assert.rejects(
+          inspected,
+          { message: 'Network connection lost.' },
+          String(type)
+        );
+      }
+    }
   },
 };
 

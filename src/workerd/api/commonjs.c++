@@ -75,12 +75,18 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
     }
   })();
 
+  auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
+  if (specifier == "node:process") {
+    targetPath = kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                              : "node-internal:legacy_process"_kj);
+    resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
+  }
+
   // require() is only exposed to worker bundle modules so the resolve here is only
   // permitted to require worker bundle or built-in modules. Internal modules are
   // excluded.
   auto& info =
-      JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path,
-                              jsg::ModuleRegistry::ResolveOption::DEFAULT,
+      JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path, resolveOption,
                               jsg::ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
           Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
