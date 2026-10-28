@@ -32,7 +32,7 @@ import {
   getBindingPath,
 } from './common';
 
-import { Test } from './test';
+import { Test, type Subset } from './test';
 
 // These imports introduce functions into the global scope, so that WPT tests can call them
 
@@ -138,6 +138,9 @@ class RunnerState {
   // advance across I/O, so the duration undercounts CPU-bound files.
   startTime = Date.now();
   duration = 0;
+
+  // Number of subsetTest() calls so far
+  subsetTestCount = 0;
 
   constructor(
     testUrl: URL,
@@ -601,9 +604,15 @@ class WPTSubtestResult {
   name: string;
   status: 'PASS' | 'FAIL' | 'PRECONDITION_FAILED' | 'NOTRUN';
   message?: string;
+  // Not part of wptreport. tools/cross/wpt_fyi_report.py uses it to split the file's results
+  // between its META variants, and removes it.
+  subset?: Subset;
 
   constructor(result: Test) {
     this.name = sanitize_unpaired_surrogates(result.name);
+    if (result.subset) {
+      this.subset = result.subset;
+    }
     if (result.error instanceof Error) {
       const cause = WPTSubtestResult.#unwrap(result.error);
       this.message = sanitize_unpaired_surrogates(

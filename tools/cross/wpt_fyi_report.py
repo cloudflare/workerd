@@ -11,8 +11,10 @@ each of its `// META: variant=` query strings, is a test of its own with its
 own ID on wpt.fyi. workerd runs each file once, in workerd's own global
 scope, which is none of WPT's, without a query string, and runs every
 subtest. The report labels that one run as one of WPT's globals, the first
-of --any-global that the file asks for, and reports a file whose variants
-select a configuration rather than subtests as its ?default variant. So a
+of --any-global that the file asks for, and makes up a result for each
+variant from the subtests that its query string would have selected through
+subsetTest() or subsetTestByKey(); a file whose variants select a
+configuration rather than subtests is reported as its ?default variant. So a
 file's rows on wpt.fyi approximate WPT's runs; they are not separate runs. If the harness ran each test URL the
 way WPT defines it, each variant with its query string, under a deliberately
 chosen global, the test IDs could come straight from the MANIFEST.json that
@@ -27,9 +29,9 @@ be given an ID are left out and counted on stderr:
   test configs mention;
 * multi-global (.any.js) files that ask for none of the --any-global
   globals;
-* files with META variants and no ?default one, because workerd runs every
-  variant's subtests in a single pass, and the subtests cannot be attributed
-  to a variant;
+* files with META variants that choose subtests other than through
+  subsetTest() and subsetTestByKey(), because their subtests cannot be
+  attributed to a variant;
 * files that the test config disables or omits as a whole, unless
   --keep-skipped is given;
 * the suites that src/wpt/BUILD.bazel marks `wpt_fyi = False`, because
@@ -57,6 +59,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
+from urllib.parse import unquote
 
 from wpt_logs import (
     Log,
@@ -329,7 +332,10 @@ def convert_result(
     globals_: list[str],
     keep_skipped: bool,
 ) -> Union[list[dict[str, Any]], str]:
-    """Returns the result under its wpt.fyi test ID, or why it has none."""
+    """Returns the result under its wpt.fyi test IDs, or why it has none.
+
+    A file with META variants yields one result for each variant.
+    """
 
     if result["status"] == "SKIP" and not keep_skipped:
         return "disabled or omitted file"
@@ -353,17 +359,68 @@ def convert_result(
     else:
         candidates = urls
 
-    if len(candidates) > 1:
-        # The harness runs every test with an empty query string. Tests
-        # whose variants select a configuration, such as the websockets
-        # tests' ?default, ?wss and ?wpt_flags=h2, treat an empty query
-        # like ?default. Tests whose variants select a subset of subtests
-        # run all of them, so no single variant describes the result.
-        candidates = [u for u in candidates if u.endswith("?default")]
-        if len(candidates) != 1:
-            return "has META variants"
+    if len(candidates) == 1:
+        return [with_subtests(result, candidates[0])]
 
-    return [renamed(result, candidates[0])]
+    # The harness runs every test with an empty query string. Tests whose
+    # variants select a configuration, such as the websockets tests'
+    # ?default, ?wss and ?wpt_flags=h2, treat an empty query like ?default.
+    default = [u for u in candidates if u.endswith("?default")]
+    if len(default) == 1:
+        return [with_subtests(result, default[0])]
+
+    # Variants that select a subset of the subtests, which the harness runs
+    # all of, get the subtests they would have run.
+    queries = [SubsetQuery.parse(url.partition("?")[2]) for url in candidates]
+    if None in queries:
+        return "has META variants that choose subtests by other means"
+    return [
+        with_subtests(result, url, query)
+        for url, query in zip(candidates, queries, strict=False)
+    ]
+
+
+@dataclass
+class SubsetQuery:
+    """Which subtests a variant's query string runs.
+
+    This follows common/subset-tests.js and common/subset-tests-by-key.js in
+    WPT: `?A-B` runs the subsetTest() calls numbered A to B, and
+    `?include=RE` or `?exclude=RE` the subsetTestByKey() calls whose key
+    matches, or doesn't match, RE.
+    """
+
+    start: float = 1
+    end: float = float("inf")
+    key: Optional[re.Pattern[str]] = None
+    exclude: bool = False
+
+    @staticmethod
+    def parse(query: str) -> Optional["SubsetQuery"]:
+        """Parses a query string, or returns None if neither script understands it."""
+
+        match = re.search(r"(?:^|&)(\d+)-(\d+|last)(?:&|$)", query)
+        if match:
+            end = float("inf") if match[2] == "last" else int(match[2])
+            return SubsetQuery(start=int(match[1]), end=end)
+        match = re.search(r"(?:^|&)(include|exclude)=([^&]+)?", query)
+        if match:
+            key = re.compile(f"^{unquote(match[2] or '')}$")
+            return SubsetQuery(key=key, exclude=match[1] == "exclude")
+        return None
+
+    def runs(self, subset: Optional[dict[str, Any]]) -> bool:
+        """Whether the variant runs a subtest, given the subset the harness
+        recorded for it. Subtests created outside subsetTest() and
+        subsetTestByKey() run in every variant."""
+
+        if not subset:
+            return True
+        if "index" in subset:
+            return self.start <= subset["index"] <= self.end
+        if self.key is None or not subset.get("key"):
+            return True
+        return bool(self.key.search(subset["key"])) != self.exclude
 
 
 # Fields that the harness adds to results for this program, which are not
@@ -371,11 +428,23 @@ def convert_result(
 HARNESS_FIELDS = {"globals", "variants"}
 
 
-def renamed(result: dict[str, Any], test: str) -> dict[str, Any]:
-    """Returns a copy of the result named `test`, without the harness's fields."""
+def with_subtests(
+    result: dict[str, Any], test: str, query: Optional[SubsetQuery] = None
+) -> dict[str, Any]:
+    """Returns a copy of the result named `test`, with the subtests that
+    `query` runs, or all of them without one.
 
+    The fields that the harness adds, including the subtests' `subset`, are
+    removed.
+    """
+
+    subtests = [
+        {k: v for k, v in subtest.items() if k != "subset"}
+        for subtest in result["subtests"]
+        if query is None or query.runs(subtest.get("subset"))
+    ]
     fields = {k: v for k, v in result.items() if k not in HARNESS_FIELDS}
-    return {**fields, "test": test}
+    return {**fields, "test": test, "subtests": subtests}
 
 
 if __name__ == "__main__":

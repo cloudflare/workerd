@@ -46,6 +46,11 @@ declare global {
 
 type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
 
+// Identifies a subtest created through subsetTest() or subsetTestByKey(), which WPT uses to split a
+// file's subtests between its META variants: `index` is the subsetTest() call's 1-based position,
+// which ?A-B variants select, and `key` is the key that ?include= and ?exclude= variants match.
+export type Subset = { index: number } | { key: string };
+
 /**
  * A single subtest. A Test is not constructed directly but via the
  * :js:func:`test`, :js:func:`async_test` or :js:func:`promise_test` functions.
@@ -70,6 +75,9 @@ export class Test {
   cleanup_callbacks: UnknownFunc[] = [];
 
   error: TestErrorType = undefined;
+
+  // Set if this test was created through subsetTest() or subsetTestByKey()
+  subset?: Subset;
 
   // If this test is asynchronous, stores a promise that resolves on test completion
   promise?: Promise<void>;

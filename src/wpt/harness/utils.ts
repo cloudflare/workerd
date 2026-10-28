@@ -25,6 +25,7 @@
 
 import crypto from 'node:crypto';
 import { type UnknownFunc, type HostInfo, getHostInfo } from './common';
+import { type Subset } from './test';
 
 declare global {
   var GLOBAL: {
@@ -86,15 +87,31 @@ globalThis.GLOBAL = {
 
 globalThis.done = (): undefined => undefined;
 
+// subsetTestByKey() and subsetTest() let a browser run only some of a file's subtests, chosen by
+// the query string of one of the file's META variants. We always run all the subtests, and record
+// which subset each belongs to so that results can be reported per variant.
+function runSubset(
+  subset: Subset,
+  testFunc: (...args: unknown[]) => unknown,
+  args: unknown[]
+): unknown {
+  const subtests = globalThis.state.subtests;
+  const first = subtests.length;
+  try {
+    return testFunc(...args);
+  } finally {
+    for (const subtest of subtests.slice(first)) {
+      subtest.subset ??= subset;
+    }
+  }
+}
+
 globalThis.subsetTestByKey = (
-  _key: string,
+  key: string,
   testFunc: (...args: unknown[]) => unknown,
   ...args: unknown[]
 ): unknown => {
-  // This function is designed to allow selecting only certain tests when
-  // running in a browser, by changing the query string. We'll always run
-  // all the tests.
-  return testFunc(...args);
+  return runSubset({ key }, testFunc, args);
 };
 
 // Used by idlharness.js to determine if a subtest should be run.
@@ -105,12 +122,8 @@ globalThis.subsetTest = (
   testFunc: (...args: unknown[]) => void,
   ...args: unknown[]
 ): void => {
-  // This function is designed to allow selecting only certain tests when
-  // running in a browser, by changing the query string. We'll always run
-  // all the tests.
-
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
-  return testFunc(...args);
+  const index = ++globalThis.state.subsetTestCount;
+  runSubset({ index }, testFunc, args);
 };
 
 /**
