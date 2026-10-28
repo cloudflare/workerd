@@ -27,7 +27,6 @@
 #include <workerd/api/node/node.h>
 #include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>

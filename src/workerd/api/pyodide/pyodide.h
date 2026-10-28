@@ -168,8 +168,6 @@ class PyodideMetadataReader: public jsg::Object {
     kj::String mainModule;
     PythonModuleInfo moduleInfo;
     kj::String pyodideVersion;
-    kj::String packagesVersion;
-    kj::String packagesLock;
     bool isWorkerdFlag;
     bool isTracingFlag;
     bool snapshotToDisk;
@@ -180,8 +178,6 @@ class PyodideMetadataReader: public jsg::Object {
         kj::Array<kj::String> names,
         kj::Array<kj::Array<kj::byte>> contents,
         kj::String pyodideVersion,
-        kj::String packagesVersion,
-        kj::String packagesLock,
         IsWorkerd isWorkerd,
         IsTracing isTracing,
         SnapshotToDisk snapshotToDisk,
@@ -190,8 +186,6 @@ class PyodideMetadataReader: public jsg::Object {
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           pyodideVersion(kj::mv(pyodideVersion)),
-          packagesVersion(kj::mv(packagesVersion)),
-          packagesLock(kj::mv(packagesLock)),
           isWorkerdFlag(isWorkerd),
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
@@ -258,14 +252,6 @@ class PyodideMetadataReader: public jsg::Object {
     return state->pyodideVersion;
   }
 
-  kj::StringPtr getPackagesVersion() {
-    return state->packagesVersion;
-  }
-
-  kj::StringPtr getPackagesLock() {
-    return state->packagesLock;
-  }
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   // We call this during Python setup with the wasm memory and the addresses of the signal clock and
@@ -294,8 +280,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(getPyodideVersion);
-    JSG_METHOD(getPackagesVersion);
-    JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
@@ -524,8 +508,6 @@ class SimplePythonLimiter: public jsg::Object {
     JSG_METHOD(finishStartup);
   }
 };
-
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 // Computes the subresource-integrity-style checksum ("sha256-<base64>") of the given bytes.
 kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes);
