@@ -177,7 +177,8 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 
 ### Configuration System
 
-- Uses **Cap'n Proto** for configuration files (`.capnp` format)
+- Uses **Cap'n Proto** for configuration files (`.capnp` format); a `wrangler.json(c)` is also
+  accepted and translated (`src/workerd/server/cli/wrangler.rs`)
 - Main schema: `src/workerd/server/workerd.capnp`
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model

@@ -16,6 +16,7 @@ mod config;
 mod process;
 mod socket_fd;
 mod watch;
+mod wrangler;
 
 use std::fmt::Display;
 use std::io::IsTerminal;
@@ -350,6 +351,16 @@ fn load_config<T: CommandFactory>(
     if config_file == "-" {
         usage_error::<T>("-: Reading config from stdin is only allowed with --binary.");
     }
+    if wrangler::is_wrangler_config(&config_file) {
+        if let Some(name) = const_name {
+            usage_error::<T>(format!("{name}: A wrangler config has no named constants."));
+        }
+        if !std::path::Path::new(&config_file).is_file() {
+            usage_error::<T>(format!("{config_file}: No such file."));
+        }
+        return wrangler::load(&config_file, process)
+            .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
+    }
 
     let compiled = ffi::compile_config(
         &config_file,
@@ -363,7 +374,13 @@ fn load_config<T: CommandFactory>(
             .unwrap_or_else(|error| usage_error::<T>(format!("{config_file}: {error}")));
     }
 
-    for error in &compiled.errors {
+    config_errors(&compiled.errors, process)
+}
+
+/// Prints errors in the config. Without `--watch` they end the process; with it the process waits
+/// for the files to change and reloads.
+fn config_errors(errors: &[impl Display], process: &Process) -> ! {
+    for error in errors {
         eprintln!("{error}");
     }
     let Some(watcher) = process.watcher() else {

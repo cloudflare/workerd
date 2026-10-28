@@ -216,6 +216,8 @@ pub struct ConfigFileArgs {
     #[arg(short, long)]
     pub binary: bool,
 
+    /// A Cap'n Proto config (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, whose `main` is
+    /// bundled with esbuild as `wrangler` does.
     #[arg(value_name = "config-file")]
     pub config_file: String,
 }
