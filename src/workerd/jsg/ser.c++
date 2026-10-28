@@ -585,9 +585,12 @@ v8::Maybe<bool> writeNativeError(
     if (!keys->Get(context, i).ToLocal(&key)) return v8::Nothing<bool>();
     // The name and message are written above.
     if (key->StrictEquals(nameKey) || key->StrictEquals(messageKey)) continue;
+    // A data property rather than Set(), as when reading, so that each property is copied as it
+    // is: Set() would run a setter that Object.prototype has for the key instead, and an own
+    // `__proto__` would replace the object's prototype.
     v8::Local<v8::Value> value;
     if (!error->Get(context, key).ToLocal(&value) ||
-        properties->Set(context, key, value).IsNothing()) {
+        properties->CreateDataProperty(context, key.As<v8::Name>(), value).IsNothing()) {
       return v8::Nothing<bool>();
     }
   }

@@ -62,7 +62,8 @@ export const errorDeserPrototypeSetterRegression = {
 };
 
 // Also verify the serialization side: when the serializer copies own
-// properties into a temporary plain object, it can safely use Set()
+// properties into a temporary plain object, it defines them as data
+// properties, so no Object.prototype setter runs and each property is kept.
 export const errorSerPrototypeSetterRegression = {
   test() {
     let setterInvoked = false;
@@ -85,13 +86,18 @@ export const errorSerPrototypeSetterRegression = {
         configurable: true,
       });
 
-      // This exercises the serialization path (ser.c++:286) where own
+      // This exercises the serialization path (writeNativeError()) where own
       // properties are copied to a temporary plain object.
-      const _clone = structuredClone(err);
+      const clone = structuredClone(err);
 
+      strictEqual(
+        Object.getOwnPropertyDescriptor(clone, 'serprop')?.value,
+        99,
+        'own data property serprop should round-trip with value 99'
+      );
       ok(
-        setterInvoked,
-        'Object.prototype setter must be invoked during serialization'
+        !setterInvoked,
+        'Object.prototype setter must not be invoked during serialization'
       );
     } finally {
       delete Object.prototype.serprop;
