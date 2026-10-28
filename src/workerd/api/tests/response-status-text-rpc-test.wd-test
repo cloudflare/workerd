@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The same worker runs twice, with and without pedantic_wpt, and each instance's test() receives
+# Responses created by the other.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "pedantic",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "rpc", "pedantic_wpt"],
+        bindings = [
+          (name = "peer", service = (name = "non-pedantic", entrypoint = "Peer")),
+          (name = "peerIsPedantic", json = "false"),
+        ],
+      )
+    ),
+    ( name = "non-pedantic",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        bindings = [
+          (name = "peer", service = (name = "pedantic", entrypoint = "Peer")),
+          (name = "peerIsPedantic", json = "true"),
+        ],
+      )
+    ),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "response-status-text-rpc-test.js")
+];

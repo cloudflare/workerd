@@ -1096,8 +1096,13 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
         statusCode == 101, RangeError, "Responses with a WebSocket must have status code 101.");
   }
 
-  KJ_IF_SOME(s, statusText) {
-    validateStatusText(js, s);
+  // A status message copied from another Response is not validated again: it was accepted when that
+  // Response was created, possibly under different rules, by a Worker with different compatibility
+  // flags or from a network response.
+  if (init.is<InitializerDict>()) {
+    KJ_IF_SOME(s, statusText) {
+      validateStatusText(js, s);
+    }
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1196,6 +1201,10 @@ jsg::Ref<Response> Response::json_(
   // field is also an optional kj::OneOf that can be either a dict or a jsg::Ref<Headers>.
   // We have to deal with all of the various possibilities here to set the content-type
   // appropriately.
+  //
+  // A status message copied from another Response is set after construction so that, as in the
+  // constructor, it is not validated again.
+  kj::Maybe<kj::String> copiedStatusText;
   KJ_IF_SOME(init, maybeInit) {
     KJ_SWITCH_ONEOF(init) {
       KJ_CASE_ONEOF(dict, InitializerDict) {
@@ -1206,19 +1215,17 @@ jsg::Ref<Response> Response::json_(
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
-        jsg::Optional<kj::String> statusText;
         if (FeatureFlags::get(js).getPedanticWpt()) {
-          statusText = res->statusText.clone();
+          copiedStatusText = res->statusText.clone();
         } else {
           auto otherStatusText = res->getStatusText(js);
           if (otherStatusText != nullptr &&
               otherStatusText != defaultStatusText(res->statusCode)) {
-            statusText = kj::str(otherStatusText);
+            copiedStatusText = kj::str(otherStatusText);
           }
         }
         auto newInit = InitializerDict{
           .status = res->statusCode,
-          .statusText = kj::mv(statusText),
           .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
           .cf = res->cf.getRef(js),
           .encodeBody =
@@ -1238,7 +1245,11 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  auto response = constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  KJ_IF_SOME(statusText, copiedStatusText) {
+    response->statusText = kj::mv(statusText);
+  }
+  return response;
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
@@ -1455,7 +1466,13 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     }
   }
 
-  return Response::constructor(js, kj::mv(body), kj::mv(init));
+  // The sending Worker validated the status message under its own compatibility flags, which may be
+  // stricter or looser than this Worker's, so it is restored without being validated again.
+  kj::Maybe<kj::String> statusText = kj::mv(init.statusText);
+  init.statusText = kj::none;
+  auto response = Response::constructor(js, kj::mv(body), kj::mv(init));
+  response->statusText = kj::mv(statusText);
+  return response;
 }
 
 // =======================================================================================

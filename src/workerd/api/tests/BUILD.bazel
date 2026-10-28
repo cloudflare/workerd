@@ -953,6 +953,11 @@ wd_test(
 )
 
 wd_test(
+    src = "response-status-text-rpc-test.wd-test",
+    data = ["response-status-text-rpc-test.js"],
+)
+
+wd_test(
     src = "response-status-text-test.wd-test",
     data = [
         "response-status-text-target.js",
