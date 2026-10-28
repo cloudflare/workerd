@@ -59,6 +59,7 @@ Checks: >
   readability-delete-null-pointer,
   readability-duplicate-include,
   readability-enum-initial-value,
+  readability-inconsistent-ifelse-braces,
   readability-redundant-*,
   -readability-redundant-inline-specifier,
   -readability-redundant-parentheses,

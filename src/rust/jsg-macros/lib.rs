@@ -14,6 +14,7 @@
 //! | `#[jsg_static_constant]` | const inside impl | Expose a numeric constant on both constructor and prototype  |
 //! | `#[jsg_property]`        | fn inside impl   | Register a resource accessor property (getter/setter)          |
 //! | `#[jsg_inspect_property]` | fn inside impl  | Register a debug-inspect-only symbol property                  |
+//! | `#[jsg_wildcard_property]` | fn inside impl | Answer reads of any property the object does not have          |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
 //!
@@ -24,6 +25,7 @@
 mod resource;
 mod trace;
 mod utils;
+mod wildcard;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -36,24 +38,30 @@ use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
+use trace::generate_trace_statements;
 use utils::elide_named_lifetimes;
 use utils::error;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
 use utils::fast_api_signature;
 use utils::is_lock_ref;
+use utils::is_named_this;
 use utils::is_option_type;
+use utils::is_rc_self;
 use utils::is_result_type;
 use utils::snake_to_camel;
+use utils::this_param;
 
 // =============================================================================
 // #[jsg_struct]
 // =============================================================================
 
-/// Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS`
+/// Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, `jsg::FromJS` and `jsg::Traced`
 /// implementations for a plain data struct.
 ///
-/// Only `pub` fields are projected into the JavaScript object.
+/// Only `pub` fields are projected into the JavaScript object. Each converts with its `ToJS`
+/// impl, and a field whose conversion fails fails the struct's conversion with that error.
+/// The generated `Traced` impl visits every field, so a field can be a `jsg::Rc<R>`.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata (used in diagnostics/type reporting), not to define a JS class.
 #[proc_macro_attribute]
@@ -67,10 +75,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(err) => return err,
     };
 
-    let mut field_assignments = Vec::new();
+    let mut to_js_fields = Vec::new();
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
+    let traced_impl = struct_traced_impl(name, &named_fields);
 
     for field in &named_fields {
         // Only public fields are projected into JavaScript objects.
@@ -86,16 +95,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let optional = is_option_type(field_type);
         all_optional &= optional;
 
-        // Like C++ JSG, an absent optional field is omitted, not undefined.
-        let set = quote! {
-            let value = jsg::v8::ToLocalValue::to_local(value, lock);
-            obj.set(lock, #field_name_str, value);
-        };
-        field_assignments.push(if optional {
-            quote! { if let Some(value) = &this.#field_name { #set } }
-        } else {
-            quote! { { let value = &this.#field_name; #set } }
-        });
+        to_js_fields.push((field_name, field_name_str.clone(), optional));
         // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
             let prop = obj.get(lock, #field_name_str)?;
@@ -117,6 +117,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let to_js_body = to_js_fn_body(&to_js_fields);
+
     quote! {
         #input
 
@@ -129,16 +131,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl<'s> jsg::ToJS<'s> for #name {
-            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
-                // TODO(soon): Use a precached ObjectTemplate instance to create the object,
-                // similar to how C++ JSG optimizes object creation. This would avoid recreating
-                // the object shape on every wrap() call and improve performance.
-                {
-                    let this = self;
-                    let obj = lock.new_object();
-                    #(#field_assignments)*
-                    obj.into()
-                }
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
+                #to_js_body
             }
         }
 
@@ -153,12 +147,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if value.is_null() || value.is_undefined() {
                     #empty
                 }
-                if !value.is_object() {
+                let Ok(obj) = jsg::v8::Local::<jsg::v8::Object>::try_from(value) else {
                     return Err(jsg::Error::new_type_error(
                         format!("Expected object but got {}", value.type_of(lock))
                     ));
-                }
-                let obj: jsg::v8::Local<'s, jsg::v8::Object> = value.into();
+                };
                 #(#field_extractions)*
                 Ok(Self { #(#field_names),* })
             }
@@ -173,14 +166,83 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl jsg::Struct for #name {}
 
+        #traced_impl
+    }
+    .into()
+}
+
+/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field and holds GC
+/// references when a field does.
+fn struct_traced_impl(
+    name: &syn::Ident,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let field_types = fields.iter().map(|field| &field.ty);
+    let trace_statements = generate_trace_statements(fields);
+    quote! {
         #[automatically_derived]
         impl jsg::Traced for #name {
             fn holds_gc_references() -> bool {
-                false
+                false #(|| <#field_types as jsg::Traced>::holds_gc_references())*
+            }
+
+            fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                let _ = visitor;
+                #(#trace_statements)*
             }
         }
     }
-    .into()
+}
+
+/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
+/// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
+/// `fast_jsg_struct` flag.
+fn to_js_fn_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
+    // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
+    let data_properties = fields.iter().map(|(field_name, js_name, optional)| {
+        let value = if *optional {
+            quote! {
+                match this.#field_name {
+                    Some(value) => jsg::ToJS::to_js(value, lock)?,
+                    None => lock.undefined(),
+                }
+            }
+        } else {
+            quote! { jsg::ToJS::to_js(this.#field_name, lock)? }
+        };
+        quote! { properties.push((#js_name, #value)); }
+    });
+    // Set() skips an absent optional field rather than setting it to undefined.
+    let field_sets = fields.iter().map(|(field_name, js_name, optional)| {
+        let set = quote! {
+            let value = jsg::ToJS::to_js(value, lock)?;
+            obj.set(lock, #js_name, value)?;
+        };
+        if *optional {
+            quote! { if let Some(value) = this.#field_name { #set } }
+        } else {
+            quote! { { let value = this.#field_name; #set } }
+        }
+    });
+    quote! {
+        let this = self;
+        if lock.feature_flags().get_fast_jsg_struct() {
+            // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
+            // no setter a script put on Object.prototype runs.
+            // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather
+            // than recreating its shape on every conversion.
+            #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
+            let mut properties = ::std::vec::Vec::new();
+            #(#data_properties)*
+            Ok(jsg::v8::Object::with_data_properties(lock, &properties)?.into())
+        } else {
+            // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
+            // Object.prototype; what it throws is passed on.
+            let obj = lock.new_object();
+            #(#field_sets)*
+            Ok(obj.into())
+        }
+    }
 }
 
 // =============================================================================
@@ -196,7 +258,10 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The first typed parameter may be `&mut Lock` (or `&mut jsg::Lock`) to receive
 /// the isolate lock directly; it is not counted as a JavaScript argument.
 ///
-/// Instance methods take `&self`; any other receiver is a compile error.
+/// Instance methods take `&self`, or `this: jsg::Rc<Self>` as their first parameter in
+/// place of it, which receives a `jsg::Rc` of the resource the method was called on, like
+/// C++ JSG's `JSG_THIS`. Any other receiver is a compile error, and so is a `this` parameter
+/// anywhere else or of another type.
 ///
 /// Use `#[jsg_method(name = "jsName")]` to override the default `camelCase`
 /// conversion of the Rust function name.
@@ -213,7 +278,7 @@ pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[derive(Clone, Copy)]
 enum Callback {
     Function,
-    /// `AccessorNameGetterCallback`, for instance properties.
+    /// `AccessorNameGetterCallback`, for instance and lazy instance properties.
     Getter,
     /// `AccessorNameSetterCallbackV2`, for instance properties.
     Setter,
@@ -240,13 +305,25 @@ fn callback_with_instance(
     let fn_sig = &input_fn.sig;
     let fn_block = &input_fn.block;
 
-    // Methods with a `&self` receiver become instance methods on the prototype.
-    // Methods without a receiver become static methods on the constructor.
+    // Methods with a `&self` receiver, or a `this: jsg::Rc<Self>` parameter in its place, become
+    // instance methods on the prototype. Methods with neither become static methods on the
+    // constructor.
     let callback_kinds = callback_names(fn_name, kind, instance_kind);
     if let Some(error) = receiver_error(&input_fn, callback_kinds.clone()) {
         return error.into();
     }
+    if let Some(error) = this_error(&input_fn, callback_kinds.clone()) {
+        return error.into();
+    }
     let has_self = fn_sig.receiver().is_some();
+    let has_this = this_param(fn_sig).is_some();
+    let receiver = if has_self {
+        Receiver::SelfRef
+    } else if has_this {
+        Receiver::This
+    } else {
+        Receiver::None
+    };
 
     let params: Vec<_> = fn_sig
         .inputs
@@ -257,20 +334,24 @@ fn callback_with_instance(
         })
         .collect();
 
-    // Check if the first typed parameter is `&mut Lock` — if so, pass `&mut lock`
-    // directly instead of extracting it from JS args (like C++ jsg::Lock&).
-    let has_lock_param = params.first().is_some_and(|ty| is_lock_ref(ty));
+    // The parameters the callback fills in itself come first: `this`, then `&mut Lock` (like
+    // C++ jsg::Lock&). Only the parameters after them are JavaScript arguments.
+    let this_params = usize::from(has_this);
+    let has_lock_param = params.get(this_params).is_some_and(|ty| is_lock_ref(ty));
+    let injected_params = this_params + usize::from(has_lock_param);
 
     let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
         .iter()
         .enumerate()
         .map(|(i, ty)| {
-            // First param is &mut Lock — pass the callback's lock directly.
-            if i == 0 && has_lock_param {
+            if i == 0 && has_this {
+                return (quote! {}, quote! { this });
+            }
+            if i == this_params && has_lock_param {
                 return (quote! {}, quote! { &mut *lock });
             }
 
-            let js_index = i - usize::from(has_lock_param);
+            let js_index = i - injected_params;
             let arg = syn::Ident::new(&format!("arg{js_index}"), fn_name.span());
             let unwrap = unwrap_argument(ty, &arg, js_index, method_name.as_deref());
             // For reference types (like &str), FromJS returns an owned type (String),
@@ -288,53 +369,25 @@ fn callback_with_instance(
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
 
-    let result_handling = if is_result {
+    let conversion = if is_result {
         quote! {
             match result {
-                Ok(value) => args.set_return_value(jsg::ToJS::to_js(value, lock)),
-                Err(err) => lock.throw_exception(&err.into()),
+                Ok(value) => jsg::ToJS::to_js(value, lock),
+                Err(err) => Err(err.into()),
             }
         }
     } else {
-        quote! {
-            args.set_return_value(jsg::ToJS::to_js(result, lock));
+        quote! { jsg::ToJS::to_js(result, lock) }
+    };
+    let result_handling = quote! {
+        let converted: ::std::result::Result<_, jsg::Error> = #conversion;
+        match converted {
+            Ok(value) => args.set_return_value(value),
+            Err(err) => lock.throw_exception(&err),
         }
     };
 
-    let invocation = if has_self {
-        quote! {
-            let this = args.this();
-            // For instance methods, `v8::Signature` (applied in
-            // `create_resource_template`, ffi.c++) makes V8 throw
-            // `TypeError: Illegal invocation` *before* this callback runs on a
-            // wrong receiver, so the mismatch below is unreachable for them.
-            // Property getters/setters (`#[jsg_property]` /
-            // `#[jsg_inspect_property]`) reuse this same code but are registered
-            // WITHOUT a signature, so a wrong receiver (e.g.
-            // `Object.getOwnPropertyDescriptor(proto, p).get.call({})`) *can*
-            // reach here. Surface that as a JS `TypeError` — matching V8's own
-            // "Illegal invocation" — instead of panicking (a panic here is
-            // caught by `catch_panic`, but as an *internal* error + execution
-            // termination, which is the wrong shape for tenant-triggerable input).
-            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock, this) else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
-                return;
-            };
-            let Some(resource) = wrappable.resolve_resource::<Self>() else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
-                return;
-            };
-            // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
-            // during the call. Resources are only ever borrowed shared, so this may alias the
-            // borrow of a method that called into JavaScript, or of GC tracing.
-            let self_: &Self = unsafe { resource.as_ref() };
-            let result = self_.#fn_name(#(#arg_exprs),*);
-        }
-    } else {
-        quote! {
-            let result = Self::#fn_name(#(#arg_exprs),*);
-        }
-    };
+    let invocation = invocation(fn_name, receiver, &arg_exprs);
 
     // Comments do not survive into the expansion, so the SAFETY comment on the `unsafe` block
     // that borrows the resource cannot satisfy the lint.
@@ -363,6 +416,77 @@ fn callback_with_instance(
         #(#callbacks)*
     }
     .into()
+}
+
+/// The statements that call `fn_name` with `arg_exprs` and bind the call's `result`: on the
+/// resource of `this` for a `&self` method, with a `jsg::Rc` of it for a `this` method, and as
+/// an associated function otherwise.
+fn invocation(
+    fn_name: &syn::Ident,
+    receiver: Receiver,
+    arg_exprs: &[proc_macro2::TokenStream],
+) -> proc_macro2::TokenStream {
+    match receiver {
+        Receiver::SelfRef => quote! {
+            let this = args.this();
+            // For instance methods, `v8::Signature` (applied in
+            // `create_resource_template`, ffi.c++) makes V8 throw
+            // `TypeError: Illegal invocation` *before* this callback runs on a
+            // wrong receiver, so the mismatch below is unreachable for them.
+            // Property getters/setters (`#[jsg_property]` /
+            // `#[jsg_inspect_property]`) reuse this same code but are registered
+            // WITHOUT a signature, so a wrong receiver (e.g.
+            // `Object.getOwnPropertyDescriptor(proto, p).get.call({})`) *can*
+            // reach here. Surface that as a JS `TypeError` — matching V8's own
+            // "Illegal invocation" — instead of panicking (a panic here is
+            // caught by `catch_panic`, but as an *internal* error + execution
+            // termination, which is the wrong shape for tenant-triggerable input).
+            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock, this) else {
+                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                return;
+            };
+            let Some(resource) = wrappable.resolve_resource::<Self>() else {
+                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                return;
+            };
+            // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
+            // during the call. Resources are only ever borrowed shared, so this may alias the
+            // borrow of a method that called into JavaScript, or of GC tracing.
+            let self_: &Self = unsafe { resource.as_ref() };
+            let result = self_.#fn_name(#(#arg_exprs),*);
+        },
+        Receiver::This => quote! {
+            // Converts the JS `this` with `FromJS`, which only succeeds for a wrapper of this
+            // resource type, so the `jsg::Rc` always points into jsg's own allocation. Any
+            // other `this` throws the same `TypeError` as for `&self` methods.
+            let this = match <jsg::Rc<Self> as jsg::FromJS<'_>>::try_from_js(lock, args.this()) {
+                Ok(Some(this)) => this,
+                Ok(None) => {
+                    lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
+                    return;
+                }
+                Err(err) => {
+                    lock.throw_exception(&err);
+                    return;
+                }
+            };
+            let result = Self::#fn_name(#(#arg_exprs),*);
+        },
+        Receiver::None => quote! {
+            let result = Self::#fn_name(#(#arg_exprs),*);
+        },
+    }
+}
+
+/// How a generated callback reaches the method's resource, if the method has one.
+#[derive(Clone, Copy)]
+enum Receiver {
+    /// `&self`: the callback borrows the resource of `this`.
+    SelfRef,
+    /// `this: jsg::Rc<Self>`: the callback makes a `jsg::Rc` of the resource of `this`.
+    This,
+    /// A static method.
+    None,
 }
 
 /// The callbacks generated for `fn_name`: `{fn_name}_callback` of shape `kind`, and
@@ -504,19 +628,46 @@ fn receiver_error(
         "a resource method takes `&self`: JavaScript can call into the resource while the \
          method runs, so the method cannot have exclusive access. Keep state that methods \
          change in `Cell` or `RefCell` fields",
-    )
-    .to_compile_error();
-    // The callbacks are still emitted so that their registration in `#[jsg_resource]` adds no
-    // errors of its own, and so is the method, so that its callers add none.
+    );
+    Some(reject(input_fn, callbacks, &error))
+}
+
+/// Rejects a `this` parameter that is not the first parameter of a method without `&self`, or
+/// whose type is not `jsg::Rc<Self>`. The parameter is the resource the method was called on,
+/// and a method has one receiver.
+fn this_error(
+    input_fn: &ItemFn,
+    callbacks: impl Iterator<Item = (Callback, syn::Ident)>,
+) -> Option<proc_macro2::TokenStream> {
+    let named_this = input_fn.sig.inputs.iter().find(|arg| is_named_this(arg))?;
+    if this_param(&input_fn.sig).is_some_and(|param| is_rc_self(&param.ty)) {
+        return None;
+    }
+    let error = syn::Error::new_spanned(
+        named_this,
+        "`this` must be the first parameter, instead of `&self`, and have type `jsg::Rc<Self>`",
+    );
+    Some(reject(input_fn, callbacks, &error))
+}
+
+/// Emits `error` for a method the macro rejects, along with the method itself and stubs of its
+/// callbacks, so that neither the method's callers nor its registration in `#[jsg_resource]`
+/// add errors of their own.
+fn reject(
+    input_fn: &ItemFn,
+    callbacks: impl Iterator<Item = (Callback, syn::Ident)>,
+    error: &syn::Error,
+) -> proc_macro2::TokenStream {
+    let error = error.to_compile_error();
     let callbacks = callbacks.map(|(kind, callback_name)| {
         let (raw_callback, _) = callback_constructor(kind);
         quote! { fn #callback_name() -> #raw_callback { unreachable!() } }
     });
-    Some(quote! {
+    quote! {
         #error
         #input_fn
         #(#callbacks)*
-    })
+    }
 }
 
 // =============================================================================
@@ -532,7 +683,7 @@ fn receiver_error(
 /// every named field.
 ///
 /// **On an impl block** — emits `jsg::Resource::members(flags)` registering every
-/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
+/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
 /// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
@@ -613,15 +764,17 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `#[jsg_resource]` type.
 ///
 /// Supported arguments:
-/// - `prototype` or `instance` (optional, defaults to `prototype`)
+/// - `prototype`, `instance` or `lazy_instance` (optional, defaults to `prototype`)
 /// - `name = "..."` for an explicit JS property name
-/// - `readonly` to require no matching setter
+/// - `readonly` to require no matching setter; on a `lazy_instance` property it
+///   also makes the stored value read-only
 ///
 /// Methods must start with `get_` (getter) or `set_` (setter). If `name` is
 /// omitted, the prefix is stripped and the remainder is converted
 /// `snake_case` -> `camelCase`.
 ///
-/// Getters and setters take `&self`; any other receiver is a compile error.
+/// Getters and setters take `&self`, or `this: jsg::Rc<Self>` as their first parameter in
+/// place of it; any other receiver is a compile error.
 #[proc_macro_attribute]
 pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Registration as a Member is handled by #[jsg_resource] on the enclosing
@@ -644,12 +797,31 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Optional argument: `name = "..."` to set the symbol description.
 ///
 /// Inspect properties are always read-only; setters are rejected at compile time.
-/// The getter takes `&self`; any other receiver is a compile error.
+/// The getter takes `&self`, or `this: jsg::Rc<Self>` as its first parameter in place of
+/// it; any other receiver is a compile error.
 #[proc_macro_attribute]
 pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Reuse jsg_method callback generation; registration as Member::Property is
     // handled by #[jsg_resource] on the enclosing impl block.
     jsg_method(TokenStream::new(), item)
+}
+
+/// Registers a method as the wildcard property of a `#[jsg_resource]` type.
+///
+/// Equivalent to C++ JSG's `JSG_WILDCARD_PROPERTY`: reading a string-named property that
+/// neither the object nor its prototypes have calls the method with the name, and returns what
+/// it returns.
+///
+/// The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+/// `&str`, and returns `Option<T>` or `Result<Option<T>, E>` with `T: ToJS`. `None` means there
+/// is no such property, so the read gives `undefined`. The method also answers `name in obj`
+/// and assignment, so it must not have side effects. A type has at most one wildcard property.
+/// See `src/rust/jsg/README.md` for how wildcard properties behave.
+#[proc_macro_attribute]
+pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as Member::WildcardProperty is handled by #[jsg_resource] on the enclosing
+    // impl block.
+    wildcard::expand(attr, item)
 }
 
 // =============================================================================

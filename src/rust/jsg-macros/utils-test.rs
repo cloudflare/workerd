@@ -118,4 +118,44 @@ fn fast_api_signature_cases() {
     );
     assert_eq!(fast(parse_quote!(fn f<T>(&self, a: i32))), None);
     assert_eq!(fast(parse_quote!(async fn f(&self, a: i32))), None);
+    assert_eq!(
+        fast(parse_quote!(fn f(this: jsg::Rc<Self>, a: i32) -> bool)),
+        None
+    );
+}
+
+#[test]
+fn is_rc_self_cases() {
+    assert!(is_rc_self(&parse_quote!(jsg::Rc<Self>)));
+    assert!(is_rc_self(&parse_quote!(Rc<Self>)));
+    // Another module's `Rc`, a reference, another type argument, or no argument at all.
+    assert!(!is_rc_self(&parse_quote!(std::rc::Rc<Self>)));
+    assert!(!is_rc_self(&parse_quote!(&jsg::Rc<Self>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc<Other>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc<Self, Self>)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Rc)));
+    assert!(!is_rc_self(&parse_quote!(jsg::Weak<Self>)));
+}
+
+#[test]
+fn this_param_cases() {
+    let this = |sig: syn::Signature| this_param(&sig).map(|param| param.ty.clone());
+
+    assert_eq!(
+        this(parse_quote!(fn f(this: jsg::Rc<Self>, a: i32))),
+        Some(parse_quote!(jsg::Rc<Self>))
+    );
+    // The type is not checked here, and `mut this` is still `this`.
+    assert_eq!(
+        this(parse_quote!(fn f(mut this: String))),
+        Some(parse_quote!(String))
+    );
+    // Only the first parameter counts, and a receiver comes first.
+    assert_eq!(this(parse_quote!(fn f(&self, this: jsg::Rc<Self>))), None);
+    assert_eq!(
+        this(parse_quote!(fn f(lock: &mut Lock, this: jsg::Rc<Self>))),
+        None
+    );
+    assert_eq!(this(parse_quote!(fn f(that: jsg::Rc<Self>))), None);
+    assert_eq!(this(parse_quote!(fn f())), None);
 }

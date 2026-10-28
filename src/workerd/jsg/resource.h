@@ -254,7 +254,7 @@ struct MethodCallback<TypeWrapper,
   }
 
   // Gates both the preamble below and the `FastOneByteString` argument ABI.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)> && !isContext;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
@@ -267,22 +267,14 @@ struct MethodCallback<TypeWrapper,
     auto& js = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    auto invoke = [&](v8::Local<v8::Context> context) -> ReturnType {
-      auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
-      return liftKj<Ret>(isolate, [&]() {
-        // Pack expansion order is unspecified, but no `unwrapFastApi` here has side effects.
-        return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      });
-    };
-
-    // `extractInternalPointer` reads the context only for context globals, which are excluded.
-    if constexpr (noScopeNeeded) {
-      return invoke({});
-    } else {
-      v8::HandleScope handleScope(isolate);
-      return invoke(isolate->GetCurrentContext());
-    }
+    FastApiPreamble<noScopeNeeded, false> preamble(isolate);
+    auto context = preamble.context;
+    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
+    return liftKj<Ret>(isolate, [&]() {
+      // Pack expansion order is unspecified, but no `unwrapFastApi` here has side effects.
+      return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
+          TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+    });
   }
 };
 
@@ -327,8 +319,8 @@ struct MethodCallback<TypeWrapper,
     });
   }
 
-  // `Args...` excludes the `Lock&` itself.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+  // `isFastApiNoScope` strips the leading `Lock&` itself.
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)> && !isContext;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
@@ -341,22 +333,15 @@ struct MethodCallback<TypeWrapper,
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    auto invoke = [&](v8::Local<v8::Context> context) -> ReturnType {
-      auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
-      return liftKj<Ret>(isolate, [&]() {
-        // See note on fast-API ordering in the plain-method specialization above.
-        return (self.*method)(lock,
-            wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      });
-    };
-
-    v8::HandleScope handleScope(isolate);
-    if constexpr (noScopeNeeded) {
-      return invoke({});
-    } else {
-      return invoke(isolate->GetCurrentContext());
-    }
+    FastApiPreamble<noScopeNeeded, true> preamble(isolate);
+    auto context = preamble.context;
+    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
+    return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in the plain-method specialization above.
+      return (self.*method)(lock,
+          wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
+              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+    });
   }
 };
 
@@ -473,19 +458,22 @@ struct StaticMethodCallback<TypeWrapper,
     });
   }
 
+  // See MethodCallback. A static method has no receiver to unwrap.
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)>;
+
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Args>::value... fastArgs,
+      FastApiArgType<noScopeNeeded, Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
+    FastApiPreamble<noScopeNeeded, false> preamble(isolate);
+    auto context = preamble.context;
     return liftKj<Ret>(isolate, [&]() {
       // See note on fast-API ordering in MethodCallback above.
       return (*method)(wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
@@ -531,19 +519,22 @@ struct StaticMethodCallback<TypeWrapper,
     });
   }
 
+  // `isFastApiNoScope` strips the leading `Lock&` itself.
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)>;
+
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Args>::value... fastArgs,
+      FastApiArgType<noScopeNeeded, Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
+    FastApiPreamble<noScopeNeeded, true> preamble(isolate);
+    auto context = preamble.context;
     return liftKj<Ret>(isolate, [&]() {
       // See note on fast-API ordering in MethodCallback above.
       return (*method)(lock,
@@ -693,24 +684,6 @@ struct GetterCallback;
                 wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
-    template <typename ReturnType = Ret>                                                           \
-    static ReturnType fastCallback(                                                                \
-        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
-      if constexpr (TypeWrapper::trackCallCounts) {                                                \
-        callCounter.fast++;                                                                        \
-      }                                                                                            \
-      auto isolate = options.isolate;                                                              \
-      v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
-      auto& lock = Lock::from(isolate);                                                            \
-      auto& self =                                                                                 \
-          extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);        \
-      auto& wrapper = TypeWrapper::from(isolate);                                                  \
-      return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(wrapper.template unwrapFastApi<Args>(                                \
-            lock, context, static_cast<kj::Decay<Args>*>(nullptr))...);                            \
-      });                                                                                          \
-    }                                                                                              \
   };                                                                                               \
                                                                                                    \
   /* Specialization for methods that take `Lock&` as their first parameter. */                     \
@@ -740,25 +713,6 @@ struct GetterCallback;
                 js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
-    template <typename ReturnType = Ret>                                                           \
-    static ReturnType fastCallback(                                                                \
-        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
-      if constexpr (TypeWrapper::trackCallCounts) {                                                \
-        callCounter.fast++;                                                                        \
-      }                                                                                            \
-      auto isolate = options.isolate;                                                              \
-      v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
-      auto& js = Lock::from(isolate);                                                              \
-      auto& self =                                                                                 \
-          extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);        \
-      auto& wrapper = TypeWrapper::from(isolate);                                                  \
-      return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(js,                                                                  \
-            wrapper.template unwrapFastApi<Args>(                                                  \
-                js, context, static_cast<kj::Decay<Args>*>(nullptr))...);                          \
-      });                                                                                          \
-    }                                                                                              \
   };                                                                                               \
                                                                                                    \
   template <typename TypeWrapper, const char* propertyName, typename T,                            \
@@ -769,14 +723,6 @@ struct GetterCallback;
     static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {   \
       scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName);              \
     }                                                                                              \
-    template <typename ReturnType = Unimplemented>                                                 \
-    static ReturnType fastCallback(                                                                \
-        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
-      scheduleUnimplementedPropertyError(options.isolate, typeid(T), propertyName);                \
-      if constexpr (!isVoid<ReturnType>()) {                                                       \
-        return ReturnType{};                                                                       \
-      }                                                                                            \
-    };                                                                                             \
   };
 
 JSG_DEFINE_GETTER_CALLBACK_STRUCTS()
@@ -818,6 +764,8 @@ struct PropertyGetterCallback;
                 wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
+    /* Fast getters take no injected arguments. */                                                 \
+    static constexpr bool noScopeNeeded = sizeof...(Args) == 0 && !isContext;                      \
     template <typename ReturnType = Ret>                                                           \
     static ReturnType fastCallback(                                                                \
         v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
@@ -825,13 +773,12 @@ struct PropertyGetterCallback;
         callCounter.fast++;                                                                        \
       }                                                                                            \
       auto isolate = options.isolate;                                                              \
-      v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
+      auto& js = Lock::from(isolate);                                                              \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
+      FastApiPreamble<noScopeNeeded, false> preamble(isolate);                                     \
+      auto context = preamble.context;                                                             \
       auto& self =                                                                                 \
           extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);        \
-      auto& wrapper = TypeWrapper::from(isolate);                                                  \
-      auto& js = Lock::from(isolate);                                                              \
-                                                                                                   \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
         return (self.*method)(                                                                     \
             wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);               \
@@ -866,6 +813,7 @@ struct PropertyGetterCallback;
                 js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
+    static constexpr bool noScopeNeeded = sizeof...(Args) == 0 && !isContext;                      \
     template <typename ReturnType = Ret>                                                           \
     static ReturnType fastCallback(                                                                \
         v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
@@ -873,13 +821,12 @@ struct PropertyGetterCallback;
         callCounter.fast++;                                                                        \
       }                                                                                            \
       auto isolate = options.isolate;                                                              \
-      v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
-      auto& self =                                                                                 \
-          extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);        \
       auto& js = Lock::from(isolate);                                                              \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
-                                                                                                   \
+      FastApiPreamble<noScopeNeeded, true> preamble(isolate);                                      \
+      auto context = preamble.context;                                                             \
+      auto& self =                                                                                 \
+          extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);        \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
         return (self.*method)(                                                                     \
             js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);           \
@@ -893,14 +840,6 @@ struct PropertyGetterCallback;
     static constexpr bool enumerable = false;                                                      \
     static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {                        \
       scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName);              \
-    }                                                                                              \
-    template <typename ReturnType = Unimplemented>                                                 \
-    static ReturnType fastCallback(                                                                \
-        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
-      scheduleUnimplementedPropertyError(options.isolate, typeid(T), propertyName);                \
-      if constexpr (!isVoid<ReturnType>()) {                                                       \
-        return ReturnType{};                                                                       \
-      }                                                                                            \
     }                                                                                              \
   };
 
@@ -1005,20 +944,23 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
     });
   }
 
+  // See MethodCallback.
+  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<void, Arg> && !isContext;
+
   template <typename ReturnType = void>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Arg>::value fastArgs,
+      FastApiArgType<noScopeNeeded, Arg>::value fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
     auto& js = Lock::from(isolate);
-    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     auto& wrapper = TypeWrapper::from(isolate);
 
+    FastApiPreamble<noScopeNeeded, false> preamble(isolate);
+    auto context = preamble.context;
+    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     liftKj<void>(isolate, [&]() -> void {
       (self.*method)(wrapper.template unwrapFastApi<Arg>(
           js, context, fastArgs, TypeErrorContext::setterArgument(typeid(T), methodName)));
@@ -1055,20 +997,22 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
     });
   }
 
+  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<void, Arg> && !isContext;
+
   template <typename ReturnType = void>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Arg>::value fastArgs,
+      FastApiArgType<noScopeNeeded, Arg>::value fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
-    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
+    FastApiPreamble<noScopeNeeded, true> preamble(isolate);
+    auto context = preamble.context;
+    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     liftKj<void>(isolate, [&]() -> void {
       (self.*method)(lock,
           wrapper.template unwrapFastApi<Arg>(

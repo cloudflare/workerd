@@ -708,7 +708,7 @@ export interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
-export interface DurableObjectEvictionInfo {
+export interface DurableObjectHibernationInfo {
   readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 export interface DurableObjectState<Props = unknown> {
@@ -4218,7 +4218,7 @@ export interface ContainerSnapshotOptions {
 }
 export type ContainerStartupOptions = {
   entrypoint?: string[];
-  enableInternet: boolean;
+  enableInternet?: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   instance?:

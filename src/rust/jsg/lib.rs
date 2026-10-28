@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod buffer;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -15,11 +16,15 @@ pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
+mod promise;
 pub mod resource;
 mod scope;
+pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use buffer::ToJsArrayBuffer;
+pub use buffer::ToJsTypedArray;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
@@ -30,16 +35,21 @@ pub use resource::Resource;
 pub use resource::Weak;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
+pub use scope::RawWildcardGetterCallback;
+pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
 pub use scope::setter_callback;
+pub use scope::wildcard_getter_callback;
+pub use scope::wildcard_query_callback;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;
@@ -259,26 +269,31 @@ impl<'s> FromJS<'s> for Error {
     /// `DOMException` contributes its name and message as C++ JSG stores them,
     /// as [`Error::new_dom_exception`] takes them. Any other value is rejected
     /// with a `TypeError`.
+    ///
+    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
+    /// If it throws, or execution is terminating, this fails with an error for which
+    /// [`Error::is_pending`] is true.
     #[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_native_error() {
-            let obj: v8::Local<v8::Object> = value.into();
+        if value.is_native_error()
+            && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
+        {
+            let name = obj.get(lock, "name")?;
+            let name = if name.is_undefined() {
+                None
+            } else {
+                Some(String::from_js(lock, name)?)
+            };
 
-            let name = obj
-                .get(lock, "name")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok());
-
-            let message = obj
-                .get(lock, "message")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok())
-                .unwrap_or_else(|| "Unknown error".to_owned());
+            let message = obj.get(lock, "message")?;
+            let message = if message.is_undefined() {
+                "Unknown error".to_owned()
+            } else {
+                String::from_js(lock, message)?
+            };
 
             return Ok(Self {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
@@ -593,6 +608,9 @@ impl Error {
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
 /// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
+///   numbers, which must be in range
+/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -651,12 +669,12 @@ impl<T> Deref for NonCoercible<T> {
     }
 }
 
-/// A wrapper type for JavaScript numbers (IEEE 754 double-precision floats).
+/// A JavaScript number (an IEEE 754 double-precision float).
 ///
-/// `Number` represents JavaScript's `number` type, which is always a 64-bit
-/// floating-point value. This wrapper type is used instead of raw `f64` to
-/// distinguish between JavaScript numbers and Rust's `f64` type used for
-/// `Float64Array` elements.
+/// `Number` is a plain value, not a V8 handle, so it needs no `Lock` until it converts to
+/// JavaScript. It is the type of a number parameter: it converts from any value with JavaScript's
+/// `ToNumber`, like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number. An `f64`
+/// or `f32` converts to a number too, but only to JavaScript.
 ///
 /// # Usage
 ///
@@ -676,8 +694,7 @@ impl<T> Deref for NonCoercible<T> {
 /// | Rust Type | JavaScript Type |
 /// |-----------|-----------------|
 /// | `jsg::Number` | `number` |
-/// | `f64` | Used for `Float64Array` elements |
-/// | `Vec<f64>` | `Float64Array` |
+/// | `f64` | `number`, to JavaScript only |
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Number {
     value: f64,
@@ -879,8 +896,9 @@ impl<'s> Lock<'s> {
         // int-typed length parameter; V8 rejects strings that large anyway.
         let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice.
-        let value: v8::Local<'s, v8::Value> = unsafe {
+        // and len describe a valid byte slice. V8's error constructors always return an
+        // object.
+        let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
@@ -888,8 +906,8 @@ impl<'s> Lock<'s> {
                 len,
             ))
         };
-        // Error, TypeError, and RangeError are all JS objects.
-        value.into()
+        debug_assert!(error.is_object());
+        error
     }
 
     pub fn throw_error(&mut self, message: &str) {
@@ -897,14 +915,16 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
     }
 
+    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
+    /// after the current callback has returned, so they must be `'static`.
     #[expect(
         clippy::unimplemented,
         reason = "`await_io` is not implemented for Rust resources yet"
     )]
     pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
     where
-        F: Future<Output = I>,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R>,
+        F: Future<Output = I> + 'static,
+        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
     {
         unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
@@ -974,8 +994,9 @@ impl<'s> Lock<'s> {
             }
             return;
         }
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        if unsafe { v8::ffi::isolate_is_execution_terminating(self.isolate().as_ffi()) } {
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, and creating the exception while
+            // execution is terminating fails a V8 debug check.
             return;
         }
         match err.to_local(self) {
@@ -1078,6 +1099,47 @@ impl<'s> Lock<'s> {
                 None => Err(Error::pending()),
             },
         }
+    }
+
+    /// Returns the exception that [`Lock::throw_exception`] would throw for `err`, without
+    /// throwing it: an internal error is redacted (and its message logged) the same way.
+    ///
+    /// Use it to reject a promise with an `Error`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
+    /// pending in V8, and returning the error propagates it. While execution is terminating,
+    /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
+    /// termination; an internal error's message is still logged.
+    pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
+        if err.is_pending() {
+            return Err(err.clone());
+        }
+        if self.is_execution_terminating() {
+            // Creating the exception while execution is terminating fails a V8 debug check, and
+            // nothing could be rejected with it.
+            if err.is_internal {
+                // Logs the message and throws nothing.
+                self.throw_internal_error(&err.message);
+            }
+            return Err(Error::pending());
+        }
+        if err.is_internal {
+            if let Some(name) = err.dom_exception_name() {
+                let message = v8::ffi::log_internal_error(&err.message);
+                return Error::new_dom_exception(name, message).to_local(self);
+            }
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
+            // the lock's scope.
+            return Ok(unsafe {
+                v8::Local::from_ffi(v8::ffi::exception_create_internal(
+                    self.isolate().as_ffi(),
+                    &err.message,
+                ))
+            });
+        }
+        err.to_local(self)
     }
 
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
@@ -1184,6 +1246,9 @@ impl From<u64> for ConstantValue {
 ///   [`Member::InstanceProperty`] registers these.
 /// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
 ///   surfaced by `node:util` `inspect()`.
+/// - `LazyInstance` / `LazyReadonlyInstance` — own data property on every
+///   instance, computed once on first access. Only
+///   [`Member::LazyInstanceProperty`] registers these.
 pub use crate::v8::ffi::PropertyKind;
 
 /// Placement of an ordinary resource property registered by a generated member factory.
@@ -1193,6 +1258,9 @@ pub enum PropertyPlacement {
     Prototype,
     /// An own native data property on each instance, for compatibility with existing APIs.
     Instance,
+    /// An own data property on each instance whose getter runs on first access, after which
+    /// the result is stored as the property's value.
+    LazyInstance,
 }
 
 pub enum Member {
@@ -1223,6 +1291,16 @@ pub enum Member {
         /// `None` for read-only properties.
         setter_callback: Option<RawSetterCallback>,
     },
+    /// An own data property on every instance whose getter runs on first access
+    /// (V8's `SetLazyDataProperty`). V8 then replaces it with a data property
+    /// holding the getter's result, so later reads do not call the getter. The
+    /// property is writable unless `read_only`, like C++
+    /// `JSG_LAZY_INSTANCE_PROPERTY` / `JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+    LazyInstanceProperty {
+        name: String,
+        getter_callback: RawGetterCallback,
+        read_only: bool,
+    },
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
@@ -1231,6 +1309,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// A property of every instance with any string name that is not a defined property of the
+    /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
+    /// one. `query_callback` tells V8 whether a property exists, for `in`.
+    WildcardProperty {
+        getter_callback: RawWildcardGetterCallback,
+        query_callback: RawWildcardQueryCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

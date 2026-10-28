@@ -70,6 +70,9 @@ PATCHES = [
     "0045-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
     "0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch",
     "0047-Add-v8-Data-IsCompatibleWithIsolate.patch",
+    "0048-Keep-llvm-libc-private-to-v8_libbase.patch",
+    "0049-Keep-v8_libshared-private-to-v8.patch",
+    "0050-Build-Temporal-in-the-V8-Bazel-build.patch",
 ]
 
 http_archive(
@@ -83,7 +86,7 @@ http_archive(
 
 git_repository(
     name = "llvm-libc",
-    build_file_content = "load('@rules_cc//cc:cc_library.bzl', 'cc_library')\ncc_library(name = 'llvm-libc', hdrs = glob(['**/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/llvm-libc/src')",
+    build_file = "//:build/BUILD.llvm-libc",
     commit = "fe440a8abe663d6878686f147ef6b1a02075ae15",
     remote = "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git",
 )

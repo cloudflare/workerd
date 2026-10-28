@@ -89,6 +89,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String containerName,
       kj::Maybe<kj::String> imageName,
       kj::String containerEgressInterceptorImage,
+      kj::Maybe<kj::String> sessionId,
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
       kj::Function<void(kj::Promise<void>)> cleanupCallback,
@@ -133,6 +134,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Container egress interceptor image name (sidecar for egress proxy)
   kj::String containerEgressInterceptorImage;
+
+  // `DockerConfiguration.sessionId`: labels the resources that do not outlive the session.
+  kj::Maybe<kj::String> sessionId;
 
   ContainerPrivileges privileges;
 
@@ -202,14 +206,16 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
   // Resizes the TTY of a running PTY exec to the given dimensions via Docker's resize endpoint.
   kj::Promise<void> resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows);
-  kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
+  // Runs `cmd` in the container as a detached helper exec and returns its exit code once it ends.
+  kj::Promise<int32_t> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
 
   // Docker volume management for snapshots
-  kj::Promise<void> createVolume(kj::StringPtr volumeName);
+  // `sessionId` labels a volume that does not outlive the session, such as a snapshot clone.
+  kj::Promise<void> createVolume(kj::StringPtr volumeName, const kj::Maybe<kj::String>& sessionId);
   kj::Promise<void> deleteVolume(kj::String volumeName);
   kj::Promise<void> commitContainer(kj::StringPtr imageRef);
   kj::Promise<uint64_t> inspectImageSize(kj::StringPtr imageRef);

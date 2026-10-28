@@ -20,6 +20,7 @@ mod ffi {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -73,6 +74,13 @@ mod ffi {
             resource_name: KjMaybe<&str>,
         ) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Has `register_modules` add builtin modules, then calls the callback of the one named
+        /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
+        pub unsafe fn call_builtin_module(
+            self: &EvalContext,
+            register_modules: fn(Pin<&mut ModuleRegistry>),
+            specifier: &str,
+        ) -> Result<EvalResult>;
 
         /// Triggers garbage collection for testing purposes.
         /// Note: For GC to actually collect objects, they must not be reachable from the
@@ -80,6 +88,14 @@ mod ffi {
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+        /// Requests a termination and runs JavaScript until V8 delivers it, so that the
+        /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
+        pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
+
+        /// Runs the isolate's pending microtasks.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn run_microtasks(isolate: *mut Isolate);
 
         /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
         #[expect(clippy::allow_attributes)]
@@ -102,6 +118,12 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
 
+        /// Calls a function that C++ JSG wrapped and returns whether
+        /// `jsg::v8::ffi::fci_get_data_wrappable` finds a Rust Wrappable in its data.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_wrapped_function_data_is_rust_wrappable(isolate: *mut Isolate) -> bool;
+
         /// Returns an empty `v8::MaybeLocal`.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
@@ -112,6 +134,17 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
+        /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
+        /// throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -120,6 +153,15 @@ mod ffi {
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub fn throw_kj_exception(description: &str) -> Result<()>;
+
+        /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
+        /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
+        /// Then resets the `Global` and runs a full GC again. See `hold_across_gc` in `ffi.h`.
+        pub unsafe fn hold_across_gc(
+            isolate: *mut Isolate,
+            create: unsafe fn(*mut Isolate) -> MaybeLocal,
+            check: unsafe fn(*mut Isolate, Local),
+        );
     }
 }
 
@@ -209,9 +251,33 @@ impl EvalContext<'_> {
         }
     }
 
+    /// Has `register` add builtin modules with `jsg::modules::add_builtin`, then produces the
+    /// exports of the one named `specifier`, as importing it does.
+    ///
+    /// # Panics
+    ///
+    /// If `register` adds no module named `specifier`.
+    pub fn import_builtin<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        register: fn(Pin<&mut v8::ffi::ModuleRegistry>),
+        specifier: &str,
+    ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
+        // SAFETY: self.inner is a valid EvalContext, and the callback runs in `lock`'s scope.
+        let result = unsafe { self.inner.call_builtin_module(register, specifier) }
+            .expect("no such builtin module");
+        Self::raw_result(lock, result)
+    }
+
     /// Converts `value` to JavaScript and stores it as the global `name`.
+    ///
+    /// # Panics
+    ///
+    /// If the conversion fails.
     pub fn set_global<'s>(&self, lock: &mut jsg::Lock<'s>, name: &str, value: impl jsg::ToJS<'s>) {
-        let value = value.to_js(lock);
+        let value = value
+            .to_js(lock)
+            .expect("converting a global's value failed");
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
@@ -366,9 +432,24 @@ impl Harness {
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
     }
 
+    /// Runs the pending microtasks, such as promise reactions, as the event loop does after
+    /// each task. The isolate's microtask policy is explicit, so nothing else runs them.
+    pub fn run_microtasks(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::run_microtasks(lock.isolate().as_ffi()) };
+    }
+
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// Terminates execution the way running out of CPU time does. On return the termination
+    /// exception is pending and `lock.is_execution_terminating()` is true. (`terminate_execution`
+    /// only requests a termination; V8 delivers it the next time JavaScript runs.)
+    pub fn terminate_and_deliver(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock).
+        unsafe { ffi::terminate_and_deliver(lock.isolate().as_ffi()) };
     }
 
     /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
@@ -441,6 +522,59 @@ impl Harness {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
+    }
+
+    /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
+    /// `v8::Function::new` function, and returns whether the data is taken for a Rust Wrappable.
+    pub fn cpp_wrapped_function_data_is_rust_wrappable(lock: &mut jsg::Lock<'_>) -> bool {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open.
+        unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer`, to compare with
+    /// [`jsg::ser::serialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization throws.
+    pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `value` belongs to.
+        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi()) }
+            .expect("C++ JSG should serialize the value")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
+    /// [`jsg::ser::deserialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if deserialization throws.
+    pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
+                    .expect("C++ JSG should deserialize the data"),
+            )
+        }
+    }
+
+    /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it
+    /// would call a crate's `extern "Rust"` constructor, and keeps the result only in a
+    /// `v8::Global` while a full GC runs. It then calls `check` with the value, resets the
+    /// `Global` and runs a full GC again.
+    ///
+    /// `create` and `check` run with the isolate locked, a context entered and a `HandleScope`
+    /// open; `lock` is borrowed for the duration, so they open their own scopes on the isolate.
+    pub fn hold_across_gc(
+        lock: &mut jsg::Lock<'_>,
+        create: fn(*mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal,
+        check: fn(*mut v8::ffi::Isolate, v8::ffi::Local),
+    ) {
+        // SAFETY: the isolate is valid and locked with a context entered (guaranteed by Lock).
+        unsafe { ffi::hold_across_gc(lock.isolate().as_ffi(), create, check) };
     }
 }
 

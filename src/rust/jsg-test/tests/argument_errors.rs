@@ -81,7 +81,7 @@ fn error(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, call: &str) -> Stri
 fn missing_required_argument() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takeCount()"),
@@ -109,7 +109,7 @@ fn missing_required_argument() {
 fn top_level_type_mismatch() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takePoint(5)"),
@@ -129,7 +129,7 @@ fn top_level_type_mismatch() {
 fn deeper_errors_are_kept() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         let negative = "TypeError: The value cannot be converted because it is negative and \
                         this API expects a positive number.";

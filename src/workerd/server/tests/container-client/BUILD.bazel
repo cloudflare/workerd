@@ -1,9 +1,11 @@
 load("//:build/wd_test.bzl", "wd_test")
+load("//images/container-client-test:images.bzl", "CONTAINER_TEST_IMAGES")
 
 wd_test(
     size = "enormous",
     src = "container-client.wd-test",
     args = ["--experimental"],
+    container_images = CONTAINER_TEST_IMAGES,
     data = ["test.js"],
     tags = [
         "requires-container-engine",

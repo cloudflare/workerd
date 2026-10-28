@@ -69,10 +69,7 @@ KJ_TEST("EventSource native pump owns parser state after its EventSource is dest
       capnp::MallocMessageBuilder message;
       auto flags = message.initRoot<CompatibilityFlags>();
       flags.setTypeScriptImplementedStreams(typescript);
-      TestFixture fixture({
-        .featureFlags = flags.asReader(),
-        .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
-      });
+      TestFixture fixture({.featureFlags = flags.asReader()});
       auto gate = kj::newPromiseAndFulfiller<void>();
       fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
         kj::Promise<void> pump = nullptr;

@@ -1734,4 +1734,31 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
   # The handler's socket then has secureTransport "starttls". Without the flag, it has
   # secureTransport "off" and its startTls() throws.
+
+  offpeakLocationHint @197 :Bool
+      $compatEnableFlag("offpeak_location_hint")
+      $experimental;
+  # Allows `locationHint: "offpeak"` when getting a Durable Object stub. In production, a new object
+  # created with this hint is placed in a region that is off-peak at the current UTC time. The
+  # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
+  # unsupported.
+
+  pythonSharedStandardLibrary @198 :Bool
+      $compatEnableFlag("python_shared_standard_library");
+  # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
+  # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
+  # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
+  # archive for writing fails with this flag.
+
+  wasmSourceUrlSupport @199 :Bool
+      $compatEnableFlag("wasm_source_url_support")
+      $compatDisableFlag("no_wasm_source_url_support")
+      $compatEnableDate("2026-12-01");
+  # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
+  # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
+  # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
+  # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
+  # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
+  # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
+  # and module name.
 }

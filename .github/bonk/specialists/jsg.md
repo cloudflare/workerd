@@ -10,12 +10,18 @@ paths:
   - src/workerd/server/workerd-api.*
   - src/rust/jsg/**
   - src/rust/jsg-macros/**
+  - src/rust/jsg-test/**
   - src/rust/api/**
+  - src/rust/node-exceptions/**
+  - src/rust/memory-cache/**
+  - src/rust/**/*.c++
+  - src/rust/**/*.h
 budget: 6m
 ---
 You review how C++ and Rust types are bound to JavaScript and traced by V8's garbage collector.
 References: `src/workerd/jsg/AGENTS.md` ("INVARIANTS"), `src/workerd/jsg/README.md`
-("GC-Visitable Types"), and `src/rust/AGENTS.md` ("JSG resources", "`Traced`").
+("GC-Visitable Types"), `src/rust/AGENTS.md` ("JSG resources", "`Traced`"), and
+`src/rust/jsg/README.md` ("Safety rules") for Rust JSG.
 
 GC tracing:
 - A resource that holds `jsg::Ref`, `V8Ref`/`jsg::Value`, `JsRef`, `jsg::Function`,
@@ -29,6 +35,28 @@ GC tracing:
   `jsg::WeakRef<T>`. C++ reference cycles are never collected (AGENTS.md, Anti-Patterns).
 - Rust: `jsg::Rc<T>`, `Option<jsg::Rc<T>>` and `Nullable<jsg::Rc<T>>` fields are traced
   automatically. `jsg::Weak<T>` is not. A `#[jsg_resource(custom_trace)]` impl must trace every strong field.
+
+Rust JSG (rules and reasons in `src/rust/jsg/README.md` "Safety rules"; what to flag in
+`docs/reference/rust-review-checklist.md` "Rust JSG Safety Rules"). The most common mistakes:
+- An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if only one
+  GC owner holds it so far. Once a clone reaches a second owner (for example a `Function::new`
+  data object, or the other reaction function of a promise), a `jsg::Rc` aborts the process and a
+  `TracedGlobal` can lose its value. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that
+  owns the state, which a method gets as `this: jsg::Rc<Self>`.
+- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
+  a traced `Vec`) and used after a call that can run JavaScript or allocate, without a `.clone()`
+  first. Once GC has visited it in the field, it is neither strong nor traced after the move, so
+  GC can collect the resource's wrapper and stop tracing its fields (#7976). The fix is to clone
+  it right away.
+- A `jsg::v8::Global` in anything GC traces. It is always strong, so a cycle through it is never
+  collected. It should be a `TracedGlobal`.
+- A shim that calls `isolate->ThrowException` without checking `IsExecutionTerminating()` (the
+  `isolate_throw_*` shims check), or a `jsg::Error` from a JavaScript call discarded with
+  `.ok()`/`unwrap_or*`/`map_err`. Either one can let a terminated script keep running or replace
+  a pending exception.
+- New C++ JSG (`jsg::Lock`, `JSG_TRY`/`JSG_CATCH`, `jsg::check`, `createTunneledException`,
+  `makeInternalError`, `jsg::Data`) in a C++ shim under `src/rust`. Shims use `v8::TryCatch` and
+  `MaybeLocal` directly.
 
 Member and struct types:
 - No `v8::Local`/`JsValue` as class members, and no `v8::Local`/`v8::Global` in `JSG_STRUCT`
@@ -46,13 +74,18 @@ Allocation and conversion:
   avoided in new APIs. `jsg::Optional<T>` throws on `null`, `kj::Maybe<T>` accepts `null` and
   `undefined`, and `LenientOptional<T>` silently ignores type errors (README, "Nullable/Optional
   Semantics"; in Rust, `Option`/`Nullable`). Check which one the spec calls for.
-- Use `JSG_TRY`/`JSG_CATCH` rather than the deprecated `js.tryCatch()`. `JSG_CATCH` cannot rethrow
-  with `throw`.
+- In C++ JSG code, use `JSG_TRY`/`JSG_CATCH` rather than the deprecated `js.tryCatch()`.
+  `JSG_CATCH` cannot rethrow with `throw`. (Rust JSG's C++ shims use neither; see above.)
 - Module evaluation must hold a `Lock::ModuleEvaluationScope` and must not drain microtasks while
   nested (invariant 12).
-- Rust: `&Lock`/`&mut Lock` is the first parameter after any `&self`/`&mut self` receiver.
-  `#[jsg_method]` renames snake_case to camelCase, so check that the resulting JS name is the
-  intended one.
+- Rust: `&Lock`/`&mut Lock` is the first parameter after any `&self`/`&mut self` receiver or
+  `this: jsg::Rc<Self>` parameter. `#[jsg_method]` renames snake_case to camelCase, so check
+  that the resulting JS name is the intended one.
+- Rust: a `Vec<u8>`, or a `Vec` of another Rust numeric type, that converts through `ToJS`
+  becomes a JS `Array` of numbers: a `.to_js(lock)` call, a `#[jsg_method]` return value, or a
+  `#[jsg_struct]` field. Ask whether an `Array` is intended. A port of C++ that returned
+  `kj::Array<kj::byte>` (an `ArrayBuffer`) or a typed array should call `to_js_array_buffer` or
+  `to_js_typed_array` instead. This is a `warning`, never `blocking`.
 
 Docs: when the change alters JSG macros, type mappings or invariants, `src/workerd/jsg/README.md`,
 `docs/jsg.md` or `src/workerd/jsg/AGENTS.md` should change with it (the "CODE REVIEW RULE" in

@@ -57,6 +57,17 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr kj::StringPtr SESSION_LABEL = "dev.workerd.session"_kj;
+
+// Labels a container with its session, if there is one, so the session's supervisor can find it.
+void setSessionLabel(docker_api::Docker::ContainerCreateRequest::Builder request,
+    const kj::Maybe<kj::String>& sessionId) {
+  KJ_IF_SOME(id, sessionId) {
+    auto labels = request.initLabels().initObject(1);
+    labels[0].setName(SESSION_LABEL);
+    labels[0].initValue().setString(id);
+  }
+}
 
 struct ContainerImageAlias {
   kj::StringPtr alias;
@@ -559,7 +570,7 @@ kj::Array<kj::byte> createTarWithFile(
   writeTarField(header.slice(116, 124), "0000000"_kj);
 
   {
-    char sizeBuf[12];
+    char sizeBuf[12]{};
     snprintf(sizeBuf, sizeof(sizeBuf), "%011" PRIo64, static_cast<uint64_t>(content.size()));
     writeTarField(header.slice(124, 136), kj::StringPtr(sizeBuf));
   }
@@ -574,7 +585,7 @@ kj::Array<kj::byte> createTarWithFile(
   for (auto byte: header) checksum += byte;
 
   {
-    char checksumBuf[8];
+    char checksumBuf[8]{};
     snprintf(checksumBuf, sizeof(checksumBuf), "%06o ", checksum);
     writeTarField(header.slice(148, 155), kj::StringPtr(checksumBuf));
   }
@@ -884,7 +895,7 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
 // stdout and stderr rather than the 8-byte multiplexed framing used for non-TTY execs.
 kj::Promise<void> copyRawExecOutput(
     kj::AsyncInputStream& input, kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter) {
-  kj::byte scratch[16384];
+  kj::byte scratch[16384]{};
   KJ_TRY {
     for (;;) {
       auto amount = co_await input.tryRead(scratch, 1, sizeof(scratch));
@@ -1008,6 +1019,17 @@ kj::String killTokenPidFile(kj::StringPtr killToken) {
   return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
 }
 
+// Exit code of the kill helper exec when the PID file is still empty. `kill` itself exits with 1
+// or 2 when it fails, so this can't be confused with a failed signal.
+constexpr int32_t PID_NOT_RECORDED_EXIT_CODE = 3;
+
+// How long kill() waits for an exec's wrapper shell to record its PID, and the backoff between
+// its attempts: the first retry comes after PID_RETRY_INITIAL_DELAY, and each later one waits
+// twice as long as the one before, up to PID_RETRY_MAX_DELAY.
+constexpr kj::Duration PID_RECORD_TIMEOUT = 5 * kj::SECONDS;
+constexpr kj::Duration PID_RETRY_INITIAL_DELAY = 10 * kj::MILLISECONDS;
+constexpr kj::Duration PID_RETRY_MAX_DELAY = 500 * kj::MILLISECONDS;
+
 kj::Promise<void> ensureSystemImageAvailable(
     kj::Network& network, kj::StringPtr dockerPath, kj::StringPtr requestedImage) {
   KJ_IF_SOME(image, tryResolveContainerImage(requestedImage)) {
@@ -1094,6 +1116,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String containerName,
     kj::Maybe<kj::String> imageName,
     kj::String containerEgressInterceptorImage,
+    kj::Maybe<kj::String> sessionId,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
     kj::Function<void(kj::Promise<void>)> cleanupCallback,
@@ -1107,6 +1130,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
+      sessionId(kj::mv(sessionId)),
       privileges(kj::mv(privileges)),
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
@@ -1328,10 +1352,32 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
     // (see createExec). Read that PID inside the container and signal it. This works regardless of
     // whether the container shares the host PID namespace, unlike signalling by the host PID that
     // Docker's exec-inspect reports.
+    //
+    // exec() returns once Docker has started the exec, which can be before the wrapper shell has
+    // written the PID, so a kill that finds the file empty is retried, with exponential backoff,
+    // until the deadline. The shell creates the file empty and then writes the PID with one
+    // write(), so a non-empty file holds the whole PID.
     auto pidFile = killTokenPidFile(killToken);
-    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
+    auto killCmd = kj::str("[ -s ", pidFile, " ] || exit ", PID_NOT_RECORDED_EXIT_CODE, "; kill -",
+        context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
     auto cmd = kj::arr(kj::str("/bin/sh"), kj::str("-c"), kj::mv(killCmd));
-    co_await containerClient->runSimpleExec(cmd.asPtr());
+
+    auto& timer = containerClient->timer;
+    auto deadline = timer.now() + PID_RECORD_TIMEOUT;
+    auto delay = PID_RETRY_INITIAL_DELAY;
+    while (true) {
+      auto exitCode = co_await containerClient->runSimpleExec(cmd.asPtr());
+      if (exitCode == 0) {
+        co_return;
+      }
+      JSG_REQUIRE(exitCode == PID_NOT_RECORDED_EXIT_CODE, Error,
+          "Helper Docker exec failed with exit code ", exitCode);
+      auto now = timer.now();
+      JSG_REQUIRE(now < deadline, Error,
+          "Cannot signal the process: it did not record its PID within ", PID_RECORD_TIMEOUT, ".");
+      co_await timer.afterDelay(kj::min(delay, deadline - now));
+      delay = kj::min(delay * 2, PID_RETRY_MAX_DELAY);
+    }
   }
 
   kj::Promise<void> resize(ResizeContext context) override {
@@ -1867,6 +1913,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(resolveContainerImage(effectiveImage));
+  setSessionLabel(jsonRoot, sessionId);
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
@@ -2082,7 +2129,7 @@ kj::Promise<ContainerClient::ExecInspectResponse> ContainerClient::inspectExec(
   };
 }
 
-kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
+kj::Promise<int32_t> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
 
@@ -2124,9 +2171,7 @@ kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> 
   while (true) {
     auto inspect = co_await inspectExec(execId);
     if (!inspect.running) {
-      JSG_REQUIRE(inspect.exitCode == 0, Error, "Helper Docker exec failed with exit code ",
-          inspect.exitCode);
-      co_return;
+      co_return inspect.exitCode;
     }
     co_await timer.afterDelay(50 * kj::MILLISECONDS);
   }
@@ -2182,6 +2227,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   auto ipv6Enabled = co_await isDaemonIpv6Enabled();
 
@@ -2252,15 +2298,20 @@ kj::Promise<void> ContainerClient::destroySidecarContainer() {
   co_await removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName));
 }
 
-kj::Promise<void> ContainerClient::createVolume(kj::StringPtr volumeName) {
+kj::Promise<void> ContainerClient::createVolume(
+    kj::StringPtr volumeName, const kj::Maybe<kj::String>& sessionId) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::VolumeCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto req = message.initRoot<docker_api::Docker::VolumeCreateRequest>();
   req.setName(volumeName);
-  auto labels = req.initLabels().initObject(1);
+  auto labels = req.initLabels().initObject(sessionId == kj::none ? 1 : 2);
   labels[0].setName(SNAPSHOT_VOLUME_CREATED_AT_LABEL);
   labels[0].initValue().setString(currentSnapshotVolumeTimestamp());
+  KJ_IF_SOME(id, sessionId) {
+    labels[1].setName(SESSION_LABEL);
+    labels[1].initValue().setString(id);
+  }
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/volumes/create"), codec.encode(req));
@@ -2315,6 +2366,7 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
   // This helper only provides filesystem access to snapshot volumes, so it uses the infrastructure
   // sidecar image.
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   auto hostConfig = jsonRoot.initHostConfig();
   auto binds = hostConfig.initBinds(1);
@@ -2331,7 +2383,7 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
 }
 
 kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot) {
-  co_await createVolume(snapshot.cloneVolume);
+  co_await createVolume(snapshot.cloneVolume, sessionId);
 
   bool cloneCommitted = false;
   KJ_DEFER(if (!cloneCommitted) {
@@ -2344,6 +2396,7 @@ kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot)
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
   auto entrypoint = jsonRoot.initEntrypoint(1);
@@ -2815,7 +2868,8 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   // Create a Docker volume to store the snapshot contents. If anything after this
   // fails, clean up the volume so we don't leak Docker resources on retries.
   auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
-  co_await createVolume(volumeName);
+  // Snapshots outlive the session, so the volume carries no session label.
+  co_await createVolume(volumeName, kj::none);
   bool volumeCommitted = false;
   KJ_DEFER(if (!volumeCommitted) {
     waitUntilTasks.add(

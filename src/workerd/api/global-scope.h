@@ -647,9 +647,9 @@ struct BenchExportedHandler {
 // Reading it runs no user code, so a claim can check it before the handler or method runs.
 inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
 
-// Key of the internal symbol exported as `onEvict` from "cloudflare:durable-objects". A Durable
-// Object class defines its eviction handler as the method keyed by this symbol.
-inline constexpr auto ON_EVICT_SYMBOL_KEY = "cloudflare:durable-objects:onEvict"_kjc;
+// Key of the internal symbol exported as `onHibernate` from "cloudflare:durable-objects". A
+// Durable Object class defines its hibernation handler as the method keyed by this symbol.
+inline constexpr auto ON_HIBERNATE_SYMBOL_KEY = "cloudflare:durable-objects:onHibernate"_kjc;
 
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.

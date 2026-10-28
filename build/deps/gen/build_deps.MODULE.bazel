@@ -14,7 +14,7 @@ bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.5.1")
+bazel_dep(name = "aspect_rules_js", version = "3.5.2")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
@@ -86,22 +86,22 @@ git_repository(
 bazel_dep(name = "platforms", version = "1.1.0")
 
 # rules_cc
-bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_cc", version = "0.2.27")
 
 # rules_foreign_cc
-bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
+bazel_dep(name = "rules_foreign_cc", version = "0.17.0")
 
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.14.0")
 
 # rules_nodejs
-bazel_dep(name = "rules_nodejs", version = "6.7.6")
+bazel_dep(name = "rules_nodejs", version = "6.7.7")
 
 # rules_oci
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.4.2")
+bazel_dep(name = "rules_python", version = "2.4.5")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
@@ -110,6 +110,8 @@ single_version_override(
     patch_strip = 1,
     patches = [
         "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+        "//:patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch",
+        "//:patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch",
     ],
 )
 
@@ -129,6 +131,10 @@ filegroup(
 )
 exports_files(["library/Cargo.toml"])
 """,
+    patch_strip = 1,
+    patches = [
+        "//patches/rust:0001-teach-tsan-about-fcntl-file-descriptor-duplication.patch",
+    ],
     sha256 = "b8bb98533e65cb2468548b20b3575518d01b44e7738045a12de2dbb71a0d6cc2",
     strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
     type = "tar.xz",

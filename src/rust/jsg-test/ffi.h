@@ -29,6 +29,11 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Has `registerModules` add builtin modules, then calls the callback of the one named
+  // `specifier`, as importing it does. Returns its exports, or the exception it threw.
+  EvalResult call_builtin_module(
+      ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+      ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
 
   v8::Isolate* v8Isolate;
@@ -72,6 +77,14 @@ enum class GcType : uint8_t;
 // Triggers garbage collection for testing purposes.
 void request_gc(Isolate* isolate, GcType gc_type);
 
+// Requests a termination and runs JavaScript until V8 delivers it. On return the termination
+// exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
+// was terminated.
+void terminate_and_deliver(Isolate* isolate);
+
+// Runs the isolate's pending microtasks, as the event loop does after each task.
+void run_microtasks(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
@@ -82,17 +95,36 @@ size_t used_global_handles_size(Isolate* isolate);
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
 
+// Calls a function that C++ JSG wrapped (Lock::wrapReturningFunction()), whose data is also an
+// opaque wrapper, and returns whether rust::jsg::fci_get_data_wrappable() finds a Rust Wrappable
+// in it.
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
+
 // Returns an empty v8::MaybeLocal, to test how it reaches Rust.
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local();
 
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
+// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
+// exception if serialization throws.
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
+// deserialization throws.
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 
 // Throws a kj::Exception with `description`.
 void throw_kj_exception(::rust::Str description);
+
+// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
+// only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
+// and runs a full GC again. Neither call's handles outlive the call.
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
 
 }  // namespace rust::jsg_test
 

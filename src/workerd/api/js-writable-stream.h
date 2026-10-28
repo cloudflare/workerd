@@ -31,8 +31,7 @@ namespace workerd::api {
 // WritableStream or a TypeScript implemented WritableStream (represented as a JS object). Every
 // method that touches the underlying stream switches on the backend. The TypeScript arms
 // dispatch through the webstreams/cpp_exports bootstrap module (see js-writable-stream.c++),
-// which exists only when the typescript_implemented_streams compat flag (plus the per-isolate
-// bootstrap autogate) is enabled.
+// which exists only when the typescript_implemented_streams compat flag is enabled.
 class JsWritableStream final {
  public:
   // The underlying stream: either the legacy C++ WritableStream or the TypeScript

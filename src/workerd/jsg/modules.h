@@ -17,6 +17,7 @@
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
+#include <kj/vector.h>
 
 namespace workerd::jsg {
 
@@ -63,8 +64,12 @@ enum class ModuleInfoCompileOption {
   BUILTIN,
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(
-    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer);
+// `sourceUrl` names the module in stack traces when the `wasm_source_url_support` compatibility
+// flag is enabled. Otherwise V8 names it after a hash of its bytes.
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl = kj::none);
 
 // Holds the compiled code of one Wasm module so that any isolate in the process can instantiate
 // it without recompiling. V8 shares compiled modules between isolates on its own, but only while
@@ -96,6 +101,17 @@ class CompiledWasmModuleHolder {
   // Indexed by Lock::isWasmEsmIntegrationBuiltinsEnabled().
   kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> compiled[2];
 };
+
+// Whether a bundle ES module is compiled so that V8 records compile hints for it: from then on,
+// V8 records the start position of each of the module's functions when it first compiles it,
+// which for a lazily compiled function is when it first runs. Read them with
+// ModuleRegistry::getProducedCompileHints() or getProducedCompileHints().
+WD_STRONG_BOOL(ProduceCompileHints);
+
+// Returns the compile hints V8 has recorded so far for `module`, a source text module compiled
+// with ProduceCompileHints::YES, sorted and without duplicates, in the form that
+// ModuleRegistry::ModuleInfo accepts as `compileHints`. Empty for a module compiled without it.
+kj::Array<int> getProducedCompileHints(jsg::Lock& js, v8::Local<v8::Module> module);
 
 // The ModuleRegistry maintains the collection of modules known to a script that can be
 // required or imported.
@@ -206,6 +222,9 @@ class ModuleRegistry {
     // See: https://github.com/cloudflare/workerd/issues/5844
     mutable kj::Maybe<V8Ref<v8::Object>> maybeMutableExports;
 
+    // Whether V8 records compile hints for this module.
+    ProduceCompileHints producesCompileHints = ProduceCompileHints::NO;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
@@ -223,21 +242,28 @@ class ModuleRegistry {
     // Hints are read only during this call and need not be sorted. Positions at which no function
     // starts are ignored. The isolate's code cache takes precedence when installed, since V8
     // cannot consume a code cache and compile hints in one compilation.
+    //
+    // With ProduceCompileHints::YES, V8 records compile hints for the module instead (see
+    // ModuleRegistry::getProducedCompileHints()). V8 cannot produce hints while consuming a code
+    // cache or hints, so both are ignored during production.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         const CompilationObserver& observer,
-        kj::ArrayPtr<const int> compileHints = nullptr);
+        kj::ArrayPtr<const int> compileHints = nullptr,
+        ProduceCompileHints produceCompileHints = ProduceCompileHints::NO);
 
     // Compiles UTF-8 source with an embedded cache, read only during this call. An empty cache
     // uses the isolate's code cache store, if installed. `compileHints` is used only when neither
-    // cache is present, with the same semantics as the bundle constructor above.
+    // cache is present, with the same semantics as the bundle constructor above. With
+    // ProduceCompileHints::YES, both caches and `compileHints` are ignored.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         kj::ArrayPtr<const kj::byte> compileCache,
         const CompilationObserver& observer,
-        kj::ArrayPtr<const int> compileHints = nullptr);
+        kj::ArrayPtr<const int> compileHints = nullptr,
+        ProduceCompileHints produceCompileHints = ProduceCompileHints::NO);
 
     // The builtin ESM constructors below only read `compileCache` during the call.
 
@@ -305,6 +331,19 @@ class ModuleRegistry {
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) = 0;
 
   virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
+
+  // Compile hints recorded for one bundle module compiled with ProduceCompileHints::YES.
+  struct ProducedCompileHints {
+    kj::Path specifier;
+    // Sorted, without duplicates.
+    kj::Array<int> functionPositions;
+  };
+
+  // Returns the compile hints recorded so far for each bundle module that was compiled with
+  // ProduceCompileHints::YES; other modules are not listed. Hints accumulate while the modules'
+  // functions run: after top-level evaluation they cover the functions evaluation ran, and a
+  // later call also covers functions that ran since, e.g. during a warm-up request.
+  virtual kj::Array<ProducedCompileHints> getProducedCompileHints(jsg::Lock& js) = 0;
 
   virtual Promise<Value> resolveDynamicImport(jsg::Lock& js,
       const kj::Path& specifier,
@@ -652,6 +691,21 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       }
     }
     return kj::none;
+  }
+
+  kj::Array<ProducedCompileHints> getProducedCompileHints(jsg::Lock& js) override {
+    kj::Vector<ProducedCompileHints> result;
+    for (const kj::Own<Entry>& entry: entries) {
+      if (entry->type != Type::BUNDLE) continue;
+      KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
+        if (!info.producesCompileHints) continue;
+        result.add(ProducedCompileHints{
+          .specifier = entry->specifier.clone(),
+          .functionPositions = jsg::getProducedCompileHints(js, info.module.getHandle(js)),
+        });
+      }
+    }
+    return result.releaseAsArray();
   }
 
   size_t size() const {

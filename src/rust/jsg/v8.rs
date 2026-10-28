@@ -29,7 +29,9 @@
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
+//! function's V8 data.
 
 #![allow(
     unsafe_code,
@@ -46,14 +48,17 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
-use crate::Nullable;
-use crate::Number;
 use crate::Resource;
+use crate::Traced;
+use crate::UnitType;
 use crate::isolate_state::IsolateState;
+pub use crate::promise::Promise;
+pub use crate::promise::PromiseResolver;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -138,6 +143,14 @@ pub mod ffi {
         SyntaxError,
     }
 
+    /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum PromiseState {
+        Pending = 0,
+        Fulfilled = 1,
+        Rejected = 2,
+    }
+
     extern "Rust" {
         /// Called from C++ Wrappable destructor to drop the Rust object.
         /// Reconstructs the `Rc<dyn GarbageCollected>` from `data[0..1]` and drops it.
@@ -162,6 +175,7 @@ pub mod ffi {
         type FastApiCallbackOptions;
         type PropertyCallbackInfo;
         type PropertySetterCallbackInfo;
+        type PropertyQueryCallbackInfo;
         type Wrappable;
 
         // BackingStore
@@ -300,6 +314,7 @@ pub mod ffi {
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        pub unsafe fn local_is_promise(value: &Local) -> bool;
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         pub unsafe fn local_is_name(value: &Local) -> bool;
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
@@ -374,9 +389,13 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<BigInt>
+        pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
+        pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
         pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
+        pub unsafe fn local_big_int_uint64_value(value: &Local, lossless: &mut bool) -> u64;
 
         // Local<Date>
+        pub unsafe fn date_new(isolate: *mut Isolate, time: f64) -> MaybeLocal;
         pub unsafe fn local_date_value_of(value: &Local) -> f64;
 
         // Local<Function>
@@ -386,41 +405,93 @@ pub mod ffi {
             recv: &Local,
             args: &[Local],
         ) -> MaybeLocal;
+        pub unsafe fn function_new(
+            isolate: *mut Isolate,
+            callback: usize,
+            data: &Local,
+        ) -> MaybeLocal;
 
         // Local<Object>
+        // Fallible: interning a key fails if it is longer than V8's string length limit or V8
+        // fails to create the string, and there must be as many keys as values.
+        pub unsafe fn object_new_with_data_properties(
+            isolate: *mut Isolate,
+            keys: &[&str],
+            values: &[Local],
+        ) -> Result<Local>;
+        // Leave what a setter, getter or Proxy trap throws pending; see `call_into_js()`.
+        // Fallible: interning the key fails if it is longer than V8's string length limit or V8
+        // fails to create the string.
         pub unsafe fn local_object_set_property(
             isolate: *mut Isolate,
             object: &mut Local,
             key: &str,
             value: Local,
-        );
+        ) -> Result<bool>;
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
+            has: &mut bool,
         ) -> Result<bool>;
         pub unsafe fn local_object_get_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-        ) -> Result<Local>;
+        ) -> Result<MaybeLocal>;
+
+        // Local<Promise>
+        pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
+        pub unsafe fn local_promise_result(promise: &Local) -> Local;
+        pub unsafe fn local_promise_mark_as_handled(promise: &Local);
+        pub unsafe fn local_promise_then(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_catch(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_or_catch(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+
+        // Local<PromiseResolver>
+        pub unsafe fn promise_resolver_new(isolate: *mut Isolate) -> MaybeLocal;
+        pub unsafe fn local_promise_resolver_promise(resolver: &Local) -> Local;
+        pub unsafe fn local_promise_resolver_resolve(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            value: &Local,
+        ) -> bool;
+        pub unsafe fn local_promise_resolver_reject(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            reason: &Local,
+        ) -> bool;
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
-        pub unsafe fn local_array_get(isolate: *mut Isolate, array: &Local, index: u32) -> Local;
+        pub unsafe fn array_new_with_elements(isolate: *mut Isolate, elements: &[Local]) -> Local;
+        // Leaves what a setter throws pending; see `call_into_js()`.
         pub unsafe fn local_array_set(
             isolate: *mut Isolate,
             array: &mut Local,
             index: u32,
             value: Local,
-        );
-        // Fallible: KJ_REQUIREs the value is an array, and tunnels any JS exception
-        // thrown by a proxy trap/getter encountered while iterating elements. See
-        // "Unwrappers" below.
+        ) -> bool;
+        // Leaves what a getter or Proxy trap on an element throws pending; see
+        // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-        ) -> Result<Vec<Global>>;
+            result: &mut Vec<Global>,
+        ) -> Result<bool>;
 
         // Local<TypedArray>
         // Fallible: KJ_REQUIREs the view is within the buffer's bounds.
@@ -493,32 +564,22 @@ pub mod ffi {
 
         // Unwrappers
         //
-        // Shims that can throw (coercion via jsg::check, building rust::String/Vec
-        // from V8 data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then
-        // catches the throw in C++ instead of aborting across the nounwind FFI
-        // frame. Shims that provably can't throw stay bare (see unwrap_boolean).
-        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> Result<String>;
+        // Shims that can throw a C++ exception (building rust::String/Vec from V8
+        // data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then catches the
+        // throw in C++ instead of aborting across the nounwind FFI frame. Shims that
+        // provably can't throw stay bare (see unwrap_boolean, unwrap_number).
+        //
+        // unwrap_string and unwrap_number leave what a coercion throws pending; see
+        // `call_into_js()`.
+        pub unsafe fn unwrap_string(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut String,
+        ) -> Result<bool>;
         // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
-        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> Result<f64>;
-        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
-        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
-        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
-        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i8>>;
-        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i16>>;
-        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i32>>;
-        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local)
-        -> Result<Vec<f32>>;
-        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local)
-        -> Result<Vec<f64>>;
-        pub unsafe fn unwrap_bigint64_array(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> Result<Vec<i64>>;
-        pub unsafe fn unwrap_biguint64_array(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> Result<Vec<u64>>;
+        // Infallible: NumberValue reports what JavaScript threw in its result.
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
 
         // ArrayBuffer detach/detachable/was-detached
         pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
@@ -535,6 +596,9 @@ pub mod ffi {
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+        pub unsafe fn fci_get_data_wrappable(
+            args: *mut FunctionCallbackInfo,
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         // PropertyCallbackInfo, for native data properties
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
@@ -542,6 +606,10 @@ pub mod ffi {
         pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
+
+        // PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+        pub unsafe fn pqci_get_isolate(info: *mut PropertyQueryCallbackInfo) -> *mut Isolate;
+        pub unsafe fn pqci_get_this(info: *mut PropertyQueryCallbackInfo) -> Local;
 
         // FastApiCallbackOptions
         pub unsafe fn fast_api_unwrap_receiver(
@@ -561,6 +629,19 @@ pub mod ffi {
             internal_message: &str,
         );
         pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
+
+        // Serialization
+        // Leaves what serialization throws pending; see `call_into_js()`. Fallible: the result
+        // is a rust::Vec.
+        pub unsafe fn local_serialize(
+            isolate: *mut Isolate,
+            value: &Local,
+            errors_are_host_objects: bool,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
+        // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
+        // throws.
+        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         // Errors
         /// Creates a JS built-in error; `exception_type` must not be DOM-prefixed.
@@ -585,6 +666,10 @@ pub mod ffi {
             name: &mut String,
             message: &mut String,
         ) -> Result<bool>;
+        pub unsafe fn exception_create_internal(
+            isolate: *mut Isolate,
+            internal_message: &str,
+        ) -> Local;
 
         // TryCatch
         pub unsafe fn isolate_try_catch(
@@ -666,16 +751,28 @@ pub mod ffi {
         /// Registered under a unique symbol on the prototype; invisible to normal
         /// enumeration and string-key lookup; surfaced by `node:util` `inspect()`.
         Inspect = 2,
+        /// Own data property on every instance whose getter runs on first access;
+        /// the result then replaces it as a plain writable data property.
+        LazyInstance = 3,
+        /// As `LazyInstance`, but the property is read-only.
+        LazyReadonlyInstance = 4,
     }
 
     /// Descriptor for a single accessor property. `setter_callback` is `None` for
-    /// read-only properties; ignored entirely for `Inspect`.
+    /// read-only properties; ignored entirely for `Inspect` and the lazy kinds.
     pub struct PropertyDescriptor {
         pub name: String,
         pub kind: PropertyKind,
         pub getter_callback: usize,
         /// `None` means read-only (no setter).
         pub setter_callback: KjMaybe<usize>,
+    }
+
+    /// The callbacks of a wildcard property: a named-property interceptor on every instance
+    /// (`v8::NamedPropertyGetterCallback` and `v8::NamedPropertyQueryCallback`).
+    pub struct WildcardPropertyDescriptor {
+        pub getter_callback: usize,
+        pub query_callback: usize,
     }
 
     pub struct ResourceDescriptor {
@@ -685,6 +782,7 @@ pub mod ffi {
         pub properties: Vec<PropertyDescriptor>,
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
+        pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
     }
 
     // Resources
@@ -694,16 +792,26 @@ pub mod ffi {
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
 
+        // Leaves what creating the wrapper throws pending, and checks for termination itself,
+        // rather than through `call_into_js()`; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> MaybeLocal /* v8::Local<Value>, empty if wrapped in another isolate */;
+            wrapped_elsewhere: &mut bool,
+        ) -> MaybeLocal /* v8::Local<Value> */;
 
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
         );
+
+        // Fallible: throws if the Wrappable already has a wrapper, or if V8 cannot create one,
+        // which happens only when execution is terminating.
+        pub unsafe fn wrappable_attach_opaque_wrapper(
+            isolate: *mut Isolate,
+            wrappable: KjRc<Wrappable>,
+        ) -> Result<Local>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -1256,7 +1364,7 @@ impl<'s, T> Local<'s, T> {
     /// The scope rules keep handles in their isolate, except inside
     /// [`allow_scopes_of_another_isolate`](crate::allow_scopes_of_another_isolate); this
     /// catches handles that cross isolates there.
-    fn debug_assert_isolate(&self, lock: &Lock<'_>) {
+    pub(crate) fn debug_assert_isolate(&self, lock: &Lock<'_>) {
         debug_assert!(
             // SAFETY: the lock's isolate is locked, and the check reads only the value's page
             // header, which is valid whichever isolate owns the value.
@@ -1266,7 +1374,7 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// The handle as the FFI type that C++ functions take, without giving up its lifetime.
-    fn raw(&self) -> &ffi::Local {
+    pub(crate) fn raw(&self) -> &ffi::Local {
         // SAFETY: `Local` is a `repr(transparent)` pointer and `ffi::Local` a pointer-sized
         // integer, with the same size and alignment (asserted above).
         unsafe { &*std::ptr::from_ref(self).cast::<ffi::Local>() }
@@ -1466,6 +1574,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_function(self.raw()) }
     }
 
+    /// Returns true if the value is a JavaScript Promise.
+    pub fn is_promise(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_promise(self.raw()) }
+    }
+
     /// Returns true if the value is a JavaScript Symbol.
     ///
     /// Corresponds to `v8::Value::IsSymbol()`.
@@ -1512,62 +1626,6 @@ impl<'s, T> Local<'s, T> {
     }
 }
 
-/// Trait for safe checked casts between V8 `Local` handle types.
-///
-/// Use via the turbofish method on `Local<Value>`:
-/// ```ignore
-/// let func: Local<Function> = value.try_as::<Function>().unwrap();
-/// ```
-pub trait As<T>: Sized {
-    type Output;
-
-    /// Attempts to cast this handle to the target type.
-    /// Returns `None` if the underlying value is not of the target type.
-    fn try_as(self) -> Option<Self::Output>;
-}
-
-/// Implements `As<$target>` for `Local<Value>` using the given type-check method.
-macro_rules! impl_as {
-    ($target:ident, $check:ident) => {
-        impl<'a> As<$target> for Local<'a, Value> {
-            type Output = Local<'a, $target>;
-
-            fn try_as(self) -> Option<Local<'a, $target>> {
-                if self.$check() {
-                    // SAFETY: We verified the type above.
-                    Some(unsafe { Local::from_ffi(self.into_ffi()) })
-                } else {
-                    None
-                }
-            }
-        }
-    };
-}
-
-impl_as!(Function, is_function);
-impl_as!(Object, is_object);
-impl_as!(Array, is_array);
-impl_as!(String, is_string);
-impl_as!(Symbol, is_symbol);
-impl_as!(Name, is_name);
-impl_as!(BigInt, is_big_int);
-impl_as!(Date, is_date);
-impl_as!(ArrayBuffer, is_array_buffer);
-impl_as!(ArrayBufferView, is_array_buffer_view);
-
-// Value-specific implementations
-impl Local<'_, Value> {
-    /// Attempts a checked cast to a more specific `Local<T>` type.
-    ///
-    /// Returns `None` if the value is not of the target type.
-    pub fn try_as<T>(self) -> Option<<Self as As<T>>::Output>
-    where
-        Self: As<T>,
-    {
-        As::<T>::try_as(self)
-    }
-}
-
 impl PartialEq for Local<'_, Value> {
     fn eq(&self, other: &Self) -> bool {
         // SAFETY: both handles are valid within the current HandleScope.
@@ -1583,6 +1641,152 @@ impl PartialEq for Local<'_, String> {
 }
 
 impl Eq for Local<'_, String> {}
+
+/// The state of a function created by [`Function::new`], owned by the function's C++
+/// `Wrappable`.
+struct FunctionData<T>(T);
+
+impl<T: Traced> Traced for FunctionData<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        // C++ JSG's name for the object that owns a wrapped function.
+        c"WrappableFunction"
+    }
+}
+
+impl Function {
+    /// Creates a JavaScript function that calls `f` with `data`, like C++ JSG's
+    /// `Lock::wrapReturningFunction()`.
+    ///
+    /// The function owns `data`: the garbage collector traces it through the function and drops
+    /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
+    /// traces may lead back to the function. Two things break this:
+    ///
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
+    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
+    ///   collector, and the function and `data` are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
+    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
+    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
+    ///   traced from two owners can be freed while one of them still uses it. To share state,
+    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
+    ///
+    /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
+    /// from `data`.
+    ///
+    /// `f`'s `Ok` value is the call's result and an `Err` is thrown. A panic throws an internal
+    /// error and terminates execution, as in a `#[jsg_method]`. As with the functions C++ JSG
+    /// wraps, the function's `name` is empty, its `length` is 0, and it can be called with `new`.
+    ///
+    /// While execution is terminating, or a JavaScript exception is pending, creates nothing and
+    /// returns an error for which [`Error::is_pending`] is true, so that returning it propagates
+    /// the termination or the exception.
+    ///
+    /// ```ignore
+    /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
+    ///     let name = String::from_js(lock, args.get(0))?;
+    ///     format!("{greeting}, {name}").to_js(lock)
+    /// })?;
+    /// ```
+    pub fn new<'s, T, F>(lock: &mut Lock<'s>, data: T, f: F) -> crate::Result<Local<'s, Self>>
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        Ok(function)
+    }
+
+    /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
+    /// and its opaque wrapper is the V8 data of every function, so the garbage collector traces
+    /// `data` once, whichever of the functions are reachable, and drops it once none is.
+    ///
+    /// Each callback comes from [`Function::callback`] with the same `T`. Fails as
+    /// [`Function::new`] does.
+    pub(crate) fn new_sharing_data<'s, T, const N: usize>(
+        lock: &Lock<'s>,
+        data: T,
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Self>; N]>
+    where
+        T: Traced + 'static,
+    {
+        // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
+        // Wrappable is destroyed.
+        let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
+        let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
+        let mut wrappable: WrappableRc =
+            ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
+        let functions = wrappable.new_functions(lock, callbacks);
+        // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
+        // the functions own it, so the reference is dropped and the garbage collector decides.
+        wrappable.remove_strong_ref(true);
+        functions
+    }
+
+    /// The callback with which a function that [`Function::new_sharing_data`] creates with
+    /// data `T` calls `f`, as [`Function::new`]'s function calls its closure.
+    pub(crate) fn callback<T, F>(f: F) -> crate::RawFunctionCallback
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let _ = f;
+        crate::function_callback(call_function::<T, F>)
+    }
+}
+
+/// The callback of a function created by [`Function::new`] with data `T` and closure `F`.
+fn call_function<'s, T, F>(lock: &mut Lock<'s>, args: &mut FunctionCallbackInfo<'s>)
+where
+    T: Traced + 'static,
+    F: UnitType
+        + 'static
+        + for<'a> Fn(
+            &mut Lock<'a>,
+            &T,
+            &mut FunctionCallbackInfo<'a>,
+        ) -> Result<Local<'a, Value>, Error>,
+{
+    let Some(data) = WrappableRc::of_function(args) else {
+        unreachable!("a function created by Function::new has a Wrappable as its data");
+    };
+    let Some(data_ptr) = data.resolve::<FunctionData<T>>() else {
+        unreachable!(
+            "a function created by Function::new has data of the type it was created with"
+        );
+    };
+    // SAFETY: `data` keeps the Wrappable, and with it the `FunctionData`, alive for this call.
+    // Only shared references to the `FunctionData` are ever created.
+    let data_ref = unsafe { &data_ptr.as_ref().0 };
+    // SAFETY: `Function::new` was handed a value of `F`.
+    let f = unsafe { crate::scope::unit_value::<F>() };
+    match f(lock, data_ref, args) {
+        Ok(value) => args.set_return_value(value),
+        Err(err) => lock.throw_exception(&err),
+    }
+}
 
 impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
@@ -1606,8 +1810,8 @@ impl<'s> Local<'s, Function> {
     /// # Example
     ///
     /// ```ignore
-    /// let x = x.to_js(lock);
-    /// let y = y.to_js(lock);
+    /// let x = x.to_js(lock)?;
+    /// let y = y.to_js(lock)?;
     /// let result: Number = func.call(lock, None, &[x, y])?;
     /// ```
     pub fn call<R: FromJS<'s>>(
@@ -1623,118 +1827,134 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
-        // Calling into V8 while execution is terminating would clear the termination.
-        // SAFETY: lock guarantees the isolate is locked.
-        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
-            return Err(Error::pending());
-        }
-        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles. The result
-        // belongs to the lock's scope.
-        let result = unsafe {
-            Local::from_ffi_maybe(ffi::local_function_call(
-                lock.isolate().as_ffi(),
-                self.raw(),
-                recv.raw(),
-                Local::raw_slice(args),
-            ))
-        };
-        match result {
-            Some(result) => R::from_js(lock, result),
-            None => Err(Error::pending()),
+        let result = call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
+            // self is a valid Local<Function>; recv and args are valid Local handles. The
+            // result belongs to the lock's scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_function_call(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    recv.raw(),
+                    Local::raw_slice(args),
+                ))
+            })
+        })?;
+        R::from_js(lock, result)
+    }
+}
+
+/// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
+///
+/// Every such call goes through here, so that all of them handle exceptions and termination
+/// alike. `shim` returns `None` if JavaScript threw, leaving the exception pending (see `ffi.h`);
+/// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
+/// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
+/// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
+///
+/// The one exception is `wrap_resource`, which checks for termination itself, so that its common
+/// case, reading a wrapper that already exists, takes one FFI call rather than two.
+pub(crate) fn call_into_js<'s, T>(
+    lock: &mut Lock<'s>,
+    shim: impl FnOnce(&mut Lock<'s>) -> Result<Option<T>, Error>,
+) -> Result<T, Error> {
+    // SAFETY: lock guarantees the isolate is locked.
+    if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+        return Err(Error::pending());
+    }
+    shim(lock)?.ok_or_else(Error::pending)
+}
+
+/// The error a checked downcast between `Local` handle types returns when the value is not
+/// of the target type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataError {
+    BadType {
+        actual: &'static str,
+        expected: &'static str,
+    },
+}
+
+impl DataError {
+    fn bad_type<E: 'static, A: 'static>() -> Self {
+        Self::BadType {
+            expected: std::any::type_name::<E>(),
+            actual: std::any::type_name::<A>(),
         }
     }
 }
 
-/// Implements bidirectional `From` conversions between `Local<$from>` and `Local<$to>`.
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadType { expected, actual } => {
+                write!(f, "expected type `{expected}`, got `{actual}`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DataError {}
+
+/// Implements the casts between `Local<$from>` and each of its supertypes `Local<$to>`.
 ///
-/// All V8 handle subtypes share the same pointer representation, so these casts
-/// are just reinterpretations of the handle. The `assert!` verifies the type
-/// invariant at runtime — redundant for upcasts (always true) but guards
-/// downcasts against misuse.
+/// All V8 handle subtypes share the same pointer representation, so a cast just
+/// reinterprets the handle. An upcast is a `From` and costs nothing. A downcast is a
+/// `TryFrom` that checks the value with `$check`.
+///
+/// Rust cannot derive the casts through intermediate types, so each type lists every one of
+/// its supertypes. The upcast is unchecked, so each `$to` must be a superclass of `$from` in
+/// V8, and `$check` must be the `Is*` test for `$from`.
 macro_rules! impl_local_cast {
-    ($from:ident -> $to:ident, $check:ident) => {
-        impl<'a> From<Local<'a, $from>> for Local<'a, $to> {
-            fn from(value: Local<'a, $from>) -> Self {
-                assert!(value.$check());
-                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
-                unsafe { Self::from_ffi(value.into_ffi()) }
+    ($from:ident: $($to:ident),+; $check:ident) => {
+        $(
+            impl<'a> From<Local<'a, $from>> for Local<'a, $to> {
+                fn from(value: Local<'a, $from>) -> Self {
+                    // SAFETY: V8 subtypes share handle representation, and every `$from` is a
+                    // `$to`.
+                    unsafe { Self::from_ffi(value.into_ffi()) }
+                }
             }
-        }
-        impl<'a> From<Local<'a, $to>> for Local<'a, $from> {
-            fn from(value: Local<'a, $to>) -> Self {
-                assert!(value.$check());
-                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
-                unsafe { Self::from_ffi(value.into_ffi()) }
+            impl<'a> TryFrom<Local<'a, $to>> for Local<'a, $from> {
+                type Error = DataError;
+
+                fn try_from(value: Local<'a, $to>) -> Result<Self, Self::Error> {
+                    if value.$check() {
+                        // SAFETY: V8 subtypes share handle representation; `$check` verified
+                        // that the value is a `$from`.
+                        Ok(unsafe { Self::from_ffi(value.into_ffi()) })
+                    } else {
+                        Err(DataError::bad_type::<$from, $to>())
+                    }
+                }
             }
-        }
+        )+
     };
 }
 
-// Upcasts to Value
-impl_local_cast!(String -> Value, is_string);
-impl_local_cast!(Name -> Value, is_name);
-impl_local_cast!(Symbol -> Value, is_symbol);
-impl_local_cast!(BigInt -> Value, is_big_int);
-impl_local_cast!(Date -> Value, is_date);
-impl_local_cast!(Object -> Value, is_object);
-impl_local_cast!(Function -> Value, is_function);
-impl_local_cast!(Array -> Value, is_array);
-
-// String and Symbol are both subtypes of Name
-impl_local_cast!(String -> Name, is_string);
-impl_local_cast!(Symbol -> Name, is_symbol);
-impl_local_cast!(Uint8Array -> Value, is_uint8_array);
-impl_local_cast!(Uint16Array -> Value, is_uint16_array);
-impl_local_cast!(Uint32Array -> Value, is_uint32_array);
-impl_local_cast!(Int8Array -> Value, is_int8_array);
-impl_local_cast!(Int16Array -> Value, is_int16_array);
-impl_local_cast!(Int32Array -> Value, is_int32_array);
-impl_local_cast!(Float32Array -> Value, is_float32_array);
-impl_local_cast!(Float64Array -> Value, is_float64_array);
-impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
-impl_local_cast!(Uint8ClampedArray -> Value, is_uint8clamped_array);
-impl_local_cast!(TypedArray -> Value, is_typed_array);
-
-// Concrete typed arrays to TypedArray base
-impl_local_cast!(Uint8Array -> TypedArray, is_uint8_array);
-impl_local_cast!(Uint16Array -> TypedArray, is_uint16_array);
-impl_local_cast!(Uint32Array -> TypedArray, is_uint32_array);
-impl_local_cast!(Int8Array -> TypedArray, is_int8_array);
-impl_local_cast!(Int16Array -> TypedArray, is_int16_array);
-impl_local_cast!(Int32Array -> TypedArray, is_int32_array);
-impl_local_cast!(Float32Array -> TypedArray, is_float32_array);
-impl_local_cast!(Float64Array -> TypedArray, is_float64_array);
-impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
-impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
-
-// Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
-impl_local_cast!(Function -> Object, is_function);
-impl_local_cast!(Array -> Object, is_array);
-impl_local_cast!(TypedArray -> Object, is_typed_array);
-
-// ArrayBuffer <-> Value, ArrayBuffer <-> Object
-impl_local_cast!(ArrayBuffer -> Value, is_array_buffer);
-impl_local_cast!(ArrayBuffer -> Object, is_array_buffer);
-
-// ArrayBufferView <-> Value, ArrayBufferView <-> Object
-// All concrete TypedArray types and DataView are ArrayBufferViews.
-impl_local_cast!(ArrayBufferView -> Value, is_array_buffer_view);
-impl_local_cast!(ArrayBufferView -> Object, is_array_buffer_view);
-
-// Concrete typed arrays <-> ArrayBufferView base
-impl_local_cast!(Uint8Array -> ArrayBufferView, is_uint8_array);
-impl_local_cast!(Uint16Array -> ArrayBufferView, is_uint16_array);
-impl_local_cast!(Uint32Array -> ArrayBufferView, is_uint32_array);
-impl_local_cast!(Int8Array -> ArrayBufferView, is_int8_array);
-impl_local_cast!(Int16Array -> ArrayBufferView, is_int16_array);
-impl_local_cast!(Int32Array -> ArrayBufferView, is_int32_array);
-impl_local_cast!(Float32Array -> ArrayBufferView, is_float32_array);
-impl_local_cast!(Float64Array -> ArrayBufferView, is_float64_array);
-impl_local_cast!(BigInt64Array -> ArrayBufferView, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> ArrayBufferView, is_biguint64_array);
+impl_local_cast!(Name: Value; is_name);
+impl_local_cast!(String: Name, Value; is_string);
+impl_local_cast!(Symbol: Name, Value; is_symbol);
+impl_local_cast!(BigInt: Value; is_big_int);
+impl_local_cast!(Object: Value; is_object);
+impl_local_cast!(Date: Object, Value; is_date);
+impl_local_cast!(Function: Object, Value; is_function);
+impl_local_cast!(Promise: Object, Value; is_promise);
+impl_local_cast!(Array: Object, Value; is_array);
+impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
+impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
+impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
+impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
+impl_local_cast!(Uint16Array: TypedArray, ArrayBufferView, Object, Value; is_uint16_array);
+impl_local_cast!(Uint32Array: TypedArray, ArrayBufferView, Object, Value; is_uint32_array);
+impl_local_cast!(Int8Array: TypedArray, ArrayBufferView, Object, Value; is_int8_array);
+impl_local_cast!(Int16Array: TypedArray, ArrayBufferView, Object, Value; is_int16_array);
+impl_local_cast!(Int32Array: TypedArray, ArrayBufferView, Object, Value; is_int32_array);
+impl_local_cast!(Float32Array: TypedArray, ArrayBufferView, Object, Value; is_float32_array);
+impl_local_cast!(Float64Array: TypedArray, ArrayBufferView, Object, Value; is_float64_array);
+impl_local_cast!(BigInt64Array: TypedArray, ArrayBufferView, Object, Value; is_bigint64_array);
+impl_local_cast!(BigUint64Array: TypedArray, ArrayBufferView, Object, Value; is_biguint64_array);
 
 impl Array {
     /// Creates a new JavaScript array with the given length.
@@ -1742,6 +1962,27 @@ impl Array {
         let isolate = lock.isolate();
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { Local::from_ffi(ffi::local_new_array(isolate.as_ffi(), len)) }
+    }
+
+    /// Creates a new JavaScript array of `elements`.
+    ///
+    /// Runs no JavaScript: unlike [`Local::<Array>::set`], it calls no setter that a script
+    /// defined on `Array.prototype`. Corresponds to `v8::Array::New(isolate, elements, length)`.
+    pub fn with_elements<'s>(
+        lock: &mut crate::Lock<'s>,
+        elements: &[Local<'s, Value>],
+    ) -> Local<'s, Self> {
+        for element in elements {
+            element.debug_assert_isolate(lock);
+        }
+        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; the
+        // elements are valid handles in it.
+        unsafe {
+            Local::from_ffi(ffi::array_new_with_elements(
+                lock.isolate().as_ffi(),
+                Local::raw_slice(elements),
+            ))
+        }
     }
 }
 
@@ -1759,30 +2000,53 @@ impl<'s> Local<'s, Array> {
         self.len() == 0
     }
 
-    /// Sets an element at the given index.
+    /// Sets element `index` to `value`, like JS `array[index] = value`.
     ///
-    /// May run JavaScript (setters on the prototype chain).
-    pub fn set(self, lock: &mut Lock<'s>, index: usize, value: Local<'s, Value>) {
-        let mut handle = *self.raw();
-        // SAFETY: lock guarantees the isolate is locked; both handles are valid in scope 's.
-        unsafe {
-            ffi::local_array_set(
-                lock.isolate().as_ffi(),
-                &mut handle,
-                index as u32,
-                value.into_ffi(),
-            );
-        }
+    /// # Errors
+    ///
+    /// If a setter, on the array or its prototype chain, throws, or execution is terminating,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
+    /// true, as for [`Local::<Function>::call`].
+    pub fn set(
+        self,
+        lock: &mut Lock<'s>,
+        index: u32,
+        value: Local<'s, Value>,
+    ) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        value.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            let mut handle = *self.raw();
+            // SAFETY: lock guarantees the isolate is locked; both handles are valid in scope 's.
+            let ok = unsafe {
+                ffi::local_array_set(
+                    lock.isolate().as_ffi(),
+                    &mut handle,
+                    index,
+                    value.into_ffi(),
+                )
+            };
+            Ok(ok.then_some(()))
+        })
     }
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
     /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
-    /// Errs (rather than aborting) if the value is not an array, or if a proxy
-    /// trap/getter throws while an element is being read during iteration.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or
+    /// execution is terminating, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
-        let globals =
-            unsafe { ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi()) }?;
+        let globals = call_into_js(lock, |lock| {
+            let mut globals = Vec::new();
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
+            let ok = unsafe {
+                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+            }?;
+            Ok(ok.then_some(globals))
+        })?;
         let state = lock.isolate_state();
         Ok(globals
             .into_iter()
@@ -2477,6 +2741,10 @@ macro_rules! impl_typed_array_from_js {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
 
+            fn type_name() -> std::string::String {
+                $name.to_owned()
+            }
+
             fn from_js(
                 lock: &mut crate::Lock<'s>,
                 value: Local<'s, Value>,
@@ -2543,11 +2811,11 @@ impl Uint8Array {
     /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
     /// `byte_offset`.
     ///
-    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
-    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
-    /// in Rust therefore does not require an intermediate `Vec`: allocate and fill
-    /// the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap the written prefix
-    /// here.
+    /// Zero-copy, unlike [`to_js_typed_array`](crate::ToJsTypedArray::to_js_typed_array), which
+    /// allocates a fresh backing store and copies into it. Producing a `Uint8Array`
+    /// from bytes computed in Rust therefore does not require an intermediate `Vec`:
+    /// allocate and fill the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap
+    /// the written prefix here.
     ///
     /// # Errors
     ///
@@ -2915,6 +3183,26 @@ impl<'s> Local<'s, Symbol> {
     }
 }
 
+impl BigInt {
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: i64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::big_int_new(isolate.as_ffi(), value)) }
+    }
+
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::NewFromUnsigned()`.
+    pub fn from_unsigned<'s>(lock: &mut crate::Lock<'s>, value: u64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::big_int_new_from_unsigned(isolate.as_ffi(), value)) }
+    }
+}
+
 impl Local<'_, BigInt> {
     /// Returns the value as an `i64`, or `None` if it is out of the range of `i64`.
     ///
@@ -2924,6 +3212,38 @@ impl Local<'_, BigInt> {
         // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
         let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
         lossless.then_some(value)
+    }
+
+    /// Returns the value as a `u64`, or `None` if it is out of the range of `u64`.
+    ///
+    /// Corresponds to `v8::BigInt::Uint64Value()`.
+    pub fn uint64_value(&self) -> Option<u64> {
+        let mut lossless = false;
+        // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
+        let value = unsafe { ffi::local_big_int_uint64_value(self.raw(), &mut lossless) };
+        lossless.then_some(value)
+    }
+}
+
+impl Date {
+    /// Creates a `Date` in the current context with the time value `time`, in milliseconds
+    /// since the epoch. A time outside the range of JavaScript dates gives an invalid date.
+    ///
+    /// Corresponds to `v8::Date::New()`.
+    ///
+    /// # Errors
+    ///
+    /// If V8 throws while creating it, or execution is terminating, the exception stays pending
+    /// and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript, which
+    /// would clear a pending termination.
+    #[inline]
+    pub fn new<'s>(lock: &mut Lock<'s>, time: f64) -> crate::Result<Local<'s, Self>> {
+        call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a `Date` V8 created in that scope.
+            Ok(unsafe { Local::from_ffi_maybe(ffi::date_new(lock.isolate().as_ffi(), time)) })
+        })
     }
 }
 
@@ -3036,38 +3356,105 @@ impl Drop for Utf8Value {
 }
 
 // Object-specific implementations
+impl Object {
+    /// Creates a new object with `properties` as its own data properties, in that order.
+    ///
+    /// Runs no JavaScript: unlike [`Local::<Object>::set`], it calls no setter that a script
+    /// defined on `Object.prototype`. Each property is defined as by
+    /// `v8::Object::CreateDataProperty` (writable, enumerable and configurable); a later duplicate
+    /// key replaces the earlier value.
+    ///
+    /// # Errors
+    ///
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it.
+    pub fn with_data_properties<'s>(
+        lock: &mut Lock<'s>,
+        properties: &[(&str, Local<'s, Value>)],
+    ) -> crate::Result<Local<'s, Self>> {
+        let (keys, values): (Vec<&str>, Vec<Local<'s, Value>>) = properties
+            .iter()
+            .map(|(key, value)| {
+                value.debug_assert_isolate(lock);
+                (*key, *value)
+            })
+            .unzip();
+        // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
+        // is active; the values are valid handles in it. The result belongs to that scope.
+        let object = unsafe {
+            ffi::object_new_with_data_properties(
+                lock.isolate().as_ffi(),
+                &keys,
+                Local::raw_slice(&values),
+            )
+        }?;
+        // SAFETY: as above.
+        Ok(unsafe { Local::from_ffi(object) })
+    }
+}
+
 impl<'s> Local<'s, Object> {
-    /// Sets `key` to `value`. May run JavaScript (setters, proxy traps).
-    pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) {
+    /// Sets `key` to `value`, like JS `obj[key] = value`.
+    ///
+    /// # Errors
+    ///
+    /// If a setter on the prototype chain or a Proxy trap throws, or execution is terminating,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
+    /// true, as for [`Local::<Function>::call`].
+    pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) -> crate::Result<()> {
         self.debug_assert_isolate(lock);
         value.debug_assert_isolate(lock);
-        let mut handle = *self.raw();
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
-        unsafe {
-            ffi::local_object_set_property(
-                lock.isolate().as_ffi(),
-                &mut handle,
-                key,
-                value.into_ffi(),
-            );
-        }
+        call_into_js(lock, |lock| {
+            let mut handle = *self.raw();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
+            let ok = unsafe {
+                ffi::local_object_set_property(
+                    lock.isolate().as_ffi(),
+                    &mut handle,
+                    key,
+                    value.into_ffi(),
+                )
+            }?;
+            Ok(ok.then_some(()))
+        })
     }
 
-    /// Whether `key` is in the object or its prototype chain. A throwing
-    /// Proxy `has` trap is an `Err`.
+    /// Whether `key` is in the object or its prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `has` trap throws, or execution is terminating, the exception stays pending
+    /// and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
     pub fn has(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<bool> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        Ok(unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), self.raw(), key) }?)
+        call_into_js(lock, |lock| {
+            let mut has = false;
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_has_property(lock.isolate().as_ffi(), self.raw(), key, &mut has)
+            }?;
+            Ok(ok.then_some(has))
+        })
     }
 
-    /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`,
-    /// and a throwing getter or Proxy trap is an `Err`.
+    /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`.
+    ///
+    /// # Errors
+    ///
+    /// If a getter or Proxy trap throws, or execution is terminating, the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
     pub fn get(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<Local<'s, Value>> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        let local =
-            unsafe { ffi::local_object_get_property(lock.isolate().as_ffi(), self.raw(), key) }?;
-        // SAFETY: the handle was just created in the current HandleScope.
-        Ok(unsafe { Local::from_ffi(local) })
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_object_get_property(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    key,
+                )?)
+            })
+        })
     }
 }
 
@@ -3400,64 +3787,6 @@ unsafe fn global_clone(lock: &mut Lock<'_>, handle: &ffi::Global) -> ffi::Global
     unsafe { ffi::global_clone(lock.isolate().as_ffi(), handle) }
 }
 
-/// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
-///
-/// Unlike [`ToJS`](crate::ToJS), this borrows `self` and also covers the integer types,
-/// which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
-/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element
-/// types were themselves `ToJS`. `#[jsg_struct]` uses it for fields.
-pub trait ToLocalValue {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value>;
-}
-
-macro_rules! impl_to_local_value_integer {
-    ($($type:ty),*) => {
-        $(
-            impl ToLocalValue for $type {
-                fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-                    Number::new(f64::from(*self)).to_local(lock)
-                }
-            }
-        )*
-    };
-}
-
-impl_to_local_value_integer!(u8, u16, u32, i8, i16, i32);
-
-impl ToLocalValue for std::string::String {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        self.as_str().to_local(lock)
-    }
-}
-
-impl ToLocalValue for &str {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
-    }
-}
-
-impl ToLocalValue for bool {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
-    }
-}
-
-impl ToLocalValue for Number {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
-    }
-}
-
-impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        match self {
-            Self::Some(v) => v.to_local(lock),
-            Self::Null => lock.null(),
-            Self::Undefined => lock.undefined(),
-        }
-    }
-}
-
 /// The arguments of a V8 function callback.
 ///
 /// `'cb` is the brand of the callback's [`Lock`](crate::Lock): V8 opens a `HandleScope`
@@ -3517,7 +3846,7 @@ impl<'cb> FunctionCallbackInfo<'cb> {
     }
 }
 
-/// The arguments to a native data property getter.
+/// The arguments to a native data property getter, or to the getter of a wildcard property.
 ///
 /// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
 /// [`FunctionCallbackInfo`]. Invariant in `'cb`.
@@ -3550,6 +3879,42 @@ impl<'cb> PropertyCallbackInfo<'cb> {
         // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
         // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+}
+
+/// The `PropertyCallbackInfo` of a wildcard property query, which tells V8 whether the property
+/// exists.
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
+/// [`FunctionCallbackInfo`]. Invariant in `'cb`.
+pub struct PropertyQueryCallbackInfo<'cb>(
+    *mut ffi::PropertyQueryCallbackInfo,
+    PhantomData<*mut &'cb ()>,
+);
+
+impl<'cb> PropertyQueryCallbackInfo<'cb> {
+    /// Wraps the `PropertyCallbackInfo` of the running query, whose lock is `lock`.
+    ///
+    /// # Safety
+    /// `info` must be the `PropertyCallbackInfo` V8 passed to the running query, and `lock`
+    /// the lock of the [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::PropertyQueryCallbackInfo,
+    ) -> Self {
+        Self(info, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::pqci_get_isolate(self.0)) }
+    }
+
+    /// The object that has the interceptor (V8's `Holder()`), which may be on the prototype
+    /// chain of the object whose property is looked up.
+    pub fn this(&self) -> Local<'cb, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(ffi::pqci_get_this(self.0)) }
     }
 }
 
@@ -3687,9 +4052,9 @@ impl ffi::TraitObjectPtr {
         unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
     }
 
-    /// Returns the resource as a typed `NonNull<R>`, or `None` if the trait object has been
+    /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
     /// cleared or holds a type other than `R`.
-    pub(crate) fn resolve<R: Resource>(&self) -> Option<NonNull<R>> {
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         if self.is_cleared() || self.type_id() != std::any::TypeId::of::<R>() {
             return None;
         }
@@ -3883,6 +4248,14 @@ impl GcVisitor {
     /// Accepts `&TracedGlobal<T>` even though it mutates the handles. This is sound because GC
     /// tracing is always single-threaded within a V8 isolate, and `trace` is never
     /// re-entrant on the same object during a GC cycle; see also [`GlobalSlot`].
+    ///
+    /// # One owner
+    ///
+    /// The visit makes the handle strong if the parent has strong Rust references, and weak if
+    /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
+    /// last visit wins, and the value can be collected while the other owner still uses it. So
+    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
+    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
@@ -4033,16 +4406,38 @@ impl WrappableRc {
     /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
     /// use creating) `R`'s cached constructor template.
     ///
-    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
-    pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
+    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate. That
+    /// is a bug in the caller, which [`resource::wrap`](crate::resource::wrap) turns into a
+    /// panic.
+    ///
+    /// # Errors
+    ///
+    /// If V8 fails to create the wrapper, or execution is terminating, the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
+    pub(crate) fn to_js<'s, R: Resource>(
+        &self,
+        lock: &mut Lock<'s>,
+    ) -> crate::Result<Option<Local<'s, Value>>> {
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
+        let mut wrapped_elsewhere = false;
         // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
+        // isolate, which the Realm's template cache keeps alive. The shim checks for termination
+        // itself, as `call_into_js()` would.
         let handle = unsafe {
-            ffi::wrap_resource(lock.isolate().as_ffi(), self.handle.clone(), &constructor)
+            ffi::wrap_resource(
+                lock.isolate().as_ffi(),
+                self.handle.clone(),
+                &constructor,
+                &mut wrapped_elsewhere,
+            )
         };
+        if wrapped_elsewhere {
+            return Ok(None);
+        }
         // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }
+        let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
+        Ok(Some(wrapper))
     }
 
     /// Attaches this Wrappable to the `this` object in a V8 constructor callback.
@@ -4163,17 +4558,74 @@ impl WrappableRc {
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
     }
 
+    /// Creates one JavaScript function per callback, each with an opaque wrapper of this
+    /// Wrappable as its data, which keeps the Wrappable alive while one of them is reachable.
+    /// The Wrappable must not have a wrapper yet, and gets one wrapper for all of them.
+    ///
+    /// While execution is terminating, or an exception is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
+    /// function only while execution is terminating.
+    pub(crate) fn new_functions<'s, const N: usize>(
+        &self,
+        lock: &Lock<'s>,
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Function>; N]> {
+        let isolate = lock.isolate().as_ffi();
+        // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
+        // exception or termination, so nothing is created while one is pending.
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        if unsafe {
+            ffi::isolate_is_execution_terminating(isolate)
+                || ffi::isolate_has_pending_exception(isolate)
+        } {
+            return Err(Error::pending());
+        }
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock).
+        let data = unsafe { ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()) }
+            .map_err(|_| Error::pending())?;
+        let mut functions = Vec::with_capacity(N);
+        for callback in callbacks {
+            // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
+            // lock's scope, in which the function is created.
+            let function = unsafe {
+                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, &data))
+            };
+            functions.push(function.ok_or_else(Error::pending)?);
+        }
+        let Ok(functions) = functions.try_into() else {
+            unreachable!("one function per callback")
+        };
+        Ok(functions)
+    }
+
+    /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
+    /// [`new_functions`](Self::new_functions) attaches it, or `None` if the data is anything else.
+    pub(crate) fn of_function(args: &FunctionCallbackInfo<'_>) -> Option<Self> {
+        // SAFETY: args.0 is the running callback's FunctionCallbackInfo.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::fci_get_data_wrappable(args.0) }.into();
+        handle.map(|handle| Self { handle })
+    }
+
     /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
     ///
-    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
-    /// does not match `R`, preventing type confusion in all builds.
-    #[doc(hidden)]
-    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+    /// Returns `None` if the trait object has been cleared or holds a type other than `R`.
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         // SAFETY: wrappable pointer is valid (guaranteed by KjRc lifetime).
         let trait_ptr = unsafe {
             let wrappable = &*self.handle.get();
             ffi::TraitObjectPtr::from_wrappable(wrappable)?
         };
         trait_ptr.resolve::<R>()
+    }
+
+    /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
+    ///
+    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
+    /// does not match `R`, preventing type confusion in all builds.
+    #[doc(hidden)]
+    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+        self.resolve::<R>()
     }
 }

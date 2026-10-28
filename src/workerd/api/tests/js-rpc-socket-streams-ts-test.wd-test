@@ -89,7 +89,6 @@ const unitTests :Workerd.Config = (
   ],
   v8Flags = [ "--expose-gc" ],
   autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
     "workerd-autogate-rpc-externals-hydration",
   ],
 );

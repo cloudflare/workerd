@@ -32,13 +32,6 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
     ? ArtifactBundler
     : undefined;
 
-// Packages
-export const PACKAGES_VERSION = MetadataReader.getPackagesVersion();
-// The package lock is embedded in the binary. See `getPyodideLock` and `packageLocks`.
-export const LOCKFILE = JSON.parse(
-  MetadataReader.getPackagesLock()
-) as PackageLock;
-
 // Entrypoints
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
@@ -63,6 +56,8 @@ export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
 export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
 export const PROCESS_PTH_FILES = !!COMPATIBILITY_FLAGS.python_process_pth_files;
+export const SHARED_STANDARD_LIBRARY =
+  !!COMPATIBILITY_FLAGS.python_shared_standard_library;
 
 export const setCpuLimitNearlyExceededCallback =
   MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);
