@@ -267,6 +267,10 @@ bool verifying() {
   return std::getenv("JSG_BENCH_VERIFY") != nullptr;
 }
 
+bool smokeTesting() {
+  return std::getenv("JSG_BENCH_SMOKE") != nullptr;
+}
+
 void fail(benchmark::State& state, kj::StringPtr message) {
   if (verifying()) {
     KJ_LOG(FATAL, "benchmark check failed", state.name().c_str(), message);
@@ -306,9 +310,11 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
     auto prefix =
         rust ? "const t=rustTarget; const C=RustNode;"_kj : "const t=cppTarget; const C=Node;"_kj;
     auto naturalJit = std::getenv("JSG_BENCH_NATURAL_JIT") != nullptr;
-    auto optimize = !naturalJit ? "%PrepareFunctionForOptimization(batch); batch(64);"
-                                  "%OptimizeFunctionOnNextCall(batch); batch(64); batch;"_kj
-                                : "batch(128); batch;"_kj;
+    auto warmupBatch = smokeTesting() ? 1 : 64;
+    auto optimize = !naturalJit
+        ? kj::str("%PrepareFunctionForOptimization(batch); batch(", warmupBatch,
+              "); %OptimizeFunctionOnNextCall(batch); batch(", warmupBatch, "); batch;")
+        : kj::str("batch(", warmupBatch * 2, "); batch;");
     auto code = kj::str("const cppTarget=makeCpp();", prefix, test.setup, ";if (!(",
         test.validation, ")) throw new Error('validation: ", test.name,
         "');"
@@ -332,10 +338,12 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
       auto result = check(function->Call(ctx, ctx->Global(), 1, args));
       benchmark::DoNotOptimize(result);
     };
-    auto start = kj::systemPreciseMonotonicClock().now();
-    do {
-      invoke();
-    } while (kj::systemPreciseMonotonicClock().now() - start < 30 * kj::MILLISECONDS);
+    if (!smokeTesting()) {
+      auto start = kj::systemPreciseMonotonicClock().now();
+      do {
+        invoke();
+      } while (kj::systemPreciseMonotonicClock().now() - start < 30 * kj::MILLISECONDS);
+    }
     // Bit 5 is OptimizationStatus::kTurboFanned in V8's src/runtime/runtime.h.
     auto tierCheck = naturalJit ? ""_kj
                                 : "if ((%GetOptimizationStatus(batch)&(1<<5))===0)"
@@ -385,7 +393,7 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
 }
 
 void nativeLifetime(benchmark::State& state, Binding binding, uint32_t clones) {
-  constexpr uint32_t COUNT = 1024;
+  const uint32_t COUNT = smokeTesting() ? 4 : 1024;
   for (auto _: state) {
     if (binding == Binding::RUST) {
       benchmark::DoNotOptimize(rustBench::native_lifetime(COUNT, clones));
@@ -414,7 +422,7 @@ int registerCases() {
     auto name =
         binding == Binding::CPP ? "Metadata/native-memory-cpp" : "Metadata/native-memory-rust";
     benchmark::RegisterBenchmark(name, [binding](benchmark::State& state) {
-      constexpr uint32_t COUNT = 100000;
+      const uint32_t COUNT = smokeTesting() ? 4 : 100000;
       // Populate allocator caches before taking the live-allocation baseline.
       benchmark::DoNotOptimize(rustBench::native_lifetime(1024, 0));
       for (uint32_t i = 0; i < 1024; ++i) {
@@ -449,6 +457,7 @@ int registerCases() {
                  kj::StringPtr validation, kj::StringPtr expected, uint32_t batch = 1024,
                  std::initializer_list<Binding> bindings = {Binding::CPP, Binding::RUST},
                  CpuTime cpuTime = CpuTime::THREAD) {
+    if (smokeTesting()) batch = 1;
     for (auto binding: bindings) {
       auto test = kj::heap<Case>(Case{kj::str(name), kj::str(setup), kj::str(expression),
         kj::str(validation), kj::str(expected), batch});
@@ -527,7 +536,8 @@ int registerCases() {
       "function attempt(){try{t.add(Symbol());}catch(e){return e instanceof TypeError ? 1 : 0;}}",
       "attempt()", "attempt()===1", "1", 64);
   add("gc/empty", "", "(gc(),1)", "true", "1", 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
-  for (auto size: {1000, 10000}) {
+  for (auto size: smokeTesting() ? std::initializer_list<int>{10, 20}
+                                 : std::initializer_list<int>{1000, 10000}) {
     add(kj::str("gc/allocate-collect/", size),
         kj::str("function cycle(){for(let j=0;j<", size, ";++j)t.newNode(j);gc();return 1;}"),
         "cycle()", "cycle()===1", "1", 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
@@ -536,13 +546,17 @@ int registerCases() {
         "(gc(),live.length)", kj::str("live.length===", size), kj::str(size), 1,
         {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
   }
-  add("gc/live-chain/1000",
-      "let live=new C(0);for(let j=1;j<1000;++j){const n=new C(j);n.setChild(live);live=n;}",
+  auto chainSize = smokeTesting() ? 10 : 1000;
+  add(kj::str("gc/live-chain/", chainSize),
+      kj::str("let live=new C(0);for(let j=1;j<", chainSize,
+          ";++j){const n=new C(j);n.setChild(live);live=n;}"),
       "(gc(),live.value)",
-      "(()=>{gc();let n=live,k=999;for(;n;n=n.child)if(n.value!==k--)return false;return k===-1;})()",
-      "999", 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
+      kj::str("(()=>{gc();let n=live,k=", chainSize - 1,
+          ";for(;n;n=n.child)if(n.value!==k--)return false;return k===-1;})()"),
+      kj::str(chainSize - 1), 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
 
-  for (auto size: {16, 1024, 65536}) {
+  for (auto size: smokeTesting() ? std::initializer_list<int>{1, 16, 64}
+                                 : std::initializer_list<int>{16, 1024, 65536}) {
     for (auto encoding: {"ascii"_kj, "latin1"_kj, "utf16"_kj}) {
       auto ch = encoding == "ascii" ? "a" : encoding == "latin1" ? "é" : "水";
       auto setup = kj::str("const x='", ch, "'.repeat(", size, ");");
@@ -553,7 +567,8 @@ int registerCases() {
           "t.stringEcho(x)===x", kj::str(size), size >= 65536 ? 16 : 256);
     }
   }
-  for (auto size: {8, 64, 1024}) {
+  for (auto size: smokeTesting() ? std::initializer_list<int>{0, 1, 8}
+                                 : std::initializer_list<int>{8, 64, 1024}) {
     auto setup = kj::str("const x=Array.from({length:", size, "},(_,i)=>i);");
     add(kj::str("array/in/", size), setup, "t.arraySum(x)",
         kj::str("t.arraySum(x)===", size * (size - 1) / 2), kj::str(size * (size - 1) / 2),
@@ -564,9 +579,10 @@ int registerCases() {
         kj::str("(a=>a.length===", size, "&&a.every((v,i)=>v===i))(t.arrayMake(", size, "))"),
         kj::str(size), size >= 1024 ? 16 : 128);
   }
-  for (auto size: {0, 16, 1024, 65536}) {
+  for (auto size: smokeTesting() ? std::initializer_list<int>{0, 16, 32, 64}
+                                 : std::initializer_list<int>{0, 16, 1024, 65536}) {
     auto setup = kj::str("const x=new Uint8Array(", size, ");x.fill(3);");
-    if (size == 16 || size == 1024) {
+    if (size == 16 || size == (smokeTesting() ? 32 : 1024)) {
       add(kj::str("buffer/length/", size), setup, "t.bytesLen(x)",
           kj::str("t.bytesLen(x)===", size), kj::str(size));
     }

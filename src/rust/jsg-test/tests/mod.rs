@@ -26,6 +26,7 @@ mod local_value;
 mod name;
 mod nested_type;
 mod non_coercible;
+mod nullable;
 mod option;
 mod promise;
 mod resource_callback;

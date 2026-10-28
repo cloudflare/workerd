@@ -26,8 +26,10 @@ Rust JSG counts fast calls only in builds with debug assertions: the `RustFast/`
 with `--config=rust-debug`, and other builds log a warning and check only the C++ cases. With
 `JSG_BENCH_NATURAL_JIT` set, V8 decides when to optimize the JavaScript instead of being told to.
 
-The `smoke-test` target runs the verification command above. It is tagged `workerd-benchmark`, so
-CI configurations that skip benchmarks skip it too.
+The `smoke-test` target also sets `JSG_BENCH_SMOKE=1` to use small inputs and one operation per
+batch, without timed warmup. It retains result, optimization, and Fast API checks. Performance
+runs use the full input sizes and warmup. The target is tagged `workerd-benchmark`, so CI
+configurations that skip benchmarks skip it too.
 
 ## Compare Rust with C++
 
@@ -88,8 +90,7 @@ are ignored.
   comparison for the other GC cases.
 - Both buffer-copy implementations allocate new storage and copy the bytes. The length and sum
   cases read existing storage. String sizes are in UTF-16 code units; native strings are UTF-8.
-  Ordinary numeric arrays use Rust `Vec<Number>` and C++ `kj::Array<double>`; `Vec<f64>` uses a
-  typed array instead.
+  Ordinary numeric arrays use Rust `Vec<Number>` and C++ `kj::Array<double>`.
 - Numeric results use Rust `Number` and C++ `double`; integer inputs, storage, and arithmetic
   remain integer-typed in both. The Rust callback checks and casts `Local<Value>` to `Function`.
   The C++ callback benchmark calls V8 directly, not through `jsg::Function`.

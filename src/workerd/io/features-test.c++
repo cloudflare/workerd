@@ -36,6 +36,7 @@ constexpr FlagSetter FLAG_SETTERS[] = {
   &CompatibilityFlags::Builder::setEnhancedErrorSerialization,
   &CompatibilityFlags::Builder::setFastJsgStruct,
   &CompatibilityFlags::Builder::setWasmEsmIntegrationBuiltins,
+  &CompatibilityFlags::Builder::setWasmSourceUrlSupport,
 };
 
 void checkSettings(CompatibilityFlags::Reader flags) {
@@ -60,6 +61,7 @@ void checkSettings(CompatibilityFlags::Reader flags) {
     KJ_EXPECT(js.isUsingEnhancedErrorSerialization() == flags.getEnhancedErrorSerialization());
     KJ_EXPECT(js.isUsingFastJsgStruct() == flags.getFastJsgStruct());
     KJ_EXPECT(js.isWasmEsmIntegrationBuiltinsEnabled() == flags.getWasmEsmIntegrationBuiltins());
+    KJ_EXPECT(js.isWasmSourceUrlSupportEnabled() == flags.getWasmSourceUrlSupport());
   });
 }
 
