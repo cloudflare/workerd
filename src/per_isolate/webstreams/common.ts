@@ -105,7 +105,7 @@ function toStringTagProperty(tag: string): PropertyDescriptor {
 
 const kMaxUint64 = 0xffff_ffff_ffff_ffffn;
 
-// Converts the non-standard expectedLength extension: the total bytes a byte
+// Converts the non-standard expectedLength extension: the total bytes a
 // source or a transformer promises, or a FixedLengthStream's length. It
 // converts as the C++ implementation converts a uint64_t, so the two accept
 // the same values and agree on what they mean. undefined means no length. A
@@ -328,9 +328,10 @@ function convertReadableStreamType(value: unknown): 'bytes' | undefined {
 // An underlying source as WebIDL converts it to an UnderlyingSource
 // dictionary, before the constructor checks anything: every member read
 // once, in lexicographic order, each callback checked, type converted as
-// its enum, and autoAllocateChunkSize and the expectedLength extension
-// converted, on a default source too, although only a byte source uses
-// them. The callbacks still run with the source itself as their receiver.
+// its enum, the expectedLength extension converted, and
+// autoAllocateChunkSize converted on a default source too, although only a
+// byte source uses it. The callbacks still run with the source itself as
+// their receiver.
 // S narrows the callbacks to one kind of source, once type is known.
 export interface UnderlyingSourceDict<
   R,
