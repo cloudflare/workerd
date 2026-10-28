@@ -639,6 +639,7 @@ fn init_workflows(
     services: &LinkedHashMap<String, Service>,
     actor_configs: &ActorConfigs,
     report: &Reporter,
+    cluster: Option<&Rc<ClusterNode>>,
     namespaces_by_unique_key: &mut HashMap<String, Rc<ActorNamespace>>,
 ) -> Result<()> {
     for service_conf in config.get_services().map_err(capnp_error)? {
@@ -670,7 +671,7 @@ fn init_workflows(
             else {
                 continue;
             };
-            if let Some(namespace) = engine.init_workflow(workflow, key, config)? {
+            if let Some(namespace) = engine.init_workflow(workflow, key, config, cluster)? {
                 namespaces_by_unique_key.insert(key.clone(), namespace);
             }
         }
@@ -759,6 +760,7 @@ impl<'a> WorkflowEngine<'a> {
         workflow: &Workflow,
         key: &str,
         config: &ActorConfig,
+        cluster: Option<&Rc<ClusterNode>>,
     ) -> Result<Option<Rc<ActorNamespace>>> {
         let (workflow_name, class_name) = (workflow.name.as_str(), workflow.class_name.as_str());
         if self.app.has_actor_class(key) {
@@ -835,6 +837,7 @@ impl<'a> WorkflowEngine<'a> {
                 actor_class,
                 storage_path,
                 self.engine.persistent_self_tokens(),
+                cluster,
             )
             .map(Some)
     }
@@ -1062,15 +1065,6 @@ impl Server {
                 .insert("internet".to_owned(), Service::Leaf(internet));
         }
 
-        // Every service exists: wire each worker's Workflows to the engine that runs them.
-        init_workflows(
-            config,
-            &services.0,
-            &actor_configs,
-            &report,
-            &mut namespaces_by_unique_key,
-        )?;
-
         let cluster = match cluster_address {
             Some(address) if config.has_cluster() => {
                 make_cluster(&factory, config, address, &report)?
@@ -1084,6 +1078,18 @@ impl Server {
                 .join()
                 .await
                 .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
+        }
+
+        // Every service exists: wire each worker's Workflows to the engine that runs them.
+        init_workflows(
+            config,
+            &services.0,
+            &actor_configs,
+            &report,
+            cluster.as_ref(),
+            &mut namespaces_by_unique_key,
+        )?;
+        if let Some(cluster) = &cluster {
             for namespace in namespaces_by_unique_key.values() {
                 namespace.set_cluster(Rc::clone(cluster));
             }
