@@ -253,18 +253,15 @@ PromiseState local_promise_state(const Local& promise);
 // if it is.
 Local local_promise_result(const Local& promise);
 void local_promise_mark_as_handled(const Local& promise);
-// `promise.then(on_fulfilled)`, `promise.catch(on_rejected)` and
 // `promise.then(on_fulfilled, on_rejected)`, without looking up `then` or the species
 // constructor. An empty result means an exception is pending (one that a promise hook threw, or a
-// termination), as local_function_call() leaves it. While one is pending these, and the
+// termination), as local_function_call() leaves it. While one is pending this, and the
 // PromiseResolver shims, call nothing in V8, which would clear it.
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled);
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected);
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected);
 
 // Local<PromiseResolver>
-// An empty result, or false, means an exception is pending, as for local_promise_then().
+// An empty result, or false, means an exception is pending, as for local_promise_then_or_catch().
 MaybeLocal promise_resolver_new(Isolate* isolate);
 Local local_promise_resolver_promise(const Local& resolver);
 // Resolving with a thenable reads its `then` property, which can run JavaScript; an exception it
