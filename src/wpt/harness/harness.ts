@@ -127,6 +127,15 @@ class RunnerState {
   // Callbacks to be run once the entire test is done.
   completionCallbacks: UnknownFunc[] = [];
 
+  // Set if the test file itself failed to load or evaluate, as opposed to one of its subtests
+  // failing. Reported as the harness status ERROR.
+  harnessError?: string;
+
+  // When the file started running and how long it ran, in milliseconds. Timers in workerd only
+  // advance across I/O, so the duration undercounts CPU-bound files.
+  startTime = Date.now();
+  duration = 0;
+
   constructor(
     testUrl: URL,
     testFileName: string,
@@ -448,21 +457,27 @@ async function runTest(
 
   const meta = parseWptMetadata(String(env[file]));
 
-  if (options.before) {
-    options.before();
-  }
+  try {
+    if (options.before) {
+      options.before();
+    }
 
-  const files = [];
+    const files = [];
 
-  for (const script of meta.scripts) {
-    files.push(getCodeAtPath(env, path.dirname(file), script));
-  }
+    for (const script of meta.scripts) {
+      files.push(getCodeAtPath(env, path.dirname(file), script));
+    }
 
-  files.push(getCodeAtPath(env, './', file, options.replace));
-  evalAsBlock(env, options.runInGlobalScope ?? false, files);
+    files.push(getCodeAtPath(env, './', file, options.replace));
+    evalAsBlock(env, options.runInGlobalScope ?? false, files);
 
-  if (options.after) {
-    options.after();
+    if (options.after) {
+      options.after();
+    }
+  } catch (err) {
+    globalThis.state.harnessError = sanitize_unpaired_surrogates(String(err));
+    globalThis.state.duration = Date.now() - globalThis.state.startTime;
+    throw err;
   }
 
   // The WPT IDL harness (idlharness.js) uses eval() inside async promise callbacks
@@ -480,6 +495,7 @@ async function runTest(
     await globalThis.state.validate();
   } finally {
     globalThis.eval = originalEval;
+    globalThis.state.duration = Date.now() - globalThis.state.startTime;
   }
 }
 
@@ -528,50 +544,75 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerConfig;`;
 }
 
+// One entry of `results` in wptreport format, the format `wpt run --log-wptreport` writes and
+// wpt.fyi ingests. A whole file that is disabled or omitted is reported as SKIP; a file that fails
+// to evaluate is reported as ERROR.
 class WPTTestResult {
   test: string;
-  status: 'OK' | 'ERROR';
+  status: 'OK' | 'ERROR' | 'SKIP';
+  message?: string;
   subtests: WPTSubtestResult[] = [];
-  // TODO(soon): Track elapsed time
-  duration: number = 0;
+  duration: number;
 
   constructor(result: RunnerState, options: TestRunnerOptions) {
     this.test = WPTTestResult.#getTestNameFromUrl(result.testUrl);
-    this.status = options.disabledTests === true ? 'ERROR' : 'OK';
+    this.duration = result.duration;
+    if (options.disabledTests === true || options.omittedTests === true) {
+      this.status = 'SKIP';
+      this.message = options.comment;
+    } else if (result.harnessError !== undefined) {
+      this.status = 'ERROR';
+      this.message = result.harnessError;
+    } else {
+      this.status = 'OK';
+    }
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
   }
 
   static #getTestNameFromUrl(testUrl: URL): string {
     const testNameUrl = new URL(testUrl);
-    testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
+    testNameUrl.pathname = testNameUrl.pathname.replace(/\.js$/, '.html');
     return testNameUrl.href.slice(testNameUrl.origin.length);
   }
 }
 
+// Subtests that were disabled or omitted by the test config never ran, so they are NOTRUN.
 class WPTSubtestResult {
   name: string;
-  status: 'PASS' | 'FAIL';
+  status: 'PASS' | 'FAIL' | 'PRECONDITION_FAILED' | 'NOTRUN';
   message?: string;
-  isExpectedFailure?: true;
 
   constructor(result: Test) {
     this.name = sanitize_unpaired_surrogates(result.name);
     if (result.error instanceof Error) {
-      this.message = result.error.message;
-      // TODO(soon): This is true in main, but not necessarily if you run a report in local dev
-      this.isExpectedFailure = true;
-      this.status = 'FAIL';
-    } else if (result.error === 'DISABLED') {
-      this.isExpectedFailure = true;
-      this.status = 'FAIL';
+      const cause = WPTSubtestResult.#unwrap(result.error);
+      this.message = sanitize_unpaired_surrogates(
+        cause instanceof Error ? cause.message : String(cause)
+      );
+      this.status =
+        cause instanceof OptionalFeatureUnsupportedError
+          ? 'PRECONDITION_FAILED'
+          : 'FAIL';
+    } else if (result.error === 'DISABLED' || result.error === 'OMITTED') {
+      this.status = 'NOTRUN';
     } else {
       this.status = 'PASS';
     }
+  }
+
+  // Test wraps what a subtest throws in an AggregateError whose message is the subtest's name,
+  // because expected failures are matched by name.
+  static #unwrap(error: Error): unknown {
+    if (error instanceof AggregateError && error.errors.length === 1) {
+      return error.errors[0];
+    }
+    return error;
   }
 }
 
 function generateReport(config: TestRunnerConfig): string {
   const results: WPTTestResult[] = [];
+  let timeStart = Date.now();
   for (const [file, options] of Object.entries(config)) {
     const testResult = globalThis.results[file];
     if (!testResult) {
@@ -581,9 +622,14 @@ function generateReport(config: TestRunnerConfig): string {
     }
 
     results.push(new WPTTestResult(testResult, options));
+    timeStart = Math.min(timeStart, testResult.startTime);
   }
 
-  return JSON.stringify({ results }, null, 2);
+  return JSON.stringify(
+    { time_start: timeStart, time_end: Date.now(), results },
+    null,
+    2
+  );
 }
 
 class Stats {
