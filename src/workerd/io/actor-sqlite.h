@@ -41,10 +41,6 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     virtual kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask);
 
-    // Called by setAlarm() before it changes anything, so that an alarm the embedder cannot
-    // schedule fails the call itself rather than the commit that follows. The default allows any.
-    virtual void checkAlarm(kj::Maybe<kj::Date> newAlarmTime) {}
-
     static const Hooks DEFAULT;
 
     static constexpr inline Hooks& getDefaultHooks() {

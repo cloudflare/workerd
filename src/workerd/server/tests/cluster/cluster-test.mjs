@@ -836,9 +836,7 @@ test('cluster: each running instance holds a lease record', async () => {
 
 test('cluster: setting an alarm is refused', async () => {
   await withCluster(1, async ({ nodes }) => {
-    // The handler catches the refusal: setAlarm() throws, not the commit.
     const res = await fetchJson(nodes[0].httpPort, '/set-alarm?name=alarm');
-    assert.strictEqual(res.status, 200);
     assert.match(res.body.error ?? '', /not yet supported in cluster mode/);
   });
 });
