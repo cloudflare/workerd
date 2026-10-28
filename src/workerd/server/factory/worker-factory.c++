@@ -1067,7 +1067,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   // it none.
   kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
   kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
-  kj::Maybe<OtlpSpanExporter&> otlpExporter;
+  kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter;
   if (entrypointName.orDefault("") != "test"_kj) {
     for (size_t i = 0; i < tails->len(); i++) {
       (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
@@ -1076,8 +1076,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
       for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
       for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
     }
-    otlpExporter = worker.otlpExporter.map(
-        [](kj::Own<OtlpSpanExporter>& exporter) -> OtlpSpanExporter& { return *exporter; });
+    otlpExporter = worker.otlpExporter.clone();
   }
 
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
@@ -1133,7 +1132,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     };
     KJ_ASSERT_NONNULL(workerTracer)
         ->setStartInvocationSpanFunc(
-            [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
+            [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
                 serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
                 identityTags = makeOtlpIdentityTags(service)](
                 tracing::InvocationSpanContext& invocation) mutable {
@@ -1142,7 +1141,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
       invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
       auto parent = invocation.getParent().map(
           [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
-      return startExportedUserSpan(entropySource, kj::addRef(*exporter),
+      return startExportedUserSpan(entropySource, exporter.addRef(),
           tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
           OtlpSpanSubmitter::Options{
             .serviceName = serviceName,

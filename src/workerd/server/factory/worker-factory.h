@@ -187,19 +187,21 @@ kj::Promise<void> factory_sleep(const WorkerFactory& factory, uint64_t nanos);
 class OtlpExporter final {
  public:
   class Impl;
-  explicit OtlpExporter(kj::Own<Impl> impl);
+  explicit OtlpExporter(kj::Rc<Impl> impl);
   ~OtlpExporter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(OtlpExporter);
 
   Impl& getImpl() const;
 
+  kj::Rc<OtlpSpanExporter> addRef() const;
+
  private:
-  mutable kj::Own<Impl> impl;
+  mutable kj::Rc<Impl> impl;
 };
 
 kj::Own<OtlpExporter> factory_new_otlp_exporter(
     const WorkerFactory& factory, ::rust::Box<SubrequestChannel> collector);
-kj::Own<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
+kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
 void otlp_exporter_unlink(const OtlpExporter& exporter);
 
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,

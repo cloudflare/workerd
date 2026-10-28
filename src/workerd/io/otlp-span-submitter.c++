@@ -154,7 +154,7 @@ kj::Array<Span::Tag> makeOtlpIdentityTags(const OtlpServiceInfo& service) {
 }
 
 SpanBuilder startExportedUserSpan(kj::EntropySource& entropySource,
-    kj::Own<OtlpSpanExporter> exporter,
+    kj::Rc<OtlpSpanExporter> exporter,
     const tracing::SpanContext& context,
     const OtlpSpanSubmitter::Options& options,
     kj::ConstString operationName,
@@ -185,7 +185,7 @@ kj::Promise<void> postOtlpTraces(kj::HttpClient& client,
 }
 
 OtlpSpanSubmitter::OtlpSpanSubmitter(kj::EntropySource& entropySource,
-    kj::Own<OtlpSpanExporter> exporter,
+    kj::Rc<OtlpSpanExporter> exporter,
     const tracing::SpanContext& context,
     Options options,
     tracing::SpanId rootSpan)
