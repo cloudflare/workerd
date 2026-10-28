@@ -562,7 +562,11 @@ that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
 `BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
-to a number, which must be finite and in range, and truncates toward zero.
+to a number, which must be finite and in range, and truncates toward zero. An integer that stays
+on the V8 heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which
+accepts only an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
+`Local<Value>::int32_value`, `uint32_value` and `integer_value` convert any value with
+JavaScript's `ToInt32`, `ToUint32` and `ToInteger`, as the V8 methods of those names do.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
@@ -775,10 +779,10 @@ use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 impl Counter {
     // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> f64 { /* ... */ }
+    pub fn get_value(&self) -> u32 { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: f64) { /* ... */ }
+    pub fn set_value(&self, v: u32) { /* ... */ }
 
     // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]
@@ -879,6 +883,9 @@ Each nested type's constructor is a property of the prototype, named after the t
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
+An integer argument reaches the callback as a `double` and converts with the slow path's checks;
+an integer of up to 32 bits returns as an `int32_t` or a `uint32_t`, while a method that returns an
+`i64` or a `u64` has no fast callback.
 
 ## FFI Functions with Raw Pointers
 

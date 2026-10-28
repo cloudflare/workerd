@@ -176,7 +176,18 @@ fn fast_api_signature_cases() {
         None
     );
     assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), Some(0));
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: u8, y: i16) -> u16)),
+        Some(2)
+    );
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: i8, y: u16) -> i8)),
+        Some(2)
+    );
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i64)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: u64))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> Option<u32>)), None);
     assert_eq!(
         fast(parse_quote!(fn f(&self) -> Result<bool, jsg::Error>)),
         None

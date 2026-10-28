@@ -458,7 +458,7 @@ fn string_try_from_from_value() {
 fn string_try_from_fails_for_non_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = 42.0_f64.to_js(lock)?;
+        let val: Local<'_, Value> = 42_u32.to_js(lock)?;
         assert!(Local::<JsString>::try_from(val).is_err());
         Ok(())
     });

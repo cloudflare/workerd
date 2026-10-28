@@ -231,9 +231,9 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 }
 
 /// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
-const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "f64"];
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
-const FAST_API_RETURN_TYPES: &[&str] = &["bool", "f64"];
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///

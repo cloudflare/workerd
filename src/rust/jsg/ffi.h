@@ -135,6 +135,8 @@ bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
+bool local_is_int32(const Local& val);
+bool local_is_uint32(const Local& val);
 bool local_is_null(const Local& val);
 bool local_is_undefined(const Local& val);
 bool local_is_null_or_undefined(const Local& val);
@@ -164,6 +166,12 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+// Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
+// result in `result` and return true, or return false if the coercion threw, leaving the exception
+// pending.
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -209,6 +217,13 @@ bool local_boolean_value(const Local& value);
 
 // Local<Number>
 double local_number_value(const Local& value);
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value);
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value);
+int64_t local_integer_value(const Local& value);
+int32_t local_int32_value(const Local& value);
+uint32_t local_uint32_value(const Local& value);
 
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value);

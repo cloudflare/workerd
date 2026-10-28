@@ -19,7 +19,7 @@ use jsg_macros::jsg_static_constant;
 
 use crate::Harness;
 
-type OptionalNumber = Option<Number>;
+type OptionalNumber = Option<u32>;
 
 struct OptionalValue;
 
@@ -46,7 +46,7 @@ struct Sample {
 #[jsg_resource(custom_members)]
 impl Sample {
     #[jsg_static_constant]
-    const VALUE: f64 = 1.0;
+    const VALUE: u32 = 1;
 
     #[jsg_constructor]
     fn constructor(this: String, _extra: OptionalNumber) -> Self {
@@ -56,18 +56,18 @@ impl Sample {
     }
 
     #[jsg_method]
-    fn two(&self, a: Number, b: Number, _c: OptionalNumber) -> Number {
-        Number::new(a.value() + b.value())
+    fn two(&self, a: u32, b: u32, _c: OptionalNumber) -> u32 {
+        a + b
     }
 
     #[jsg_method]
-    fn with_lock(&self, _lock: &mut jsg::Lock, a: Number) -> Number {
+    fn with_lock(&self, _lock: &mut jsg::Lock, a: u32) -> u32 {
         a
     }
 
     #[jsg_method]
-    fn add(a: Number, b: Number) -> Number {
-        Number::new(a.value() + b.value())
+    fn add(a: u32, b: u32) -> u32 {
+        a + b
     }
 
     #[jsg_method]
@@ -75,7 +75,7 @@ impl Sample {
         &self,
         _value: jsg::v8::Local<'s, jsg::v8::Value>,
         _optional: OptionalValue,
-        _after: jsg::Lenient<Number>,
+        _after: jsg::Lenient<u32>,
     ) -> bool {
         true
     }
@@ -120,7 +120,7 @@ impl Sample {
     }
 
     #[jsg_static_constant(name = "EXTRA")]
-    const EXTRA_VALUE: f64 = 2.0;
+    const EXTRA_VALUE: u32 = 2;
 }
 
 impl Resource for Sample {
@@ -228,7 +228,7 @@ fn constructor_called_without_new_throws_type_error() {
 
         for code in ["Sample('x')", "Sample.call({}, 'x')"] {
             let err = ctx
-                .eval::<f64>(lock, code)
+                .eval::<String>(lock, code)
                 .unwrap_err()
                 .unwrap_jsg_err(lock);
             assert_eq!(err.name, jsg::ExceptionType::TypeError, "{code}");

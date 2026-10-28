@@ -25,8 +25,7 @@ fn run_in_context_resumes_panic_and_stays_usable() {
         Some(&"intentional panic in run_in_context")
     );
     harness.run_in_context(|lock, ctx| {
-        let result: f64 = ctx.eval(lock, "1 + 1").unwrap();
-        assert!((result - 2.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "1 + 1").unwrap(), 2);
         Ok(())
     });
 }
@@ -55,8 +54,7 @@ fn eval_string_concatenation() {
 fn eval_number_returns_number_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: f64 = ctx.eval(lock, "42").unwrap();
-        assert!((result - 42.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "42").unwrap(), 42);
         Ok(())
     });
 }
@@ -65,8 +63,7 @@ fn eval_number_returns_number_type() {
 fn eval_arithmetic_expression() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: f64 = ctx.eval(lock, "1 + 2 + 3").unwrap();
-        assert!((result - 6.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "1 + 2 + 3").unwrap(), 6);
         Ok(())
     });
 }
@@ -319,7 +316,7 @@ fn lenient_string_number() {
 fn lenient_array_top_level_mismatch_is_unconvertable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<Vec<f64>> = ctx.eval(lock, "42").unwrap();
+        let result: jsg::Lenient<Vec<u32>> = ctx.eval(lock, "42").unwrap();
         assert!(matches!(result, jsg::Lenient::Unconvertable(_)));
         Ok(())
     });
@@ -329,7 +326,7 @@ fn lenient_array_top_level_mismatch_is_unconvertable() {
 fn lenient_array_nested_conversion_error_propagates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result = ctx.eval::<jsg::Lenient<Vec<f64>>>(lock, "[Symbol()]");
+        let result = ctx.eval::<jsg::Lenient<Vec<u32>>>(lock, "[Symbol()]");
         assert!(result.is_err());
         Ok(())
     });

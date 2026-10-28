@@ -168,6 +168,14 @@ bool local_is_number(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
 }
 
+bool local_is_int32(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt32();
+}
+
+bool local_is_uint32(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint32();
+}
+
 bool local_is_null(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsNull();
 }
@@ -285,6 +293,24 @@ bool local_is_shared_array_buffer(const Local& val) {
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
   v8::String::Utf8Value utf8(isolate, typeStr);
   return ::rust::String(*utf8, utf8.length());
+}
+
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->Int32Value(isolate->GetCurrentContext())
+      .To(&result);
+}
+
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->Uint32Value(isolate->GetCurrentContext())
+      .To(&result);
+}
+
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->IntegerValue(isolate->GetCurrentContext())
+      .To(&result);
 }
 
 // Utf8Value
@@ -426,6 +452,27 @@ bool local_boolean_value(const Local& value) {
 // Local<Number>
 double local_number_value(const Local& value) {
   return local_as_ref_from_ffi<v8::Number>(value)->Value();
+}
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value) {
+  return to_ffi(v8::Integer::New(isolate, value));
+}
+
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value) {
+  return to_ffi(v8::Integer::NewFromUnsigned(isolate, value));
+}
+
+int64_t local_integer_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Integer>(value)->Value();
+}
+
+int32_t local_int32_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Int32>(value)->Value();
+}
+
+uint32_t local_uint32_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Uint32>(value)->Value();
 }
 
 // Local<BigInt>
@@ -1188,6 +1235,10 @@ v8::CTypeInfo cTypeOf(FastApiType type) {
       return v8::CTypeInfo(v8::CTypeInfo::Type::kVoid);
     case FastApiType::Bool:
       return v8::CTypeInfo(v8::CTypeInfo::Type::kBool);
+    case FastApiType::Int32:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kInt32);
+    case FastApiType::Uint32:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kUint32);
     case FastApiType::Float64:
       return v8::CTypeInfo(v8::CTypeInfo::Type::kFloat64);
   }

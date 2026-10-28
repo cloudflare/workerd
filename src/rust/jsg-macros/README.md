@@ -28,7 +28,7 @@ setter on `Object.prototype` runs, and what it throws is passed on.
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
-    pub critical: f64,
+    pub critical: u8,
     pub tag: String,
     pub value: String,
 }
@@ -310,16 +310,16 @@ use std::cell::{Cell, RefCell};
 use jsg_macros::{jsg_resource, jsg_property};
 
 #[jsg_resource]
-struct Counter { value: Cell<f64>, id: RefCell<String>, kind: String }
+struct Counter { value: Cell<u32>, id: RefCell<String>, kind: String }
 
 #[jsg_resource]
 impl Counter {
     // Prototype — read/write (setter detected from `set_` prefix)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> f64 { self.value.get() }
+    pub fn get_value(&self) -> u32 { self.value.get() }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: f64) { self.value.set(v); }
+    pub fn set_value(&self, v: u32) { self.value.set(v); }
 
     // Prototype — read-only (explicit `readonly`)
     #[jsg_property(prototype, readonly)]
