@@ -106,8 +106,8 @@ crate.annotation(
     rustc_env = {"RUST_ICU_MAJOR_VERSION_NUMBER": "78"},
 )
 crate.annotation(
-    # V8's Temporal sources include the crate's diplomat-generated C++ bindings as
-    # "temporal_rs/*.hpp"; //deps/rust:temporal_capi hands them to V8 with the crate.
+    # V8 includes generated C++ bindings in the temporal_capi crate; create a cc_library to access
+    # these from Bazel.
     #
     # Not a triple-quoted string: Windows checkouts convert this file to CRLF line endings, which
     # would end up in the string and change crate_universe's lockfile digest.
