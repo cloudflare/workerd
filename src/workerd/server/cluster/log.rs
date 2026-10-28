@@ -479,13 +479,30 @@ impl Log {
 
     /// The files of `session`.
     pub async fn files(&self, session: u32) -> Result<Vec<File>> {
+        self.list(&format!("/{}/", descending(session.into())))
+            .await
+    }
+
+    /// The files of every session before `session`.
+    pub async fn older(&self, session: u32) -> Result<Vec<File>> {
+        let files = self.list("/").await?;
+        Ok(files.into_iter().filter(|f| f.session < session).collect())
+    }
+
+    /// The files under `<kind><under>`, for both kinds.
+    async fn list(&self, under: &str) -> Result<Vec<File>> {
         let mut files = Vec::new();
         for snapshot in [false, true] {
             let kind = if snapshot { "snapshot" } else { "log" };
-            let prefix = format!("{kind}/{}/", descending(session.into()));
-            for entry in self.bucket.list(&prefix).await? {
-                let name = entry.key.rsplit('/').next().unwrap_or_default();
-                if let Some(frame) = parse(name, !snapshot).and_then(|f| f.try_into().ok()) {
+            for entry in self.bucket.list(&format!("{kind}{under}")).await? {
+                let mut parts = entry.key.rsplit('/');
+                let number = |p: Option<&str>, asc| {
+                    p.and_then(|p| parse(p, asc))
+                        .and_then(|n| u32::try_from(n).ok())
+                };
+                let frame = number(parts.next(), !snapshot);
+                let session = number(parts.next(), false);
+                if let (Some(frame), Some(session)) = (frame, session) {
                     files.push(File {
                         snapshot,
                         session,

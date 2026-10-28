@@ -104,6 +104,9 @@ struct Object {
     /// The files of this epoch's session. Only this owner writes it, so
     /// compaction deletes from here rather than listing it.
     files: Vec<File>,
+    /// Whether earlier sessions may remain in the bucket, which no restore
+    /// reads once this epoch opened.
+    prune: bool,
 }
 
 pub struct Owners {
@@ -275,6 +278,7 @@ impl Owners {
             tiered: 0,
             cursor: Cursor::default(),
             files: Vec::new(),
+            prune: false,
         };
         if self
             .opened
@@ -295,6 +299,7 @@ impl Owners {
             )));
         }
         tracing::info!("cluster: {ns}/{actor} epoch {} open", owned.epoch);
+        object.prune = true;
         Ok(object)
     }
 
@@ -353,13 +358,24 @@ impl Owners {
         Ok(())
     }
 
-    /// Snapshot every owned object whose log outgrew its database. Runs off
-    /// the commit path.
+    /// Delete the sessions before each newly opened epoch's, and snapshot
+    /// every owned object whose log outgrew its database. Runs off the
+    /// commit path.
     pub async fn tier(&self) {
         let objects: Vec<_> = self.objects.borrow().values().cloned().collect();
         stream::iter(objects)
             .for_each_concurrent(TIER_CONCURRENCY, |object| async move {
-                let due = snapshot_due(&object.object.lock().await.files);
+                let (due, prune) = {
+                    let mut guard = object.object.lock().await;
+                    let prune = std::mem::take(&mut guard.prune);
+                    (
+                        snapshot_due(&guard.files),
+                        prune.then(|| guard.replica.clone()),
+                    )
+                };
+                if let Some(replica) = prune {
+                    prune_older(&replica).await;
+                }
                 if due {
                     self.compact(&object).await;
                 }
@@ -595,6 +611,20 @@ fn snapshot_due(files: &[File]) -> bool {
 }
 
 /// Uploads this node's copy of `file`.
+/// Delete the sessions before `replica`'s. A superseded owner still
+/// uploading may leave files behind, which the next epoch deletes.
+async fn prune_older(replica: &Replica) {
+    let files = match replica.client.older(replica.session).await {
+        Ok(files) => files,
+        Err(e) => return tracing::warn!("cluster: pruning old sessions: {e}"),
+    };
+    stream::iter(files)
+        .for_each_concurrent(TIER_CONCURRENCY, |f| async move {
+            let _ = replica.client.delete(&f).await;
+        })
+        .await;
+}
+
 async fn upload(replica: &Replica, file: File) -> Result<File> {
     let path = replica.cache.join(file.name());
     replica.client.put(&file, &path).await?;

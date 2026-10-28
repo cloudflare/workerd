@@ -620,4 +620,12 @@ fn a_superseded_owners_commit_is_not_acknowledged() {
         matches!(&commit, Err(Error::Contended(m)) if m.contains("superseded")),
         "{commit:?}"
     );
+
+    // b's epoch is open, so no restore reads a's session: b deletes it,
+    // with the upload a made after b took over.
+    let x = format!("{}{}", store.prefix(), crate::object_prefix("ns", "x"));
+    let x = Log::new(store.at(&x));
+    assert!(!rt.block_on(x.older(2)).unwrap().is_empty());
+    rt.block_on(b_owners.tier());
+    assert!(rt.block_on(x.older(2)).unwrap().is_empty());
 }
