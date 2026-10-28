@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from xml.etree import ElementTree
 
 EXCLUDED_TESTS = {
     # The WPT compliant implementation is in urlpattern-standard@
@@ -71,7 +70,7 @@ class Log:
 def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
     return [
         parse_log(log_file, options)
-        for log_file in sorted(logs_dir.glob("**/src/wpt/**/*@/test.xml"))
+        for log_file in sorted(logs_dir.glob("**/src/wpt/**/*@/test.log"))
     ]
 
 
@@ -81,9 +80,9 @@ def parse_log(log_file: Path, options: Options) -> Log:
     if log_file.parent.name in EXCLUDED_TESTS:
         return log
 
-    parser = ElementTree.XMLParser(encoding="utf-8")
-    root = ElementTree.parse(log_file, parser=parser)
-    text = root.find("testsuite").find("system-out").text
+    # This reads test.log rather than test.xml, because Bazel replaces each
+    # 4-byte UTF-8 sequence with "????" when it copies the log into test.xml.
+    text = log_file.read_text(encoding="utf-8", errors="surrogateescape")
 
     start_log = re.search(r"\[ TEST \] .*:zzz_results\n", text)
     if not start_log:
@@ -95,6 +94,10 @@ def parse_log(log_file: Path, options: Options) -> Log:
         return log
 
     results_log = text[start_log.end(0) : end_log.start(0)]
+    if not results_log.strip():
+        # The suite ran without any of the GEN_TEST_* variables set.
+        return log
+
     items = results_log.split("***")
 
     if options.config:

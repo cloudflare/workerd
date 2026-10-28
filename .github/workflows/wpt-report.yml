@@ -17,7 +17,8 @@ jobs:
     with:
       os_name: linux
       suffix: ''
-      extra_bazel_args: '--config=ci-test'
+      # wpt-report downloads the WPT test logs, which ci-test's --remote_download_minimal does not.
+      extra_bazel_args: '--config=ci-test --config=wpt-report'
       test_target: '//src/wpt/...'
       upload_test_logs: true
       fetch_depth: 0
