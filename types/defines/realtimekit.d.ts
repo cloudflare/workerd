@@ -13,23 +13,39 @@ interface RealtimeKitBinding {
 interface RealtimeKitCreateMeetingOptions {
   /** Human-readable meeting title. */
   title?: string | null;
-  /** Start recording when a participant joins. Defaults to false. */
+  /**
+   * Start recording when a participant joins.
+   * @default false
+   */
   record_on_start?: boolean | null;
-  /** Start livestreaming when the meeting starts. Defaults to false. */
+  /**
+   * Start livestreaming when the meeting starts.
+   * @default false
+   */
   live_stream_on_start?: boolean | null;
   /** Meeting recording settings, which take precedence over app settings. */
   recording_config?: RealtimeKitRecordingConfig;
   /** Transcription and summarization settings. */
   ai_config?: RealtimeKitAIConfig;
-  /** Retain meeting chat for a week. Defaults to false. */
+  /**
+   * Retain meeting chat for a week.
+   * @default false
+   */
   persist_chat?: boolean;
-  /** Generate a meeting summary; requires transcription. Defaults to false. */
+  /**
+   * Generate a meeting summary; requires transcription.
+   * @default false
+   */
   summarize_on_end?: boolean;
-  /** Generate a transcript when the meeting ends. Defaults to false. */
+  /**
+   * Generate a transcript when the meeting ends.
+   * @default false
+   */
   transcribe_on_end?: boolean;
   /**
    * Seconds a session stays active after its last participant leaves.
-   * Between 60 and 600; defaults to 60.
+   * Between 60 and 600.
+   * @default 60
    */
   session_keep_alive_time_in_secs?: number;
 }
@@ -117,7 +133,10 @@ interface RealtimeKitMeeting extends Disposable {
   ai_config?: RealtimeKitAIConfig;
   /** Participants cannot join an INACTIVE meeting. */
   status?: 'ACTIVE' | 'INACTIVE';
-  /** Session keep-alive duration, 60 to 600 seconds; defaults to 60. */
+  /**
+   * Session keep-alive duration, 60 to 600 seconds.
+   * @default 60
+   */
   session_keep_alive_time_in_secs?: number;
   /**
    * Adds a participant to this meeting and returns their details and join token.
@@ -156,11 +175,20 @@ interface RealtimeKitRecordingConfigResponse extends Omit<
 
 /** Video settings for meeting recordings. */
 interface RealtimeKitVideoConfig {
-  /** Video codec; defaults to H264. */
+  /**
+   * Video codec.
+   * @default 'H264'
+   */
   codec?: 'H264' | 'VP8' | 'VP9';
-  /** Video width in pixels, between 1 and 1920; defaults to 1280. */
+  /**
+   * Video width in pixels, between 1 and 1920.
+   * @default 1280
+   */
   width?: number;
-  /** Video height in pixels, between 1 and 1920; defaults to 720. */
+  /**
+   * Video height in pixels, between 1 and 1920.
+   * @default 720
+   */
   height?: number;
   /** Watermark image, dimensions, and placement. */
   watermark?: {
@@ -173,23 +201,36 @@ interface RealtimeKitVideoConfig {
       /** Watermark height; minimum 1 pixel. */
       height?: number;
     };
-    /** Watermark placement; defaults to left top. */
+    /**
+     * Watermark placement.
+     * @default 'left top'
+     */
     position?: 'left top' | 'right top' | 'left bottom' | 'right bottom';
   };
-  /** Export a separate video file. Defaults to true. */
+  /**
+   * Export a separate video file.
+   * @default true
+   */
   export_file?: boolean;
 }
 
 /** Audio settings for meeting recordings. */
 interface RealtimeKitAudioConfig {
   /**
-   * Audio codec; defaults to AAC. VP8/VP9 video automatically uses Vorbis audio,
-   * and the audio codec cannot be changed.
+   * Audio codec. VP8/VP9 video automatically uses Vorbis audio, and the audio
+   * codec cannot be changed.
+   * @default 'AAC'
    */
   codec?: 'MP3' | 'AAC';
-  /** Audio channel layout; defaults to stereo. */
+  /**
+   * Audio channel layout.
+   * @default 'stereo'
+   */
   channel?: 'mono' | 'stereo';
-  /** Export a separate audio file. Defaults to true. */
+  /**
+   * Export a separate audio file.
+   * @default true
+   */
   export_file?: boolean;
 }
 
@@ -314,17 +355,29 @@ interface RealtimeKitTranscriptionConfig {
     | 'el'
     | 'fr'
     | 'nl';
-  /** Filter offensive language in transcripts. Defaults to false. */
+  /**
+   * Filter offensive language in transcripts.
+   * @default false
+   */
   profanity_filter?: boolean;
 }
 
 /** Meeting summarization settings. */
 interface RealtimeKitSummarizationConfig {
-  /** Maximum words in the summary, between 150 and 1000; defaults to 500. */
+  /**
+   * Maximum words in the summary, between 150 and 1000.
+   * @default 500
+   */
   word_limit?: number;
-  /** Summary text format; defaults to markdown. */
+  /**
+   * Summary text format.
+   * @default 'markdown'
+   */
   text_format?: 'plain_text' | 'markdown';
-  /** Summary style; defaults to general. */
+  /**
+   * Summary style.
+   * @default 'general'
+   */
   summary_type?:
     | 'general'
     | 'team_meeting'
