@@ -22,9 +22,12 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, wpt_fyi = True, tags = [], **kwargs):
     """
     Main entry point.
+
+    wpt_fyi = False leaves the suite's results out of the report submitted to wpt.fyi, for a suite
+    that runs the same files as another one (see docs/wpt-fyi.md).
 
     1. Generates a workerd test suite in JS. This contains the logic to run
        each WPT test file, applying the relevant test config.
@@ -52,6 +55,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         test_config = test_config_as_js,
         wpt_tsproject = wpt_tsproject,
         include_tentative = include_tentative,
+        wpt_fyi = wpt_fyi,
     )
 
     wd_test_gen_rule = "{}@_wpt_wd_test_gen".format(name)
@@ -171,6 +175,7 @@ def _wpt_js_test_gen_impl(ctx):
             all_test_files = generate_external_file_list(base, test_files),
             test_name = ctx.attr.test_name,
             wpt_path = ctx.attr.wpt_directory[WPTModuleInfo].path,
+            wpt_fyi = "true" if ctx.attr.wpt_fyi else "false",
         ),
     )
 
@@ -191,6 +196,8 @@ _wpt_js_test_gen = rule(
         "wpt_tsproject": attr.label(),
         # Whether to include tentative test files
         "include_tentative": attr.bool(default = False),
+        # Whether to submit the results to wpt.fyi
+        "wpt_fyi": attr.bool(default = True),
     },
 )
 
@@ -200,7 +207,7 @@ import {{ createRunner }} from 'harness/harness';
 import config from '{test_config}';
 
 const allTestFiles = {all_test_files};
-const {{ run, printResults }} = createRunner(config, '{test_name}', '{wpt_path}', allTestFiles);
+const {{ run, printResults }} = createRunner(config, '{test_name}', '{wpt_path}', allTestFiles, {wpt_fyi});
 
 {cases}
 

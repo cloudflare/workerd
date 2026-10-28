@@ -33,7 +33,6 @@ jobs:
     with:
         image: ubuntu-22.04
         logs_artifact: 'test-logs-linux-X64.zip'
-        report_artifact: 'wpt-report.json'
 
 
 

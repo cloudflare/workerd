@@ -121,6 +121,9 @@ class RunnerState {
   // Makes test options available from assertion functions
   options: TestRunnerOptions;
 
+  // The file's META comments
+  meta: WPTMetadata;
+
   // A test is pushed to this list as soon as it is discovered
   subtests: Test[] = [];
 
@@ -140,12 +143,14 @@ class RunnerState {
     testUrl: URL,
     testFileName: string,
     env: Env,
-    options: TestRunnerOptions
+    options: TestRunnerOptions,
+    meta: WPTMetadata
   ) {
     this.testUrl = testUrl;
     this.testFileName = testFileName;
     this.env = env;
     this.options = options;
+    this.meta = meta;
   }
 
   async validate(): Promise<void> {
@@ -248,16 +253,18 @@ globalThis.console.error = colorPrint(
 );
 
 class WPTMetadata {
-  // Specifies the Javascript global scopes for the test. (Not currently supported)
-  global: string[] = [];
+  // Specifies the Javascript global scopes for the test. Tests always run in workerd's own global
+  // scope, but the report names results after one of these.
+  global?: string[];
   // Specifies additional JS scripts to execute.
   scripts: string[] = [];
   // Adjusts the timeout for the tests in this file. (Not currently supported)
   timeout?: string;
   // Sets a human-readable title for the entire test file. (Not currently supported.)
   title?: string;
-  // Specifies a variant of this test, which can be used in subsetTestByKey (Not currently supported.)
-  variants: URLSearchParams[] = [];
+  // Query strings or fragments that make variants of the test, each of which WPT runs separately.
+  // Tests always run once, without any; the report splits the results between them.
+  variants: string[] = [];
 }
 
 function parseWptMetadata(code: string): WPTMetadata {
@@ -272,7 +279,8 @@ function parseWptMetadata(code: string): WPTMetadata {
 
     switch (groups.key) {
       case 'global':
-        meta.global = groups.value.split(',');
+        // WPT only reads the first global= line.
+        meta.global ??= groups.value.split(',');
         break;
 
       case 'script': {
@@ -289,7 +297,7 @@ function parseWptMetadata(code: string): WPTMetadata {
         break;
 
       case 'variant':
-        meta.variants.push(new URLSearchParams(groups.value));
+        meta.variants.push(groups.value);
         break;
     }
   }
@@ -375,11 +383,13 @@ type Runner = {
 // generated output. `wptPath` is the tested directory's path within the WPT
 // tree (e.g. `fetch/api`); test URLs are rooted there so relative resource
 // URLs resolve against the WPT server's layout regardless of the target name.
+// `wptFyi` is false for a suite whose results are not submitted to wpt.fyi.
 export function createRunner(
   config: TestRunnerConfig,
   moduleBase: string,
   wptPath: string,
-  allTestFiles: string[]
+  allTestFiles: string[],
+  wptFyi: boolean
 ): Runner {
   const testsNotFound = new Set(Object.keys(config)).difference(
     new Set(allTestFiles)
@@ -410,7 +420,7 @@ export function createRunner(
     printResults(): TestCase {
       return {
         test(_: unknown, env: Env): void {
-          printResults(config, allTestFiles, moduleBase, env);
+          printResults(config, allTestFiles, moduleBase, wptFyi, env);
         },
       };
     },
@@ -438,7 +448,8 @@ async function runTest(
   // Update the URL's port so we can connect to it
   testUrl.port = env.HTTP_PORT ?? '';
 
-  globalThis.state = new RunnerState(testUrl, file, env, options);
+  const meta = parseWptMetadata(String(env[file]));
+  globalThis.state = new RunnerState(testUrl, file, env, options, meta);
   globalThis.results[file] = globalThis.state;
 
   if (options.disabledTests === true) {
@@ -454,8 +465,6 @@ async function runTest(
     );
     return;
   }
-
-  const meta = parseWptMetadata(String(env[file]));
 
   try {
     if (options.before) {
@@ -503,6 +512,7 @@ function printResults(
   config: TestRunnerConfig,
   allTestFiles: string[],
   moduleBase: string,
+  wptFyi: boolean,
   env: Env
 ): void {
   const results: string[] = [];
@@ -512,7 +522,7 @@ function printResults(
   }
 
   if (env.GEN_TEST_REPORT) {
-    results.push(generateReport(config));
+    results.push(generateReport(config, wptFyi));
   }
 
   if (env.GEN_TEST_STATS) {
@@ -553,10 +563,20 @@ class WPTTestResult {
   message?: string;
   subtests: WPTSubtestResult[] = [];
   duration: number;
+  // Not part of wptreport. tools/cross/wpt_fyi_report.py uses them to name the file's tests, and
+  // removes them.
+  globals?: string[];
+  variants?: string[];
 
   constructor(result: RunnerState, options: TestRunnerOptions) {
     this.test = WPTTestResult.#getTestNameFromUrl(result.testUrl);
     this.duration = result.duration;
+    if (result.meta.global) {
+      this.globals = result.meta.global;
+    }
+    if (result.meta.variants.length > 0) {
+      this.variants = result.meta.variants;
+    }
     if (options.disabledTests === true || options.omittedTests === true) {
       this.status = 'SKIP';
       this.message = options.comment;
@@ -610,7 +630,9 @@ class WPTSubtestResult {
   }
 }
 
-function generateReport(config: TestRunnerConfig): string {
+// `wpt_fyi` is not part of wptreport. tools/cross/wpt_fyi_report.py leaves out the results of
+// suites for which it is false.
+function generateReport(config: TestRunnerConfig, wptFyi: boolean): string {
   const results: WPTTestResult[] = [];
   let timeStart = Date.now();
   for (const [file, options] of Object.entries(config)) {
@@ -626,7 +648,7 @@ function generateReport(config: TestRunnerConfig): string {
   }
 
   return JSON.stringify(
-    { time_start: timeStart, time_end: Date.now(), results },
+    { time_start: timeStart, time_end: Date.now(), wpt_fyi: wptFyi, results },
     null,
     2
   );

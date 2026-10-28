@@ -25,26 +25,17 @@ class Options:
 def main() -> None:
     cmd = argparse.ArgumentParser()
     cmd.add_argument("--update-config", action="store_true")
-    cmd.add_argument("--write-report", type=Path)
     cmd.add_argument("--print-stats", action="store_true")
     cmd.add_argument("logs_dir", type=Path)
 
     args = cmd.parse_args()
-    options = Options(args.update_config, bool(args.write_report), args.print_stats)
+    # The logs that CI keeps always hold the report section, which comes
+    # before the stats.
+    options = Options(args.update_config, True, args.print_stats)
     logs = parse_logs(args.logs_dir, options)
 
     if args.print_stats:
         print(stats_table(logs))
-
-    if args.write_report:
-        # TODO(soon): Elapsed time will not be accurate. Figure out if it matters to us, and how to fix.
-        now = int(time.time())
-        time_interval = TimeInterval(now, now)
-
-        report = wpt_report(logs, time_interval)
-        if report:
-            with args.write_report.open("w") as fp:
-                json.dump(report, fp, indent=2)
 
     # TODO(soon): Implement the config option to update test configs
 
@@ -57,6 +48,9 @@ class TimeInterval:
 
 @dataclass
 class Log:
+    # The suite's name, its test target's path under src/wpt, such as "fetch/api-ts@"
+    suite: str = ""
+
     # TypeScript test config used to configure WPT tests
     config: Optional[str] = None
 
@@ -71,14 +65,12 @@ def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
     return [
         parse_log(log_file, options)
         for log_file in sorted(logs_dir.glob("**/src/wpt/**/*@/test.log"))
+        if log_file.parent.name not in EXCLUDED_TESTS
     ]
 
 
 def parse_log(log_file: Path, options: Options) -> Log:
-    log = Log()
-
-    if log_file.parent.name in EXCLUDED_TESTS:
-        return log
+    log = Log(suite=log_file.parent.as_posix().rpartition("/src/wpt/")[2])
 
     # This reads test.log rather than test.xml, because Bazel replaces each
     # 4-byte UTF-8 sequence with "????" when it copies the log into test.xml.
@@ -178,12 +170,39 @@ def get_os() -> str:
         raise ValueError("Unsupported os type")
 
 
-def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
-    all_results = [
-        result for log in logs if log.report for result in log.report["results"]
-    ]
+def workerd_version(workspace: str = ".") -> str:
+    return cmd_output(["git", "-C", workspace, "describe", "--tags", "--always"])
 
-    if not all_results:
+
+def time_interval(logs: list[Log]) -> TimeInterval:
+    """The span from the first suite's start to the last one's end.
+
+    Falls back to the current time for reports from harnesses that don't
+    record when a suite ran.
+    """
+
+    spans = [
+        (log.report["time_start"], log.report["time_end"])
+        for log in logs
+        if log.report and "time_start" in log.report
+    ]
+    if not spans:
+        now = int(time.time() * 1000)
+        return TimeInterval(now, now)
+    return TimeInterval(min(s for s, _ in spans), max(e for _, e in spans))
+
+
+def wpt_report(
+    results: list[dict[str, Any]],
+    time_interval: TimeInterval,
+    *,
+    revision: str,
+    browser_version: str,
+    browser_channel: str = "experimental",
+) -> dict[str, Any]:
+    """A report in WPT's wptreport format, or {} when there are no results."""
+
+    if not results:
         return {}
 
     return {
@@ -191,12 +210,12 @@ def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
         "time_end": time_interval.end,
         "run_info": {
             "product": "workerd",
-            "browser_channel": "experimental",
-            "browser_version": cmd_output(["git", "describe", "--tags", "--always"]),
-            "revision": cmd_output(["git", "rev-parse", "HEAD"]),
+            "browser_channel": browser_channel,
+            "browser_version": browser_version,
+            "revision": revision,
             "os": get_os(),
         },
-        "results": all_results,
+        "results": results,
     }
 
 

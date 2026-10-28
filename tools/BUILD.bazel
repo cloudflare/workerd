@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
+load("@rules_python//python:defs.bzl", "py_binary")
 
 exports_files(
     [
@@ -69,4 +70,19 @@ native_binary(
     out = "clang_tidy",
     tags = ["manual"],
     visibility = ["//visibility:public"],
+)
+
+# Merges the WPT results in a testlogs directory into a report for wpt.fyi; see
+# tools/cross/wpt_fyi_report.py.
+py_binary(
+    name = "wpt_fyi_report",
+    srcs = [
+        "cross/wpt_fyi_report.py",
+        "cross/wpt_logs.py",
+    ],
+    args = ["--wpt-revision-file=$(rootpath @wpt//:REVISION)"],
+    data = ["@wpt//:REVISION"],
+    imports = ["cross"],
+    main = "cross/wpt_fyi_report.py",
+    tags = ["manual"],
 )

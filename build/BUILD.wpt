@@ -17,5 +17,9 @@ wpt_server_entrypoint(
 )
 
 exports_files([
+    # The full hash of the WPT commit in this tree, which tools/cross/wpt_fyi_report.py reports to
+    # wpt.fyi. The cloudflare/workerd-tools WPT workflow adds it to the release archive; releases
+    # made before it did have none.
+    "REVISION",
     "tools/certs/cacert.pem",
 ])

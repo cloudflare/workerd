@@ -36,6 +36,8 @@ wpt_test(
     compat_date = "2025-04-09",
     config = "urlpattern-test.ts",
     wpt_directory = "@wpt//:urlpattern@module",
+    # wpt.fyi gets urlpattern-standard's results for these files instead.
+    wpt_fyi = False,
 )
 
 wpt_test(
@@ -69,6 +71,8 @@ wpt_test(
         "//conditions:default": [],
     }),
     wpt_directory = "@wpt//:fetch/api@module",
+    # wpt.fyi gets fetch/api-ts's results for these files instead.
+    wpt_fyi = False,
 )
 
 wpt_test(
@@ -101,6 +105,8 @@ wpt_test(
     ],
     config = "encoding-test.ts",
     wpt_directory = "@wpt//:encoding@module",
+    # wpt.fyi gets encoding-ts's results for these files instead.
+    wpt_fyi = False,
 )
 
 wpt_test(
@@ -112,6 +118,8 @@ wpt_test(
         "//conditions:default": [],
     }),
     wpt_directory = "@wpt//:compression@module",
+    # wpt.fyi gets compression-ts's results for these files instead.
+    wpt_fyi = False,
 )
 
 wpt_test(
@@ -137,6 +145,8 @@ wpt_test(
     compat_flags = ["writable_stream_spec_compliant_writer"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
+    # wpt.fyi gets streams-ts's results for these files instead.
+    wpt_fyi = False,
 )
 
 wpt_test(

@@ -10,16 +10,12 @@ on:
         description: 'Name of artifact containing test logs'
         required: true
         type: string
-      report_artifact:
-        description: 'Name of artifact to use for WPT report JSON file'
-        required: true
-        type: string
 
 permissions:
   # Read repo
   contents: read
-  # Read/write artifacts
-  actions: write
+  # Read artifacts
+  actions: read
 jobs:
   wpt-report:
     runs-on: ${{ inputs.image }}
@@ -31,10 +27,5 @@ jobs:
         with:
           name: ${{ inputs.logs_artifact }}
           path: testlogs
-      - name: Generate WPT report and stats
-        run: ./tools/cross/wpt_logs.py --print-stats --write-report=wpt-report.json testlogs/ >> $GITHUB_STEP_SUMMARY
-      - name: Upload WPT report
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ inputs.report_artifact }}
-          path: wpt-report.json
+      - name: Generate WPT stats
+        run: ./tools/cross/wpt_logs.py --print-stats testlogs/ >> $GITHUB_STEP_SUMMARY
