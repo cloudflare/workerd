@@ -1957,6 +1957,43 @@ void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
 
 // ======================================================================================
 
+namespace {
+
+tracing::AttributeStringArray cloneAttributeArray(const tracing::AttributeStringArray& array) {
+  auto result = kj::heapArray<kj::Maybe<kj::ConstString>>(array.size());
+  for (auto i: kj::indices(array)) {
+    KJ_IF_SOME(value, array[i]) {
+      result[i] = value.clone();
+    }
+  }
+  return result;
+}
+
+template <typename T>
+kj::Array<kj::Maybe<T>> cloneAttributeArray(const kj::Array<kj::Maybe<T>>& array) {
+  auto result = kj::heapArray<kj::Maybe<T>>(array.size());
+  for (auto i: kj::indices(array)) {
+    KJ_IF_SOME(value, array[i]) {
+      result[i] = value;
+    }
+  }
+  return result;
+}
+
+// Formats an attribute array for async trace annotations, which only carry text.
+template <typename T>
+kj::String attributeArrayToText(const kj::Array<kj::Maybe<T>>& array) {
+  auto elements = KJ_MAP(element, array) -> kj::String {
+    KJ_IF_SOME(value, element) {
+      return kj::str(value);
+    }
+    return kj::str("null");
+  };
+  return kj::str("[", kj::delimited(kj::mv(elements), ", "), "]");
+}
+
+}  // namespace
+
 SpanBuilder::SpanBuilder(
     kj::Rc<SpanObserver> observer, kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   if (observer != nullptr) {
@@ -2037,6 +2074,15 @@ void SpanBuilder::setTag(kj::ConstString key, TagInitValue value, IsCustomTag is
         KJ_CASE_ONEOF(val, bool) {
           return val;
         }
+        KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+          return kj::mv(arr);
+        }
+        KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+          return kj::mv(arr);
+        }
+        KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+          return kj::mv(arr);
+        }
       }
       KJ_UNREACHABLE;
     }(kj::mv(value));
@@ -2114,6 +2160,15 @@ void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) 
       KJ_CASE_ONEOF(i, int64_t) {
         text = kj::str(i);
       }
+      KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+        text = attributeArrayToText(arr);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+        text = attributeArrayToText(arr);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+        text = attributeArrayToText(arr);
+      }
     }
     asyncTraceResource.annotate(key, text);
   }
@@ -2161,6 +2216,18 @@ void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) 
       span.setTag(key.clone(), i);
       userSpan.setTag(kj::mv(key), i);
     }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      span.setTag(key.clone(), cloneAttributeArray(arr));
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      span.setTag(key.clone(), cloneAttributeArray(arr));
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      span.setTag(key.clone(), cloneAttributeArray(arr));
+      userSpan.setTag(kj::mv(key), kj::mv(arr));
+    }
   }
 }
 
@@ -2177,6 +2244,15 @@ Span::TagValue spanTagClone(const Span::TagValue& tag) {
     }
     KJ_CASE_ONEOF(val, bool) {
       return val;
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      return cloneAttributeArray(arr);
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      return cloneAttributeArray(arr);
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      return cloneAttributeArray(arr);
     }
   }
   KJ_UNREACHABLE;
@@ -2197,6 +2273,36 @@ void serializeTagValue(RpcValue::Builder builder, const Span::TagValue& value) {
     KJ_CASE_ONEOF(s, kj::ConstString) {
       builder.setString(s.asPtr());
     }
+    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+      auto list = builder.initStringArray(arr.size());
+      for (auto i: kj::indices(arr)) {
+        KJ_IF_SOME(value, arr[i]) {
+          list[i].setValue(value.asPtr());
+        } else {
+          list[i].setNone();
+        }
+      }
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+      auto list = builder.initBoolArray(arr.size());
+      for (auto i: kj::indices(arr)) {
+        KJ_IF_SOME(value, arr[i]) {
+          list[i].setValue(value);
+        } else {
+          list[i].setNone();
+        }
+      }
+    }
+    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+      auto list = builder.initFloat64Array(arr.size());
+      for (auto i: kj::indices(arr)) {
+        KJ_IF_SOME(value, arr[i]) {
+          list[i].setValue(value);
+        } else {
+          list[i].setNone();
+        }
+      }
+    }
   }
 }
 
@@ -2210,9 +2316,50 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
       return value.getInt64();
     case RpcValue::STRING:
       return kj::ConstString(kj::heapString(value.getString()));
-    default:
-      KJ_UNREACHABLE;
+    case RpcValue::STRING_ARRAY: {
+      auto list = value.getStringArray();
+      auto arr = kj::heapArray<kj::Maybe<kj::ConstString>>(list.size());
+      for (auto i: kj::indices(arr)) {
+        switch (list[i].which()) {
+          case rpc::OptionalString::VALUE:
+            arr[i] = kj::ConstString(kj::heapString(list[i].getValue()));
+            break;
+          case rpc::OptionalString::NONE:
+            break;
+        }
+      }
+      return kj::mv(arr);
+    }
+    case RpcValue::BOOL_ARRAY: {
+      auto list = value.getBoolArray();
+      auto arr = kj::heapArray<kj::Maybe<bool>>(list.size());
+      for (auto i: kj::indices(arr)) {
+        switch (list[i].which()) {
+          case rpc::OptionalBool::VALUE:
+            arr[i] = list[i].getValue();
+            break;
+          case rpc::OptionalBool::NONE:
+            break;
+        }
+      }
+      return kj::mv(arr);
+    }
+    case RpcValue::FLOAT64_ARRAY: {
+      auto list = value.getFloat64Array();
+      auto arr = kj::heapArray<kj::Maybe<double>>(list.size());
+      for (auto i: kj::indices(arr)) {
+        switch (list[i].which()) {
+          case rpc::OptionalFloat64::VALUE:
+            arr[i] = list[i].getValue();
+            break;
+          case rpc::OptionalFloat64::NONE:
+            break;
+        }
+      }
+      return kj::mv(arr);
+    }
   }
+  KJ_UNREACHABLE;
 }
 
 ScopedDurationTagger::ScopedDurationTagger(
