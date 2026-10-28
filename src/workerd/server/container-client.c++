@@ -57,6 +57,17 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr kj::StringPtr SESSION_LABEL = "dev.workerd.session"_kj;
+
+// Labels a container with its session, if there is one, so the session's supervisor can find it.
+void setSessionLabel(docker_api::Docker::ContainerCreateRequest::Builder request,
+    const kj::Maybe<kj::String>& sessionId) {
+  KJ_IF_SOME(id, sessionId) {
+    auto labels = request.initLabels().initObject(1);
+    labels[0].setName(SESSION_LABEL);
+    labels[0].initValue().setString(id);
+  }
+}
 
 struct ContainerImageAlias {
   kj::StringPtr alias;
@@ -1105,6 +1116,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String containerName,
     kj::Maybe<kj::String> imageName,
     kj::String containerEgressInterceptorImage,
+    kj::Maybe<kj::String> sessionId,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
     kj::Function<void(kj::Promise<void>)> cleanupCallback,
@@ -1118,6 +1130,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
+      sessionId(kj::mv(sessionId)),
       privileges(kj::mv(privileges)),
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
@@ -1900,6 +1913,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(resolveContainerImage(effectiveImage));
+  setSessionLabel(jsonRoot, sessionId);
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
@@ -2213,6 +2227,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   auto ipv6Enabled = co_await isDaemonIpv6Enabled();
 
@@ -2283,15 +2298,20 @@ kj::Promise<void> ContainerClient::destroySidecarContainer() {
   co_await removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName));
 }
 
-kj::Promise<void> ContainerClient::createVolume(kj::StringPtr volumeName) {
+kj::Promise<void> ContainerClient::createVolume(
+    kj::StringPtr volumeName, const kj::Maybe<kj::String>& sessionId) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::VolumeCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto req = message.initRoot<docker_api::Docker::VolumeCreateRequest>();
   req.setName(volumeName);
-  auto labels = req.initLabels().initObject(1);
+  auto labels = req.initLabels().initObject(sessionId == kj::none ? 1 : 2);
   labels[0].setName(SNAPSHOT_VOLUME_CREATED_AT_LABEL);
   labels[0].initValue().setString(currentSnapshotVolumeTimestamp());
+  KJ_IF_SOME(id, sessionId) {
+    labels[1].setName(SESSION_LABEL);
+    labels[1].initValue().setString(id);
+  }
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/volumes/create"), codec.encode(req));
@@ -2346,6 +2366,7 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
   // This helper only provides filesystem access to snapshot volumes, so it uses the infrastructure
   // sidecar image.
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   auto hostConfig = jsonRoot.initHostConfig();
   auto binds = hostConfig.initBinds(1);
@@ -2362,7 +2383,7 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
 }
 
 kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot) {
-  co_await createVolume(snapshot.cloneVolume);
+  co_await createVolume(snapshot.cloneVolume, sessionId);
 
   bool cloneCommitted = false;
   KJ_DEFER(if (!cloneCommitted) {
@@ -2375,6 +2396,7 @@ kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot)
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(containerEgressInterceptorImage);
+  setSessionLabel(jsonRoot, sessionId);
 
   // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
   auto entrypoint = jsonRoot.initEntrypoint(1);
@@ -2846,7 +2868,8 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   // Create a Docker volume to store the snapshot contents. If anything after this
   // fails, clean up the volume so we don't leak Docker resources on retries.
   auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
-  co_await createVolume(volumeName);
+  // Snapshots outlive the session, so the volume carries no session label.
+  co_await createVolume(volumeName, kj::none);
   bool volumeCommitted = false;
   KJ_DEFER(if (!volumeCommitted) {
     waitUntilTasks.add(

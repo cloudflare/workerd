@@ -17,8 +17,8 @@ Python Workers runtime layer. Replaces Pyodide's loader with a minimal substitut
 | `internal/topLevelEntropy/`                   | TS+Python: patches `getRandomValues` with deterministic entropy during import, reseeds before request |
 | `internal/pool/`                              | Emscripten setup in plain V8 isolate; `emscriptenSetup.ts` has NO access to C++ extensions            |
 | `internal/workers-api/`                       | Python SDK package (frozen)                                            |
-| `internal/metadata.ts`                        | Config flags: `IS_WORKERD`, `LOCKFILE`, `MAIN_MODULE_NAME`, etc.                                      |
 | `scripts/`                                    | Standalone dev/CI scripts (not used by bazel): `make_snapshots.py`, `upload_bundles.py`, `create_vendor_zip.py` |
+| `internal/metadata.ts`                        | Config flags: `IS_WORKERD`, `MAIN_MODULE_NAME`, etc.                                                  |
 | `pyodide_extra.capnp`                         | Cap'n Proto schema for Pyodide bundle metadata                                                        |
 
 ## Python SDK
