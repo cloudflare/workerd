@@ -56,8 +56,8 @@ const TUNNEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 pub struct ClusterNode {
     pub cluster: Rc<Cluster>,
     factory: Rc<Factory>,
-    /// One session per peer address, dialing or open, dropped when it disconnects.
-    sessions: Rc<RefCell<HashMap<String, Session>>>,
+    /// One session per peer address, dropped when it disconnects.
+    sessions: Rc<Sessions<Rc<RpcConnection>>>,
     /// The address peers dial, which their CONNECTs are bound to.
     advertise: String,
     /// The nonces of CONNECTs accepted within twice the window, by timestamp.
@@ -66,8 +66,56 @@ pub struct ClusterNode {
 
 pub struct RpcConnection(KjOwn<ffi::RpcClient>);
 
-/// A session to a peer, shared by the requests that wait for its dial.
-type Session = Shared<LocalBoxFuture<'static, std::result::Result<Rc<RpcConnection>, String>>>;
+type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
+
+/// One value per key, a peer's session: the callers that arrive while it is
+/// being made share the attempt, and a failed attempt is forgotten, so the
+/// next caller makes another.
+pub struct Sessions<V> {
+    map: RefCell<HashMap<String, Shared<Dial<V>>>>,
+}
+
+impl<V> Default for Sessions<V> {
+    fn default() -> Self {
+        Self {
+            map: RefCell::default(),
+        }
+    }
+}
+
+impl<V: Clone + 'static> Sessions<V> {
+    /// `key`'s value: the one made, the one being made, or one `make` makes.
+    pub async fn get(
+        &self,
+        key: &str,
+        make: impl FnOnce() -> Dial<V>,
+    ) -> std::result::Result<V, String> {
+        let attempt = self.map.borrow().get(key).cloned();
+        let attempt = attempt.unwrap_or_else(|| {
+            let attempt = make().shared();
+            let mut map = self.map.borrow_mut();
+            map.insert(key.to_owned(), attempt.clone());
+            attempt
+        });
+        let result = attempt.clone().await;
+        if result.is_err() {
+            let mut map = self.map.borrow_mut();
+            if map.get(key).is_some_and(|a| a.ptr_eq(&attempt)) {
+                map.remove(key);
+            }
+        }
+        result
+    }
+
+    /// Forgets `key`'s value if it is the one `is` matches.
+    pub fn forget(&self, key: &str, is: impl Fn(&V) -> bool) {
+        let mut map = self.map.borrow_mut();
+        let made = map.get(key).and_then(|a| a.peek());
+        if made.is_some_and(|r| r.as_ref().is_ok_and(&is)) {
+            map.remove(key);
+        }
+    }
+}
 
 /// Binds the cluster port, before the services start.
 /// Returns the listener and the address to advertise.
@@ -207,25 +255,12 @@ impl ClusterNode {
     /// The session to the peer at `address`: the open one, the one being
     /// dialed, or a new one.
     async fn session(&self, address: &str) -> std::io::Result<Rc<RpcConnection>> {
-        let session = self.sessions.borrow().get(address).cloned();
-        let session = session.unwrap_or_else(|| {
-            let session = self.dial(address);
-            let mut sessions = self.sessions.borrow_mut();
-            sessions.insert(address.to_owned(), session.clone());
-            session
-        });
-        let result = session.clone().await;
-        if result.is_err() {
-            // The next request dials again.
-            let mut sessions = self.sessions.borrow_mut();
-            if sessions.get(address).is_some_and(|s| s.ptr_eq(&session)) {
-                sessions.remove(address);
-            }
-        }
-        result.map_err(std::io::Error::other)
+        let dial = || self.dial(address);
+        let session = self.sessions.get(address, dial).await;
+        session.map_err(std::io::Error::other)
     }
 
-    fn dial(&self, address: &str) -> Session {
+    fn dial(&self, address: &str) -> Dial<Rc<RpcConnection>> {
         let cluster = Rc::clone(&self.cluster);
         let factory = Rc::clone(&self.factory);
         let sessions = Rc::clone(&self.sessions);
@@ -244,16 +279,11 @@ impl ClusterNode {
             let watched = Rc::clone(&session);
             factory.spawn_detached(async move {
                 let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
-                let mut sessions = sessions.borrow_mut();
-                let open = |s: &Session| matches!(s.peek(), Some(Ok(c)) if Rc::ptr_eq(c, &watched));
-                if sessions.get(&address).is_some_and(open) {
-                    sessions.remove(&address);
-                }
+                sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
         }
         .boxed_local()
-        .shared()
     }
 }
 
@@ -506,3 +536,7 @@ impl Drop for Owned {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "cluster-test.rs"]
+mod tests;
