@@ -399,8 +399,7 @@ void ValueQueue::handlePush(jsg::Lock& js,
 
   // Otherwise, pop the next pending read and resolve it. There should be nothing in the queue.
   KJ_REQUIRE(state.buffer.empty() && state.queueTotalSize == 0);
-  auto request = kj::mv(state.readRequests.front());
-  state.readRequests.pop_front();
+  auto request = state.popReadRequest();
   request->resolve(js, entry->getValue(js));
 }
 
@@ -487,7 +486,9 @@ bool ValueQueue::hasPartiallyFulfilledRead() {
   return false;
 }
 
-void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
+void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {
+  impl->visitForGc(visitor);
+}
 
 #pragma endregion ValueQueue
 
@@ -1240,8 +1241,7 @@ void ByteQueue::drain(jsg::Lock& js,
     }
 
     // Retire all queue accounting before settlement; reentry may drain the same consumer.
-    auto request = kj::mv(state.readRequests.front());
-    state.readRequests.pop_front();
+    auto request = state.popReadRequest();
     request->resolve(js);
   }
 }
@@ -1313,7 +1313,9 @@ size_t ByteQueue::getConsumerCount() {
   return impl->getConsumerCount();
 }
 
-void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
+void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {
+  impl->visitForGc(visitor);
+}
 
 #pragma endregion ByteQueue
 

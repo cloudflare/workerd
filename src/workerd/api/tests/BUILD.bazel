@@ -23,6 +23,11 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "streams-pending-gc-test.wd-test",
+    data = ["streams-pending-gc-test.js"],
+)
+
+wd_test(
     src = "streams-byob-progress-test.wd-test",
     args = ["--experimental"],
     data = [

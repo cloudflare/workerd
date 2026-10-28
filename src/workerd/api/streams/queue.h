@@ -256,6 +256,10 @@ class QueueImpl final: public kj::PtrTarget {
     return false;
   }
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    allConsumers.forEach([&](auto& consumer) { consumer.visitPendingReads(visitor); });
+  }
+
   // Specific queue implementations may provide additional state that is attached
   // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
@@ -393,7 +397,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // Settlement can release the reader and destroy this consumer.
-      auto requests = kj::mv(ready.readRequests);
+      auto requests = extractPendingReads(ready);
       state.template transitionTo<Closed>();
       for (auto& request: requests) {
         request->resolveAsDone(js);
@@ -489,8 +493,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     // Pop the request before resolving to ensure the request is fully owned locally.
-    auto request = kj::mv(ready.readRequests.front());
-    ready.readRequests.pop_front();
+    auto request = ready.popReadRequest();
     request->resolve(js);
   }
 
@@ -499,8 +502,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     // Pop the request before resolving to ensure the request is fully owned locally.
-    auto request = kj::mv(ready.readRequests.front());
-    ready.readRequests.pop_front();
+    auto request = ready.popReadRequest();
     request->resolveAsDone(js);
   }
 
@@ -553,12 +555,22 @@ class ConsumerImpl final: public kj::PtrTarget {
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       visitor.visit(errored.reason);
     }
-    // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
-    // potentially problematic if we do. Since the read requests are queued, if we
-    // GC visit it once, remove it from the queue, and GC happens to kick in before
-    // we access the resolver, then v8 could determine that the resolver or buffered
-    // entries are no longer reachable via tracing and free them before we can
-    // actually try to access the held resolver.
+    // The buffer isn't visited, because its entries can be shared with other consumers.
+    visitPendingReads(visitor);
+  }
+
+  // Visits the resolvers of pending reads. A read promise reaches the reader that made it, and
+  // through it the stream, so an unvisited resolver would keep a stream whose read never settles
+  // alive until the isolate is torn down. Both the consumer and its queue call this, so a pending
+  // read stays alive while either the stream or its controller is reachable, as in the spec,
+  // where the controller holds its stream. A request leaves the queue only through
+  // Ready::popReadRequest(), which makes its resolver strong again.
+  void visitPendingReads(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+      for (auto& request: ready.readRequests) {
+        visitor.visit(request->resolver);
+      }
+    }
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -588,6 +600,16 @@ class ConsumerImpl final: public kj::PtrTarget {
     // exclusive with regular reads - read() will reject if this is true, and drainingRead()
     // will reject if there are pending readRequests.
     bool hasPendingDrainingRead = false;
+
+    // Removes the oldest read request. Its resolver is visited while it is queued, and nothing
+    // traces it once it leaves, so moving the resolver here makes the handle strong again.
+    kj::Own<ReadRequest> popReadRequest() {
+      auto request = kj::mv(readRequests.front());
+      readRequests.pop_front();
+      auto resolver = kj::mv(request->resolver);
+      request->resolver = kj::mv(resolver);
+      return request;
+    }
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -628,8 +650,7 @@ class ConsumerImpl final: public kj::PtrTarget {
   static kj::Vector<kj::Own<ReadRequest>> extractPendingReads(Ready& ready) {
     kj::Vector<kj::Own<ReadRequest>> result(ready.readRequests.size());
     while (!ready.readRequests.empty()) {
-      result.add(kj::mv(ready.readRequests.front()));
-      ready.readRequests.pop_front();
+      result.add(ready.popReadRequest());
     }
     return result;
   }
