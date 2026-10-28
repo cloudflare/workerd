@@ -28,15 +28,15 @@ fn array_buffer_new_copies_data() {
         let is_ab: bool = ctx.eval(lock, "buf instanceof ArrayBuffer").unwrap();
         assert!(is_ab);
 
-        let len: jsg::Number = ctx.eval(lock, "buf.byteLength").unwrap();
-        assert!((len.value() - 4.0).abs() < f64::EPSILON);
+        let len: f64 = ctx.eval(lock, "buf.byteLength").unwrap();
+        assert!((len - 4.0).abs() < f64::EPSILON);
 
         // Values must be the originals, not 0xFF.
-        let v0: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[0]").unwrap();
-        assert!((v0.value() - 10.0).abs() < f64::EPSILON);
+        let v0: f64 = ctx.eval(lock, "new Uint8Array(buf)[0]").unwrap();
+        assert!((v0 - 10.0).abs() < f64::EPSILON);
 
-        let v3: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[3]").unwrap();
-        assert!((v3.value() - 40.0).abs() < f64::EPSILON);
+        let v3: f64 = ctx.eval(lock, "new Uint8Array(buf)[3]").unwrap();
+        assert!((v3 - 40.0).abs() < f64::EPSILON);
 
         Ok(())
     });
@@ -49,8 +49,8 @@ fn array_buffer_new_zeroed_is_zeroed() {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 8);
         ctx.set_global(lock, "buf", buf);
 
-        let len: jsg::Number = ctx.eval(lock, "buf.byteLength").unwrap();
-        assert!((len.value() - 8.0).abs() < f64::EPSILON);
+        let len: f64 = ctx.eval(lock, "buf.byteLength").unwrap();
+        assert!((len - 8.0).abs() < f64::EPSILON);
 
         // V8 zero-initializes new backing stores
         let all_zero: bool = ctx
@@ -190,8 +190,8 @@ fn array_buffer_as_mut_slice_mutations_visible_in_js() {
         unsafe { buf.as_mut_slice(lock) }.copy_from_slice(&[10, 20, 30]);
         ctx.set_global(lock, "buf", buf);
 
-        let v1: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[1]").unwrap();
-        assert!((v1.value() - 20.0).abs() < f64::EPSILON);
+        let v1: f64 = ctx.eval(lock, "new Uint8Array(buf)[1]").unwrap();
+        assert!((v1 - 20.0).abs() < f64::EPSILON);
 
         Ok(())
     });
@@ -287,8 +287,8 @@ fn array_buffer_into_object() {
         let obj: v8::Local<v8::Object> = buf.into();
         // ArrayBuffer is an Object — verify we can read byteLength as a property
         let bl = obj.get(lock, "byteLength").unwrap();
-        let n: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, bl)?;
-        assert!((n.value() - 1.0).abs() < f64::EPSILON);
+        let n: f64 = <f64 as jsg::FromJS>::from_js(lock, bl)?;
+        assert!((n - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -307,9 +307,10 @@ fn array_buffer_from_js_rejects_typed_array() {
     #[jsg_resource]
     impl AbResource {
         #[jsg_method]
-        pub fn byte_len(&self, buf: jsg::v8::Local<jsg::v8::ArrayBuffer>) -> jsg::Number {
-            #[expect(clippy::cast_precision_loss)]
-            jsg::Number::new(buf.byte_length() as f64)
+        pub fn byte_len(&self, buf: jsg::v8::Local<jsg::v8::ArrayBuffer>) -> f64 {
+            #[expect(clippy::cast_precision_loss, reason = "test buffers are small")]
+            let len = buf.byte_length() as f64;
+            len
         }
     }
 
@@ -318,10 +319,10 @@ fn array_buffer_from_js_rejects_typed_array() {
         let res = jsg::Rc::new(AbResource);
         ctx.set_global(lock, "r", res);
 
-        let ok: jsg::Number = ctx.eval(lock, "r.byteLen(new ArrayBuffer(5))").unwrap();
-        assert!((ok.value() - 5.0).abs() < f64::EPSILON);
+        let ok: f64 = ctx.eval(lock, "r.byteLen(new ArrayBuffer(5))").unwrap();
+        assert!((ok - 5.0).abs() < f64::EPSILON);
 
-        let err: Result<jsg::Number, _> = ctx.eval(lock, "r.byteLen(new Uint8Array([1,2,3]))");
+        let err: Result<f64, _> = ctx.eval(lock, "r.byteLen(new Uint8Array([1,2,3]))");
         assert!(err.is_err());
 
         Ok(())
@@ -392,8 +393,8 @@ fn backing_store_as_mut_slice_mutations_visible_via_local() {
         unsafe { bs.as_mut_slice(lock) }.copy_from_slice(&[7, 8, 9]);
         // The Local<ArrayBuffer> shares the same backing store
         ctx.set_global(lock, "buf", buf);
-        let v: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[0]").unwrap();
-        assert!((v.value() - 7.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "new Uint8Array(buf)[0]").unwrap();
+        assert!((v - 7.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -467,8 +468,8 @@ fn array_buffer_view_as_mut_slice() {
         // SAFETY: no other reference into this buffer is live during this call.
         unsafe { view.as_mut_slice(lock) }.fill(0xFF);
         ctx.set_global(lock, "arr", view);
-        let v: jsg::Number = ctx.eval(lock, "arr[0]").unwrap();
-        assert!((v.value() - 255.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "arr[0]").unwrap();
+        assert!((v - 255.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -529,8 +530,8 @@ fn array_buffer_view_into_object() {
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         let obj: v8::Local<v8::Object> = view.into();
         let bl = obj.get(lock, "byteLength").unwrap();
-        let n: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, bl)?;
-        assert!((n.value() - 1.0).abs() < f64::EPSILON);
+        let n: f64 = <f64 as jsg::FromJS>::from_js(lock, bl)?;
+        assert!((n - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -555,9 +556,10 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
     #[jsg_resource]
     impl ViewResource {
         #[jsg_method]
-        pub fn byte_len(&self, view: jsg::v8::Local<jsg::v8::ArrayBufferView>) -> jsg::Number {
-            #[expect(clippy::cast_precision_loss)]
-            jsg::Number::new(view.byte_length() as f64)
+        pub fn byte_len(&self, view: jsg::v8::Local<jsg::v8::ArrayBufferView>) -> f64 {
+            #[expect(clippy::cast_precision_loss, reason = "test buffers are small")]
+            let len = view.byte_length() as f64;
+            len
         }
     }
 
@@ -566,13 +568,13 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
         let res = jsg::Rc::new(ViewResource);
         ctx.set_global(lock, "r", res);
 
-        let ok: jsg::Number = ctx
+        let ok: f64 = ctx
             .eval(lock, "r.byteLen(new Uint8Array([1,2,3]))")
             .unwrap();
-        assert!((ok.value() - 3.0).abs() < f64::EPSILON);
+        assert!((ok - 3.0).abs() < f64::EPSILON);
 
         // Plain ArrayBuffer is not an ArrayBufferView
-        let err: Result<jsg::Number, _> = ctx.eval(lock, "r.byteLen(new ArrayBuffer(3))");
+        let err: Result<f64, _> = ctx.eval(lock, "r.byteLen(new ArrayBuffer(3))");
         assert!(err.is_err());
 
         Ok(())

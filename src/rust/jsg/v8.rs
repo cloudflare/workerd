@@ -379,6 +379,12 @@ pub mod ffi {
         ) -> Local;
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
+        // Local<Boolean>
+        pub unsafe fn local_boolean_value(value: &Local) -> bool;
+
+        // Local<Number>
+        pub unsafe fn local_number_value(value: &Local) -> f64;
+
         // Local<BigInt>
         pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
         pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
@@ -853,9 +859,27 @@ impl std::fmt::Display for ffi::ExceptionType {
     }
 }
 
-// Marker types for Local<T>
+// Marker types for Local<T>, Global<T> and TracedGlobal<T>. Each mirrors the V8 class of the
+// same name, and a handle of it is used as `Local<'s, T>`, as `v8::Local<T>` is in C++. The casts
+// between them are in `impl_local_cast!`.
+//
+// Deliberately left unimplemented because we didn't need them yet:
+// - Primitive, Numeric, Integer, Int32, Uint32
+// - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
+// - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
+// - WasmModuleObject, WasmMemoryObject
+// - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
+//
+// `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
 #[derive(Debug)]
 pub struct Value;
+/// Marker for `v8::Boolean` handles.
+#[derive(Debug)]
+pub struct Boolean;
+/// Marker for `v8::Number` handles. A number that Rust code holds as a plain value is an `f64`;
+/// this is the handle to one on the V8 heap.
+#[derive(Debug)]
+pub struct Number;
 /// Marker for `v8::Name` handles (supertype of `String` and `Symbol`).
 #[derive(Debug)]
 pub struct Name;
@@ -1786,7 +1810,7 @@ impl<'s> Local<'s, Function> {
     /// ```ignore
     /// let x = x.to_js(lock)?;
     /// let y = y.to_js(lock)?;
-    /// let result: Number = func.call(lock, None, &[x, y])?;
+    /// let result: f64 = func.call(lock, None, &[x, y])?;
     /// ```
     pub fn call<R: FromJS<'s>>(
         self,
@@ -1906,6 +1930,8 @@ macro_rules! impl_local_cast {
     };
 }
 
+impl_local_cast!(Boolean: Value; is_boolean);
+impl_local_cast!(Number: Value; is_number);
 impl_local_cast!(Name: Value; is_name);
 impl_local_cast!(String: Name, Value; is_string);
 impl_local_cast!(Symbol: Name, Value; is_symbol);
@@ -2709,8 +2735,9 @@ macro_rules! impl_typed_array {
     };
 }
 
-/// Generates `FromJS` for `Local<'_, T>` typed array types.
-macro_rules! impl_typed_array_from_js {
+/// Generates `FromJS` for a handle type `Local<'_, T>`: the value must already be a `T`, as C++
+/// JSG requires of a `v8::Local<T>` parameter, so no coercion runs.
+macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
@@ -2750,23 +2777,25 @@ macro_rules! impl_typed_array_from_js {
     };
 }
 
-impl_typed_array_from_js!(Uint8Array, is_uint8_array, "Uint8Array");
-impl_typed_array_from_js!(Uint16Array, is_uint16_array, "Uint16Array");
-impl_typed_array_from_js!(Uint32Array, is_uint32_array, "Uint32Array");
-impl_typed_array_from_js!(Int8Array, is_int8_array, "Int8Array");
-impl_typed_array_from_js!(Int16Array, is_int16_array, "Int16Array");
-impl_typed_array_from_js!(Int32Array, is_int32_array, "Int32Array");
-impl_typed_array_from_js!(Float32Array, is_float32_array, "Float32Array");
-impl_typed_array_from_js!(Float64Array, is_float64_array, "Float64Array");
-impl_typed_array_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
-impl_typed_array_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
-impl_typed_array_from_js!(
+impl_local_from_js!(Uint8Array, is_uint8_array, "Uint8Array");
+impl_local_from_js!(Uint16Array, is_uint16_array, "Uint16Array");
+impl_local_from_js!(Uint32Array, is_uint32_array, "Uint32Array");
+impl_local_from_js!(Int8Array, is_int8_array, "Int8Array");
+impl_local_from_js!(Int16Array, is_int16_array, "Int16Array");
+impl_local_from_js!(Int32Array, is_int32_array, "Int32Array");
+impl_local_from_js!(Float32Array, is_float32_array, "Float32Array");
+impl_local_from_js!(Float64Array, is_float64_array, "Float64Array");
+impl_local_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
+impl_local_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
+impl_local_from_js!(
     Uint8ClampedArray,
     is_uint8clamped_array,
     "Uint8ClampedArray"
 );
-impl_typed_array_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
-impl_typed_array_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
+impl_local_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
+impl_local_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
+impl_local_from_js!(Boolean, is_boolean, "Boolean");
+impl_local_from_js!(Number, is_number, "Number");
 
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
@@ -3090,6 +3119,58 @@ impl<'s> Local<'s, String> {
     pub fn is_flat(&self) -> bool {
         // SAFETY: the handle is a valid V8 String handle.
         unsafe { ffi::local_string_is_flat(self.raw()) }
+    }
+}
+
+// =============================================================================
+// `Boolean`
+// =============================================================================
+
+impl Boolean {
+    /// Returns the `true` or `false` singleton.
+    ///
+    /// Corresponds to `v8::Boolean::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: bool) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::local_new_boolean(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Boolean> {
+    /// The boolean this handle refers to.
+    ///
+    /// Corresponds to `v8::Boolean::Value()`.
+    #[inline]
+    pub fn value(&self) -> bool {
+        // SAFETY: the handle is a valid V8 Boolean handle.
+        unsafe { ffi::local_boolean_value(self.raw()) }
+    }
+}
+
+// =============================================================================
+// `Number`
+// =============================================================================
+
+impl Number {
+    /// Creates a number.
+    ///
+    /// Corresponds to `v8::Number::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: f64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::local_new_number(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Number> {
+    /// The number this handle refers to.
+    ///
+    /// Corresponds to `v8::Number::Value()`.
+    #[inline]
+    pub fn value(&self) -> f64 {
+        // SAFETY: the handle is a valid V8 Number handle.
+        unsafe { ffi::local_number_value(self.raw()) }
     }
 }
 

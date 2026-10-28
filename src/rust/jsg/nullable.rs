@@ -50,7 +50,7 @@ use crate::Result;
 /// }
 ///
 /// #[jsg_method]
-/// pub fn process_some(&self, value: Nullable<Number>) -> Result<(), Error> {
+/// pub fn process_some(&self, value: Nullable<f64>) -> Result<(), Error> {
 ///     // Throws a `TypeError` for `null`.
 ///     let value = value.not_null()?;
 ///     // Process...
@@ -58,7 +58,7 @@ use crate::Result;
 /// }
 ///
 /// #[jsg_method]
-/// pub fn return_nullable(&self) -> Nullable<Number> {
+/// pub fn return_nullable(&self) -> Nullable<f64> {
 ///     if self.condition {
 ///         Nullable::Some(self.number)
 ///     } else {

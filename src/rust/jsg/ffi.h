@@ -204,6 +204,12 @@ Local local_symbol_new(Isolate* isolate);
 Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
+// Local<Boolean>
+bool local_boolean_value(const Local& value);
+
+// Local<Number>
+double local_number_value(const Local& value);
+
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value);
 Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value);

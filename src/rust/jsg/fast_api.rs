@@ -22,7 +22,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use crate::Error;
-use crate::Number;
 use crate::Resource;
 use crate::UnitType;
 use crate::scope::unit_value;
@@ -60,12 +59,12 @@ impl FastApiArg for bool {
     }
 }
 
-impl private::Sealed for Number {}
-impl FastApiArg for Number {
-    type Raw = f64;
+impl private::Sealed for f64 {}
+impl FastApiArg for f64 {
+    type Raw = Self;
     const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Ok(Self::new(raw))
+    fn from_raw(raw: Self) -> Result<Self, Error> {
+        Ok(raw)
     }
 }
 
@@ -99,11 +98,11 @@ impl FastApiReturn for bool {
     }
 }
 
-impl FastApiReturn for Number {
-    type Raw = f64;
+impl FastApiReturn for f64 {
+    type Raw = Self;
     const TYPE: FastApiType = FastApiType::Float64;
-    fn into_raw(self) -> f64 {
-        self.value()
+    fn into_raw(self) -> Self {
+        self
     }
 }
 

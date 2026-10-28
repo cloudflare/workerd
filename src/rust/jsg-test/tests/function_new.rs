@@ -53,7 +53,7 @@ fn functions_keep_their_own_data() {
         .unwrap();
         let count = v8::Function::new(lock, Cell::new(0u32), |lock, calls, _args| {
             calls.set(calls.get() + 1);
-            jsg::Number::from(calls.get()).to_js(lock)
+            f64::from(calls.get()).to_js(lock)
         })
         .unwrap();
         ctx.set_global(lock, "hello", v8::Local::<v8::Value>::from(hello));
@@ -371,11 +371,11 @@ fn reentrant_call_sees_its_own_data() {
         // Each call logs its depth on entry and exit, and calls `again` in between, which calls
         // the same function again. No `RefCell` borrow is held across the call into JavaScript.
         let f = v8::Function::new(lock, RefCell::new(Vec::new()), |lock, log, args| {
-            let depth = jsg::Number::from_js(lock, args.get(0))?.value();
+            let depth = f64::from_js(lock, args.get(0))?;
             log.borrow_mut().push(format!("+{depth}"));
             if depth > 0.0 {
                 let again: v8::Local<v8::Function> = args.get(1).try_into().unwrap();
-                let next = jsg::Number::from(depth - 1.0).to_js(lock)?;
+                let next = (depth - 1.0).to_js(lock)?;
                 again.call::<v8::Local<v8::Value>>(lock, None, &[next])?;
             }
             log.borrow_mut().push(format!("-{depth}"));

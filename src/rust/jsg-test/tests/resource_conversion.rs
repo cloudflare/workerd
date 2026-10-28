@@ -12,7 +12,6 @@
 //!   for non-matching values
 
 use jsg::FromJS;
-use jsg::Number;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -38,8 +37,8 @@ struct Counter {
 #[jsg_resource]
 impl Counter {
     #[jsg_method]
-    pub fn get_value(&self) -> Number {
-        Number::new(self.value)
+    pub fn get_value(&self) -> f64 {
+        self.value
     }
 }
 
@@ -73,8 +72,8 @@ fn to_js_works_for_different_resource_types() {
         let js_val = counter.to_js(lock)?;
         ctx.set_global(lock, "counter", js_val);
 
-        let result: Number = ctx.eval(lock, "counter.getValue()").unwrap();
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "counter.getValue()").unwrap();
+        assert!((result - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

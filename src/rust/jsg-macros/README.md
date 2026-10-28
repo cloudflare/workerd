@@ -311,10 +311,10 @@ struct Counter { value: Cell<f64>, id: RefCell<String>, kind: String }
 impl Counter {
     // Prototype — read/write (setter detected from `set_` prefix)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { jsg::Number::new(self.value.get()) }
+    pub fn get_value(&self) -> f64 { self.value.get() }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { self.value.set(v.value()); }
+    pub fn set_value(&self, v: f64) { self.value.set(v); }
 
     // Prototype — read-only (explicit `readonly`)
     #[jsg_property(prototype, readonly)]
@@ -420,7 +420,7 @@ types.
 #[derive(Debug, Clone)]
 enum StringOrNumber {
     String(String),
-    Number(jsg::Number),
+    Number(f64),
 }
 
 #[jsg_resource]
@@ -429,7 +429,7 @@ impl MyResource {
     pub fn process(&self, value: StringOrNumber) -> String {
         match value {
             StringOrNumber::String(s) => format!("string: {s}"),
-            StringOrNumber::Number(n) => format!("number: {}", n.value()),
+            StringOrNumber::Number(n) => format!("number: {n}"),
         }
     }
 }
