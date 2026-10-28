@@ -1268,6 +1268,16 @@ extern "C" const char *cxx_run_test() noexcept {
   char expected[] = {static_cast<char>(195), static_cast<char>(191)};
   KJ_ASSERT(kj::arrayPtr(latin1.c_str(), latin1.length()) ==
             kj::arrayPtr(expected));
+  KJ_ASSERT(rust::String::latin1("", 0).empty());
+
+  // ASCII prefixes around the 32-byte scan chunk.
+  for (size_t prefix : {0, 1, 31, 32, 33, 64, 100}) {
+    std::string head(prefix, 'a'), tail(40, 'b');
+    std::string input = head + "\xe9z\xff" + tail;
+    std::string want = head + "\xc3\xa9z\xc3\xbf" + tail;
+    rust::String converted = rust::String::latin1(input.data(), input.size());
+    KJ_ASSERT(std::string(converted) == want, prefix);
+  }
 
   // Test Slice<T> explicit constructor from container
   {

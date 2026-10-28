@@ -5,7 +5,7 @@
 #![allow(unsafe_code, reason = "converts values through the V8 FFI")]
 #![allow(
     clippy::allow_attributes,
-    reason = "`impl_integer_from_js!` uses `allow`, since its cast lints fire for only some integer types"
+    reason = "`impl_integer!` uses `allow`, since its cast lints fire for only some integer types"
 )]
 
 //! Traits for converting between Rust and JavaScript values.
@@ -21,10 +21,13 @@
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `Number` | `number` |
-//! | `i64` | `bigint` or `number` (parameter only) |
+//! | `u8`, `u16`, `u32`, `i8`, `i16`, `i32` | `number` |
+//! | `i64`, `u64` | `bigint`; from a `bigint` or a `number` |
+//! | `f64`, `f32` | `number` (to JavaScript only; a parameter is a `Number`) |
 //! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
-//! | `Nullable<T>` | `T`, `null`, or `undefined` |
+//! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
+//! | `Option<Nullable<T>>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
@@ -32,38 +35,26 @@
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
 //!
-//! ## `TypedArray` Types
+//! ## Arrays, Typed Arrays and `ArrayBuffer`s
 //!
-//! These specialized `Vec` and slice types map directly to JavaScript `TypedArray`s
-//! for efficient binary data transfer:
+//! A `Vec<T>` converts to an `Array` of the converted elements, numbers included:
+//! `vec![1u8, 2, 3]` becomes `[1, 2, 3]`, and a `Vec<i64>` an `Array` of `BigInt`s. A typed array
+//! or an `ArrayBuffer` is an explicit conversion of a slice:
 //!
-//! | Rust Type | JavaScript Type |
-//! |-----------|-----------------|
-//! | `Vec<u8>` | `Uint8Array` |
-//! | `Vec<u16>` | `Uint16Array` |
-//! | `Vec<u32>` | `Uint32Array` |
-//! | `Vec<i8>` | `Int8Array` |
-//! | `Vec<i16>` | `Int16Array` |
-//! | `Vec<i32>` | `Int32Array` |
-//! | `Vec<f32>` | `Float32Array` |
-//! | `Vec<f64>` | `Float64Array` |
-//! | `Vec<i64>` | `BigInt64Array` |
-//! | `Vec<u64>` | `BigUint64Array` |
-//! | `&[u8]` | `Uint8Array` (parameter only) |
-//! | `&[u16]` | `Uint16Array` (parameter only) |
-//! | `&[u32]` | `Uint32Array` (parameter only) |
-//! | `&[i8]` | `Int8Array` (parameter only) |
-//! | `&[i16]` | `Int16Array` (parameter only) |
-//! | `&[i32]` | `Int32Array` (parameter only) |
-//! | `&[f32]` | `Float32Array` (parameter only) |
-//! | `&[f64]` | `Float64Array` (parameter only) |
-//! | `&[i64]` | `BigInt64Array` (parameter only) |
-//! | `&[u64]` | `BigUint64Array` (parameter only) |
+//! | Call | JavaScript Type |
+//! |------|-----------------|
+//! | `numbers.to_js_typed_array(lock)` ([`ToJsTypedArray`](crate::ToJsTypedArray)) | the typed array of the element type: `Uint8Array` for `[u8]`, `Float64Array` for `[f64]`, `BigInt64Array` for `[i64]`, ... |
+//! | `bytes.to_js_array_buffer(lock)` ([`ToJsArrayBuffer`](crate::ToJsArrayBuffer)) | `ArrayBuffer` holding the bytes; `[u8]` only |
 //!
-//! ## Integer Parameter Types
+//! From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array` whose elements convert to
+//! `T`. A typed array parameter is a handle, `v8::Local<'s, v8::Uint8Array>` and so on, which
+//! reads its memory in place with `as_slice(lock)`. An `ArrayBuffer` is a
+//! `v8::Local<'s, v8::ArrayBuffer>`, and `v8::Local<'s, v8::ArrayBufferView>` accepts any view.
 //!
-//! Integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) can be used as method
-//! parameters. They convert like C++ JSG's integers:
+//! ## Integers
+//!
+//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number`, and from
+//! JavaScript like C++ JSG's integers:
 //!
 //! - Values out of the type's range, checked before truncation, are a
 //!   `TypeError` (e.g., `256` or `255.5` for `u8`)
@@ -72,8 +63,9 @@
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 //!
-//! `i64` converts like C++ JSG's `int64_t`: a `BigInt` that does not fit is a
-//! `TypeError`, and any other value converts as above.
+//! `i64` and `u64` convert to a `BigInt`, and from JavaScript like C++ JSG's `int64_t` and
+//! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
+//! above.
 
 use crate::Error;
 use crate::Lenient;
@@ -83,7 +75,6 @@ use crate::Nullable;
 use crate::Number;
 use crate::Type;
 use crate::v8;
-use crate::v8::ToLocalValue;
 
 // =============================================================================
 // Traced trait — GC tracing for field types
@@ -464,7 +455,9 @@ impl Type for bool {
 impl<'s> ToJS<'s> for bool {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe { v8::Local::from_ffi(v8::ffi::local_new_boolean(isolate.as_ffi(), self)) })
     }
 }
 
@@ -497,14 +490,16 @@ impl Type for std::string::String {
 impl<'s> ToJS<'s> for std::string::String {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        self.as_str().to_js(lock)
     }
 }
 
 impl<'s> ToJS<'s> for &str {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) })
     }
 }
 
@@ -537,7 +532,26 @@ impl Type for Number {
 impl<'s> ToJS<'s> for Number {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe {
+            v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value()))
+        })
+    }
+}
+
+// Like C++ JSG's double, an f64 or f32 is a number. From JavaScript, a parameter is a `Number`.
+impl<'s> ToJS<'s> for f64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Number::new(self).to_js(lock)
+    }
+}
+
+impl<'s> ToJS<'s> for f32 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Number::new(f64::from(self)).to_js(lock)
     }
 }
 
@@ -641,18 +655,37 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
     }
 }
 
-// Integer types follow C++ JSG (jsg/value.h): a value out of the type's
-// range, checked before truncation, is a TypeError, and so is a non-finite
-// one, except that i32 reads it as 0. In-range values truncate toward zero.
+// Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
+// to 32 bits is a number, and an i64 or u64 is a BigInt. From JavaScript, a value out
+// of the type's range, checked before truncation, is a TypeError, and so is a
+// non-finite one, except that i32 reads it as 0. In-range values truncate
+// toward zero.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
     fn from_number(num: f64) -> Result<Self, Error>;
 }
 
-macro_rules! impl_integer_from_js {
+macro_rules! impl_integer {
     ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
+            impl Type for $type {
+                fn class_name() -> &'static str {
+                    "number"
+                }
+
+                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                    value.is_number()
+                }
+            }
+
+            impl<'s> ToJS<'s> for $type {
+                #[inline]
+                fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+                    Number::new(f64::from(self)).to_js(lock)
+                }
+            }
+
             impl FromNumber for $type {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
                 fn from_number(num: f64) -> Result<Self, Error> {
@@ -733,7 +766,7 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
     format!("Value out of range. Must be between {min} and {max} (inclusive).")
 }
 
-impl_integer_from_js!(
+impl_integer!(
     u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
     u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
     u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
@@ -741,6 +774,24 @@ impl_integer_from_js!(
     i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
     i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
 );
+
+impl Type for i64 {
+    fn class_name() -> &'static str {
+        "bigint"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_big_int()
+    }
+}
+
+// Like C++ JSG's int64_t (jsg/value.h), an i64 is a BigInt.
+impl<'s> ToJS<'s> for i64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(v8::BigInt::new(lock, self).into())
+    }
+}
 
 // Like C++ JSG's int64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
 // number, which must be finite and in range, and truncates toward zero.
@@ -771,6 +822,66 @@ impl<'s> FromJS<'s> for i64 {
         }
         if num < Self::MIN as f64 || num > Self::MAX as f64 {
             return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
+        }
+        Ok(num as Self)
+    }
+}
+
+impl Type for u64 {
+    fn class_name() -> &'static str {
+        "bigint"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_big_int()
+    }
+}
+
+// Like C++ JSG's uint64_t (jsg/value.h), a u64 is a BigInt.
+impl<'s> ToJS<'s> for u64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(v8::BigInt::from_unsigned(lock, self).into())
+    }
+}
+
+// Like C++ JSG's uint64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
+// number, which must be finite, not negative and in range, and truncates toward zero.
+impl<'s> FromJS<'s> for u64 {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "bigint".to_owned()
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        reason = "like C++ JSG, the range is checked in doubles, where u64::MAX rounds up to 2^64, \
+                  which then saturates"
+    )]
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
+            return big_int.uint64_value().ok_or_else(|| {
+                Error::new_type_error(
+                    "The value cannot be converted because it is either negative and this API \
+                     expects a positive bigint, or the value would be truncated.",
+                )
+            });
+        }
+        let num = unwrap_number(lock, value)?;
+        if !num.is_finite() {
+            return not_an_integer();
+        }
+        if num < 0.0 {
+            return Err(Error::new_type_error(
+                "The value cannot be converted because it is negative and this API expects a \
+                 positive bigint.",
+            ));
+        }
+        if num > Self::MAX as f64 {
+            return Err(Error::new_type_error(unsigned_range(Self::MAX)));
         }
         Ok(num as Self)
     }
@@ -885,7 +996,6 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
         match self {
             Self::Some(value) => value.to_js(lock),
             Self::Null => Ok(lock.null()),
-            Self::Undefined => Ok(lock.undefined()),
         }
     }
 }
@@ -966,6 +1076,8 @@ impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     }
 }
 
+// Like C++ `kj::Maybe<T>`, Web IDL nullable conversion reads `undefined` as `null`.
+// Nullable arguments remain required; only an outer `Option` permits omission.
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
@@ -977,10 +1089,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
+        if value.is_null_or_undefined() {
             Ok(Nullable::Null)
-        } else if value.is_undefined() {
-            Ok(Nullable::Undefined)
         } else {
             Ok(Nullable::Some(T::from_js(lock, value)?))
         }
@@ -990,10 +1100,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
+        if value.is_null_or_undefined() {
             Ok(Some(Nullable::Null))
-        } else if value.is_undefined() {
-            Ok(Some(Nullable::Undefined))
         } else {
             Ok(T::try_from_js(lock, value)?.map(Nullable::Some))
         }
@@ -1044,12 +1152,14 @@ impl<T: Type> Type for Vec<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        let array = v8::Array::new(lock, self.len());
-        for (i, item) in self.into_iter().enumerate() {
-            let value = item.to_js(lock)?;
-            array.set(lock, i, value);
-        }
-        Ok(array.into())
+        // As C++ JSG does, this builds the array from its elements instead of setting them
+        // one by one, so no setter a script put on Array.prototype runs. Converting stops at
+        // the first element that fails.
+        let elements = self
+            .into_iter()
+            .map(|item| item.to_js(lock))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(v8::Array::with_elements(lock, &elements).into())
     }
 }
 
@@ -1091,205 +1201,43 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
 // TypedArray implementations
 // =============================================================================
 //
-// This macro generates implementations for TypedArray types:
-// - `v8::*Array` marker types: `Type` trait for type-safe V8 handles
-// - `Vec<T>`: `Type`, `ToJS`, `FromJS` for bidirectional conversion
-// - `&[T]`: `Type`, `FromJS` for parameter-only conversion (delegates to Vec<T>)
-//
-// Supported mappings:
-// - `Vec<u8>` / `&[u8]`   <-> `Uint8Array`
-// - `Vec<u16>` / `&[u16]` <-> `Uint16Array`
-// - `Vec<u32>` / `&[u32]` <-> `Uint32Array`
-// - `Vec<i8>` / `&[i8]`   <-> `Int8Array`
-// - `Vec<i16>` / `&[i16]` <-> `Int16Array`
-// - `Vec<i32>` / `&[i32]` <-> `Int32Array`
-// - `Vec<f32>` / `&[f32]` <-> `Float32Array`
-// - `Vec<f64>` / `&[f64]` <-> `Float64Array`
-// - `Vec<i64>` / `&[i64]` <-> `BigInt64Array`
-// - `Vec<u64>` / `&[u64]` <-> `BigUint64Array`
+// The conversions of typed arrays are those of their handles, `Local<'s, T>`, in `v8.rs`. The
+// marker types implement `Type`, which names their JavaScript class.
 
-macro_rules! impl_typed_array {
-    ($elem:ty, $marker:ident, $is_check:ident, $new_fn:ident, $unwrap_fn:ident) => {
-        impl Type for v8::$marker {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl Type for Vec<$elem> {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl Type for &[$elem] {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl<'s> ToJS<'s> for Vec<$elem> {
-            #[inline]
-            fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-                let isolate = lock.isolate();
-                // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-                Ok(unsafe {
-                    v8::Local::from_ffi(v8::ffi::$new_fn(
-                        isolate.as_ffi(),
-                        self.as_ptr(),
-                        self.len(),
-                    ))
-                })
-            }
-        }
-
-        impl<'s> FromJS<'s> for Vec<$elem> {
-            type ResultType = Self;
-
-            fn type_name() -> String {
-                stringify!($marker).to_owned()
-            }
-
-            fn from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Self, Error> {
-                if !value.$is_check() {
-                    return Err(Error::new_type_error(format!(
-                        "Expected {} but got {}",
-                        stringify!($marker),
-                        value.type_of(lock)
-                    )));
+macro_rules! impl_typed_array_type {
+    ($($marker:ident => $is_check:ident),* $(,)?) => {
+        $(
+            impl Type for v8::$marker {
+                fn class_name() -> &'static str {
+                    stringify!($marker)
                 }
-                // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
-                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) }?)
-            }
-
-            fn try_from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Option<Self>, Error> {
-                if !value.$is_check() {
-                    return Ok(None);
+                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                    value.$is_check()
                 }
-                // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
-                Ok(Some(unsafe {
-                    v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi())
-                }?))
             }
-        }
-
-        impl<'s> FromJS<'s> for &[$elem] {
-            type ResultType = Vec<$elem>;
-
-            fn type_name() -> String {
-                stringify!($marker).to_owned()
-            }
-
-            fn from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Vec<$elem>, Error> {
-                Vec::<$elem>::from_js(lock, value)
-            }
-
-            fn try_from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Option<Vec<$elem>>, Error> {
-                Vec::<$elem>::try_from_js(lock, value)
-            }
-        }
+        )*
     };
 }
 
-impl_typed_array!(
-    u8,
-    Uint8Array,
-    is_uint8_array,
-    local_new_uint8_array,
-    unwrap_uint8_array
-);
-impl_typed_array!(
-    u16,
-    Uint16Array,
-    is_uint16_array,
-    local_new_uint16_array,
-    unwrap_uint16_array
-);
-impl_typed_array!(
-    u32,
-    Uint32Array,
-    is_uint32_array,
-    local_new_uint32_array,
-    unwrap_uint32_array
-);
-impl_typed_array!(
-    i8,
-    Int8Array,
-    is_int8_array,
-    local_new_int8_array,
-    unwrap_int8_array
-);
-impl_typed_array!(
-    i16,
-    Int16Array,
-    is_int16_array,
-    local_new_int16_array,
-    unwrap_int16_array
-);
-impl_typed_array!(
-    i32,
-    Int32Array,
-    is_int32_array,
-    local_new_int32_array,
-    unwrap_int32_array
-);
-impl_typed_array!(
-    f32,
-    Float32Array,
-    is_float32_array,
-    local_new_float32_array,
-    unwrap_float32_array
-);
-impl_typed_array!(
-    f64,
-    Float64Array,
-    is_float64_array,
-    local_new_float64_array,
-    unwrap_float64_array
-);
-impl_typed_array!(
-    i64,
-    BigInt64Array,
-    is_bigint64_array,
-    local_new_bigint64_array,
-    unwrap_bigint64_array
-);
-impl_typed_array!(
-    u64,
-    BigUint64Array,
-    is_biguint64_array,
-    local_new_biguint64_array,
-    unwrap_biguint64_array
+impl_typed_array_type!(
+    Uint8Array => is_uint8_array,
+    Uint16Array => is_uint16_array,
+    Uint32Array => is_uint32_array,
+    Int8Array => is_int8_array,
+    Int16Array => is_int16_array,
+    Int32Array => is_int32_array,
+    Float32Array => is_float32_array,
+    Float64Array => is_float64_array,
+    BigInt64Array => is_bigint64_array,
+    BigUint64Array => is_biguint64_array,
 );
 
 // =============================================================================
 // ArrayBuffer, ArrayBufferView, SharedArrayBuffer
 // =============================================================================
 //
-// These three types only implement `Type` (used by `NonCoercible<T>` for type
-// checking).  They do not have element-typed `ToJS`/`FromJS` conversions and
-// do not fit the `impl_typed_array!` macro.
+// These types only implement `Type` (used by `NonCoercible<T>` for type checking); their
+// conversions are those of their handles, in `v8.rs`.
 
 impl Type for v8::ArrayBuffer {
     fn class_name() -> &'static str {

@@ -185,10 +185,6 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             serve_or_test,
             bench,
         } => run_bench(verbose, config, &serve_or_test, bench, executable),
-        args::Command::PyodideLock => {
-            println!("{}", ffi::pyodide_lock()?);
-            Ok(0)
-        }
         args::Command::MakePyodideBaselineSnapshot {
             python_version,
             output_directory,

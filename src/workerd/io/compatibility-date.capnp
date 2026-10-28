@@ -1749,4 +1749,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
   # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
   # archive for writing fails with this flag.
+
+  wasmSourceUrlSupport @199 :Bool
+      $compatEnableFlag("wasm_source_url_support")
+      $compatDisableFlag("no_wasm_source_url_support")
+      $compatEnableDate("2026-12-01");
+  # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
+  # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
+  # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
+  # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
+  # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
+  # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
+  # and module name.
 }

@@ -462,15 +462,22 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
   };
 }
 
-// The Docker client of the container `id`: the live one, if an earlier incarnation of the actor
-// left it running (a `setInactivityTimeout()` timer holds it), else a new one for the class's
-// `container` options on its worker's `containerEngine`.
+// The Docker client of the container for the actor `actorKey` (`<uniqueKey>-<actorId>`): the live
+// one, if an earlier incarnation of the actor left it running (a `setInactivityTimeout()` timer
+// holds it), else a new one for the class's `container` options on its worker's `containerEngine`.
 kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
-    kj::String id,
+    kj::StringPtr actorKey,
     config::Worker::ContainerEngine::Reader engine,
     config::Worker::DurableObjectNamespace::ContainerOptions::Reader options) {
   KJ_REQUIRE(!factory.containerShutdownStarted,
       "cannot acquire a container client after graceful shutdown has begun");
+  KJ_REQUIRE(engine.isLocalDocker(),
+      "dockerPath must be defined to enable containers on this Durable Object.");
+  auto docker = engine.getLocalDocker();
+  // Unique per namespace and actor across the machine, and per session if there is one.
+  auto session = docker.getSessionId();
+  auto id = session.size() > 0 ? kj::str("workerd-", session, "-", actorKey)
+                               : kj::str("workerd-", actorKey);
   auto& state = *factory.containers.findOrCreate(id, [&]() {
     return decltype(factory.containers)::Entry{
       kj::str(id), kj::heap<WorkerFactory::Impl::Container>()};
@@ -479,13 +486,12 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
     return client.addRef();
   }
 
-  KJ_REQUIRE(engine.isLocalDocker(),
-      "dockerPath must be defined to enable containers on this Durable Object.");
-  auto docker = engine.getLocalDocker();
   KJ_REQUIRE(docker.hasContainerEgressInterceptorImage(),
       "containerEgressInterceptorImage must be configured for containers.");
   kj::Maybe<kj::String> imageName;
   if (options.getImageName().size() > 0) imageName = kj::str(options.getImageName());
+  kj::Maybe<kj::String> sessionId;
+  if (session.size() > 0) sessionId = kj::str(session);
   auto privilegeConf = options.getPrivileges();
   ContainerPrivileges privileges{
     .capabilities = KJ_MAP(c, privilegeConf.getCapabilities()) { return kj::str(c); },
@@ -506,8 +512,8 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
   state.canceler.cancel("a new container client took the container over"_kj);
   auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
       factory.network, kj::str(docker.getSocketPath()), kj::mv(id), kj::mv(imageName),
-      kj::str(docker.getContainerEgressInterceptorImage()), factory.tasks, kj::mv(previousCleanup),
-      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
+      kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId), factory.tasks,
+      kj::mv(previousCleanup), [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
     // The client's shutdown began: the next incarnation of the actor gets a new client.
     state.client = kj::none;
     state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();
@@ -577,10 +583,9 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
       return jsg::Dict<kj::String>::Field{
         .name = kj::str(image.getName()), .value = kj::str(image.getImage())};
     };
-    // Unique per namespace and actor across the machine.
-    containerClient = rpc::Container::Client(getContainerClient(factory,
-        kj::str("workerd-", storage.getImpl().uniqueKey, "-", actor_id_key(*id)),
-        workerConf.getContainerEngine(), options));
+    auto actorKey = kj::str(storage.getImpl().uniqueKey, "-", actor_id_key(*id));
+    containerClient = rpc::Container::Client(
+        getContainerClient(factory, actorKey, workerConf.getContainerEngine(), options));
   }
 
   auto actorHooks = kj::refcounted<ActorHooksImpl>(kj::mv(hooks));

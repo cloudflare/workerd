@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "61cebc4aa64c396cca8187baadd5b83d7a8f8d63c4d8a5dbbe2f03ae35bde8d6",
+  "checksum": "33898b4c3fe680c38aa89fe347f491daec819d6fc982c720d95288722a69dde1",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -1121,6 +1121,46 @@
       ],
       "version": "0.2.9"
     },
+    "calendrical_calculations 0.2.4": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "core_maths 0.1.1",
+            "target": "core_maths"
+          }
+        ],
+        "edition": "2021",
+        "proc_macro_deps": [
+          {
+            "id": "displaydoc 0.2.7",
+            "target": "displaydoc"
+          }
+        ]
+      },
+      "library_target_name": "calendrical_calculations",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "calendrical_calculations",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "5abbd6eeda6885048d357edc66748eea6e0268e3dd11f326fff5bd248d779c26",
+          "url": "https://static.crates.io/crates/calendrical_calculations/0.2.4/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "calendrical_calculations",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.4"
+    },
     "capnp 0.27.2": {
       "common_attrs": {
         "crate_features": [
@@ -1986,6 +2026,40 @@
       ],
       "version": "1.0.0"
     },
+    "core_maths 0.1.1": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "libm 0.2.16",
+            "target": "libm"
+          }
+        ],
+        "edition": "2015"
+      },
+      "library_target_name": "core_maths",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "core_maths",
+      "package_url": "https://github.com/robertbastian/core_maths",
+      "repository": {
+        "Http": {
+          "sha256": "77745e017f5edba1a9c1d854f6f3a52dac8a12dd5af5d2f54aecf61e43d80d30",
+          "url": "https://static.crates.io/crates/core_maths/0.1.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "core_maths",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.1.1"
+    },
     "cpufeatures 0.2.17": {
       "common_attrs": {
         "deps": {
@@ -2243,7 +2317,7 @@
             "target": "phf"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.2",
             "target": "smallvec"
           }
         ],
@@ -2662,6 +2736,137 @@
       ],
       "version": "0.11.3"
     },
+    "diplomat 0.16.1": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "diplomat_core 0.16.1",
+            "target": "diplomat_core"
+          },
+          {
+            "id": "proc-macro2 1.0.107",
+            "target": "proc_macro2"
+          },
+          {
+            "id": "quote 1.0.47",
+            "target": "quote"
+          },
+          {
+            "id": "syn 3.0.9",
+            "target": "syn"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "diplomat",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "diplomat",
+      "package_url": "https://github.com/rust-diplomat/diplomat",
+      "repository": {
+        "Http": {
+          "sha256": "f8b37a6cea72eb6df5143d3e091d4c34cb0cf4046dd1ddcc082988886fe1f809",
+          "url": "https://static.crates.io/crates/diplomat/0.16.1/download"
+        }
+      },
+      "targets": [
+        {
+          "ProcMacro": {
+            "crate_name": "diplomat",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.16.1"
+    },
+    "diplomat-runtime 0.15.2": {
+      "common_attrs": {
+        "edition": "2021"
+      },
+      "library_target_name": "diplomat_runtime",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "diplomat-runtime",
+      "package_url": "https://github.com/rust-diplomat/diplomat",
+      "repository": {
+        "Http": {
+          "sha256": "25b2f28ba90d2ffa95a531ea479769d4a6b2f5f187cd76ab5fd3bdcd64b3603e",
+          "url": "https://static.crates.io/crates/diplomat-runtime/0.15.2/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "diplomat_runtime",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.15.2"
+    },
+    "diplomat_core 0.16.1": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "proc-macro2 1.0.107",
+            "target": "proc_macro2"
+          },
+          {
+            "id": "quote 1.0.47",
+            "target": "quote"
+          },
+          {
+            "id": "serde 1.0.229",
+            "target": "serde"
+          },
+          {
+            "id": "smallvec 1.16.2",
+            "target": "smallvec"
+          },
+          {
+            "id": "strck 1.0.0",
+            "target": "strck"
+          },
+          {
+            "id": "syn 3.0.9",
+            "target": "syn"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "diplomat_core",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-APACHE",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "diplomat_core",
+      "package_url": "https://github.com/rust-diplomat/diplomat",
+      "repository": {
+        "Http": {
+          "sha256": "73b18e806f9ecb92df828d080efe47984ae1193958295d4a84fb8b32c9a1aa1b",
+          "url": "https://static.crates.io/crates/diplomat_core/0.16.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "diplomat_core",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.16.1"
+    },
     "direct-cargo-bazel-deps 0.0.1": {
       "common_attrs": {
         "deps": [
@@ -2760,6 +2965,10 @@
           {
             "id": "hyper-util 0.1.21",
             "target": "hyper_util"
+          },
+          {
+            "id": "icu_calendar 2.2.1",
+            "target": "icu_calendar"
           },
           {
             "id": "ipnet 2.12.2",
@@ -2872,6 +3081,14 @@
           {
             "id": "syn 2.0.119",
             "target": "syn"
+          },
+          {
+            "id": "temporal_capi 0.2.6",
+            "target": "temporal_capi"
+          },
+          {
+            "id": "temporal_rs 0.2.6",
+            "target": "temporal_rs"
           },
           {
             "id": "thiserror 2.0.21",
@@ -4948,7 +5165,7 @@
             "target": "pin_project_lite"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.2",
             "target": "smallvec"
           },
           {
@@ -5083,7 +5300,112 @@
       ],
       "version": "0.1.21"
     },
-    "icu_collections 2.4.0": {
+    "icu_calendar 2.2.1": {
+      "common_attrs": {
+        "crate_features": [
+          "compiled_data"
+        ],
+        "deps": [
+          {
+            "id": "calendrical_calculations 0.2.4",
+            "target": "calendrical_calculations"
+          },
+          {
+            "id": "icu_calendar_data 2.2.0",
+            "target": "icu_calendar_data"
+          },
+          {
+            "id": "icu_locale 2.2.0",
+            "target": "icu_locale"
+          },
+          {
+            "id": "icu_locale_core 2.3.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "icu_provider 2.3.1",
+            "target": "icu_provider"
+          },
+          {
+            "id": "tinystr 0.8.4",
+            "target": "tinystr"
+          },
+          {
+            "id": "zerovec 0.11.8",
+            "target": "zerovec"
+          }
+        ],
+        "edition": "2021",
+        "proc_macro_deps": [
+          {
+            "id": "displaydoc 0.2.7",
+            "target": "displaydoc"
+          }
+        ]
+      },
+      "library_target_name": "icu_calendar",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "icu_calendar",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "a2b2acc6263f494f1df50685b53ff8e57869e47d5c6fe39c23d518ae9a4f3e45",
+          "url": "https://static.crates.io/crates/icu_calendar/2.2.1/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "icu_calendar",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "2.2.1"
+    },
+    "icu_calendar_data 2.2.0": {
+      "build_script_attrs": {},
+      "common_attrs": {
+        "edition": "2021",
+        "extra_deps": [
+          ":build_script_build"
+        ]
+      },
+      "library_target_name": "icu_calendar_data",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "icu_calendar_data",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "118577bcf3a0fa7c6ac0a7d6e951814da84ee56b9b1f68fb4d8d10b08cefaf4d",
+          "url": "https://static.crates.io/crates/icu_calendar_data/2.2.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "icu_calendar_data",
+            "crate_root": "src/lib.rs"
+          }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs"
+          }
+        }
+      ],
+      "version": "2.2.0"
+    },
+    "icu_collections 2.2.0": {
       "common_attrs": {
         "deps": [
           {
@@ -5095,7 +5417,7 @@
             "target": "utf8_iter"
           },
           {
-            "id": "yoke 0.8.4",
+            "id": "yoke 0.8.3",
             "target": "yoke"
           },
           {
@@ -5103,11 +5425,11 @@
             "target": "zerofrom"
           },
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
-        "edition": "2024",
+        "edition": "2021",
         "proc_macro_deps": [
           {
             "id": "displaydoc 0.2.7",
@@ -5125,8 +5447,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "fe090a42a0d3140fed8c63263ed1fecc02422cb2f4bfe55cd8de2de1b8e105dd",
-          "url": "https://static.crates.io/crates/icu_collections/2.4.0/download"
+          "sha256": "2984d1cd16c883d7935b9e07e44071dca8d917fd52ecc02c04d5fa0b5a3f191c",
+          "url": "https://static.crates.io/crates/icu_collections/2.2.0/download"
         }
       },
       "targets": [
@@ -5137,11 +5459,73 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.2.0"
     },
-    "icu_locale_core 2.4.0": {
+    "icu_locale 2.2.0": {
       "common_attrs": {
         "crate_features": [
+          "compiled_data"
+        ],
+        "deps": [
+          {
+            "id": "icu_collections 2.2.0",
+            "target": "icu_collections"
+          },
+          {
+            "id": "icu_locale_core 2.3.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "icu_locale_data 2.2.0",
+            "target": "icu_locale_data"
+          },
+          {
+            "id": "icu_provider 2.3.1",
+            "target": "icu_provider"
+          },
+          {
+            "id": "potential_utf 0.1.6",
+            "target": "potential_utf"
+          },
+          {
+            "id": "tinystr 0.8.4",
+            "target": "tinystr"
+          },
+          {
+            "id": "zerovec 0.11.8",
+            "target": "zerovec"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "icu_locale",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "icu_locale",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "d5a396343c7208121dc86e35623d3dfe19814a7613cfd14964994cdc9c9a2e26",
+          "url": "https://static.crates.io/crates/icu_locale/2.2.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "icu_locale",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "2.2.0"
+    },
+    "icu_locale_core 2.3.0": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
           "zerovec"
         ],
         "deps": [
@@ -5150,7 +5534,7 @@
             "target": "litemap"
           },
           {
-            "id": "tinystr 0.8.5",
+            "id": "tinystr 0.8.4",
             "target": "tinystr"
           },
           {
@@ -5158,7 +5542,7 @@
             "target": "writeable"
           },
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
@@ -5180,8 +5564,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "25d29b57c17c6528d0dc4c2141cfa2d08200465acb537a3909c8b9b8a4a984c0",
-          "url": "https://static.crates.io/crates/icu_locale_core/2.4.0/download"
+          "sha256": "d56e28588da92eee5c3201a6eff33fabdd49b62269c8938d4ff050ce4d900deb",
+          "url": "https://static.crates.io/crates/icu_locale_core/2.3.0/download"
         }
       },
       "targets": [
@@ -5192,36 +5576,74 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.3.0"
     },
-    "icu_normalizer 2.4.0": {
+    "icu_locale_data 2.2.0": {
+      "build_script_attrs": {},
+      "common_attrs": {
+        "edition": "2021",
+        "extra_deps": [
+          ":build_script_build"
+        ]
+      },
+      "library_target_name": "icu_locale_data",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "icu_locale_data",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "d5fdcc9ac77c6d74ff5cf6e65ef3181d6af32003b16fce3a77fb451d2f695993",
+          "url": "https://static.crates.io/crates/icu_locale_data/2.2.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "icu_locale_data",
+            "crate_root": "src/lib.rs"
+          }
+        },
+        {
+          "BuildScript": {
+            "crate_name": "build_script_build",
+            "crate_root": "build.rs"
+          }
+        }
+      ],
+      "version": "2.2.0"
+    },
+    "icu_normalizer 2.2.0": {
       "common_attrs": {
         "crate_features": [
           "compiled_data"
         ],
         "deps": [
           {
-            "id": "icu_collections 2.4.0",
+            "id": "icu_collections 2.2.0",
             "target": "icu_collections"
           },
           {
-            "id": "icu_normalizer_data 2.4.0",
+            "id": "icu_normalizer_data 2.2.0",
             "target": "icu_normalizer_data"
           },
           {
-            "id": "icu_provider 2.4.0",
+            "id": "icu_provider 2.3.1",
             "target": "icu_provider"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.2",
             "target": "smallvec"
           },
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
-        "edition": "2024"
+        "edition": "2021"
       },
       "library_target_name": "icu_normalizer",
       "license": "Unicode-3.0",
@@ -5233,8 +5655,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "404a3b8c486f205c87fe7f23ab6894d84a4ad76d6e4671ae1981ba7def87c599",
-          "url": "https://static.crates.io/crates/icu_normalizer/2.4.0/download"
+          "sha256": "c56e5ee99d6e3d33bd91c5d85458b6005a22140021cc324cea84dd0e72cff3b4",
+          "url": "https://static.crates.io/crates/icu_normalizer/2.2.0/download"
         }
       },
       "targets": [
@@ -5245,12 +5667,12 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.2.0"
     },
-    "icu_normalizer_data 2.4.0": {
+    "icu_normalizer_data 2.2.0": {
       "build_script_attrs": {},
       "common_attrs": {
-        "edition": "2024",
+        "edition": "2021",
         "extra_deps": [
           ":build_script_build"
         ]
@@ -5265,8 +5687,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "20f0088bfb7441f7a37fa0c9e20cb1e9cba1cac6b9ce8cd2a6dc44294f8e8cbc",
-          "url": "https://static.crates.io/crates/icu_normalizer_data/2.4.0/download"
+          "sha256": "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38",
+          "url": "https://static.crates.io/crates/icu_normalizer_data/2.2.0/download"
         }
       },
       "targets": [
@@ -5283,28 +5705,28 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.2.0"
     },
-    "icu_properties 2.4.0": {
+    "icu_properties 2.2.0": {
       "common_attrs": {
         "crate_features": [
           "compiled_data"
         ],
         "deps": [
           {
-            "id": "icu_collections 2.4.0",
+            "id": "icu_collections 2.2.0",
             "target": "icu_collections"
           },
           {
-            "id": "icu_locale_core 2.4.0",
+            "id": "icu_locale_core 2.3.0",
             "target": "icu_locale_core"
           },
           {
-            "id": "icu_properties_data 2.4.0",
+            "id": "icu_properties_data 2.2.0",
             "target": "icu_properties_data"
           },
           {
-            "id": "icu_provider 2.4.0",
+            "id": "icu_provider 2.3.1",
             "target": "icu_provider"
           },
           {
@@ -5312,17 +5734,11 @@
             "target": "zerotrie"
           },
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
-        "edition": "2024",
-        "proc_macro_deps": [
-          {
-            "id": "displaydoc 0.2.7",
-            "target": "displaydoc"
-          }
-        ]
+        "edition": "2021"
       },
       "library_target_name": "icu_properties",
       "license": "Unicode-3.0",
@@ -5334,8 +5750,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "2ea83d991c56158f7cf898bf86436c1dfe7c07ee82fe88951f2695c9f37a379f",
-          "url": "https://static.crates.io/crates/icu_properties/2.4.0/download"
+          "sha256": "bee3b67d0ea5c2cca5003417989af8996f8604e34fb9ddf96208a033901e70de",
+          "url": "https://static.crates.io/crates/icu_properties/2.2.0/download"
         }
       },
       "targets": [
@@ -5346,12 +5762,12 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.2.0"
     },
-    "icu_properties_data 2.4.0": {
+    "icu_properties_data 2.2.0": {
       "build_script_attrs": {},
       "common_attrs": {
-        "edition": "2024",
+        "edition": "2021",
         "extra_deps": [
           ":build_script_build"
         ]
@@ -5366,8 +5782,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "b98f29af82d02b163fe50161388350e743bb3107cc8e8c2f7314cb505faddfcf",
-          "url": "https://static.crates.io/crates/icu_properties_data/2.4.0/download"
+          "sha256": "8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14",
+          "url": "https://static.crates.io/crates/icu_properties_data/2.2.0/download"
         }
       },
       "targets": [
@@ -5384,24 +5800,29 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.2.0"
     },
-    "icu_provider 2.4.0": {
+    "icu_provider 2.3.1": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "baked"
         ],
         "deps": [
           {
-            "id": "icu_locale_core 2.4.0",
+            "id": "icu_locale_core 2.3.0",
             "target": "icu_locale_core"
+          },
+          {
+            "id": "stable_deref_trait 1.2.1",
+            "target": "stable_deref_trait"
           },
           {
             "id": "writeable 0.6.4",
             "target": "writeable"
           },
           {
-            "id": "yoke 0.8.4",
+            "id": "yoke 0.8.3",
             "target": "yoke"
           },
           {
@@ -5413,7 +5834,7 @@
             "target": "zerotrie"
           },
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
@@ -5435,8 +5856,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "413099315636c588ee8f011190b329b971a09a8fae9d157e01dcae8379468514",
-          "url": "https://static.crates.io/crates/icu_provider/2.4.0/download"
+          "sha256": "d27bbb9d3abbefac45d55f647c9de1d44aafcd1186eb91879afef17c396c3e73",
+          "url": "https://static.crates.io/crates/icu_provider/2.3.1/download"
         }
       },
       "targets": [
@@ -5447,7 +5868,7 @@
           }
         }
       ],
-      "version": "2.4.0"
+      "version": "2.3.1"
     },
     "idna 1.1.0": {
       "common_attrs": {
@@ -5462,7 +5883,7 @@
             "target": "idna_adapter"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.2",
             "target": "smallvec"
           },
           {
@@ -5504,11 +5925,11 @@
         ],
         "deps": [
           {
-            "id": "icu_normalizer 2.4.0",
+            "id": "icu_normalizer 2.2.0",
             "target": "icu_normalizer"
           },
           {
-            "id": "icu_properties 2.4.0",
+            "id": "icu_properties 2.2.0",
             "target": "icu_properties"
           }
         ],
@@ -5844,6 +6265,38 @@
         }
       ],
       "version": "1.0.18"
+    },
+    "ixdtf 0.6.6": {
+      "common_attrs": {
+        "crate_features": [
+          "default",
+          "duration"
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "ixdtf",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "ixdtf",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "4d3667095d64c3ecffc96463a21157b04bf3e252f6e8d5750b20c02e33c194e3",
+          "url": "https://static.crates.io/crates/ixdtf/0.6.6/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "ixdtf",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.6.6"
     },
     "jni 0.22.4": {
       "build_script_attrs": {
@@ -6413,6 +6866,9 @@
     },
     "litemap 0.8.3": {
       "common_attrs": {
+        "crate_features": [
+          "alloc"
+        ],
         "edition": "2021"
       },
       "library_target_name": "litemap",
@@ -8057,11 +8513,17 @@
     "potential_utf 0.1.6": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
+          "writeable",
           "zerovec"
         ],
         "deps": [
           {
-            "id": "zerovec 0.11.9",
+            "id": "writeable 0.6.4",
+            "target": "writeable"
+          },
+          {
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
@@ -8168,7 +8630,7 @@
         ],
         "deps": [
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           }
         ],
@@ -8814,6 +9276,44 @@
       ],
       "version": "0.8.11"
     },
+    "resb 0.1.2": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "potential_utf 0.1.6",
+            "target": "potential_utf"
+          },
+          {
+            "id": "serde_core 1.0.229",
+            "target": "serde_core"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "resb",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "resb",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "22d392791f3c6802a1905a509e9d1a6039cbbcb5e9e00e5a6d3661f7c874f390",
+          "url": "https://static.crates.io/crates/resb/0.1.2/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "resb",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.1.2"
+    },
     "ring 0.17.14": {
       "build_script_attrs": {
         "deps": [
@@ -9020,7 +9520,7 @@
             "target": "static_assertions"
           },
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           },
           {
@@ -9076,7 +9576,7 @@
             "target": "ruff_text_size"
           },
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           }
         ],
@@ -10069,7 +10569,7 @@
             "target": "servo_arc"
           },
           {
-            "id": "smallvec 1.16.4",
+            "id": "smallvec 1.16.2",
             "target": "smallvec"
           }
         ],
@@ -10173,6 +10673,7 @@
       "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "default",
           "derive",
           "rc",
@@ -10231,6 +10732,7 @@
       "build_script_attrs": {},
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "default",
           "rc",
           "result",
@@ -10812,7 +11314,7 @@
       ],
       "version": "0.4.12"
     },
-    "smallvec 1.16.4": {
+    "smallvec 1.16.2": {
       "common_attrs": {
         "crate_features": [
           "const_generics",
@@ -10831,8 +11333,8 @@
       "package_url": "https://github.com/servo/rust-smallvec",
       "repository": {
         "Http": {
-          "sha256": "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8",
-          "url": "https://static.crates.io/crates/smallvec/1.16.4/download"
+          "sha256": "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e",
+          "url": "https://static.crates.io/crates/smallvec/1.16.2/download"
         }
       },
       "targets": [
@@ -10843,7 +11345,7 @@
           }
         }
       ],
-      "version": "1.16.4"
+      "version": "1.16.2"
     },
     "socket2 0.6.5": {
       "common_attrs": {
@@ -10994,6 +11496,43 @@
         }
       ],
       "version": "1.1.0"
+    },
+    "strck 1.0.0": {
+      "common_attrs": {
+        "crate_features": [
+          "ident"
+        ],
+        "deps": [
+          {
+            "id": "unicode-ident 1.0.26",
+            "target": "unicode_ident"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "strck",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "MIT"
+      ],
+      "name": "strck",
+      "package_url": "https://github.com/QnnOkabayashi/strck",
+      "repository": {
+        "Http": {
+          "sha256": "42316e70da376f3d113a68d138a60d8a9883c604fe97942721ec2068dab13a9f",
+          "url": "https://static.crates.io/crates/strck/1.0.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "strck",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "1.0.0"
     },
     "string_enum 1.0.2": {
       "common_attrs": {
@@ -12386,7 +12925,7 @@
             "target": "quote"
           },
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           }
         ],
@@ -12442,7 +12981,7 @@
             "target": "quote"
           },
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           }
         ],
@@ -12546,6 +13085,152 @@
         }
       ],
       "version": "1.0.1"
+    },
+    "temporal_capi 0.2.6": {
+      "additive_build_file_content": "\nload(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\n\ncc_library(\n    name = \"cpp_bindings\",\n    hdrs = glob([\"bindings/cpp/**/*.hpp\"]),\n    strip_include_prefix = \"bindings/cpp\",\n)\n",
+      "common_attrs": {
+        "crate_features": [
+          "zoneinfo64"
+        ],
+        "deps": [
+          {
+            "id": "diplomat-runtime 0.15.2",
+            "target": "diplomat_runtime"
+          },
+          {
+            "id": "icu_calendar 2.2.1",
+            "target": "icu_calendar"
+          },
+          {
+            "id": "icu_locale_core 2.3.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "num-traits 0.2.19",
+            "target": "num_traits"
+          },
+          {
+            "id": "temporal_rs 0.2.6",
+            "target": "temporal_rs"
+          },
+          {
+            "id": "timezone_provider 0.2.6",
+            "target": "timezone_provider"
+          },
+          {
+            "id": "writeable 0.6.4",
+            "target": "writeable"
+          },
+          {
+            "id": "zoneinfo64 0.3.0",
+            "target": "zoneinfo64"
+          }
+        ],
+        "edition": "2021",
+        "proc_macro_deps": [
+          {
+            "id": "diplomat 0.16.1",
+            "target": "diplomat"
+          }
+        ]
+      },
+      "extra_aliased_targets": {
+        "temporal_capi_cpp_bindings": "cpp_bindings"
+      },
+      "library_target_name": "temporal_capi",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-Apache",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "temporal_capi",
+      "package_url": "https://github.com/boa-dev/temporal",
+      "repository": {
+        "Http": {
+          "sha256": "f48eb9ca4ca22caaa48d1e7a534ad3fd598a23d1a71945e8ad5ac0be501fa5f2",
+          "url": "https://static.crates.io/crates/temporal_capi/0.2.6/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "temporal_capi",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.6"
+    },
+    "temporal_rs 0.2.6": {
+      "common_attrs": {
+        "crate_features": [
+          "float64_representable_durations"
+        ],
+        "deps": [
+          {
+            "id": "calendrical_calculations 0.2.4",
+            "target": "calendrical_calculations"
+          },
+          {
+            "id": "core_maths 0.1.1",
+            "target": "core_maths"
+          },
+          {
+            "id": "icu_calendar 2.2.1",
+            "target": "icu_calendar"
+          },
+          {
+            "id": "icu_locale_core 2.3.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "ixdtf 0.6.6",
+            "target": "ixdtf"
+          },
+          {
+            "id": "num-traits 0.2.19",
+            "target": "num_traits"
+          },
+          {
+            "id": "timezone_provider 0.2.6",
+            "target": "timezone_provider"
+          },
+          {
+            "id": "tinystr 0.8.4",
+            "target": "tinystr"
+          },
+          {
+            "id": "writeable 0.6.4",
+            "target": "writeable"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "temporal_rs",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-Apache",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "temporal_rs",
+      "package_url": "https://github.com/boa-dev/temporal",
+      "repository": {
+        "Http": {
+          "sha256": "1a978fef907a27736827d336c0bfaab14fb8a7509dd6dc2b43c44e51d59aca5b",
+          "url": "https://static.crates.io/crates/temporal_rs/0.2.6/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "temporal_rs",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.6"
     },
     "termcolor 1.4.1": {
       "common_attrs": {
@@ -12679,14 +13364,66 @@
       ],
       "version": "2.0.21"
     },
-    "tinystr 0.8.5": {
+    "timezone_provider 0.2.6": {
       "common_attrs": {
         "crate_features": [
+          "zoneinfo64"
+        ],
+        "deps": [
+          {
+            "id": "tinystr 0.8.4",
+            "target": "tinystr"
+          },
+          {
+            "id": "zerotrie 0.2.5",
+            "target": "zerotrie"
+          },
+          {
+            "id": "zerovec 0.11.8",
+            "target": "zerovec"
+          },
+          {
+            "id": "zoneinfo64 0.3.0",
+            "target": "zoneinfo64"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "timezone_provider",
+      "license": "MIT OR Apache-2.0",
+      "license_file": "LICENSE-Apache",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "name": "timezone_provider",
+      "package_url": "https://github.com/boa-dev/temporal",
+      "repository": {
+        "Http": {
+          "sha256": "89ec4f4eebb4817fde02a411aedc7ac5f66c89c68c49e5d4b17a8139f077af52",
+          "url": "https://static.crates.io/crates/timezone_provider/0.2.6/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "timezone_provider",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.2.6"
+    },
+    "tinystr 0.8.4": {
+      "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default",
           "zerovec"
         ],
         "deps": [
           {
-            "id": "zerovec 0.11.9",
+            "id": "zerovec 0.11.8",
             "target": "zerovec"
           }
         ],
@@ -12708,8 +13445,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "abc840c238154d58f9e86b2792261edfde565a17696e1cda1a449de27979801a",
-          "url": "https://static.crates.io/crates/tinystr/0.8.5/download"
+          "sha256": "b1e27c91459209c2986af3dcf603a5a74a4368754ce37414f59acc971167f643",
+          "url": "https://static.crates.io/crates/tinystr/0.8.4/download"
         }
       },
       "targets": [
@@ -12720,7 +13457,7 @@
           }
         }
       ],
-      "version": "0.8.5"
+      "version": "0.8.4"
     },
     "tinyvec 1.13.3": {
       "common_attrs": {
@@ -13241,7 +13978,7 @@
       ],
       "version": "1.5.0"
     },
-    "unicode-ident 1.0.27": {
+    "unicode-ident 1.0.26": {
       "common_attrs": {
         "edition": "2021"
       },
@@ -13257,8 +13994,8 @@
       "package_url": "https://github.com/dtolnay/unicode-ident",
       "repository": {
         "Http": {
-          "sha256": "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563",
-          "url": "https://static.crates.io/crates/unicode-ident/1.0.27/download"
+          "sha256": "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954",
+          "url": "https://static.crates.io/crates/unicode-ident/1.0.26/download"
         }
       },
       "targets": [
@@ -13269,7 +14006,7 @@
           }
         }
       ],
-      "version": "1.0.27"
+      "version": "1.0.26"
     },
     "unicode-normalization 0.1.26": {
       "common_attrs": {
@@ -13961,7 +14698,7 @@
       "common_attrs": {
         "deps": [
           {
-            "id": "unicode-ident 1.0.27",
+            "id": "unicode-ident 1.0.26",
             "target": "unicode_ident"
           }
         ],
@@ -14641,6 +15378,10 @@
     },
     "writeable 0.6.4": {
       "common_attrs": {
+        "crate_features": [
+          "alloc",
+          "default"
+        ],
         "edition": "2021"
       },
       "library_target_name": "writeable",
@@ -14744,9 +15485,10 @@
       ],
       "version": "0.2.5"
     },
-    "yoke 0.8.4": {
+    "yoke 0.8.3": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "derive",
           "zerofrom"
         ],
@@ -14778,8 +15520,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "417ef3fcf6c300b7dbd25c85531a746931c02ad536f3cf4786ed1e88223340b3",
-          "url": "https://static.crates.io/crates/yoke/0.8.4/download"
+          "sha256": "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5",
+          "url": "https://static.crates.io/crates/yoke/0.8.3/download"
         }
       },
       "targets": [
@@ -14790,7 +15532,7 @@
           }
         }
       ],
-      "version": "0.8.4"
+      "version": "0.8.3"
     },
     "yoke-derive 0.8.4": {
       "common_attrs": {
@@ -14939,6 +15681,7 @@
     "zerofrom 0.1.8": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "derive"
         ],
         "edition": "2021",
@@ -15055,12 +15798,14 @@
     "zerotrie 0.2.5": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
+          "default",
           "yoke",
           "zerofrom"
         ],
         "deps": [
           {
-            "id": "yoke 0.8.4",
+            "id": "yoke 0.8.3",
             "target": "yoke"
           },
           {
@@ -15100,15 +15845,16 @@
       ],
       "version": "0.2.5"
     },
-    "zerovec 0.11.9": {
+    "zerovec 0.11.8": {
       "common_attrs": {
         "crate_features": [
+          "alloc",
           "derive",
           "yoke"
         ],
         "deps": [
           {
-            "id": "yoke 0.8.4",
+            "id": "yoke 0.8.3",
             "target": "yoke"
           },
           {
@@ -15119,7 +15865,7 @@
         "edition": "2021",
         "proc_macro_deps": [
           {
-            "id": "zerovec-derive 0.11.7",
+            "id": "zerovec-derive 0.11.6",
             "target": "zerovec_derive"
           }
         ]
@@ -15134,8 +15880,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "f58a2799cfe9a1670c7ea8edbd52ef8edb93cb37a7f83bf31ba9e35d9dae6a40",
-          "url": "https://static.crates.io/crates/zerovec/0.11.9/download"
+          "sha256": "bb0464e17806c1d976d5cba29399c7f08e516e279e2ba493f63123b5fca67dd8",
+          "url": "https://static.crates.io/crates/zerovec/0.11.8/download"
         }
       },
       "targets": [
@@ -15146,9 +15892,9 @@
           }
         }
       ],
-      "version": "0.11.9"
+      "version": "0.11.8"
     },
-    "zerovec-derive 0.11.7": {
+    "zerovec-derive 0.11.6": {
       "common_attrs": {
         "deps": [
           {
@@ -15176,8 +15922,8 @@
       "package_url": "https://github.com/unicode-org/icu4x",
       "repository": {
         "Http": {
-          "sha256": "c3743ddbf47738d929cd1ae2e199d40d0162979dfe31aef8ae646d2bf00bf97a",
-          "url": "https://static.crates.io/crates/zerovec-derive/0.11.7/download"
+          "sha256": "34df6fc39dbd26ddc9c10e6a2984476e13acce22e64e4487636ef494369225da",
+          "url": "https://static.crates.io/crates/zerovec-derive/0.11.6/download"
         }
       },
       "targets": [
@@ -15188,7 +15934,7 @@
           }
         }
       ],
-      "version": "0.11.7"
+      "version": "0.11.6"
     },
     "zlib-rs 0.6.8": {
       "common_attrs": {
@@ -15260,6 +16006,56 @@
         }
       ],
       "version": "1.0.23"
+    },
+    "zoneinfo64 0.3.0": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "calendrical_calculations 0.2.4",
+            "target": "calendrical_calculations"
+          },
+          {
+            "id": "icu_locale_core 2.3.0",
+            "target": "icu_locale_core"
+          },
+          {
+            "id": "potential_utf 0.1.6",
+            "target": "potential_utf"
+          },
+          {
+            "id": "resb 0.1.2",
+            "target": "resb"
+          },
+          {
+            "id": "serde 1.0.229",
+            "target": "serde"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "zoneinfo64",
+      "license": "Unicode-3.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Unicode-3.0"
+      ],
+      "name": "zoneinfo64",
+      "package_url": "https://github.com/unicode-org/icu4x",
+      "repository": {
+        "Http": {
+          "sha256": "ed6eb2607e906160c457fd573e9297e65029669906b9ac8fb1b5cd5e055f0705",
+          "url": "https://static.crates.io/crates/zoneinfo64/0.3.0/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "zoneinfo64",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.3.0"
     }
   },
   "direct_deps": [
@@ -15288,6 +16084,7 @@
     "httpdate 1.0.3",
     "hyper 1.12.0",
     "hyper-util 0.1.21",
+    "icu_calendar 2.2.1",
     "ipnet 2.12.2",
     "libc 0.2.191",
     "libm 0.2.16",
@@ -15317,6 +16114,8 @@
     "swc_common 25.0.0",
     "swc_ts_fast_strip 57.0.0",
     "syn 2.0.119",
+    "temporal_capi 0.2.6",
+    "temporal_rs 0.2.6",
     "thiserror 2.0.21",
     "tokio 1.54.1",
     "tokio-rustls 0.26.6",

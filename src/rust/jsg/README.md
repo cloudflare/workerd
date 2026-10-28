@@ -41,9 +41,9 @@ keeps running.
   and the fast API error path are safe. A shim that calls `isolate->ThrowException` itself must
   check first.
 - Don't discard a `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`,
-  a coercion). It may be the termination, or a JavaScript exception that is still pending (see
-  [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
-  `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
+  `Object::set`, a coercion). It may be the termination, or a JavaScript exception that is still
+  pending (see [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of
+  using `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
 - An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
   overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
@@ -108,7 +108,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`.
+them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
+`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
+workerd's API objects serialize, since their serializers are written against C++ JSG.
 
 Bad: a shim that wraps a V8 call in `JSG_TRY(js) { ... } JSG_CATCH(error) {
 kj::throwException(createTunneledException(...)); }`. Fix: catch with a `v8::TryCatch` in the
@@ -390,7 +392,7 @@ A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Va
 
 ```rust
 let str_value = "hello".to_js(lock)?;
-let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
+let num_value = 42u32.to_js(lock)?;
 let global = str_value.to_global(lock);
 
 let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
@@ -511,7 +513,7 @@ propagating. As with the functions C++ JSG wraps, the function's `name` is empty
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), and `Array::iterate` and so converting to a `Vec` (an element's getter). `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way. `Object::set`, `Array::get` and `Array::set` don't yet work this way: they still turn what JavaScript throws into a panic.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
 Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element. These conversions fail only with pending errors. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
@@ -526,20 +528,90 @@ match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
 }
 ```
 
+## Serialization
+
+`jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
+of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default options: the bytes are
+the same, and each reads what the other writes, so the two can share stored data. Native errors
+are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
+objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
+serialized. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
+bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
+resolve, so data containing one can't be read back. Deserialization runs no JavaScript. Transfer
+lists, externals and the other options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+
 ## Type Conversions
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
-how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
-but not return values:
+how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
+but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
+is a `Number`.
 
-- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
-  Like C++ JSG's integers.
-- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
-  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `&[T]` and typed-array slices such as `&[u8]`.
+Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
+and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
+`BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
+to a number, which must be finite and in range, and truncates toward zero.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
+
+### Arrays, typed arrays and `ArrayBuffer`s
+
+A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
+`vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
+A typed array or an `ArrayBuffer` is an explicit conversion of a slice:
+
+```rust
+use jsg::ToJS;
+use jsg::ToJsArrayBuffer;
+use jsg::ToJsTypedArray;
+
+let bytes: Vec<u8> = encode(input);
+let typed: v8::Local<v8::Uint8Array> = bytes.to_js_typed_array(lock); // Uint8Array
+let buffer: v8::Local<v8::ArrayBuffer> = bytes.to_js_array_buffer(lock); // ArrayBuffer
+let array: v8::Local<v8::Value> = bytes.to_js(lock)?; // Array of numbers
+```
+
+`to_js_typed_array` makes the typed array of the element type, from `Uint8Array` for `[u8]` to
+`BigUint64Array` for `[u64]`. `to_js_array_buffer` makes an `ArrayBuffer` holding the bytes, which
+is what C++ JSG returns for a `kj::Array<kj::byte>`; only `[u8]` has it. A method returns the
+handle, and so takes `lock: &mut Lock<'s>` and names the scope:
+
+```rust
+#[jsg_method]
+pub fn digest<'s>(
+    &self,
+    lock: &mut jsg::Lock<'s>,
+    data: v8::Local<'s, v8::Uint8Array>,
+) -> v8::Local<'s, v8::Uint8Array> {
+    hash(data.as_slice(lock)).to_js_typed_array(lock)
+}
+```
+
+From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array`. A typed array parameter is a
+handle, whose `as_slice(lock)` reads its memory in place; copy it out with `to_vec()` if the
+method keeps it. An `ArrayBuffer` parameter is a `v8::Local<'s, v8::ArrayBuffer>`, and a
+`v8::Local<'s, v8::ArrayBufferView>` accepts any typed array or `DataView`. To return an
+`ArrayBuffer` of bytes computed in Rust, call `to_js_array_buffer(lock)` on them; to fill one in
+place, allocate it with `ArrayBuffer::new_zeroed_with` and view it with `Uint8Array::from_buffer`.
+
+To port a C++ JSG signature:
+
+| C++ JSG | Rust JSG |
+| --- | --- |
+| `kj::Array<kj::byte>` returned | `v8::Local<'s, v8::ArrayBuffer>`, from `to_js_array_buffer` |
+| `kj::Array<kj::byte>` parameter | `v8::Local<'s, v8::ArrayBufferView>`; C++ JSG also accepts a bare `ArrayBuffer`, for which take a `v8::Local<'s, v8::Value>` and `try_into()` each |
+| `jsg::BufferSource` | `v8::Local<'s, v8::Value>`; check `is_array_buffer()` / `is_array_buffer_view()` and `try_into()` each |
+| `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
+| `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
+| `kj::Array<T>` of integers parameter | `Vec<T>` |
+| `kj::Array<double>` parameter | `Vec<Number>` |
+| `kj::Array<bool>` | `Vec<bool>` |
+| `kj::Array<T>` of anything else | `Vec<T>` |
+
+A `#[jsg_struct]` field converts with its `ToJS` impl like any other value, so a `Vec<u8>` field
+becomes an `Array` of numbers. A field has no way to choose a typed array or an `ArrayBuffer`, so
+a `JSG_STRUCT` with a `kj::Array<kj::byte>` field has no direct port.
 
 ## Union Types
 

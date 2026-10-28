@@ -146,10 +146,6 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    /// outputs the package lock file used by Pyodide
-    #[command(long_about = "Outputs the package lock file used by Pyodide.")]
-    PyodideLock,
-
     /// Make a Pyodide baseline memory snapshot
     MakePyodideBaselineSnapshot {
         #[arg(value_name = "python-version")]

@@ -8,6 +8,9 @@ pub fn t() -> jsg::RawFunctionCallback {
     jsg::function_callback(move |lock, args| {
         //~^ ERROR E0277
         let value = lock.new_object();
-        value.set(lock, &name, args.this());
+        match value.set(lock, &name, args.this()) {
+            Ok(()) => args.set_return_value(value.into()),
+            Err(err) => lock.throw_exception(&err),
+        }
     })
 }
