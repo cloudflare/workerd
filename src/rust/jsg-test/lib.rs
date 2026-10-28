@@ -299,7 +299,14 @@ impl Harness {
     /// Like [`Harness::new`], with `JsgConfig::fastApiEnabled` set so that resource methods get
     /// V8 Fast API callbacks.
     pub fn with_fast_api() -> Self {
-        Self::create(|_| {}, ffi::FastApi::Enabled)
+        Self::with_fast_api_and_flags(|_| {})
+    }
+
+    /// Like [`Harness::with_flags`], with V8 Fast API callbacks enabled.
+    pub fn with_fast_api_and_flags(
+        set_flags: impl FnOnce(compatibility_flags::Builder<'_>),
+    ) -> Self {
+        Self::create(set_flags, ffi::FastApi::Enabled)
     }
 
     fn create(

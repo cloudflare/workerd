@@ -504,20 +504,23 @@ fn get_resource_descriptor<R: Resource>(
 
     for m in R::members(flags) {
         match m {
-            Member::Constructor { callback } => {
+            Member::Constructor { callback, length } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
                     callback: callback as usize,
+                    length,
                 });
             }
             Member::Method {
                 name,
                 callback,
                 fast,
+                length,
             } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                     fast: fast.into(),
+                    length,
                 });
             }
             Member::Property {
@@ -570,11 +573,13 @@ fn get_resource_descriptor<R: Resource>(
                 name,
                 callback,
                 fast,
+                length,
             } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                     fast: fast.into(),
+                    length,
                 });
             }
             Member::StaticConstant { name, value } => {

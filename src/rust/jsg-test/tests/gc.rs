@@ -904,7 +904,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 struct NativeState {
-    value: u64,
+    value: u32,
 }
 
 impl jsg::Traced for NativeState {}
@@ -923,10 +923,8 @@ struct NativeOwnerResource {
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
-    fn get_value(&self) -> f64 {
-        #[expect(clippy::cast_precision_loss, reason = "test values are small")]
-        let value = self.state.value as f64;
-        value
+    fn get_value(&self) -> u32 {
+        self.state.value
     }
 }
 

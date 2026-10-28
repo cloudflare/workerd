@@ -44,7 +44,7 @@ fn resolver_settles_its_promise_once() {
         assert_eq!(promise.state(), PromiseState::Pending);
         assert!(promise.result(lock).is_none());
 
-        let value = 42.0_f64.to_js(lock)?;
+        let value = 42_u32.to_js(lock)?;
         resolver.resolve(lock, value)?;
         let other = "ignored".to_js(lock)?;
         // Settling a settled promise does nothing.
@@ -52,10 +52,7 @@ fn resolver_settles_its_promise_once() {
 
         assert_eq!(promise.state(), PromiseState::Fulfilled);
         let result = promise.result(lock).unwrap();
-        #[expect(clippy::float_cmp, reason = "42 is exactly representable")]
-        {
-            assert_eq!(f64::from_js(lock, result)?, 42.0);
-        }
+        assert_eq!(u32::from_js(lock, result)?, 42);
         Ok(())
     });
 }

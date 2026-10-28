@@ -282,6 +282,8 @@ pub mod ffi {
         pub unsafe fn local_is_string(value: &Local) -> bool;
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
         pub unsafe fn local_is_number(value: &Local) -> bool;
+        pub unsafe fn local_is_int32(value: &Local) -> bool;
+        pub unsafe fn local_is_uint32(value: &Local) -> bool;
         pub unsafe fn local_is_null(value: &Local) -> bool;
         pub unsafe fn local_is_undefined(value: &Local) -> bool;
         pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
@@ -311,6 +313,24 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
+        // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
+        // store the result in `result` and return true, or return false if the coercion threw,
+        // leaving the exception pending; see `call_into_js()`.
+        pub unsafe fn local_value_int32_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut i32,
+        ) -> bool;
+        pub unsafe fn local_value_uint32_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut u32,
+        ) -> bool;
+        pub unsafe fn local_value_integer_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut i64,
+        ) -> bool;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -384,6 +404,13 @@ pub mod ffi {
 
         // Local<Number>
         pub unsafe fn local_number_value(value: &Local) -> f64;
+
+        // Local<Integer>
+        pub unsafe fn integer_new(isolate: *mut Isolate, value: i32) -> Local;
+        pub unsafe fn integer_new_from_unsigned(isolate: *mut Isolate, value: u32) -> Local;
+        pub unsafe fn local_integer_value(value: &Local) -> i64;
+        pub unsafe fn local_int32_value(value: &Local) -> i32;
+        pub unsafe fn local_uint32_value(value: &Local) -> u32;
 
         // Local<BigInt>
         pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
@@ -700,12 +727,19 @@ pub mod ffi {
 
     pub struct ConstructorDescriptor {
         callback: usize,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
+    /// The C types of a fast callback's arguments and result. `Int32` and `Uint32` are result
+    /// types only: an integer argument is a `Float64`, converted with the slow path's checks
+    /// (see `fast_api.rs`).
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum FastApiType {
         Void,
         Bool,
+        Int32,
+        Uint32,
         Float64,
     }
 
@@ -719,6 +753,8 @@ pub mod ffi {
         name: String,
         callback: usize,
         fast: KjMaybe<FastApiDescriptor>,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
     pub struct StaticConstantDescriptor {
@@ -875,7 +911,7 @@ impl std::fmt::Display for ffi::ExceptionType {
 // between them are in `impl_local_cast!`.
 //
 // Deliberately left unimplemented because we didn't need them yet:
-// - Primitive, Numeric, Integer, Int32, Uint32
+// - Primitive, Numeric
 // - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
 // - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
 // - WasmModuleObject, WasmMemoryObject
@@ -891,6 +927,20 @@ pub struct Boolean;
 /// this is the handle to one on the V8 heap.
 #[derive(Debug)]
 pub struct Number;
+/// Marker for `v8::Integer` handles: an integral number in the range of `i32` or `u32`.
+///
+/// That is what `Integer::new` and `Integer::new_from_unsigned` create, and what the Rust
+/// integer types of up to 32 bits convert to; `i64` and `u64` convert to a `BigInt`. V8's own
+/// cast to `Integer` accepts any number; this one, like `rusty_v8`'s, accepts only a value that is
+/// an `Int32` or a `Uint32`.
+#[derive(Debug)]
+pub struct Integer;
+/// Marker for `v8::Int32` handles: an integral number in the range of `i32`. `-0` is not one.
+#[derive(Debug)]
+pub struct Int32;
+/// Marker for `v8::Uint32` handles: an integral number in the range of `u32`. `-0` is not one.
+#[derive(Debug)]
+pub struct Uint32;
 /// Marker for `v8::Name` handles (supertype of `String` and `Symbol`).
 #[derive(Debug)]
 pub struct Name;
@@ -1443,6 +1493,29 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_number(self.raw()) }
     }
 
+    /// Returns true if the value is an integral number in the range of `i32`, other than `-0`.
+    ///
+    /// Corresponds to `v8::Value::IsInt32()`.
+    pub fn is_int32(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_int32(self.raw()) }
+    }
+
+    /// Returns true if the value is an integral number in the range of `u32`, other than `-0`.
+    ///
+    /// Corresponds to `v8::Value::IsUint32()`.
+    pub fn is_uint32(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_uint32(self.raw()) }
+    }
+
+    /// Whether the value is a `v8::Integer`, which has no `Is*` test of its own: an integral
+    /// number in the range of `i32` or `u32`, as `Integer::new` and `Integer::new_from_unsigned`
+    /// create.
+    fn is_int32_or_uint32(self) -> bool {
+        self.is_int32() || self.is_uint32()
+    }
+
     pub fn is_null(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_null(self.raw()) }
@@ -1632,6 +1705,63 @@ impl<'s, T> Local<'s, T> {
         // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the current
         // HandleScope.
         unsafe { ffi::local_type_of(lock.isolate().as_ffi(), self.raw()) }
+    }
+
+    /// Converts the value with JavaScript's `ToInt32`: `ToNumber`, then truncation toward zero
+    /// modulo 2^32, so NaN and the infinities are 0 and `2 ** 32 + 5` is 5. If the coercion
+    /// throws, or execution is terminating, fails with an error for which
+    /// [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::Int32Value()`.
+    pub fn int32_value(&self, lock: &mut Lock<'s>) -> Result<i32, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_int32_value(lock.isolate().as_ffi(), self.into_ffi(), &mut result)
+            };
+            Ok(ok.then_some(result))
+        })
+    }
+
+    /// Converts the value with JavaScript's `ToUint32`: `ToNumber`, then truncation toward zero
+    /// modulo 2^32, so NaN and the infinities are 0 and `-1` is `u32::MAX`. If the coercion
+    /// throws, or execution is terminating, fails with an error for which
+    /// [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::Uint32Value()`.
+    pub fn uint32_value(&self, lock: &mut Lock<'s>) -> Result<u32, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_uint32_value(lock.isolate().as_ffi(), self.into_ffi(), &mut result)
+            };
+            Ok(ok.then_some(result))
+        })
+    }
+
+    /// Converts the value with JavaScript's `ToInteger` (`ToNumber`, then truncation toward
+    /// zero, with NaN as 0), saturating at the range of `i64`. If the coercion throws, or
+    /// execution is terminating, fails with an error for which [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::IntegerValue()`.
+    pub fn integer_value(&self, lock: &mut Lock<'s>) -> Result<i64, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_integer_value(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    &mut result,
+                )
+            };
+            Ok(ok.then_some(result))
+        })
     }
 }
 
@@ -1946,6 +2076,9 @@ macro_rules! impl_local_cast {
 
 impl_local_cast!(Boolean: Value; is_boolean);
 impl_local_cast!(Number: Value; is_number);
+impl_local_cast!(Integer: Number, Value; is_int32_or_uint32);
+impl_local_cast!(Int32: Integer, Number, Value; is_int32);
+impl_local_cast!(Uint32: Integer, Number, Value; is_uint32);
 impl_local_cast!(Name: Value; is_name);
 impl_local_cast!(String: Name, Value; is_string);
 impl_local_cast!(Symbol: Name, Value; is_symbol);
@@ -2810,6 +2943,9 @@ impl_local_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
 impl_local_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
 impl_local_from_js!(Boolean, is_boolean, "Boolean");
 impl_local_from_js!(Number, is_number, "Number");
+impl_local_from_js!(Integer, is_int32_or_uint32, "Integer");
+impl_local_from_js!(Int32, is_int32, "Int32");
+impl_local_from_js!(Uint32, is_uint32, "Uint32");
 
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
@@ -3185,6 +3321,63 @@ impl Local<'_, Number> {
     pub fn value(&self) -> f64 {
         // SAFETY: the handle is a valid V8 Number handle.
         unsafe { ffi::local_number_value(self.raw()) }
+    }
+}
+
+// =============================================================================
+// `Integer`, `Int32` and `Uint32`
+// =============================================================================
+
+impl Integer {
+    /// Creates a number from an `i32`.
+    ///
+    /// Corresponds to `v8::Integer::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: i32) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::integer_new(isolate.as_ffi(), value)) }
+    }
+
+    /// Creates a number from a `u32`.
+    ///
+    /// Corresponds to `v8::Integer::NewFromUnsigned()`.
+    pub fn new_from_unsigned<'s>(lock: &mut crate::Lock<'s>, value: u32) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::integer_new_from_unsigned(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Integer> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Integer::Value()`.
+    #[inline]
+    pub fn value(&self) -> i64 {
+        // SAFETY: the handle is a valid V8 Integer handle.
+        unsafe { ffi::local_integer_value(self.raw()) }
+    }
+}
+
+impl Local<'_, Int32> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Int32::Value()`.
+    #[inline]
+    pub fn value(&self) -> i32 {
+        // SAFETY: the handle is a valid V8 Int32 handle.
+        unsafe { ffi::local_int32_value(self.raw()) }
+    }
+}
+
+impl Local<'_, Uint32> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Uint32::Value()`.
+    #[inline]
+    pub fn value(&self) -> u32 {
+        // SAFETY: the handle is a valid V8 Uint32 handle.
+        unsafe { ffi::local_uint32_value(self.raw()) }
     }
 }
 

@@ -80,8 +80,8 @@ impl Node {
     }
 
     #[jsg_property(prototype)]
-    fn get_value(&self) -> f64 {
-        self.value.get().into()
+    fn get_value(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_method]
@@ -112,13 +112,13 @@ impl Target {
     fn static_noop() {}
 
     #[jsg_method]
-    fn add(&self, a: u32) -> f64 {
-        (a + 1).into()
+    fn add(&self, a: u32) -> u32 {
+        a + 1
     }
 
     #[jsg_method]
-    fn add_four(&self, a: u32, b: u32, c: u32, d: u32) -> f64 {
-        (a + b + c + d).into()
+    fn add_four(&self, a: u32, b: u32, c: u32, d: u32) -> u32 {
+        a + b + c + d
     }
 
     #[jsg_method]
@@ -137,8 +137,8 @@ impl Target {
     }
 
     #[jsg_property(prototype)]
-    fn get_value(&self) -> f64 {
-        self.value.get().into()
+    fn get_value(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_property(prototype)]
@@ -147,8 +147,8 @@ impl Target {
     }
 
     #[jsg_property(instance)]
-    fn get_own(&self) -> f64 {
-        self.value.get().into()
+    fn get_own(&self) -> u32 {
+        self.value.get()
     }
 
     #[jsg_property(instance)]
@@ -157,8 +157,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn optional(&self, a: Option<u32>) -> f64 {
-        a.unwrap_or(7).into()
+    fn optional(&self, a: Option<u32>) -> u32 {
+        a.unwrap_or(7)
     }
 
     #[jsg_method]
@@ -170,8 +170,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn string_len(&self, a: String) -> f64 {
-        (a.len() as u32).into()
+    fn string_len(&self, a: String) -> u32 {
+        a.len() as u32
     }
 
     #[jsg_method]
@@ -224,24 +224,20 @@ impl Target {
     }
 
     #[jsg_method]
-    fn bytes_len(&self, a: v8::Local<'_, v8::Uint8Array>) -> f64 {
-        (a.byte_length() as u32).into()
+    fn bytes_len(&self, a: v8::Local<'_, v8::Uint8Array>) -> u32 {
+        a.byte_length() as u32
     }
 
     #[jsg_method]
-    fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> f64 {
+    fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
         let a = a.as_slice(lock).to_vec();
         black_box(&a);
-        (a.len() as u32).into()
+        a.len() as u32
     }
 
     #[jsg_method]
-    fn bytes_sum<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> f64 {
-        a.as_slice(lock)
-            .iter()
-            .map(|&x| u32::from(x))
-            .sum::<u32>()
-            .into()
+    fn bytes_sum<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> u32 {
+        a.as_slice(lock).iter().map(|&x| u32::from(x)).sum()
     }
 
     #[jsg_method]
@@ -255,8 +251,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn take_node(&self, a: jsg::Rc<Node>) -> f64 {
-        a.value.get().into()
+    fn take_node(&self, a: jsg::Rc<Node>) -> u32 {
+        a.value.get()
     }
 
     #[jsg_method]
