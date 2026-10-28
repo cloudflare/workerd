@@ -320,6 +320,63 @@ fn fast_and_slow_paths_agree() {
     }
 }
 
+/// A fraction just past a range limit converts the same on the fast path as on the slow path in
+/// either state of the `JSG_INTEGER_ENFORCE_RANGE` autogate: with it, both truncate; without it,
+/// both throw.
+#[test]
+fn enforce_range_autogate_applies_on_the_fast_path() {
+    let cases = [
+        ("idI32", "2 ** 31 - 0.5", "2147483647"),
+        ("idI32", "-(2 ** 31) - 0.5", "-2147483648"),
+        ("idU32", "-0.5", "0"),
+        ("idU32", "2 ** 32 - 0.5", "4294967295"),
+        ("idU8", "255.5", "255"),
+        ("idU8", "-0.5", "0"),
+        ("idI8", "-128.5", "-128"),
+        ("idI16", "32767.5", "32767"),
+        ("idU16", "65535.5", "65535"),
+    ];
+    let states: [(&[&str], bool); 2] = [(&[], false), (&["jsg-integer-enforce-range"], true)];
+
+    for (method, arg, truncated) in cases {
+        let source = optimized("x", &format!("return String(r.{method}(x));"), "1", arg);
+        for (gates, enforce_range) in states {
+            let _autogates = crate::set_autogates(gates);
+
+            let mut slow_result = None;
+            crate::Harness::new().run_in_context(|lock, ctx| {
+                set_resource(lock, ctx, 0);
+                slow_result = Some(
+                    ctx.eval::<String>(lock, &source)
+                        .map_err(|e| e.unwrap_jsg_err(lock).message),
+                );
+                Ok(())
+            });
+
+            crate::Harness::with_fast_api().run_in_context(|lock, ctx| {
+                set_resource(lock, ctx, 0);
+                let (fast_result, fast_calls) = count_fast_calls(|| {
+                    ctx.eval::<String>(lock, &source)
+                        .map_err(|e| e.unwrap_jsg_err(lock).message)
+                });
+                assert_eq!(Some(&fast_result), slow_result.as_ref(), "{method}({arg})");
+                if enforce_range {
+                    assert_eq!(fast_result, Ok(truncated.to_owned()), "{method}({arg})");
+                } else {
+                    let message = fast_result.expect_err(method);
+                    assert!(
+                        message.starts_with("Value out of range")
+                            || message.contains("it is negative"),
+                        "{method}({arg}): {message}"
+                    );
+                }
+                assert_ne!(fast_calls, Some(0), "{method}({arg})");
+                Ok(())
+            });
+        }
+    }
+}
+
 /// An integer comes out of a fast callback as V8's `int32_t` or `uint32_t`, which makes the
 /// same number as the slow path does, over the whole range of the type: `i32::MIN`, `u32::MAX`
 /// and the other values beyond the Smi range included.

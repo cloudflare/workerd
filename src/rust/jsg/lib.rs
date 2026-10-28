@@ -115,6 +115,11 @@ mod ffi {
         /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
         /// the isolate is disposed.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
+
+        // Autogates
+        /// Whether the `JSG_INTEGER_ENFORCE_RANGE` autogate is enabled; see
+        /// `wrappable::integer_part_for_range_check`.
+        pub fn integer_enforce_range_autogate_enabled() -> bool;
     }
 }
 
