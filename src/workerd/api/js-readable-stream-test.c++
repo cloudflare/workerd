@@ -3609,6 +3609,67 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
   });
 }
 
+KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prototype.then") {
+  // The bytes reach C++ through a promise TypeScript resolves. Resolving one with an object
+  // looks up its then, so a patched Object.prototype.then would replace them; here it would hand
+  // each helper 'intercepted' instead.
+  auto fixture = makeTsStreamsFixture();
+  uint thenCalls = 0;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto objectPrototype = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    objectPrototype.set(js, "then"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
+            [&thenCalls](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      ++thenCalls;
+      auto onFulfilled = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsFunction>());
+      onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
+    })));
+
+    JsReadableStream forArrayBuffer(js, kj::str(kData));
+    JsReadableStream forBytes(js, kj::str(kData));
+    JsReadableStream forText(js, kj::str(kData));
+    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
+    JsReadableStream forBlob(js, kj::str(kData));
+
+    auto promise =
+        forArrayBuffer.arrayBuffer(js, kLimit)
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
+                      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forBytes.bytes(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forText = kj::mv(forText)), (forText),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsUint8Array> bytes) mutable {
+                      KJ_EXPECT(bytes.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forText.text(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forJson = kj::mv(forJson)), (forJson),
+                    (jsg::Lock & js, kj::String text) mutable {
+                      KJ_EXPECT(text == kData);
+                      return forJson.json(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBlob = kj::mv(forBlob)), (forBlob),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsValue> value) mutable {
+                      auto obj = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsObject>());
+                      KJ_EXPECT(js.toString(obj.get(js, "hello"_kj)) == "world"_kj);
+                      return forBlob.blob(js, kLimit, kj::str("text/plain"));
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((objectPrototype = jsg::JsRef(js, objectPrototype)),
+                    (objectPrototype), (jsg::Lock& js, jsg::Ref<Blob> blob) {
+                      KJ_EXPECT(blob->getSize() == kData.size());
+                      objectPrototype.getHandle(js).delete_(js, "then"_kj);
+                    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(thenCalls == 0);
+}
+
 KJ_TEST("JsReadableStream addRef shares a TypeScript-backed stream") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
