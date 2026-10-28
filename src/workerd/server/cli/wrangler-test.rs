@@ -210,6 +210,15 @@ fn migrations_follow_wranglers_order_and_checks() {
     let error = classes(r#"[{ "tag": "v1", "new_classes": ["A"], "new_sqlite_classes": ["A"] }]"#)
         .unwrap_err();
     assert!(error.contains("new class A already exists"), "{error}");
+    let error = classes(
+        r#"[{ "tag": "v1", "new_classes": ["A", "B"] },
+            { "tag": "v2", "renamed_classes": [{ "from": "A", "to": "B" }] }]"#,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("renamed-to class B already exists"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -283,11 +292,15 @@ fn bundle_reads_esbuild_output_and_watches_inputs() {
     let _spawn = SPAWN
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let dir = project(&[("index.ts", ""), ("node_modules/x/index.js", "")]);
+    let dir = project(&[
+        ("index.ts", ""),
+        ("lib.ts", ""),
+        ("node_modules/x/index.js", ""),
+    ]);
     let esbuild = stub_esbuild(
         &dir,
         r#"echo 'export default {}' > "$out/index.js"; echo wasm > "$out/a.wasm"
-echo '{"inputs":{"index.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
+echo '{"inputs":{"index.ts":{},"lib.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
     );
     let watched = std::cell::RefCell::new(Vec::new());
     let sources = bundle(&esbuild, &dir, "index.ts", &|p| {
@@ -298,6 +311,8 @@ echo '{"inputs":{"index.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
     let names: Vec<_> = sources.iter().map(|(n, _, _)| n.as_str()).collect();
     assert_eq!(names, ["index.js", "a.wasm"]);
     assert!(watched.borrow().contains(&dir.join("index.ts")));
+    // Only the metafile names `lib.ts`.
+    assert!(watched.borrow().contains(&dir.join("lib.ts")));
     assert!(
         !watched
             .borrow()

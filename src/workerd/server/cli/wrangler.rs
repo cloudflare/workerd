@@ -6,14 +6,14 @@
 //!
 //! As wrangler does, `main` is bundled with esbuild (`WORKERD_ESBUILD`, else the project's
 //! `node_modules/.bin/esbuild`, else `esbuild` on `PATH`), with the same platform, conditions and
-//! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`, `main` must be an ES
-//! module and the modules it imports are found by scanning its directory with wrangler's default
-//! module rules. Supported fields: `name`, `main`, `compatibility_date`, `compatibility_flags`,
-//! `vars`, `durable_objects`, `migrations` and `no_bundle`. Any other field is an error rather
-//! than silently ignored.
+//! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`,
+//! `main` must be an ES module and the modules it imports are found by scanning its directory with
+//! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
+//! `compatibility_flags`, `vars`, `durable_objects`, `migrations`, `no_bundle` and `$schema`. Any
+//! other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
-//! directory per class (`<name>-<class>`). The server listens on `*:8787`, as `wrangler dev`
+//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server listens on `*:8787`, as `wrangler dev`
 //! does; `--socket-addr http=<addr>` overrides it.
 
 use std::collections::BTreeMap;
@@ -450,6 +450,12 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
         }
         for r in &m.renamed_classes {
             let i = find(&classes, &r.from, "renamed")?;
+            if find(&classes, &r.to, "").is_ok() {
+                return Err(format!(
+                    "migrations: renamed-to class {} already exists",
+                    r.to
+                ));
+            }
             classes[i].0.clone_from(&r.to);
         }
         let new = m.new_classes.iter().map(|c| (c, false));
