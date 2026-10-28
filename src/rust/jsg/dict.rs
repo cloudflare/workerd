@@ -29,8 +29,8 @@
 /// }
 ///
 /// #[jsg_method]
-/// pub fn get_counts(&self) -> Dict<f64> {
-///     Dict::from(vec![("hits".to_owned(), 3.0)])
+/// pub fn get_counts(&self) -> Dict<u32> {
+///     Dict::from(vec![("hits".to_owned(), 3)])
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
