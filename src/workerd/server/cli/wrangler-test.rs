@@ -110,7 +110,10 @@ fn durable_objects() {
                   "durable_objects": {
                     "bindings": [{ "name": "COUNTER", "class_name": "Counter" }],
                   },
-                  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }],
+                  "migrations": [
+                    { "tag": "v1", "new_sqlite_classes": ["Old"] },
+                    { "tag": "v2", "renamed_classes": [{ "from": "Old", "to": "Counter" }] },
+                  ],
                 }"#,
             ),
             ("index.js", "export class Counter {}"),
@@ -124,10 +127,21 @@ fn durable_objects() {
         panic!("expected a worker service")
     };
     let worker = worker.unwrap();
+    let binding = worker.get_bindings().unwrap().get(0);
+    assert_eq!(binding.get_name().unwrap(), "COUNTER");
+    let worker::binding::Which::DurableObjectNamespace(target) = binding.which().unwrap() else {
+        panic!("expected a durable object binding")
+    };
+    assert_eq!(target.unwrap().get_class_name().unwrap(), "Counter");
     let ns = worker.get_durable_object_namespaces().unwrap().get(0);
     assert_eq!(ns.get_class_name().unwrap(), "Counter");
+    // Renamed, the class keeps the storage it was created with.
+    let worker::durable_object_namespace::Which::UniqueKey(key) = ns.which().unwrap() else {
+        panic!("expected a unique key")
+    };
+    assert_eq!(key.unwrap(), "counter-Old");
     assert!(ns.get_enable_sql());
-    assert_eq!(services.get(1).get_name().unwrap(), STORAGE_SERVICE);
+    assert_eq!(services.get(1).get_name().unwrap(), "counter-do-storage");
 }
 
 #[test]
@@ -167,8 +181,26 @@ fn migrations_follow_wranglers_order_and_checks() {
                         { "tag": "v2", "deleted_classes": ["A"], "new_sqlite_classes": ["A"] }]"#;
     assert_eq!(
         classes(recreated).unwrap(),
-        [("A".to_owned(), "A".to_owned(), true)]
+        [("A".to_owned(), "A~1".to_owned(), true)]
     );
+    // A key is never reused, so a re-created or renamed-away name starts empty.
+    let reused = r#"[{ "tag": "v1", "new_classes": ["A"] },
+                     { "tag": "v2", "renamed_classes": [{ "from": "A", "to": "B" }] },
+                     { "tag": "v3", "new_classes": ["A"] }]"#;
+    assert_eq!(
+        classes(reused).unwrap(),
+        [
+            ("B".to_owned(), "A".to_owned(), false),
+            ("A".to_owned(), "A~1".to_owned(), false)
+        ]
+    );
+    let error = classes(
+        r#"[{ "tag": "v1", "new_classes": ["A"] },
+            { "tag": "v2", "deleted_classes": ["A"],
+              "renamed_classes": [{ "from": "A", "to": "B" }] }]"#,
+    )
+    .unwrap_err();
+    assert!(error.contains("renamed class A does not exist"), "{error}");
     let error = classes(r#"[{ "tag": "v1", "deleted_classes": ["A"] }]"#).unwrap_err();
     assert!(error.contains("deleted class A does not exist"), "{error}");
     let error = classes(r#"[{ "tag": "v1", "new_classes": ["A"], "new_sqlite_classes": ["A"] }]"#)
@@ -205,8 +237,15 @@ fn unbundled_typescript_main_is_an_error() {
     assert!(error.contains("no_bundle"), "{error}");
 }
 
+/// Held by every test that spawns a process. Writing the stub esbuild while another thread
+/// forks would leave the fork holding it open for writing, and running it would fail (ETXTBSY).
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn missing_esbuild_is_explained() {
+    let _spawn = SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = project(&[("index.ts", "export default {}")]);
     let error = bundle(Path::new("/nonexistent/esbuild"), &dir, "index.ts", &|_| {
         Ok(())
@@ -237,6 +276,9 @@ fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
 #[cfg(unix)]
 #[test]
 fn bundle_reads_esbuild_output_and_watches_inputs() {
+    let _spawn = SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = project(&[("index.ts", ""), ("node_modules/x/index.js", "")]);
     let esbuild = stub_esbuild(
         &dir,
@@ -251,7 +293,13 @@ echo '{"inputs":{"index.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
     .unwrap();
     let names: Vec<_> = sources.iter().map(|(n, _, _)| n.as_str()).collect();
     assert_eq!(names, ["index.js", "a.wasm"]);
-    assert_eq!(*watched.borrow(), [dir.join("index.ts")]);
+    assert!(watched.borrow().contains(&dir.join("index.ts")));
+    assert!(
+        !watched
+            .borrow()
+            .iter()
+            .any(|p| p.starts_with(dir.join("node_modules")))
+    );
     let args = fs::read_to_string(dir.join("args.txt")).unwrap();
     for arg in [
         "index.ts",
@@ -267,8 +315,11 @@ echo '{"inputs":{"index.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
 
 #[cfg(unix)]
 #[test]
-fn failed_bundle_watches_sources() {
-    let dir = project(&[("index.ts", ""), ("README.md", "")]);
+fn failed_bundle_watches_sources_and_missing_main() {
+    let _spawn = SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = project(&[("lib.ts", ""), ("README.md", "")]);
     let esbuild = stub_esbuild(&dir, "echo 'syntax error' >&2; exit 1");
     let watched = std::cell::RefCell::new(Vec::new());
     let error = bundle(&esbuild, &dir, "index.ts", &|p| {
@@ -278,5 +329,9 @@ fn failed_bundle_watches_sources() {
     .err()
     .unwrap();
     assert!(error.contains("syntax error"), "{error}");
-    assert_eq!(*watched.borrow(), [dir.join("index.ts")]);
+    watched.borrow_mut().sort();
+    assert_eq!(
+        *watched.borrow(),
+        [dir.join("index.ts"), dir.join("lib.ts")]
+    );
 }

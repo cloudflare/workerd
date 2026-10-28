@@ -25,7 +25,6 @@ use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
-const STORAGE_SERVICE: &str = "wrangler-do-storage";
 const DEFAULT_ADDRESS: &str = "*:8787";
 
 #[derive(Deserialize)]
@@ -193,11 +192,13 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
             n.set_unique_key(format!("{name}-{key}"));
             n.set_enable_sql(*sql);
         }
+        // Named after the worker, so it cannot collide with it.
+        let storage_service = format!("{name}-do-storage");
         worker
             .init_durable_object_storage()
-            .set_local_disk(STORAGE_SERVICE);
+            .set_local_disk(&storage_service);
         let mut disk_service = services.get(1);
-        disk_service.set_name(STORAGE_SERVICE);
+        disk_service.set_name(&storage_service);
         let mut disk = disk_service.init_disk();
         disk.set_path(storage.to_string_lossy());
         disk.set_writable(true);
@@ -302,6 +303,8 @@ fn run_esbuild(
     out: &Path,
     watch: Watch,
 ) -> Result<Vec<Source>, String> {
+    // Watched up front: if `main` is missing, creating it reloads.
+    watch(&root.join(main))?;
     let metafile = out.join("meta.json");
     let output = std::process::Command::new(esbuild)
         .current_dir(root)
@@ -416,11 +419,22 @@ fn files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The Durable Object classes, each with the name it was created under (its storage key, kept
-/// across renames) and whether it is SQLite-backed, from `migrations` applied in order, plus any
-/// bound class the migrations never mention (not SQLite-backed, as in wrangler).
+/// The Durable Object classes, each with its storage key and whether it is SQLite-backed, from
+/// `migrations` applied in order, plus any bound class the migrations never mention (not
+/// SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is never
+/// reused: a class created under a name an earlier class was keyed by (since deleted or renamed)
+/// gets `<name>~<n>` and starts empty, as in production.
 fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
     let mut classes: Vec<(String, String, bool)> = Vec::new();
+    let mut used: Vec<String> = Vec::new();
+    let mut key = |c: &str| {
+        let k = std::iter::once(c.to_owned())
+            .chain((1..=used.len()).map(|n| format!("{c}~{n}")))
+            .find(|k| !used.contains(k))
+            .unwrap_or_default();
+        used.push(k.clone());
+        k
+    };
     for m in &w.migrations {
         // In wrangler's order: deletes, then renames, then new classes.
         let find = |classes: &[(String, String, bool)], c: &str, what: &str| {
@@ -439,12 +453,12 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
             if find(&classes, c, "new").is_ok() {
                 return Err(format!("migrations: new class {c} already exists"));
             }
-            classes.push((c.clone(), c.clone(), sql));
+            classes.push((c.clone(), key(c), sql));
         }
     }
     for b in w.durable_objects.iter().flat_map(|d| &d.bindings) {
         if !classes.iter().any(|(c, _, _)| *c == b.class_name) {
-            classes.push((b.class_name.clone(), b.class_name.clone(), false));
+            classes.push((b.class_name.clone(), key(&b.class_name), false));
         }
     }
     Ok(classes)
