@@ -359,10 +359,10 @@ fn dicts_convert_to_plain_objects() {
     });
 }
 
-// Like C++ JSG, converting a Dict runs a setter that Object.prototype has for its key. What
-// the setter throws reaches the caller unchanged, and no later entry is set.
+// As Web IDL does for a record, converting a Dict defines its entries as own data properties,
+// so a setter that Object.prototype has for a key neither runs nor hides the entry.
 #[test]
-fn converting_a_dict_runs_inherited_setters() {
+fn converting_a_dict_runs_no_inherited_setters() {
     with_records(|lock, ctx| {
         expect_eval(
             lock,
@@ -371,29 +371,33 @@ fn converting_a_dict_runs_inherited_setters() {
              Object.defineProperty(Object.prototype, 'a', {
                set(v) { seen.push(v); }, configurable: true,
              });
+             Object.defineProperty(Object.prototype, 'b', {
+               set(v) { throw new RangeError('setter'); }, configurable: true,
+             });
              const d = records.make(['a', 'b']);
              delete Object.prototype.a;
-             `${seen} ${JSON.stringify(d)}`",
-            "1 {\"b\":2}",
+             delete Object.prototype.b;
+             const own = Object.getOwnPropertyDescriptor(d, 'a');
+             [seen.length, JSON.stringify(d), own.writable, own.enumerable, own.configurable]
+               .join(' ')",
+            "0 {\"a\":1,\"b\":2} true true true",
         );
-        let result: bool = ctx
-            .eval(
-                lock,
-                "globalThis.thrown = new RangeError('setter'); globalThis.ran = false;
-                 Object.defineProperty(Object.prototype, 'a', {
-                   set(v) { throw thrown; }, configurable: true,
-                 });
-                 Object.defineProperty(Object.prototype, 'b', {
-                   set(v) { ran = true; }, configurable: true,
-                 });
-                 let caught;
-                 try { records.make(['a', 'b']); } catch (e) { caught = e; }
-                 delete Object.prototype.a;
-                 delete Object.prototype.b;
-                 caught === thrown && !ran",
-            )
-            .unwrap();
-        assert!(result);
+    });
+}
+
+// A `__proto__` entry is an own property, as `Object.fromEntries` makes it: it neither
+// replaces the object's prototype nor is dropped.
+#[test]
+fn a_proto_entry_is_an_own_property() {
+    with_records(|lock, ctx| {
+        expect_eval(
+            lock,
+            ctx,
+            "const d = records.make(['__proto__', 'a']);
+             [Object.getPrototypeOf(d) === Object.prototype, Object.hasOwn(d, '__proto__'),
+              JSON.stringify(d)].join(' ')",
+            "true true {\"__proto__\":1,\"a\":2}",
+        );
     });
 }
 

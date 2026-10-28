@@ -11,8 +11,10 @@
 ///   enumerable properties that are not symbols, in property order, as `Object.keys()` lists
 ///   them. Each value is read and converted before the next one is read. A value of the wrong
 ///   type is a `TypeError` that names its key.
-/// - To JavaScript, it is a new plain object with a property for each entry, set in order, so
-///   that a later entry with the same key overwrites an earlier one.
+/// - To JavaScript, it is a new plain object with an own data property for each entry, defined
+///   in order, so that a later entry with the same key overwrites an earlier one. As in Web IDL,
+///   and unlike C++ JSG, which sets the properties, no setter on `Object.prototype` runs and a
+///   `__proto__` entry is an own property.
 ///
 /// # Examples
 ///

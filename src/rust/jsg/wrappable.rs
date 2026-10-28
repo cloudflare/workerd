@@ -1228,14 +1228,18 @@ impl<V> Type for Dict<V> {
 
 impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        let object = lock.new_object();
-        for (key, value) in self {
-            let value = value.to_js(lock)?;
-            // Like C++ JSG's, this runs a setter that `Object.prototype` has for the key, and
-            // stops at the first entry that fails, including when the setter throws.
-            object.set(lock, &key, value)?;
-        }
-        Ok(object.into())
+        let entries = self
+            .into_iter()
+            .map(|(key, value)| Ok((key, value.to_js(lock)?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let properties: Vec<(&str, v8::Local<'s, v8::Value>)> = entries
+            .iter()
+            .map(|(key, value)| (key.as_str(), *value))
+            .collect();
+        // As Web IDL does for a record, defines each entry as an own data property, unlike C++
+        // JSG's DictWrapper, which sets it: no setter on `Object.prototype` runs, and a
+        // `__proto__` entry is an own property rather than replacing the prototype.
+        Ok(v8::Object::with_data_properties(lock, &properties)?.into())
     }
 }
 
