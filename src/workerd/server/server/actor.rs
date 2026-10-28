@@ -397,7 +397,11 @@ impl ActorNamespace {
             ActorConfig::Ephemeral { .. } => ("", ""),
         };
         if !path.is_empty() {
-            let _ = self.directory.set(format!("{path}/{unique_key}"));
+            let directory = format!("{path}/{unique_key}");
+            if self.cluster.get().is_some() {
+                claim_directory(&directory)?;
+            }
+            let _ = self.directory.set(directory);
         }
         let storage = ffi::factory_new_actor_storage(
             self.factory.raw(),
@@ -433,6 +437,32 @@ impl ActorNamespace {
             self.abort_all(Some(&kj::disconnected!("Server shutting down.")));
         }
     }
+}
+
+/// Marks a namespace's `directory` as the cluster's. The cluster replaces an
+/// object's database with the bucket's copy, so a directory holding Durable
+/// Objects from before cluster mode is refused rather than deleted.
+fn claim_directory(directory: &str) -> Result<()> {
+    let directory = std::path::Path::new(directory);
+    let marker = directory.join(".cluster");
+    if marker.exists() {
+        return Ok(());
+    }
+    let databases = std::fs::read_dir(directory).into_iter().flatten().flatten();
+    let held = databases.map(|e| e.file_name()).any(|name| {
+        let name = name.to_string_lossy();
+        name.ends_with(".sqlite") && name != "metadata.sqlite"
+    });
+    if held {
+        return Err(kj::failed!(
+            "{} holds Durable Objects from before cluster mode, which the cluster would \
+             replace: move them away",
+            directory.display()
+        ));
+    }
+    std::fs::create_dir_all(directory)
+        .and_then(|()| std::fs::write(&marker, ""))
+        .map_err(|e| kj::failed!("{}: {e}", marker.display()))
 }
 
 impl ActorNamespaceHandle {

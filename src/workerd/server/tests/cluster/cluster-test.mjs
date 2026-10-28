@@ -20,7 +20,7 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO.
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect, createServer } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
@@ -799,6 +799,24 @@ test('cluster: a public cluster address is refused', async () => {
     assert.match(stderr, /8\.8\.8\.8 is public/, flag);
   }
   await rm(local, { recursive: true });
+});
+
+test('cluster: Durable Objects from before cluster mode are refused', async () => {
+  await withCluster(1, async ({ bucket }) => {
+    const local = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+    await mkdir(join(local, 'counter-test-namespace'));
+    await writeFile(join(local, 'counter-test-namespace', 'a.sqlite'), '');
+    const node = new ClusterNode({
+      binary: env.WORKERD_BINARY,
+      config: env.WD_TEST_CONFIG,
+      localPath: local,
+      s3Port: bucket.port,
+      nodeId: 'old',
+    });
+    await assert.rejects(node.start(), /exited before listening/);
+    assert.match(node.stderr, /from before cluster mode/);
+    await rm(local, { recursive: true });
+  });
 });
 
 test('cluster: each running instance holds a lease record', async () => {

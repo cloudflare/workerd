@@ -108,7 +108,9 @@ struct ClusterConfig {
   # record naming its address, and each Durable Object's owner is a record claimed by a conditional
   # write. Taking an object over from an owner whose lease expired bumps its ownership epoch.
   # Instances need no shared filesystem: `durableObjectStorage.localDisk` is each instance's own
-  # disk. Durable Objects stored in memory stay local to each instance.
+  # disk. Durable Objects stored in memory stay local to each instance. The bucket's copy of an
+  # object replaces the instance's, so a `localDisk` already holding Durable Objects from before
+  # cluster mode is refused at startup; they are not imported.
   #
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
