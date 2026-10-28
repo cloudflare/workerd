@@ -902,62 +902,6 @@ let controllerStartedOf: ControllerOp<[], boolean>;
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultController
 
-interface SinkAlgorithms<W> {
-  write: ((chunk: W) => Promise<void>) | undefined;
-  close: (() => Promise<void>) | undefined;
-  abort: ((reason: unknown) => Promise<void>) | undefined;
-}
-
-// The controller's write, close and abort algorithms, calling the hooks
-// through captured uncurryThis wrappers with the sink as `this` (spec
-// SetUpWritableStreamDefaultControllerFromUnderlyingSink). Built outside
-// the controller constructor so that `underlyingSink` is captured only by
-// these closures, not by the constructor's shared context (which start()'s
-// reactions keep alive until it settles): once ClearAlgorithms drops them,
-// the sink is collectable.
-function makeSinkAlgorithms<W>(
-  underlyingSink: UnderlyingSink<W>,
-  controller: WritableStreamDefaultController<W>,
-  writeFn: UnderlyingSink<W>['write'],
-  closeFn: UnderlyingSink<W>['close'],
-  abortFn: UnderlyingSink<W>['abort']
-): SinkAlgorithms<W> {
-  let write: SinkAlgorithms<W>['write'];
-  if (writeFn !== undefined) {
-    const callWrite = uncurryThis(writeFn);
-    write = (chunk: W) => {
-      try {
-        return PromiseResolve(callWrite(underlyingSink, chunk, controller));
-      } catch (e) {
-        return PromiseReject(e);
-      }
-    };
-  }
-  let close: SinkAlgorithms<W>['close'];
-  if (closeFn !== undefined) {
-    const callClose = uncurryThis(closeFn);
-    close = () => {
-      try {
-        return PromiseResolve(callClose(underlyingSink));
-      } catch (e) {
-        return PromiseReject(e);
-      }
-    };
-  }
-  let abort: SinkAlgorithms<W>['abort'];
-  if (abortFn !== undefined) {
-    const callAbort = uncurryThis(abortFn);
-    abort = (reason: unknown) => {
-      try {
-        return PromiseResolve(callAbort(underlyingSink, reason));
-      } catch (e) {
-        return PromiseReject(e);
-      }
-    };
-  }
-  return { write, close, abort };
-}
-
 interface QueuedWrite<W> {
   value: W | typeof kCloseMarker | typeof kFlushMarker;
   size: number;
@@ -979,9 +923,18 @@ class WritableStreamDefaultController<
   #started: boolean = false;
   #strategyHWM: number;
   #sizeAlgorithm: ((chunk: W) => number) | undefined;
-  #writeAlgorithm: ((chunk: W) => Promise<void>) | undefined;
-  #closeAlgorithm: (() => Promise<void>) | undefined;
-  #abortAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
+  // The write, close and abort algorithms are these hooks, uncurried, called
+  // with the sink as `this` by #callWrite, #callClose and #callAbort. The
+  // sink lives in a field ClearAlgorithms clears, never in a closure: a
+  // closure's context can stay reachable after the closure is dropped (from
+  // JIT-compiled code), and the sink with it.
+  #underlyingSink: UnderlyingSink<W> | undefined;
+  #writeHook:
+    | ((sink: UnderlyingSink<W>, chunk: W, controller: this) => unknown)
+    | undefined;
+  #closeHook: ((sink: UnderlyingSink<W>) => unknown) | undefined;
+  #abortHook:
+    ((sink: UnderlyingSink<W>, reason: unknown) => unknown) | undefined;
   #abortController = new AbortController();
 
   static {
@@ -1034,11 +987,7 @@ class WritableStreamDefaultController<
     // returns, so a write made from inside sink.abort() still consults
     // size() (WritableStreamDefaultWriterWrite step 4) before it rejects.
     controllerAbortSteps = (controller, reason) => {
-      const abortAlgorithm = controller.#abortAlgorithm;
-      const result =
-        abortAlgorithm === undefined
-          ? PromiseResolve()
-          : abortAlgorithm(reason);
+      const result = controller.#callAbort(reason);
       controller.#clearAlgorithms();
       return result;
     };
@@ -1142,16 +1091,10 @@ class WritableStreamDefaultController<
       start: startFn,
       write: writeFn,
     } = sinkDict;
-    const algorithms = makeSinkAlgorithms(
-      underlyingSink,
-      this,
-      writeFn,
-      closeFn,
-      abortFn
-    );
-    this.#writeAlgorithm = algorithms.write;
-    this.#closeAlgorithm = algorithms.close;
-    this.#abortAlgorithm = algorithms.abort;
+    this.#underlyingSink = underlyingSink;
+    this.#writeHook = writeFn === undefined ? undefined : uncurryThis(writeFn);
+    this.#closeHook = closeFn === undefined ? undefined : uncurryThis(closeFn);
+    this.#abortHook = abortFn === undefined ? undefined : uncurryThis(abortFn);
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -1201,10 +1144,50 @@ class WritableStreamDefaultController<
   }
 
   #clearAlgorithms(): void {
-    this.#writeAlgorithm = undefined;
-    this.#closeAlgorithm = undefined;
-    this.#abortAlgorithm = undefined;
+    this.#underlyingSink = undefined;
+    this.#writeHook = undefined;
+    this.#closeHook = undefined;
+    this.#abortHook = undefined;
     this.#sizeAlgorithm = undefined;
+  }
+
+  // The sink algorithms: each calls its hook, if the sink has one and the
+  // algorithms are not cleared, as a promise, a sync throw becoming a
+  // rejection.
+  #callWrite(chunk: W): Promise<void> {
+    const hook = this.#writeHook;
+    if (hook === undefined) return PromiseResolve();
+    try {
+      return PromiseResolve(
+        hook(this.#underlyingSink as UnderlyingSink<W>, chunk, this)
+      ) as Promise<void>;
+    } catch (e) {
+      return PromiseReject(e);
+    }
+  }
+
+  #callClose(): Promise<void> {
+    const hook = this.#closeHook;
+    if (hook === undefined) return PromiseResolve();
+    try {
+      return PromiseResolve(
+        hook(this.#underlyingSink as UnderlyingSink<W>)
+      ) as Promise<void>;
+    } catch (e) {
+      return PromiseReject(e);
+    }
+  }
+
+  #callAbort(reason: unknown): Promise<void> {
+    const hook = this.#abortHook;
+    if (hook === undefined) return PromiseResolve();
+    try {
+      return PromiseResolve(
+        hook(this.#underlyingSink as UnderlyingSink<W>, reason)
+      ) as Promise<void>;
+    } catch (e) {
+      return PromiseReject(e);
+    }
   }
 
   #advanceQueueIfNeeded(): void {
@@ -1247,9 +1230,7 @@ class WritableStreamDefaultController<
     // As in [[AbortSteps]], the algorithms are cleared after the close
     // algorithm returns: a write made from inside sink.close() consults
     // size() before it rejects.
-    const closeAlgorithm = this.#closeAlgorithm;
-    const promise =
-      closeAlgorithm === undefined ? PromiseResolve() : closeAlgorithm();
+    const promise = this.#callClose();
     this.#clearAlgorithms();
     PromisePrototypeThen(
       promise,
@@ -1265,9 +1246,7 @@ class WritableStreamDefaultController<
   #processWrite(chunk: W): void {
     const stream = this.#stream;
     writableStreamMarkFirstWriteRequestInFlight(stream);
-    const writeAlgorithm = this.#writeAlgorithm;
-    const promise =
-      writeAlgorithm === undefined ? PromiseResolve() : writeAlgorithm(chunk);
+    const promise = this.#callWrite(chunk);
     // A detach (detachWritableStream) closes the stream with this write in
     // flight, and has already rejected its request and dropped the queue:
     // the sink's settlement is then ignored. Nothing else closes a stream
