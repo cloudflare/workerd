@@ -813,7 +813,7 @@ inline consteval kj::StringPtr exportedFieldName(const char (&s)[N]) {
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
   registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
-      name##_JSG_NAME_DO_NOT_USE_DIRECTLY)
+      ::workerd::jsg::exportedFieldName(name##_JSG_NAME_DO_NOT_USE_DIRECTLY))
 
 // Indexes for adding API data to V8's Isolate object.
 enum SetDataIndex {
