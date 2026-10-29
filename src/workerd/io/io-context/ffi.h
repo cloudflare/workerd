@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/io-context.h>
+#include <workerd/rust/jsg/ffi.h>
 
 #include <rust/cxx.h>
 
@@ -57,5 +58,20 @@ class IoOwnedObject {
 
 // IoContext::addObject() for `slot`.
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
+
+// IoContext::setFailOpen(), for ctx.passThroughOnException().
+void io_context_set_fail_open(uint64_t id);
+
+// The two calls below use C++ JSG, as a reviewed exception; see "C++ JSG" in ffi.c++. Each takes
+// handles in the scope of the caller's lock, and returns false if JavaScript threw, leaving the
+// exception pending, which Rust turns into a jsg::Error for which is_pending() is true.
+
+// IoContext::addWaitUntil(IoContext::awaitJs(promise)), for ctx.waitUntil().
+bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise);
+
+// IoContext::abort() with `reason` as jsg::Lock::exceptionToKj() encodes it, or, if `reason` is
+// empty, with the error ctx.abort() aborts with when called without one. Does not terminate
+// execution.
+bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason);
 
 }  // namespace workerd::io_context
