@@ -225,3 +225,96 @@ wpt_test(
     config = "webidl-test.ts",
     wpt_directory = "@wpt//:webidl@module",
 )
+
+wpt_test(
+    name = "survey/console",
+    config = "survey/console-test.ts",
+    wpt_directory = "@wpt//:console@module",
+)
+
+wpt_test(
+    name = "survey/cookiestore",
+    config = "survey/cookiestore-test.ts",
+    wpt_directory = "@wpt//:cookiestore@module",
+)
+
+wpt_test(
+    name = "survey/FileAPI",
+    size = "large",
+    start_server = True,
+    config = "survey/FileAPI-test.ts",
+    wpt_directory = "@wpt//:FileAPI@module",
+)
+
+wpt_test(
+    name = "survey/webmessaging",
+    config = "survey/webmessaging-test.ts",
+    wpt_directory = "@wpt//:webmessaging@module",
+)
+
+wpt_test(
+    name = "survey/scheduler",
+    config = "survey/scheduler-test.ts",
+    wpt_directory = "@wpt//:scheduler@module",
+)
+
+wpt_test(
+    name = "survey/hr-time",
+    config = "survey/hr-time-test.ts",
+    wpt_directory = "@wpt//:hr-time@module",
+)
+
+wpt_test(
+    name = "survey/mimesniff",
+    config = "survey/mimesniff-test.ts",
+    wpt_directory = "@wpt//:mimesniff@module",
+)
+
+wpt_test(
+    name = "survey/user-timing",
+    config = "survey/user-timing-test.ts",
+    wpt_directory = "@wpt//:user-timing@module",
+)
+
+wpt_test(
+    name = "survey/web-locks",
+    config = "survey/web-locks-test.ts",
+    wpt_directory = "@wpt//:web-locks@module",
+)
+
+wpt_test(
+    name = "survey/dom-idl",
+    config = "survey/dom-idl-test.ts",
+    wpt_directory = "@wpt//:dom@module",
+)
+
+wpt_test(
+    name = "survey/infrastructure",
+    config = "survey/infrastructure-test.ts",
+    wpt_directory = "@wpt//:infrastructure@module",
+)
+
+wpt_test(
+    name = "survey/storage",
+    config = "survey/storage-test.ts",
+    wpt_directory = "@wpt//:storage@module",
+)
+
+wpt_test(
+    name = "survey/js",
+    config = "survey/js-test.ts",
+    wpt_directory = "@wpt//:js@module",
+)
+
+wpt_test(
+    name = "survey/workers",
+    config = "survey/workers-test.ts",
+    wpt_directory = "@wpt//:workers@module",
+)
+
+wpt_test(
+    name = "survey/cache-storage",
+    config = "survey/cache-storage-test.ts",
+    wpt_directory = "@wpt//:service-workers/cache-storage@module",
+)
+
