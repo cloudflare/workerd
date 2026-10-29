@@ -120,8 +120,13 @@ native-backed tee, a native-backed stream whose source is extracted
 bridge's `detach()`: `new Request(request)`, socket upgrades), and a
 detached queued stream other than the source's own stream (a tee
 branch, or a copy detached again). The legacy C++ streams leave the
-same streams locked, disturbed and closed. The Node.js interop
-closed-promise settles then, and the interop error hook, which acts only
+same streams locked, disturbed and closed. The exception to the lock is
+a native-to-native `pipeTo()`: once the pipe settles, its source is
+unlocked (still closed), and its destination, whose native sink the pipe
+also extracted, is closed or errored with the pipe's error and unlocked
+(`finishNativePipe` in readable.ts), as a pipe releases its endpoints.
+The Node.js interop closed-promise settles then, and the interop error
+hook, which acts only
 on a readable stream, cannot reach the moved source. A queued source's
 own stream, once detached, is the exception: it stays the controller's
 stream, closing and erroring with the source, and the hook on it errors

@@ -71,8 +71,9 @@ impl FastApiArg for f64 {
 // Integers come from V8 as doubles, so that their range checks and truncation are the slow
 // path's. V8's own integer argument types convert differently: by default with `ToInt32`'s
 // wrapping, and with `kEnforceRangeBit` they truncate before the range check, so that
-// `2 ** 31 - 0.5` is an `int32_t` and `-0.5` a `uint32_t`, where C++ JSG and `from_number`
-// check the range first and throw a `TypeError` for both.
+// `2 ** 31 - 0.5` is an `int32_t` and `-0.5` a `uint32_t`. `from_number` converts both like
+// that only with the `JSG_INTEGER_ENFORCE_RANGE` autogate (see `wrappable.rs`); without it, it
+// checks the range first and throws a `TypeError` for both. C++ JSG does the same in each state.
 
 macro_rules! impl_fast_api_integer_arg {
     ($($type:ty),*) => {

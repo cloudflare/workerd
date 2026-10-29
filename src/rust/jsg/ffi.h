@@ -495,6 +495,10 @@ bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
 
+// Autogates
+// workerd::util::Autogate::isEnabled(AutogateKey::JSG_INTEGER_ENFORCE_RANGE).
+bool integer_enforce_range_autogate_enabled();
+
 // Serialization
 // In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
 // and the other way round; see ser.c++.

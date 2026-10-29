@@ -104,8 +104,12 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `v8::Local<v8::Uint8Array>`.
   `Option<T>` maps to `T | undefined`; like `jsg::Optional<T>`, `null` converts as `T`.
   `Nullable<T>` maps to `T | null` and, like `kj::Maybe<T>`, coerces `undefined` to `null` on
-  input, but a method argument is still required. Use `Option<Nullable<T>>` for an optional
-  `T | null | undefined` that keeps `undefined` distinct from `null`.
+  input, but a method argument is still required. Prefer `NullOrUndefined<T>` to
+  `Option<Nullable<T>>` for an optional `T | null | undefined`, with distinct `Some(T)`,
+  `Null`, and `Undefined` states. Omitted method arguments become `Undefined`. Use
+  `Lenient<T>` only when shallow type mismatches should also be accepted; converting it to
+  `NullOrUndefined<T>` maps `Unconvertable` to `Undefined`, while nested conversion errors
+  still propagate.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
@@ -118,10 +122,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   which GC never visits and which keeps its handle inline. A handle that a resource owns is a
   `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
   keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
-- **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
-  structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
-  that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly
-  traced — missing traces cause use-after-free when the child is collected prematurely.
+- **GC tracing**: `jsg::Rc<T>` fields on `#[jsg_resource]` structs are automatically traced
+  during GC, including through `Option`, `Nullable`, and `NullOrUndefined` wrappers when
+  `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
+  traced (no-op). Verify that every resource reference is properly traced — missing traces
+  cause use-after-free when the child is collected prematurely.
 
 ### Rust JSG Safety Rules
 

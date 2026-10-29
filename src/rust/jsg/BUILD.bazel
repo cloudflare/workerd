@@ -78,6 +78,7 @@ wd_cc_library(
         ":v8.rs@cxx",
         "//src/rust/cxx/kj-rs",
         "//src/workerd/jsg:jsg-core",
+        "//src/workerd/util:autogate",
         "@workerd-v8//:v8",
     ],
 )
