@@ -222,6 +222,50 @@ fn migrations_follow_wranglers_order_and_checks() {
 }
 
 #[test]
+fn exports() {
+    let classes = |exports: &str| {
+        let w: Wrangler = serde_json::from_str(&format!(
+            r#"{{ "main": "index.js", "compatibility_date": "2026-01-01",
+                  "durable_objects": {{ "bindings": [{{ "name": "B", "class_name": "Bound" }}] }},
+                  "exports": {exports} }}"#
+        ))
+        .unwrap();
+        do_classes(&w)
+    };
+    let ok = r#"{ "Counter": { "type": "durable-object", "storage": "sqlite" },
+                  "Kv": { "type": "durable-object", "storage": "legacy-kv" },
+                  "Gone": { "type": "durable-object", "state": "deleted" },
+                  "Old": { "type": "durable-object", "state": "renamed",
+                           "renamed_to": "Counter" } }"#;
+    assert_eq!(
+        classes(ok).unwrap(),
+        [
+            ("Counter".to_owned(), "Old".to_owned(), true),
+            ("Kv".to_owned(), "Kv".to_owned(), false),
+            ("Bound".to_owned(), "Bound".to_owned(), false)
+        ]
+    );
+    let error = classes(r#"{ "A": { "type": "durable-object" } }"#).unwrap_err();
+    assert!(error.contains("A has the wrong fields"), "{error}");
+    let error = classes(
+        r#"{ "A": { "type": "durable-object", "state": "deleted", "storage": "sqlite" } }"#,
+    )
+    .unwrap_err();
+    assert!(error.contains("A has the wrong fields"), "{error}");
+    let error =
+        classes(r#"{ "A": { "type": "durable-object", "state": "renamed", "renamed_to": "B" } }"#)
+            .unwrap_err();
+    assert!(error.contains("which is not live"), "{error}");
+    let both: Result<Wrangler, _> = serde_json::from_str(
+        r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
+             "exports": { "A": { "type": "durable-object", "storage": "sqlite" } },
+             "migrations": [{ "tag": "v1", "new_sqlite_classes": ["A"] }] }"#,
+    );
+    let error = do_classes(&both.unwrap()).unwrap_err();
+    assert!(error.contains("cannot both"), "{error}");
+}
+
+#[test]
 fn sample_parses() {
     let src = include_str!("../../../../samples/wrangler/wrangler.jsonc");
     let w: Wrangler = serde_json::from_str(&strip_jsonc(src)).unwrap();

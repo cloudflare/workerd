@@ -9,8 +9,8 @@
 //! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`,
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
-//! `compatibility_flags`, `vars`, `durable_objects`, `migrations`, `no_bundle` and `$schema`. Any
-//! other field is an error rather than silently ignored.
+//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `no_bundle` and
+//! `$schema`. Any other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
@@ -45,6 +45,8 @@ struct Wrangler {
     vars: BTreeMap<String, Value>,
     durable_objects: Option<DurableObjects>,
     #[serde(default)]
+    exports: BTreeMap<String, Export>,
+    #[serde(default)]
     migrations: Vec<Migration>,
     #[serde(default)]
     no_bundle: bool,
@@ -61,6 +63,40 @@ struct DurableObjects {
 struct DurableObjectBinding {
     name: String,
     class_name: String,
+}
+
+/// An `exports` entry: a Durable Object class and its lifecycle state.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(rename = "type")]
+    _type: ExportType,
+    #[serde(default)]
+    state: State,
+    storage: Option<Storage>,
+    renamed_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ExportType {
+    DurableObject,
+}
+
+#[derive(Deserialize, Default, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum State {
+    #[default]
+    Created,
+    Deleted,
+    Renamed,
+}
+
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum Storage {
+    Sqlite,
+    LegacyKv,
 }
 
 #[derive(Deserialize)]
@@ -424,10 +460,11 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The Durable Object classes, each with its storage key and whether it is SQLite-backed, from
-/// `migrations` applied in order, plus any bound class the migrations never mention (not
-/// SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is never
-/// reused: a class created under a name an earlier class was keyed by (since deleted or renamed)
-/// gets `<name>~<n>` and starts empty, as in production.
+/// the live `exports` entries or `migrations` applied in order, plus any bound class neither
+/// mentions (not SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is
+/// never reused: a class created under a name an earlier class was keyed by (since deleted or
+/// renamed) gets `<name>~<n>` and starts empty, as in production. `exports` holds no history, so a
+/// class keeps its old key only while its `renamed` entry remains.
 fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
     let mut classes: Vec<(String, String, bool)> = Vec::new();
     let mut used: Vec<String> = Vec::new();
@@ -439,6 +476,31 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
         used.push(k.clone());
         k
     };
+    if !w.exports.is_empty() && !w.migrations.is_empty() {
+        return Err("exports and migrations cannot both declare Durable Objects".to_owned());
+    }
+    let live = |c: &str| w.exports.get(c).is_some_and(|e| e.state == State::Created);
+    for (c, e) in &w.exports {
+        match (&e.state, &e.storage, &e.renamed_to) {
+            (State::Created, Some(s), None) => {
+                // A renamed class keeps the old class's key, and so its objects.
+                let from = w
+                    .exports
+                    .iter()
+                    .find(|(_, e)| e.renamed_to.as_ref() == Some(c));
+                let k = key(from.map_or(c, |(f, _)| f));
+                classes.push((c.clone(), k, *s == Storage::Sqlite));
+            }
+            (State::Deleted, None, None) => {}
+            (State::Renamed, None, Some(to)) if live(to) => {}
+            (State::Renamed, None, Some(to)) => {
+                return Err(format!(
+                    "exports: {c} is renamed to {to}, which is not live"
+                ));
+            }
+            _ => return Err(format!("exports: {c} has the wrong fields for its state")),
+        }
+    }
     for m in &w.migrations {
         // In wrangler's order: deletes, then renames, then new classes.
         let find = |classes: &[(String, String, bool)], c: &str, what: &str| {
