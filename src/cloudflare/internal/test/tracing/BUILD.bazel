@@ -1,39 +1,62 @@
+load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("//:build/wd_test.bzl", "wd_test")
+
+# Bundle independent real API copies to exercise their global/version handshake with the runtime.
+# npm aliases pin both versions side by side.
+[
+    esbuild(
+        name = "opentelemetry-api-" + version,
+        entry_point = "opentelemetry-api-" + version + "-entry.js",
+        format = "esm",
+        output = "opentelemetry-api-" + version + ".0.js",
+        sourcemap = False,
+        deps = ["//:node_modules/@opentelemetry/api-" + version],
+    )
+    for version in [
+        "1.9",
+        "1.10",
+    ]
+]
+
+OTEL_API_BUNDLES = [
+    ":opentelemetry-api-1.9",
+    ":opentelemetry-api-1.10",
+]
 
 wd_test(
     src = "opentelemetry-roots-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]),
+    data = glob(["*.js"]) + OTEL_API_BUNDLES,
 )
 
 wd_test(
     src = "opentelemetry-http-policy-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
     src = "opentelemetry-http-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
     src = "opentelemetry-metadata-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
     src = "opentelemetry-sampling-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
     src = "opentelemetry-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(

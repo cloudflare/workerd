@@ -20,6 +20,12 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.1)
+      '@opentelemetry/api-1.10':
+        specifier: npm:@opentelemetry/api@1.10.0
+        version: '@opentelemetry/api@1.10.0'
+      '@opentelemetry/api-1.9':
+        specifier: npm:@opentelemetry/api@1.9.0
+        version: '@opentelemetry/api@1.9.0'
       '@types/estree':
         specifier: ^1.0.9
         version: 1.0.9
@@ -61,10 +67,10 @@ importers:
     dependencies:
       '@opennextjs/cloudflare':
         specifier: 1.20.2
-        version: 1.20.2(next@16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(wrangler@4.120.1)
+        version: 1.20.2(next@16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(wrangler@4.120.1)
       next:
         specifier: 16.3.8
-        version: 16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -1344,6 +1350,14 @@ packages:
     peerDependenciesMeta:
       rclone.js:
         optional: true
+
+  '@opentelemetry/api@1.10.0':
+    resolution: {integrity: sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==}
+    engines: {node: '>=8.0.0'}
+
+  '@opentelemetry/api@1.9.0':
+    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
+    engines: {node: '>=8.0.0'}
 
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
@@ -3883,7 +3897,7 @@ snapshots:
     dependencies:
       gzip-size: 6.0.0
 
-  '@opennextjs/aws@4.1.0(next@16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))':
+  '@opennextjs/aws@4.1.0(next@16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))':
     dependencies:
       '@ast-grep/napi': 0.40.5
       '@aws-sdk/client-cloudfront': 3.984.0
@@ -3899,31 +3913,35 @@ snapshots:
       cookie: 1.1.1
       esbuild: 0.25.4
       express: 5.3.0
-      next: 16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      next: 16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       path-to-regexp: 6.3.0
       urlpattern-polyfill: 10.1.0
       yaml: 2.9.1
     transitivePeerDependencies:
       - supports-color
 
-  '@opennextjs/cloudflare@1.20.2(next@16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(wrangler@4.120.1)':
+  '@opennextjs/cloudflare@1.20.2(next@16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(wrangler@4.120.1)':
     dependencies:
       '@ast-grep/napi': 0.40.5
       '@dotenvx/dotenvx': 1.31.0
-      '@opennextjs/aws': 4.1.0(next@16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
+      '@opennextjs/aws': 4.1.0(next@16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
       ci-info: 4.4.0
       cloudflare: 4.5.0
       comment-json: 4.6.2
       enquirer: 2.4.1
       esbuild: 0.27.7
       glob: 12.0.0
-      next: 16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      next: 16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       ts-tqdm: 0.8.6
       wrangler: 4.120.1
       yargs: 18.2.0
     transitivePeerDependencies:
       - encoding
       - supports-color
+
+  '@opentelemetry/api@1.10.0': {}
+
+  '@opentelemetry/api@1.9.0': {}
 
   '@poppinss/colors@4.1.6':
     dependencies:
@@ -4936,7 +4954,7 @@ snapshots:
     dependencies:
       content-type: 2.1.0
 
-  next@16.3.8(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  next@16.3.8(@opentelemetry/api@1.10.0)(@types/node@25.9.5)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@next/env': 16.3.8
       '@swc/helpers': 0.5.23
@@ -4955,6 +4973,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.3.8
       '@next/swc-win32-arm64-msvc': 16.3.8
       '@next/swc-win32-x64-msvc': 16.3.8
+      '@opentelemetry/api': 1.10.0
       sharp: 0.35.5(@types/node@25.9.5)
     transitivePeerDependencies:
       - '@babel/core'
