@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "7c291f282fd54549d51644602320eca9c686cea67d071b55fb7e6b84270a7b27",
+  "checksum": "4f7c905fb454b3d367e5ae35edc0a5d3b38300d86a842ca721465a1cb99a6cc0",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -3017,6 +3017,10 @@
           {
             "id": "rand 0.9.5",
             "target": "rand"
+          },
+          {
+            "id": "ring 0.17.14",
+            "target": "ring"
           },
           {
             "id": "ruff_python_ast 0.0.0",
@@ -16018,6 +16022,7 @@
     "proc-macro2 1.0.107",
     "quote 1.0.47",
     "rand 0.9.5",
+    "ring 0.17.14",
     "ruff_python_ast 0.0.0",
     "ruff_python_parser 0.0.0",
     "rust_icu_sys 5.8.0",

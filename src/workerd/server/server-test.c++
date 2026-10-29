@@ -1075,6 +1075,35 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
   conn.httpGet200("/", "wrapped: object");
 }
 
+kj::String clusterConfig(kj::StringPtr key) {
+  return kj::str(R"((
+    services = [(
+      name = "hello",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        modules = [(name = "main.js", esModule = "export default {}")]
+      )
+    )],
+    cluster = (bucket = "s3://bucket", address = "127.0.0.1:0", key = ")",
+      key, R"("),
+  ))");
+}
+
+KJ_TEST("Server: cluster mode requires --experimental") {
+  TestServer test(clusterConfig("0123456789abcdef0123456789abcdef"));
+  test.expectErrors(R"(
+    Cluster mode is experimental; it requires --experimental.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: a short cluster key is refused") {
+  TestServer test(clusterConfig("0123456789abcdef"));
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    cluster.key must be at least 32 bytes.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2024-10-01",
