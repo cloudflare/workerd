@@ -276,9 +276,9 @@ fn a_failed_adoption_still_schedules_and_retries() {
 /// Deterministic simulation: the real `Index` on several nodes over a store
 /// whose every call the simulation completes, fails or leaves hanging, in an
 /// order a seed picks, among crashes, takeovers, arming, firing and adoption
-/// rounds. The server's part (ownership, the local scheduler, commits and
-/// their arm gate, opening an object) is modelled here. Once the faults stop,
-/// every alarm an object's database holds must run.
+/// rounds. The server's part (ownership, the local scheduler, commits,
+/// opening an object) is modelled here. Once the faults stop, every alarm
+/// an object's database holds must run.
 mod sim {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -548,8 +548,8 @@ mod sim {
         }
 
         /// Opening `o` on `n`, its owner now: the alarm its database holds
-        /// is scheduled and indexed here. The index write rides on the next
-        /// commit, if any, so its failure goes unnoticed.
+        /// is scheduled and indexed here, the index write detached, so
+        /// nothing notices its failure but `tidy`.
         fn open(world: &mut World, store: &Store, index: &Rc<Index>, n: usize, o: &str) {
             world.owner.insert(o.to_owned(), n);
             let Some(at) = store.peek(&db_key(o)).map(|b| parse_at(&b)) else {
@@ -559,7 +559,6 @@ mod sim {
             world.log.push(format!("open {o} on n{n}"));
             let index = Rc::clone(index);
             let o = o.to_owned();
-            // Detached from the caller: the arm is the next commit's.
             let task = async move {
                 let _ = index.arm(NS, &o, None, Some(at)).await;
             };
@@ -642,7 +641,7 @@ mod sim {
         }
 
         /// `setAlarm(at)`, or `deleteAlarm()` for `None`, on `o`'s owner as
-        /// `ActorSqlite` and the arm gate run it.
+        /// `ActorSqlite` runs it.
         fn set(&mut self, n: usize, o: &str, at: Option<u64>) {
             let index = Rc::clone(self.indexes[n].as_ref().unwrap());
             {
@@ -694,7 +693,7 @@ mod sim {
             });
         }
 
-        /// The alarms loop: tidy, then adopt dead nodes' alarms.
+        /// The alarms loop: adopt dead nodes' alarms, then tidy.
         fn round(&mut self, n: usize) {
             let index = Rc::clone(self.indexes[n].as_ref().unwrap());
             let (live, dead) = {
