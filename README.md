@@ -160,6 +160,13 @@ To serve your config, do:
 
 `workerd serve my-config.capnp`
 
+To check a config without serving it, do:
+
+`workerd check my-config.capnp`
+
+This builds every service and compiles every Worker, but binds no socket. It reports every
+error rather than only the first, and exits with status 1 if there was any.
+
 For more details about command-line usage, use `workerd --help`.
 
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:

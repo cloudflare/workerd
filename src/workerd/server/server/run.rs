@@ -4,6 +4,8 @@
 
 //! `workerd serve`, `workerd test` and `workerd bench`: bind the sockets, build the service
 //! graph, listen, and either wait for the drain signal or run the tests or benchmarks.
+//!
+//! `workerd check` builds the graph only.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -177,17 +179,7 @@ async fn start(
             continue;
         };
         let name = text(sock.get_name())?;
-        let mut errors = Vec::new();
-        let designator = Designator::from_reader(
-            sock.get_service().map_err(capnp_error)?,
-            format!("Socket \"{name}\""),
-            &mut errors,
-        )
-        .map_err(capnp_error)?;
-        for error in errors {
-            server.report().error(error);
-        }
-        let channel = server.lookup(&designator);
+        let channel = socket_channel(&server, sock, &name)?;
         ports.push((name, listen::bound_port(&bound)?));
         if let Some(listener) =
             listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
@@ -220,6 +212,25 @@ async fn start(
         listeners,
         drain,
     }))
+}
+
+/// The channel socket `name` serves, after reporting any error in its service designator.
+fn socket_channel(
+    server: &Server,
+    sock: socket::Reader<'_>,
+    name: &str,
+) -> Result<Rc<dyn Channel>> {
+    let mut errors = Vec::new();
+    let designator = Designator::from_reader(
+        sock.get_service().map_err(capnp_error)?,
+        format!("Socket \"{name}\""),
+        &mut errors,
+    )
+    .map_err(capnp_error)?;
+    for error in errors {
+        server.report().error(error);
+    }
+    Ok(server.lookup(&designator))
 }
 
 /// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for
@@ -436,6 +447,47 @@ pub async fn run(
         namespace.begin_container_cleanup();
     }
     Ok(ffi::factory_shutdown_containers(server.factory().raw()).await?)
+}
+
+/// What `workerd check` found in a config.
+pub struct CheckSummary {
+    pub services: usize,
+    pub sockets: usize,
+}
+
+/// `workerd check`: builds the service graph, compiling every Worker, and resolves every
+/// socket's service, without binding a socket or joining a cluster. Config errors go to
+/// `report`.
+///
+/// A socket without an address is a warning rather than an error: `workerd serve` accepts its
+/// address on the command line.
+pub async fn check(
+    factory: Rc<Factory>,
+    overrides: &Overrides,
+    report: Reporter,
+) -> Result<CheckSummary> {
+    let message = factory.config()?;
+    let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
+    let sockets = config.get_sockets().map_err(capnp_error)?;
+    for sock in sockets {
+        if !sock.has_address() {
+            let name = text(sock.get_name())?;
+            report.warning(format!(
+                "Socket \"{name}\" has no address in the config, so `workerd serve` needs one \
+                 on the command line with `--socket-addr` or `--socket-fd`."
+            ));
+        }
+    }
+    let server =
+        Server::start(Rc::clone(&factory), overrides, report, HashMap::new(), None).await?;
+    report_unmatched_overrides(&server, overrides, config, false)?;
+    for sock in sockets {
+        socket_channel(&server, sock, &text(sock.get_name())?)?;
+    }
+    Ok(CheckSummary {
+        services: config.get_services().map_err(capnp_error)?.len() as usize,
+        sockets: sockets.len() as usize,
+    })
 }
 
 /// The entrypoints `workerd test` or `workerd bench` runs a handler of: the channel of each,

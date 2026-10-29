@@ -1,0 +1,7 @@
+{
+  "name": "check-wrangler",
+  "main": "index.js",
+  "compatibility_date": "2025-01-01",
+  // Scanned as plain modules, so the test needs no esbuild.
+  "no_bundle": true,
+}

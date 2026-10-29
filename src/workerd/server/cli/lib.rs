@@ -129,6 +129,17 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 watching(process),
             )
         }
+        args::Command::Check {
+            config,
+            const_name,
+            serve_or_test,
+        } => run_check(
+            verbose,
+            config,
+            const_name.const_name,
+            &serve_or_test,
+            executable,
+        ),
         args::Command::Compile {
             config,
             const_name,
@@ -191,6 +202,34 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             output_directory,
         } => run_baseline_snapshot(verbose, &python_version, output_directory, executable),
     }
+}
+
+/// `workerd check`: every error in the config, without serving it. Options that only make sense
+/// for a running server are usage errors rather than silently ignored.
+fn run_check(
+    verbose: bool,
+    config: args::ConfigFileArgs,
+    const_name: Option<String>,
+    serve_or_test: &args::ServeOrTestArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    check_serve_or_test::<T>(serve_or_test);
+    if serve_or_test.watch {
+        usage_error::<T>("--watch: `check` does not serve, so has nothing to reload.");
+    }
+    if serve_or_test.inspector_addr.is_some() {
+        usage_error::<T>("--inspector-addr: `check` does not serve, so starts no inspector.");
+    }
+    let process = Process::new(executable, None, Vec::new());
+    let config = load_config::<T>(config, const_name, &process);
+    entry::check(
+        verbose,
+        config.into_words(),
+        serve_or_test.into(),
+        run_options(serve_or_test).overrides,
+    )
 }
 
 /// `workerd compile`: the config, encoded, either on its own (`--config-only`) or appended to a
