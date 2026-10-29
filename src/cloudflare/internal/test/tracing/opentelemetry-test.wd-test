@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "opentelemetry-test", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-test.js")],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "streams_enable_constructors"],
+      streamingTails = ["tail"],
+      bindings = [(name = "fetchTarget", service = "mock")],
+    )),
+    ( name = "without-node-compat", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-no-node-test.js")],
+      compatibilityFlags = ["opentelemetry_api"],
+      streamingTails = ["tail"],
+    )),
+    ( name = "mock", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-hierarchy-mock.js")],
+    )),
+    ( name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-instrumentation-test.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+    ( name = "unregistered", worker = (
+      modules = [(name = "worker", esModule = "export const noRegistration = { test() { if (globalThis[Symbol.for('opentelemetry.js.api.1')] !== undefined) throw new Error('unexpected registration'); } };" )],
+    )),
+  ],
+);

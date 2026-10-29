@@ -1,0 +1,311 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+import assert from 'node:assert';
+import { tracing } from 'cloudflare:workers';
+
+const key = Symbol.for('opentelemetry.js.api.1');
+const spanKey = Symbol.for('OpenTelemetry Context Key SPAN');
+const api = globalThis[key];
+// Registration must precede user module evaluation.
+assert.strictEqual(api.version, '1.10.0');
+assert.strictEqual(api, globalThis[key]);
+const root = api.context.active();
+const tracer = api.trace.getTracer('test', '1', { schemaUrl: 'schema' });
+
+export const registrationAndSurface = {
+  test() {
+    assert.strictEqual(
+      tracer,
+      api.trace.getTracer('test', '1', { schemaUrl: 'schema' })
+    );
+    assert.notStrictEqual(tracer, api.trace.getTracer('test', '2'));
+    assert.notStrictEqual(
+      tracer,
+      api.trace.getTracer('test', '1', { schemaUrl: 'other' })
+    );
+    assert.strictEqual(api.context.active(), api.context.active());
+    const invocation = api.context.active().getValue(spanKey);
+    assert.deepStrictEqual(invocation.spanContext(), {
+      ...tracing.getActiveSpan().spanContext(),
+      traceFlags: 1,
+    });
+    const span = tracer.startSpan('otel-surface', {
+      attributes: { a: [true, false] },
+    });
+    assert.strictEqual(span.setAttribute('x', {}), span);
+    assert.strictEqual(span.setAttributes(null), span);
+    assert.strictEqual(span.setStatus(null), span);
+    assert.strictEqual(
+      span
+        .addEvent('event')
+        .addLink({})
+        .addLinks([])
+        .updateName('otel-surface'),
+      span
+    );
+    assert.strictEqual(span.isRecording(), true);
+    span.recordException(new Error('recorded'));
+    span.recordException({ code: 'E_CODE', name: 'Ignored', message: 'coded' });
+    span.recordException({ code: 503 });
+    span.recordException(null);
+    span.recordException({
+      get message() {
+        throw new Error('bad getter');
+      },
+    });
+    const identity = span.spanContext();
+    span.end();
+    span.end();
+    assert.strictEqual(span.isRecording(), false);
+    assert.deepStrictEqual(span.spanContext(), identity);
+    // The API owns diag registration independently; the provider must remain extensible.
+    api.diag = { error() {} };
+    assert.strictEqual(globalThis[key].diag, api.diag);
+    delete api.diag;
+  },
+};
+
+export const asyncContext = {
+  async test(_ctrl, env) {
+    const valueKey = Symbol('opaque');
+    const ctx = api.context.active().setValue(valueKey, 'value');
+    await api.context.with(
+      ctx,
+      async function (a) {
+        assert.strictEqual(this.tag, 'this');
+        assert.strictEqual(a, 42);
+        assert.strictEqual(api.context.active(), ctx);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        await new Promise((resolve) => queueMicrotask(resolve));
+        assert.strictEqual(api.context.active(), ctx);
+        const target = new EventTarget();
+        let fired = false;
+        target.addEventListener('test', () => {
+          fired = true;
+          assert.strictEqual(api.context.active(), ctx);
+        });
+        await Promise.resolve();
+        target.dispatchEvent(new Event('test'));
+        assert.ok(fired);
+        const bound = api.context.bind(ctx, function (x) {
+          return [this.tag, x, api.context.active()];
+        });
+        assert.deepStrictEqual(bound.call({ tag: 'bound' }, 7), [
+          'bound',
+          7,
+          ctx,
+        ]);
+        await tracer.startActiveSpan('otel-parent', async (span) => {
+          assert.strictEqual(api.context.active().getValue(spanKey), span);
+          await Promise.resolve();
+          assert.strictEqual(api.context.active().getValue(spanKey), span);
+          tracer.startSpan('otel-child').end();
+          await env.fetchTarget.fetch('http://mock/');
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue('value');
+              controller.close();
+            },
+          });
+          for await (const value of stream) {
+            assert.strictEqual(value, 'value');
+            assert.strictEqual(api.context.active().getValue(spanKey), span);
+          }
+          span.end();
+        });
+        assert.strictEqual(api.context.active(), ctx);
+      },
+      { tag: 'this' },
+      42
+    );
+    assert.strictEqual(api.context.active().getValue(valueKey), undefined);
+    assert.throws(
+      () =>
+        api.context.with(root, () => {
+          throw new Error('callback');
+        }),
+      /callback/
+    );
+  },
+};
+
+export const externalParentsAndRoots = {
+  async test(_ctrl, env) {
+    const getter = { get: (carrier, key) => carrier[key] };
+    const extracted = api.propagation.extract(
+      root,
+      {
+        traceparent: '00-11111111111111111111111111111111-2222222222222222-01',
+        tracestate: 'vendor=value',
+        baggage: 'tenant=hello%20world;property',
+      },
+      getter
+    );
+    assert.strictEqual(extracted.getValue(spanKey).isRecording(), false);
+    assert.strictEqual(
+      extracted.getValue(spanKey).spanContext().isRemote,
+      true
+    );
+    await api.context.with(extracted, async () => {
+      assert.strictEqual(api.context.active(), extracted);
+      await tracer.startActiveSpan(
+        'otel-remote-child',
+        {},
+        extracted,
+        async (span) => {
+          assert.strictEqual(
+            span.spanContext().traceId,
+            '11111111111111111111111111111111'
+          );
+          assert.strictEqual(
+            span.spanContext().traceState.serialize(),
+            'vendor=value'
+          );
+          await env.fetchTarget.fetch('http://mock/');
+          span.end();
+        }
+      );
+    });
+    const carrier = {};
+    api.propagation.inject(extracted, carrier, {
+      set: (c, k, v) => {
+        c[k] = v;
+      },
+    });
+    assert.strictEqual(
+      carrier.traceparent,
+      '00-11111111111111111111111111111111-2222222222222222-01'
+    );
+    assert.strictEqual(carrier.baggage, 'tenant=hello%20world;property');
+    const detached = api.context.active().deleteValue(spanKey);
+    api.context.with(detached, () => {
+      assert.strictEqual(api.context.active(), detached);
+      assert.strictEqual(api.context.active().getValue(spanKey), undefined);
+      tracer.startSpan('otel-deleted-root').end();
+    });
+    const span = tracer.startSpan('otel-new-root', { root: true }, extracted);
+    assert.notStrictEqual(
+      span.spanContext().traceId,
+      '11111111111111111111111111111111'
+    );
+    assert.notStrictEqual(
+      span.spanContext().traceId,
+      tracing.getActiveSpan().spanContext().traceId
+    );
+    span.end();
+    tracing.startActiveSpan('otel-native-parent', (nativeSpan) => {
+      const ctx = root.setValue(spanKey, nativeSpan);
+      api.context.with(ctx, () => {
+        assert.strictEqual(api.context.active(), ctx);
+        tracer.startSpan('otel-native-child').end();
+      });
+      nativeSpan.end();
+    });
+    const unsampled = api.propagation.extract(
+      root,
+      {
+        traceparent: '00-11111111111111111111111111111111-2222222222222222-00',
+      },
+      getter
+    );
+    tracer.startActiveSpan('otel-unsampled', {}, unsampled, (span) => {
+      assert.strictEqual(span.isRecording(), false);
+      assert.strictEqual(span.spanContext().traceFlags, 0);
+      assert.strictEqual(
+        span.spanContext().traceId,
+        '11111111111111111111111111111111'
+      );
+      assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
+      assert.strictEqual(api.context.active().getValue(spanKey), span);
+      assert.strictEqual(tracing.getActiveSpan(), undefined);
+      const child = tracer.startSpan('otel-unsampled-child');
+      assert.strictEqual(child.isRecording(), false);
+      assert.strictEqual(
+        child.spanContext().traceId,
+        span.spanContext().traceId
+      );
+      child.end();
+      span.end();
+    });
+  },
+};
+
+export const propagationValidation = {
+  test() {
+    const getter = { get: (carrier, key) => carrier[key] };
+    const parent = '00-11111111111111111111111111111111-2222222222222222-03';
+    const ctx = api.propagation.extract(
+      root,
+      {
+        traceparent: [parent, 'ignored'],
+        tracestate:
+          'vendor=value,3tenant@vendor=other,3invalid=ignored,invalid@1vendor=ignored',
+      },
+      getter
+    );
+    const sc = ctx.getValue(spanKey).spanContext();
+    assert.strictEqual(sc.traceFlags, 3);
+    assert.strictEqual(
+      sc.traceState.serialize(),
+      'vendor=value,3tenant@vendor=other'
+    );
+    assert.strictEqual(
+      sc.traceState.set('vendor', 'new').serialize(),
+      'vendor=new,3tenant@vendor=other'
+    );
+    assert.strictEqual(
+      sc.traceState.serialize(),
+      'vendor=value,3tenant@vendor=other'
+    );
+    const carrier = {};
+    api.propagation.inject(ctx, carrier, {
+      set: (c, k, v) => {
+        c[k] = v;
+      },
+    });
+    assert.strictEqual(carrier.traceparent, parent);
+    for (const traceparent of [
+      parent + '-extra',
+      parent.replace('00-', 'ff-'),
+      parent.replace('111', 'AAA'),
+      parent.replace('2222222222222222', '0000000000000000'),
+    ]) {
+      assert.strictEqual(
+        api.propagation.extract(root, { traceparent }, getter),
+        root
+      );
+    }
+    const withBrokenBaggage = api.propagation.extract(
+      root,
+      {},
+      {
+        get(_carrier, key) {
+          if (key === 'traceparent') return parent;
+          throw new Error('broken carrier');
+        },
+      }
+    );
+    assert.strictEqual(
+      withBrokenBaggage.getValue(spanKey).spanContext().traceId,
+      sc.traceId
+    );
+    const entries = api.propagation.extract(
+      root,
+      {
+        baggage: `a=${'x'.repeat(4000)},b=${'y'.repeat(4000)},c=${'z'.repeat(4000)}`,
+      },
+      getter
+    );
+    const baggageCarrier = {};
+    api.propagation.inject(entries, baggageCarrier, {
+      set: (c, k, v) => {
+        c[k] = v;
+      },
+    });
+    assert.ok(baggageCarrier.baggage.length <= 8192);
+    assert.ok(baggageCarrier.baggage.includes('b='));
+    assert.ok(!baggageCarrier.baggage.includes('c='));
+  },
+};

@@ -1328,6 +1328,13 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   }
 }
 
+jsg::JsValue ServiceWorkerGlobalScope::getOpenTelemetryApi(jsg::Lock& js) {
+  KJ_IF_SOME(module, js.resolveInternalModule("cloudflare-internal:opentelemetry"_kj)) {
+    return module.has(js, "default"_kj) ? module.get(js, "default"_kj) : module;
+  }
+  return js.undefined();
+}
+
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   KJ_IF_SOME(p, bufferValue) {
     return p.getHandle(js);

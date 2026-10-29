@@ -906,6 +906,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // compat Buffer and process at the global scope in all modules as lazy instance
   // properties.
   jsg::JsValue getBuffer(jsg::Lock& js);
+  jsg::JsValue getOpenTelemetryApi(jsg::Lock& js);
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
@@ -973,6 +974,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
+    if (flags.getOpentelemetryApi()) {
+      static const char OTEL_API_KEY[] = "opentelemetry.js.api.1";
+      registry.template registerLazyInstanceProperty<OTEL_API_KEY,
+          decltype(&Self::getOpenTelemetryApi), &Self::getOpenTelemetryApi, false, true>();
+    }
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
 
 #ifdef WORKERD_FUZZILLI
