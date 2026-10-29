@@ -1,0 +1,61 @@
+src/workerd/jsg/wrappable-tag.h
+  s_144e1c38c83f9e::t_e5fe51ba386145 43-46,49,79-83
+  s_144e1c38c83f9e::t_1221bbf72cefd8 28
+src/rust/jsg/lib.rs
+  s_144e1c38c83f9e::t_233817940994e8 998-999
+src/rust/jsg-test/tests/resource_callback.rs
+  s_144e1c38c83f9e::t_f660fabc5b1617 970-1063
+src/rust/jsg/ffi.c++
+  s_144e1c38c83f9e::t_07cda2b9784bc0 865,884,939-943,969-970,972-974
+  s_144e1c38c83f9e::t_2da7d597a489aa 962-968
+  s_dc4353008f6e06::t_7bc36bf8552edc 867-869,886-888,937-938,948-951,971
+src/rust/jsg/v8.rs
+  s_144e1c38c83f9e::t_578c35e3cf9880 850-854,4747-4766
+  s_144e1c38c83f9e::t_021c85f65fb293 844-849,4728-4746
+src/rust/jsg-macros/wildcard.rs
+  s_144e1c38c83f9e::t_f590e1f6d7a2fd 205-206
+src/rust/jsg/ffi.h
+  s_144e1c38c83f9e::t_31e5eb89bd5819 419
+  s_144e1c38c83f9e::t_8e19640799ca2b 418
+src/rust/jsg-macros/lib.rs
+  s_144e1c38c83f9e::t_a1fd1180ceb2a0 280-281
+  s_144e1c38c83f9e::t_26e9cd9af2b0ea 313-315
+  s_144e1c38c83f9e::t_1c22aa531111dc 317-318
+  s_144e1c38c83f9e::t_d7520278b21683 300-309,312
+  s_144e1c38c83f9e::t_f4c966cda01e6b 283-285
+  s_144e1c38c83f9e::t_82b804d3893ca4 282,316,326,419,456,459-467,471-474,817-823,836-843
+src/rust/AGENTS.md
+  s_dc4353008f6e06::t_7d7d8190c9adf6 38
+src/rust/jsg-test/ffi.c++
+  s_dc4353008f6e06::t_79aeeeae62f4d7 241
+src/workerd/jsg/wrappable.h
+  s_dc4353008f6e06::t_c91f570cfe456c 397-403
+src/rust/jsg-test/tests/unwrap.rs
+  s_dc4353008f6e06::t_4f278a7e3ba3b3 121-122,143-193
+src/workerd/jsg/wrappable.c++
+  s_dc4353008f6e06::t_bcad4a17d5289f 403-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a156aae9969f3bd5b1ec95769a8e464ba37d0826",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_dc4353008f6e06": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4fc3b48b-445d-4e24-86ce-01cf32d6637e",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
