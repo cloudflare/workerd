@@ -1,0 +1,58 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "streaming", worker = (
+      modules = .testModules,
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "rpc"],
+      streamingTails = ["tail"],
+      bindings = [
+        (name = "expectedFlags", json = "1"),
+        (name = "callee", service = "callee"),
+        (name = "flagOffCallee", service = "flag-off-callee"),
+        (name = "rpc", service = (name = "callee", entrypoint = "RpcLogger")),
+        (name = "sockets", service = "callee"),
+      ],
+    )),
+    (name = "buffered", worker = (
+      modules = .testModules,
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+      tails = ["buffered-tail"],
+      bindings = [(name = "expectedFlags", json = "0")],
+    )),
+    (name = "flag-off", worker = (
+      modules = .testModules,
+      compatibilityFlags = ["nodejs_compat"],
+      streamingTails = ["tail"],
+      bindings = [(name = "expectedFlags", json = "0")],
+    )),
+    (name = "callee", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-sampling-callee.js")],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "rpc"],
+      streamingTails = ["tail"],
+      durableObjectNamespaces = [(className = "SocketLogger", uniqueKey = "sampling-socket")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "SOCKET", durableObjectNamespace = "SocketLogger")],
+    )),
+    (name = "flag-off-callee", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-sampling-callee.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      streamingTails = ["tail"],
+    )),
+    (name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-sampling-tail.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+    (name = "buffered-tail", worker = (
+      modules = [(name = "worker", esModule = "export default { tail() {} };" )],
+    )),
+  ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "opentelemetry-sampling-test.js"),
+  (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+];
