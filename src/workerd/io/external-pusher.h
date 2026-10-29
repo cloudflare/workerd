@@ -6,6 +6,7 @@
 #pragma once
 
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/util/completion-membrane.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
@@ -77,5 +78,22 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
   class AbortSignalImpl;
   class DelayedChannelTokenImpl;
 };
+
+// A MembraneCallRedirector for the CompletionMembrane and RevokerMembrane of a JS RPC session. It
+// redirects ExternalPusher.pushAbortSignal() so that the returned `trigger` crosses the membrane
+// unwrapped, and lets every other call through.
+//
+// Holding a trigger means only that the holder may abort the signal later, so it doesn't keep the
+// session in use, and it remains usable after the session ends. An abort that arrives after the
+// receiving request has ended still reaches the signal's pending abort reason.
+//
+// The returned `signal` is still wrapped: the caller sends it back inside a serialized value, and
+// ExternalPusherImpl::unwrapAbortSignal() recognizes it only once the membrane has unwrapped it
+// again on the way back in.
+kj::Maybe<capnp::Capability::Client> redirectPushAbortSignal(uint64_t interfaceId,
+    uint16_t methodId,
+    capnp::Capability::Client target,
+    capnp::MembranePolicy& policy,
+    MembraneCallDirection direction);
 
 }  // namespace workerd

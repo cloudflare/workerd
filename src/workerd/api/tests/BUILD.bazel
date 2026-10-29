@@ -621,8 +621,14 @@ wd_test(
 
 wd_test(
     src = "abortsignal-test.wd-test",
-    args = ["--experimental"],
-    data = ["abortsignal-test.js"],
+    args = [
+        "--experimental",
+        "abortsignal-test",
+    ],
+    data = [
+        "abortsignal-test.js",
+        "abortsignal-test-tail.js",
+    ],
 )
 
 wd_test(
