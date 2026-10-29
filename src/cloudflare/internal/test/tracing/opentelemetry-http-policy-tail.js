@@ -33,9 +33,13 @@ export const validate = {
         onset.event.spanId,
         onset.spanContext.spanId,
         remote,
-        '2222222222222222', // Explicit remote parent used by cross-trace policy cases.
         ...spans.map((s) => s.event.spanId),
       ]);
+      const path =
+        typeof onset.event.info?.url === 'string'
+          ? new URL(onset.event.info.url).pathname
+          : undefined;
+      if (path?.startsWith('/state-')) known.add('2222222222222222');
       for (const span of spans) {
         assert.ok(
           known.has(span.spanContext.spanId),
@@ -43,7 +47,6 @@ export const validate = {
         );
       }
       if (typeof onset.event.info?.url !== 'string') continue;
-      const path = new URL(onset.event.info.url).pathname;
       if (path === '/native-untraced') {
         const result = logs
           .filter((s) => s.startsWith('{'))

@@ -4232,6 +4232,55 @@ KJ_TEST("Server: Durable Objects websocket") {
   wsConn.recvWebSocket(expectedTwo);
 }
 
+KJ_TEST("Server: tail-less hibernatable sockets do not invent HTTP trace parents") {
+  TestServer test(R"((
+    services = [(name = "main", worker = (
+      compatibilityDate = "2026-07-01",
+      compatibilityFlags = ["opentelemetry_api"],
+      modules = [(name = "worker", esModule =
+        `export default { fetch(request, env) { return env.ns.getByName('socket').fetch(request); } };
+        `export class Actor {
+        `  constructor(ctx) { this.ctx = ctx; }
+        `  fetch() {
+        `    const [client, server] = Object.values(new WebSocketPair());
+        `    this.ctx.acceptWebSocket(server);
+        `    return new Response(null, {status: 101, webSocket: client});
+        `  }
+        `  async webSocketMessage(ws) {
+        `    const response = await fetch('http://origin/');
+        `    ws.send(await response.text());
+        `  }
+        `}
+      )],
+      bindings = [(name = "ns", durableObjectNamespace = "Actor")],
+      durableObjectNamespaces = [(className = "Actor", uniqueKey = "untraced-socket")],
+      durableObjectStorage = (inMemory = void),
+    ))],
+    sockets = [(name = "main", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.server.allowExperimental();
+  test.start();
+  auto socket = test.connect("test-addr");
+  socket.upgradeToWebSocket();
+  for (bool hibernate: {false, true}) {
+    if (hibernate) test.wait(10);
+    socket.send(kj::str("\x81\x01", "x"));
+    auto origin = test.receiveInternetSubrequest("origin");
+    // Exact raw headers also rule out an invented traceparent on the message's real fetch.
+    origin.recv(R"(
+      GET / HTTP/1.1
+      Host: origin
+
+    )"_blockquote);
+    origin.send(R"(
+      HTTP/1.1 200 OK
+      Content-Length: 2
+
+      OK)"_blockquote);
+    socket.recvWebSocket("OK");
+  }
+}
+
 KJ_TEST("Server: Durable Objects websocket hibernation") {
   TestServer test(R"((
     services = [

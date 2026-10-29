@@ -39,6 +39,7 @@ declare const tracingContext: {
     }
   ): Span;
   getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';
+  hasTracer(): boolean;
   getInvocationSpanContext(): TracingSpanContext | undefined;
   withActiveSpanContext<T>(
     context: TracingSpanContext | undefined,

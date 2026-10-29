@@ -415,6 +415,7 @@ class TracingContext: public jsg::Object {
       jsg::Optional<bool> suppress = kj::none);
   jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
   kj::StringPtr getSpanCreationMode(jsg::Lock& js);
+  bool hasTracer(jsg::Lock& js);
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
     JSG_METHOD(startSpan);
@@ -425,6 +426,7 @@ class TracingContext: public jsg::Object {
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
+    JSG_METHOD(hasTracer);
     JSG_METHOD(getInvocationSpanContext);
   }
 };

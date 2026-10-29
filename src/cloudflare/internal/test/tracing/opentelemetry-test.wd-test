@@ -21,7 +21,10 @@ const unitTests :Workerd.Config = (
       modules = [(name = "worker", esModule = embed "tracing-hierarchy-mock.js")],
     )),
     ( name = "untraced", worker = (
-      modules = [(name = "worker", esModule = embed "opentelemetry-untraced-test.js")],
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-untraced-test.js"),
+        (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+      ],
       compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
     )),
     ( name = "new-registry", worker = (

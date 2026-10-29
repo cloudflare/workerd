@@ -74,14 +74,22 @@ class IoContext;
 // rather than attributing them to a newer request. That delivery policy needs product sign-off.
 class UserTraceAsyncContext final {
  public:
+  enum class TracerPresence { ABSENT, PRESENT };
+
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
       kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
-      tracing::TraceFlags jsSamplingDecision)
+      tracing::TraceFlags jsSamplingDecision,
+      TracerPresence tracerPresence)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
         invocationSpanContext(kj::mv(invocationSpanContext)),
-        localSampled(jsSamplingDecision.isSampled()) {}
+        localSampled(jsSamplingDecision.isSampled()),
+        tracerLess(tracerPresence == TracerPresence::ABSENT) {}
+
+  bool isTracerLess() const {
+    return tracerLess;
+  }
 
   bool getLocalSampled() const {
     return localSampled;
@@ -122,6 +130,7 @@ class UserTraceAsyncContext final {
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   const bool localSampled;
+  const bool tracerLess;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
@@ -286,6 +295,7 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
   bool localSampled = false;
+  bool tracerLess = true;
 
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
@@ -1276,6 +1286,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // JS-only fallback for absent native flags. Never use this in native propagation or exports.
   kj::Maybe<tracing::TraceFlags> getDefaultJsTraceFlags();
   kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationContext();
+  // The existing invocation identity, never a newly invented trace. Tracer-less deliveries
+  // use their trigger's span ID; an expired tracer does not change a captured owner's identity.
+  kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationIdentity();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async

@@ -644,6 +644,9 @@ void WorkerTracer::setReturn(
 
 void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
   setMakeUserRequestSpanContextFunc([func = kj::mv(func)](tracing::SpanContext context) mutable {
+    // Legacy factories create invocation roots, not arbitrary externally parented carriers.
+    // Declining lets the caller retain the complete identity in a propagation-only observer.
+    if (context.getSpanId() != kj::none) return SpanParent(nullptr);
     return func(context.getTraceId(), context.getTraceFlags());
   });
 }

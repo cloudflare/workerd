@@ -17,7 +17,11 @@ incoming trigger identity and flags is treated as forwarded context: `fetch(requ
 header, even an invalid one, wins. A `tracestate` equal to the adopted state is also treated
 as forwarded: automatic rewrites replace it with the active context's state (including JS
 updates), or drop it if the new context has none. This avoids attaching an old trace's state
-to a different trace. A different explicit application state still wins. Injection edits only
+to a different trace. A different explicit application state still wins.
+Multiple vendor-state fields are comma-joined before comparison, just as
+at HTTP adoption. If adoption discarded invalid or oversized state, there is no canonical
+state to recognise as forwarded: the application-supplied fields remain unchanged, including
+on a cross-trace rewrite. Injection edits only
 the native outgoing headers, not the JavaScript Request. Redirect hops get their own fetch
 identities, including cross-origin hops. OTel `suppressTracing()` disables native user spans
 and automatic injection within that async scope; it does not remove explicit headers.
@@ -28,7 +32,8 @@ span. An invocation without either a trigger or a tracer does not invent a new i
 including owner-less handlers such as hibernatable WebSocket callbacks. Clearing an explicit
 context in such a handler cannot reveal an invented invocation parent. Explicit `00`
 invocations retain propagation identities without
-recording user or built-in user spans.
+recording OTel shim spans, even under a foreign explicitly sampled parent. Explicit foreign
+activation can still shape native carriers; the shim sampling rule is not an export boundary.
 
 Binding fetchers, actors, and JS RPC use native trigger propagation rather than automatic
 HTTP injection. This conservative channel-based exclusion also covers bindings configured
@@ -85,8 +90,11 @@ by this prototype; adopting the capability is an integration prerequisite, not a
 production rollout. Coordinating explicit headers with that exporter is still its responsibility.
 
 The legacy `BaseTracer::MakeUserRequestSpanFunc` and `setMakeUserRequestSpanFunc()` retain
-their `(TraceId, Maybe<TraceFlags>)` source interface through an adapter. That adapter drops
-vendor state. Callers wishing to retain it use `setMakeUserRequestSpanContextFunc()` with a
+their `(TraceId, Maybe<TraceFlags>)` source interface through an adapter. That adapter creates
+invocation roots without vendor state and declines contexts with parent span IDs. Such parents
+remain propagation-only carriers with their full identity rather than becoming recording
+roots with missing parent IDs. Callers wishing to record these parents and retain state use
+`setMakeUserRequestSpanContextFunc()` with a
 `SpanContext` callback. The new channel-factory virtual still requires rebuilding embedders;
 this is source compatibility, not binary ABI compatibility.
 

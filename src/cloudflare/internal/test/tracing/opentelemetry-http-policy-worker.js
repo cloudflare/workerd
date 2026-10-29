@@ -56,7 +56,27 @@ export default {
       console.log(JSON.stringify({ path, echo: result }));
       return Response.json({ active, echo: result, original });
     }
-    if (path.startsWith('/state-')) {
+    if (path === '/platform-unsampled') {
+      assert.strictEqual(active.traceFlags, 0);
+      const foreign = trace.setSpanContext(context.active(), {
+        traceId: '11111111111111111111111111111111',
+        spanId: '2222222222222222',
+        traceFlags: 1,
+      });
+      const tracer = trace.getTracer('platform-unsampled');
+      tracer.startActiveSpan('platform-unsampled', {}, foreign, (span) => {
+        assert.strictEqual(span.isRecording(), false);
+        assert.strictEqual(
+          span.spanContext().traceId,
+          '11111111111111111111111111111111'
+        );
+        const child = tracer.startSpan('platform-unsampled-child');
+        assert.strictEqual(child.isRecording(), false);
+        child.end();
+        span.end();
+      });
+      return Response.json({ active });
+    } else if (path.startsWith('/state-')) {
       const base = trace.getActiveSpan().spanContext();
       const updated = base.traceState.unset('upstream').set('updated', '1');
       const foreign = path !== '/state-updated';

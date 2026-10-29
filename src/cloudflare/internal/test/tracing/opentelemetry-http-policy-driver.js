@@ -56,6 +56,12 @@ export default {
     }
     const buffered = await call(env.BUFFERED, '/fresh');
     assert.strictEqual(buffered.echo.traceparent.split('-')[3], '00');
+    await call(env.ON, '/platform-unsampled', { traceparent: parent('00') });
+    await call(env.ON, '/state-multi', [
+      ['traceparent', parent('01')],
+      ['tracestate', 'upstream=1'],
+      ['tracestate', 'other=2'],
+    ]);
     const future = await call(env.ON, '/fresh', {
       traceparent: parent('ff', '01') + '-extension',
     });

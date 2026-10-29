@@ -41,6 +41,43 @@ KJ_TEST("legacy request-span factories retain their two-argument source interfac
   KJ_EXPECT(KJ_ASSERT_NONNULL(identity.getSpanId()) == tracing::SpanId(42));
 }
 
+KJ_TEST("legacy request-span factories decline external parents without losing their identity") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader()});
+  auto context = fixture.newIoContext();
+  auto tracer = makeTracer();
+  int calls = 0;
+  tracer->setMakeUserRequestSpanFunc([&](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) {
+    ++calls;
+    return observedParent(42);
+  });
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  request->delivered();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    auto primitive = env.js.alloc<api::TracingContext>();
+    primitive->withActiveSpanContext(env.js,
+        api::user_tracing::TracingSpanContext{.traceId = tracing::TraceId(3, 4).toW3C(),
+          .spanId = tracing::SpanId(55).toGoString(),
+          .traceFlags = 1,
+          .traceState = kj::str("vendor=foreign")},
+        jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+      auto identity = KJ_ASSERT_NONNULL(context->getCurrentUserTraceSpan().toSpanContext());
+      KJ_EXPECT(identity.getTraceId() == tracing::TraceId(3, 4));
+      KJ_EXPECT(KJ_ASSERT_NONNULL(identity.getSpanId()) == tracing::SpanId(55));
+      KJ_EXPECT(KJ_ASSERT_NONNULL(identity.cloneTraceState()) == "vendor=foreign");
+      auto child = context->makeUserTraceSpan("legacy-external-child"_kjc);
+      auto childIdentity = KJ_ASSERT_NONNULL(child.getUserSpanParent().toSpanContext());
+      KJ_EXPECT(KJ_ASSERT_NONNULL(childIdentity.getSpanId()) == tracing::SpanId(55));
+      return jsg::JsRef(js, js.undefined());
+    }));
+  });
+  KJ_EXPECT(calls == 1);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 kj::Rc<BaseTracer> makeObservedTracer() {
   auto tracer = makeTracer();
   tracer->setMakeUserRequestSpanContextFunc([](tracing::SpanContext) { return observedParent(2); });
@@ -927,6 +964,39 @@ KJ_TEST("overlapping actor frames retain their tracer through explicit-parent ac
     }));
   });
   fixture.drainAndDestroy(kj::mv(first));
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("expired traced owners keep their invocation identity rather than their trigger") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader(),
+    .actorId = Worker::Actor::Id(kj::str("expired-trace-identity"))});
+  auto context = fixture.newIoContext();
+  auto trigger = tracing::InvocationSpanContext(tracing::TraceId(1, 2), tracing::TraceId::nullId,
+      tracing::SpanId(42), tracing::TraceFlags(1));
+  auto first =
+      fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer(), trigger.clone());
+  first->delivered();
+  auto expected = first->getInvocationSpanContext().getSpanId();
+  KJ_EXPECT(expected != trigger.getSpanId());
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    captured = jsg::AsyncContextFrame::currentRef(env.js);
+  });
+  auto second = fixture.newIncomingRequest(*context);
+  fixture.drainAndDestroy(kj::mv(first));
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    jsg::AsyncContextFrame::Scope restored(env.js, captured);
+    KJ_EXPECT(context->getWorkerTracer() == kj::none);
+    auto identity = KJ_ASSERT_NONNULL(context->getUserTraceInvocationIdentity());
+    KJ_EXPECT(identity.getSpanId() == expected);
+    auto primitive = env.js.alloc<api::TracingContext>();
+    KJ_EXPECT(KJ_ASSERT_NONNULL(primitive->getInvocationSpanContext(env.js)).spanId ==
+        expected.toGoString());
+  });
   fixture.drainAndDestroy(kj::mv(second));
 }
 
