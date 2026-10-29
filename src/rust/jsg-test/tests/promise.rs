@@ -529,7 +529,7 @@ impl Watcher {
             watch.state.seen.borrow_mut().push(seen);
             // No borrow is held across the call, whose JavaScript calls back into the watcher.
             let callback = watch.callback.as_local(lock);
-            callback.call::<v8::Local<v8::Value>>(lock, None, &[value])
+            callback.call(lock, None, &[value])
         })
     }
 
@@ -588,9 +588,7 @@ impl TerminatingPromises {
         let promise = resolver.promise();
         lock.terminate_execution();
         let spin = v8::Local::<v8::Function>::try_from(spin).unwrap();
-        let err = spin
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
+        let err = spin.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
 
         let mut pending = Vec::new();
@@ -918,8 +916,7 @@ impl ReadThroughCache {
 
         let key_js = key.as_str().to_js(lock)?;
         // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
-        let called =
-            lock.try_catch(|lock| fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js]));
+        let called = lock.try_catch(|lock| fallback.call(lock, None, &[key_js]));
         match called {
             // Resolving with a promise follows it, and with any other value fulfills.
             Ok(Ok(produced)) => resolver.resolve(lock, produced)?,

@@ -628,41 +628,13 @@ JsWritableStream WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
   // graph read. Everything JS-executing happened in hydrateRpcWritableStream() during
-  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
-  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
-  // requires no JS).
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result.
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
 
-  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltWritable()) {
-    return kj::mv(prebuilt);
-  }
-
-  // Not hydrated: only reachable for legacy-streams isolates (the
-  // typescript_implemented_streams flag requires the hydration gate; see
-  // RpcDeserializerExternalHandler::prepare()), so the in-place legacy construction -- which
-  // runs no JS -- is the only case here.
-  auto reader = externalHandler->read();
-  KJ_REQUIRE(reader.isWritableStream(), "external table slot type doesn't match serialization tag");
-
-  auto ws = reader.getWritableStream();
-  auto encoding = ws.getEncoding();
-
-  KJ_REQUIRE(
-      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
-      "unknown StreamEncoding received from peer");
-
-  IoContext& ioctx = IoContext::current();
-  auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
-  auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
-
-  // Legacy-streams isolates only (see above), and JsWritableStream::create() may run JS, which is
-  // forbidden here.
-  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
-  return JsWritableStream(js.alloc<WritableStream>(
-      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver()));
+  return externalHandler->claimPrebuiltWritable();
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

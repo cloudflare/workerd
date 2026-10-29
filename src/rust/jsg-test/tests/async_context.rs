@@ -92,9 +92,7 @@ impl Probe {
         // Compared as handles, since converting them could run JavaScript, which must not run
         // while execution is terminating.
         let before = Harness::async_context_value(lock);
-        let result = frame.enter(lock, |lock| {
-            callback.call::<v8::Local<v8::Value>>(lock, None, &[])
-        });
+        let result = frame.enter(lock, |lock| callback.call(lock, None, &[]));
         self.restored
             .set(Harness::async_context_value(lock) == before);
         self.saw_pending
@@ -449,9 +447,7 @@ fn frame_in_function_data_lives_as_long_as_function() {
         let frame = Harness::run_in_async_context(lock, marker, TracedAsyncContextFrame::current);
         let run_in_frame = v8::Function::new(lock, frame, |lock, frame, args| {
             let callback = v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();
-            frame.enter(lock, |lock| {
-                callback.call::<v8::Local<v8::Value>>(lock, None, &[])
-            })
+            frame.enter(lock, |lock| callback.call(lock, None, &[]))
         })?;
         kept = Some(run_in_frame.to_global(lock));
         Ok(())
@@ -465,11 +461,9 @@ fn frame_in_function_data_lives_as_long_as_function() {
         let read_value = v8::Function::new(lock, (), |lock, (), _args| {
             Ok(Harness::async_context_value(lock).unwrap_or_else(|| lock.undefined()))
         })?;
-        let value = run_in_frame.as_local(lock).call::<v8::Local<v8::Value>>(
-            lock,
-            None,
-            &[read_value.into()],
-        )?;
+        let value = run_in_frame
+            .as_local(lock)
+            .call(lock, None, &[read_value.into()])?;
         assert!(jsg::Rc::<Marker>::from_js(lock, value).is_ok());
         assert_eq!(current(lock), None);
         Ok(())

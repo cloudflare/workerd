@@ -1165,31 +1165,13 @@ JsReadableStream ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
   // graph read. Everything JS-executing happened in hydrateRpcReadableStream() during
-  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
-  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
-  // requires no JS).
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result.
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
 
-  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltReadable()) {
-    return kj::mv(prebuilt);
-  }
-
-  // Not hydrated: the rpc-externals-hydration autogate is off, which
-  // RpcDeserializerExternalHandler::prepare() only permits for legacy-streams isolates (the
-  // typescript_implemented_streams flag requires the gate), so constructing the legacy
-  // stream in place -- which runs no JS -- is the only case here.
-  auto reader = externalHandler->read();
-  KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
-
-  auto& ioctx = IoContext::current();
-  // Legacy-streams isolates only (see above), and JsReadableStream::create() may run JS, which is
-  // forbidden here.
-  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
-  return JsReadableStream(js.alloc<ReadableStream>(
-      ioctx, newRpcReadableStreamSource(ioctx, reader.getReadableStream())));
+  return externalHandler->claimPrebuiltReadable();
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

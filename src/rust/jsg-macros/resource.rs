@@ -101,6 +101,9 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #[automatically_derived]
         impl jsg::Type for #name {
+            const UNION_NAMES: &'static [&'static str] =
+                &[concat!(module_path!(), "::", #name_str)];
+
             fn class_name() -> &'static str { #class_name }
 
             fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
@@ -122,6 +125,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl<'s> jsg::FromJS<'s> for #name {
             type ResultType = jsg::Rc<Self>;
+
+            const UNION_MEMBER: jsg::UnionMember = jsg::UnionMember::Resource;
 
             fn type_name() -> String {
                 <Self as jsg::Type>::class_name().to_owned()
