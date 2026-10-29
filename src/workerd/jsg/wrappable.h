@@ -394,11 +394,23 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
+  // Unwrap any object whose stored tag is exactly `tag`. Returns kj::none for every other object:
+  // one that was never wrapped, or a wrapper of another type. Unlike unwrapFromShimInRangeOrAbort(),
+  // this needs no prior knowledge of the object, so a mismatch is an answer, not an invariant
+  // violation. Creates no handles, so fast API callbacks can use it.
+  static kj::Maybe<Wrappable&> tryUnwrapFromShimWithTag(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, uint16_t tag);
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 
  private:
   class CppgcShim;
+
+  // The shim of a wrapper whose stored tag is exactly `tag`, or null for any other object. The
+  // caller must know `object` is an API wrapper; see tryUnwrapFromShimWithTag().
+  static CppgcShim* tryGetShimWithTag(
+      v8::Isolate* isolate, v8::Local<v8::Object> object, uint16_t tag);
 
   // The shim owning this Wrappable's wrapper handle, or null when no live wrapper exists.
   // Downcasts `weakShim`; see its comment for why that is stored as the cppgc base type.

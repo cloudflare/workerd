@@ -238,7 +238,7 @@ size_t used_global_handles_size(Isolate* isolate) {
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
   auto obj = ::workerd::jsg::check(tmpl->NewInstance(isolate->GetCurrentContext()));
 
-  // Set the C++ wrappable tag (NOT the Rust tag) to simulate a C++ JSG object
+  // Set C++ JSG's internal-field marker without wrapping the object.
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_WRAPPABLE_TAG);
   obj->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
       tagAddress,

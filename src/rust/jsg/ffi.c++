@@ -826,6 +826,22 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
+namespace {
+void attachRustWrapper(Isolate* isolate, Wrappable& wrappable, v8::Local<v8::Object> object) {
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  wrappable.attachWrapper(isolate, object, true,
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
+
+  // A Rust wrapper must not pass C++ JSG's isWorkerdApiObject() check, which would take it for a
+  // C++ object (e.g. when serializing). Rust code identifies its wrappers by the CppHeap pointer
+  // tag, not by this marker.
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+}
+}  // namespace
+
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
   // Checked here rather than through `call_into_js()`, which would make a second FFI call on
@@ -853,15 +869,7 @@ MaybeLocal wrap_resource(
     return MaybeLocal{.ptr = 0};
   }
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  attachRustWrapper(isolate, *wrappable, object);
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
@@ -870,15 +878,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   auto* isolate = args.GetIsolate();
   auto object = args.This();
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
-  wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  attachRustWrapper(isolate, *wrappable, object);
 }
 
 Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
@@ -923,8 +923,8 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
-// For an object already known to be a Rust resource wrapper, from the marker or a signature.
-// Anything else is an invariant violation and aborts.
+// For an object already known to be a Rust resource wrapper, from a signature. Anything else is an
+// invariant violation and aborts.
 Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
   return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
       isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange));
@@ -934,17 +934,12 @@ Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
 kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
   if (!v8_val->IsObject()) return kj::none;
-  auto v8_obj = v8_val.As<v8::Object>();
-  // Plain JS objects have no internal fields; check before reading to avoid V8 fatal error.
-  if (v8_obj->InternalFieldCount() < ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT ||
-      v8_obj->GetAlignedPointerFromInternalField(
-          ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-          static_cast<v8::EmbedderDataTypeTag>(
-              ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) !=
-          const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
-    return kj::none;
+  KJ_IF_SOME(wrappable,
+      ::workerd::jsg::Wrappable::tryUnwrapFromShimWithTag(
+          isolate, v8_val.As<v8::Object>(), ::workerd::jsg::kRustResourceWrappableTag)) {
+    return static_cast<Wrappable&>(wrappable);
   }
-  return unwrapRustWrapper(isolate, v8_obj);
+  return kj::none;
 }
 }  // namespace
 
@@ -964,7 +959,7 @@ const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value
 
 const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
   // V8 has checked the receiver against the method's Signature, so it is a wrapper made from a
-  // Rust resource template, and needs no marker check.
+  // Rust resource template.
   return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
 }
 

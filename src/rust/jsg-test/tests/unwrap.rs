@@ -118,18 +118,14 @@ fn v8_unwrap_string_returns_correct_values() {
     });
 }
 
-/// Tests that `unwrap_resource` rejects a C++ JSG object (tagged with `WORKERD_WRAPPABLE_TAG`).
-///
-/// Rust wrappables use `WORKERD_RUST_WRAPPABLE_TAG` (0xeb05), while C++ JSG objects use
-/// `WORKERD_WRAPPABLE_TAG` (0xeb04). Attempting to unwrap a C++ object through the Rust path
-/// must return None to prevent reading garbage from non-existent `data[2]` fields.
+/// Tests that `unwrap_resource` rejects an object that carries C++ JSG's internal-field marker but
+/// was never wrapped, so has no `CppHeap` pointer to unwrap.
 #[test]
 fn unwrap_resource_rejects_cpp_tagged_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
 
-        // unwrap_resource returns None because the object has the C++ tag, not the Rust tag.
         let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
             // SAFETY: isolate is valid and locked, value is a valid Local.
             unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), cpp_obj.into_ffi()) }
@@ -143,24 +139,34 @@ fn unwrap_resource_rejects_cpp_tagged_object() {
     });
 }
 
-/// Tests that `unwrap_resource` rejects a plain JS object with no internal fields.
-///
-/// A plain `{}` object has no wrappable tag at all. This verifies we don't crash on
-/// objects that were never wrapped by either the C++ or Rust JSG layer.
+/// Tests that `unwrap_resource` rejects objects that are not Rust wrappers: plain objects, objects
+/// that are not API wrappers (which keep other fields where an API wrapper keeps its `CppHeap`
+/// pointer), and a live C++ JSG wrapper, the harness's global object.
 #[test]
-fn unwrap_resource_rejects_plain_js_object() {
+fn unwrap_resource_rejects_other_objects() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
-
-        let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
-            // SAFETY: isolate is valid and locked, value is a valid Local.
-            unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), plain_obj.into_ffi()) }
-                .into();
-        assert!(
-            result.is_none(),
-            "unwrap_resource should return None for a plain JS object"
-        );
+        for source in [
+            "({})",
+            "globalThis",
+            "(() => {})",
+            "[1, 2]",
+            "new Map()",
+            "Promise.resolve()",
+            "new Proxy({}, {})",
+            "new Uint8Array(4)",
+            "new Error('e')",
+        ] {
+            let value = ctx.eval_raw(lock, source).unwrap();
+            let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
+                // SAFETY: isolate is valid and locked, value is a valid Local.
+                unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) }
+                    .into();
+            assert!(
+                result.is_none(),
+                "unwrap_resource should return None for {source}"
+            );
+        }
 
         Ok(())
     });
