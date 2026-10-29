@@ -906,7 +906,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
-      kj::Array<TailEvent> events = KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
+      auto events = TailEvent::readBatch(eventReaders);
+      if (events.size() == 0) return kj::READY_NOW;
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.

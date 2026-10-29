@@ -6,6 +6,7 @@
 #include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/dynamic.h>
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
@@ -1932,6 +1933,16 @@ TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
       timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       sequence(reader.getSequence()),
       event(readEventFromTailEvent(reader)) {}
+
+kj::Array<TailEvent> TailEvent::readBatch(capnp::List<rpc::Trace::TailEvent>::Reader readers) {
+  kj::Vector<TailEvent> events(readers.size());
+  for (auto reader: readers) {
+    if (capnp::toDynamic(reader.getEvent()).which() != kj::none) {
+      events.add(TailEvent(reader));
+    }
+  }
+  return events.releaseAsArray();
+}
 
 void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
   spanContext.toCapnp(builder.initSpanContext());

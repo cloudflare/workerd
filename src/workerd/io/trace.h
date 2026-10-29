@@ -1131,6 +1131,8 @@ struct TailEvent final {
       Event&& event,
       kj::Maybe<TraceFlags> traceFlags = kj::none);
   TailEvent(rpc::Trace::TailEvent::Reader reader);
+  // Ignore union members introduced by newer producers, without losing the rest of a batch.
+  static kj::Array<TailEvent> readBatch(capnp::List<rpc::Trace::TailEvent>::Reader readers);
   TailEvent(TailEvent&&) = default;
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);

@@ -5,12 +5,38 @@
 #include <workerd/io/trace.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/dynamic.h>
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
 
 namespace workerd::tracing {
 namespace {
+
+KJ_TEST("Tail batches skip unknown union members and retain subsequent events") {
+  capnp::MallocMessageBuilder message;
+  auto batch = message.initRoot<capnp::List<rpc::Trace::TailEvent>>(3);
+  batch[0].initEvent().initSpanClose();
+  batch[0].setSequence(1);
+  auto unknown = batch[1].initEvent();
+  auto offset =
+      capnp::toDynamic(unknown).getSchema().getProto().getStruct().getDiscriminantOffset();
+  auto data = capnp::AnyStruct::Builder(kj::mv(unknown)).getDataSection();
+  data[offset * sizeof(uint16_t)] = 0xff;
+  data[offset * sizeof(uint16_t) + 1] = 0xff;
+  batch[2].initEvent().initOutcome();
+  batch[2].setSequence(3);
+  auto events = TailEvent::readBatch(batch.asReader());
+  KJ_ASSERT(events.size() == 2);
+  KJ_EXPECT(events[0].event.is<SpanClose>());
+  KJ_EXPECT(events[1].event.is<Outcome>());
+  KJ_EXPECT(events[0].sequence == 1 && events[1].sequence == 3);
+  capnp::MallocMessageBuilder unknownMessage;
+  unknownMessage.setRoot(batch.asReader()[1]);
+  auto unknownBatch = message.initRoot<capnp::List<rpc::Trace::TailEvent>>(1);
+  unknownBatch.setWithCaveats(0, unknownMessage.getRoot<rpc::Trace::TailEvent>());
+  KJ_EXPECT(TailEvent::readBatch(unknownBatch.asReader()).size() == 0);
+}
 
 class FakeEntropySource final: public kj::EntropySource {
  public:
