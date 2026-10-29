@@ -256,6 +256,16 @@ fn exports() {
         classes(r#"{ "A": { "type": "durable-object", "state": "renamed", "renamed_to": "B" } }"#)
             .unwrap_err();
     assert!(error.contains("which is not live"), "{error}");
+    let error = classes(
+        r#"{ "A": { "type": "durable-object", "state": "renamed", "renamed_to": "C" },
+             "B": { "type": "durable-object", "state": "renamed", "renamed_to": "C" },
+             "C": { "type": "durable-object", "storage": "sqlite" } }"#,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("more than one class is renamed to C"),
+        "{error}"
+    );
     let both: Result<Wrangler, _> = serde_json::from_str(
         r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
              "exports": { "A": { "type": "durable-object", "storage": "sqlite" } },

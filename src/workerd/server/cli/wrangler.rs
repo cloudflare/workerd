@@ -463,8 +463,9 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 /// the live `exports` entries or `migrations` applied in order, plus any bound class neither
 /// mentions (not SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is
 /// never reused: a class created under a name an earlier class was keyed by (since deleted or
-/// renamed) gets `<name>~<n>` and starts empty, as in production. `exports` holds no history, so a
-/// class keeps its old key only while its `renamed` entry remains.
+/// renamed) gets `<name>~<n>` and starts empty, as in production. `exports` holds no history, so
+/// there a class is keyed by its name, or by its old name while its `renamed` entry remains, and a
+/// `deleted` entry leaves the class's objects on disk.
 fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
     let mut classes: Vec<(String, String, bool)> = Vec::new();
     let mut used: Vec<String> = Vec::new();
@@ -480,6 +481,12 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
         return Err("exports and migrations cannot both declare Durable Objects".to_owned());
     }
     let live = |c: &str| w.exports.get(c).is_some_and(|e| e.state == State::Created);
+    let renames = |c: &String| {
+        w.exports
+            .values()
+            .filter(|e| e.renamed_to.as_ref() == Some(c))
+            .count()
+    };
     for (c, e) in &w.exports {
         match (&e.state, &e.storage, &e.renamed_to) {
             (State::Created, Some(s), None) => {
@@ -492,6 +499,9 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
                 classes.push((c.clone(), k, *s == Storage::Sqlite));
             }
             (State::Deleted, None, None) => {}
+            (State::Renamed, None, Some(to)) if renames(to) > 1 => {
+                return Err(format!("exports: more than one class is renamed to {to}"));
+            }
             (State::Renamed, None, Some(to)) if live(to) => {}
             (State::Renamed, None, Some(to)) => {
                 return Err(format!(
