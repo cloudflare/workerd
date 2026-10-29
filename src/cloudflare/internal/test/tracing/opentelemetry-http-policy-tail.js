@@ -47,6 +47,13 @@ export const validate = {
         );
       }
       if (typeof onset.event.info?.url !== 'string') continue;
+      if (path === '/platform-unsampled') {
+        assert.strictEqual(
+          spans.length,
+          0,
+          'unsampled native work must not be exported'
+        );
+      }
       if (path === '/native-untraced') {
         const result = logs
           .filter((s) => s.startsWith('{'))

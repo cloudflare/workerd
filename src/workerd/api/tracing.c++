@@ -852,11 +852,8 @@ kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
   if (!IoContext::hasCurrent()) return "untraced"_kj;
   auto& io = IoContext::current();
   if (io.getWorkerTracer() == kj::none) return "untraced"_kj;
-  KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
-    if (invocation.getTraceFlags().map([](auto flags) {
-      return !flags.isSampled();
-    }).orDefault(false))
-      return "unsampled"_kj;
+  KJ_IF_SOME(flags, io.getUserTraceInvocationFlags()) {
+    if (!flags.isSampled()) return "unsampled"_kj;
   }
   auto parent = io.getCurrentUserTraceSpan();
   if (!parent.isObserved()) return "untraced"_kj;
@@ -876,13 +873,10 @@ kj::StringPtr rootCreationMode() {
       !io.isRootUserTraceObserved())
     return "untraced"_kj;
   if (!KJ_ASSERT_NONNULL(io.getWorkerTracer()).supportsDetachedRoots()) return "attached"_kj;
-  KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
-    KJ_IF_SOME(flags, invocation.getTraceFlags()) {
-      if (!flags.isSampled()) return "unsampled"_kj;
-    }
-    return "recording"_kj;
+  KJ_IF_SOME(flags, io.getUserTraceInvocationFlags()) {
+    if (!flags.isSampled()) return "unsampled"_kj;
   }
-  return "untraced"_kj;
+  return "recording"_kj;
 }
 }  // namespace
 
@@ -926,9 +920,13 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
             return tracer.isDetachedTraceId(identity.getTraceId());
           }).orDefault(false);
           if (io.isOpentelemetryApiEnabled() &&
-              (identity.getTraceId() == invocation.getTraceId() || minted)) {
+              (identity.getTraceId() == invocation.getTraceId() || minted ||
+                  invocation.getTraceFlags().map([](auto flags) {
+            return !flags.isSampled();
+          }).orDefault(false))) {
             // Invocation and locally minted trace identities inherit the owner's native decision,
-            // including absent flags and reserved bits. Projected JS flags are not new decisions.
+            // including absent flags and reserved bits. Explicitly unsampled invocations also
+            // override foreign sampled parents. Projected JS flags are not new decisions.
             identity = tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
                 invocation.getTraceFlags(), identity.cloneTraceState());
           }

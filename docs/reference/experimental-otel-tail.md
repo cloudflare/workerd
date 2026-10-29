@@ -71,9 +71,11 @@ continues writing to its creator's stream and cannot keep a dead tracer alive.
 
 A root retained in Durable Object memory is not a cross-request recording session. Once its
 creator's tracer expires, later children, marks and closure can be dropped; no later stream
-receives that root's close. A hibernatable WebSocket accepted while a root is active retains
-that root's identity. Later message/close/error invocations join its trace without inherited
-flags, forming a multi-invocation trace rather than extending the creator's span lifetime.
+receives that root's close. A hibernatable WebSocket captures a real active accept-time identity,
+unless its trace was minted as a detached root by the invocation's tracer. In that case, or
+without a real active identity, it uses the invocation identity when one exists. Later
+message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
+inside a detached root does not pull later events into that root's trace.
 There is no dedicated per-invocation root quota. Recording spans share the existing export
 budgets; minted trace IDs remain in the tracer until it expires.
 

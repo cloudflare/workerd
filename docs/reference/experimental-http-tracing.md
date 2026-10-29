@@ -32,8 +32,8 @@ span. An invocation without either a trigger or a tracer does not invent a new i
 including owner-less handlers such as hibernatable WebSocket callbacks. Clearing an explicit
 context in such a handler cannot reveal an invented invocation parent. Explicit `00`
 invocations retain propagation identities without
-recording OTel shim spans, even under a foreign explicitly sampled parent. Explicit foreign
-activation can still shape native carriers; the shim sampling rule is not an export boundary.
+recording shim or native spans, even under a foreign explicitly sampled parent. Native
+activation retains the foreign identity with the owning invocation's unsampled flags.
 
 Binding fetchers, actors, and JS RPC use native trigger propagation rather than automatic
 HTTP injection. This conservative channel-based exclusion also covers bindings configured
@@ -81,7 +81,8 @@ explicit application headers, native span creation, and native subrequest metada
 The embedder's existing exporter remains the sole automatic writer and retains authority
 over its own forwarding opt-outs, sampling checks, and account-boundary policies. JS can
 still activate a foreign context with explicit sampled flags and thereby shape the native
-identity supplied to that exporter; this capability is not a sampling or trust-policy boundary.
+identity supplied to that exporter, except that an explicitly unsampled owning invocation
+keeps native work propagation-only. This capability is not a trust-policy boundary.
 Conversely, JS may see projected `01` with a streaming sink while an exporter requiring an
 explicit native sampled decision emits nothing. Standalone development (writer on) and an
 embedded deployment (writer off) therefore need not have identical propagation behaviour.

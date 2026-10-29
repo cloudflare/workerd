@@ -4240,15 +4240,16 @@ KJ_TEST("Server: tail-less hibernatable sockets do not invent HTTP trace parents
       modules = [(name = "worker", esModule =
         `export default { fetch(request, env) { return env.ns.getByName('socket').fetch(request); } };
         `export class Actor {
-        `  constructor(ctx) { this.ctx = ctx; }
+        `  constructor(ctx) { this.ctx = ctx; this.reqCount = 0; }
         `  fetch() {
+        `    ++this.reqCount;
         `    const [client, server] = Object.values(new WebSocketPair());
         `    this.ctx.acceptWebSocket(server);
         `    return new Response(null, {status: 101, webSocket: client});
         `  }
         `  async webSocketMessage(ws) {
         `    const response = await fetch('http://origin/');
-        `    ws.send(await response.text());
+        `    ws.send(this.reqCount + ':' + await response.text());
         `  }
         `}
       )],
@@ -4277,7 +4278,94 @@ KJ_TEST("Server: tail-less hibernatable sockets do not invent HTTP trace parents
       Content-Length: 2
 
       OK)"_blockquote);
-    socket.recvWebSocket("OK");
+    socket.recvWebSocket(hibernate ? "0:OK" : "1:OK");
+  }
+}
+
+KJ_TEST("Server: hibernatable socket capture drops accept flags state and detached traces") {
+  for (bool traced: {false, true}) {
+    for (auto flags: {"00"_kj, "01"_kj}) {
+      for (auto mode: {"invocation"_kj, "active"_kj, "detached"_kj}) {
+        TestServer test(kj::str(R"((
+          services = [(name = "main", worker = (
+            compatibilityDate = "2026-07-01",
+            compatibilityFlags = ["opentelemetry_api"],
+            modules = [(name = "worker", esModule =
+              `import { tracing } from 'cloudflare:workers';
+              `const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
+              `const key = Symbol.for('OpenTelemetry Context Key SPAN');
+              `const identity = () => api.context.active().getValue(key).spanContext();
+              `export default { fetch(r, env) { return env.ns.getByName('socket').fetch(r); } };
+              `export class Actor {
+              `  constructor(ctx) { this.ctx = ctx; this.reqCount = 0; }
+              `  fetch(request) {
+              `    ++this.reqCount;
+              `    const invocation = identity();
+              `    const [client, server] = Object.values(new WebSocketPair());
+              `    let expected = invocation;
+              `    const accept = () => this.ctx.acceptWebSocket(server);
+              `    if (request.url.endsWith('/active')) {
+              `      const span = tracing.startSpan('accept-active');
+              `      tracing.withActiveSpan(span, () => { expected = identity(); accept(); });
+              `      span.end();
+              `    } else if (request.url.endsWith('/detached')) {
+              `      const root = api.trace.getTracer('accept').startSpan('accept-root', {root:true});
+              `      api.context.with(api.context.active().setValue(key, root), accept);
+              `      root.end();
+              `    } else { accept(); }
+              `    server.serializeAttachment({traceId: expected.traceId, spanId: expected.spanId});
+              `    return new Response(null, {status: 101, webSocket: client});
+              `  }
+              `  async webSocketMessage(ws) {
+              `    const expected = ws.deserializeAttachment();
+              `    const active = identity();
+              `    if (active.traceId !== expected.traceId || active.traceFlags !== 0 ||
+              `        active.traceState !== undefined) throw new Error('wrong restored identity');
+              `    const response = await fetch('http://origin/');
+              `    ws.send(this.reqCount + ':' + await response.text());
+              `  }
+              `}
+            )],
+            bindings = [(name = "ns", durableObjectNamespace = "Actor")],
+            durableObjectNamespaces = [(className = "Actor", uniqueKey = "capture-socket")],
+            durableObjectStorage = (inMemory = void),
+        )",
+            traced ? "tails = [\"tail\"],"_kj : ""_kj, R"(
+          )), (name = "tail", worker = (
+            compatibilityDate = "2026-07-01",
+            modules = [(name = "worker", esModule = "export default { tail() {} };")],
+          ))],
+          sockets = [(name = "main", address = "test-addr", service = "main")],
+        ))"));
+        test.server.allowExperimental();
+        test.start();
+        auto socket = test.connect("test-addr");
+        socket.send(kj::str("GET /", mode, " HTTP/1.1\r\nHost: foo\r\nUpgrade: websocket\r\n",
+            "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n",
+            "traceparent: 00-11111111111111111111111111111111-2222222222222222-", flags,
+            "\r\ntracestate: vendor=accept\r\n\r\n"));
+        socket.recv(R"(
+          HTTP/1.1 101 Switching Protocols
+          Connection: Upgrade
+          Upgrade: websocket
+          Sec-WebSocket-Accept: ICX+Yqv66kxgM0FcWaLWlFLwTAI=
+
+        )"_blockquote);
+        for (bool hibernate: {false, true}) {
+          if (hibernate) test.wait(10);
+          socket.send(kj::str("\x81\x01", "x"));
+          auto origin = test.receiveInternetSubrequest("origin");
+          origin.recvRegex("GET / HTTP/1.1\nHost: origin\n"
+                           "traceparent: 00-11111111111111111111111111111111-[0-9a-f]{16}-00\n\n");
+          origin.send(R"(
+            HTTP/1.1 200 OK
+            Content-Length: 2
+
+            OK)"_blockquote);
+          socket.recvWebSocket(hibernate ? "0:OK" : "1:OK");
+        }
+      }
+    }
   }
 }
 

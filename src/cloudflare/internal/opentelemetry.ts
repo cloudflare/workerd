@@ -521,10 +521,8 @@ class Tracer {
       let parentSpan = getSpan(parent);
       let detached =
         options.root === true || (parentSpan === undefined && parent !== ROOT);
-      const rootMode = detached
-        ? tracingContext.getRootCreationMode()
-        : undefined;
-      if (rootMode === 'attached') {
+      const rootMode = tracingContext.getRootCreationMode();
+      if (detached && rootMode === 'attached') {
         detached = false;
         parentSpan = undefined;
         parent = ROOT;
@@ -607,7 +605,9 @@ class Tracer {
         return span;
       };
       // A root uses the owning invocation, never an unrelated explicit/active remote context.
-      return detached ? create() : context.with(parent, create);
+      return detached || rootMode === 'unsampled'
+        ? create()
+        : context.with(parent, create);
     }, new Span());
   }
   startActiveSpan<R>(name: string, fn: (span: Span) => R): R;

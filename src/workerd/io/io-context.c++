@@ -1681,6 +1681,19 @@ kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationConte
   return getCurrentIncomingRequest().getInvocationSpanContext().clone();
 }
 
+kj::Maybe<tracing::TraceFlags> IoContext::getUserTraceInvocationFlags() {
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    KJ_IF_SOME(context, owner.getInvocationSpanContext()) return context.getTraceFlags();
+    return kj::none;
+  }
+  if (opentelemetryApiEnabled && hasCurrentUserTraceOwner()) return kj::none;
+  if (incomingRequests.empty()) return kj::none;
+  if (opentelemetryApiEnabled && getCurrentIncomingRequest().getWorkerTracer() == kj::none &&
+      getCurrentIncomingRequest().maybeTriggerInvocationSpan == kj::none)
+    return kj::none;
+  return getCurrentIncomingRequest().getInvocationSpanContext().getTraceFlags();
+}
+
 kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationIdentity() {
   if (!opentelemetryApiEnabled) return getUserTraceInvocationContext();
   auto context = getUserTraceInvocationContext();
@@ -1700,6 +1713,25 @@ kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationIdent
     }
   }
   return context;
+}
+
+kj::Maybe<tracing::SpanContext> IoContext::getUserTraceWebSocketContext() {
+  // Detached traces belong to one recording session, not the socket's later invocations.
+  KJ_IF_SOME(active, getCurrentUserTraceSpan().toSpanContext()) {
+    bool detached = getWorkerTracer()
+                        .map([&](auto& tracer) {
+      return tracer.isDetachedTraceId(active.getTraceId());
+    }).orDefault(false);
+    KJ_IF_SOME(id, active.getSpanId()) {
+      if (active.getTraceId() != nullptr && id != nullptr && !detached) {
+        return tracing::SpanContext(active.getTraceId(), id);
+      }
+    }
+  }
+  KJ_IF_SOME(identity, getUserTraceInvocationIdentity()) {
+    return tracing::SpanContext(identity.getTraceId(), identity.getSpanId());
+  }
+  return kj::none;
 }
 
 kj::Maybe<tracing::TraceFlags> IoContext::getDefaultJsTraceFlags() {

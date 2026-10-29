@@ -73,8 +73,27 @@ export default {
         const child = tracer.startSpan('platform-unsampled-child');
         assert.strictEqual(child.isRecording(), false);
         child.end();
+        const root = tracer.startSpan('platform-unsampled-root', {
+          root: true,
+        });
+        assert.strictEqual(root.isRecording(), false);
+        assert.strictEqual(root.spanContext().traceFlags, 0);
+        assert.notStrictEqual(root.spanContext().traceId, active.traceId);
+        assert.notStrictEqual(
+          root.spanContext().traceId,
+          span.spanContext().traceId
+        );
+        root.end();
         span.end();
       });
+      // No shim startSpan: native activation must apply the owning platform decision too.
+      const echo = await context.with(foreign, () =>
+        get('http://echo/platform-unsampled')
+      );
+      assert.strictEqual(
+        echo.traceparent,
+        '00-11111111111111111111111111111111-2222222222222222-00'
+      );
       return Response.json({ active });
     } else if (path.startsWith('/state-')) {
       const base = trace.getActiveSpan().spanContext();

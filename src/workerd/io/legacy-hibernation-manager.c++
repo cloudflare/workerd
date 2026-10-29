@@ -168,14 +168,9 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   auto hib = kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, *this);
   HibernatableWebSocket& refToHibernatable = *hib.get();
 
-  // TODO(mar): Improve accept span context capturing — route snapshotted user span context
-  // to serialization point instead of capturing only the invocation root span here.
   auto& io = IoContext::current();
   if (io.isOpentelemetryApiEnabled()) {
-    KJ_IF_SOME(identity, io.getUserTraceInvocationIdentity()) {
-      refToHibernatable.userSpanContext = tracing::SpanContext(identity.getTraceId(),
-          identity.getSpanId(), identity.getTraceFlags(), identity.cloneTraceState());
-    }
+    refToHibernatable.userSpanContext = io.getUserTraceWebSocketContext();
   } else {
     auto invCtx = io.getInvocationSpanContext();
     refToHibernatable.userSpanContext =

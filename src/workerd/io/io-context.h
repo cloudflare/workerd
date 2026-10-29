@@ -1293,10 +1293,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // JS-only fallback for absent native flags. Never use this in native propagation or exports.
   kj::Maybe<tracing::TraceFlags> getDefaultJsTraceFlags();
   kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationContext();
+  // Read the owning invocation's native decision without copying its vendor state.
+  kj::Maybe<tracing::TraceFlags> getUserTraceInvocationFlags();
   bool isRootUserTraceObserved();
   // The existing invocation identity, never a newly invented trace. Tracer-less deliveries
   // use their trigger's span ID; an expired tracer does not change a captured owner's identity.
   kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationIdentity();
+  // Capture accept-time WebSocket parenting without sampling flags or vendor state.
+  kj::Maybe<tracing::SpanContext> getUserTraceWebSocketContext();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
