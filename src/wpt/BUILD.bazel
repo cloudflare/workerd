@@ -307,3 +307,9 @@ wpt_test(
     extra_wpt_directories = ["@wpt//:fetch/data-urls@module"],
     wpt_directory = "@wpt//:html/webappapis/atob@module",
 )
+
+wpt_test(
+    name = "html/webappapis/timers",
+    config = "html/webappapis/timers-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/timers@module",
+)
