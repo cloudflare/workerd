@@ -396,12 +396,22 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
         return flags.isSampled();
       }).orDefault([&] { return workerTracer->exportsUserSpans(); });
     }
-    rootUserTraceSpan = workerTracer->makeUserRequestSpan(
-        invCtx.getTraceId(), invCtx.getTraceFlags(), invCtx.cloneTraceState());
     if (context->isOpentelemetryApiEnabled() &&
         invCtx.getTraceFlags().map([](auto flags) {
       return !flags.isSampled();
     }).orDefault(false)) {
+      rootUserTraceSpan =
+          SpanParent(kj::rc<PropagationOnlySpanObserver>(tracing::SpanContext(invCtx.getTraceId(),
+              invCtx.getSpanId(), invCtx.getTraceFlags(), invCtx.cloneTraceState())));
+    } else {
+      rootUserTraceSpan = workerTracer->makeUserRequestSpan(
+          invCtx.getTraceId(), invCtx.getTraceFlags(), invCtx.cloneTraceState());
+    }
+  } else if (context->isOpentelemetryApiEnabled()) {
+    auto& invCtx = getInvocationSpanContext();
+    // A trigger can be adopted HTTP or native dispatch. Without a sink, retain its identity
+    // for JS and egress, but do not invent a context for an otherwise untraced invocation.
+    if (invCtx.getParent() != kj::none) {
       rootUserTraceSpan =
           SpanParent(kj::rc<PropagationOnlySpanObserver>(tracing::SpanContext(invCtx.getTraceId(),
               invCtx.getSpanId(), invCtx.getTraceFlags(), invCtx.cloneTraceState())));
@@ -1561,7 +1571,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
           ? tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), id,
                 base.getTraceFlags(), base.cloneTraceState())
           : base.clone();
-    } else if (tracer != kj::none) {
+    } else if (tracer != kj::none || userSpan.isObserved()) {
       invocationSpanContext = getCurrentIncomingRequest().getInvocationSpanContext().clone();
     }
   }

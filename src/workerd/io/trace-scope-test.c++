@@ -198,6 +198,40 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
 
 enum class UserSpanFactory { PRESENT, ABSENT };
 
+KJ_TEST("a native trigger without a tracer remains a propagation-only root") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader()});
+  for (int flags: {-1, 0, 1, 255}) {
+    auto context = fixture.newIoContext();
+    auto request = fixture.newUndeliveredIncomingRequest(*context);
+    auto& invocation = request->getInvocationSpanContext();
+    auto nativeFlags = flags < 0 ? kj::Maybe<tracing::TraceFlags>(kj::none)
+                                 : kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(flags));
+    auto trigger = tracing::InvocationSpanContext(tracing::TraceId(1, 2), tracing::TraceId::nullId,
+        tracing::SpanId(42), nativeFlags, kj::str("vendor=native"));
+    invocation = tracing::InvocationSpanContext::newForInvocation(trigger);
+    request->delivered();
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto scope = context->makeRequestTraceScope(env.lock);
+      auto identity = KJ_ASSERT_NONNULL(context->getCurrentUserTraceSpan().toSpanContext());
+      KJ_EXPECT(identity.getTraceId() == trigger.getTraceId());
+      KJ_EXPECT(identity.getTraceFlags() == nativeFlags);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(identity.cloneTraceState()) == "vendor=native");
+      auto span = activeSpan(env);
+      KJ_EXPECT(!span->getIsTraced());
+      KJ_EXPECT(span->spanContext().traceId == trigger.getTraceId().toW3C());
+      KJ_EXPECT(context->getWorkerTracer() == kj::none);
+      auto child = context->makeUserTraceSpan("untraced-native-child"_kjc);
+      auto propagated = KJ_ASSERT_NONNULL(child.getUserSpanParent().toSpanContext());
+      KJ_EXPECT(propagated.getTraceId() == trigger.getTraceId());
+      KJ_EXPECT(propagated.getTraceFlags() == nativeFlags);
+    });
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+}
+
 kj::Rc<WorkerTracer> makeSinkTracer(kj::TaskSet& tasks,
     bool streaming,
     PipelineLogLevel level = PipelineLogLevel::FULL,
@@ -698,7 +732,8 @@ KJ_TEST("unsampled roots remain native carriers with either flag state") {
           jsg::check(script->Run(env.js.v8Context()));
         }
       });
-      KJ_EXPECT(parents == 1);
+      // Explicit 00 uses a propagation-only root without allocating a discarded recording one.
+      KJ_EXPECT(parents == (enabled && flags == 0 ? 0 : 1));
       fixture.drainAndDestroy(kj::mv(request));
     }
   }

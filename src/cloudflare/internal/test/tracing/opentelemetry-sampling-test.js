@@ -19,7 +19,9 @@ export const jsOnlySampling = {
     );
     for (let i = 0; i < 9; i++) {
       const child = tracer.startSpan(`sampling-rebuilt-${i}`, {}, rebuilt);
-      assert.strictEqual(child.isRecording(), env.expectedFlags === 1);
+      // A same-trace projected zero is not a native sampling decision. A buffered sink
+      // still supplies recording spans, even though their JS projection remains zero.
+      assert.strictEqual(child.isRecording(), !!env.callee);
       assert.strictEqual(child.spanContext().traceFlags, env.expectedFlags);
       child.end();
     }
@@ -40,7 +42,7 @@ export const jsOnlySampling = {
         {},
         rebuilt,
         async (span) => {
-          assert.strictEqual(span.isRecording(), false);
+          assert.strictEqual(span.isRecording(), true);
           assert.strictEqual(span.spanContext().traceFlags, 0);
           await checkCallees('active');
           span.end();

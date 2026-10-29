@@ -1555,26 +1555,57 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   request.shallowCopyHeadersTo(headers);
 
-  if (ioContext.isOpentelemetryApiEnabled() && usesGlobalOutbound) {
-    bool hasParent = false;
+  if (ioContext.isOpentelemetryApiEnabled() && usesGlobalOutbound &&
+      ioContext.getIoChannelFactory().shouldInjectW3cTraceContext()) {
+    kj::Maybe<kj::StringPtr> existingParent;
+    size_t parentCount = 0;
     bool hasState = false;
-    headers.forEach([&](kj::StringPtr name, kj::StringPtr) {
-      if (strcaseeq(name, "traceparent"_kj)) hasParent = true;
+    headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+      if (strcaseeq(name, "traceparent"_kj)) {
+        existingParent = value;
+        ++parentCount;
+      }
       if (strcaseeq(name, "tracestate"_kj)) hasState = true;
     });
-    if (!hasParent) {
+    bool forwardedParent = false;
+    if (parentCount == 1) {
+      KJ_IF_SOME(invocation, ioContext.getUserTraceInvocationContext()) {
+        KJ_IF_SOME(trigger, invocation.getParent()) {
+          KJ_IF_SOME(parent, tracing::SpanContext::tryFromHttpTraceparent(
+              KJ_ASSERT_NONNULL(existingParent))) {
+            forwardedParent = parent.getTraceId() == trigger.getTraceId() &&
+                parent.getSpanId() == trigger.getSpanId() &&
+                parent.getTraceFlags() == trigger.getTraceFlags();
+          }
+        }
+      }
+    }
+    if (parentCount == 0 || forwardedParent) {
       kj::Maybe<tracing::SpanContext> identity;
       KJ_IF_SOME(span, traceContext) identity = span.getUserSpanParent().toSpanContext();
       if (identity == kj::none) identity = ioContext.getCurrentUserTraceSpan().toSpanContext();
       KJ_IF_SOME(context, identity) {
-        auto flags = context.getTraceFlags().orDefault(
+        auto nativeFlags = context.getTraceFlags().orDefault(
             ioContext.getDefaultJsTraceFlags().orDefault(tracing::TraceFlags(0)));
+        // W3C Level 2: retain sampled/random; never re-emit reserved flag bits. Keep the
+        // native identity untouched, since it also serves non-HTTP dispatch and tail events.
+        auto flags = tracing::TraceFlags(uint8_t(nativeFlags) & 0x03);
         KJ_IF_SOME(id, context.getSpanId()) {
           if (context.getTraceId() && id != tracing::SpanId::nullId) {
             // Opting into OTel HTTP propagation exposes trace IDs and vendor state to origins,
             // including third parties, as standard OTel auto-instrumentation does. This is user
             // trace context, not the embedder's independent internal trace-context export; an
             // embedder must keep those paths distinct and avoid injecting a second user header.
+            if (forwardedParent) {
+              // Unregistered headers cannot be removed by name. Rebuild only the native
+              // copy, keeping its backing storage alive without touching the JS Request.
+              kj::HttpHeaders rewritten(ioContext.getHeaderTable());
+              headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+                if (!strcaseeq(name, "traceparent"_kj)) rewritten.addPtrPtr(name, value);
+              });
+              rewritten.takeOwnership(kj::mv(headers));
+              headers = kj::mv(rewritten);
+            }
             headers.addPtr("traceparent"_kj, tracing::formatW3CTraceparent(context.getTraceId(), id, flags));
             if (!hasState) {
               KJ_IF_SOME(state, context.cloneTraceState()) headers.addPtr("tracestate"_kj, kj::mv(state));

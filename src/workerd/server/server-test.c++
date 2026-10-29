@@ -32,6 +32,48 @@
 namespace workerd::server {
 namespace {
 
+KJ_TEST("HTTP trace adoption rejects duplicate parents and bounds joined vendor state") {
+  constexpr auto parent = "00-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-ff"_kj;
+  for (bool indexed: {false, true}) {
+    kj::HttpHeaderTable::Builder builder;
+    if (indexed) {
+      builder.add("traceparent");
+      builder.add("tracestate");
+    }
+    auto table = builder.build();
+    kj::HttpHeaders headers(*table);
+    headers.addPtrPtr("traceparent", parent);
+    headers.addPtrPtr("traceparent", parent);
+    RequestMetadata duplicate(IoChannelFactory::SubrequestMetadata{});
+    request_metadata_read_http_trace_context(duplicate, headers);
+    KJ_EXPECT(duplicate.httpTraceContext == kj::none);
+
+    headers.clear();
+    headers.addPtrPtr("traceparent", parent);
+    headers.addPtrPtr("tracestate", " , a=one,, ");
+    headers.addPtrPtr("tracestate", " , b=two, ");
+    RequestMetadata valid(IoChannelFactory::SubrequestMetadata{});
+    request_metadata_read_http_trace_context(valid, headers);
+    auto& context = KJ_ASSERT_NONNULL(valid.httpTraceContext);
+    KJ_EXPECT(uint8_t(KJ_ASSERT_NONNULL(context.getTraceFlags())) == 255);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(context.cloneTraceState()) == "a=one,b=two");
+
+    // Indexed headers are already coalesced with comma-space by HttpHeaders. Account for
+    // that space so both representations exercise exactly 512 and 513 input bytes.
+    for (size_t size: {512, 513}) {
+      auto length = size - 259 - (indexed ? 1 : 0);
+      headers.clear();
+      headers.addPtrPtr("traceparent", parent);
+      headers.addPtr("tracestate", kj::str("a=", kj::repeat('x', 254)));
+      headers.addPtr("tracestate", kj::str("b=", kj::repeat('y', length)));
+      RequestMetadata bounded(IoChannelFactory::SubrequestMetadata{});
+      request_metadata_read_http_trace_context(bounded, headers);
+      auto& identity = KJ_ASSERT_NONNULL(bounded.httpTraceContext);
+      KJ_EXPECT((identity.cloneTraceState() != kj::none) == (size == 512));
+    }
+  }
+}
+
 // TODO(cleanup): Move these macro definitions to KJ?:
 
 #ifndef KJ_FAIL_EXPECT_AT

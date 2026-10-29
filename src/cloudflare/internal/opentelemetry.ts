@@ -310,6 +310,9 @@ class ContextManager {
         { context: ctx, native: inner } satisfies ActiveState,
         invoke
       );
+    if (ctx.getValue(SUPPRESS)) {
+      return tracingContext.withActiveSpanContext(undefined, run, true);
+    }
     if (inner !== undefined) return tracing.withActiveSpan(inner, run);
     return tracingContext.withActiveSpanContext(
       valid(spanContext)
@@ -390,7 +393,18 @@ class Tracer {
             );
         return valid(identity) ? nonRecording(identity) : new Span();
       }
-      if (valid(parentSpanContext) && !(parentSpanContext.traceFlags & 1)) {
+      const invocation = attempt(
+        () => tracingContext.getInvocationSpanContext(),
+        undefined
+      );
+      // Same-trace parents can contain a cached JS sampling projection from a non-exporting
+      // caller. Use the invocation's native decision too, rather than minting a JS-only
+      // identity whose recording native descendants would be orphaned.
+      if (
+        valid(parentSpanContext) &&
+        !(parentSpanContext.traceFlags & 1) &&
+        parentSpanContext.traceId.toLowerCase() !== invocation?.traceId
+      ) {
         return nonRecording(parentSpanContext);
       }
       const inner = context.with(parent, () =>

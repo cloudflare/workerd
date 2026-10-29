@@ -8,7 +8,7 @@ import { context, propagation, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 
 const traceId = 'a3ce929d0e0e47364bf92f3577b34da6';
 const spanId = 'c0ffee0ba902b7aa';
-const custom = `00-${traceId}-${spanId}-00`;
+const custom = `00-${'1'.repeat(32)}-${spanId}-00`;
 const echo = (path, init) =>
   fetch(`http://echo/${path}`, init).then((r) => r.json());
 

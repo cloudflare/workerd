@@ -44,11 +44,14 @@ KJ_TEST("HTTP W3C validation and in-memory vendor state inheritance") {
   KJ_EXPECT(SpanContext::tryFromHttpTraceparent(kj::str(parent, "-extra")) == kj::none);
   KJ_EXPECT(SpanContext::tryFromHttpTraceparent(
                 "01-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01-extra") != kj::none);
-  for (auto invalid: {"a=1,a=2"_kj, "a="_kj, "A=value"_kj, "1=value"_kj, "a=b=c"_kj, "a=value,"_kj,
+  for (auto invalid: {"a=1,a=2"_kj, "a="_kj, "A=value"_kj, "1=value"_kj, "a=b=c"_kj,
          "a@b@c=value"_kj, "a=\x7f"_kj}) {
     KJ_EXPECT(SpanContext::parseTracestate(invalid) == kj::none);
   }
   constexpr auto state = "upstream=1,1tenant@vendor=value"_kj;
+  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanContext::parseTracestate(
+                " , \tupstream=1,,1tenant@vendor=value, \t")) == state);
+  KJ_EXPECT(SpanContext::parseTracestate(" , ,\t") == kj::none);
   remote.setTraceState(SpanContext::parseTracestate(state));
   KJ_EXPECT(KJ_ASSERT_NONNULL(SpanContext::clone(remote).cloneTraceState()) == state);
   auto trigger = InvocationSpanContext(remote.getTraceId(), TraceId::nullId,

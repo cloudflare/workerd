@@ -131,6 +131,13 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory: public virtual kj::Refcounted {
  public:
+  // Single-writer capability for user W3C headers on global outbound HTTP. Embedders that
+  // export context outside the isolate must override this to false, keeping their own export
+  // and forwarding policies authoritative. This does not disable native span metadata.
+  virtual bool shouldInjectW3cTraceContext() const {
+    return true;
+  }
+
   enum class EvictWebSocketMode {
     HIBERNATE,
     CLOSE,

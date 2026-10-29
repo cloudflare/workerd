@@ -10,7 +10,8 @@ declare const tracingContext: {
   getInvocationSpanContext(): TracingSpanContext | undefined;
   withActiveSpanContext<T>(
     context: TracingSpanContext | undefined,
-    callback: () => T
+    callback: () => T,
+    suppress?: boolean
   ): T;
   createAsyncContextVariable(): {
     get(): unknown;

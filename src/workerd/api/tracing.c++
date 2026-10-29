@@ -762,7 +762,8 @@ kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
 
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
     jsg::Optional<user_tracing::TracingSpanContext> context,
-    jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
+    jsg::Function<jsg::JsRef<jsg::JsValue>()> callback,
+    jsg::Optional<bool> suppress) {
   // Clear the active JS span before installing the supplied parent (or invocation fallback).
   jsg::AsyncContextFrame::StorageScope activeScope(js,
       jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(),
@@ -770,7 +771,8 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
   if (!IoContext::hasCurrent()) return callback(js);
   auto& io = IoContext::current();
   SpanParent parent(nullptr);
-  if (io.getWorkerTracer() != kj::none || io.isOpentelemetryApiEnabled()) {
+  if (!suppress.orDefault(false) &&
+      (io.getWorkerTracer() != kj::none || io.isOpentelemetryApiEnabled())) {
     kj::Maybe<tracing::SpanContext> parsed;
     KJ_IF_SOME(value, context) {
       // Remote parents carry a sampling bit; same-invocation native flags are restored below.

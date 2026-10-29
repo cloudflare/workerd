@@ -3,12 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "global-scope.h"
+#include "tracing.h"
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/strings.h>
 
+#include <capnp/message.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -36,14 +39,17 @@ class RecordingRequestObserver final: public RequestObserver {
 // request body first so a streaming sender doesn't block on backpressure.
 class MockFetchTarget final: public WorkerInterface {
  public:
-  explicit MockFetchTarget(kj::Maybe<kj::Function<void()>> beforeResponse = kj::none)
-      : beforeResponse(kj::mv(beforeResponse)) {}
+  explicit MockFetchTarget(kj::Maybe<kj::Function<void()>> beforeResponse = kj::none,
+      kj::Maybe<kj::Function<void(const kj::HttpHeaders&)>> checkHeaders = kj::none)
+      : beforeResponse(kj::mv(beforeResponse)),
+        checkHeaders(kj::mv(checkHeaders)) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
+    KJ_IF_SOME(check, checkHeaders) check(headers);
     co_await requestBody.readAllBytes();
     KJ_IF_SOME(check, beforeResponse) {
       co_await kj::evalLater([]() {});
@@ -78,7 +84,72 @@ class MockFetchTarget final: public WorkerInterface {
 
  private:
   kj::Maybe<kj::Function<void()>> beforeResponse;
+  kj::Maybe<kj::Function<void(const kj::HttpHeaders&)>> checkHeaders;
 };
+
+class W3cPolicyChannels final: public TestFixture::DummyIoChannelFactory {
+ public:
+  W3cPolicyChannels(TimerChannel& timer, bool inject, bool enabled)
+      : DummyIoChannelFactory(timer),
+        inject(inject),
+        enabled(enabled) {}
+  bool shouldInjectW3cTraceContext() const override {
+    return inject;
+  }
+  kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
+    // Disabling the HTTP writer must not strip native trigger metadata.
+    KJ_EXPECT((metadata.userSpanParent.toSpanContext() != kj::none) == enabled);
+    return kj::heap<MockFetchTarget>(kj::none,
+        kj::Function<void(const kj::HttpHeaders&)>(
+            [expected = inject && enabled](const auto& headers) {
+      uint parents = 0;
+      headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+        if (strcaseeq(name, "traceparent"_kj)) {
+          ++parents;
+          KJ_EXPECT(value == "00-00000000000000020000000000000001-000000000000002a-01");
+        }
+      });
+      KJ_EXPECT(parents == (expected ? 1 : 0));
+    }));
+  }
+
+ private:
+  bool inject;
+  bool enabled;
+};
+
+KJ_TEST("the embedder can disable the W3C writer without disabling native propagation") {
+  for (bool enabled: {false, true}) {
+    for (bool inject: {false, true}) {
+      capnp::MallocMessageBuilder message;
+      auto flags = message.initRoot<CompatibilityFlags>();
+      flags.setOpentelemetryApi(enabled);
+      TestFixture fixture({
+        .featureFlags = flags.asReader(),
+        .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+            [=](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+        return kj::rc<W3cPolicyChannels>(timer, inject, enabled);
+      }),
+      });
+      fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+        auto primitive = env.js.alloc<TracingContext>();
+        auto fetcher = env.js.alloc<Fetcher>(
+            IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+        kj::Maybe<kj::Promise<void>> pending;
+        primitive->withActiveSpanContext(env.js,
+            user_tracing::TracingSpanContext{.traceId = tracing::TraceId(1, 2).toW3C(),
+              .spanId = tracing::SpanId(42).toGoString(),
+              .traceFlags = 1},
+            jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+          auto response = fetcher->fetch(js, kj::str("http://example.com/"), kj::none);
+          pending = env.context.awaitJs(js, kj::mv(response)).ignoreResult();
+          return jsg::JsRef(js, js.undefined());
+        }));
+        return kj::mv(KJ_ASSERT_NONNULL(pending)).attach(kj::mv(fetcher));
+      });
+    }
+  }
+}
 
 struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
   FetchTargetIoChannelFactory(TimerChannel& timer): DummyIoChannelFactory(timer) {}

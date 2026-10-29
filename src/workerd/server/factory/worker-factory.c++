@@ -1250,18 +1250,28 @@ void request_metadata_read_http_trace_context(
   kj::Maybe<kj::StringPtr> parent;
   size_t parentCount = 0;
   kj::Vector<kj::StringPtr> states;
+  size_t stateSize = 0;
   headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
     if (strcaseeq(name, "traceparent"_kj)) {
       parent = value;
       ++parentCount;
     }
-    if (strcaseeq(name, "tracestate"_kj)) states.add(value);
+    if (strcaseeq(name, "tracestate"_kj)) {
+      // Bound the total, including inserted commas, before allocating the joined string.
+      if (value.size() > 512 || stateSize > 512 - value.size() ||
+          (!states.empty() && stateSize + value.size() == 512)) {
+        stateSize = 513;
+      } else {
+        stateSize += value.size() + (states.empty() ? 0 : 1);
+      }
+      if (stateSize <= 512) states.add(value);
+    }
   });
   if (parentCount != 1) return;
   KJ_IF_SOME(value, parent) {
     metadata.httpTraceContext = tracing::SpanContext::tryFromHttpTraceparent(value);
     KJ_IF_SOME(context, metadata.httpTraceContext) {
-      if (!states.empty()) {
+      if (!states.empty() && stateSize <= 512) {
         context.setTraceState(
             tracing::SpanContext::parseTracestate(kj::strArray(states.asPtr(), ",")));
       }

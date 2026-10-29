@@ -438,6 +438,7 @@ kj::Maybe<SpanContext> SpanContext::tryFromHttpTraceparent(kj::StringPtr value) 
 kj::Maybe<kj::String> SpanContext::parseTracestate(kj::StringPtr value) {
   if (value.size() == 0 || value.size() > 512) return kj::none;
   kj::Vector<kj::ArrayPtr<const char>> keys;
+  kj::Vector<kj::ArrayPtr<const char>> entries;
   auto lower = [](char c) { return c >= 'a' && c <= 'z'; };
   auto digit = [](char c) { return c >= '0' && c <= '9'; };
   size_t start = 0;
@@ -448,6 +449,11 @@ kj::Maybe<kj::String> SpanContext::parseTracestate(kj::StringPtr value) {
     while (entry.size() && (entry[0] == ' ' || entry[0] == '\t')) entry = entry.slice(1);
     while (entry.size() && (entry.back() == ' ' || entry.back() == '\t')) {
       entry = entry.slice(0, entry.size() - 1);
+    }
+    // W3C permits empty list members, including leading and trailing members.
+    if (entry.size() == 0) {
+      start = end + 1;
+      continue;
     }
     auto equals = KJ_UNWRAP_OR_RETURN(entry.findFirst('='), kj::none);
     auto key = entry.slice(0, equals);
@@ -475,11 +481,12 @@ kj::Maybe<kj::String> SpanContext::parseTracestate(kj::StringPtr value) {
     for (auto c: data)
       if (c < 0x20 || c > 0x7e || c == '=') return kj::none;
     keys.add(key);
+    entries.add(entry);
     if (end == value.size()) break;
     start = end + 1;
-    if (start == value.size()) return kj::none;
   }
-  return kj::str(value);
+  if (entries.empty()) return kj::none;
+  return kj::strArray(entries.asPtr(), ",");
 }
 
 kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags) {
