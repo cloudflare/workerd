@@ -665,6 +665,17 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // request is canceled.
   void addTask(kj::Promise<void> promise);
 
+  // Like addTask(), but even in an actor the task is not a waitUntil() task: it doesn't keep any
+  // request open, delay drain(), or prevent the actor from hibernating. Use it for work that waits
+  // for an external event which may never arrive. The task is canceled when the IoContext is
+  // destroyed.
+  void addBackgroundTask(kj::Promise<void> promise);
+
+  // Resolves once this IoContext has a current IncomingRequest, which run() requires: immediately
+  // if it has one, otherwise when the next request is delivered. An actor's IoContext outlives
+  // its requests, so a background task that wants to run JavaScript waits on this first.
+  kj::Promise<void> whenIncomingRequestAvailable();
+
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
@@ -1363,6 +1374,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Array<jsg::Value> args);
 
   uint addTaskCounter = 0;
+
+  // Fulfilled, and cleared, when the next IncomingRequest is delivered. Declared before `tasks`
+  // so that tasks waiting on these are canceled before the fulfillers are destroyed.
+  kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> incomingRequestWaiters;
+
   kj::TaskSet tasks;
 
   // This canceler will be canceled when the IoContext is destroyed. Use it to wrap promises that

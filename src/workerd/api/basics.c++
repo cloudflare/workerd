@@ -563,6 +563,34 @@ kj::Promise<void> abortRpcClientTask(
   co_await client.abort(reason);
 }
 
+// Waits for an abort to arrive over RPC, then runs `deliver` in `ioctx`. run() needs a current
+// IncomingRequest, which an actor's IoContext doesn't have between requests, so this waits for
+// the next one, and waits again if the request ends while run() is waiting for the isolate lock.
+kj::Promise<void> deliverRpcAbort(IoContext& ioctx,
+    kj::Promise<void> abortPromise,
+    kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> box,
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection,
+    kj::Function<void(jsg::Lock&)> deliver) {
+  co_await abortPromise;
+  if (*box->value.lockShared() == nullptr) {
+    // The trigger was dropped without an abort, so the signal never aborts.
+    co_return;
+  }
+
+  for (;;) {
+    co_await ioctx.whenIncomingRequestAvailable();
+    try {
+      co_await ioctx.run([&deliver](Worker::Lock& lock) { deliver(lock); },
+          criticalSection.map([](kj::Rc<InputGate::CriticalSection>& cs) { return cs.addRef(); }));
+      co_return;
+    } catch (...) {
+      if (ioctx.hasCurrentIncomingRequest()) {
+        throw;
+      }
+    }
+  }
+}
+
 // Sends the serialized abort reason to one RPC clone as a task on the current IoContext,
 // which must be the context that owns the client.
 void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Array<kj::byte> reason) {
@@ -596,7 +624,7 @@ void AbortSignal::setOnAbort(
 
 void AbortSignal::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
   // Only 'abort' listeners can observe an abort; registrations for other event types must
-  // not arm the RPC subscription (whose pending awaitIo blocks actor hibernation). A
+  // not arm the RPC subscription, which holds the signal until the abort arrives. A
   // notification that leaves 'abort' listeners registered arms too — arming is idempotent,
   // and any such notification means an abort could still be observed.
   if (type == kAbortEvent && count > 0) {
@@ -1270,8 +1298,8 @@ kj::Maybe<jsg::JsValue> AbortSignal::deserializePendingReason(jsg::Lock& js) {
 
 void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   // For an AbortSignal received over RPC, the first time someone registers an event on the signal,
-  // we want to arrange to awaitIo() for the underlying RPC signal. If no one is actually listening,
-  // though, we don't want to awaitIo() since it blocks hibernation in actors.
+  // we want to arrange to wait for the underlying RPC signal. If no one is actually listening,
+  // though, there's nothing to deliver the abort to, so we don't wait.
 
   if (rpcAbortPromise == kj::none) {
     // Not an RPC-received signal, or the subscription is already armed.
@@ -1297,11 +1325,17 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   }
 
   KJ_IF_SOME(promise, rpcAbortPromise) {
-    IoContext::current().awaitIo(js, kj::mv(*promise), [self = JSG_THIS](jsg::Lock& js) mutable {
+    // A background task, so that a listener waiting for an abort that may never come doesn't keep
+    // the receiving request open. If the IoContext is destroyed first, the task is canceled and
+    // the abort only fills in the box.
+    auto& ioctx = IoContext::current();
+    ioctx.addBackgroundTask(
+        deliverRpcAbort(ioctx, kj::mv(*promise), KJ_ASSERT_NONNULL(pendingReason).addRef(),
+            ioctx.getCriticalSection(), [self = JSG_THIS](jsg::Lock& js) mutable {
       KJ_IF_SOME(r, self->deserializePendingReason(js)) {
         self->triggerAbort(js, r);
       }
-    });
+    }));
 
     rpcAbortPromise = kj::none;
   }

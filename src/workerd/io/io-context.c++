@@ -361,6 +361,10 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
 
   context->incomingRequests.addFront(*this);
   wasDelivered = true;
+  for (auto& waiter: context->incomingRequestWaiters) {
+    waiter->fulfill();
+  }
+  context->incomingRequestWaiters.clear();
   deliveredLocation = location;
   metrics->delivered();
 
@@ -713,6 +717,20 @@ void IoContext::addTask(kj::Promise<void> promise) {
   }
 
   tasks.add(kj::mv(promise));
+}
+
+void IoContext::addBackgroundTask(kj::Promise<void> promise) {
+  ++addTaskCounter;
+  tasks.add(kj::mv(promise));
+}
+
+kj::Promise<void> IoContext::whenIncomingRequestAvailable() {
+  if (!incomingRequests.empty()) {
+    return kj::READY_NOW;
+  }
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  incomingRequestWaiters.add(kj::mv(paf.fulfiller));
+  return kj::mv(paf.promise);
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {

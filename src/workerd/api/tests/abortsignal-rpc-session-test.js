@@ -116,6 +116,28 @@ export const abortAfterActorMethodReturnedFiresListener = {
   },
 };
 
+// A pending abort listener doesn't keep the actor's request open: its outcome is reported before
+// the abort, which then still fires the listener.
+export const pendingListenerDoesNotHoldActor = {
+  async test(ctrl, env) {
+    const ac = new AbortController();
+    const actor = env.ACTOR.get(env.ACTOR.idFromName('listens-no-hold'));
+    assert.strictEqual(await actor.actorListensForOnabort(ac.signal), 'ok');
+    await assertCalleeSucceeded(env, 'actorListensForOnabort');
+
+    ac.abort('after outcome');
+    const state = await waitForState(
+      () => actor.actorHeldSignalState(),
+      (s) => s.abortedWith !== undefined
+    );
+    assert.deepStrictEqual(state, {
+      aborted: true,
+      reason: 'after outcome',
+      abortedWith: 'after outcome',
+    });
+  },
+};
+
 // Resetting the actor destroys the IoContext that received the signal before the abort.
 export const abortAfterActorReset = {
   async test(ctrl, env) {

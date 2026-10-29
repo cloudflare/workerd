@@ -40,14 +40,22 @@ export class CalleeActor extends DurableObject {
     return 'ok';
   }
 
-  // Keeps the signal and listens for its abort after this method has returned. The listener keeps
-  // this request open until the abort arrives.
+  // Keeps the signal and listens for its abort after this method has returned.
   async actorListensForAbort(signal) {
     this.signal = signal;
     this.abortedWith = undefined;
     signal.addEventListener('abort', () => {
       this.abortedWith = signal.reason;
     });
+    return 'ok';
+  }
+
+  async actorListensForOnabort(signal) {
+    this.signal = signal;
+    this.abortedWith = undefined;
+    signal.onabort = () => {
+      this.abortedWith = signal.reason;
+    };
     return 'ok';
   }
 

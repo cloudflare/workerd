@@ -129,4 +129,8 @@ dropped without an abort never aborts. Registrations made after that point obser
 delivered abort through the already-aborted pre-checks instead. The trigger capability doesn't
 keep the JS RPC session that delivered the signal open (see `redirectPushAbortSignal()` in
 `src/workerd/io/external-pusher.h`), so the receiving request can end while the sender still
-holds it.
+holds it. Neither does an armed subscription: it runs as an `IoContext::addBackgroundTask()`
+task, so a pending listener doesn't keep the receiving request open or block actor
+hibernation. An abort that arrives while the receiving context has no current request (an
+actor between requests) fires the listeners once the next request is delivered; one that
+arrives after the context is destroyed only fills in the box.
