@@ -68,6 +68,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         [entrypointName = entrypointName, eventParameters = kj::mv(eventParameters),
             versionInfo = kj::mv(versionInfo), props = kj::mv(props),
             isDynamicDispatch](Worker::Lock& lock, IoContext& context) mutable {
+      auto traceScope = context.makeRequestTraceScope(lock);
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           markHibernatableWebSocketReceive(context);

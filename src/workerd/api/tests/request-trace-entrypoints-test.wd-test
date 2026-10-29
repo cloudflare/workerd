@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "driver", worker = (
+      modules = [(name = "worker", esModule = embed "request-trace-entrypoints-driver.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "ACTOR", service = "actor")],
+    )),
+    (name = "actor", worker = (
+      modules = [(name = "worker", esModule = embed "request-trace-entrypoints-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      durableObjectNamespaces = [(className = "TraceActor", uniqueKey = "trace-entrypoints")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "NS", durableObjectNamespace = "TraceActor")],
+      streamingTails = ["tail"],
+    )),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "request-trace-entrypoints-tail.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

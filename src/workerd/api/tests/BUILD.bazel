@@ -23,6 +23,15 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "request-trace-entrypoints-test.wd-test",
+    data = [
+        "request-trace-entrypoints-driver.js",
+        "request-trace-entrypoints-tail.js",
+        "request-trace-entrypoints-test.js",
+    ],
+)
+
+wd_test(
     src = "streams-byob-progress-test.wd-test",
     args = ["--experimental"],
     data = [
