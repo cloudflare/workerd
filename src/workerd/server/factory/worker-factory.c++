@@ -543,6 +543,20 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
         [&](BaseTracer& tracer) { tracer.addSpanUpdate(spanId, kj::mv(update)); });
   }
 
+  void submitSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanEvent(spanId, kj::mv(event)); });
+  }
+  void submitSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanLinks(spanId, kj::mv(links)); });
+  }
+  void submitSpanExceptionWithTimestamp(
+      tracing::SpanId spanId, tracing::Exception exception) override {
+    if (isPredictableModeForTest()) exception.timestamp = kj::UNIX_EPOCH;
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      tracer.addSpanExceptionWithTimestamp(spanId, kj::mv(exception));
+    });
+  }
+
   void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,

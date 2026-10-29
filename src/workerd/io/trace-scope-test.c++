@@ -102,6 +102,7 @@ class FixtureSpanSubmitter final: public SpanSubmitter {
         context(kj::mv(context)) {}
   bool submitSpanOpen(
       tracing::SpanId id, tracing::SpanId parent, kj::ConstString name, kj::Date time) override {
+    if (name == "rejected") return false;
     return tracer->runIfAlive([&](BaseTracer& tracer) {
       tracer.setUserSpanContext(
           id, tracing::SpanContext(context.getTraceId(), id, context.getTraceFlags()));
@@ -130,6 +131,16 @@ class FixtureSpanSubmitter final: public SpanSubmitter {
   tracing::SpanId makeSpanId() override {
     return tracing::SpanId(next++);
   }
+  void submitSpanEvent(tracing::SpanId id, tracing::SpanEvent event) override {
+    tracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanEvent(id, kj::mv(event)); });
+  }
+  void submitSpanLinks(tracing::SpanId id, tracing::SpanLinks links) override {
+    tracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanLinks(id, kj::mv(links)); });
+  }
+  void submitSpanExceptionWithTimestamp(tracing::SpanId id, tracing::Exception exception) override {
+    tracer->runIfAlive(
+        [&](BaseTracer& tracer) { tracer.addSpanExceptionWithTimestamp(id, kj::mv(exception)); });
+  }
 
  private:
   kj::Own<BaseTracer::WeakRef> tracer;
@@ -146,10 +157,10 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
     export default {
       tailStream(onset) {
         if (onset.spanContext.traceFlags !== 3) throw new Error('onset flags');
-        return event => {
+        return { spanOpen: event => {
           if (event.spanContext.traceFlags !== 3) throw new Error('child flags');
           if (event.event.type === 'spanOpen') globalThis.childEvents++;
-        };
+        } };
       }
     };
   )JS"_kj});
@@ -172,9 +183,9 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
   auto& invocation = request->getInvocationSpanContext();
   invocation = tracing::InvocationSpanContext(invocation.getTraceId(), invocation.getInvocationId(),
       invocation.getSpanId(), tracing::TraceFlags(3));
-  tracer->setEventInfoInternal(invocation, kj::none, kj::UNIX_EPOCH, tracing::CustomEventInfo());
   request->delivered();
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    tracer->setEventInfo(*request, tracing::CustomEventInfo());
     auto scope = context->makeRequestTraceScope(env.lock);
     auto tracing = env.js.alloc<api::Tracing>();
     auto child = context->getCurrentUserTraceSpan().newChild("native-child"_kjc);
@@ -183,6 +194,14 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
     auto grandchild = tracing->startSpan(env.js, kj::str("native-grandchild"));
     KJ_EXPECT(grandchild->spanContext().traceFlags == 3);
     grandchild->end();
+    auto script = jsg::check(v8::Script::Compile(env.js.v8Context(), env.js.str(R"JS(
+      const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
+      const span = api.trace.getTracer('ignored-marks').startSpan('marked');
+      span.addEvent('ignored');
+      span.addLink({ context: span.spanContext() });
+      span.end();
+    )JS"_kj)));
+    jsg::check(script->Run(env.js.v8Context()));
     child.end();
   });
   fixture.drainAndDestroy(kj::mv(request));
@@ -191,12 +210,107 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
   fixture.runInIoContext([](const TestFixture::Environment& env) {
     auto script = jsg::check(v8::Script::Compile(env.js.v8Context(),
         env.js.str(
-            "if (globalThis.childEvents !== 2) throw new Error('missing tail child events');"_kj)));
+            "if (globalThis.childEvents !== 3) throw new Error('missing tail child events');"_kj)));
     jsg::check(script->Run(env.js.v8Context()));
   });
 }
 
 enum class UserSpanFactory { PRESENT, ABSENT };
+
+KJ_TEST("actor span marks use their creator stream and rejected spans emit nothing") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader(),
+    .mainModuleSource = R"JS(
+      globalThis.events = [];
+      export default {
+        tailStream(onset) {
+          events.push(onset);
+          const collect = event => events.push(event);
+          return { spanOpen: collect, spanClose: collect, spanEvent: collect,
+            spanLinks: collect, exception: collect, outcome: collect };
+        }
+      };
+    )JS"_kj,
+    .actorId = Worker::Actor::Id(kj::str("span-mark-owner"))});
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  auto makeStreamingTracer = [&]() {
+    auto tails = kj::heapArray<kj::Own<WorkerInterface>>(1);
+    tails[0] = kj::heap<FixtureTail>(fixture, tasks);
+    auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+        kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+    auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
+        kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
+    tracer->setMakeUserRequestSpanFunc([ptr = tracer.get()](tracing::SpanContext identity) {
+      return SpanParent(kj::rc<UserSpanObserver>(
+          kj::refcounted<FixtureSpanSubmitter>(*ptr, tracing::SpanContext::clone(identity)),
+          identity.getTraceId(), identity.getTraceFlags()));
+    });
+    return tracer;
+  };
+  auto run = [](const TestFixture::Environment& env, kj::StringPtr source) {
+    auto script = jsg::check(v8::Script::Compile(env.js.v8Context(), env.js.str(source)));
+    jsg::check(script->Run(env.js.v8Context()));
+  };
+  auto context = fixture.newIoContext();
+  auto firstTracer = makeStreamingTracer();
+  auto first = fixture.newUndeliveredIncomingRequest(*context, firstTracer.clone());
+  first->delivered();
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    firstTracer->setEventInfo(*first, tracing::CustomEventInfo());
+    auto scope = context->makeRequestTraceScope(env.lock);
+    run(env, R"JS(
+      globalThis.api = globalThis[Symbol.for('opentelemetry.js.api.1')];
+      globalThis.tracer = api.trace.getTracer('owner');
+      globalThis.creatorInvocation = api.context.active().getValue(
+        Symbol.for('OpenTelemetry Context Key SPAN'));
+      globalThis.kept = tracer.startSpan('kept');
+      globalThis.link = { context: { traceId: '00000000000000001111111111111111',
+        spanId: '2222222222222222', traceFlags: 1 } };
+      globalThis.mark = span => {
+        span.addEvent('owner-event', {}, [1700000000, 1]);
+        span.addLinks([link, link]);
+        span.recordException(new Error('owner-exception'), [1700000000, 2]);
+      };
+      mark(creatorInvocation);
+      const rejected = tracer.startSpan('rejected');
+      mark(rejected);
+      rejected.end();
+    )JS"_kj);
+  });
+  auto secondTracer = makeStreamingTracer();
+  auto second = fixture.newUndeliveredIncomingRequest(*context, secondTracer.clone());
+  second->delivered();
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    secondTracer->setEventInfo(*second, tracing::CustomEventInfo());
+    auto scope = context->makeRequestTraceScope(env.lock);
+    run(env, "mark(kept); mark(creatorInvocation); kept.end();"_kj);
+  });
+  fixture.drainAndDestroy(kj::mv(first));
+  fixture.drainAndDestroy(kj::mv(second));
+  firstTracer = nullptr;
+  secondTracer = nullptr;
+  tasks.onEmpty().wait(fixture.getWaitScope());
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    run(env, R"JS(
+      const opens = events.filter(e => e.event.type === 'spanOpen');
+      if (opens.length !== 1 || opens[0].event.name !== 'kept') throw new Error('rejected open');
+      const owner = opens[0].invocationId;
+      const marks = events.filter(e => ['spanEvent', 'spanLinks', 'exception'].includes(e.event.type));
+      if (marks.length !== 9) throw new Error('missing or leaked marks: ' + marks.length);
+      const rootId = events.find(e => e.event.type === 'onset' && e.invocationId === owner).event.spanId;
+      for (const e of marks) {
+        if (e.invocationId !== owner) throw new Error('wrong creator stream');
+        if (![opens[0].event.spanId, rootId].includes(e.spanContext.spanId)) throw new Error('wrong span ID');
+      }
+      if (marks.filter(e => e.spanContext.spanId === rootId).length !== 6) throw new Error('invocation marks');
+      if (marks.filter(e => e.event.type === 'spanLinks').some(e => e.event.links.length !== 2))
+        throw new Error('links not batched');
+    )JS"_kj);
+  });
+}
 
 KJ_TEST("a native trigger without a tracer remains a propagation-only root") {
   capnp::MallocMessageBuilder message;

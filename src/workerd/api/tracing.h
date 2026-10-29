@@ -93,6 +93,8 @@ class SpanState: public kj::Refcounted {
 
   virtual void updateName(kj::ConstString operationName) = 0;
   virtual void setStatus(tracing::SpanStatus status) = 0;
+  // Only adapter-created spans override this; invocation/native spans retain platform end times.
+  virtual void setEndTimestamp(tracing::SpanTimestamp time) {}
 
   void addEvent(tracing::SpanEvent event);
   void addLinks(tracing::SpanLinks links);
@@ -110,15 +112,20 @@ class SpanState: public kj::Refcounted {
   SpanState() = default;
   virtual bool canRecordAttributes() = 0;
   virtual void recordAttribute(kj::String key, AttributeValue value) = 0;
+  virtual void recordEvent(tracing::SpanEvent event) {}
+  virtual void recordLinks(tracing::SpanLinks links) {}
   virtual void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
-      kj::Maybe<kj::String> stack) = 0;
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<tracing::SpanTimestamp> time) = 0;
   virtual void recordSpanDataLimitError(
       kj::StringPtr itemKind, kj::StringPtr name, size_t valueSize) {}
 
  private:
   size_t bytesUsed = 0;
+  size_t eventCount = 0;
+  size_t linkCount = 0;
 };
 
 // JavaScript-accessible tracing span (exposed as `Span`). From the user's perspective this
@@ -375,6 +382,13 @@ class TracingContext: public jsg::Object {
     jsg::Optional<Timestamp> startTime;
     JSG_STRUCT(kind, scope, startTime);
   };
+  struct Link {
+    user_tracing::TracingSpanContext context;
+    jsg::Dict<jsg::Optional<jsg::Value>> attributes;
+    jsg::Optional<bool> isRemote;
+    jsg::Optional<kj::String> traceState;
+    JSG_STRUCT(context, attributes, isRemote, traceState);
+  };
   TracingContext() = default;
   TracingContext(jsg::Lock&, const jsg::Url&) {}
   jsg::Ref<user_tracing::Span> startSpan(
@@ -391,12 +405,9 @@ class TracingContext: public jsg::Object {
       jsg::Dict<jsg::Optional<jsg::Value>> attributes,
       jsg::Optional<Timestamp> time,
       const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler);
-  void addLink(jsg::Lock& js,
+  void addLinks(jsg::Lock& js,
       jsg::Ref<user_tracing::Span> span,
-      user_tracing::TracingSpanContext context,
-      jsg::Dict<jsg::Optional<jsg::Value>> attributes,
-      jsg::Optional<bool> isRemote,
-      jsg::Optional<kj::String> traceState,
+      kj::Array<Link> links,
       const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler);
   jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
       jsg::Optional<user_tracing::TracingSpanContext> context,
@@ -410,7 +421,7 @@ class TracingContext: public jsg::Object {
     JSG_METHOD(end);
     JSG_METHOD(recordException);
     JSG_METHOD(addEvent);
-    JSG_METHOD(addLink);
+    JSG_METHOD(addLinks);
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
@@ -449,4 +460,4 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
   api::Tracing, api::TracingContext, api::TracingContextVariable, api::user_tracing::Span,         \
       api::user_tracing::ExceptionData, api::user_tracing::TracingSpanStatus,                      \
       api::user_tracing::TracingSpanContext, api::TracingContext::Scope,                           \
-      api::TracingContext::SpanOptions, api::TracingContext::Timestamp
+      api::TracingContext::SpanOptions, api::TracingContext::Timestamp, api::TracingContext::Link

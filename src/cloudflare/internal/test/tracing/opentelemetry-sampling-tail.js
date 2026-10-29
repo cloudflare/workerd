@@ -30,6 +30,9 @@ export default {
     onsets.push(onset);
     const collect = collector.tailStream(onset);
     return (event) => {
+      assert(
+        !['spanEvent', 'spanLinks', 'exception'].includes(event.event.type)
+      );
       assert.strictEqual(event.spanContext.traceFlags, expectedFlags);
       if (event.event.type === 'log') logs.push(event.event.message);
       collect(event);

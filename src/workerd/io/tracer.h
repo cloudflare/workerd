@@ -327,6 +327,13 @@ class SpanSubmitter: public kj::Refcounted {
   }
 
   virtual void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
+  virtual void submitSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) {}
+  virtual void submitSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
+  virtual void submitSpanExceptionWithTimestamp(
+      tracing::SpanId spanId, tracing::Exception exception) {
+    submitSpanException(spanId, exception.timestamp, kj::mv(exception.code), kj::mv(exception.name),
+        kj::mv(exception.message), kj::mv(exception.stack));
+  }
 
   virtual void submitSpanException(tracing::SpanId spanId,
       kj::Date timestamp,
@@ -386,6 +393,7 @@ class UserSpanObserver final: public SpanObserver {
   kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
   void setOpenMetadata(tracing::SpanMetadata metadata) override {
+    startTimestamp = metadata.startTime;
     openMetadata = kj::mv(metadata);
   }
   void setEndTimestamp(tracing::SpanTimestamp time) override {
@@ -394,6 +402,9 @@ class UserSpanObserver final: public SpanObserver {
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
   void onUpdateStatus(tracing::SpanStatus&& status) override;
+  void onEvent(tracing::SpanEvent event) override;
+  void onLinks(tracing::SpanLinks links) override;
+  void onExceptionWithTimestamp(tracing::Exception exception) override;
   void onException(kj::Date timestamp,
       kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
@@ -421,6 +432,7 @@ class UserSpanObserver final: public SpanObserver {
   bool fromUserCode = false;
   kj::Maybe<tracing::SpanMetadata> openMetadata;
   kj::Maybe<tracing::SpanTimestamp> endTimestamp;
+  kj::Maybe<tracing::SpanTimestamp> startTimestamp;
 };
 
 }  // namespace workerd

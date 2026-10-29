@@ -47,30 +47,51 @@ function timestamp(
   return attempt(() => normalizeTimestamp(value), undefined);
 }
 
+function isTimeInput(value: unknown): boolean {
+  return (
+    typeof value === 'number' ||
+    value instanceof Date ||
+    (Array.isArray(value) &&
+      value.length === 2 &&
+      value.every((item) => typeof item === 'number'))
+  );
+}
+
 function normalizeTimestamp(
   value: unknown
 ): { seconds: number; nanoseconds: number } | undefined {
-  if (value instanceof Date) value = value.getTime();
+  const date = value instanceof Date;
+  if (date) value = (value as Date).getTime();
+  let seconds: number;
+  let nanoseconds: number;
   if (typeof value === 'number' && Number.isFinite(value)) {
-    let seconds = Math.floor(value / 1000);
-    let nanoseconds = Math.round((value - seconds * 1000) * 1e6);
-    if (nanoseconds === 1e9) {
-      ++seconds;
-      nanoseconds = 0;
-    }
-    if (Number.isSafeInteger(seconds)) return { seconds, nanoseconds };
-  }
-  if (
+    const millis =
+      !date && value < performance.timeOrigin / 2
+        ? performance.timeOrigin + value
+        : value;
+    seconds = Math.floor(millis / 1000);
+    nanoseconds = Math.round((millis - seconds * 1000) * 1e6);
+  } else if (
     Array.isArray(value) &&
     value.length === 2 &&
-    value.every(Number.isInteger) &&
-    Number.isSafeInteger(value[0]) &&
-    value[1] >= 0 &&
-    value[1] < 1e9
+    value.every((item) => typeof item === 'number' && Number.isFinite(item))
   ) {
-    return { seconds: value[0] as number, nanoseconds: value[1] as number };
-  }
-  return undefined;
+    seconds = Math.floor(value[0] as number);
+    nanoseconds = Math.round(
+      ((value[0] as number) - seconds) * 1e9 + (value[1] as number)
+    );
+  } else return undefined;
+  if (!Number.isSafeInteger(nanoseconds)) return undefined;
+  seconds += Math.floor(nanoseconds / 1e9);
+  nanoseconds = ((nanoseconds % 1e9) + 1e9) % 1e9;
+  if (
+    !Number.isSafeInteger(seconds) ||
+    seconds < 0 ||
+    seconds > 9223372036 ||
+    (seconds === 9223372036 && nanoseconds >= 854775808)
+  )
+    return undefined;
+  return { seconds, nanoseconds };
 }
 
 function eventAttributes(input: unknown): Record<string, SpanValue> {
@@ -81,6 +102,7 @@ function eventAttributes(input: unknown): Record<string, SpanValue> {
     typeof value === 'number' ||
     typeof value === 'boolean';
   for (const [key, value] of Object.entries(input)) {
+    if (Object.keys(result).length === 128) break;
     if (!key) continue;
     if (scalar(value)) result[key] = value as SpanValue;
     else if (Array.isArray(value)) {
@@ -164,6 +186,8 @@ class Span implements SpanLike {
   readonly #context: SpanContext;
   #ended = false;
   #status = 0;
+  #eventCount = 0;
+  #linkCount = 0;
 
   constructor(
     inner?: RuntimeSpan,
@@ -216,47 +240,57 @@ class Span implements SpanLike {
     return this;
   }
   addEvent(name: string, attributesOrTime?: unknown, time?: unknown): this {
-    if (this.#ended || this.inner === undefined || typeof name !== 'string')
+    if (
+      this.#ended ||
+      this.inner === undefined ||
+      typeof name !== 'string' ||
+      this.#eventCount >= 128
+    )
       return this;
     attempt(() => {
-      const secondIsTime =
-        typeof attributesOrTime === 'number' ||
-        attributesOrTime instanceof Date ||
-        Array.isArray(attributesOrTime);
+      const secondIsTime = isTimeInput(attributesOrTime);
       tracingContext.addEvent(
         this.inner as RuntimeSpan,
         name,
         eventAttributes(secondIsTime ? undefined : attributesOrTime),
-        timestamp(secondIsTime ? attributesOrTime : time)
+        timestamp(secondIsTime && !isTimeInput(time) ? attributesOrTime : time)
       );
+      ++this.#eventCount;
     }, undefined);
     return this;
   }
   addLink(link: unknown): this {
-    if (this.#ended || this.inner === undefined) return this;
-    attempt(() => {
-      if (link === null || typeof link !== 'object') return;
-      const value = link as { context?: SpanContext; attributes?: unknown };
-      const identity = value.context;
-      if (!valid(identity)) return;
-      tracingContext.addLink(
-        this.inner as RuntimeSpan,
-        {
-          traceId: identity.traceId.toLowerCase(),
-          spanId: identity.spanId.toLowerCase(),
-          traceFlags: identity.traceFlags,
-        },
-        eventAttributes(value.attributes),
-        identity.isRemote === true,
-        identity.traceState?.serialize()
-      );
-    }, undefined);
-    return this;
+    return this.addLinks([link]);
   }
   addLinks(links: unknown[]): this {
-    if (!this.#ended && Array.isArray(links)) {
-      for (const link of links) this.addLink(link);
-    }
+    if (this.#ended || this.inner === undefined || !Array.isArray(links))
+      return this;
+    attempt(() => {
+      const output: Parameters<typeof tracingContext.addLinks>[1] = [];
+      for (const link of links) {
+        if (this.#linkCount + output.length >= 128) break;
+        attempt(() => {
+          if (link === null || typeof link !== 'object') return;
+          const value = link as { context?: SpanContext; attributes?: unknown };
+          const identity = value.context;
+          if (!valid(identity)) return;
+          const traceState = identity.traceState?.serialize();
+          output.push({
+            context: {
+              traceId: identity.traceId.toLowerCase(),
+              spanId: identity.spanId.toLowerCase(),
+              traceFlags: identity.traceFlags,
+            },
+            attributes: eventAttributes(value.attributes),
+            isRemote: identity.isRemote === true,
+            ...(typeof traceState === 'string' ? { traceState } : {}),
+          });
+        }, undefined);
+      }
+      if (output.length !== 0)
+        tracingContext.addLinks(this.inner as RuntimeSpan, output);
+      this.#linkCount += output.length;
+    }, undefined);
     return this;
   }
   setStatus(status: { code: number; message?: string }): this {
@@ -293,7 +327,7 @@ class Span implements SpanLike {
     }, undefined);
   }
   recordException(exception: unknown, time?: unknown): void {
-    if (!this.#ended)
+    if (!this.#ended && this.#eventCount < 128)
       attempt(() => {
         if (this.inner !== undefined)
           tracingContext.recordException(
@@ -301,6 +335,7 @@ class Span implements SpanLike {
             exception,
             timestamp(time)
           );
+        ++this.#eventCount;
       }, undefined);
   }
 }

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { trace, createTraceState } from '@opentelemetry/api';
+import { context, trace, createTraceState } from '@opentelemetry/api';
 import { tracing } from 'cloudflare:workers';
 
 export const metadata = {
@@ -84,6 +84,76 @@ export const metadata = {
       .getTracer('empty', '', { schemaUrl: '' })
       .startSpan('empty-optionals')
       .end();
+    provider
+      .getTracer('a'.repeat(255) + '💥', 'v'.repeat(255) + '💥', {
+        schemaUrl: 's'.repeat(2047) + '💥',
+      })
+      .startSpan('scope-limit')
+      .end();
+    const limits = tracer.startSpan('count-limits');
+    const attributes = Object.fromEntries(
+      Array.from({ length: 130 }, (_, i) => [`k${i}`, i])
+    );
+    for (let i = 0; i < 130; i++)
+      limits.addEvent('count', i === 0 ? attributes : {});
+    limits.addLinks(
+      Array.from({ length: 130 }, (_, i) => ({
+        context: linkedContext,
+        attributes: i === 0 ? attributes : {},
+      }))
+    );
+    limits.end();
+    const budget = tracer.startSpan('event-budget');
+    budget.addEvent('too-large', { text: 'x'.repeat(70000) });
+    budget.setAttribute('starved', true);
+    budget.end();
+    const linkBudget = tracer.startSpan('link-budget');
+    linkBudget.addLink({
+      context: linkedContext,
+      attributes: { text: 'x'.repeat(70000) },
+    });
+    linkBudget.end();
+    const times = tracer.startSpan('time-validation', { startTime: [-1, 0] });
+    times.addEvent('overload', [1, 1], [1700000000, 2]);
+    times.addEvent('third-date', {}, new Date(1700000000123));
+    times.addEvent('third-number', {}, 1700000000456);
+    times.addEvent('normalized', [1700000000.5, 1000000001]);
+    times.addEvent('negative-carry', [1700000001, -1]);
+    times.addEvent('negative-time', [-1, 0]);
+    times.addEvent('overflow-time', [9223372036, 854775808]);
+    times.addEvent('max-time', [9223372036, 854775807]);
+    times.addEvent('a'.repeat(63) + '💥');
+    times.addEvent('oversized-array', { values: Array(513).fill(1) });
+    times.addLink({
+      context: {
+        ...linkedContext,
+        traceId: '00000000000000001111111111111111',
+        traceState: { serialize: () => 'invalid state' },
+      },
+    });
+    times.end([9223372036, 854775808]);
+    tracer
+      .startSpan('future-start', { startTime: [9223372036, 854775807] })
+      .end();
+    tracer.startActiveSpan('otel-parent', (parent) => {
+      tracing.startSpan('runtime-child').end();
+      parent.end();
+    });
+    context.with(
+      context
+        .active()
+        .setValue(
+          Symbol.for('OpenTelemetry SDK Context Key SUPPRESS_TRACING'),
+          true
+        ),
+      () => {
+        const suppressed = tracer.startSpan('must-not-export');
+        suppressed.addEvent('suppressed');
+        suppressed.addLink({ context: linkedContext });
+        suppressed.recordException(new Error('suppressed'), [1700000000, 1]);
+        suppressed.end();
+      }
+    );
     // Extra arguments to the public API remain ignored, including while the flag is off.
     tracing
       .startSpan(`native-${env.enabled}`, {

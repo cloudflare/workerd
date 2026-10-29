@@ -12,12 +12,14 @@ declare const tracingContext: {
     exception: unknown,
     time?: { seconds: number; nanoseconds: number }
   ): void;
-  addLink(
+  addLinks(
     span: Span,
-    context: TracingSpanContext,
-    attributes: Record<string, unknown>,
-    isRemote: boolean,
-    traceState?: string
+    links: {
+      context: TracingSpanContext;
+      attributes: Record<string, unknown>;
+      isRemote: boolean;
+      traceState?: string;
+    }[]
   ): void;
   addEvent(
     span: Span,

@@ -588,7 +588,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanLinks& links, StringCache& cache) {
   obj.set(js, "links", js.arr(links.links.asPtr(), [&cache](jsg::Lock& js, const SpanLink& link) {
     auto item = js.obj();
     auto context = js.obj();
-    context.set(js, TRACEID_STR, js.str(link.context.getTraceId().toGoString()));
+    context.set(js, TRACEID_STR, js.str(link.context.getTraceId().toW3C()));
     KJ_IF_SOME(spanId, link.context.getSpanId()) {
       context.set(js, SPANID_STR, js.str(spanId.toGoString()));
     }

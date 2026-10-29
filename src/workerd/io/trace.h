@@ -1507,6 +1507,13 @@ class SpanObserver: public kj::Refcounted {
   virtual void setOpenMetadata(tracing::SpanMetadata metadata) {}
   // An application end time does not replace the observation clock used by onClose().
   virtual void setEndTimestamp(tracing::SpanTimestamp time) {}
+  virtual void onEvent(tracing::SpanEvent event) {}
+  virtual void onLinks(tracing::SpanLinks links) {}
+  // Compatibility fallback retains the exception even when an embedder ignores explicit times.
+  virtual void onExceptionWithTimestamp(tracing::Exception exception) {
+    onException(exception.timestamp, kj::mv(exception.code), kj::mv(exception.name),
+        kj::mv(exception.message), kj::mv(exception.stack));
+  }
 
   // Called when the span is opened. Delivers the initial operation name and start time.
   // Called exactly once, before any other lifecycle method.

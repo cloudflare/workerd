@@ -63,6 +63,9 @@ export const jsOnlySampling = {
         unsampled,
         async (span) => {
           assert.strictEqual(span.isRecording(), false);
+          span.addEvent('must-not-export');
+          span.addLink({ context: invocation });
+          span.recordException(new Error('must-not-export'), [1700000000, 1]);
           assert.strictEqual(tracing.getActiveSpan(), undefined);
           tracing.enterSpan('sampling-orphan-child', (child) => {
             assert.strictEqual(child.isTraced, false);

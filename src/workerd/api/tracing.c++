@@ -266,71 +266,48 @@ void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
     recordSpanDataLimitError("exception", name, valueSize);
     return;
   }
-  KJ_IF_SOME(explicitTime, time) {
-    auto parent = makeSpanParent();
-    KJ_IF_SOME(context, parent.toSpanContext()) {
-      KJ_IF_SOME(spanId, context.getSpanId()) {
-        KJ_IF_SOME(observer, parent.getObserver()) {
-          if (IoContext::hasCurrent()) {
-            KJ_IF_SOME(tracer, IoContext::current().getWorkerTracer()) {
-              tracing::Exception exception(
-                  observer.getTime(), kj::mv(name), kj::mv(message), kj::mv(stack), kj::mv(code));
-              exception.time = explicitTime;
-              tracer.addSpanExceptionWithTimestamp(spanId, kj::mv(exception));
-            }
-          }
-        }
-      }
-    }
-    return;
-  }
-  recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+  recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack), time);
 }
 
 void SpanState::addEvent(tracing::SpanEvent event) {
-  if (!getIsTraced() || !IoContext::hasCurrent()) return;
+  if (!getIsTraced() || eventCount >= 128 || bytesUsed > MAX_SPAN_BYTES) return;
+  ++eventCount;
   auto size = event.size();
   bytesUsed += size;
   if (bytesUsed > MAX_SPAN_BYTES) {
     recordSpanDataLimitError("event", event.name, size);
     return;
   }
-  auto parent = makeSpanParent();
-  KJ_IF_SOME(context, parent.toSpanContext()) {
-    KJ_IF_SOME(spanId, context.getSpanId()) {
-      KJ_IF_SOME(tracer, IoContext::current().getWorkerTracer()) {
-        tracer.addSpanEvent(spanId, kj::mv(event));
-      }
-    }
-  }
+  recordEvent(kj::mv(event));
 }
 
 void SpanState::addLinks(tracing::SpanLinks links) {
-  if (!getIsTraced() || !IoContext::hasCurrent()) return;
+  if (!getIsTraced() || linkCount >= 128 || bytesUsed > MAX_SPAN_BYTES) return;
+  if (links.links.size() > 128 - linkCount) {
+    kj::Vector<tracing::SpanLink> limited;
+    for (size_t i = 0; i < 128 - linkCount; ++i) limited.add(kj::mv(links.links[i]));
+    links.links = limited.releaseAsArray();
+  }
+  linkCount += links.links.size();
   auto size = links.size();
   bytesUsed += size;
   if (bytesUsed > MAX_SPAN_BYTES) {
     recordSpanDataLimitError("links", "", size);
     return;
   }
-  auto parent = makeSpanParent();
-  KJ_IF_SOME(context, parent.toSpanContext()) {
-    KJ_IF_SOME(spanId, context.getSpanId()) {
-      KJ_IF_SOME(tracer, IoContext::current().getWorkerTracer()) {
-        tracer.addSpanLinks(spanId, kj::mv(links));
-      }
-    }
-  }
+  if (links.links.size() != 0) recordLinks(kj::mv(links));
 }
 
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer,
       kj::ConstString operationName,
-      kj::Maybe<tracing::TraceFlags> defaultJsFlags)
+      kj::Maybe<tracing::TraceFlags> defaultJsFlags,
+      bool adapterCreated = false)
       : spanContext(projectJsSpanContext(observer->toSpanContext(), defaultJsFlags)),
         sampledOut(observer->isSampledOut()),
         childParent(observer.addRef()),
+        adapterCreated(adapterCreated),
         builder(kj::mv(observer), kj::mv(operationName)) {}
 
   ~UserSpanState() noexcept(false) override {
@@ -364,6 +341,12 @@ class UserSpanState final: public SpanState {
 
   void setStatus(tracing::SpanStatus status) override {
     builder.setStatus(kj::mv(status));
+  }
+
+  void setEndTimestamp(tracing::SpanTimestamp time) override {
+    if (adapterCreated && getIsTraced()) {
+      KJ_IF_SOME(observer, childParent.getObserver()) observer.setEndTimestamp(time);
+    }
   }
 
  protected:
@@ -402,8 +385,26 @@ class UserSpanState final: public SpanState {
   void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
-      kj::Maybe<kj::String> stack) override {
-    builder.recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<tracing::SpanTimestamp> time) override {
+    KJ_IF_SOME(explicitTime, time) {
+      KJ_IF_SOME(observer, childParent.getObserver()) {
+        tracing::Exception exception(
+            observer.getTime(), kj::mv(name), kj::mv(message), kj::mv(stack), kj::mv(code));
+        exception.time = explicitTime;
+        observer.onExceptionWithTimestamp(kj::mv(exception));
+      }
+    } else {
+      builder.recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+    }
+  }
+
+  void recordEvent(tracing::SpanEvent event) override {
+    KJ_IF_SOME(observer, childParent.getObserver()) observer.onEvent(kj::mv(event));
+  }
+
+  void recordLinks(tracing::SpanLinks links) override {
+    KJ_IF_SOME(observer, childParent.getObserver()) observer.onLinks(kj::mv(links));
   }
 
   void recordSpanDataLimitError(
@@ -430,6 +431,7 @@ class UserSpanState final: public SpanState {
   // Unlike `builder`, this keeps the observer after end() so the span can still parent spans that
   // are created later, as OpenTelemetry allows.
   workerd::SpanParent childParent;
+  bool adapterCreated;
   workerd::SpanBuilder builder;
 };
 
@@ -511,17 +513,45 @@ class InvocationSpanState final: public SpanState {
     }
   }
 
+  void recordEvent(tracing::SpanEvent event) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(valueTracer, tracer) {
+        valueTracer->runIfAlive([&](BaseTracer& tracer) {
+          tracer.addSpanEvent(valueContext.getSpanId(), kj::mv(event));
+        });
+      }
+    }
+  }
+
+  void recordLinks(tracing::SpanLinks links) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(valueTracer, tracer) {
+        valueTracer->runIfAlive([&](BaseTracer& tracer) {
+          tracer.addSpanLinks(valueContext.getSpanId(), kj::mv(links));
+        });
+      }
+    }
+  }
+
   void recordExceptionImpl(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
-      kj::Maybe<kj::String> stack) override {
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<tracing::SpanTimestamp> time) override {
     KJ_IF_SOME(valueContext, context) {
       KJ_IF_SOME(observer, parent.getObserver()) {
         auto timestamp = observer.getTime();
         KJ_IF_SOME(valueTracer, tracer) {
           valueTracer->runIfAlive([&](BaseTracer& tracer) {
-            tracer.addSpanException(valueContext.getSpanId(), timestamp, kj::mv(code), kj::mv(name),
-                kj::mv(message), kj::mv(stack));
+            KJ_IF_SOME(explicitTime, time) {
+              tracing::Exception exception(
+                  timestamp, kj::mv(name), kj::mv(message), kj::mv(stack), kj::mv(code));
+              exception.time = explicitTime;
+              tracer.addSpanExceptionWithTimestamp(valueContext.getSpanId(), kj::mv(exception));
+            } else {
+              tracer.addSpanException(valueContext.getSpanId(), timestamp, kj::mv(code),
+                  kj::mv(name), kj::mv(message), kj::mv(stack));
+            }
           });
         }
       }
@@ -562,9 +592,11 @@ class NoopSpanState final: public SpanState {
 
   void recordAttribute(kj::String, AttributeValue) override {}
 
-  void recordExceptionImpl(
-      kj::Maybe<tracing::Exception::Code>, kj::String, kj::String, kj::Maybe<kj::String>) override {
-  }
+  void recordExceptionImpl(kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>,
+      kj::Maybe<tracing::SpanTimestamp>) override {}
 };
 
 // ======================================================================================
@@ -932,11 +964,13 @@ CreatedSpan createSpan(
         // newChildFromUserCode (vs newChild) signals user-origin to the submitter so it can
         // skip the operation-name allowlist that gates runtime spans.
         auto childObserver = observer.newChildFromUserCode();
+        bool adapterCreated = metadata != kj::none;
         KJ_IF_SOME(value, metadata) {
           childObserver->setOpenMetadata(kj::mv(value));
         }
         state = kj::refcounted<user_tracing::UserSpanState>(kj::mv(childObserver),
-            kj::ConstString(kj::heapString(operationName)), context.getDefaultJsTraceFlags());
+            kj::ConstString(kj::heapString(operationName)), context.getDefaultJsTraceFlags(),
+            adapterCreated);
         // Capture a SpanParent for the child so startActiveSpan() / enterSpan() can push it onto
         // the AsyncContextFrame. Safe to carry across the request boundary thanks to
         // BaseTracer::WeakRef in the submitter - stale parents cannot pin the tracer.
@@ -1097,10 +1131,18 @@ jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operat
 }
 
 namespace {
+kj::String truncateUtf8(kj::String value, size_t limit) {
+  if (value.size() <= limit) return kj::mv(value);
+  while (limit > 0 && (static_cast<unsigned char>(value[limit]) & 0xc0) == 0x80) --limit;
+  return kj::str(value.first(limit));
+}
+
 kj::Maybe<tracing::SpanTimestamp> toNativeTimestamp(
     const jsg::Optional<TracingContext::Timestamp>& time) {
   KJ_IF_SOME(value, time) {
-    JSG_REQUIRE(value.nanoseconds < 1000000000, TypeError, "Invalid span timestamp");
+    if (value.seconds < 0 || value.nanoseconds >= 1000000000 || value.seconds > 9223372036 ||
+        (value.seconds == 9223372036 && value.nanoseconds >= 854775808))
+      return kj::none;
     return tracing::SpanTimestamp(value.seconds, value.nanoseconds);
   }
   return kj::none;
@@ -1111,9 +1153,13 @@ void TracingContext::end(jsg::Ref<user_tracing::Span> span, jsg::Optional<Timest
   if (!IoContext::hasCurrent() || !IoContext::current().isOpentelemetryApiEnabled()) return;
   if (span->getIsTraced()) {
     KJ_IF_SOME(value, toNativeTimestamp(time)) {
-      auto parent = span->makeSpanParent();
-      KJ_IF_SOME(observer, parent.getObserver()) {
-        observer.setEndTimestamp(value);
+      KJ_SWITCH_ONEOF(span->state) {
+        KJ_CASE_ONEOF(state, kj::Own<user_tracing::SpanState>) {
+          state->setEndTimestamp(value);
+        }
+        KJ_CASE_ONEOF(state, IoOwn<user_tracing::SpanState>) {
+          state->setEndTimestamp(value);
+        }
       }
     }
   }
@@ -1141,6 +1187,7 @@ void TracingContext::addEvent(jsg::Lock& js,
     return;
   kj::Vector<tracing::Attribute> values;
   for (auto& field: attributes.fields) {
+    if (values.size() == 128) break;
     KJ_IF_SOME(value, field.value) {
       KJ_IF_SOME(converted,
           user_tracing::toAttributeValue(js, field.name, value.getHandle(js), scalarHandler)) {
@@ -1149,7 +1196,8 @@ void TracingContext::addEvent(jsg::Lock& js,
     }
   }
   auto timestamp = toNativeTimestamp(time);
-  tracing::SpanEvent event(kj::ConstString(kj::mv(name)), values.releaseAsArray(), timestamp);
+  tracing::SpanEvent event(
+      kj::ConstString(truncateUtf8(kj::mv(name), 64)), values.releaseAsArray(), timestamp);
   KJ_SWITCH_ONEOF(span->state) {
     KJ_CASE_ONEOF(state, kj::Own<user_tracing::SpanState>) {
       state->addEvent(kj::mv(event));
@@ -1160,40 +1208,44 @@ void TracingContext::addEvent(jsg::Lock& js,
   }
 }
 
-void TracingContext::addLink(jsg::Lock& js,
+void TracingContext::addLinks(jsg::Lock& js,
     jsg::Ref<user_tracing::Span> span,
-    user_tracing::TracingSpanContext context,
-    jsg::Dict<jsg::Optional<jsg::Value>> attributes,
-    jsg::Optional<bool> isRemote,
-    jsg::Optional<kj::String> traceState,
+    kj::Array<Link> input,
     const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler) {
   if (!IoContext::hasCurrent() || !IoContext::current().isOpentelemetryApiEnabled() ||
       !span->getIsTraced())
     return;
-  auto parsed = tracing::SpanContext::tryFromTraceparent(
-      kj::str("00-", context.traceId, "-", context.spanId, "-00"));
-  JSG_REQUIRE(parsed != kj::none, TypeError, "Invalid link context");
-  auto& identity = KJ_ASSERT_NONNULL(parsed);
-  kj::Vector<tracing::Attribute> values;
-  for (auto& field: attributes.fields) {
-    KJ_IF_SOME(value, field.value) {
-      KJ_IF_SOME(converted,
-          user_tracing::toAttributeValue(js, field.name, value.getHandle(js), scalarHandler)) {
-        values.add(tracing::Attribute(kj::ConstString(kj::mv(field.name)), kj::mv(converted)));
+  kj::Vector<tracing::SpanLink> output;
+  for (auto& link: input) {
+    if (output.size() == 128) break;
+    auto parsed = tracing::SpanContext::tryFromTraceparent(
+        kj::str("00-", link.context.traceId, "-", link.context.spanId, "-00"));
+    if (parsed == kj::none) continue;
+    auto& identity = KJ_ASSERT_NONNULL(parsed);
+    kj::Vector<tracing::Attribute> values;
+    for (auto& field: link.attributes.fields) {
+      if (values.size() == 128) break;
+      KJ_IF_SOME(value, field.value) {
+        KJ_IF_SOME(converted,
+            user_tracing::toAttributeValue(js, field.name, value.getHandle(js), scalarHandler)) {
+          values.add(tracing::Attribute(kj::ConstString(kj::mv(field.name)), kj::mv(converted)));
+        }
       }
     }
+    kj::Maybe<kj::ConstString> serializedTraceState;
+    KJ_IF_SOME(value, link.traceState) {
+      KJ_IF_SOME(validated, tracing::SpanContext::parseTracestate(value)) {
+        serializedTraceState = kj::ConstString(kj::mv(validated));
+      }
+    }
+    output.add(tracing::SpanLink(tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
+                                     tracing::TraceFlags(link.context.traceFlags)),
+        values.releaseAsArray(),
+        link.isRemote.orDefault(false) ? tracing::SpanLink::Origin::REMOTE
+                                       : tracing::SpanLink::Origin::LOCAL,
+        kj::mv(serializedTraceState)));
   }
-  kj::Maybe<kj::ConstString> serializedTraceState;
-  KJ_IF_SOME(value, traceState) {
-    serializedTraceState = kj::ConstString(kj::mv(value));
-  }
-  tracing::SpanLink link(tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
-                             tracing::TraceFlags(context.traceFlags)),
-      values.releaseAsArray(),
-      isRemote.orDefault(false) ? tracing::SpanLink::Origin::REMOTE
-                                : tracing::SpanLink::Origin::LOCAL,
-      kj::mv(serializedTraceState));
-  tracing::SpanLinks links(kj::arr(kj::mv(link)));
+  tracing::SpanLinks links(output.releaseAsArray());
   KJ_SWITCH_ONEOF(span->state) {
     KJ_CASE_ONEOF(state, kj::Own<user_tracing::SpanState>) {
       state->addLinks(kj::mv(links));
@@ -1213,12 +1265,12 @@ jsg::Ref<user_tracing::Span> TracingContext::startSpan(
   JSG_REQUIRE(options.kind <= 4, TypeError, "Invalid span kind");
   metadata.kind = static_cast<rpc::SpanKind>(options.kind + 1);
   tracing::InstrumentationScope scope{
-    kj::ConstString(kj::mv(options.scope.name)), kj::none, kj::none};
+    kj::ConstString(truncateUtf8(kj::mv(options.scope.name), 256)), kj::none, kj::none};
   KJ_IF_SOME(value, options.scope.version) {
-    scope.version = kj::ConstString(kj::mv(value));
+    scope.version = kj::ConstString(truncateUtf8(kj::mv(value), 256));
   }
   KJ_IF_SOME(value, options.scope.schemaUrl) {
-    scope.schemaUrl = kj::ConstString(kj::mv(value));
+    scope.schemaUrl = kj::ConstString(truncateUtf8(kj::mv(value), 2048));
   }
   metadata.scope = kj::mv(scope);
   return createSpan(js, kj::mv(operationName), kj::mv(metadata)).span;

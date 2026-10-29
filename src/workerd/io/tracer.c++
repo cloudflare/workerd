@@ -29,13 +29,16 @@ void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
     kj::Maybe<tracing::Exception::Code> code,
     kj::StringPtr name,
     kj::StringPtr message,
-    kj::Maybe<kj::StringPtr> stack) {
+    kj::Maybe<kj::StringPtr> stack,
+    kj::Maybe<tracing::SpanTimestamp> time = kj::none) {
+  auto timestampSize = time == kj::none ? 0 : sizeof(tracing::SpanTimestamp);
+  auto maxBytes = MAX_TRACE_BYTES - timestampSize;
   kj::Maybe<tracing::Exception::Code> truncatedCode;
   size_t codeSize = 0;
   KJ_IF_SOME(c, code) {
     KJ_SWITCH_ONEOF(c) {
       KJ_CASE_ONEOF(text, kj::String) {
-        codeSize = kj::min(text.size(), MAX_TRACE_BYTES);
+        codeSize = kj::min(text.size(), maxBytes);
         truncatedCode = kj::str(text.first(codeSize));
       }
       KJ_CASE_ONEOF(number, double) {
@@ -44,20 +47,22 @@ void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
       }
     }
   }
-  auto truncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES - codeSize));
+  auto truncatedName = name.first(kj::min(name.size(), maxBytes - codeSize));
   auto truncatedMessage =
-      message.first(kj::min(message.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size()));
+      message.first(kj::min(message.size(), maxBytes - codeSize - truncatedName.size()));
   kj::Maybe<kj::String> truncatedStack;
   size_t truncatedStackSize = 0;
   KJ_IF_SOME(s, stack) {
-    truncatedStackSize = kj::min(
-        s.size(), MAX_TRACE_BYTES - codeSize - truncatedName.size() - truncatedMessage.size());
+    truncatedStackSize =
+        kj::min(s.size(), maxBytes - codeSize - truncatedName.size() - truncatedMessage.size());
     truncatedStack = kj::heapString(s.first(truncatedStackSize));
   }
-  writer.report(context,
-      {tracing::Exception(timestamp, kj::str(truncatedName), kj::str(truncatedMessage),
-          kj::mv(truncatedStack), kj::mv(truncatedCode))},
-      timestamp, codeSize + truncatedName.size() + truncatedMessage.size() + truncatedStackSize);
+  tracing::Exception exception(timestamp, kj::str(truncatedName), kj::str(truncatedMessage),
+      kj::mv(truncatedStack), kj::mv(truncatedCode));
+  exception.time = time;
+  writer.report(context, kj::mv(exception), timestamp,
+      codeSize + truncatedName.size() + truncatedMessage.size() + truncatedStackSize +
+          timestampSize);
 }
 }  // namespace
 
@@ -306,22 +311,9 @@ void WorkerTracer::addSpanExceptionWithTimestamp(
     tracing::SpanId spanId, tracing::Exception exception) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) return;
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  auto size = EXCEPTION_BASE_BYTES + sizeof(tracing::SpanTimestamp) + exception.name.size() +
-      exception.message.size() +
-      exception.stack.map([](const auto& value) { return value.size(); }).orDefault(0);
-  KJ_IF_SOME(code, exception.code) {
-    KJ_SWITCH_ONEOF(code) {
-      KJ_CASE_ONEOF(text, kj::String) {
-        size += text.size();
-      }
-      KJ_CASE_ONEOF(number, double) {
-        size += sizeof(double);
-      }
-    }
-  }
-  if (size > MAX_TRACE_BYTES) return;
-  auto timestamp = exception.timestamp;
-  writer->report(spanEventContext(spanId), kj::mv(exception), timestamp, size);
+  auto stack = exception.stack.map([](const auto& value) -> kj::StringPtr { return value; });
+  reportExceptionToTailStream(*writer, spanEventContext(spanId), exception.timestamp,
+      kj::mv(exception.code), exception.name, exception.message, stack, exception.time);
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -752,6 +744,17 @@ void UserSpanObserver::onClose(
   // span logs are not supported in user tracing.
   (void)logs;
   if (wasAccepted) {
+    auto toTimestamp = [](kj::Date value) {
+      auto ns = (value - kj::UNIX_EPOCH) / kj::NANOSECONDS;
+      return tracing::SpanTimestamp(ns / 1000000000, ns % 1000000000);
+    };
+    auto start = startTimestamp.orDefault(toTimestamp(startTime));
+    auto end = endTimestamp.orDefault(toTimestamp(endTime));
+    if ((startTimestamp != kj::none || endTimestamp != kj::none) &&
+        (end.seconds < start.seconds ||
+            (end.seconds == start.seconds && end.nanoseconds < start.nanoseconds))) {
+      endTimestamp = start;
+    }
     KJ_IF_SOME(time, endTimestamp) {
       submitter->submitSpanCloseWithTimestamp(spanId, startTime, endTime, kj::mv(tags), time);
       return;
@@ -764,6 +767,18 @@ void UserSpanObserver::onUpdateName(kj::ConstString operationName) {
   if (wasAccepted) {
     submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(operationName)));
   }
+}
+
+void UserSpanObserver::onEvent(tracing::SpanEvent event) {
+  if (wasAccepted) submitter->submitSpanEvent(spanId, kj::mv(event));
+}
+
+void UserSpanObserver::onLinks(tracing::SpanLinks links) {
+  if (wasAccepted) submitter->submitSpanLinks(spanId, kj::mv(links));
+}
+
+void UserSpanObserver::onExceptionWithTimestamp(tracing::Exception exception) {
+  if (wasAccepted) submitter->submitSpanExceptionWithTimestamp(spanId, kj::mv(exception));
 }
 
 void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
