@@ -1,0 +1,45 @@
+src/rust/jsg-test/ffi.c++
+  s_ea0f453699492c::t_88faf249b8b180 18,297-302
+src/rust/jsg-test/ffi.h
+  s_ea0f453699492c::t_bd8cb855e6b1a4 119-121
+src/rust/jsg-test/lib.rs
+  s_ea0f453699492c::t_dc2f929a6457e5 153-156
+src/rust/jsg-test/tests/gc.rs
+  s_ea0f453699492c::t_7ac7ac86883ceb 1396-1455
+src/workerd/api/streams/standard-test.c++
+  s_ea0f453699492c::t_e65d9d90e8e296 9,2940-2994
+src/workerd/api/streams/standard.c++
+  s_ea0f453699492c::t_7f5fdd00cae1f2 12,3690-3693,3706-3727,3759,3765-3767,3771-3773,3990-3992
+src/workerd/io/io-own-test.c++
+  s_ea0f453699492c::t_ac8a373f4bfb11 1,4,99-175
+src/workerd/io/io-own.c++
+  s_ea0f453699492c::t_6177320e0ca984 5,7,12-22,30-34
+src/workerd/jsg/gc-deferred-cleanup-test.c++
+  s_ea0f453699492c::t_49f4c0594d386b 1-228
+src/workerd/jsg/setup.c++
+  s_ea0f453699492c::t_e80dae429fd04e 270-272,303-304,352
+src/workerd/jsg/setup.h
+  s_ea0f453699492c::t_2c5fe56d490ce4 475-482,702-704
+src/workerd/jsg/wrappable.c++
+  s_ea0f453699492c::t_8d4b44ad0228fb 10,29-34,37-64,73-74,180-190
+src/workerd/jsg/wrappable.h
+  s_ea0f453699492c::t_97467b6942eeb9 498-500,503-518,585-587
+src/workerd/util/autogate.h
+  s_ea0f453699492c::t_f78cd7cc9d5b2f 130-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6c11a737de0b6870dcc317ab383871c4d1db84e4",
+  "prompts": {},
+  "sessions": {
+    "s_ea0f453699492c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4d5aeec642b32f15",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
