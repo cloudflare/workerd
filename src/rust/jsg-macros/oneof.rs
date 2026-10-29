@@ -142,8 +142,11 @@ impl<'a> Union<'a> {
     /// `webidl::UnionTypeValidator` checks a `kj::OneOf`. The rules on the variants' categories
     /// are checked through their types' `jsg::UnionVariant::UNION_TYPES`, which flatten nested
     /// unions and nullable types. A variant type that appears twice has two conflicting
-    /// implementations of a local trait; a `Nullable<T>` variant implements it for `T`, as
-    /// `webidl::FlattenedTypeTraits` flattens `kj::Maybe<T>` to `T`.
+    /// implementations of a local trait, whose error points at the variant; a `Nullable<T>`
+    /// variant implements it for `T`, as `webidl::FlattenedTypeTraits` flattens `kj::Maybe<T>` to
+    /// `T`. That can't see into a nested union, so the names in `jsg::Type::UNION_NAMES`, which
+    /// flatten as the categories do, catch a resource, handle or `SystemTime` that appears in
+    /// both a union and a union nested in it.
     fn generate_checks(&self, input: &DeriveInput) -> proc_macro2::TokenStream {
         let self_type = self.with_static_lifetime(self.self_type(input));
         // Spanned on the variant, so that a duplicate's error points at it.
@@ -155,6 +158,7 @@ impl<'a> Union<'a> {
         });
         quote! {
             const _: () = <#self_type as jsg::Type>::UNION_TYPES.validate();
+            const _: () = jsg::validate_union_names(<#self_type as jsg::Type>::UNION_NAMES);
 
             const _: () = {
                 /// A `#[jsg_oneof]` union may not contain duplicate types; a type that has two
@@ -172,11 +176,26 @@ impl<'a> Union<'a> {
         let self_type = self.self_type(input);
         let lifetime = self.lifetime.into_iter();
         let inner_types = &self.inner_types;
+        // A constant's type can't use the enum's lifetime, so the names are those of the
+        // `'static` variant types; a lifetime doesn't change a type's name.
+        let static_types: Vec<_> = inner_types
+            .iter()
+            .map(|ty| self.with_static_lifetime(ty))
+            .collect();
         quote! {
             #[automatically_derived]
             impl<#(#lifetime)*> jsg::Type for #self_type {
                 const UNION_TYPES: jsg::UnionTypes = jsg::UnionTypes::OTHER
                     #(.plus(<#inner_types as jsg::UnionVariant>::UNION_TYPES))*;
+
+                const UNION_NAMES: &'static [&'static str] = {
+                    const LEN: usize =
+                        0 #(+ <#static_types as jsg::UnionVariant>::UNION_NAMES.len())*;
+                    const NAMES: [&str; LEN] = jsg::concat_union_names(
+                        &[#(<#static_types as jsg::UnionVariant>::UNION_NAMES),*],
+                    );
+                    &NAMES
+                };
 
                 fn class_name() -> &'static str {
                     stringify!(#name)

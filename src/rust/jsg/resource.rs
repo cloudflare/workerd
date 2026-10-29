@@ -185,6 +185,8 @@ impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
 impl<R: Resource> Type for Rc<R> {
     // A Web IDL non-callback interface type.
     const UNION_TYPES: UnionTypes = UnionTypes::INTERFACE_LIKE;
+    // The resource's, which `#[jsg_resource]` makes its module path and name.
+    const UNION_NAMES: &'static [&'static str] = R::UNION_NAMES;
 
     fn class_name() -> &'static str {
         R::class_name()

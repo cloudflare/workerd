@@ -727,12 +727,9 @@ numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; a
 nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
 without resources, dictionary-like or sequence-like types; no `Option<T>` or
 `Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
-`Nullable<T>` as `T`. A union may have several resource types, as Web IDL allows. One
-difference from C++: the check for a type that appears twice covers the union's own
-variants, seeing through `Nullable<…>` as written but not through a type alias of one,
-and not the variants of a nested union. So a type that no at-most-one rule counts, such
-as a resource, a typed array handle, `SystemTime` or `v8::Local<'s, v8::Value>`, isn't
-caught when it is in both a union and a union nested in it.
+`Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
+have several resource types, as Web IDL allows, but not the same one in both a union and
+a union nested in it.
 
 The union traces the variant it holds, so a union with a `jsg::Rc<R>` variant can be a
 resource field; one that holds handles can't. A union implements `jsg::ToJS` when every

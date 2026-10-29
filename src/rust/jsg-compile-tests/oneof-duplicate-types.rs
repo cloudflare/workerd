@@ -4,7 +4,9 @@
 
 // A #[jsg_oneof] union may not contain the same type twice, as C++ JSG's
 // webidl::UnionTypeValidator requires of a kj::OneOf, even of a kind it may have more than one
-// of, such as resources. As there, a nullable type counts as its inner type.
+// of, such as resources. As there, a nullable type counts as its inner type. Each union is
+// rejected twice: by conflicting trait impls, which point at the second variant, and because
+// the union's names contain the resource's twice.
 
 use jsg::Nullable;
 use jsg_macros::jsg_oneof;
@@ -18,13 +20,13 @@ impl Thing {}
 
 type SameThing = jsg::Rc<Thing>;
 
-#[jsg_oneof]
+#[jsg_oneof] //~ ERROR E0080: may not contain the same type twice
 pub enum SameResourceTwice {
     First(jsg::Rc<Thing>),
     Second(SameThing), //~ ERROR E0119
 }
 
-#[jsg_oneof]
+#[jsg_oneof] //~ ERROR E0080: may not contain the same type twice
 pub enum ResourceAndNullableResource {
     Thing(jsg::Rc<Thing>),
     Nullable(Nullable<jsg::Rc<Thing>>), //~ ERROR E0119

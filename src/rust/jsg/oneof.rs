@@ -270,6 +270,71 @@ impl UnionTypes {
     }
 }
 
+/// The names of a union's types: `parts`, its variants' names, one after another. `N` is their
+/// total number.
+///
+/// # Panics
+///
+/// Panics, at compile time when evaluated in a constant, if `N` is not that number.
+#[doc(hidden)]
+#[must_use]
+pub const fn concat_union_names<const N: usize>(parts: &[&[&'static str]]) -> [&'static str; N] {
+    let mut names = [""; N];
+    let mut len = 0;
+    let mut part = 0;
+    while part < parts.len() {
+        let mut i = 0;
+        while i < parts[part].len() {
+            names[len] = parts[part][i];
+            len += 1;
+            i += 1;
+        }
+        part += 1;
+    }
+    assert!(len == N, "`N` is not the number of names in `parts`");
+    names
+}
+
+/// Panics, at compile time when evaluated in a constant, if a name appears twice in `names`,
+/// the names of a union's types, as `webidl::UnionTypeValidator` rejects a `kj::OneOf` whose
+/// flattened types contain a type twice.
+///
+/// # Panics
+///
+/// Panics if `names` contains a name twice.
+#[doc(hidden)]
+pub const fn validate_union_names(names: &[&str]) {
+    let mut i = 0;
+    while i < names.len() {
+        let mut j = i + 1;
+        while j < names.len() {
+            assert!(
+                !str_eq(names[i], names[j]),
+                "A #[jsg_oneof] union may not contain the same type twice, counting the variants \
+                 of nested unions and the inner types of nullable types."
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+/// Whether `a` and `b` are equal, in a constant: `PartialEq` for `str` is not `const`.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// A type that can be a `#[jsg_oneof]` variant: every [`Type`], and the optional types, which
 /// are not `Type`s and which a union rejects with an explanation rather than with a missing
 /// impl.
@@ -282,12 +347,16 @@ pub trait UnionVariant {
     /// The variant's types, flattened; see [`UnionTypes`].
     const UNION_TYPES: UnionTypes;
 
+    /// The names of the variant's types, flattened; see [`Type::UNION_NAMES`].
+    const UNION_NAMES: &'static [&'static str];
+
     /// Whether `value` is exactly of the variant's type; see [`Type::is_exact`].
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
 }
 
 impl<T: Type> UnionVariant for T {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES;
+    const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         T::is_exact(value)
@@ -296,6 +365,7 @@ impl<T: Type> UnionVariant for T {
 
 impl<T: UnionVariant> UnionVariant for Option<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.optional();
+    const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_undefined() || T::is_exact(value)
@@ -304,6 +374,7 @@ impl<T: UnionVariant> UnionVariant for Option<T> {
 
 impl<T: UnionVariant> UnionVariant for Lenient<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.optional();
+    const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_null_or_undefined() || T::is_exact(value)

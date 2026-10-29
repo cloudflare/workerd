@@ -943,6 +943,8 @@ impl<'s> FromJS<'s> for u64 {
 // Like C++ JSG's `kj::Date`, which is in none of Web IDL's categories, so a union tries it in
 // the pass for types that aren't strings, numbers or booleans, where it also takes a number.
 impl Type for std::time::SystemTime {
+    const UNION_NAMES: &'static [&'static str] = &["SystemTime"];
+
     fn class_name() -> &'static str {
         "Date"
     }
@@ -1160,6 +1162,7 @@ impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
 // Like C++ JSG's `kj::Maybe<T>`: a union with it as a variant counts it as nullable, and as `T`.
 impl<T: Type> Type for Nullable<T> {
     const UNION_TYPES: UnionTypes = T::UNION_TYPES.nullable();
+    const UNION_NAMES: &'static [&'static str] = T::UNION_NAMES;
 
     fn class_name() -> &'static str {
         T::class_name()
@@ -1394,6 +1397,8 @@ macro_rules! impl_typed_array_type {
     ($($marker:ident => $is_check:ident),* $(,)?) => {
         $(
             impl Type for v8::$marker {
+                const UNION_NAMES: &'static [&'static str] = &[concat!("v8::", stringify!($marker))];
+
                 fn class_name() -> &'static str {
                     stringify!($marker)
                 }
@@ -1407,6 +1412,7 @@ macro_rules! impl_typed_array_type {
 
 impl_typed_array_type!(
     Uint8Array => is_uint8_array,
+    Uint8ClampedArray => is_uint8clamped_array,
     Uint16Array => is_uint16_array,
     Uint32Array => is_uint32_array,
     Int8Array => is_int8_array,
@@ -1426,6 +1432,8 @@ impl_typed_array_type!(
 // conversions are those of their handles, in `v8.rs`.
 
 impl Type for v8::ArrayBuffer {
+    const UNION_NAMES: &'static [&'static str] = &["v8::ArrayBuffer"];
+
     fn class_name() -> &'static str {
         "ArrayBuffer"
     }
@@ -1435,6 +1443,8 @@ impl Type for v8::ArrayBuffer {
 }
 
 impl Type for v8::ArrayBufferView {
+    const UNION_NAMES: &'static [&'static str] = &["v8::ArrayBufferView"];
+
     fn class_name() -> &'static str {
         "ArrayBufferView"
     }
@@ -1472,6 +1482,7 @@ impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
 // A handle is the type its marker is, as C++ JSG's `v8::Local<T>` is.
 impl<M: Type> Type for v8::Local<'_, M> {
     const UNION_TYPES: UnionTypes = M::UNION_TYPES;
+    const UNION_NAMES: &'static [&'static str] = M::UNION_NAMES;
 
     fn class_name() -> &'static str {
         M::class_name()
@@ -1488,6 +1499,7 @@ macro_rules! impl_marker_type {
     ($($marker:ident: $name:literal, $is_exact:ident, $types:expr;)*) => {
         $(impl Type for v8::$marker {
             const UNION_TYPES: UnionTypes = $types;
+            const UNION_NAMES: &'static [&'static str] = &[concat!("v8::", stringify!($marker))];
 
             fn class_name() -> &'static str {
                 $name
@@ -1511,6 +1523,8 @@ impl_marker_type! {
 
 // Any value is a `v8::Value`.
 impl Type for v8::Value {
+    const UNION_NAMES: &'static [&'static str] = &["v8::Value"];
+
     fn class_name() -> &'static str {
         "Value"
     }

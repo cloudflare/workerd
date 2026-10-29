@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // The unions that Web IDL allows compile, including several resources, a handle of any type with
-// a dictionary, and an object handle with primitives.
+// a dictionary, an object handle with primitives, and different resources and typed array handles
+// in a union and a union nested in it.
 
 use jsg::Nullable;
 use jsg::v8;
@@ -53,4 +54,17 @@ pub enum Handles<'s> {
 pub enum AnyOrPoint<'s> {
     Any(v8::Local<'s, v8::Value>),
     Point(Point),
+}
+
+#[jsg_oneof]
+pub enum SecondOrClamped<'s> {
+    Second(jsg::Rc<Second>),
+    Clamped(v8::Local<'s, v8::Uint8ClampedArray>),
+}
+
+#[jsg_oneof]
+pub enum FirstOrNested<'s> {
+    First(jsg::Rc<First>),
+    Bytes(v8::Local<'s, v8::Uint8Array>),
+    Nested(SecondOrClamped<'s>),
 }

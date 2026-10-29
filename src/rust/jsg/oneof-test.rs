@@ -11,13 +11,18 @@ use crate::FromJS;
 use crate::NonCoercible;
 use crate::Nullable;
 
-/// The message `validate` panics with for `types`, or `None` if they are valid.
-fn rejection(types: UnionTypes) -> Option<String> {
-    let payload = std::panic::catch_unwind(AssertUnwindSafe(|| types.validate())).err()?;
+/// The message `check` panics with, or `None` if it returns.
+fn panic_message(check: impl FnOnce()) -> Option<String> {
+    let payload = std::panic::catch_unwind(AssertUnwindSafe(check)).err()?;
     payload
         .downcast_ref::<&str>()
         .map(|message| (*message).to_owned())
         .or_else(|| payload.downcast_ref::<String>().cloned())
+}
+
+/// The message `validate` panics with for `types`, or `None` if they are valid.
+fn rejection(types: UnionTypes) -> Option<String> {
+    panic_message(|| types.validate())
 }
 
 /// The types of a union of the types in `members`.
@@ -159,6 +164,39 @@ fn each_type_has_the_kind_of_its_cpp_counterpart() {
     assert_kind::<v8::Local<'static, v8::Function>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::Promise>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::Uint8Array>>(Fallible, UnionTypes::OTHER);
+    assert_kind::<v8::Local<'static, v8::Uint8ClampedArray>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::TypedArray>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::ArrayBuffer>>(Fallible, UnionTypes::OTHER);
+}
+
+#[test]
+fn union_names_concatenate_in_order() {
+    let names: [&str; 3] = concat_union_names(&[&["a"], &[], &["b", "c"]]);
+    assert_eq!(names, ["a", "b", "c"]);
+}
+
+#[test]
+fn a_name_twice_is_rejected() {
+    assert_eq!(
+        panic_message(|| validate_union_names(&["a", "b", "ab"])),
+        None
+    );
+    let message = panic_message(|| validate_union_names(&["a", "b", "a"])).unwrap_or_default();
+    assert!(
+        message.contains("may not contain the same type twice"),
+        "{message:?}"
+    );
+}
+
+/// Handles, nullable types and `SystemTime` have the names of the types they hold or are; other
+/// types are kept from appearing twice by their categories, and have none.
+#[test]
+fn names_flatten_as_categories_do() {
+    let names = <v8::Local<'static, v8::Uint8ClampedArray> as UnionVariant>::UNION_NAMES;
+    assert_eq!(names, ["v8::Uint8ClampedArray"]);
+    let names = <Nullable<v8::Local<'static, v8::Value>> as UnionVariant>::UNION_NAMES;
+    assert_eq!(names, ["v8::Value"]);
+    assert_eq!(<SystemTime as UnionVariant>::UNION_NAMES, ["SystemTime"]);
+    assert!(<String as UnionVariant>::UNION_NAMES.is_empty());
+    assert!(<Vec<v8::Local<'static, v8::Value>> as UnionVariant>::UNION_NAMES.is_empty());
 }

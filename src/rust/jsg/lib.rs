@@ -39,7 +39,11 @@ pub use oneof::UnionTypes;
 #[doc(hidden)]
 pub use oneof::UnionVariant;
 #[doc(hidden)]
+pub use oneof::concat_union_names;
+#[doc(hidden)]
 pub use oneof::try_union_from_js;
+#[doc(hidden)]
+pub use oneof::validate_union_names;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -952,6 +956,18 @@ pub trait Type: Sized {
     /// at compile time; see [`UnionTypes`].
     #[doc(hidden)]
     const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
+
+    /// Names that identify the type in a `#[jsg_oneof]` union, flattened as
+    /// [`Self::UNION_TYPES`] is: a union's are those of its variants, and a `Nullable<T>`'s are
+    /// `T`'s. A union may not contain a name twice, as C++ JSG's `webidl::FlattenedTypeTraits`
+    /// rejects a type that appears twice in a flattened `kj::OneOf`.
+    ///
+    /// Resources, handles and `SystemTime` have a name, since most of them are in no category, or
+    /// in one with no limit, so [`UnionTypes::validate`] can't tell that one appears twice. The
+    /// other types that `jsg` implements `Type` for need none: each is in a category that a union
+    /// may hold at most one type of.
+    #[doc(hidden)]
+    const UNION_NAMES: &'static [&'static str] = &[];
 }
 
 /// Represents a constant value that can be exposed to JavaScript.

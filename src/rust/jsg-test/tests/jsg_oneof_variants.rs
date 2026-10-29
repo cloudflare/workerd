@@ -113,6 +113,13 @@ enum Uint8ArrayOrString<'s> {
     String(String),
 }
 
+/// `kj::OneOf<v8::Local<v8::Uint8ClampedArray>, kj::String>`.
+#[jsg_oneof]
+enum Uint8ClampedArrayOrString<'s> {
+    Clamped(v8::Local<'s, v8::Uint8ClampedArray>),
+    String(String),
+}
+
 /// A dictionary and a value of any type, in both orders: both are tried in the same pass, in
 /// declaration order.
 #[jsg_oneof]
@@ -277,6 +284,17 @@ impl VariantContext {
     }
 
     #[jsg_method]
+    pub fn take_uint8_clamped_array_or_string<'s>(
+        &self,
+        value: Uint8ClampedArrayOrString<'s>,
+    ) -> String {
+        match value {
+            Uint8ClampedArrayOrString::Clamped(bytes) => format!("clamped:{}", bytes.len()),
+            Uint8ClampedArrayOrString::String(s) => format!("string:{s}"),
+        }
+    }
+
+    #[jsg_method]
     pub fn take_point_or_value<'s>(&self, value: PointOrValue<'s>) -> String {
         match value {
             PointOrValue::Point(p) => format!("point:{:?}", p.x),
@@ -300,12 +318,28 @@ impl VariantContext {
     ) -> Result<String, jsg::Error> {
         Ok(match value {
             NumberOrNestedHandle::Number(n) => format!("number:{n}"),
-            NumberOrNestedHandle::Nested(StringHandleOrBool::String(s)) => {
-                format!("handle:{}", String::from_js(lock, s.into())?)
-            }
-            NumberOrNestedHandle::Nested(StringHandleOrBool::Bool(b)) => format!("bool:{b}"),
+            NumberOrNestedHandle::Nested(nested) => describe_string_handle_or_bool(lock, &nested)?,
         })
     }
+
+    #[jsg_method]
+    pub fn take_string_handle_or_bool<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: StringHandleOrBool<'s>,
+    ) -> Result<String, jsg::Error> {
+        describe_string_handle_or_bool(lock, &value)
+    }
+}
+
+fn describe_string_handle_or_bool<'s>(
+    lock: &mut jsg::Lock<'s>,
+    value: &StringHandleOrBool<'s>,
+) -> Result<String, jsg::Error> {
+    Ok(match value {
+        StringHandleOrBool::String(s) => format!("handle:{}", String::from_js(lock, (*s).into())?),
+        StringHandleOrBool::Bool(b) => format!("bool:{b}"),
+    })
 }
 
 fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
@@ -530,6 +564,26 @@ fn typed_array_handle_variant_takes_its_typed_array() {
     });
 }
 
+/// A `Uint8ClampedArray` handle takes only a `Uint8ClampedArray`, not a `Uint8Array` with the same
+/// elements, as C++ JSG's `v8::Local<v8::Uint8ClampedArray>` does.
+#[test]
+fn uint8_clamped_array_handle_variant_takes_only_its_typed_array() {
+    with_context(|lock, ctx| {
+        expect_eval(
+            lock,
+            ctx,
+            "cx.takeUint8ClampedArrayOrString(new Uint8ClampedArray(3))",
+            "clamped:3",
+        );
+        expect_eval(
+            lock,
+            ctx,
+            "cx.takeUint8ClampedArrayOrString(new Uint8Array(3))",
+            "string:0,0,0",
+        );
+    });
+}
+
 /// A value handle takes anything, in the pass for types that aren't strings, numbers or
 /// booleans, so within that pass declaration order decides.
 #[test]
@@ -549,5 +603,25 @@ fn nested_union_with_handles_is_flattened() {
         expect_eval(lock, ctx, "cx.takeNumberOrNestedHandle(true)", "bool:true");
         expect_eval(lock, ctx, "cx.takeNumberOrNestedHandle(5)", "number:5");
         expect_eval(lock, ctx, "cx.takeNumberOrNestedHandle({})", "number:NaN");
+    });
+}
+
+/// A string handle takes only a string, so with no numeric variant a value that is neither a
+/// string nor a boolean reaches the last pass, where the boolean variant coerces it, as in
+/// `kj::OneOf<v8::Local<v8::String>, bool>`.
+#[test]
+fn boolean_variant_coerces_in_the_last_pass() {
+    with_context(|lock, ctx| {
+        expect_eval(lock, ctx, "cx.takeStringHandleOrBool('a')", "handle:a");
+        expect_eval(lock, ctx, "cx.takeStringHandleOrBool(true)", "bool:true");
+        expect_eval(lock, ctx, "cx.takeStringHandleOrBool(0)", "bool:false");
+        expect_eval(lock, ctx, "cx.takeStringHandleOrBool(1)", "bool:true");
+        expect_eval(lock, ctx, "cx.takeStringHandleOrBool({})", "bool:true");
+        expect_eval(
+            lock,
+            ctx,
+            "cx.takeStringHandleOrBool(undefined)",
+            "bool:false",
+        );
     });
 }
