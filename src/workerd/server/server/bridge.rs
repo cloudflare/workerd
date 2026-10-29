@@ -462,6 +462,11 @@ pub mod ffi {
         ) -> Result<KjOwn<ActorStorage>>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
+        /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
+        /// is `name`, empty for none.
+        fn actor_storage_set_alarm(storage: &ActorStorage, actor: &str, name: &str, at_ms: u64);
+        /// What an alarm runs on when another instance owns its object: nothing, successfully.
+        fn alarm_owned_elsewhere() -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -851,6 +856,14 @@ pub mod ffi {
         fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);
         /// The database of the root actor `root_key` was deleted.
         fn database_reset(self: &ActorNamespaceHandle, root_key: &str);
+        /// Indexes root actor `actor`'s alarm at `at_ms` (0: cleared) in the cluster: done once
+        /// a peer would find it.
+        fn alarm_set(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.

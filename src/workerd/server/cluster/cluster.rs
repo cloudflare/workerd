@@ -26,7 +26,10 @@ use crate::Ownership;
 use crate::Registry;
 use crate::Result;
 use crate::Version;
+use crate::alarms::Adopted;
+use crate::alarms::Index;
 use crate::hmac_sha256;
+use crate::namespace_hash;
 use crate::owner::Owners;
 use crate::ownership::Owned;
 use crate::s3::S3;
@@ -73,6 +76,7 @@ pub struct Cluster {
     bucket: Bucket,
     key: Vec<u8>,
     lease: RefCell<Lease>,
+    alarms: Index,
 }
 
 impl Cluster {
@@ -92,6 +96,7 @@ impl Cluster {
             setup.ttl_ms,
         ));
         Ok(Rc::new(Self {
+            alarms: Index::new(bucket.clone(), &setup.node),
             owners: Owners::new(bucket.clone()),
             ownership: Ownership::new(bucket.clone(), registry.clone()),
             bucket,
@@ -221,6 +226,29 @@ impl Cluster {
     /// Keep an object workerd evicted, uploading what the bucket lacks.
     pub async fn evict_actor(&self, ns: &str, actor: &str, epoch: u64) {
         self.owners.evict(ns, actor, epoch).await;
+    }
+
+    /// Index an owned object's alarm, `None` once cleared, so that peers
+    /// wake the object if this node dies (`alarms::Index::arm`).
+    pub async fn arm_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: Option<u64>,
+    ) -> Result<()> {
+        self.alarms
+            .arm(&namespace_hash(ns), actor, name, at_ms)
+            .await
+    }
+
+    /// Delete the alarm entries this node no longer needs and move later
+    /// ones, then take this node's share of dead nodes' alarms, to schedule
+    /// here.
+    pub async fn alarms_round(&self, now_ms: u64) -> Result<Vec<Adopted>> {
+        self.alarms.tidy().await;
+        let live = self.registry.listed_nodes(now_ms);
+        self.alarms.adopt(&live, &self.registry.dead()).await
     }
 
     pub async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<()> {

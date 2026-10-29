@@ -60,6 +60,7 @@ use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
+use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::config::Factory;
 use crate::tasks::TaskHandle;
@@ -155,7 +156,16 @@ impl ActorNamespace {
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
     pub fn set_cluster(&self, cluster: Rc<ClusterNode>) {
+        if let Some(unique_key) = self.unique_key() {
+            cluster.add_namespace(unique_key, Weak::clone(&self.this));
+        }
         let _ = self.cluster.set(cluster);
+    }
+
+    /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
+    pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms);
+        Ok(())
     }
 
     /// The cluster, for a namespace linked on disk; in-memory namespaces stay local.
@@ -409,6 +419,11 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        if self.cluster().is_some() {
+            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
+            // its alarms from the bucket.
+            ffi::actor_storage_delete_all(&storage)?;
+        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -474,9 +489,54 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
-        namespace
-            .container_for(id)
-            .start_request(ffi::new_request_metadata(KjMaybe::None, KjMaybe::None))
+        let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+        let Some(node) = namespace.cluster().map(Rc::clone) else {
+            return namespace.container_for(id).start_request(metadata);
+        };
+        // Only an object's owner runs its alarm. One that moved since this instance scheduled
+        // the alarm has it scheduled where it lives now, since opening an object schedules
+        // its alarm: here the alarm is done.
+        let key = ffi::actor_id_key(&id);
+        Ok(PromisedInterface::new(async move {
+            match namespace.resolve(id).await? {
+                Resolved::Here(client) => client.start_request(metadata),
+                Resolved::Remote(_) => {
+                    let unique_key = namespace.unique_key().unwrap_or_default().to_owned();
+                    let cluster = Rc::clone(&node.cluster);
+                    namespace.factory.spawn_detached(async move {
+                        if let Err(e) = cluster.arm_alarm(&unique_key, &key, None, None).await {
+                            tracing::warn!("unindexing a moved object's alarm: {e}");
+                        }
+                    });
+                    Ok(ffi::alarm_owned_elsewhere())
+                }
+            }
+        })
+        .into_kj())
+    }
+
+    pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let ns = self.namespace();
+        let cluster = ns
+            .as_ref()
+            .and_then(|ns| ns.cluster())
+            .map(|n| Rc::clone(&n.cluster));
+        let unique_key = ns
+            .as_ref()
+            .and_then(|ns| ns.unique_key())
+            .map(str::to_owned);
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(ResultTask(Box::pin(async move {
+            let (Some(cluster), Some(unique_key)) = (cluster, unique_key) else {
+                return Ok(());
+            };
+            let name = (!name.is_empty()).then_some(name.as_str());
+            let at_ms = (at_ms != 0).then_some(at_ms);
+            cluster
+                .arm_alarm(&unique_key, &actor, name, at_ms)
+                .await
+                .map_err(|e| kj::failed!("indexing an alarm: {e}"))
+        })))
     }
 
     fn namespace(&self) -> Option<Rc<ActorNamespace>> {

@@ -43,6 +43,8 @@ pub struct Registry {
     instance: u64,
     /// Live peers' records, as of the last listing.
     listed: RefCell<HashMap<String, NodeRecord>>,
+    /// Dead peers whose records remain, as of the last listing.
+    dead: RefCell<Vec<String>>,
 }
 
 fn node_key(node: &str) -> String {
@@ -62,6 +64,7 @@ impl Registry {
                 std::time::SystemTime::now(),
             ),
             listed: RefCell::new(HashMap::new()),
+            dead: RefCell::new(Vec::new()),
         }
     }
 
@@ -117,11 +120,25 @@ impl Registry {
         }
     }
 
-    /// Remove this instance's record on a clean shutdown, so peers stop
-    /// routing to it before its lease would have run out.
+    /// Expire this instance's record on a clean shutdown, so peers stop
+    /// routing to it before its lease would have run out and adopt its
+    /// alarms. The record goes once they have.
     pub async fn deregister(&self) -> Result<()> {
-        self.own.take();
-        self.bucket.delete(&node_key(&self.node)).await
+        let Some(version) = self.own.take() else {
+            return Ok(());
+        };
+        let record = NodeRecord {
+            node: self.node.clone(),
+            address: self.address.clone(),
+            expires_ms: 0,
+            instance: self.instance,
+        };
+        let body = serde_json::to_vec(&record)?;
+        let key = node_key(&self.node);
+        self.bucket
+            .put_if(&key, body, Guard::Match(version))
+            .await
+            .map(drop)
     }
 
     /// Whether `node` held a lease past `now_ms` at the last listing. No
@@ -150,12 +167,19 @@ impl Registry {
             return Ok(None);
         };
         let record: NodeRecord = serde_json::from_slice(&body)?;
-        if record.expires_ms + DEAD_RECORD_TTLS * self.ttl_ms < now_ms {
+        if record.expires_ms + DEAD_RECORD_TTLS * self.ttl_ms < now_ms
+            && self
+                .bucket
+                .list(&format!("alarms/{node}/"))
+                .await?
+                .is_empty()
+        {
             // A fenced or crashed instance leaves its record, every restart
             // adds one, and every listing read them all: 40 after an
             // afternoon of fleet tests. One this long expired belongs to a
             // process that fenced long ago; were it still running, its next
-            // renewal's conditional write would fail and fence it.
+            // renewal's conditional write would fail and fence it. It stays
+            // while it has alarms, so that survivors find them.
             self.bucket.delete(&node_key(node)).await?;
         }
         if record.expires_ms <= now_ms {
@@ -180,13 +204,31 @@ impl Registry {
                 .strip_prefix("nodes/")
                 .and_then(|key| key.strip_suffix(".json"))
         });
-        let fetched = futures::future::join_all(nodes.map(|node| self.fetch(node, now_ms))).await;
+        let nodes: Vec<_> = nodes.collect();
+        let fetched = futures::future::join_all(nodes.iter().map(|n| self.fetch(n, now_ms))).await;
         let mut peers = Vec::new();
         for record in fetched {
             peers.extend(record?);
         }
         *self.listed.borrow_mut() = peers.iter().map(|p| (p.node.clone(), p.clone())).collect();
+        *self.dead.borrow_mut() = nodes
+            .into_iter()
+            .filter(|n| !self.listed.borrow().contains_key(*n))
+            .map(str::to_owned)
+            .collect();
         Ok(peers)
+    }
+
+    /// The live nodes, this one included, as of the last listing.
+    pub fn listed_nodes(&self, now_ms: u64) -> Vec<String> {
+        let listed = self.listed.borrow();
+        let live = listed.values().filter(|r| r.expires_ms > now_ms);
+        live.map(|r| r.node.clone()).collect()
+    }
+
+    /// Dead nodes whose records remain, as of the last listing.
+    pub fn dead(&self) -> Vec<String> {
+        self.dead.borrow().clone()
     }
 }
 
