@@ -1,0 +1,29 @@
+src/rust/AGENTS.md
+  s_dc4353008f6e06::t_7d7d8190c9adf6 38
+src/rust/jsg-test/tests/unwrap.rs
+  s_dc4353008f6e06::t_4f278a7e3ba3b3 121-122,143-193
+src/workerd/jsg/wrappable.h
+  s_dc4353008f6e06::t_c91f570cfe456c 397-403
+src/workerd/jsg/wrappable.c++
+  s_dc4353008f6e06::t_bcad4a17d5289f 403-419
+src/rust/jsg-test/ffi.c++
+  s_dc4353008f6e06::t_79aeeeae62f4d7 241
+src/rust/jsg/ffi.c++
+  s_dc4353008f6e06::t_7bc36bf8552edc 867-869,886-888,937-938,948-951,971
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a5cf3ad6a1672168966d422af8d00fb461e6d5ef",
+  "prompts": {},
+  "sessions": {
+    "s_dc4353008f6e06": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4fc3b48b-445d-4e24-86ce-01cf32d6637e",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
