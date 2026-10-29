@@ -61,6 +61,15 @@ impl Alarms {
         self.bucket.delete(&entry.key(node)).await
     }
 
+    /// The nodes with entries.
+    pub async fn nodes(&self) -> Result<Vec<String>> {
+        let listed = self.bucket.prefixes("alarms/").await?;
+        let nodes = listed
+            .iter()
+            .filter_map(|p| p.strip_prefix("alarms/")?.strip_suffix('/'));
+        Ok(nodes.map(str::to_owned).collect())
+    }
+
     /// `node`'s entries, earliest first.
     pub async fn list(&self, node: &str) -> Result<Vec<Entry>> {
         let under = format!("alarms/{node}/");
@@ -288,6 +297,13 @@ impl Index {
         }
         self.arm(namespace, actor, None, None).await?;
         Ok(false)
+    }
+
+    /// The nodes with entries other than `known`.
+    pub async fn unknown(&self, known: &[String]) -> Result<Vec<String>> {
+        let mut nodes = self.alarms.nodes().await?;
+        nodes.retain(|n| !known.contains(n));
+        Ok(nodes)
     }
 
     /// Take over this node's share of `dead` nodes' alarms among the `live`

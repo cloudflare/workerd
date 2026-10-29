@@ -280,6 +280,12 @@ class FakeS3 {
     return res.status === 404 ? null : await res.text();
   }
 
+  async delete(key) {
+    await fetch(`http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`, {
+      method: 'DELETE',
+    });
+  }
+
   // The key of the node that owns the Counter with this ID, or null when no
   // owner record exists.
   async owner(id) {
@@ -866,6 +872,33 @@ test("cluster: a killed owner's alarm runs once on a survivor", async () => {
     });
     assert.strictEqual(res.body.nodeId, survivor.nodeId);
     assert.deepStrictEqual(res.body.fired, [survivor.nodeId]);
+  });
+});
+
+test("cluster: a killed owner's alarm runs without its record", async () => {
+  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
+    const set = await fetchJson(
+      nodes[0].httpPort,
+      '/set-alarm?name=unrecorded&ms=5000'
+    );
+    assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+    const ownerIndex = nodes.findIndex((n) => n.nodeId === set.body.nodeId);
+    const survivor = nodes[1 - ownerIndex];
+    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    // With the record gone, no listing of nodes finds the dead owner: only
+    // the look for orphaned alarms does, which a starting node runs first.
+    await bucket.delete(`nodes/${nodeKeys.get(set.body.nodeId)}.json`);
+    await survivor.stop();
+    await survivor.start();
+    await sleep(30_000);
+    const res = await fetchJson(survivor.httpPort, '/alarms?name=unrecorded', {
+      timeoutMs: 10_000,
+    });
+    assert.deepStrictEqual(res.body.fired, [survivor.nodeId]);
+    assert.match(
+      survivor.stderr,
+      /adopting the alarms of \w+, which has no record/
+    );
   });
 });
 

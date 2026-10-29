@@ -226,6 +226,11 @@ impl Registry {
         live.map(|r| r.node.clone()).collect()
     }
 
+    /// Whether `node` has a record, live or not.
+    pub async fn recorded(&self, node: &str) -> Result<bool> {
+        Ok(self.bucket.get(&node_key(node)).await?.is_some())
+    }
+
     /// Dead nodes whose records remain, as of the last listing.
     pub fn dead(&self) -> Vec<String> {
         self.dead.borrow().clone()

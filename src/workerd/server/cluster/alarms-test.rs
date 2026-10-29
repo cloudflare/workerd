@@ -49,6 +49,20 @@ fn a_node_lists_its_entries_earliest_first() {
 }
 
 #[test]
+fn the_nodes_with_entries_are_found_without_a_record() {
+    block_on(async {
+        let bucket = Bucket::memory("p");
+        let index = Index::new(bucket.clone(), "n1", 0);
+        for node in ["n1", "n3", "n2"] {
+            index.alarms.put(node, &entry(1, "a"), None).await.unwrap();
+        }
+        bucket.put("alarmsx/n4/1", Vec::new(), &[]).await.unwrap();
+        let unknown = index.unknown(&["n1".to_owned()]).await.unwrap();
+        assert_eq!(unknown, ["n2", "n3"]);
+    });
+}
+
+#[test]
 fn an_entry_carries_the_actors_name() {
     block_on(async {
         let alarms = Alarms::new(Bucket::memory(""));
