@@ -214,7 +214,7 @@ impl ActorNamespace {
             .route(&unique_key, &self.service, &self.class_name, &key)
             .await?
         {
-            Owner::Remote(connection) => Ok(Resolved::Remote(connection)),
+            Owner::Remote(connection, node) => Ok(Resolved::Remote(connection, node)),
             Owner::Here(epoch) => {
                 // A concurrent request may have taken it meanwhile.
                 if let Some(container) = self.owned_container(&key) {
@@ -501,11 +501,11 @@ impl ActorNamespaceHandle {
         Ok(PromisedInterface::new(async move {
             match namespace.resolve(id).await? {
                 Resolved::Here(client) => client.start_request(metadata),
-                Resolved::Remote(_) => {
+                Resolved::Remote(_, owner) => {
                     let unique_key = namespace.unique_key().unwrap_or_default();
                     let again = node
                         .cluster
-                        .alarm_elsewhere(unique_key, &key, cluster::now_ms())
+                        .alarm_elsewhere(unique_key, &key, &owner, cluster::now_ms())
                         .await
                         .unwrap_or(true);
                     Ok(ffi::alarm_owned_elsewhere(again))
@@ -571,7 +571,8 @@ impl ActorNamespaceHandle {
 /// Where a request to a clustered actor goes.
 enum Resolved {
     Here(Client),
-    Remote(Rc<RpcConnection>),
+    /// On the node named.
+    Remote(Rc<RpcConnection>, String),
 }
 
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
@@ -605,7 +606,7 @@ impl Channel for RoutedChannel {
             };
             match &*resolved {
                 Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection) => Ok(attach(
+                Resolved::Remote(connection, _) => Ok(attach(
                     connection.start_request(metadata),
                     Rc::clone(connection),
                 )),
@@ -639,7 +640,7 @@ impl Channel for RoutedChannel {
                 .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
             match namespace.resolve(ffi::actor_id_clone(&self.id)).await? {
                 Resolved::Here(container) => container.evict_for_test(hibernate).await,
-                Resolved::Remote(_) => Err(kj::failed!(
+                Resolved::Remote(..) => Err(kj::failed!(
                     "jsg.Error: Cannot evict a Durable Object another instance owns."
                 )),
             }

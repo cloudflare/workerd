@@ -242,21 +242,28 @@ impl Cluster {
             .await
     }
 
-    /// An indexed alarm fired here for an object another node owns:
+    /// An indexed alarm fired here for an object `owner` owns:
     /// whether to fire it again later (`alarms::Index::elsewhere`).
-    pub async fn alarm_elsewhere(&self, ns: &str, actor: &str, now_ms: u64) -> Result<bool> {
+    pub async fn alarm_elsewhere(
+        &self,
+        ns: &str,
+        actor: &str,
+        owner: &str,
+        now_ms: u64,
+    ) -> Result<bool> {
         self.alarms
-            .elsewhere(&namespace_hash(ns), actor, now_ms)
+            .elsewhere(&namespace_hash(ns), actor, owner, now_ms)
             .await
     }
 
-    /// Delete the alarm entries this node no longer needs and move later
-    /// ones, then take this node's share of dead nodes' alarms, to schedule
-    /// here.
-    pub async fn alarms_round(&self, now_ms: u64) -> Vec<Adopted> {
-        self.alarms.tidy().await;
+    /// Take this node's share of dead nodes' alarms, handing `adopted` each
+    /// to schedule here, then bring this node's entries in line with its
+    /// alarms (`alarms::Index::tidy`).
+    pub async fn alarms_round(&self, now_ms: u64, adopted: impl FnMut(Adopted)) {
         let live = self.registry.listed_nodes(now_ms);
-        self.alarms.adopt(&live, &self.registry.dead()).await
+        let dead = self.registry.dead();
+        self.alarms.adopt(&live, &dead, adopted).await;
+        self.alarms.tidy().await;
     }
 
     pub async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<()> {

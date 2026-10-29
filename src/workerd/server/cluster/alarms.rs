@@ -93,8 +93,8 @@ impl Alarms {
     }
 }
 
-/// Entries a node adopts at once.
-const ADOPT_CONCURRENCY: usize = 32;
+/// Entries a node writes, deletes or adopts at once.
+const CONCURRENCY: usize = 32;
 
 /// An object, as the index keys it: namespace hash and actor.
 type Key = (String, String);
@@ -126,9 +126,9 @@ pub struct Index {
     stale: RefCell<Vec<Entry>>,
     /// The last entry's `seq`.
     seq: Cell<u64>,
-    /// Objects whose alarm fired here while another node owned them, by
-    /// when this node first found that.
-    elsewhere: RefCell<BTreeMap<Key, u64>>,
+    /// Objects whose alarm fired here while another node owned them: that
+    /// owner, and when this node first found it there.
+    elsewhere: RefCell<BTreeMap<Key, (String, u64)>>,
     /// How long an owner must outlive that before this node's entry goes:
     /// past its lease, had it died before indexing the alarm itself.
     grace_ms: u64,
@@ -211,48 +211,78 @@ impl Index {
                 .map(|(key, a)| (key.clone(), a.indexed.clone(), a.want, a.name.clone()))
                 .collect()
         };
-        for (key, indexed, want, name) in moves {
-            let next = want.map(|want| self.entry(&key, want));
-            if let Some(next) = &next
-                && self
-                    .alarms
-                    .put(&self.node, next, name.as_deref())
-                    .await
-                    .is_err()
-            {
-                continue;
-            }
-            let mut armed = self.armed.borrow_mut();
-            let Some(a) = armed.get_mut(&key) else {
-                continue;
-            };
-            let stale = if a.indexed == indexed && a.want == want {
-                std::mem::replace(&mut a.indexed, next)
-            } else {
-                // Armed meanwhile: the next tidy moves what this did not.
-                next
-            };
-            self.stale.borrow_mut().extend(stale);
-            if a.indexed.is_none() && a.want.is_none() {
-                armed.remove(&key);
-            }
-        }
+        stream::iter(moves)
+            .for_each_concurrent(CONCURRENCY, |(key, indexed, want, name)| {
+                self.move_entry(key, indexed, want, name)
+            })
+            .await;
         let stale = std::mem::take(&mut *self.stale.borrow_mut());
-        for entry in stale {
-            if self.alarms.delete(&self.node, &entry).await.is_err() {
-                self.stale.borrow_mut().push(entry);
-            }
+        stream::iter(stale)
+            .for_each_concurrent(CONCURRENCY, |entry| async move {
+                if self.alarms.delete(&self.node, &entry).await.is_err() {
+                    self.stale.borrow_mut().push(entry);
+                }
+            })
+            .await;
+    }
+
+    /// Index `key` at `want`, in place of `indexed`.
+    async fn move_entry(
+        &self,
+        key: Key,
+        indexed: Option<Entry>,
+        want: Option<u64>,
+        name: Option<String>,
+    ) {
+        let next = want.map(|want| self.entry(&key, want));
+        if let Some(next) = &next
+            && self
+                .alarms
+                .put(&self.node, next, name.as_deref())
+                .await
+                .is_err()
+        {
+            return;
+        }
+        let mut armed = self.armed.borrow_mut();
+        let Some(a) = armed.get_mut(&key) else {
+            return;
+        };
+        let stale = if a.indexed == indexed && a.want == want {
+            std::mem::replace(&mut a.indexed, next)
+        } else {
+            // Armed meanwhile: the next tidy moves what this did not.
+            next
+        };
+        self.stale.borrow_mut().extend(stale);
+        if a.indexed.is_none() && a.want.is_none() {
+            armed.remove(&key);
         }
     }
 
-    /// An alarm of this node's fired for an object another node owns. That
-    /// node indexed the alarm when it opened the object, unless it died
-    /// first, which its lease hides for a while: this node keeps its entry
-    /// until the owner has outlived the grace since it first found it
+    /// An alarm of this node's fired for an object `owner` owns. That node
+    /// indexed the alarm when it opened the object, unless it died first,
+    /// which its lease hides for a while: this node keeps its entry until
+    /// the same owner has outlived the grace since this node first found it
     /// there. Answers whether to look again later.
-    pub async fn elsewhere(&self, namespace: &str, actor: &str, now_ms: u64) -> Result<bool> {
+    pub async fn elsewhere(
+        &self,
+        namespace: &str,
+        actor: &str,
+        owner: &str,
+        now_ms: u64,
+    ) -> Result<bool> {
         let key = (namespace.to_owned(), actor.to_owned());
-        let first = *self.elsewhere.borrow_mut().entry(key).or_insert(now_ms);
+        let first = {
+            let mut elsewhere = self.elsewhere.borrow_mut();
+            let seen = elsewhere
+                .entry(key)
+                .or_insert_with(|| (owner.to_owned(), now_ms));
+            if seen.0 != owner {
+                *seen = (owner.to_owned(), now_ms);
+            }
+            seen.1
+        };
         if now_ms < first + self.grace_ms {
             return Ok(true);
         }
@@ -262,13 +292,12 @@ impl Index {
 
     /// Take over this node's share of `dead` nodes' alarms among the `live`
     /// ones: each is indexed here before it goes there, so it is never in
-    /// neither. Answers every one to schedule here, whatever this node knows
-    /// of the object: its index says what it wakes, not that its scheduler
-    /// still holds it, since a wake that finds no alarm consumes the one but
-    /// not the other. An entry that fails stays where it is, for the next
-    /// round.
-    pub async fn adopt(&self, live: &[String], dead: &[String]) -> Vec<Adopted> {
-        let mut adopted = Vec::new();
+    /// neither. Hands `adopted` every one to schedule here as it goes,
+    /// whatever this node knows of the object: its index says what it
+    /// wakes, not that its scheduler still holds it, since a wake that
+    /// finds no alarm consumes the one but not the other. An entry that
+    /// fails stays where it is, for the next round.
+    pub async fn adopt(&self, live: &[String], dead: &[String], mut adopted: impl FnMut(Adopted)) {
         for node in dead {
             let entries = match self.alarms.list(node).await {
                 Ok(entries) => entries,
@@ -280,19 +309,16 @@ impl Index {
             let mine = entries
                 .into_iter()
                 .filter(|e| assignee(live, e) == Some(self.node.as_str()));
-            let results: Vec<_> = stream::iter(mine)
+            let mut results = stream::iter(mine)
                 .map(|e| self.adopt_one(node, e))
-                .buffer_unordered(ADOPT_CONCURRENCY)
-                .collect()
-                .await;
-            for result in results {
+                .buffer_unordered(CONCURRENCY);
+            while let Some(result) = results.next().await {
                 match result {
-                    Ok(a) => adopted.push(a),
+                    Ok(a) => adopted(a),
                     Err(e) => tracing::warn!("adopting {node}'s alarm: {e}"),
                 }
             }
         }
-        adopted
     }
 
     /// Index `entry` here, then delete it from `node`. `armed` changes only

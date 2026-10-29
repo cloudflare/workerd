@@ -167,8 +167,9 @@ fn survivors_split_a_dead_nodes_alarms() {
         // that, and the adopted one only wakes the object early.
         a.arm("ns", "0", Some("name0"), Some(500)).await.unwrap();
         let dead_nodes = ["d".to_owned()];
-        let by_a = a.adopt(&live, &dead_nodes).await;
-        let by_b = b.adopt(&live, &dead_nodes).await;
+        let (mut by_a, mut by_b) = (Vec::new(), Vec::new());
+        a.adopt(&live, &dead_nodes, |x| by_a.push(x)).await;
+        b.adopt(&live, &dead_nodes, |x| by_b.push(x)).await;
         assert!(alarms.list("d").await.unwrap().is_empty());
         let (in_a, in_b) = (
             alarms.list("a").await.unwrap(),
@@ -224,6 +225,12 @@ impl crate::Store for Flaky {
     }
 }
 
+async fn adopt(index: &Index, live: &[String], dead: &[String]) -> usize {
+    let mut n = 0;
+    index.adopt(live, dead, |_| n += 1).await;
+    n
+}
+
 #[test]
 fn a_failed_adoption_still_schedules_and_retries() {
     block_on(async {
@@ -240,14 +247,14 @@ fn a_failed_adoption_still_schedules_and_retries() {
         let a = Index::new(bucket.clone(), "a", 0);
         fail.set(true);
         // Indexed here but still there: every one is scheduled once.
-        assert_eq!(a.adopt(&live, &dead_nodes).await.len(), 8);
+        assert_eq!(adopt(&a, &live, &dead_nodes).await, 8);
         assert_eq!(
             Alarms::new(bucket.clone()).list("d").await.unwrap().len(),
             8
         );
         fail.set(false);
         // Again, which only schedules what is scheduled already.
-        assert_eq!(a.adopt(&live, &dead_nodes).await.len(), 8);
+        assert_eq!(adopt(&a, &live, &dead_nodes).await, 8);
         assert!(Alarms::new(bucket).list("d").await.unwrap().is_empty());
     });
 }
@@ -427,13 +434,13 @@ mod sim {
     enum Route {
         Here,
         Claim,
-        Remote,
+        Remote(usize),
     }
 
     fn route(world: &World, n: usize, o: &str) -> Route {
         match world.owner.get(o) {
             Some(&m) if m == n => Route::Here,
-            Some(&m) if world.routable(m) => Route::Remote,
+            Some(&m) if world.routable(m) => Route::Remote(m),
             _ => Route::Claim,
         }
     }
@@ -629,7 +636,7 @@ mod sim {
                 match route(&world, n, o) {
                     Route::Here => {}
                     Route::Claim => Self::open(&mut world, &self.store, &index, n, o),
-                    Route::Remote => return,
+                    Route::Remote(_) => return,
                 }
                 if !world.nodes[n].busy.insert(o.to_owned()) {
                     return;
@@ -694,18 +701,17 @@ mod sim {
             };
             let world = Rc::clone(&self.world);
             self.spawn(n, async move {
-                index.tidy().await;
-                let adopted = index.adopt(&live, &dead).await;
-                let mut world = world.borrow_mut();
-                world.nodes[n].round = false;
-                for a in adopted {
-                    world
-                        .log
-                        .push(format!("adopt {} {} on n{n}", a.actor, a.at_ms));
+                let schedule = |a: Adopted| {
+                    let mut world = world.borrow_mut();
+                    let adopted = format!("adopt {} {} on n{n}", a.actor, a.at_ms);
+                    world.log.push(adopted);
                     let local = &mut world.nodes[n].local;
                     let at = local.get(&a.actor).map_or(a.at_ms, |&l| l.min(a.at_ms));
                     local.insert(a.actor, at);
-                }
+                };
+                index.adopt(&live, &dead, schedule).await;
+                index.tidy().await;
+                world.borrow_mut().nodes[n].round = false;
             });
         }
 
@@ -727,14 +733,14 @@ mod sim {
                 match route(&world, n, &o) {
                     Route::Here => {}
                     Route::Claim => Self::open(&mut world, &self.store, &index, n, &o),
-                    Route::Remote => {
-                        world.log.push(format!("fire {o} on n{n}: elsewhere"));
-                        let now = world.now;
+                    Route::Remote(m) => {
+                        world.log.push(format!("fire {o} on n{n}: on n{m}"));
+                        let (now, owner) = (world.now, world.nodes[m].id.clone());
                         drop(world);
                         let world = Rc::clone(&self.world);
                         self.spawn(n, async move {
                             // The scheduler retries it, unless dropped.
-                            if index.elsewhere(NS, &o, now).await.unwrap_or(true) {
+                            if index.elsewhere(NS, &o, &owner, now).await.unwrap_or(true) {
                                 let mut world = world.borrow_mut();
                                 let local = &mut world.nodes[n].local;
                                 local.entry(o).or_insert(now + 2);

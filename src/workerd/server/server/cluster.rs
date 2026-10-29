@@ -228,18 +228,19 @@ impl ClusterNode {
     pub async fn alarms_loop(&self) {
         loop {
             tokio::time::sleep(ALARMS_INTERVAL).await;
-            for alarm in self.cluster.alarms_round(cluster::now_ms()).await {
+            let schedule = |alarm: cluster::Adopted| {
                 let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
                 let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
                     // Not configured here: a peer that has it adopts it once this one dies.
                     tracing::warn!("an adopted alarm's namespace is not configured here");
-                    continue;
+                    return;
                 };
                 let (actor, name) = (&alarm.actor, alarm.name.as_deref());
                 if let Err(e) = namespace.adopt_alarm(actor, name, alarm.at_ms) {
                     tracing::warn!("scheduling an adopted alarm: {}", e.description());
                 }
-            }
+            };
+            self.cluster.alarms_round(cluster::now_ms(), schedule).await;
         }
     }
 
@@ -281,9 +282,10 @@ impl ClusterNode {
             .await
             .map_err(|e| kj::disconnected!("{namespace}/{actor} on {node}: {e}"))?;
         // A channel per stub, so a stub stays with the instance it reached.
-        Ok(Owner::Remote(Rc::new(RpcConnection(
-            ffi::rpc_client_debug_actor(&session.0, service, class, actor),
-        ))))
+        let connection = RpcConnection(ffi::rpc_client_debug_actor(
+            &session.0, service, class, actor,
+        ));
+        Ok(Owner::Remote(Rc::new(connection), node))
     }
 
     /// The session to the peer at `address`: the open one, the one being
@@ -345,10 +347,11 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
     Ok(stream)
 }
 
-/// Where a Durable Object runs, for a request about to start on it.
+/// Where a Durable Object runs, for a request about to start on it: here at
+/// an epoch, or on the node named.
 pub enum Owner {
     Here(u64),
-    Remote(Rc<RpcConnection>),
+    Remote(Rc<RpcConnection>, String),
 }
 
 impl RpcConnection {
