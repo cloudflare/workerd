@@ -313,3 +313,12 @@ wpt_test(
     config = "html/webappapis/timers-test.ts",
     wpt_directory = "@wpt//:html/webappapis/timers@module",
 )
+
+wpt_test(
+    name = "html/webappapis/structured-clone",
+    config = "html/webappapis/structured-clone-test.ts",
+    # META scripts name the battery helpers by absolute path, e.g.
+    # /html/webappapis/structured-clone/structured-clone-battery-of-tests.js
+    extra_wpt_directories = ["@wpt//:html/webappapis/structured-clone@module"],
+    wpt_directory = "@wpt//:html/webappapis/structured-clone@module",
+)
