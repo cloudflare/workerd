@@ -47,6 +47,9 @@ struct TestFixture {
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
     bool useRealTimers;
+    // If true, the actor's storage cache flushes writes to its stage, which is read-only, so a
+    // write fails at flush time. Otherwise writes stay in the cache, as in a preview session.
+    bool flushActorStorage;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;

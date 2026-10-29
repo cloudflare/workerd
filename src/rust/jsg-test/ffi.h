@@ -29,6 +29,11 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Has `registerModules` add builtin modules, then calls the callback of the one named
+  // `specifier`, as importing it does. Returns its exports, or the exception it threw.
+  EvalResult call_builtin_module(
+      ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+      ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
 
   v8::Isolate* v8Isolate;
@@ -101,8 +106,21 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
+// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
+// exception if serialization throws.
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
+// deserialization throws.
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
+
+// Configures the process's autogates to exactly `names`, each without the `workerd-autogate-`
+// prefix, ignoring WORKERD_ALL_AUTOGATES.
+void set_autogates_for_test(::rust::Slice<const ::rust::Str> names);
+// Deinitializes the autogate configuration, so that the gates follow WORKERD_ALL_AUTOGATES again.
+void deinit_autogates_for_test();
 
 // Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
 // only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global

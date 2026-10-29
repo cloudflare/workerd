@@ -224,16 +224,17 @@ export const conversionErrorPrecedence = {
   },
 };
 
-// DIVERGENCE: autoAllocateChunkSize and expectedLength on a default
-// source, which uses neither. Both convert them on every source, as on a
-// byte source but with no zero check (spec): expectedLength as a uint64,
-// so 'abc' and -1 throw TypeError (messages differ; the readable-byte
-// suite's ledger #35), and autoAllocateChunkSize as a number whose
-// fraction truncates, so 0, 1.5 and 2 ** 31 - 1 are accepted. C++
-// converts autoAllocateChunkSize as an int: it accepts -1, 'abc', NaN and
-// Infinity, and throws from 2 ** 31. TypeScript converts it as the spec's
-// [EnforceRange] unsigned long long: it throws for those, and accepts up
-// to 2 ** 53 - 1.
+// DIVERGENCE: autoAllocateChunkSize on a default source, which does not
+// use it (its expectedLength becomes a body's Content-Length, as a byte
+// source's does; see integration-body.js). Both convert the two on every
+// source, as on a byte source but with no zero check (spec):
+// expectedLength as a uint64, so 'abc' and -1 throw TypeError (messages
+// differ; the readable-byte suite's ledger #35), and
+// autoAllocateChunkSize as a number whose fraction truncates, so 0, 1.5
+// and 2 ** 31 - 1 are accepted. C++ converts autoAllocateChunkSize as an
+// int: it accepts -1, 'abc', NaN and Infinity, and throws from 2 ** 31.
+// TypeScript converts it as the spec's [EnforceRange] unsigned long long:
+// it throws for those, and accepts up to 2 ** 53 - 1.
 export const byteMembersOnDefaultSource = {
   test() {
     const outOfRange = {

@@ -918,9 +918,12 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
   }
 }
 
-KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
-  TestServer test(singleWorker(R"((
+// `compatibilityFlags` is a config list literal.
+void testClientDisconnectCancelsResponseBody(kj::StringPtr compatibilityFlags) {
+  TestServer test(singleWorker(kj::str(R"((
     compatibilityDate = "2024-10-01",
+    compatibilityFlags = )"_kj,
+      compatibilityFlags, R"(,
     modules = [
       ( name = "worker",
         esModule =
@@ -941,8 +944,9 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
           `}
       )
     ]
-  ))"_kj));
+  ))"_kj)));
 
+  test.server.allowExperimental();
   test.start();
 
   {
@@ -960,6 +964,14 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/state", "canceled:undefined");
+}
+
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody("[]");
+}
+
+KJ_TEST("Server: client disconnect cancels a TypeScript-implemented ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody(R"(["typescript_implemented_streams"])");
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
@@ -1061,6 +1073,35 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "wrapped: object");
+}
+
+kj::String clusterConfig(kj::StringPtr key) {
+  return kj::str(R"((
+    services = [(
+      name = "hello",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        modules = [(name = "main.js", esModule = "export default {}")]
+      )
+    )],
+    cluster = (bucket = "s3://bucket", address = "127.0.0.1:0", key = ")",
+      key, R"("),
+  ))");
+}
+
+KJ_TEST("Server: cluster mode requires --experimental") {
+  TestServer test(clusterConfig("0123456789abcdef0123456789abcdef"));
+  test.expectErrors(R"(
+    Cluster mode is experimental; it requires --experimental.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: a short cluster key is refused") {
+  TestServer test(clusterConfig("0123456789abcdef"));
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    cluster.key must be at least 32 bytes.
+  )"_blockquote);
 }
 
 KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {

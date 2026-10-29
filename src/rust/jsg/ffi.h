@@ -135,6 +135,8 @@ bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
+bool local_is_int32(const Local& val);
+bool local_is_uint32(const Local& val);
 bool local_is_null(const Local& val);
 bool local_is_undefined(const Local& val);
 bool local_is_null_or_undefined(const Local& val);
@@ -164,6 +166,12 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+// Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
+// result in `result` and return true, or return false if the coercion threw, leaving the exception
+// pending.
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -204,10 +212,24 @@ Local local_symbol_new(Isolate* isolate);
 Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
+// Local<Boolean>
+bool local_boolean_value(const Local& value);
+
+// Local<Number>
+double local_number_value(const Local& value);
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value);
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value);
+int64_t local_integer_value(const Local& value);
+int32_t local_int32_value(const Local& value);
+uint32_t local_uint32_value(const Local& value);
+
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value);
 Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value);
 int64_t local_big_int_int64_value(const Local& value, bool& lossless);
+uint64_t local_big_int_uint64_value(const Local& value, bool& lossless);
 
 // Local<Date>
 // Runs no JavaScript, but prepares to, which would clear a pending termination, so Rust doesn't
@@ -215,14 +237,11 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 MaybeLocal date_new(Isolate* isolate, double time);
 double local_date_value_of(const Local& value);
 
-// Shims that run JavaScript (a call, a getter or Proxy trap, or a coercion through `toString`,
-// `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty result or
-// false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust turns that
-// into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and doesn't call
-// them while execution is terminating. The exceptions are `local_object_set_property`,
-// `local_array_get` and `local_array_set`, which can also run JavaScript (a setter, getter or
-// Proxy trap) but use `jsg::check()` and are not declared as returning `Result`: what JavaScript
-// throws there becomes a Rust panic, which terminates execution (EW-11138).
+// Shims that run JavaScript (a call, a getter, setter or Proxy trap, or a coercion through
+// `toString`, `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty
+// result or false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust
+// turns that into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and
+// doesn't call them while execution is terminating.
 
 // Local<Function>
 // Returns the call's result, or none if it threw, leaving the exception pending.
@@ -234,13 +253,28 @@ MaybeLocal local_function_call(
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
 
 // Local<Object>
-void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
+// Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
+// JavaScript: no setter on Object.prototype is called. Throws a KJ exception if a key is too
+// long for a V8 string, V8 fails to create one, or there are not as many keys as values.
+Local object_new_with_data_properties(
+    Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values);
+// Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
+// leaving the exception pending.
+bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 // Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
 // trap threw, leaving the exception pending.
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has);
 // Returns the value of `key`, or none if a getter or Proxy trap threw, leaving the exception
 // pending.
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+// The same for a `v8::Name` key.
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name);
+// Appends the names of the own enumerable string-keyed properties, converted to strings, to
+// `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
+// the exception pending.
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
 
 // Local<Promise>
 PromiseState local_promise_state(const Local& promise);
@@ -295,8 +329,11 @@ bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, cons
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
-Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
-void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
+// Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
+Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
+// Sets element `index` to `value` and returns true, or returns false if a setter threw, leaving
+// the exception pending.
+bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
 // Appends the elements to `result` and returns true, or returns false with `result` empty if a
 // getter or Proxy trap on an element threw, leaving the exception pending.
 bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result);
@@ -377,8 +414,17 @@ void wrappable_clear_trait_object(Wrappable& wrappable);
 kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 
 // Wrappers
-// Returns an empty handle if the Wrappable has a live wrapper in another isolate.
-MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);
+// Returns the Wrappable's wrapper in `isolate`, creating it if needed, or an empty handle in one
+// of two cases, which `wrappedElsewhere` tells apart:
+//
+// - true: the Wrappable already has a wrapper in another isolate. That is a bug in the caller,
+//   which panics. This does not assert, because unwinding would drop the caller's reference to
+//   the Wrappable, and releasing it needs the other isolate's lock.
+// - false: execution is terminating, or creating the wrapper failed and the exception is left
+//   pending. Like `call_into_js()` in v8.rs, this creates and reads nothing while execution is
+//   terminating, even a wrapper that already exists.
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of
@@ -394,16 +440,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
-::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
-::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
-::rust::Vec<uint32_t> unwrap_uint32_array(Isolate* isolate, Local value);
-::rust::Vec<int8_t> unwrap_int8_array(Isolate* isolate, Local value);
-::rust::Vec<int16_t> unwrap_int16_array(Isolate* isolate, Local value);
-::rust::Vec<int32_t> unwrap_int32_array(Isolate* isolate, Local value);
-::rust::Vec<float> unwrap_float32_array(Isolate* isolate, Local value);
-::rust::Vec<double> unwrap_float64_array(Isolate* isolate, Local value);
-::rust::Vec<int64_t> unwrap_bigint64_array(Isolate* isolate, Local value);
-::rust::Vec<uint64_t> unwrap_biguint64_array(Isolate* isolate, Local value);
+
 // ArrayBuffer detach/detachable/was-detached
 void local_array_buffer_detach(Isolate* isolate, Local& buffer);
 bool local_array_buffer_was_detached(const Local& buffer);
@@ -482,6 +519,28 @@ Realm* realm_from_isolate(Isolate* isolate);
 bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
+
+// Autogates
+// workerd::util::Autogate::isEnabled(AutogateKey::JSG_INTEGER_ENFORCE_RANGE).
+bool integer_enforce_range_autogate_enabled();
+
+// Serialization
+// In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
+// and the other way round; see ser.c++.
+//
+// Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
+// `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
+// objects through their serializers. Stores the bytes in `result` and returns true, or returns
+// false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
+// Proxy trap or serializer threw.
+bool local_serialize(Isolate* isolate,
+    const Local& value,
+    bool errors_are_host_objects,
+    ::rust::Vec<uint8_t>& result);
+// Reads a value as jsg::Deserializer does with its default options, and returns it, or
+// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
+// exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

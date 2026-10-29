@@ -12,7 +12,6 @@
 //!   for non-matching values
 
 use jsg::FromJS;
-use jsg::Number;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -32,14 +31,14 @@ impl Greeter {
 
 #[jsg_resource]
 struct Counter {
-    value: f64,
+    value: i32,
 }
 
 #[jsg_resource]
 impl Counter {
     #[jsg_method]
-    pub fn get_value(&self) -> Number {
-        Number::new(self.value)
+    pub fn get_value(&self) -> i32 {
+        self.value
     }
 }
 
@@ -55,7 +54,7 @@ fn to_js_creates_object_with_methods() {
         let greeter = Greeter {
             greeting: "Hello".to_owned(),
         };
-        let js_val = greeter.to_js(lock);
+        let js_val = greeter.to_js(lock)?;
         ctx.set_global(lock, "greeter", js_val);
 
         let result: String = ctx.eval(lock, "greeter.greet('World')").unwrap();
@@ -69,12 +68,12 @@ fn to_js_creates_object_with_methods() {
 fn to_js_works_for_different_resource_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let counter = Counter { value: 42.0 };
-        let js_val = counter.to_js(lock);
+        let counter = Counter { value: 42 };
+        let js_val = counter.to_js(lock)?;
         ctx.set_global(lock, "counter", js_val);
 
-        let result: Number = ctx.eval(lock, "counter.getValue()").unwrap();
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result: i32 = ctx.eval(lock, "counter.getValue()").unwrap();
+        assert_eq!(result, 42);
         Ok(())
     });
 }

@@ -465,7 +465,7 @@ bool ecdsa_verify(Ecdsa algorithm,
       !EC_KEY_set_public_key(key.get(), point.get())) {
     return false;
   }
-  uint8_t hash[EVP_MAX_MD_SIZE];
+  uint8_t hash[EVP_MAX_MD_SIZE]{};
   unsigned int hashSize = 0;
   if (!EVP_Digest(message.data(), message.size(), hash, &hashSize, digest, nullptr)) {
     return false;

@@ -56,44 +56,25 @@ function computeVersionTuple(Module: Module): [number, number, number] {
 
 /**
  * This is passed as a preRun hook in EmscriptenSettings, run just before
- * main(). It ensures that the file system includes the stuff that main() needs,
- * most importantly the Python standard library.
- *
- * Put the Python + Pyodide standard libraries into a zip file in the
- * appropriate location /lib/python311.zip . Python will import stuff directly
- * from this zip file using ZipImporter.
- *
- * ZipImporter is quite useful here -- the Python runtime knows how to unpack a
- * bunch of different archive formats but it is not possible to use these until
- * the runtime state is initialized. So ZipImporter breaks this bootstrapping
- * knot for us.
- *
- * We also make an empty home directory and an empty global site-packages
+ * main(). It makes an empty home directory and an empty global site-packages
  * directory `/lib/pythonv.vv/site-packages`.
  *
  * This is a simplified version of the `prepareFileSystem` function here:
  * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
  */
-function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
-  return function prepareFileSystem(Module: Module): void {
-    Module.API.pyVersionTuple = computeVersionTuple(Module);
-    const [pymajor, pyminor] = Module.API.pyVersionTuple;
-    Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
-    Module.LD_LIBRARY_PATH = [
-      '/usr/lib',
-      Module.FS.sitePackages,
-      '/session/metadata/python_modules/lib/',
-    ].join(':');
-    Module.ENV.LD_LIBRARY_PATH = Module.LD_LIBRARY_PATH;
-    Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
-    Module.FS.mkdirTree(Module.FS.sitePackages);
-    Module.FS.writeFile(
-      `/lib/python${pymajor}${pyminor}.zip`,
-      new Uint8Array(pythonStdlib),
-      { canOwn: true }
-    );
-    Module.FS.mkdirTree(Module.API.config.env.HOME);
-  };
+function prepareFileSystem(Module: Module): void {
+  Module.API.pyVersionTuple = computeVersionTuple(Module);
+  const [pymajor, pyminor] = Module.API.pyVersionTuple;
+  Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+  Module.LD_LIBRARY_PATH = [
+    '/usr/lib',
+    Module.FS.sitePackages,
+    '/session/metadata/python_modules/lib/',
+  ].join(':');
+  Module.ENV.LD_LIBRARY_PATH = Module.LD_LIBRARY_PATH;
+  Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
+  Module.FS.mkdirTree(Module.FS.sitePackages);
+  Module.FS.mkdirTree(Module.API.config.env.HOME);
 }
 
 /**
@@ -163,7 +144,6 @@ function getInstantiateWasm(
  * This isn't public API of Pyodide so it's a bit fiddly.
  */
 function getEmscriptenSettings(
-  pythonStdlib: ArrayBuffer,
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings {
   const config: PyodideConfig = {
@@ -198,7 +178,6 @@ function getEmscriptenSettings(
     rejectReadyPromise = rej;
   });
   const waitForDynlibs = getWaitForDynlibs(resolveReadyPromise!);
-  const prepareFileSystem = getPrepareFileSystem(pythonStdlib);
   const instantiateWasm = getInstantiateWasm(pyodideWasmModule);
 
   // Emscripten settings to control runtime instantiation.
@@ -258,10 +237,9 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
  * Returns the instantiated emscriptenModule object.
  */
 export async function instantiateEmscriptenModule(
-  pythonStdlib: ArrayBuffer,
   wasmModule: WebAssembly.Module
 ): Promise<Module> {
-  const emscriptenSettings = getEmscriptenSettings(pythonStdlib, wasmModule);
+  const emscriptenSettings = getEmscriptenSettings(wasmModule);
   for (const _ of featureDetectionMonkeyPatchesContextManager()) {
     // Ignore the returned promise, it won't resolve until we're done preloading dynamic
     // libraries.

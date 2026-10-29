@@ -3,9 +3,8 @@ load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
-load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS")
 load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
@@ -43,15 +42,6 @@ def _bin_relative_path(path):
         path = "external/" + repo + "/" + path
     return path
 
-def _copy_and_capnp_embed(src):
-    out_name = _out_name(src)
-    _copy_to_generated(src)
-    capnp_embed(
-        name = out_name + "@capnp",
-        src = _out_path(out_name, None),
-        deps = [out_name + "@copy"],
-    )
-
 def _fmt_python_snapshot_release(
         pyodide_version,
         pyodide_date,
@@ -82,19 +72,10 @@ def pyodide_extra():
         out_name = "pyodide_extra_tmpl.capnp",
     )
 
-    package_tags = [info["tag"] for info in PYTHON_LOCKFILES]
-
     expand_template(
         name = "pyodide_extra_expand_template@rule",
         out = "generated/pyodide_extra.capnp",
         substitutions = {
-            "%PACKAGE_LOCKS": ",".join(
-                [
-                    '(packageDate = "%s", lock = embed "pyodide-lock_%s.json")' %
-                    (tag, tag)
-                    for tag in package_tags
-                ],
-            ),
             "%PYTHON_RELEASES": ", ".join(
                 [_fmt_python_snapshot_release(**info) for info in BUNDLE_VERSION_INFO.values()],
             ),
@@ -102,18 +83,10 @@ def pyodide_extra():
         template = "generated/pyodide_extra_tmpl.capnp",
     )
 
-    for tag in package_tags:
-        _copy_and_capnp_embed("python-lock/pyodide-lock_" + tag + ".json")
-
     cc_capnp_library(
         name = "pyodide_extra_capnp",
         srcs = ["generated/pyodide_extra.capnp"],
         visibility = ["//visibility:public"],
-        deps = [
-        ] + [
-            ":pyodide-lock_%s.json@capnp" % tag
-            for tag in package_tags
-        ],
     )
 
 def _packages_tag_for_version(version):
@@ -270,7 +243,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
     # the bundle so that the runtime no longer has to download or unpack them at request time. The
     # wheels listed in the (pre-filtered) lock file are extracted at build time into a single
     # PythonPackages capnp message (one entry per file, keyed by install_dir + path; see
-    # python_packages.capnp / pack_python_packages.py) which is embedded as the `python_packages`
+    # python_packages.capnp / tools/pack_python_packages.py) which is embedded as the `python_packages`
     # data module. Newer Pyodide versions bundle the stdlib directly and have no wheels to embed.
     packages_tag = _packages_tag_for_version(version)
     internal_data_modules = [
@@ -286,7 +259,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
             srcs = [wheels, lockfile, "python_packages.capnp"],
             outs = [_out_path("python_packages.bin", version)],
             cmd = " ".join([
-                "$(execpath :pack_python_packages)",
+                "$(execpath //src/pyodide/tools:pack_python_packages)",
                 "--capnp $(execpath @capnp-cpp//src/capnp:capnp_tool)",
                 "--schema $(location python_packages.capnp)",
                 "--lock $(location %s)" % lockfile,
@@ -294,7 +267,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
                 "$(locations %s)" % wheels,
             ]),
             tools = [
-                ":pack_python_packages",
+                "//src/pyodide/tools:pack_python_packages",
                 "@capnp-cpp//src/capnp:capnp_tool",
             ],
         )

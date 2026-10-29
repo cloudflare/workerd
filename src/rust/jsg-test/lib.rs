@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use jsg::FromJS;
 use jsg::feature_flags::compatibility_flags;
@@ -20,6 +22,7 @@ mod ffi {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -73,6 +76,13 @@ mod ffi {
             resource_name: KjMaybe<&str>,
         ) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Has `register_modules` add builtin modules, then calls the callback of the one named
+        /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
+        pub unsafe fn call_builtin_module(
+            self: &EvalContext,
+            register_modules: fn(Pin<&mut ModuleRegistry>),
+            specifier: &str,
+        ) -> Result<EvalResult>;
 
         /// Triggers garbage collection for testing purposes.
         /// Note: For GC to actually collect objects, they must not be reachable from the
@@ -126,8 +136,27 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
+        /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
+        /// throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
+
+        /// Configures the process's autogates to exactly `names`, each in kebab-case without
+        /// the `workerd-autogate-` prefix, whatever `WORKERD_ALL_AUTOGATES` says. See
+        /// `set_autogates`.
+        pub fn set_autogates_for_test(names: &[&str]);
+        /// Deinitializes the configuration that `set_autogates_for_test` made, so that the
+        /// gates follow `WORKERD_ALL_AUTOGATES` again.
+        pub fn deinit_autogates_for_test();
 
         /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
         /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
@@ -157,6 +186,45 @@ mod ffi {
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+/// The process's autogate configuration that [`set_autogates`] made.
+///
+/// Dropping it deinitializes the configuration, so that the gates follow `WORKERD_ALL_AUTOGATES`
+/// again.
+#[must_use = "the autogates are reset when this is dropped"]
+pub struct Autogates(());
+
+/// Whether an [`Autogates`] guard is alive.
+///
+/// The guards do not nest: an inner one would replace the outer configuration and its drop would
+/// discard it, so `set_autogates` refuses one.
+static AUTOGATES_SET: AtomicBool = AtomicBool::new(false);
+
+impl Drop for Autogates {
+    fn drop(&mut self) {
+        ffi::deinit_autogates_for_test();
+        AUTOGATES_SET.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Configures the process's autogates to exactly `names` for as long as the returned guard lives.
+///
+/// Each name is in kebab-case without the `workerd-autogate-` prefix
+/// (`"jsg-integer-enforce-range"` for `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`). An empty slice
+/// disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and
+/// the tests run serially, so a test holds the guard for its duration.
+///
+/// # Panics
+///
+/// Panics if another guard is alive; the guards do not nest.
+pub fn set_autogates(names: &[&str]) -> Autogates {
+    assert!(
+        !AUTOGATES_SET.swap(true, Ordering::SeqCst),
+        "an Autogates guard is already alive; drop it before configuring the autogates again"
+    );
+    ffi::set_autogates_for_test(names);
+    Autogates(())
+}
 
 pub struct EvalContext<'a> {
     inner: &'a ffi::EvalContext,
@@ -242,9 +310,33 @@ impl EvalContext<'_> {
         }
     }
 
+    /// Has `register` add builtin modules with `jsg::modules::add_builtin`, then produces the
+    /// exports of the one named `specifier`, as importing it does.
+    ///
+    /// # Panics
+    ///
+    /// If `register` adds no module named `specifier`.
+    pub fn import_builtin<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        register: fn(Pin<&mut v8::ffi::ModuleRegistry>),
+        specifier: &str,
+    ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
+        // SAFETY: self.inner is a valid EvalContext, and the callback runs in `lock`'s scope.
+        let result = unsafe { self.inner.call_builtin_module(register, specifier) }
+            .expect("no such builtin module");
+        Self::raw_result(lock, result)
+    }
+
     /// Converts `value` to JavaScript and stores it as the global `name`.
+    ///
+    /// # Panics
+    ///
+    /// If the conversion fails.
     pub fn set_global<'s>(&self, lock: &mut jsg::Lock<'s>, name: &str, value: impl jsg::ToJS<'s>) {
-        let value = value.to_js(lock);
+        let value = value
+            .to_js(lock)
+            .expect("converting a global's value failed");
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
@@ -272,7 +364,14 @@ impl Harness {
     /// Like [`Harness::new`], with `JsgConfig::fastApiEnabled` set so that resource methods get
     /// V8 Fast API callbacks.
     pub fn with_fast_api() -> Self {
-        Self::create(|_| {}, ffi::FastApi::Enabled)
+        Self::with_fast_api_and_flags(|_| {})
+    }
+
+    /// Like [`Harness::with_flags`], with V8 Fast API callbacks enabled.
+    pub fn with_fast_api_and_flags(
+        set_flags: impl FnOnce(compatibility_flags::Builder<'_>),
+    ) -> Self {
+        Self::create(set_flags, ffi::FastApi::Enabled)
     }
 
     fn create(
@@ -497,6 +596,35 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open.
         unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer`, to compare with
+    /// [`jsg::ser::serialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization throws.
+    pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `value` belongs to.
+        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi()) }
+            .expect("C++ JSG should serialize the value")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
+    /// [`jsg::ser::deserialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if deserialization throws.
+    pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
+                    .expect("C++ JSG should deserialize the data"),
+            )
+        }
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

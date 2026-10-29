@@ -27,7 +27,7 @@ impl Waiter {
         *self.resolver.borrow_mut() = Some(resolver.to_traced_global(lock));
         let wrapped = input.then(lock, String::from("data"), |lock, data, value| {
             let object = lock.new_object();
-            object.set(lock, data, value);
+            object.set(lock, data, value)?;
             Ok(object.into())
         })?;
         wrapped.catch(lock, (), |_lock, (), reason| Ok(reason))?;

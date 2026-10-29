@@ -69,7 +69,10 @@ impl Task {
 
     /// `this` comes before the lock, as `&self` does.
     #[jsg_method]
-    fn name_value<'s>(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn name_value<'s>(
+        this: jsg::Rc<Self>,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<v8::Local<'s, v8::Value>> {
         this.name.as_str().to_js(lock)
     }
 
@@ -83,8 +86,9 @@ impl Task {
     /// wrapper in return.
     #[jsg_method]
     fn schedule(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, queue: jsg::Rc<Queue>) {
-        this.queue
-            .set(Some(queue.clone().to_js(lock).to_traced_global(lock)));
+        this.queue.set(Some(
+            queue.clone().to_js(lock).unwrap().to_traced_global(lock),
+        ));
         queue.tasks.borrow_mut().push(this);
     }
 
@@ -130,8 +134,8 @@ impl Queue {
     }
 
     #[jsg_method]
-    fn len(&self) -> jsg::Number {
-        jsg::Number::from(u32::try_from(self.tasks.borrow().len()).unwrap())
+    fn len(&self) -> u32 {
+        u32::try_from(self.tasks.borrow().len()).unwrap()
     }
 }
 
@@ -173,6 +177,27 @@ fn this_is_the_resource_the_method_was_called_on() {
         );
         Ok(())
     });
+}
+
+#[test]
+fn function_lengths_exclude_this_and_lock() {
+    for (enabled, expected) in [(false, "0,0,0,0"), (true, "0,1,0,1")] {
+        crate::Harness::with_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        })
+        .run_in_context(|lock, ctx| {
+            install(lock, ctx);
+            let lengths = ctx
+                .eval::<String>(
+                    lock,
+                    "[task.itself.length, task.isSame.length, task.nameValue.length, \
+                     task.schedule.length].join()",
+                )
+                .unwrap();
+            assert_eq!(lengths, expected);
+            Ok(())
+        });
+    }
 }
 
 /// Accessors take `this` too, on the prototype, as own properties and as inspect properties.

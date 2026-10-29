@@ -25,7 +25,6 @@ use std::cell::Cell;
 
 use jsg::ExceptionType;
 use jsg::FromJS;
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -115,7 +114,7 @@ fn coercion_throws_thrown_value() {
                 "({ valueOf() { throw thrown; } })",
                 "new Proxy({}, { get() { throw thrown; } })",
             ] {
-                let caught = conversion_throws::<Number>(lock, ctx, expr);
+                let caught = conversion_throws::<f64>(lock, ctx, expr);
                 assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
                 let caught = conversion_throws::<i32>(lock, ctx, expr);
                 assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
@@ -160,7 +159,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
     });
 }
 
-/// `Number` coercion of a `Symbol`/`BigInt` throws in JS.
+/// `ToNumber` on a `Symbol`/`BigInt` throws in JS.
 #[test]
 fn number_from_hostile_values_returns_err() {
     let harness = crate::Harness::new();
@@ -171,7 +170,7 @@ fn number_from_hostile_values_returns_err() {
             "({ valueOf() { throw new TypeError('no number'); } })",
         ];
         for expr in hostile {
-            conversion_throws::<Number>(lock, ctx, expr);
+            conversion_throws::<f64>(lock, ctx, expr);
         }
         Ok(())
     });
@@ -196,10 +195,10 @@ fn typed_array_from_wrong_type_returns_err() {
         // Not a Uint8Array: a plain array, a number, and a Symbol.
         for expr in ["[1, 2, 3]", "42", "Symbol('s')"] {
             let value = ctx.eval_raw(lock, expr).expect("should evaluate");
-            let result = <Vec<u8> as FromJS>::from_js(lock, value);
+            let result = <v8::Local<v8::Uint8Array> as FromJS>::from_js(lock, value);
             assert!(
                 result.as_ref().is_err_and(|err| !err.is_pending()),
-                "Vec::<u8>::from_js({expr}) should be a non-pending Err, got {result:?}"
+                "Local::<Uint8Array>::from_js({expr}) should be a non-pending Err, got {result:?}"
             );
         }
         Ok(())
@@ -273,17 +272,17 @@ impl ReentrantResource {
         format!("[{message}]")
     }
 
-    /// Takes a `Number` argument; same nesting trick as `echo` but for
+    /// Takes an `f64` argument; same nesting trick as `echo` but for
     /// `unwrap_number`/`ToNumber`.
     #[jsg_method]
-    pub fn double(&self, n: Number) -> Number {
+    pub fn double(&self, n: f64) -> f64 {
         self.call_count.set(self.call_count.get() + 1);
-        Number::new(n.value() * 2.0)
+        n * 2.0
     }
 
     #[jsg_method]
-    pub fn call_count(&self) -> Number {
-        Number::new(f64::from(self.call_count.get()))
+    pub fn call_count(&self) -> u32 {
+        self.call_count.get()
     }
 
     /// Unconditionally panics, to test that a panic triggered *while V8 is
@@ -317,13 +316,12 @@ fn string_from_tostring_side_effects_are_observed() {
         let s = <String as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert_eq!(s, "computed-1");
 
-        let side_effect: Number = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect.value() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`.
+/// Same as above, but for `ToNumber`/`valueOf`.
 #[test]
 fn number_from_valueof_side_effects_are_observed() {
     let harness = crate::Harness::new();
@@ -340,11 +338,10 @@ fn number_from_valueof_side_effects_are_observed() {
             )
             .expect("expression should evaluate");
 
-        let n = <Number as FromJS>::from_js(lock, value).expect("coercion should succeed");
-        assert!((n.value() - 42.0).abs() < f64::EPSILON);
+        let n = <f64 as FromJS>::from_js(lock, value).expect("coercion should succeed");
+        assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let side_effect: Number = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect.value() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
@@ -360,7 +357,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -375,13 +372,12 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let s = <String as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert_eq!(s, "[inner]");
 
-        let count: Number = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count.value() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`/`unwrap_number`.
+/// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_into_rust_resource_method() {
     let harness = crate::Harness::new();
@@ -389,7 +385,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -401,11 +397,10 @@ fn number_coercion_reentrant_into_rust_resource_method() {
             )
             .expect("expression should evaluate");
 
-        let n = <Number as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
-        assert!((n.value() - 42.0).abs() < f64::EPSILON);
+        let n = <f64 as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
+        assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let count: Number = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count.value() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
@@ -420,7 +415,7 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -454,7 +449,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -473,7 +468,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`/`unwrap_number`.
+/// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
@@ -481,14 +476,14 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
             .eval_raw(lock, "({ valueOf() { resource.panicNow(); return 0; } })")
             .expect("expression should evaluate");
 
-        let result = lock.try_catch(|lock| <Number as FromJS>::from_js(lock, value));
+        let result = lock.try_catch(|lock| <f64 as FromJS>::from_js(lock, value));
         assert!(
             !matches!(result, Ok(Ok(_))),
             "panic during ToNumber coercion must be an Err, got {result:?}"
@@ -508,7 +503,7 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -576,6 +571,65 @@ fn object_has_from_throwing_proxy_returns_err() {
     });
 }
 
+/// `Object::set` throws what a setter, on the object or its prototype chain, or a Proxy `set`
+/// trap threw.
+#[test]
+fn object_set_from_throwing_setter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "({ set x(v) { throw thrown; } })",
+            "Object.create({ set x(v) { throw thrown; } })",
+            "new Proxy({}, { set() { throw thrown; } })",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+            let one = 1_u32.to_js(lock)?;
+            let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let obj: v8::Local<'_, v8::Object> =
+            ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
+        let one = 1_u32.to_js(lock)?;
+        obj.set(lock, "x", one)?;
+        let x = obj.get(lock, "x")?;
+        assert_eq!(u32::from_js(lock, x)?, 1);
+        Ok(())
+    });
+}
+
+/// `Array::set` throws what an element's setter, on the array or `Array.prototype`, threw.
+#[test]
+fn array_set_from_throwing_setter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "Object.defineProperty([0], 0, { set(v) { throw thrown; } })",
+            "Object.setPrototypeOf([], Object.create(Array.prototype, \
+                 { 0: { set(v) { throw thrown; } } }))",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
+            let one = 1_u32.to_js(lock)?;
+            let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
+        let one = 1_u32.to_js(lock)?;
+        array.set(lock, 2, one)?;
+        assert_eq!(array.len(), 3);
+        Ok(())
+    });
+}
+
 /// What an argument's coercion throws reaches the JavaScript caller of a method unchanged.
 #[test]
 fn coercion_exception_propagates_through_method() {
@@ -609,25 +663,44 @@ fn coercion_exception_propagates_through_method() {
 enum Conversion {
     String,
     Number,
+    Int32,
+    Uint32,
+    Integer,
     Get,
     Has,
     Iterate,
+    Set,
+    SetElement,
+    DictKeys,
+    DictValue,
+    DictValueCoercion,
 }
 
 impl Conversion {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 13] = [
         Self::String,
         Self::Number,
+        Self::Int32,
+        Self::Uint32,
+        Self::Integer,
         Self::Get,
         Self::Has,
         Self::Iterate,
+        Self::Set,
+        Self::SetElement,
+        Self::DictKeys,
+        Self::DictValue,
+        Self::DictValueCoercion,
     ];
 
-    /// Converts `value`, or reads its property `x`.
+    /// Converts `value`, reads or sets its property `x`, or sets its element 0.
     fn run<'s>(self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<()> {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
-            Self::Number => Number::from_js(lock, value).map(drop),
+            Self::Number => f64::from_js(lock, value).map(drop),
+            Self::Int32 => value.int32_value(lock).map(drop),
+            Self::Uint32 => value.uint32_value(lock).map(drop),
+            Self::Integer => value.integer_value(lock).map(drop),
             Self::Get => v8::Local::<v8::Object>::try_from(value)
                 .unwrap()
                 .get(lock, "x")
@@ -636,22 +709,47 @@ impl Conversion {
                 .unwrap()
                 .has(lock, "x")
                 .map(drop),
-            Self::Iterate => Vec::<Number>::from_js(lock, value).map(drop),
+            Self::Iterate => Vec::<u32>::from_js(lock, value).map(drop),
+            Self::Set => {
+                let undefined = lock.undefined();
+                v8::Local::<v8::Object>::try_from(value)
+                    .unwrap()
+                    .set(lock, "x", undefined)
+            }
+            Self::SetElement => {
+                let undefined = lock.undefined();
+                v8::Local::<v8::Array>::try_from(value)
+                    .unwrap()
+                    .set(lock, 0, undefined)
+            }
+            Self::DictKeys | Self::DictValue | Self::DictValueCoercion => {
+                jsg::Dict::<f64>::from_js(lock, value).map(drop)
+            }
         }
     }
 
-    /// A value whose conversion, or whose property `x`, calls `f`.
+    /// A value whose conversion, property `x` or element 0 calls `f`.
     fn value_calling(self, f: &str) -> String {
         match self {
             Self::String => format!("({{ toString: {f} }})"),
-            Self::Number => format!("({{ valueOf: {f} }})"),
-            Self::Get => format!("({{ get x() {{ return ({f})(); }} }})"),
+            Self::Number | Self::Int32 | Self::Uint32 | Self::Integer => {
+                format!("({{ valueOf: {f} }})")
+            }
+            Self::Get | Self::DictValue => format!("({{ get x() {{ return ({f})(); }} }})"),
             Self::Has => format!("new Proxy({{}}, {{ has: {f} }})"),
             Self::Iterate => {
                 format!(
                     "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ get: {f} }}); return a; }})()"
                 )
             }
+            Self::Set => format!("({{ set x(v) {{ ({f})(); }} }})"),
+            Self::SetElement => {
+                format!(
+                    "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ set: {f} }}); return a; }})()"
+                )
+            }
+            Self::DictKeys => format!("new Proxy({{}}, {{ ownKeys: {f} }})"),
+            Self::DictValueCoercion => format!("({{ x: {{ valueOf: {f} }} }})"),
         }
     }
 }

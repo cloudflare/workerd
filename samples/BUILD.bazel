@@ -1,4 +1,5 @@
 exports_files([
     "helloworld/config.capnp",
     "helloworld/worker.js",
+    "wrangler/wrangler.jsonc",
 ])

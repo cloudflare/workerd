@@ -24,6 +24,7 @@ use crate::utils::has_custom_trace_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
+use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
 
@@ -109,7 +110,10 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #[automatically_derived]
         impl<'s> jsg::ToJS<'s> for #name {
-            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
+            fn to_js(
+                self,
+                lock: &mut jsg::Lock<'s>,
+            ) -> ::std::result::Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
                 let r = jsg::Rc::new(self);
                 jsg::ToJS::to_js(r, lock)
             }
@@ -200,8 +204,10 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
                 .map(|list| list.tokens.clone())
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
-            let callback_name =
-                syn::Ident::new(&format!("{rust_method_name}_callback"), rust_method_name.span());
+            let callback_name = syn::Ident::new(
+                &format!("{rust_method_name}_callback"),
+                rust_method_name.span(),
+            );
 
             let has_self = method
                 .sig
@@ -210,14 +216,38 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
                 .any(|arg| matches!(arg, FnArg::Receiver(_)))
                 || this_param(&method.sig).is_some();
 
-            let fast_api =
-                syn::Ident::new(&format!("{rust_method_name}_fast_api"), rust_method_name.span());
+            let fast_api = syn::Ident::new(
+                &format!("{rust_method_name}_fast_api"),
+                rust_method_name.span(),
+            );
             let fast = quote! { Self::#fast_api() };
 
+            let length = required_argument_count(
+                method
+                    .sig
+                    .inputs
+                    .iter()
+                    .skip(usize::from(this_param(&method.sig).is_some())),
+            );
+
             let member = if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
+                quote! {
+                    jsg::Member::Method {
+                        name: #js_name.to_owned(),
+                        callback: Self::#callback_name(),
+                        fast: #fast,
+                        length: #length,
+                    }
+                }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
+                quote! {
+                    jsg::Member::StaticMethod {
+                        name: #js_name.to_owned(),
+                        callback: Self::#callback_name(),
+                        fast: #fast,
+                        length: #length,
+                    }
+                }
             };
             Some(MemberRegistration::new(rust_method_name, &member))
         })
@@ -735,6 +765,7 @@ fn generate_constructor_registration(
     let call = quote! { #self_ty::#rust_method_name };
 
     let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
+    let length = required_argument_count(method.sig.inputs.iter());
     let lock_arg = if has_lock_param {
         quote! { &mut *lock, }
     } else {
@@ -775,6 +806,7 @@ fn generate_constructor_registration(
                 let rc = jsg::Rc::new(resource);
                 rc.attach_to_this(args);
             }),
+            length: #length,
         }
     };
     Ok(Some(MemberRegistration::new(rust_method_name, &member)))

@@ -105,11 +105,35 @@ crate.annotation(
     crate = "rust_icu_sys",
     rustc_env = {"RUST_ICU_MAJOR_VERSION_NUMBER": "78"},
 )
+crate.annotation(
+    # V8 includes generated C++ bindings in the temporal_capi crate; create a cc_library to access
+    # these from Bazel.
+    #
+    # Not a triple-quoted string: Windows checkouts convert this file to CRLF line endings, which
+    # would end up in the string and change crate_universe's lockfile digest.
+    additive_build_file_content = "\n".join([
+        "",
+        'load("@rules_cc//cc:cc_library.bzl", "cc_library")',
+        "",
+        "cc_library(",
+        '    name = "cpp_bindings",',
+        '    hdrs = glob(["bindings/cpp/**/*.hpp"]),',
+        '    strip_include_prefix = "bindings/cpp",',
+        ")",
+        "",
+    ]),
+    crate = "temporal_capi",
+    extra_aliased_targets = {"temporal_capi_cpp_bindings": "cpp_bindings"},
+)
 crate.from_cargo(
     # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
     # followup.
     name = "crates_vendor",
     cargo_lockfile = "//deps/rust:Cargo.lock",
+    # The resolved crate graph, which `just update-rust` updates along with Cargo.lock. After
+    # editing Cargo.toml or Cargo.lock by hand, regenerate it with
+    # `bazel fetch --repo_env=CARGO_BAZEL_REPIN=1 --repo=@crates_vendor`.
+    lockfile = "//deps/rust:cargo-bazel-lock.json",
     manifests = ["//deps/rust:Cargo.toml"],
     supported_platform_triples = RUST_TARGET_TRIPLES,
 )

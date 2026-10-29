@@ -16,8 +16,6 @@ package-lock.json
 /external
 # Bazel output symlinks: Same reasoning as /external. You need the * because people can change the name of the directory your repository is cloned into, changing the bazel-<workspace_name> symlink.
 /bazel-*
-# Bazel 8's MODULE lock, since we're not actually locking anything yet.
-MODULE.bazel.lock
 # Compiled output -> don't check in
 /compile_commands.json
 /rust-project.json
@@ -43,10 +41,7 @@ perf.data
 
 # opencode auto-generates package.json, bun.lock, and .gitignore inside .opencode/
 # at startup to install plugin dependencies. These are runtime artifacts that should
-# not be committed — the opencode CLI version is pinned in CI workflows (see
-# .github/workflows/bonk.yml) which determines the plugin version deterministically.
-# Without these rules, Bonk (our AI reviewer) will see the generated files as dirty
-# and commit them to PR branches, causing merge conflicts.
+# not be committed.
 .opencode/package.json
 .opencode/bun.lock
 .opencode/.gitignore

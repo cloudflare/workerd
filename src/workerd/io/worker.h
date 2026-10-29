@@ -61,6 +61,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
 
+class BaseTracer;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -356,6 +357,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
+  // Get the Worker::Isolate of a V8 isolate that a Worker::Isolate created.
+  static const Isolate& from(v8::Isolate* isolate);
 
   // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
   // safe since we call it in a signal handler.
@@ -917,6 +920,13 @@ class Worker::Actor final: public kj::Refcounted {
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
   static bool idsEqual(const Id& a, const Id& b);
 
+  // Why an actor is hibernating, as passed to its onHibernate handler.
+  enum class HibernationReason {
+    INACTIVE,
+    CODE_UPDATED,
+    SYSTEM,
+  };
+
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
   class Loopback {
@@ -927,6 +937,18 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
 
     virtual kj::Own<Loopback> addRef() = 0;
+
+    // Runs `actor`'s onHibernate handler by calling Worker::Actor::runOnHibernate() with the
+    // embedder's per-request objects. It lives here because, like hibernatable WebSocket events,
+    // the hook runs without an inbound request. `actor` is explicit because a Loopback can outlive
+    // its actor.
+    //
+    // Returns kj::none if the actor has no handler, or if the embedder doesn't deliver the hook
+    // through the Loopback.
+    virtual kj::Maybe<kj::Promise<void>> runOnHibernate(
+        Worker::Actor& actor, HibernationReason reason) {
+      return kj::none;
+    }
   };
 
   // The HibernationManager class manages HibernatableWebSockets created by an actor.
@@ -1062,6 +1084,29 @@ class Worker::Actor final: public kj::Refcounted {
   // This is used only for modules-syntax actors (which most are, since that's the only format we
   // support publicly).
   void ensureConstructed(IoContext&);
+
+  // Whether the actor's class instance has an onHibernate handler. Always false without the
+  // experimental compatibility flag. Reads state that requests modify, so only call it while the
+  // actor is idle.
+  bool hasOnHibernateHandler();
+
+  // Runs the actor's onHibernate handler, then waits for the storage writes it made to be flushed.
+  // Call it before a planned shutdown(), and only if hasOnHibernateHandler() returns
+  // true; skipping the call keeps the shutdown timing of actors without a handler unchanged.
+  //
+  // The handler runs on a lightweight IncomingRequest built from the given objects. This doesn't
+  // call addRef(), whose request tracking would cancel the shutdown that called it. When the
+  // handler finishes, or this call is canceled while it runs, any work it left behind is
+  // canceled, so no more JavaScript runs in the actor.
+  //
+  // abort() cancels this call. The outcome is reported to `observer` and to the ActorObserver,
+  // unless this call is canceled before the handler finishes. Failures of the handler itself don't
+  // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
+  // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
+  kj::Promise<void> runOnHibernate(HibernationReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
@@ -1202,6 +1247,11 @@ class Worker::Actor final: public kj::Refcounted {
   friend class Worker;
 
   kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
+
+  kj::Promise<void> runOnHibernateImpl(HibernationReason reason,
+      kj::Rc<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> observer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
 };
 
 WD_STRONG_BOOL(PopulateVersionInfoMetadata);

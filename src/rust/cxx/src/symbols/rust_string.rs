@@ -31,9 +31,26 @@ unsafe extern "C" fn string_from_latin1(
     // Safety: the bridge representation and ownership invariants satisfy this operation.
     let slice = unsafe { slice::from_raw_parts(ptr, len) };
     let this = this.as_mut_ptr();
-    let owned = slice.iter().map(|&c| c as char).collect();
+    let (ascii, rest) = slice.split_at(leading_ascii_len(slice));
+    let mut owned = String::with_capacity(len + rest.iter().filter(|&&c| c >= 0x80).count());
+    // Safety: every byte of `ascii` is ASCII, which is valid UTF-8.
+    owned.push_str(unsafe { str::from_utf8_unchecked(ascii) });
+    owned.extend(rest.iter().map(|&c| c as char));
     // Safety: the bridge representation and ownership invariants satisfy this operation.
     unsafe { ptr::write(this, owned) }
+}
+
+fn leading_ascii_len(bytes: &[u8]) -> usize {
+    // 32-byte chunks let the compiler vectorize the scan.
+    const CHUNK: usize = 32;
+    let mut len = 0;
+    for chunk in bytes.chunks_exact(CHUNK) {
+        if chunk.iter().fold(0, |acc, &b| acc | b) >= 0x80 {
+            break;
+        }
+        len += CHUNK;
+    }
+    len + bytes[len..].iter().take_while(|b| b.is_ascii()).count()
 }
 
 #[unsafe(export_name = "cxxbridge1$string$from_utf8")]

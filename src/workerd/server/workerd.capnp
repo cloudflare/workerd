@@ -94,6 +94,68 @@ struct Config {
 
   logging @6 : LoggingOptions;
   # Console and Stdio logging configuration options.
+
+  cluster @7 :ClusterConfig;
+  # Set when this instance should join a cluster. Requires `--experimental`.
+}
+
+struct ClusterConfig {
+  # workerd instances can work together in a cluster, to distribute Durable Objects among them.
+  # Each Durable Object runs on one instance at a time, its owner; any instance routes requests
+  # for it there.
+  #
+  # The cluster's shared state lives in an S3-compatible bucket: each instance renews a lease
+  # record naming its address, and each Durable Object's owner is a record claimed by a conditional
+  # write. Taking an object over from an owner whose lease expired bumps its ownership epoch.
+  # Instances need no shared filesystem: `durableObjectStorage.localDisk` is each instance's own
+  # disk. Durable Objects stored in memory stay local to each instance. The bucket's copy of an
+  # object replaces the instance's, so a `localDisk` already holding Durable Objects from before
+  # cluster mode is refused at startup; they are not imported.
+  #
+  # All instances in the cluster MUST have identical configuration: any instance may forward any
+  # request to any other and it must produce the same result. During a rolling upgrade, instances
+  # may differ in backwards-compatible ways.
+
+  bucket @0 :Text;
+  # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
+
+  bucketOptions @1 :List(Text);
+  # `key=value` settings for `bucket`: `aws_endpoint=https://...`, `aws_region=auto`,
+  # `aws_access_key_id=...`, `aws_secret_access_key=...`, and `aws_token=...`. In place of the
+  # last three, `aws_credentials_file=<path>` names a file of `AWS_ACCESS_KEY_ID=`,
+  # `AWS_SECRET_ACCESS_KEY=` and `AWS_SESSION_TOKEN=` lines, reread whenever it changes, so
+  # short-lived credentials rotate without a restart. Replace it by rename, not in place. Each
+  # setting not given falls back to an environment variable: `AWS_ENDPOINT_URL`, `AWS_REGION`,
+  # `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CREDENTIALS_FILE`.
+
+  address @2 :Text;
+  # Where this instance listens for other instances: `host:port`, a port of 0 for an ephemeral
+  # one. Overridden by `--cluster-addr`. Holders of `key` get full access to every service in the
+  # process through it, and its traffic is not encrypted: only the cluster's instances should
+  # reach it, on a private network (a VPC, WireGuard, Tailscale). A public IP is refused unless
+  # `unsafePublicAddress` is set; a wildcard (`0.0.0.0`) listens on every interface, so firewall
+  # the port.
+
+  advertise @4 :Text;
+  # The address other instances reach this one at, which goes in its lease record in the bucket.
+  # Optional: by default, the address bound, with the port it got. Required when that is a
+  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). Overridden by
+  # `--cluster-advertise`. A public IP is refused unless `unsafePublicAddress` is set.
+
+  key @3 :Text;
+  # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
+  # of `openssl rand -hex 32`. Each connection between instances opens with
+  # a MAC keyed by it, over the target, a timestamp and a nonce, so a header seen on the wire
+  # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
+  # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
+  # the cluster on a private network (a VPC, WireGuard, Tailscale).
+  #
+  # TODO(someday): Support some way to gradually roll out a rotated key.
+
+  unsafePublicAddress @5 :Bool = false;
+  # Allow a public IP as `address` or `advertise`. Refused by default, since traffic between
+  # instances is not encrypted. Private, loopback, link-local and shared (100.64.0.0/10, as
+  # Tailscale uses) addresses, wildcards and hostnames are allowed.
 }
 
 struct LoggingOptions {
@@ -816,8 +878,8 @@ struct Worker {
     # extensions `.sqlite-wal`, and `.sqlite-shm` may also be present.)
   }
 
-  # TODO(someday): Support distributing objects across a cluster. At present, objects are always
-  #   local to one instance of the runtime.
+  # In a cluster (`Config.cluster`), objects stored on `localDisk` are distributed across the
+  # instances; see `ClusterConfig`.
 
   moduleFallback @13 :Text;
 
@@ -847,6 +909,19 @@ struct Worker {
     # This sidecar intercepts outbound traffic from containers and routes it
     # through workerd for egress mappings (setEgressHttp bindings).
     # You can find this image in repositories like DockerHub: https://hub.docker.com/r/cloudflare/proxy-everything
+
+    sessionId @2 :Text;
+    # Scopes the Docker resources workerd creates to a session chosen by the program that
+    # supervises workerd, such as Miniflare. May contain only the characters Docker allows in
+    # container names: letters, digits, `_`, `.` and `-`.
+    #
+    # When set, container and sidecar names include the session ID, so different sessions never
+    # share or adopt each other's containers, while a workerd process started with the same
+    # session adopts the containers an earlier one left running. Resources that do not outlive
+    # the session carry the label `dev.workerd.session=<sessionId>`: application containers,
+    # sidecars, snapshot helper containers, and snapshot clone volumes. The supervisor can remove
+    # them by that label once the session ends. Snapshot volumes and container snapshot images
+    # outlive sessions and are not labelled.
   }
 
   accessBlobHeader @18 :Text;

@@ -44,18 +44,15 @@ fn resolver_settles_its_promise_once() {
         assert_eq!(promise.state(), PromiseState::Pending);
         assert!(promise.result(lock).is_none());
 
-        let value = jsg::Number::new(42.0).to_js(lock);
+        let value = 42_u32.to_js(lock)?;
         resolver.resolve(lock, value)?;
-        let other = "ignored".to_js(lock);
+        let other = "ignored".to_js(lock)?;
         // Settling a settled promise does nothing.
         resolver.reject(lock, other)?;
 
         assert_eq!(promise.state(), PromiseState::Fulfilled);
         let result = promise.result(lock).unwrap();
-        #[expect(clippy::float_cmp, reason = "42 is exactly representable")]
-        {
-            assert_eq!(jsg::Number::from_js(lock, result)?.value(), 42.0);
-        }
+        assert_eq!(u32::from_js(lock, result)?, 42);
         Ok(())
     });
 }
@@ -121,7 +118,7 @@ fn rejecting_with_an_error_creates_its_exception() {
 #[test]
 fn promise_argument_accepts_any_value() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let value = "plain".to_js(lock);
+        let value = "plain".to_js(lock)?;
         let promise = v8::Local::<v8::Promise>::from_js(lock, value)?;
         ctx.set_global(lock, "p", promise);
         assert_eq!(
@@ -185,7 +182,7 @@ fn then_runs_callbacks_as_microtasks_with_their_data() {
         let greeted = promise
             .then(lock, "hello".to_owned(), |lock, greeting, value| {
                 let name = String::from_js(lock, value)?;
-                Ok(format!("{greeting}, {name}").to_js(lock))
+                format!("{greeting}, {name}").to_js(lock)
             })
             .unwrap();
         // Reactions never run synchronously.
@@ -216,7 +213,7 @@ fn then_rejects_with_callback_error_and_handles_rejections() {
         let recovered = rejected
             .catch(lock, (), |lock, (), reason| {
                 let err = jsg::Error::from_js(lock, reason)?;
-                Ok(format!("recovered from {}", err.message).to_js(lock))
+                format!("recovered from {}", err.message).to_js(lock)
             })
             .unwrap();
         ctx.set_global(lock, "recovered", recovered);
@@ -290,11 +287,11 @@ fn react_to_outcome<'s>(
             "outcome".to_owned(),
             |lock, what, value| {
                 let value = String::from_js(lock, value)?;
-                Ok(format!("{what}: fulfilled with {value}").to_js(lock))
+                format!("{what}: fulfilled with {value}").to_js(lock)
             },
             |lock, what, reason| {
                 let err = jsg::Error::from_js(lock, reason)?;
-                Ok(format!("{what}: rejected with {}", err.message).to_js(lock))
+                format!("{what}: rejected with {}", err.message).to_js(lock)
             },
         )
         .unwrap()
@@ -410,7 +407,7 @@ fn then_or_catch_data_holds_a_resource() {
             .then_or_catch(
                 lock,
                 leaf,
-                |lock, leaf, _| Ok(leaf.clone().to_js(lock)),
+                |lock, leaf, _| leaf.clone().to_js(lock),
                 |lock, _, _| Ok(lock.undefined()),
             )
             .unwrap();
@@ -919,7 +916,7 @@ impl ReadThroughCache {
             .borrow_mut()
             .insert(key.clone(), in_flight);
 
-        let key_js = key.as_str().to_js(lock);
+        let key_js = key.as_str().to_js(lock)?;
         // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
         let called =
             lock.try_catch(|lock| fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js]));

@@ -11,6 +11,7 @@ export {
   handlerAcrossChunkBoundaries,
   rewrittenBodyIsReadableStream,
   contentFromReadableStream,
+  stringChunksAreUtf8,
   identityStreamBody,
   cancelReachesSourceAfterNextChunk,
   erroringSourceRejectsConsumption,

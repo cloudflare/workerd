@@ -9,10 +9,12 @@ const unitTests :Workerd.Config = (
       compatibilityFlags = ["experimental", "nodejs_compat"],
       durableObjectNamespaces = [
         (className = "OnHibernateObject", uniqueKey = "do-on-hibernate-symbol"),
+        (className = "ThrowingReadObject", uniqueKey = "do-on-hibernate-throwing-read"),
       ],
       durableObjectStorage = (inMemory = void),
       bindings = [
         (name = "ns", durableObjectNamespace = "OnHibernateObject"),
+        (name = "throwingRead", durableObjectNamespace = "ThrowingReadObject"),
       ],
     )),
     (name = "do-on-hibernate-symbol-unflagged-test", worker = (
@@ -20,6 +22,13 @@ const unitTests :Workerd.Config = (
         (name = "worker", esModule = embed "do-on-hibernate-symbol-unflagged-test.js"),
       ],
       compatibilityFlags = ["nodejs_compat"],
+      durableObjectNamespaces = [
+        (className = "RecordingReadObject", uniqueKey = "do-on-hibernate-recording-read"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "recordingRead", durableObjectNamespace = "RecordingReadObject"),
+      ],
     )),
   ],
 );

@@ -61,6 +61,7 @@ wpt_test(
     size = "large",
     compat_flags = ["strip_bom_in_read_all_text"],
     config = "fetch/api-test.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -74,12 +75,12 @@ wpt_test(
 wpt_test(
     name = "fetch/api-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = [
         "strip_bom_in_read_all_text",
         "typescript_implemented_streams",
     ],
     config = "fetch/api-test-ts.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -88,6 +89,27 @@ wpt_test(
         "//conditions:default": [],
     }),
     wpt_directory = "@wpt//:fetch/api@module",
+)
+
+wpt_test(
+    name = "fetch/misc",
+    size = "large",
+    config = "fetch/misc-test.ts",
+    exclude_test_dirs = [
+        # Runs as its own targets
+        "api",
+        # Opaque Response Blocking is browser-only, and its resources include deliberately invalid
+        # .json files, which cannot be bound as JSON modules
+        "orb",
+    ],
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:fetch@module",
 )
 
 wpt_test(
@@ -106,6 +128,7 @@ wpt_test(
 wpt_test(
     name = "compression",
     config = "compression-test.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -142,9 +165,9 @@ wpt_test(
 wpt_test(
     name = "compression-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "compression-test-ts.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -156,7 +179,6 @@ wpt_test(
 wpt_test(
     name = "streams-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "streams-test-ts.ts",
     wpt_directory = "@wpt//:streams@module",
@@ -165,7 +187,6 @@ wpt_test(
 wpt_test(
     name = "encoding-ts",
     size = "large",
-    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = [
         "typescript_implemented_streams",
         "text_decoder_cjk_decoder",

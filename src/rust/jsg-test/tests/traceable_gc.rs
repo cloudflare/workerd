@@ -7,6 +7,7 @@
 //! `#[jsg_resource]` now traces every field via `Traced::trace`, so nested
 //! non-resource helper structs/enums just need to implement `Traced`.
 
+use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -80,7 +81,7 @@ fn enum_unit_variant_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Closed,
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
@@ -108,7 +109,7 @@ fn enum_variant_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Readable(child.clone()),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -142,7 +143,7 @@ fn enum_named_variant_child_kept_alive_through_gc() {
                 reason: child.clone(),
             },
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -170,13 +171,93 @@ struct PlainStruct {
 struct PlainData;
 jsg::jsg_traced!(PlainData);
 
-/// `jsg::Rc` and resources can hold GC references; `jsg::Weak`, `#[jsg_struct]` types and
-/// `jsg_traced!` types cannot.
+/// `jsg::Rc` and resources can hold GC references; `jsg::Weak` and `jsg_traced!` types cannot,
+/// and a `#[jsg_struct]` type can when a field can.
 #[test]
 fn holds_gc_references_of_jsg_types() {
     assert!(<jsg::Rc<Leaf>>::holds_gc_references());
     assert!(Leaf::holds_gc_references());
     assert!(!<jsg::Weak<Leaf>>::holds_gc_references());
     assert!(!PlainStruct::holds_gc_references());
+    assert!(Link::holds_gc_references());
     assert!(!PlainData::holds_gc_references());
+}
+
+// =============================================================================
+// #[jsg_struct] fields
+// =============================================================================
+
+static NODE_DROPS: AtomicUsize = AtomicUsize::new(0);
+static BACK_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A struct whose field is a GC reference.
+#[jsg_struct]
+struct Link {
+    pub target: jsg::Rc<Back>,
+}
+
+#[jsg_resource]
+struct Node {
+    pub link: RefCell<Option<Link>>,
+}
+
+impl Drop for Node {
+    fn drop(&mut self) {
+        NODE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Node {}
+
+/// Holds a `Node`'s wrapper, which closes a cycle through the `Node`'s `Link`.
+#[jsg_resource]
+struct Back {
+    node: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+}
+
+impl Drop for Back {
+    fn drop(&mut self) {
+        BACK_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Back {}
+
+/// A `#[jsg_struct]` traces its fields, so a cycle through one is collected: `Node` holds a `Back`
+/// through a `Link`, and `Back` holds the `Node`'s wrapper. Were the `Link` not traced, the
+/// `jsg::Rc<Back>` in it would stay strong and the cycle would never be collected.
+#[test]
+fn cycle_through_struct_field_is_collected() {
+    NODE_DROPS.store(0, Ordering::SeqCst);
+    BACK_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let back = jsg::Rc::new(Back {
+            node: std::cell::Cell::new(None),
+        });
+        let node = jsg::Rc::new(Node {
+            link: RefCell::new(Some(Link {
+                target: back.clone(),
+            })),
+        });
+        let node_wrapper = node.clone().to_js(lock)?;
+        back.node.set(Some(node_wrapper.to_traced_global(lock)));
+        // `Back` needs a wrapper for the `jsg::Rc<Back>` in the `Link` to trace it.
+        let _ = back.clone().to_js(lock)?;
+        std::mem::drop(node);
+        std::mem::drop(back);
+        assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(BACK_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(BACK_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
 }

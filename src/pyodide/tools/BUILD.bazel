@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_python//python:defs.bzl", "py_binary")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 
 # Build-time tool that applies workerd's patches to Pyodide's pyodide.asm.js / pyodide.asm.mjs as
@@ -20,5 +21,13 @@ js_binary(
     name = "patch_pyodide_asm",
     data = [":patch_pyodide_asm_lib"],
     entry_point = "patch_pyodide_asm.js",
+    visibility = ["//src/pyodide:__pkg__"],
+)
+
+# Build-time tool that extracts the stdlib wheels into a PythonPackages capnp message embedded in
+# the Pyodide bundle. Used by python_bundles() in //src/pyodide:helpers.bzl.
+py_binary(
+    name = "pack_python_packages",
+    srcs = ["pack_python_packages.py"],
     visibility = ["//src/pyodide:__pkg__"],
 )

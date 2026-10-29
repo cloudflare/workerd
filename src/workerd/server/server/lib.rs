@@ -15,6 +15,7 @@ pub mod bench;
 pub mod bindings;
 pub mod bridge;
 pub mod channels;
+pub mod cluster;
 pub mod config;
 pub mod entry;
 pub mod in_process;

@@ -15,6 +15,11 @@ wasm_tools_parse(
     src = "js-string-builtins.wat",
 )
 
+wasm_tools_parse(
+    name = "wasm-source-url.wasm",
+    src = "wasm-source-url.wat",
+)
+
 exports_files(["starttls-server.pem"])
 
 wd_test(
@@ -219,11 +224,9 @@ wd_test(
 )
 
 # For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
-# them from running concurrently with each other while still allowing other tests to run alongside.
-# Bazel only accounts for local resources on local execution, so also keep these tests off remote
-# executors, where two of them can otherwise share a network namespace and collide on bind().
+# them from running concurrently with each other while still allowing other tests to run alongside,
+# and gives each its own executor under remote execution (see build/bazelflare/exec_properties.bzl).
 SOCKET_TEST_TAGS = [
-    "no-remote-exec",
     "resources:socket:1",
 ]
 
@@ -291,6 +294,11 @@ wd_test(
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],
+)
+
+wd_test(
+    src = "temporal-test.wd-test",
+    data = ["temporal-test.js"],
 )
 
 wd_test(
@@ -751,6 +759,12 @@ wd_test(
 )
 
 wd_test(
+    src = "eventsource-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-test.js"],
+)
+
+wd_test(
     src = "legacy-dispatch-exceptions-test.wd-test",
     args = ["--experimental"],
     data = ["legacy-dispatch-exceptions-test.js"],
@@ -1007,6 +1021,11 @@ wd_test(
     src = "globals-iteration-test.wd-test",
     args = ["--experimental"],
     data = ["globals-iteration-test.js"],
+)
+
+wd_test(
+    src = "temporal-hidden-test.wd-test",
+    data = ["temporal-hidden-test.js"],
 )
 
 wd_test(
@@ -1301,6 +1320,15 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-source-url-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-source-url-test.js",
+        ":wasm-source-url.wasm",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-do-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -1462,11 +1490,8 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    # Needs to fetch pyodide which is not supported under RBE
-    tags = [
-        "no-remote-exec",
-        "requires-network",
-    ],
+    # Fetches Pyodide.
+    tags = ["requires-network"],
 )
 
 wd_test(

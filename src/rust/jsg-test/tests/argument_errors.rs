@@ -34,8 +34,8 @@ struct Args {}
 #[jsg_resource]
 impl Args {
     #[jsg_method]
-    pub fn take_count(&self, count: u32) -> jsg::Number {
-        jsg::Number::from(count)
+    pub fn take_count(&self, count: u32) -> u32 {
+        count
     }
 
     #[jsg_method]
@@ -57,8 +57,8 @@ impl Args {
     pub fn take_renamed(&self, _count: u32) {}
 
     #[jsg_method]
-    pub fn take_point(&self, point: Point) -> jsg::Number {
-        jsg::Number::from(point.x)
+    pub fn take_point(&self, point: Point) -> u32 {
+        point.x
     }
 
     #[jsg_method]
@@ -81,7 +81,7 @@ fn error(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, call: &str) -> Stri
 fn missing_required_argument() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takeCount()"),
@@ -109,7 +109,7 @@ fn missing_required_argument() {
 fn top_level_type_mismatch() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takePoint(5)"),
@@ -129,7 +129,7 @@ fn top_level_type_mismatch() {
 fn deeper_errors_are_kept() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock);
+        let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         let negative = "TypeError: The value cannot be converted because it is negative and \
                         this API expects a positive number.";

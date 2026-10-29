@@ -54,16 +54,10 @@ To build `workerd`, you need:
 
 * Bazel
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
-* On Linux:
-  * We use the clang/LLVM toolchain to build workerd and support version 22 and higher. Earlier versions of clang may still work, but are not officially supported.
-  * Clang 22+ (e.g. package `clang-22` on Debian Trixie). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--repo_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
-
-  * libc++ 22+ (e.g. package `libc++-22-dev`)
-  * LLD 22+ (e.g. package `lld-22`).
-  * `python3`, `python3-distutils`, and `tcl8.6`
+* On Linux, nothing else: the build downloads its own LLVM toolchain (clang, lld and libc++) and a
+  Debian sysroot (see `build/deps/llvm.MODULE.bazel`), and uses no compiler or libraries from the host.
 * On macOS:
   * Xcode 26.6 installation (available on macOS 26 and higher). Building with just the Xcode Command Line Tools is not being tested, but should work too.
-  * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
     from the Microsoft Store for the `winget` package manager and then run
@@ -89,7 +83,7 @@ You can also build from within Visual Studio Code using the instructions in [doc
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
 
-If you run a Bazel build before you've installed some dependencies (like clang or libc++), and then you install the dependencies, you must resync locally cached toolchains, or clean Bazel's cache, otherwise you might get strange errors:
+If you run a Bazel build before you've installed some dependencies (like Xcode), and then you install the dependencies, you must resync locally cached toolchains, or clean Bazel's cache, otherwise you might get strange errors:
 
 ```sh
 bazel fetch --configure --force
@@ -113,6 +107,12 @@ bazel build --config=thin-lto //src/workerd/server:workerd
 ### Configuring `workerd`
 
 `workerd` is configured using a config file written in Cap'n Proto text format.
+
+For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
+config. `main` is bundled with esbuild, as Wrangler does. The supported fields
+are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
+`durable_objects`, `migrations`, `no_bundle` and `$schema`; any other field
+is an error.
 
 A simple "Hello World!" config file might look like:
 
