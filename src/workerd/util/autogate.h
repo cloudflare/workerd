@@ -48,6 +48,8 @@ namespace workerd::util {
 //    config option in the test's config file.
 // 4. You can set the `WORKERD_ALL_AUTOGATES=1` environment variable to enable
 //    all gates for a test run.
+// 5. In a Rust test, `jsg_test::set_autogates(&["my-new-feature"])` configures exactly the
+//    named gates for as long as the returned guard lives.
 //
 // Removing the gate after rollout:
 //
@@ -88,15 +90,6 @@ namespace workerd::util {
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
-  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
-     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
-     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
-     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
-     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
-     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
-     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
-     streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)                                                                       \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
@@ -128,7 +121,13 @@ namespace workerd::util {
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)
+  V(NODEJS_I18N_RUST)                                                                              \
+  /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
+     before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
+     arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
+     uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
+     fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
+  V(JSG_INTEGER_ENFORCE_RANGE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

@@ -26,6 +26,8 @@ use crate::Member;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
+use crate::UnionMember;
+use crate::UnionTypes;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
 use crate::v8;
@@ -180,8 +182,28 @@ impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
     }
 }
 
+impl<R: Resource> Type for Rc<R> {
+    // A Web IDL non-callback interface type.
+    const UNION_TYPES: UnionTypes = UnionTypes::INTERFACE_LIKE;
+    // The resource's, which `#[jsg_resource]` makes its module path and name.
+    const UNION_NAMES: &'static [&'static str] = R::UNION_NAMES;
+
+    fn class_name() -> &'static str {
+        R::class_name()
+    }
+
+    // Any object: telling whether it wraps an `R` takes a lock, which `is_exact` doesn't have.
+    // `FromJS::try_from_js` makes that check. A resource is not `Coercible`, so no
+    // `NonCoercible<Rc<R>>` relies on this.
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_object()
+    }
+}
+
 impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::Resource;
 
     fn type_name() -> String {
         R::class_name().to_owned()
@@ -484,20 +506,23 @@ fn get_resource_descriptor<R: Resource>(
 
     for m in R::members(flags) {
         match m {
-            Member::Constructor { callback } => {
+            Member::Constructor { callback, length } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
                     callback: callback as usize,
+                    length,
                 });
             }
             Member::Method {
                 name,
                 callback,
                 fast,
+                length,
             } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                     fast: fast.into(),
+                    length,
                 });
             }
             Member::Property {
@@ -550,11 +575,13 @@ fn get_resource_descriptor<R: Resource>(
                 name,
                 callback,
                 fast,
+                length,
             } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
                     fast: fast.into(),
+                    length,
                 });
             }
             Member::StaticConstant { name, value } => {

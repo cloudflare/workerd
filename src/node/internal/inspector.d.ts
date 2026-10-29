@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Type definitions for the C++ implementation of `node-internal:inspector`.
+// Type definitions for the native (Rust) implementation of `node-internal:inspector`.
 
 export type MessageCallback = (message: string) => void;
 

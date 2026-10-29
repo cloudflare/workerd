@@ -8,6 +8,8 @@ use jsg::v8::String as JsString;
 use jsg::v8::Utf8Value;
 use jsg::v8::Value;
 use jsg::v8::WriteFlags;
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
 fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
@@ -458,7 +460,7 @@ fn string_try_from_from_value() {
 fn string_try_from_fails_for_non_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = jsg::Number::new(42.0).to_js(lock)?;
+        let val: Local<'_, Value> = 42_u32.to_js(lock)?;
         assert!(Local::<JsString>::try_from(val).is_err());
         Ok(())
     });
@@ -556,4 +558,77 @@ fn string_max_length_matches_v8() {
     assert_eq!(JsString::MAX_LENGTH, (1 << 28) - 16);
     #[cfg(target_pointer_width = "64")]
     assert_eq!(JsString::MAX_LENGTH, (1 << 29) - 24);
+}
+
+// =============================================================================
+// Strings longer than V8 allows
+// =============================================================================
+
+/// A string one byte longer than V8 accepts. Its bytes are zero, so that the allocation costs
+/// no physical memory until something reads it, which refusing it by its length never does.
+fn overlong_string() -> String {
+    let bytes = vec![0u8; usize::try_from(JsString::MAX_LENGTH).unwrap() + 1];
+    // SAFETY: zero bytes are ASCII, so valid UTF-8.
+    unsafe { String::from_utf8_unchecked(bytes) }
+}
+
+#[jsg_resource]
+struct Overlong;
+
+#[jsg_resource]
+impl Overlong {
+    #[jsg_method]
+    fn string(&self) -> String {
+        overlong_string()
+    }
+}
+
+#[test]
+fn string_constructors_refuse_an_overlong_string() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let s = overlong_string();
+        assert!(JsString::new_from_str(lock, &s).is_none());
+        assert!(JsString::new_from_utf8(lock, s.as_bytes()).is_none());
+        assert!(JsString::new_internalized_from_str(lock, &s).is_none());
+        assert!(JsString::new_from_one_byte(lock, s.as_bytes()).is_none());
+        // V8 refused with nothing pending, so JavaScript still runs.
+        assert!(ctx.eval::<bool>(lock, "1 + 1 === 2").unwrap());
+        Ok(())
+    });
+}
+
+#[test]
+fn to_js_of_an_overlong_string_is_a_range_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let s = overlong_string();
+        for err in [
+            s.as_str().to_js(lock).unwrap_err(),
+            s.to_js(lock).unwrap_err(),
+        ] {
+            assert_eq!(err.name, jsg::ExceptionType::RangeError);
+            assert_eq!(err.message, "Invalid string length");
+            assert!(!err.is_pending(), "the error is not a pending exception");
+        }
+        // Nothing is pending, so JavaScript still runs.
+        assert!(ctx.eval::<bool>(lock, "1 + 1 === 2").unwrap());
+        Ok(())
+    });
+}
+
+/// JavaScript catches the `RangeError` that V8 itself throws for such a string.
+#[test]
+fn method_returning_an_overlong_string_throws_a_range_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "overlong", jsg::Rc::new(Overlong));
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "let caught;
+                 try { overlong.string(); } catch (e) { caught = e; }
+                 caught instanceof RangeError && caught.message === 'Invalid string length'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
 }

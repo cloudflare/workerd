@@ -1527,23 +1527,11 @@ jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "Socket can only be deserialized from RPC.");
 
-  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltSocket()) {
-    // Hydrated before the graph read; unwrapping reads internal fields only, so no JS
-    // executes here (forbidden under the deserializer's no-JS scope).
-    return KJ_ASSERT_NONNULL(socketHandler.tryUnwrap(js, prebuilt.getHandle(js)),
-        "hydrated socket slot did not hold a Socket");
-  }
-
-  // Not hydrated: only reachable for legacy-streams isolates (the
-  // typescript_implemented_streams flag requires the hydration gate; see
-  // RpcDeserializerExternalHandler::prepare()), for which this in-place construction is
-  // scope-safe. The explicit sequencing matters -- the externals must be consumed in
-  // Socket::serialize()'s order.
-  auto socketExternal = externalHandler->read();
-  auto readableExternal = externalHandler->read();
-  auto writableExternal = externalHandler->read();
-  return hydrateRpcSocket(
-      js, IoContext::current(), socketExternal, readableExternal, writableExternal);
+  // Hydrated before the graph read; unwrapping reads internal fields only, so no JS executes
+  // here (forbidden under the deserializer's no-JS scope).
+  auto prebuilt = externalHandler->claimPrebuiltSocket();
+  return KJ_ASSERT_NONNULL(socketHandler.tryUnwrap(js, prebuilt.getHandle(js)),
+      "hydrated socket slot did not hold a Socket");
 }
 
 jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,

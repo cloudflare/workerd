@@ -55,7 +55,13 @@ pub enum Command {
     /// run the server
     #[command(
         long_about = "Serve requests based on a config.",
-        after_long_help = "Serves requests based on the configuration specified in <config-file>."
+        after_long_help = "Serves requests based on the configuration specified in <config-file>.\n\n\
+            Cluster mode (`Config.cluster`, with --experimental): instances that share an \
+            S3-compatible bucket serve Durable Objects together. Each `cluster.bucketOptions` \
+            setting falls back to an environment variable: AWS_ENDPOINT_URL, AWS_REGION, \
+            AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or \
+            AWS_CREDENTIALS_FILE. The cluster port must stay on a private network; see \
+            --cluster-addr."
     )]
     Serve {
         #[command(flatten)]
@@ -140,10 +146,6 @@ pub enum Command {
         bench: BenchArgs,
     },
 
-    /// outputs the package lock file used by Pyodide
-    #[command(long_about = "Outputs the package lock file used by Pyodide.")]
-    PyodideLock,
-
     /// Make a Pyodide baseline memory snapshot
     MakePyodideBaselineSnapshot {
         #[arg(value_name = "python-version")]
@@ -220,6 +222,8 @@ pub struct ConfigFileArgs {
     #[arg(short, long)]
     pub binary: bool,
 
+    /// A Cap'n Proto config (`.capnp`), or a `wrangler.json` / `wrangler.jsonc`, whose `main` is
+    /// bundled with esbuild as `wrangler` does.
     #[arg(value_name = "config-file")]
     pub config_file: String,
 }
@@ -328,6 +332,21 @@ pub struct ServeArgs {
     /// each socket is listening on when ready.
     #[arg(long, value_name = "fd", value_parser = parse_control_fd)]
     pub control_fd: Option<u32>,
+
+    /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. The
+    /// port gives full access to every service in the process to holders of the cluster key, and
+    /// its traffic is not encrypted: only the cluster's instances should reach it, on a private
+    /// network (a VPC or Tailscale). A public IP is refused unless the config sets
+    /// `cluster.unsafePublicAddress`; a wildcard (0.0.0.0) listens on every interface, so
+    /// firewall the port.
+    #[arg(long = "cluster-addr", value_name = "addr")]
+    pub cluster_address: Option<String>,
+
+    /// Advertise <addr> to the cluster's other instances instead of the config's
+    /// `cluster.advertise` or the bound address. A public IP is refused unless the config sets
+    /// `cluster.unsafePublicAddress`.
+    #[arg(long = "cluster-advertise", value_name = "addr")]
+    pub cluster_advertise: Option<String>,
 
     /// Listen on the specified address for debug RPC connections. This exposes a privileged
     /// interface that allows access to all services in the process. For use by miniflare and local

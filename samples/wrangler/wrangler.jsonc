@@ -1,0 +1,11 @@
+{
+  // workerd reads this file directly: `workerd serve wrangler.jsonc`.
+  "name": "counter",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "vars": { "GREETING": "Hello" },
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }],
+}

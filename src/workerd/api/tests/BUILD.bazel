@@ -297,6 +297,11 @@ wd_test(
 )
 
 wd_test(
+    src = "temporal-test.wd-test",
+    data = ["temporal-test.js"],
+)
+
+wd_test(
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",
@@ -697,6 +702,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-sha3-test.wd-test",
+    data = ["crypto-sha3-test.js"],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],
@@ -749,6 +759,12 @@ wd_test(
 
 wd_test(
     src = "eventsource-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-test.js"],
+)
+
+wd_test(
+    src = "eventsource-ts-test.wd-test",
     args = ["--experimental"],
     data = ["eventsource-test.js"],
 )

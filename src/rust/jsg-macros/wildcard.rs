@@ -202,11 +202,8 @@ impl Signature {
             // V8 calls an interceptor only on objects made from the resource's instance
             // template, so this is the resource's own wrapper; a mismatch is still a
             // TypeError rather than a panic.
-            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock, this) else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
-                return jsg::Intercepted::Yes;
-            };
-            let Some(resource) = wrappable.resolve_resource::<Self>() else {
+            let resource = jsg::v8::WrappableRc::resolve_receiver::<Self>(lock, this);
+            let Some(resource) = resource else {
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
                 return jsg::Intercepted::Yes;
             };

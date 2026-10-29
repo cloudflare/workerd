@@ -50,7 +50,6 @@ use std::sync::Arc;
 
 pub use self::ffi::PromiseState;
 use crate::Error;
-use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Resource;
@@ -184,7 +183,6 @@ pub mod ffi {
         // Local<T>
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
-        pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
@@ -282,6 +280,8 @@ pub mod ffi {
         pub unsafe fn local_is_string(value: &Local) -> bool;
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
         pub unsafe fn local_is_number(value: &Local) -> bool;
+        pub unsafe fn local_is_int32(value: &Local) -> bool;
+        pub unsafe fn local_is_uint32(value: &Local) -> bool;
         pub unsafe fn local_is_null(value: &Local) -> bool;
         pub unsafe fn local_is_undefined(value: &Local) -> bool;
         pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
@@ -311,6 +311,24 @@ pub mod ffi {
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
         pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
+        // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
+        // store the result in `result` and return true, or return false if the coercion threw,
+        // leaving the exception pending; see `call_into_js()`.
+        pub unsafe fn local_value_int32_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut i32,
+        ) -> bool;
+        pub unsafe fn local_value_uint32_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut u32,
+        ) -> bool;
+        pub unsafe fn local_value_integer_value(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut i64,
+        ) -> bool;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -379,6 +397,19 @@ pub mod ffi {
         ) -> Local;
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
+        // Local<Boolean>
+        pub unsafe fn local_boolean_value(value: &Local) -> bool;
+
+        // Local<Number>
+        pub unsafe fn local_number_value(value: &Local) -> f64;
+
+        // Local<Integer>
+        pub unsafe fn integer_new(isolate: *mut Isolate, value: i32) -> Local;
+        pub unsafe fn integer_new_from_unsigned(isolate: *mut Isolate, value: u32) -> Local;
+        pub unsafe fn local_integer_value(value: &Local) -> i64;
+        pub unsafe fn local_int32_value(value: &Local) -> i32;
+        pub unsafe fn local_uint32_value(value: &Local) -> u32;
+
         // Local<BigInt>
         pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
         pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
@@ -430,6 +461,17 @@ pub mod ffi {
             object: &Local,
             key: &str,
         ) -> Result<MaybeLocal>;
+        // Like the three above, but infallible: they neither intern nor check.
+        pub unsafe fn local_object_get_property_by_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_object_get_own_property_names(
+            isolate: *mut Isolate,
+            object: &Local,
+            names: &mut Vec<Local>,
+        ) -> bool;
 
         // Local<Promise>
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
@@ -600,7 +642,7 @@ pub mod ffi {
         pub unsafe fn fast_api_throw_exception(
             options: *mut FastApiCallbackOptions,
             exception_type: ExceptionType,
-            message: &str,
+            message: &[u8],
         );
         pub unsafe fn fast_api_throw_internal_error(
             options: *mut FastApiCallbackOptions,
@@ -622,11 +664,11 @@ pub mod ffi {
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         // Errors
+        // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
             exception_type: ExceptionType,
-            data: *const u8,
-            length: i32,
+            message: &[u8],
         ) -> Local;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
@@ -643,7 +685,6 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
@@ -673,12 +714,19 @@ pub mod ffi {
 
     pub struct ConstructorDescriptor {
         callback: usize,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
+    /// The C types of a fast callback's arguments and result. `Int32` and `Uint32` are result
+    /// types only: an integer argument is a `Float64`, converted with the slow path's checks
+    /// (see `fast_api.rs`).
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum FastApiType {
         Void,
         Bool,
+        Int32,
+        Uint32,
         Float64,
     }
 
@@ -692,6 +740,8 @@ pub mod ffi {
         name: String,
         callback: usize,
         fast: KjMaybe<FastApiDescriptor>,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
     pub struct StaticConstantDescriptor {
@@ -778,6 +828,17 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> KjMaybe<KjRc<Wrappable>>;
+        // Like `unwrap_resource`, but borrows: the pointer is into the Wrappable of `value`'s
+        // wrapper, or null when `value` is not a Rust resource.
+        pub unsafe fn unwrap_resource_trait_object(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalValue */
+        ) -> *const TraitObjectPtr;
+        // For the receiver of a method registered with a `v8::Signature`, which V8 has checked.
+        pub unsafe fn unwrap_method_receiver(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalObject */
+        ) -> *const TraitObjectPtr;
 
         pub unsafe fn function_template_get_function(
             isolate: *mut Isolate,
@@ -843,9 +904,41 @@ impl std::fmt::Display for ffi::ExceptionType {
     }
 }
 
-// Marker types for Local<T>
+// Marker types for Local<T>, Global<T> and TracedGlobal<T>. Each mirrors the V8 class of the
+// same name, and a handle of it is used as `Local<'s, T>`, as `v8::Local<T>` is in C++. The casts
+// between them are in `impl_local_cast!`.
+//
+// Deliberately left unimplemented because we didn't need them yet:
+// - Primitive, Numeric
+// - NumberObject, BooleanObject, StringObject, SymbolObject, BigIntObject
+// - Map, Set, Proxy, RegExp, External, DataView, SharedArrayBuffer, Float16Array
+// - WasmModuleObject, WasmMemoryObject
+// - Context, Template, ObjectTemplate, Signature, Module, Script, Private, PrimitiveArray
+//
+// `Promise` and `PromiseResolver` (`v8::Promise::Resolver`) are in `promise.rs`.
 #[derive(Debug)]
 pub struct Value;
+/// Marker for `v8::Boolean` handles.
+#[derive(Debug)]
+pub struct Boolean;
+/// Marker for `v8::Number` handles. A number that Rust code holds as a plain value is an `f64`;
+/// this is the handle to one on the V8 heap.
+#[derive(Debug)]
+pub struct Number;
+/// Marker for `v8::Integer` handles: an integral number in the range of `i32` or `u32`.
+///
+/// That is what `Integer::new` and `Integer::new_from_unsigned` create, and what the Rust
+/// integer types of up to 32 bits convert to; `i64` and `u64` convert to a `BigInt`. V8's own
+/// cast to `Integer` accepts any number; this one, like `rusty_v8`'s, accepts only a value that is
+/// an `Int32` or a `Uint32`.
+#[derive(Debug)]
+pub struct Integer;
+/// Marker for `v8::Int32` handles: an integral number in the range of `i32`. `-0` is not one.
+#[derive(Debug)]
+pub struct Int32;
+/// Marker for `v8::Uint32` handles: an integral number in the range of `u32`. `-0` is not one.
+#[derive(Debug)]
+pub struct Uint32;
 /// Marker for `v8::Name` handles (supertype of `String` and `Symbol`).
 #[derive(Debug)]
 pub struct Name;
@@ -865,13 +958,26 @@ pub struct Date;
 impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
     ///
-    /// Matches `v8::String::kMaxLength`. Attempting to create a string longer than
-    /// this will cause V8 to return `None`.
+    /// Matches `v8::String::kMaxLength`. The constructors return `None` for input longer than
+    /// this, and [`ToJS`](crate::ToJS) for `&str` and `String` fails with a `RangeError`.
     pub const MAX_LENGTH: i32 = if cfg!(target_pointer_width = "32") {
         (1 << 28) - 16
     } else {
         (1 << 29) - 24
     };
+
+    /// The length V8 takes for input of `len` units (bytes or UTF-16 code units), or `None` if
+    /// the input is longer than [`Self::MAX_LENGTH`], which V8 refuses with no exception pending.
+    ///
+    /// For UTF-8 input the units are bytes, of which a string never has fewer than UTF-16 code
+    /// units, so the input fits whenever the check passes. Checking here keeps a length above
+    /// `i32::MAX` from reaching V8's `int` parameter, where a negative value means
+    /// "NUL-terminated".
+    fn v8_length(len: usize) -> Option<i32> {
+        i32::try_from(len)
+            .ok()
+            .filter(|&len| len <= Self::MAX_LENGTH)
+    }
 
     /// Returns the empty string singleton.
     ///
@@ -883,6 +989,8 @@ impl String {
     }
 
     /// Creates a new string from a `&str`.
+    ///
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
     pub fn new_from_str<'s>(lock: &mut crate::Lock<'s>, data: &str) -> Option<Local<'s, Self>> {
@@ -925,16 +1033,13 @@ impl String {
 
     /// Creates a new string from UTF-8 data.
     ///
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes
-    /// to satisfy V8's `int`-typed length parameter; in practice V8 will reject strings
-    /// that large anyway due to heap limits.
+    /// Returns `None`, with no exception pending, if `data` is longer than
+    /// [`Self::MAX_LENGTH`] bytes. Invalid sequences become U+FFFD.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
     pub fn new_from_utf8<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
@@ -948,7 +1053,7 @@ impl String {
     /// Equal strings will be pointer-equal after internalization, which speeds up
     /// property-key lookups at the cost of a hash-table probe on creation.
     ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
     pub fn new_internalized_from_utf8<'s>(
@@ -956,7 +1061,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
@@ -968,9 +1073,7 @@ impl String {
     /// Creates a new string from Latin-1 (one-byte) data.
     ///
     /// Each byte is mapped to the Unicode code point with the same value.
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte`.
     pub fn new_from_one_byte<'s>(
@@ -978,7 +1081,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, false)
@@ -990,7 +1093,7 @@ impl String {
     /// Creates an internalized string from Latin-1 (one-byte) data.
     ///
     /// Equal strings will be pointer-equal after internalization.
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte` with `kInternalized`.
     pub fn new_internalized_from_one_byte<'s>(
@@ -998,7 +1101,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, true)
@@ -1009,9 +1112,7 @@ impl String {
 
     /// Creates a new string from UTF-16 data.
     ///
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte`.
     pub fn new_from_two_byte<'s>(
@@ -1019,7 +1120,7 @@ impl String {
         data: &[u16],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, false)
@@ -1031,7 +1132,7 @@ impl String {
     /// Creates an internalized string from UTF-16 data.
     ///
     /// Equal strings will be pointer-equal after internalization.
-    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte` with `kInternalized`.
     pub fn new_internalized_from_two_byte<'s>(
@@ -1039,7 +1140,7 @@ impl String {
         data: &[u16],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, true)
@@ -1398,6 +1499,29 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_number(self.raw()) }
     }
 
+    /// Returns true if the value is an integral number in the range of `i32`, other than `-0`.
+    ///
+    /// Corresponds to `v8::Value::IsInt32()`.
+    pub fn is_int32(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_int32(self.raw()) }
+    }
+
+    /// Returns true if the value is an integral number in the range of `u32`, other than `-0`.
+    ///
+    /// Corresponds to `v8::Value::IsUint32()`.
+    pub fn is_uint32(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_uint32(self.raw()) }
+    }
+
+    /// Whether the value is a `v8::Integer`, which has no `Is*` test of its own: an integral
+    /// number in the range of `i32` or `u32`, as `Integer::new` and `Integer::new_from_unsigned`
+    /// create.
+    fn is_int32_or_uint32(self) -> bool {
+        self.is_int32() || self.is_uint32()
+    }
+
     pub fn is_null(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_null(self.raw()) }
@@ -1588,6 +1712,63 @@ impl<'s, T> Local<'s, T> {
         // HandleScope.
         unsafe { ffi::local_type_of(lock.isolate().as_ffi(), self.raw()) }
     }
+
+    /// Converts the value with JavaScript's `ToInt32`: `ToNumber`, then truncation toward zero
+    /// modulo 2^32, so NaN and the infinities are 0 and `2 ** 32 + 5` is 5. If the coercion
+    /// throws, or execution is terminating, fails with an error for which
+    /// [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::Int32Value()`.
+    pub fn int32_value(&self, lock: &mut Lock<'s>) -> Result<i32, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_int32_value(lock.isolate().as_ffi(), self.into_ffi(), &mut result)
+            };
+            Ok(ok.then_some(result))
+        })
+    }
+
+    /// Converts the value with JavaScript's `ToUint32`: `ToNumber`, then truncation toward zero
+    /// modulo 2^32, so NaN and the infinities are 0 and `-1` is `u32::MAX`. If the coercion
+    /// throws, or execution is terminating, fails with an error for which
+    /// [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::Uint32Value()`.
+    pub fn uint32_value(&self, lock: &mut Lock<'s>) -> Result<u32, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_uint32_value(lock.isolate().as_ffi(), self.into_ffi(), &mut result)
+            };
+            Ok(ok.then_some(result))
+        })
+    }
+
+    /// Converts the value with JavaScript's `ToInteger` (`ToNumber`, then truncation toward
+    /// zero, with NaN as 0), saturating at the range of `i64`. If the coercion throws, or
+    /// execution is terminating, fails with an error for which [`Error::is_pending`] is true.
+    ///
+    /// Corresponds to `v8::Value::IntegerValue()`.
+    pub fn integer_value(&self, lock: &mut Lock<'s>) -> Result<i64, Error> {
+        call_into_js(lock, |lock| {
+            let mut result = 0;
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope.
+            let ok = unsafe {
+                ffi::local_value_integer_value(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                    &mut result,
+                )
+            };
+            Ok(ok.then_some(result))
+        })
+    }
 }
 
 impl PartialEq for Local<'_, Value> {
@@ -1753,37 +1934,37 @@ where
 }
 
 impl<'s> Local<'s, Function> {
-    /// Calls this function and converts the result via [`FromJS`].
+    /// Calls this function and returns what it returns, as a handle.
     ///
     /// `receiver` is the `this` value; pass `None` for `undefined`.
     ///
-    /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
-    /// convert Rust values, or `.into()` for other `Local<T>` handles.
+    /// `args` is a slice of `Local<Value>`: use [`ToJS::to_js`](crate::ToJS::to_js) to convert
+    /// Rust values, or `.into()` for other `Local<T>` handles. To get a Rust value back, convert
+    /// the result with [`FromJS::from_js`](crate::FromJS::from_js), as the example does.
     ///
     /// # Errors
     ///
     /// If the function throws, or execution is terminating (then without calling it), the
-    /// exception stays pending and this
-    /// returns an error for which [`Error::is_pending`] is true. [`Lock::throw_exception`] throws
-    /// nothing for it, so
-    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
-    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
-    /// instead, make the call in [`Lock::try_catch`]. Also fails if the result does not convert
-    /// to `R`.
+    /// exception stays pending and this returns an error for which [`Error::is_pending`] is
+    /// true. [`Lock::throw_exception`] throws nothing for it, so returning it from a callback
+    /// propagates the exception to the callback's JavaScript caller, as C++ JSG does. Don't call
+    /// into JavaScript after such an error; to handle the exception instead, make the call in
+    /// [`Lock::try_catch`].
     ///
     /// # Example
     ///
     /// ```ignore
     /// let x = x.to_js(lock)?;
     /// let y = y.to_js(lock)?;
-    /// let result: Number = func.call(lock, None, &[x, y])?;
+    /// let result = func.call(lock, None, &[x, y])?;
+    /// let sum = f64::from_js(lock, result)?;
     /// ```
-    pub fn call<R: FromJS<'s>>(
+    pub fn call(
         self,
         lock: &mut Lock<'s>,
         receiver: Option<Local<'s, Value>>,
         args: &[Local<'s, Value>],
-    ) -> Result<R::ResultType, Error> {
+    ) -> Result<Local<'s, Value>, Error> {
         let recv = receiver.unwrap_or_else(|| lock.undefined());
         self.debug_assert_isolate(lock);
         recv.debug_assert_isolate(lock);
@@ -1791,7 +1972,7 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
-        let result = call_into_js(lock, |lock| {
+        call_into_js(lock, |lock| {
             // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
             // self is a valid Local<Function>; recv and args are valid Local handles. The
             // result belongs to the lock's scope.
@@ -1803,17 +1984,19 @@ impl<'s> Local<'s, Function> {
                     Local::raw_slice(args),
                 ))
             })
-        })?;
-        R::from_js(lock, result)
+        })
     }
 }
 
 /// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
+/// A call that runs no JavaScript but that V8 doesn't allow while execution is terminating, such
+/// as `CreateDataProperty`, goes through here too, and its `shim` never returns `None`.
 ///
-/// Every such call goes through here, so that all of them handle exceptions and termination
-/// alike. `shim` returns `None` if JavaScript threw, leaving the exception pending (see `ffi.h`);
-/// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
-/// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
+/// Every call that can run JavaScript goes through here, so that all of them handle exceptions
+/// and termination alike. `shim` returns `None` if JavaScript threw, leaving the exception pending
+/// (see `ffi.h`); that becomes an error for which [`Error::is_pending`] is true. While execution
+/// is terminating, `shim` is not run and the error is the same: calling into V8 then would clear
+/// the termination.
 /// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
 ///
 /// The one exception is `wrap_resource`, which checks for termination itself, so that its common
@@ -1896,6 +2079,11 @@ macro_rules! impl_local_cast {
     };
 }
 
+impl_local_cast!(Boolean: Value; is_boolean);
+impl_local_cast!(Number: Value; is_number);
+impl_local_cast!(Integer: Number, Value; is_int32_or_uint32);
+impl_local_cast!(Int32: Integer, Number, Value; is_int32);
+impl_local_cast!(Uint32: Integer, Number, Value; is_uint32);
 impl_local_cast!(Name: Value; is_name);
 impl_local_cast!(String: Name, Value; is_string);
 impl_local_cast!(Symbol: Name, Value; is_symbol);
@@ -2699,8 +2887,9 @@ macro_rules! impl_typed_array {
     };
 }
 
-/// Generates `FromJS` for `Local<'_, T>` typed array types.
-macro_rules! impl_typed_array_from_js {
+/// Generates `FromJS` for a handle type `Local<'_, T>`: the value must already be a `T`, as C++
+/// JSG requires of a `v8::Local<T>` parameter, so no coercion runs.
+macro_rules! impl_local_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
@@ -2740,23 +2929,28 @@ macro_rules! impl_typed_array_from_js {
     };
 }
 
-impl_typed_array_from_js!(Uint8Array, is_uint8_array, "Uint8Array");
-impl_typed_array_from_js!(Uint16Array, is_uint16_array, "Uint16Array");
-impl_typed_array_from_js!(Uint32Array, is_uint32_array, "Uint32Array");
-impl_typed_array_from_js!(Int8Array, is_int8_array, "Int8Array");
-impl_typed_array_from_js!(Int16Array, is_int16_array, "Int16Array");
-impl_typed_array_from_js!(Int32Array, is_int32_array, "Int32Array");
-impl_typed_array_from_js!(Float32Array, is_float32_array, "Float32Array");
-impl_typed_array_from_js!(Float64Array, is_float64_array, "Float64Array");
-impl_typed_array_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
-impl_typed_array_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
-impl_typed_array_from_js!(
+impl_local_from_js!(Uint8Array, is_uint8_array, "Uint8Array");
+impl_local_from_js!(Uint16Array, is_uint16_array, "Uint16Array");
+impl_local_from_js!(Uint32Array, is_uint32_array, "Uint32Array");
+impl_local_from_js!(Int8Array, is_int8_array, "Int8Array");
+impl_local_from_js!(Int16Array, is_int16_array, "Int16Array");
+impl_local_from_js!(Int32Array, is_int32_array, "Int32Array");
+impl_local_from_js!(Float32Array, is_float32_array, "Float32Array");
+impl_local_from_js!(Float64Array, is_float64_array, "Float64Array");
+impl_local_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
+impl_local_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
+impl_local_from_js!(
     Uint8ClampedArray,
     is_uint8clamped_array,
     "Uint8ClampedArray"
 );
-impl_typed_array_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
-impl_typed_array_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
+impl_local_from_js!(ArrayBuffer, is_array_buffer, "ArrayBuffer");
+impl_local_from_js!(ArrayBufferView, is_array_buffer_view, "ArrayBufferView");
+impl_local_from_js!(Boolean, is_boolean, "Boolean");
+impl_local_from_js!(Number, is_number, "Number");
+impl_local_from_js!(Integer, is_int32_or_uint32, "Integer");
+impl_local_from_js!(Int32, is_int32, "Int32");
+impl_local_from_js!(Uint32, is_uint32, "Uint32");
 
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
@@ -3084,6 +3278,115 @@ impl<'s> Local<'s, String> {
 }
 
 // =============================================================================
+// `Boolean`
+// =============================================================================
+
+impl Boolean {
+    /// Returns the `true` or `false` singleton.
+    ///
+    /// Corresponds to `v8::Boolean::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: bool) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::local_new_boolean(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Boolean> {
+    /// The boolean this handle refers to.
+    ///
+    /// Corresponds to `v8::Boolean::Value()`.
+    #[inline]
+    pub fn value(&self) -> bool {
+        // SAFETY: the handle is a valid V8 Boolean handle.
+        unsafe { ffi::local_boolean_value(self.raw()) }
+    }
+}
+
+// =============================================================================
+// `Number`
+// =============================================================================
+
+impl Number {
+    /// Creates a number.
+    ///
+    /// Corresponds to `v8::Number::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: f64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::local_new_number(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Number> {
+    /// The number this handle refers to.
+    ///
+    /// Corresponds to `v8::Number::Value()`.
+    #[inline]
+    pub fn value(&self) -> f64 {
+        // SAFETY: the handle is a valid V8 Number handle.
+        unsafe { ffi::local_number_value(self.raw()) }
+    }
+}
+
+// =============================================================================
+// `Integer`, `Int32` and `Uint32`
+// =============================================================================
+
+impl Integer {
+    /// Creates a number from an `i32`.
+    ///
+    /// Corresponds to `v8::Integer::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: i32) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::integer_new(isolate.as_ffi(), value)) }
+    }
+
+    /// Creates a number from a `u32`.
+    ///
+    /// Corresponds to `v8::Integer::NewFromUnsigned()`.
+    pub fn new_from_unsigned<'s>(lock: &mut crate::Lock<'s>, value: u32) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(ffi::integer_new_from_unsigned(isolate.as_ffi(), value)) }
+    }
+}
+
+impl Local<'_, Integer> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Integer::Value()`.
+    #[inline]
+    pub fn value(&self) -> i64 {
+        // SAFETY: the handle is a valid V8 Integer handle.
+        unsafe { ffi::local_integer_value(self.raw()) }
+    }
+}
+
+impl Local<'_, Int32> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Int32::Value()`.
+    #[inline]
+    pub fn value(&self) -> i32 {
+        // SAFETY: the handle is a valid V8 Int32 handle.
+        unsafe { ffi::local_int32_value(self.raw()) }
+    }
+}
+
+impl Local<'_, Uint32> {
+    /// The integer this handle refers to.
+    ///
+    /// Corresponds to `v8::Uint32::Value()`.
+    #[inline]
+    pub fn value(&self) -> u32 {
+        // SAFETY: the handle is a valid V8 Uint32 handle.
+        unsafe { ffi::local_uint32_value(self.raw()) }
+    }
+}
+
+// =============================================================================
 // `Name` — supertype of `String` and `Symbol`
 // =============================================================================
 
@@ -3330,7 +3633,9 @@ impl Object {
     ///
     /// # Errors
     ///
-    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it.
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it. While execution
+    /// is terminating, it creates nothing, and the error is one for which [`Error::is_pending`]
+    /// is true, as for [`Local::<Object>::set`].
     pub fn with_data_properties<'s>(
         lock: &mut Lock<'s>,
         properties: &[(&str, Local<'s, Value>)],
@@ -3342,17 +3647,22 @@ impl Object {
                 (*key, *value)
             })
             .unzip();
-        // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
-        // is active; the values are valid handles in it. The result belongs to that scope.
-        let object = unsafe {
-            ffi::object_new_with_data_properties(
-                lock.isolate().as_ffi(),
-                &keys,
-                Local::raw_slice(&values),
-            )
-        }?;
-        // SAFETY: as above.
-        Ok(unsafe { Local::from_ffi(object) })
+        // No JavaScript runs, but V8 doesn't allow `CreateDataProperty` while execution is
+        // terminating (a debug check fails), which `call_into_js` checks for.
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked, a context is entered and a
+            // HandleScope is active; the values are valid handles in it. The result belongs to
+            // that scope.
+            let object = unsafe {
+                ffi::object_new_with_data_properties(
+                    lock.isolate().as_ffi(),
+                    &keys,
+                    Local::raw_slice(&values),
+                )
+            }?;
+            // SAFETY: as above.
+            Ok(Some(unsafe { Local::from_ffi(object) }))
+        })
     }
 }
 
@@ -3419,6 +3729,63 @@ impl<'s> Local<'s, Object> {
                 )?)
             })
         })
+    }
+
+    /// Reads the property named `name`, like [`get`](Self::get) but with the key as a handle,
+    /// so that any string or symbol can be the key.
+    ///
+    /// # Errors
+    ///
+    /// As for [`get`](Self::get).
+    pub fn get_by_name(
+        self,
+        lock: &mut Lock<'s>,
+        name: Local<'s, Name>,
+    ) -> crate::Result<Local<'s, Value>> {
+        name.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); both handles are valid.
+            // The result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_object_get_property_by_name(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    name.raw(),
+                ))
+            })
+        })
+    }
+
+    /// Returns the names of the object's own enumerable properties that are not symbols, in
+    /// property order, like JS `Object.keys(obj)`. An integer-like name comes as a string.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `ownKeys` or `getOwnPropertyDescriptor` trap throws, or execution is
+    /// terminating, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn keys(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, String>>> {
+        let names = call_into_js(lock, |lock| {
+            let mut names = Vec::new();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_get_own_property_names(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    &mut names,
+                )
+            };
+            Ok(ok.then_some(names))
+        })?;
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                // SAFETY: V8 created the names in the current HandleScope, as strings.
+                let name: Local<'s, String> = unsafe { Local::from_ffi(name) };
+                debug_assert!(Local::<Value>::from(name).is_string());
+                name
+            })
+            .collect())
     }
 }
 
@@ -4352,6 +4719,45 @@ pub struct WrappableRc {
 }
 
 impl WrappableRc {
+    /// Resolves the receiver `value` of a callback registered without a `v8::Signature`
+    /// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
+    /// a reference.
+    ///
+    /// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+    /// `value` is reachable, which a callback's `this` is for the duration of the call.
+    #[doc(hidden)]
+    pub fn resolve_receiver<R: 'static>(
+        lock: &mut Lock<'_>,
+        value: Local<'_, Value>,
+    ) -> Option<NonNull<R>> {
+        // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+        // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
+        let ptr = unsafe {
+            ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+        };
+        ptr?.resolve::<R>()
+    }
+
+    /// Like [`Self::resolve_receiver`], for the receiver of a method registered with a
+    /// `v8::Signature`.
+    ///
+    /// # Safety
+    ///
+    /// V8 must have checked `value` against the signature of a method of a resource type.
+    #[doc(hidden)]
+    pub unsafe fn resolve_method_receiver<R: 'static>(
+        lock: &mut Lock<'_>,
+        value: Local<'_, Value>,
+    ) -> Option<NonNull<R>> {
+        // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
+        // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
+        // keeps alive.
+        let ptr = unsafe {
+            ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+        };
+        ptr?.resolve::<R>()
+    }
+
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable
@@ -4593,3 +4999,7 @@ impl WrappableRc {
         self.resolve::<R>()
     }
 }
+
+#[cfg(test)]
+#[path = "v8-test.rs"]
+mod tests;

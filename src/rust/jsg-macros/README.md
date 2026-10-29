@@ -25,10 +25,17 @@ it, the fields are defined as data properties, an absent optional field as `unde
 JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
 setter on `Object.prototype` runs, and what it throws is passed on.
 
+Optional fields can use `Option<T>` (`None` is absent) or `jsg::NullOrUndefined<T>`
+(`Undefined` is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>`
+when a field must distinguish `null` from `undefined`; its `Null` state always
+produces a property whose value is `null`. An absent input property becomes `None`
+or `Undefined`, respectively. If all public fields are optional, a `null` or
+`undefined` input is accepted as an empty dictionary.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
-    pub critical: f64,
+    pub critical: u8,
     pub tag: String,
     pub value: String,
 }
@@ -69,9 +76,18 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
   `this`, the lock comes right after `this`.
+- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::Lenient<T>` arguments may be omitted.
+  Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` for three distinct
+  `Some(T)`, `Null`, and `Undefined` states; omission produces `Undefined`.
+  A `jsg::Nullable<T>` argument remains required, although explicitly passing
+  `undefined` converts to `Null`. See [nullish value conversions](../jsg/README.md#nullablet-and-nullorundefinedt).
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
+  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
+  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
+  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -234,7 +250,8 @@ JavaScript constructor. An `Err` is converted with `Into<jsg::Error>` and thrown
 `#[jsg_method]`. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
 isolate lock and is not counted as a JavaScript argument. Calling the constructor without
-`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
+`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG. Parameter
+conversion and `.length` follow the [`#[jsg_method]`](#jsg_method) rules.
 
 ```rust
 #[jsg_resource]
@@ -305,16 +322,16 @@ use std::cell::{Cell, RefCell};
 use jsg_macros::{jsg_resource, jsg_property};
 
 #[jsg_resource]
-struct Counter { value: Cell<f64>, id: RefCell<String>, kind: String }
+struct Counter { value: Cell<u32>, id: RefCell<String>, kind: String }
 
 #[jsg_resource]
 impl Counter {
     // Prototype — read/write (setter detected from `set_` prefix)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { jsg::Number::new(self.value.get()) }
+    pub fn get_value(&self) -> u32 { self.value.get() }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { self.value.set(v.value()); }
+    pub fn set_value(&self, v: u32) { self.value.set(v); }
 
     // Prototype — read-only (explicit `readonly`)
     #[jsg_property(prototype, readonly)]
@@ -409,18 +426,24 @@ impl Env {
 
 ## `#[jsg_oneof]`
 
-Generates `jsg::Type` and `jsg::FromJS` for a union enum — the Rust equivalent of
-`kj::OneOf<…>`. Each variant must be a single-field tuple whose inner type implements
-`jsg::Type` + `jsg::FromJS`. Variants are tried in declaration order using
-exact-type matching; if none matches, a `TypeError` is thrown listing all expected
-types.
+Generates `jsg::Type`, `jsg::FromJS` and `jsg::Traced` for a union enum — the Rust
+equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it. Each
+variant must be a single-field tuple whose inner type converts from JavaScript and is
+`jsg::Type`. A union that holds handles has one lifetime parameter,
+their scope, and no `jsg::Traced` that can be used; a union has no other generic
+parameters. A value converts as it would to the equivalent `kj::OneOf`: variants are
+tried in passes that leave coercion for last, in declaration order within a pass. If no
+variant converts the value, a `TypeError` is thrown naming the expected types, such as
+`Expected string or number but got symbol`. Like `kj::OneOf`, a union that breaks Web
+IDL's rules for unions, such as one with two string types, doesn't compile. See
+[Union Types](../jsg/README.md#union-types).
 
 ```rust
 #[jsg_oneof]
 #[derive(Debug, Clone)]
 enum StringOrNumber {
     String(String),
-    Number(jsg::Number),
+    Number(f64),
 }
 
 #[jsg_resource]
@@ -429,7 +452,7 @@ impl MyResource {
     pub fn process(&self, value: StringOrNumber) -> String {
         match value {
             StringOrNumber::String(s) => format!("string: {s}"),
-            StringOrNumber::Number(n) => format!("number: {}", n.value()),
+            StringOrNumber::Number(n) => format!("number: {n}"),
         }
     }
 }
@@ -463,8 +486,9 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
-| `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
-| `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
+| `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
 | `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
 | Plain data / primitives | No-op `Traced` |

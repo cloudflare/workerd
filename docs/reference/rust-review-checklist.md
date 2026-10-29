@@ -96,15 +96,20 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `JSG_STATIC_CONSTANT`). The name is used as-is (no camelCase conversion).
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
-- **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<T>` converts to a
-  JS `Array`, numbers included. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
+- **Type mappings**: a JS number is an `f64`, converted with `ToNumber` like C++ JSG's `double`; a
+  handle to one is `jsg::v8::Local<jsg::v8::Number>`. `Vec<T>` converts to a JS `Array`, numbers
+  included. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
   `to_js_array_buffer` on a byte slice (what C++ JSG returns for `kj::Array<kj::byte>`). From
   JS, `Vec<T>` reads an `Array`, and a typed array or `ArrayBuffer` is a handle such as
   `v8::Local<v8::Uint8Array>`.
   `Option<T>` maps to `T | undefined`; like `jsg::Optional<T>`, `null` converts as `T`.
   `Nullable<T>` maps to `T | null` and, like `kj::Maybe<T>`, coerces `undefined` to `null` on
-  input, but a method argument is still required. Use `Option<Nullable<T>>` for an optional
-  `T | null | undefined` that keeps `undefined` distinct from `null`.
+  input, but a method argument is still required. Prefer `NullOrUndefined<T>` to
+  `Option<Nullable<T>>` for an optional `T | null | undefined`, with distinct `Some(T)`,
+  `Null`, and `Undefined` states. Omitted method arguments become `Undefined`. Use
+  `Lenient<T>` only when shallow type mismatches should also be accepted; converting it to
+  `NullOrUndefined<T>` maps `Unconvertable` to `Undefined`, while nested conversion errors
+  still propagate.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
@@ -117,10 +122,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   which GC never visits and which keeps its handle inline. A handle that a resource owns is a
   `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
   keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
-- **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
-  structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
-  that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly
-  traced — missing traces cause use-after-free when the child is collected prematurely.
+- **GC tracing**: `jsg::Rc<T>` fields on `#[jsg_resource]` structs are automatically traced
+  during GC, including through `Option`, `Nullable`, and `NullOrUndefined` wrappers when
+  `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
+  traced (no-op). Verify that every resource reference is properly traced — missing traces
+  cause use-after-free when the child is collected prematurely.
 
 ### Rust JSG Safety Rules
 

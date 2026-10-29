@@ -125,7 +125,6 @@ void global_clear_weak(uintptr_t* global);
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
-Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
@@ -135,6 +134,8 @@ bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
+bool local_is_int32(const Local& val);
+bool local_is_uint32(const Local& val);
 bool local_is_null(const Local& val);
 bool local_is_undefined(const Local& val);
 bool local_is_null_or_undefined(const Local& val);
@@ -164,6 +165,12 @@ bool local_is_name(const Local& val);
 bool local_is_big_int(const Local& val);
 bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+// Coerce with ToInt32, ToUint32 and ToInteger (v8::Value::Int32Value() and the like): store the
+// result in `result` and return true, or return false if the coercion threw, leaving the exception
+// pending.
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -203,6 +210,19 @@ int32_t local_name_get_identity_hash(const Local& value);
 Local local_symbol_new(Isolate* isolate);
 Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
+
+// Local<Boolean>
+bool local_boolean_value(const Local& value);
+
+// Local<Number>
+double local_number_value(const Local& value);
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value);
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value);
+int64_t local_integer_value(const Local& value);
+int32_t local_int32_value(const Local& value);
+uint32_t local_uint32_value(const Local& value);
 
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value);
@@ -246,6 +266,14 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 // Returns the value of `key`, or none if a getter or Proxy trap threw, leaving the exception
 // pending.
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+// The same for a `v8::Name` key.
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name);
+// Appends the names of the own enumerable string-keyed properties, converted to strings, to
+// `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
+// the exception pending.
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names);
 
 // Local<Promise>
 PromiseState local_promise_state(const Local& promise);
@@ -383,6 +411,8 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value);
 
 // ArrayBuffer detach/detachable/was-detached
 void local_array_buffer_detach(Isolate* isolate, Local& buffer);
@@ -417,8 +447,9 @@ Local pqci_get_this(PropertyQueryCallbackInfo* info);
 // FastApiCallbackOptions
 // Fast callbacks run without a HandleScope; none of these leak a handle.
 TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver);
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message);
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message);
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage);
 void fast_api_terminate_execution(FastApiCallbackOptions* options);
 
@@ -463,6 +494,10 @@ bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
 
+// Autogates
+// workerd::util::Autogate::isEnabled(AutogateKey::JSG_INTEGER_ENFORCE_RANGE).
+bool integer_enforce_range_autogate_enabled();
+
 // Serialization
 // In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
 // and the other way round; see ser.c++.
@@ -485,8 +520,9 @@ MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+// A message longer than V8's string limit is cut to fit, so this never fails.
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -505,7 +541,6 @@ void isolate_try_catch(
 // The isolate_throw_*() functions throw nothing while execution is terminating, so that they
 // never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
-void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);

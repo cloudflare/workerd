@@ -178,15 +178,28 @@ RpcClient::Impl& RpcClient::getImpl() const {
 }
 
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream) {
-  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(stream)));
+  auto session = kj::refcounted<RpcClient::Impl::Session>(kj::mv(stream));
+  auto target = session->rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(factory, kj::mv(session), kj::mv(target)));
+}
+
+kj::Own<RpcClient> rpc_client_debug_actor(
+    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId) {
+  auto& impl = session.getImpl();
+  auto peer = impl.session->rpcSystem.bootstrap().castAs<rpc::WorkerdDebugPort>();
+  auto request = peer.getActorRequest();
+  request.setService(kj::str(service));
+  request.setEntrypoint(kj::str(className));
+  request.setActorId(kj::str(actorId));
+  return kj::heap<RpcClient>(kj::heap<RpcClient::Impl>(
+      impl.factory, kj::addRef(*impl.session), request.send().getActor()));
 }
 
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson) {
   auto& impl = client.getImpl();
-  auto bootstrap = impl.rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
-  auto request = bootstrap.startEventRequest(capnp::MessageSize{4, 0});
+  auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
   KJ_IF_SOME(cf, cfBlobJson) request.setCfBlobJson(kj::str(cf));
   auto dispatcher = request.send().getDispatcher();
   // Workerd-to-workerd RPC does not support `restore()`, so Frankenvalues need no handler.
@@ -196,8 +209,20 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
   co_return rust::worker::CustomEventResult{.outcome = rust::worker::toRustOutcome(result.outcome)};
 }
 
+kj::Own<WorkerInterface> rpc_client_start_request(
+    const RpcClient& client, kj::Own<RequestMetadata> metadata) {
+  auto& impl = client.getImpl();
+  auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
+  KJ_IF_SOME(cf, metadata->cfBlobJson) request.setCfBlobJson(cf);
+  request.setFromPersistentStub(metadata->fromPersistentStub == Persistent::YES);
+  auto dispatcher = request.send().getDispatcher();
+  auto& factory = impl.factory.getImpl();
+  return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,
+      getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+}
+
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client) {
-  return client.getImpl().rpcSystem.onDisconnect();
+  return client.getImpl().session->rpcSystem.onDisconnect();
 }
 
 // =======================================================================================

@@ -89,6 +89,67 @@ export const secret_key_equals_test = {
     // Unable to determine equality if either key is not extractable.
     ok(!hmac_ko.equals(hmac2_ko));
     ok(!hmac2_ko.equals(hmac_ko));
+
+    const raw_ko = createSecretKey(secretKeyData1);
+    for (const key of [aes1_ko, aes2_ko, hmac_ko]) {
+      ok(raw_ko.equals(key));
+      ok(key.equals(raw_ko));
+    }
+    for (const key of [aes3_ko, hmac2_ko]) {
+      ok(!raw_ko.equals(key));
+      ok(!key.equals(raw_ko));
+    }
+  },
+};
+
+export const webcrypto_secret_key_size_and_export = {
+  async test() {
+    for (const [algorithm, size, usages] of [
+      ['AES-GCM', 16, ['encrypt']],
+      ['AES-GCM', 24, ['encrypt']],
+      ['AES-GCM', 32, ['encrypt']],
+      [{ name: 'HMAC', hash: 'SHA-256' }, 33, ['sign']],
+      [{ name: 'HMAC', hash: 'SHA-256', length: 249 }, 32, ['sign']],
+    ]) {
+      const data = Buffer.alloc(size, 0x80);
+      for (const extractable of [false, true]) {
+        const key = KeyObject.from(
+          await crypto.subtle.importKey(
+            'raw',
+            data,
+            algorithm,
+            extractable,
+            usages
+          )
+        );
+        strictEqual(key.symmetricKeySize, size);
+        if (extractable) {
+          deepStrictEqual(key.export(), data);
+          deepStrictEqual(key.export({ format: 'buffer' }), data);
+          deepStrictEqual(
+            Buffer.from(key.export({ format: 'jwk' }).k, 'base64url'),
+            data
+          );
+        } else {
+          throws(() => key.export(), TypeError);
+        }
+      }
+    }
+
+    const data = Buffer.alloc(31, 7);
+    for (const algorithm of ['HKDF', 'PBKDF2']) {
+      const key = KeyObject.from(
+        await crypto.subtle.importKey('raw', data, algorithm, false, [
+          'deriveBits',
+        ])
+      );
+      strictEqual(key.symmetricKeySize, data.byteLength);
+      throws(() => key.export(), TypeError);
+    }
+    const key = createSecretKey(data);
+    strictEqual(key.symmetricKeySize, data.byteLength);
+    deepStrictEqual(key.export(), data);
+    deepStrictEqual(key.export({ format: 'buffer' }), data);
   },
 };
 

@@ -15,17 +15,17 @@ use crate::Result;
 /// passing `undefined` produces `Nullable::Null`, but omitting the argument
 /// is a `TypeError`.
 ///
-/// Use `Option<Nullable<T>>` for an optional nullable that keeps `undefined`
-/// distinct from `null`, since [`Option<T>`] is `T | undefined`:
+/// Use [`NullOrUndefined<T>`](crate::NullOrUndefined) for an optional nullable
+/// that keeps `undefined` distinct from `null`:
 ///
-/// | JavaScript  | `Nullable<T>`       | `Option<Nullable<T>>`     |
-/// |-------------|---------------------|---------------------------|
-/// | a `T`       | `Nullable::Some(v)` | `Some(Nullable::Some(v))` |
-/// | `null`      | `Nullable::Null`    | `Some(Nullable::Null)`    |
-/// | `undefined` | `Nullable::Null`    | `None`                    |
+/// | JavaScript  | `Nullable<T>`       | `NullOrUndefined<T>`         |
+/// |-------------|---------------------|------------------------------|
+/// | a `T`       | `Nullable::Some(v)` | `NullOrUndefined::Some(v)`   |
+/// | `null`      | `Nullable::Null`    | `NullOrUndefined::Null`      |
+/// | `undefined` | `Nullable::Null`    | `NullOrUndefined::Undefined` |
 ///
 /// Output conversion produces only `T` or `null`. The TypeScript type is
-/// `T | null`; `Option<Nullable<T>>` adds `undefined` and permits omission.
+/// `T | null`; `NullOrUndefined<T>` adds `undefined` and permits omission.
 ///
 /// # Examples
 ///
@@ -41,16 +41,16 @@ use crate::Result;
 /// }
 ///
 /// #[jsg_method]
-/// pub fn process_optional(&self, value: Option<Nullable<String>>) {
+/// pub fn process_optional(&self, value: jsg::NullOrUndefined<String>) {
 ///     match value {
-///         Some(Nullable::Some(s)) => println!("Got value: {s}"),
-///         Some(Nullable::Null) => println!("Got null"),
-///         None => println!("Got undefined"),
+///         jsg::NullOrUndefined::Some(s) => println!("Got value: {s}"),
+///         jsg::NullOrUndefined::Null => println!("Got null"),
+///         jsg::NullOrUndefined::Undefined => println!("Got undefined"),
 ///     }
 /// }
 ///
 /// #[jsg_method]
-/// pub fn process_some(&self, value: Nullable<Number>) -> Result<(), Error> {
+/// pub fn process_some(&self, value: Nullable<f64>) -> Result<(), Error> {
 ///     // Throws a `TypeError` for `null`.
 ///     let value = value.not_null()?;
 ///     // Process...
@@ -58,7 +58,7 @@ use crate::Result;
 /// }
 ///
 /// #[jsg_method]
-/// pub fn return_nullable(&self) -> Nullable<Number> {
+/// pub fn return_nullable(&self) -> Nullable<f64> {
 ///     if self.condition {
 ///         Nullable::Some(self.number)
 ///     } else {

@@ -11,6 +11,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 
 #include <kj-rs/convert.h>
 
@@ -59,33 +60,32 @@ namespace workerd::rust::jsg {
 // BackingStore — the size_t handle is the address of a heap-allocated
 // std::shared_ptr<v8::BackingStore> allocated with `new`.
 
-// Creates a V8 string from UTF-8. NewFromUtf8 fails only when the string is longer than
-// v8::String::kMaxLength, and then leaves no JavaScript exception pending, so an overlong string
-// throws a KJ exception instead. The length is checked before the call, which keeps a length
-// above INT_MAX from reaching NewFromUtf8's int parameter, where a negative value means
-// "NUL-terminated". kMaxLength counts UTF-16 code units and the check counts UTF-8 bytes, of
-// which there are never fewer, so it may reject a long multi-byte string that V8 could hold, but
-// never lets through one that V8 would reject.
-static v8::Local<v8::String> newUtf8String(
+// The longest UTF-8 input that NewFromUtf8 accepts. kMaxLength counts UTF-16 code units, and a
+// string never has more of those than it has UTF-8 bytes, so a UTF-8 input of at most this many
+// bytes always fits.
+static constexpr size_t MAX_UTF8_STRING_SIZE = static_cast<size_t>(v8::String::kMaxLength);
+
+// Creates a V8 string from UTF-8. Returns an empty handle, with no JavaScript exception pending,
+// if the input is longer than MAX_UTF8_STRING_SIZE, as NewFromUtf8 itself does. The length is
+// checked here so that a length above INT_MAX never reaches NewFromUtf8's int parameter, where a
+// negative value means "NUL-terminated". Never throws, and never fails for a shorter input, so
+// each caller decides what an overlong string means.
+static v8::MaybeLocal<v8::String> newUtf8String(
     v8::Isolate* isolate, kj::ArrayPtr<const char> utf8, v8::NewStringType type) {
-  KJ_REQUIRE(utf8.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "string exceeds V8's string length limit", utf8.size());
-  v8::Local<v8::String> result;
-  if (!v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()))
-           .ToLocal(&result)) {
-    KJ_FAIL_REQUIRE("V8 failed to create a string", utf8.size());
-  }
-  return result;
+  if (utf8.size() > MAX_UTF8_STRING_SIZE) return {};
+  return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
-// overlong name is checked here too, so that the error names it.
+// overlong name throws. The property shims, which take a key from arbitrary Rust text, are
+// declared fallible in v8.rs for that reason. The names a resource template interns come from
+// Rust source and are far shorter.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
-  KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "Rust identifier name exceeds V8 string length limit", name);
+  KJ_REQUIRE(name.size() <= MAX_UTF8_STRING_SIZE, "name exceeds V8's string length limit", name);
   return newUtf8String(
-      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
+      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized)
+      .ToLocalChecked();
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
@@ -119,12 +119,6 @@ Global local_to_global(Isolate* isolate, Local value) {
 
 Local local_new_number(Isolate* isolate, double value) {
   v8::Local<v8::Number> val = v8::Number::New(isolate, value);
-  return to_ffi(kj::mv(val));
-}
-
-Local local_new_string(Isolate* isolate, ::rust::Str value) {
-  auto val =
-      newUtf8String(isolate, kj::arrayPtr(value.data(), value.size()), v8::NewStringType::kNormal);
   return to_ffi(kj::mv(val));
 }
 
@@ -166,6 +160,14 @@ bool local_is_boolean(const Local& val) {
 
 bool local_is_number(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
+}
+
+bool local_is_int32(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt32();
+}
+
+bool local_is_uint32(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint32();
 }
 
 bool local_is_null(const Local& val) {
@@ -285,6 +287,24 @@ bool local_is_shared_array_buffer(const Local& val) {
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
   v8::String::Utf8Value utf8(isolate, typeStr);
   return ::rust::String(*utf8, utf8.length());
+}
+
+bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->Int32Value(isolate->GetCurrentContext())
+      .To(&result);
+}
+
+bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->Uint32Value(isolate->GetCurrentContext())
+      .To(&result);
+}
+
+bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
+  return local_from_ffi<v8::Value>(kj::mv(value))
+      ->IntegerValue(isolate->GetCurrentContext())
+      .To(&result);
 }
 
 // Utf8Value
@@ -418,6 +438,37 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
+// Local<Boolean>
+bool local_boolean_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Boolean>(value)->Value();
+}
+
+// Local<Number>
+double local_number_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Number>(value)->Value();
+}
+
+// Local<Integer>
+Local integer_new(Isolate* isolate, int32_t value) {
+  return to_ffi(v8::Integer::New(isolate, value));
+}
+
+Local integer_new_from_unsigned(Isolate* isolate, uint32_t value) {
+  return to_ffi(v8::Integer::NewFromUnsigned(isolate, value));
+}
+
+int64_t local_integer_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Integer>(value)->Value();
+}
+
+int32_t local_int32_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Int32>(value)->Value();
+}
+
+uint32_t local_uint32_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Uint32>(value)->Value();
+}
+
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value) {
   return to_ffi(v8::BigInt::New(isolate, value));
@@ -479,7 +530,7 @@ Local object_new_with_data_properties(
   for (size_t i = 0; i < keys.size(); i++) {
     // Unlike Set(), CreateDataProperty() doesn't look up the prototype chain, so no setter runs,
     // and on an ordinary object no Proxy trap runs either: nothing here runs JavaScript, so it
-    // can't throw.
+    // can't throw. V8 doesn't allow it while execution is terminating, which the caller checks.
     auto defined = object->CreateDataProperty(
         context, makeInternedStr(isolate, keys[i]), local_as_ref_from_ffi<v8::Value>(values[i]));
     KJ_ASSERT(defined.FromMaybe(false), "defining a property of a new object failed", keys[i]);
@@ -509,6 +560,39 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
   return maybe_local_to_ffi(v8_obj->Get(context, v8_key));
+}
+
+MaybeLocal local_object_get_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name) {
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
+}
+
+bool local_object_get_own_property_names(
+    Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  // The filter of GetOwnPropertyNames(context), with the names as strings.
+  v8::Local<v8::Array> array;
+  if (!v8_obj
+           ->GetOwnPropertyNames(context,
+               static_cast<v8::PropertyFilter>(v8::ONLY_ENUMERABLE | v8::SKIP_SYMBOLS),
+               v8::KeyConversionMode::kConvertToString)
+           .ToLocal(&array)) {
+    return false;
+  }
+  names.reserve(array->Length());
+  for (uint32_t i = 0; i < array->Length(); i++) {
+    // The elements are the array's own, so reading them runs no JavaScript.
+    v8::Local<v8::Value> name;
+    if (!array->Get(context, i).ToLocal(&name)) {
+      names.clear();
+      return false;
+    }
+    names.push_back(to_ffi(kj::mv(name)));
+  }
+  return true;
 }
 
 // Local<Promise>
@@ -759,7 +843,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -776,7 +860,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -827,6 +911,13 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
+// For an object already known to be a Rust resource wrapper, from the marker or a signature.
+// Anything else is an invariant violation and aborts.
+Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
+  return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
+      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange));
+}
+
 // Creates no handles, so fast callbacks can use it without a HandleScope.
 kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
@@ -841,15 +932,7 @@ kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Val
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
-  // The WORKERD_RUST_WRAPPABLE_TAG marker check above established that this is one of our Rust
-  // wrappables, so the pointer can be taken directly through the shim.
-  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, v8_obj);
-  if (wrappable == nullptr) {
-    // unwrapFromShimAnyType() should never return null for a marked object.
-    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
-    abort();
-  }
-  return *static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
+  return unwrapRustWrapper(isolate, v8_obj);
 }
 }  // namespace
 
@@ -858,6 +941,19 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
     return wrappable.toRc();
   }
   return kj::none;
+}
+
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value) {
+  KJ_IF_SOME(wrappable, tryUnwrapRustWrappable(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    return &wrappable.trait_object;
+  }
+  return nullptr;
+}
+
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
+  // V8 has checked the receiver against the method's Signature, so it is a wrapper made from a
+  // Rust resource template, and needs no marker check.
+  return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
 }
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
@@ -1109,12 +1205,14 @@ TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local r
   return {};
 }
 
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message) {
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message) {
+  // `isolate_throw_exception` would throw nothing, so create nothing.
+  if (options->isolate->IsExecutionTerminating()) return;
   v8::HandleScope scope(options->isolate);
-  isolate_throw_exception(options->isolate,
-      exception_create_from_bytes(options->isolate, exceptionType,
-          reinterpret_cast<const uint8_t*>(message.data()), static_cast<int32_t>(message.size())));
+  isolate_throw_exception(
+      options->isolate, exception_create_from_bytes(options->isolate, exceptionType, message));
 }
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
@@ -1133,6 +1231,10 @@ v8::CTypeInfo cTypeOf(FastApiType type) {
       return v8::CTypeInfo(v8::CTypeInfo::Type::kVoid);
     case FastApiType::Bool:
       return v8::CTypeInfo(v8::CTypeInfo::Type::kBool);
+    case FastApiType::Int32:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kInt32);
+    case FastApiType::Uint32:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kUint32);
     case FastApiType::Float64:
       return v8::CTypeInfo(v8::CTypeInfo::Type::kFloat64);
   }
@@ -1231,10 +1333,17 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     workerd::jsg::isolateRegisterExternalReference(isolate, static_cast<intptr_t>(callback));
   };
 
+  const bool specCompliant = workerd::jsg::getSpecCompliantPropertyAttributes(isolate);
+
+  // Per Web IDL, a function's .length is its number of required arguments. Mirrors
+  // ResourceTypeBuilder::registerMethod and getTemplate() in resource.h.
+  auto specLength = [&](uint32_t length) { return specCompliant ? static_cast<int>(length) : 0; };
+
   v8::Local<v8::FunctionTemplate> constructor;
   KJ_IF_SOME(descriptor, descriptor.constructor) {
     constructor = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)),
+        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), specLength(descriptor.length));
     registerExternalRef(descriptor.callback);
   } else {
     constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
@@ -1250,8 +1359,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   instance->SetInternalFieldCount(workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
+  // A resource's name comes from Rust source, so it is far shorter than V8's limit.
   auto classname = newUtf8String(isolate,
-      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal);
+      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
 
   if (workerd::jsg::getShouldSetToStringTag(isolate)) {
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
@@ -1280,12 +1391,12 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         const auto& cFunction = getFastCFunction(fast);
         registerExternalRef(reinterpret_cast<size_t>(&cFunction));
         return v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, callback,
-            v8::Local<v8::Value>(), methodSignature, 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+            v8::Local<v8::Value>(), methodSignature, specLength(method.length),
+            v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
       }
     }
-    return v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), methodSignature, 0,
-        v8::ConstructorBehavior::kThrow);
+    return v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), methodSignature,
+        specLength(method.length), v8::ConstructorBehavior::kThrow);
   };
 
   for (const auto& method: descriptor.static_methods) {
@@ -1299,8 +1410,6 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     auto name = makeInternedStr(isolate, method.name);
     prototype->Set(name, functionTemplate);
   }
-
-  const bool specCompliant = workerd::jsg::getSpecCompliantPropertyAttributes(isolate);
 
   // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
   // the inspectProperties ObjectTemplate under the kResourceTypeInspect API symbol.  node:util's
@@ -1490,6 +1599,12 @@ void realm_detach(Isolate* isolate, const IsolateState* state) {
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 
+// Autogates
+bool integer_enforce_range_autogate_enabled() {
+  return ::workerd::util::Autogate::isEnabled(
+      ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
+}
+
 // Errors
 namespace {
 Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::String> message) {
@@ -1511,16 +1626,22 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
 }  // namespace
 
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length) {
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
   // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
   // js.str() behavior.
-  auto message = newUtf8String(isolate,
-      kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
-      v8::NewStringType::kNormal);
-  return exceptionCreateFromMessage(exception_type, message);
+  //
+  // A message longer than V8's limit is cut to fit rather than refused, so that creating an
+  // error never fails. The Rust callers cut it at a character boundary first (see
+  // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
+  // after it NewFromUtf8 cannot refuse the string.
+  auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
+  auto v8Message = newUtf8String(
+      isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
+  return exceptionCreateFromMessage(exception_type, v8Message);
 }
 
 namespace {
@@ -1564,16 +1685,6 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
-}
-
-void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
-  // kNormal (not kInternalized): error messages are arbitrary caller-supplied
-  // strings and should not pollute the internalized string table (which is never
-  // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
-  if (isolate->IsExecutionTerminating()) return;
-  auto message = newUtf8String(
-      isolate, kj::arrayPtr(description.data(), description.size()), v8::NewStringType::kNormal);
-  isolate->ThrowError(message);
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {

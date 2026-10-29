@@ -23,7 +23,7 @@ impl<'s> ToJS<'s> for CallsWhenConverted {
     fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Value>> {
         let callback = v8::Local::<v8::Function>::try_from(self.callback.as_local(lock))
             .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
-        callback.call::<v8::Local<v8::Value>>(lock, None::<v8::Local<v8::Value>>, &[])
+        callback.call(lock, None, &[])
     }
 }
 

@@ -20,6 +20,35 @@ Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<
 
 Per-isolate state for Rust resources exposed to JavaScript. Stores cached function templates.
 
+### `Nullable<T>` and `NullOrUndefined<T>`
+
+Use `Nullable<T>` for `T | null`: it coerces `undefined` to `null` on input and
+method arguments remain required. Use `NullOrUndefined<T>` for `T | null | undefined`
+with distinct `Some(T)`, `Null`, and `Undefined` states and optional method arguments.
+Prefer it to `Option<Nullable<T>>`. Both wrappers trace their contained value.
+
+| Rust type | Nullish input conversion | Omitted method argument |
+|---|---|---|
+| `Option<T>` | `undefined` → `None`; `null` is converted by `T` | `None` |
+| `Nullable<T>` | `null` or `undefined` → `Null` | `TypeError` |
+| `NullOrUndefined<T>` | `null` → `Null`; `undefined` → `Undefined` | `Undefined` |
+
+`NullOrUndefined::default()` is `Undefined`, without requiring `T: Default`.
+`as_ref()`, `as_mut()`, and `map()` preserve `Null` and `Undefined`.
+Conversions to and from `Option<Nullable<T>>` preserve all three states;
+`Nullable<T>` also converts into `NullOrUndefined<T>`.
+
+In a `#[jsg_struct]`, a missing `NullOrUndefined<T>` field reads as `Undefined`.
+When converting back to JavaScript, `Null` produces a `null` property; `Undefined`
+is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
+that flag, just as `None` does for an `Option<T>` field.
+
+`Lenient<T>` additionally preserves shallow conversion mismatches as `Unconvertable`.
+Converting it to `NullOrUndefined<T>` maps those mismatches to `Undefined`;
+`Lenient::to_parts()` returns `(NullOrUndefined<T>, Option<TracedGlobal<Value>>)`,
+with the original mismatched JavaScript value in the second element when present.
+Errors from nested conversions or JavaScript execution still propagate.
+
 ## Safety rules
 
 Every change to Rust JSG, and to the C++ shims under it, must follow these four rules. Each rule
@@ -153,6 +182,7 @@ struct MyResource {
     child: jsg::Rc<OtherResource>,
     maybe_child: Option<jsg::Rc<OtherResource>>,
     nullable_child: jsg::Nullable<jsg::Rc<OtherResource>>,
+    optional_nullable_child: jsg::NullOrUndefined<jsg::Rc<OtherResource>>,
 
     // jsg::Weak<T> fields — weak reference, does not keep the target alive
     observer: jsg::Weak<OtherResource>,
@@ -239,13 +269,16 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `jsg::Rc<T>` | Yes — strong edge | Keeps target alive through GC |
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
+| `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
 | `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
 | `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Vec<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` in the vec |
 | `HashMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
 | `BTreeMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
+| `jsg::Dict<jsg::Rc<T>>` | Yes — each value | Visits the value of every entry |
 | `HashSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `BTreeSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `Cell` variant of above |
@@ -254,6 +287,7 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `jsg::v8::TracedGlobal<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
 | `Option<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
+| `jsg::NullOrUndefined<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction |
 | `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
@@ -381,10 +415,21 @@ creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that 
 JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
 (`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
 
+`T` is a marker type that mirrors the V8 class of the same name: `v8::Value`, `v8::Boolean`,
+`v8::Number`, `v8::String`, `v8::Object`, `v8::Function`, `v8::Uint8Array` and so on, all in
+`jsg::v8` and nowhere else, so that `v8::String` reads as it does in C++ and never collides with
+`std::string::String`. A marker's `Local<T>` methods are named after the methods of its V8 class,
+in snake case (`Local<Number>::value()`, `Local<String>::length()`), and a marker has a
+constructor where V8 has one (`v8::Number::new(lock, 1.5)`). The markers are defined in `v8.rs`
+(promises in `promise.rs`); the comment above `Value` lists the V8 classes that have no marker
+yet. Other V8 classes that Rust JSG wraps, such as `v8::BackingStore`, are also only in
+`jsg::v8`.
+
 A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
 isolate; methods that need the isolate take the lock. A handle that may be empty is an
 `Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
-constructors return `None` when V8 cannot create the string.
+constructors that take runtime input return `None` for a string longer than
+`String::MAX_LENGTH`, which V8 refuses with no exception pending.
 
 A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Value>`, is a
 `From` and costs nothing, whichever supertype it targets. A cast to a subtype is a
@@ -398,6 +443,13 @@ let global = str_value.to_global(lock);
 let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
 assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 ```
+
+A method parameter can be a handle of the types that C++ JSG's `v8::Local<T>` parameters
+take: `Local<Value>` takes any value, and `Local<String>`, `Local<Object>`,
+`Local<Function>`, `Local<BigInt>`, `Local<TypedArray>`, `Local<ArrayBuffer>`,
+`Local<ArrayBufferView>` and the typed arrays take a value of exactly that type, with no
+coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any value, as a
+promise resolved with it.
 
 ### `Global<T>`
 
@@ -511,18 +563,53 @@ or a JavaScript exception is pending, `Function::new` creates nothing and return
 propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
 0, and it can be called with `new`.
 
+### Conventions of the `v8` module
+
+The `v8` module takes handles and returns handles. Converting between a Rust value and a
+JavaScript value is the job of `FromJS` and `ToJS`, not of a `v8` method.
+
+- A method returns a Rust value only where V8 itself returns a C scalar, or copies memory out
+  (`to_vec`, `to_string`). The scalar comes from a typed handle (`value`, `length`, `value_of`,
+  `int64_value`, `is_*`, `byte_length`), or from one of V8's own coercions of any value
+  (`int32_value`, `uint32_value`, `integer_value`). `Function::call` and `Object::get` return a
+  `Local<Value>`; convert it where a Rust value is wanted:
+
+  ```rust
+  let result = func.call(lock, None, &[x, y])?;
+  let sum = f64::from_js(lock, result)?;
+  ```
+
+- A method takes raw Rust data only where V8 takes C data: a constructor's input
+  (`String::new_from_str`, `Number::new`, `Integer::new`), an index, a time, and a `&str`
+  property key as a convenience (`obj.get(lock, "name")`).
+- A method that can run JavaScript, or that needs a context, returns a `Result`, as the
+  coercions do; its error is usually pending (see
+  [Errors from JavaScript](#errors-from-javascript)). It returns an `Option` only for "absent",
+  as `int64_value` does for a `BigInt` that does not fit, or for "V8 refused, with nothing
+  pending", as the `String` constructors do for input longer than `String::MAX_LENGTH`. The
+  exception is `String::new_from_utf8_literal`, which panics for an overlong literal, as V8's
+  `NewFromUtf8Literal` fails a `static_assert`. A method never has an infallible signature over
+  a C++ shim that can throw: the shim is declared `Result` in the bridge, or Rust decides before
+  calling it, as `String::new_from_utf8` checks the length.
+- Naming: `as_*` is free and borrows (`as_slice`, `as_local`); `to_*` costs a copy or an
+  allocation (`to_vec`, `to_string`, `to_global`); `value` and `*_value` read a scalar under
+  the name V8 gives it (`Local<Number>::value`, `int64_value`, `int32_value`).
+
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
-Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element. These conversions fail only with pending errors. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
+Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element, whichever kind it is. A `&str` or `String` longer than `v8::String::MAX_LENGTH` fails with a `RangeError` ("Invalid string length", as V8 reports it), which is not pending; every other conversion of a single value in this crate fails only with a pending error. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
 Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without preparing V8 to run JavaScript, which would clear the termination, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
-match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+match lock.try_catch(|lock| {
+    let result = callback.call(lock, None, &[])?;
+    f64::from_js(lock, result)
+})? {
     Ok(result) => { /* ... */ }
     Err(exception) => { /* handle what the callback threw */ }
 }
@@ -544,16 +631,35 @@ lists, externals and the other options are not supported. The C++ side is `src/r
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
 how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
-but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
-is a `Number`.
+but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
+and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
+that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
-and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
-`BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
-to a number, which must be finite and in range, and truncates toward zero.
+and from a value converted to a number, which must be in range; whether a fraction just past a
+range limit (`255.5` or `-0.5` for `u8`) is truncated before that check, as Web IDL's
+`[EnforceRange]` does, or is out of range depends on the `JSG_INTEGER_ENFORCE_RANGE` autogate (see
+the module docs of `wrappable.rs`). `i64` and `u64` convert to a `BigInt`, like `int64_t` and
+`uint64_t`, and from a `BigInt` that fits, or any other value converted to a number, which must be
+finite and in range (the autogate does not apply), and truncates toward zero. An integer that stays
+on the V8 heap is a `v8::Local<'s, v8::Int32>`, `v8::Uint32` or `v8::Integer` (either), which
+accepts only an integral number in that range, as `v8::Local<v8::Number>` accepts only a number.
+`Local<Value>::int32_value`, `uint32_value` and `integer_value` convert any value with
+JavaScript's `ToInt32`, `ToUint32` and `ToInteger`, as the V8 methods of those names do.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
+
+`jsg::Dict<V>` is C++ JSG's `jsg::Dict<V>`, Web IDL's `record<DOMString, V>`: a plain object used
+as a map from strings to values. It holds its entries in order, in a `Vec<(String, V)>`. From
+JavaScript, it takes any object other than an array, and reads its own enumerable properties
+that are not symbols, as `Object.keys()` lists them; a value that is not a `V` is a `TypeError`
+naming its key. To JavaScript, it is a new plain object with each entry as an own data property
+(`Object::with_data_properties`), as Web IDL defines a record. C++ JSG's `DictWrapper` sets the
+entries instead, so with it a setter on `Object.prototype` runs and a `__proto__` entry replaces
+the prototype or is dropped; with Rust JSG, no JavaScript runs and `__proto__` is an own property,
+as with `Object.fromEntries()`. `Local<Object>::keys()` and
+`get_by_name()` list and read properties the same way.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
 
@@ -605,7 +711,7 @@ To port a C++ JSG signature:
 | `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
 | `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
 | `kj::Array<T>` of integers parameter | `Vec<T>` |
-| `kj::Array<double>` parameter | `Vec<Number>` |
+| `kj::Array<double>` parameter | `Vec<f64>` |
 | `kj::Array<bool>` | `Vec<bool>` |
 | `kj::Array<T>` of anything else | `Vec<T>` |
 
@@ -636,7 +742,70 @@ pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
 }
 ```
 
-This is similar to `kj::OneOf<>` in C++ JSG.
+A union converts a value as the equivalent `kj::OneOf<>` does in C++ JSG, following
+Web IDL's union conversion. It tries its variants in passes, in declaration order
+within each pass, and takes the first that converts:
+
+1. resource types (`jsg::Rc<R>`);
+2. every type that is not a string, numeric or boolean type, such as resources, arrays,
+   typed arrays and structs;
+3. boolean types, if the value is a boolean;
+4. numeric types, if the value is a number or a `BigInt`;
+5. string types;
+6. numeric types;
+7. boolean types.
+
+So a value is coerced only when no variant takes it as it is, and coerced to a string
+in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
+`null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
+cannot become a string, or an exception thrown by `toString()`, is thrown rather than
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
+`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+exactly that type. A variant that is itself a union takes part
+in each pass with its own variants, as a nested `kj::OneOf` does.
+
+Variants can be any type that converts from JavaScript and that a `kj::OneOf` can hold:
+strings, numbers, the integer types, booleans, `SystemTime`, resources, structs,
+`Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
+handles (`v8::Local<'s, T>`). Each is tried in the passes of its C++ counterpart, so a few
+behave as they do in C++ rather than as their position suggests:
+
+- `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
+  also takes a number of milliseconds, before any numeric variant does.
+- `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
+  and `undefined`, and converts any other value as `T` would, coercion included. A value
+  that `T` does not take is not taken as `null`, as in C++ JSG with the
+  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+- A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
+  `v8::Local<'s, v8::String>` is a string type, but never coerces, and
+  `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
+  `v8::Local<'s, v8::Value>` takes any value, in pass 2.
+
+A union that holds handles takes their scope as its one lifetime parameter, and can't
+outlive it:
+
+```rust
+#[jsg_oneof]
+enum ObjectOrString<'s> {
+    Object(jsg::v8::Local<'s, jsg::v8::Object>),
+    String(String),
+}
+```
+
+Like C++ JSG's `webidl::UnionTypeValidator` (`src/workerd/jsg/web-idl.h`), `#[jsg_oneof]`
+rejects at compile time a union that breaks Web IDL's rules for unions, counting the
+variants of nested unions and the inner types of nullable types: at most one boolean,
+numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
+nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
+without resources, dictionary-like or sequence-like types; no `Option<T>` or
+`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
+have several resource types, as Web IDL allows, but not the same one in both a union and
+a union nested in it.
+
+The union traces the variant it holds, so a union with a `jsg::Rc<R>` variant can be a
+resource field; one that holds handles can't. A union implements `jsg::ToJS` when every
+variant does.
 
 ## Feature Flags (Compatibility Flags)
 
@@ -667,6 +836,15 @@ harness.run_in_context(|lock, _ctx| {
     Ok(())
 });
 ```
+
+Autogates (`src/workerd/util/autogate.h`) are process-wide, not per harness.
+`jsg_test::set_autogates(&["jsg-integer-enforce-range"])` configures exactly the named gates
+(kebab-case, without the `workerd-autogate-` prefix) for as long as the returned guard lives, and
+an empty slice disables them all, whatever `WORKERD_ALL_AUTOGATES` says. Dropping the guard
+deinitializes the configuration, so the gates follow `WORKERD_ALL_AUTOGATES` again. The tests run
+serially, so a test holds the guard for its duration; the guards do not nest.
+
+Use `Harness::with_fast_api_and_flags()` to combine compatibility flags with V8 Fast API callbacks.
 
 The harness sets raw flag values; it does not apply a compatibility date or resolve flag
 implications. It uses the same `configureJsgIsolate()` helper as workers to apply isolate-level
@@ -750,10 +928,10 @@ use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 impl Counter {
     // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { /* ... */ }
+    pub fn get_value(&self) -> u32 { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { /* ... */ }
+    pub fn set_value(&self, v: u32) { /* ... */ }
 
     // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]
@@ -854,6 +1032,10 @@ Each nested type's constructor is a property of the prototype, named after the t
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
+An integer argument reaches the callback as a `double` and converts with the slow path's checks,
+following the `JSG_INTEGER_ENFORCE_RANGE` autogate as the slow path does; an integer of up to 32
+bits returns as an `int32_t` or a `uint32_t`, while a method that returns an `i64` or a `u64` has
+no fast callback.
 
 ## FFI Functions with Raw Pointers
 

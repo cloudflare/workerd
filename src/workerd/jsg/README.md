@@ -28,6 +28,14 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `nullptr`        | `v8::Null`      | `null`          | Via `kj::Maybe<T>`                         |
 | `nullptr`        | `v8::Undefined` | `undefined`     | Via `jsg::Optional<T>`                     |
 
+An integer of up to 32 bits is unwrapped with `ToNumber`, a range check and a truncating cast
+(`value.h`). NaN and the infinities are a `TypeError` for every type except `int`, which reads
+them as 0, and so is a value out of the type's range. Whether a fraction just past a range limit
+(`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned type) is out of range or is truncated first, as
+Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, depends on the
+`JSG_INTEGER_ENFORCE_RANGE` autogate (`util/autogate.h`). `int64_t` and `uint64_t` take a
+`BigInt` that fits, or any other value converted to a number that is finite and in range.
+
 ## Nullable/Optional Semantics
 
 | Type                      | JS `undefined` → C++ | JS `null` → C++ | C++ empty → JS |

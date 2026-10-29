@@ -6,6 +6,8 @@
 // only. The default export serves the SELF binding used by the
 // integration tests (echo).
 
+import { compressedByteResponse } from 'expected-length';
+
 // Set by a request to /fail-now: the /failing body errors once it is set.
 let failNow = false;
 
@@ -67,6 +69,9 @@ export default {
     if (url.pathname === '/fail-now') {
       failNow = true;
       return new Response(null);
+    }
+    if (url.pathname === '/gzip') {
+      return compressedByteResponse();
     }
     return new Response(request.body, {
       headers: {
@@ -314,6 +319,9 @@ export {
   byteSourceExpectedLengthRange,
   byteSourceExpectedLengthContract,
   byteSourceExpectedLengthHeldRequest,
+  byteSourceForkBeforeReadKeepsLength,
+  byteSourceForkAfterReadSendsChunked,
+  byteSourceCompressedResponseDropsLength,
 } from 'expected-length';
 
 export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';
