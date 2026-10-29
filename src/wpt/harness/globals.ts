@@ -24,7 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import path from 'node:path';
-import { getBindingPath } from './common';
+import { findBindingPath } from './common';
 
 // @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.self = globalThis;
@@ -78,7 +78,8 @@ globalThis.fetch = async (
   init?: RequestInit
 ): Promise<Response> => {
   if (typeof input === 'string' && input.endsWith('.json')) {
-    const relativePath = getBindingPath(
+    const relativePath = findBindingPath(
+      globalThis.state.env,
       path.dirname(globalThis.state.testFileName),
       input
     );

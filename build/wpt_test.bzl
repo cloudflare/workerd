@@ -22,7 +22,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -31,6 +31,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     2. Generates a wd-test file for this test suite. This contains all of the
        paths to modules needed to run the test: generated test suite, test config
        file, WPT test scripts, associated JSON resources.
+
+    extra_wpt_directories lists further wpt_module targets (e.g. "@wpt//:fetch/data-urls@module")
+    whose JS and JSON files the tests load from outside wpt_directory. Their files are bound under
+    their absolute WPT paths (e.g. "/fetch/data-urls/resources/base64.json").
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
@@ -67,6 +71,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common = wpt_common,
         wpt_resources = wpt_resources,
         wpt_interfaces = wpt_interfaces,
+        extra_wpt_directories = extra_wpt_directories,
         compat_flags = compat_flags + ["immutable_api_prototypes", "spec_compliant_property_attributes", "pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
@@ -79,7 +84,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common,  # i.e. "wpt/common/**"
         wpt_resources,  # i.e. "wpt/resources/**"
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
-    ]
+    ] + extra_wpt_directories
 
     wd_test(
         name = "{}".format(name),
@@ -270,7 +275,11 @@ def _wpt_wd_test_gen_impl(ctx):
     resources_bindings = generate_resources_bindings(src, resources_base, ctx.files.wpt_resources)
     interfaces_base = ctx.attr.wpt_interfaces[WPTModuleInfo].base
     interfaces_bindings = generate_interfaces_bindings(src, interfaces_base, ctx.files.wpt_interfaces)
-    all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] if b])
+    extra_bindings = [
+        generate_extra_bindings(src, module[WPTModuleInfo], module.files.to_list())
+        for module in ctx.attr.extra_wpt_directories
+    ]
+    all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] + extra_bindings if b])
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -310,6 +319,8 @@ _wpt_wd_test_gen = rule(
         "wpt_resources": attr.label(),
         # Target specifying the WPT interfaces directory module
         "wpt_interfaces": attr.label(),
+        # Further WPT directory modules whose files are bound under their absolute WPT paths
+        "extra_wpt_directories": attr.label_list(providers = [WPTModuleInfo]),
         # A list of autogates to specify in the generated wd-test file
         "autogates": attr.string_list(),
         # A list of compatibility flags to specify in the generated wd-test file
@@ -481,6 +492,30 @@ def generate_interfaces_bindings(wd_test_file, base, files):
         relative_path = module_relative_path(base, file)
         file_path = wd_test_relative_path(wd_test_file, file)
         result.append('(name = "/interfaces/{}", text = embed "{}")'.format(relative_path, file_path))
+
+    return ",\n".join(result)
+
+def generate_extra_bindings(wd_test_file, module_info, files):
+    """
+    Generates bindings for each file in an extra WPT module, named by its absolute WPT path
+    (e.g. /fetch/data-urls/resources/base64.json).
+
+    - JS files: text binding to allow code to be evaluated
+    - JSON files: JSON binding to allow test code to fetch resources
+    """
+
+    result = []
+
+    for file in files:
+        if file.extension == "js":
+            binding_type = "text"
+        elif file.extension == "json":
+            binding_type = "json"
+        else:
+            continue
+
+        relative_path = module_relative_path(module_info.base, file)
+        result.append('(name = "/{}/{}", {} = embed "{}")'.format(module_info.path, relative_path, binding_type, wd_test_relative_path(wd_test_file, file)))
 
     return ",\n".join(result)
 

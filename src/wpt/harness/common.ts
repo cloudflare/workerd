@@ -177,3 +177,25 @@ export function getBindingPath(base: string, rawPath: string): string {
 
   return path.relative('/', path.resolve(base, rawPath));
 }
+
+// Like getBindingPath, but also finds files outside the tested directory. Those are bound under
+// their absolute WPT paths (see extra_wpt_directories in wpt_test.bzl), so a relative path that
+// isn't bound within the module is resolved against the test file's location in the WPT tree.
+export function findBindingPath(
+  env: Record<string, unknown>,
+  base: string,
+  rawPath: string
+): string {
+  const bindingPath = getBindingPath(base, rawPath);
+  if (env[bindingPath] !== undefined || path.isAbsolute(rawPath)) {
+    return bindingPath;
+  }
+
+  const wptRootPath = path.resolve(
+    '/',
+    globalThis.state.wptPath,
+    base,
+    rawPath
+  );
+  return env[wptRootPath] === undefined ? bindingPath : wptRootPath;
+}

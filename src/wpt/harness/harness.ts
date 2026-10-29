@@ -29,7 +29,7 @@ import {
   type UnknownFunc,
   sanitize_unpaired_surrogates,
   getHostInfo,
-  getBindingPath,
+  findBindingPath,
 } from './common';
 
 import { Test } from './test';
@@ -115,6 +115,9 @@ class RunnerState {
   // Filename of the current test. Used in error messages.
   testFileName: string;
 
+  // Path of the tested directory within the WPT tree (e.g. fetch/api).
+  wptPath: string;
+
   // The worker environment. Used to allow fetching resources in the test.
   env: Env;
 
@@ -133,11 +136,13 @@ class RunnerState {
   constructor(
     testUrl: URL,
     testFileName: string,
+    wptPath: string,
     env: Env,
     options: TestRunnerOptions
   ) {
     this.testUrl = testUrl;
     this.testFileName = testFileName;
+    this.wptPath = wptPath;
     this.env = env;
     this.options = options;
   }
@@ -321,7 +326,7 @@ function getCodeAtPath(
   rawPath: string,
   replace?: (code: string) => string
 ): string {
-  const bindingPath = getBindingPath(base, rawPath);
+  const bindingPath = findBindingPath(env, base, rawPath);
 
   if (EXCLUDED_PATHS.has(bindingPath)) {
     return '';
@@ -432,7 +437,7 @@ async function runTest(
   // Update the URL's port so we can connect to it
   testUrl.port = env.HTTP_PORT ?? '';
 
-  globalThis.state = new RunnerState(testUrl, file, env, options);
+  globalThis.state = new RunnerState(testUrl, file, wptPath, env, options);
   globalThis.results[file] = globalThis.state;
 
   if (options.disabledTests === true) {
