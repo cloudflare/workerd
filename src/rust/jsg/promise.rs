@@ -228,6 +228,20 @@ where
     Function::callback::<ReactionData<T>, _>(react::<T, F>)
 }
 
+/// The reaction [`Local::catch`] registers for a fulfillment: resolves the derived promise with
+/// it, as C++ JSG's `identityPromiseContinuation()` does.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "has the signature of a reaction, which can fail"
+)]
+fn pass_fulfillment<'a, T>(
+    _lock: &mut Lock<'a>,
+    _data: &T,
+    value: Local<'a, Value>,
+) -> Result<Local<'a, Value>, Error> {
+    Ok(value)
+}
+
 /// The reaction [`Local::then`] registers for a rejection: passes it through.
 fn pass_rejection<'a, T>(
     lock: &mut Lock<'a>,
@@ -276,9 +290,12 @@ impl<'s> Local<'s, Promise> {
     ///
     /// As with [`Function::new`], the callback must capture nothing, which a compile-time
     /// assertion checks, and whatever it needs comes from `data`. As in C++ JSG, `data` is
-    /// dropped as soon as the promise settles: after the callback returns, or when a rejection
-    /// passes through. If the promise never settles, the garbage collector drops it once the
-    /// promise is unreachable. Until then it traces `data`, so it may hold `TracedGlobal`s and
+    /// dropped once a reaction to the promise has run: after the callback returns, or once a
+    /// rejection has passed through. The callback can rely on `data` being traced while it runs.
+    /// If no reaction ever runs, as when the promise never settles, execution is terminated or
+    /// the isolate is torn down, or if the callback panics, the garbage collector drops `data`
+    /// once the reactions are unreachable, or the teardown does. Until then the garbage collector
+    /// traces `data`, so it may hold `TracedGlobal`s and
     /// `jsg::Rc`s, including ones that lead back to the promise. It must be their only owner that
     /// the garbage collector traces: to share a resource's state, hold a `jsg::Rc` or
     /// `jsg::Weak` to the resource rather than an `std::rc::Rc` of the state.
@@ -299,13 +316,18 @@ impl<'s> Local<'s, Promise> {
     }
 
     /// Registers `on_rejected` to run when the promise is rejected, like
-    /// `promise.catch(onRejected)`, and returns the promise for its result. A fulfillment passes
-    /// through to the returned promise unchanged.
+    /// `promise.catch(onRejected)`, and returns the promise for its result. A fulfillment
+    /// resolves the returned promise.
     ///
     /// Like [`Local::then`] otherwise, with the rejection reason as the callback's argument, and
-    /// `data` dropped when a fulfillment passes through. Unlike `promise.catch()`, this does not
-    /// call `promise.then`. Registering `on_rejected` marks the promise as handled, as in
+    /// `data` dropped once a fulfillment has passed through. Unlike `promise.catch()`, this does
+    /// not call `promise.then`. Registering `on_rejected` marks the promise as handled, as in
     /// JavaScript.
+    ///
+    /// As with C++ JSG's `catch_()`, the fulfillment passes through a reaction that returns it,
+    /// so the returned promise is resolved with the value rather than fulfilled with it: if the
+    /// value is an object, its `then` is read, and a thenable is followed. A getter or Proxy can
+    /// therefore run JavaScript then, and even reject the returned promise.
     ///
     /// # Errors
     ///
@@ -319,7 +341,7 @@ impl<'s> Local<'s, Promise> {
     {
         // As C++ JSG does, a fulfillment passes through a reaction of its own, so that `data` is
         // dropped then too.
-        self.then_or_catch(lock, data, |_, _, value| Ok(value), on_rejected)
+        self.then_or_catch(lock, data, pass_fulfillment::<T>, on_rejected)
     }
 
     /// Registers `on_fulfilled` and `on_rejected` to run when the promise settles, like

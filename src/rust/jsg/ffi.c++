@@ -614,7 +614,7 @@ void local_promise_mark_as_handled(const Local& promise) {
 
 namespace {
 // Whether an exception or a termination is pending, in which case the promise shims call nothing
-// in V8 and fail, leaving it pending. Promise::Resolver::New(), Then() and Catch() would clear
+// in V8 and fail, leaving it pending. Promise::Resolver::New() and Then() would clear
 // it: they open a PrepareForExecutionScope, which clears the pending exception, a termination
 // included, so that a terminated script would run on. V8 also requires that embedders don't
 // enter it at all while execution is terminating.

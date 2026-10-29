@@ -230,8 +230,8 @@ fn then_rejects_with_callback_error_and_handles_rejections() {
     });
 }
 
-/// `then` passes a rejection through and `catch` a fulfillment, natively: the value arrives
-/// unchanged, and no intermediate promise is rejected without a handler.
+/// `then` passes a rejection through and `catch` a fulfillment, each through a reaction of its
+/// own: the value arrives unchanged.
 #[test]
 fn then_and_catch_pass_the_other_outcome_through() {
     crate::Harness::new().run_in_context(|lock, ctx| {
@@ -268,6 +268,51 @@ fn then_and_catch_pass_the_other_outcome_through() {
                 )
             ),
             "same error: true|fulfilled: kept"
+        );
+        Ok(())
+    });
+}
+
+/// As with C++ JSG's `catch_()`, and unlike a native `promise.catch()`, the fulfillment that
+/// `catch` passes through resolves the returned promise: an object's `then` is read then, once,
+/// and a thenable is followed.
+#[test]
+fn catch_resolves_with_the_fulfillment_it_passes_through() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let fulfilled = ctx
+            .eval_raw(
+                lock,
+                // The getter is added once the promise is fulfilled with the object, since
+                // resolving it with a thenable would follow the thenable.
+                "globalThis.thenReads = 0;
+                 const value = {};
+                 const p = Promise.resolve(value);
+                 Object.defineProperty(value, 'then', {
+                   get() {
+                     thenReads++;
+                     return (resolve) => resolve('from thenable');
+                   },
+                 });
+                 p",
+            )
+            .unwrap();
+        let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
+        let caught = fulfilled
+            .catch(lock, (), |_lock, (), _reason| {
+                Err(jsg::Error::new_type_error("on_rejected ran"))
+            })
+            .unwrap();
+        // Registering reads nothing.
+        let reads = ctx.eval_raw(lock, "thenReads").unwrap();
+        assert_eq!(u32::from_js(lock, reads)?, 0);
+        ctx.set_global(lock, "caught", caught);
+        assert_eq!(
+            log_after_microtasks(
+                lock,
+                ctx,
+                &format!("{RECORD} record(caught).then(() => log.push(`reads: ${{thenReads}}`))")
+            ),
+            "fulfilled: from thenable|reads: 1"
         );
         Ok(())
     });
@@ -352,18 +397,22 @@ impl jsg::Traced for DropCounter {}
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// As in C++ JSG, reaction data is dropped once a reaction has run, without waiting for the
-/// garbage collector, while the promise stays reachable.
+/// garbage collector. It is kept while the callback runs.
 #[test]
 fn then_data_is_dropped_once_the_promise_settles() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resolver = v8::PromiseResolver::new(lock).unwrap();
-        resolver
+        let settled = resolver
             .promise()
             .then_or_catch(
                 lock,
                 DropCounter(&SETTLED_DATA_DROPS),
-                |lock, _, _| Ok(lock.undefined()),
+                |lock, _, _| {
+                    // A failed assertion here would reject `settled` with an internal error.
+                    assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 0);
+                    Ok(lock.undefined())
+                },
                 |lock, _, _| Ok(lock.undefined()),
             )
             .unwrap();
@@ -374,6 +423,7 @@ fn then_data_is_dropped_once_the_promise_settles() {
         let value = lock.undefined();
         resolver.resolve(lock, value)?;
         crate::Harness::run_microtasks(lock);
+        assert_eq!(settled.state(), PromiseState::Fulfilled);
         assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -387,32 +437,88 @@ fn then_data_is_dropped_once_the_promise_settles() {
 static PASSED_THROUGH_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 /// The data of `then` is dropped when a rejection passes through, that of `catch` when a
-/// fulfillment does, and that of a callback that fails once it has returned.
+/// fulfillment does, that of `then_or_catch` once its rejection callback has returned, and that
+/// of a callback that fails once it has returned.
 #[test]
 fn reaction_data_is_dropped_whichever_way_the_promise_settles() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
         let reason = lock.undefined();
         let rejected = v8::Promise::rejected(lock, reason)?;
         let passed = rejected.then(lock, DropCounter(&PASSED_THROUGH_DROPS), |lock, _, _| {
             Ok(lock.undefined())
         })?;
         passed.mark_as_handled();
+        rejected.then_or_catch(
+            lock,
+            DropCounter(&PASSED_THROUGH_DROPS),
+            |lock, _, _| Ok(lock.undefined()),
+            |lock, _, _| Ok(lock.undefined()),
+        )?;
         let value = lock.undefined();
         let fulfilled = v8::Promise::resolved(lock, value)?;
         fulfilled.catch(lock, DropCounter(&PASSED_THROUGH_DROPS), |lock, _, _| {
             Ok(lock.undefined())
         })?;
-        let value = lock.undefined();
-        let fulfilled = v8::Promise::resolved(lock, value)?;
         let failed = fulfilled.then(lock, DropCounter(&PASSED_THROUGH_DROPS), |_, _, _| {
             Err(jsg::Error::new_type_error("failed"))
         })?;
         failed.mark_as_handled();
-        // All three stay reachable, so only their reactions can have dropped the data.
-        ctx.set_global(lock, "passed", passed);
-        ctx.set_global(lock, "failed", failed);
+        // No garbage collection runs before the assertion, so only the reactions can have
+        // dropped the data.
         crate::Harness::run_microtasks(lock);
-        assert_eq!(PASSED_THROUGH_DROPS.load(Ordering::SeqCst), 3);
+        assert_eq!(PASSED_THROUGH_DROPS.load(Ordering::SeqCst), 4);
+        Ok(())
+    });
+}
+
+static IN_CALLBACK_GC_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// Reaction data that holds the only reference to an object.
+struct ObjectData {
+    _drops: DropCounter,
+    object: v8::TracedGlobal<v8::Object>,
+}
+
+impl jsg::Traced for ObjectData {
+    fn trace(&self, visitor: &mut jsg::GcVisitor) {
+        self.object.trace(visitor);
+    }
+}
+
+/// The garbage collector traces reaction data while the callback runs, so what the data holds
+/// survives a collection that the callback triggers.
+#[test]
+fn reaction_data_is_traced_while_the_callback_runs() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let value = lock.undefined();
+        let outer = v8::Promise::resolved(lock, value)?;
+        // The object is created in a reaction, whose handles go once it returns, so that only
+        // the inner reaction's data refers to it after that.
+        let read = outer.then(lock, (), |lock, (), _| {
+            let object = lock.new_object();
+            let alive = "alive".to_js(lock)?;
+            object.set(lock, "state", alive)?;
+            let data = ObjectData {
+                _drops: DropCounter(&IN_CALLBACK_GC_DROPS),
+                object: object.to_traced_global(lock),
+            };
+            let value = lock.undefined();
+            let inner = v8::Promise::resolved(lock, value)?.then(lock, data, |lock, data, _| {
+                crate::Harness::request_gc(lock);
+                assert_eq!(IN_CALLBACK_GC_DROPS.load(Ordering::SeqCst), 0);
+                let object = data.object.as_local(lock);
+                object.get(lock, "state")
+            })?;
+            // A collection while the inner reaction is pending traces the data, which makes its
+            // handle weak; from then on only tracing keeps the object alive.
+            crate::Harness::request_gc(lock);
+            Ok(inner.into())
+        })?;
+        crate::Harness::run_microtasks(lock);
+        assert_eq!(read.state(), PromiseState::Fulfilled);
+        let result = read.result(lock).unwrap();
+        assert_eq!(String::from_js(lock, result)?, "alive");
+        assert_eq!(IN_CALLBACK_GC_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
 }
