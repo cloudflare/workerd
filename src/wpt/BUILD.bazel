@@ -287,3 +287,9 @@ wpt_test(
     config = "console-test.ts",
     wpt_directory = "@wpt//:console@module",
 )
+
+wpt_test(
+    name = "mimesniff/mime-types",
+    config = "mimesniff/mime-types-test.ts",
+    wpt_directory = "@wpt//:mimesniff/mime-types@module",
+)
