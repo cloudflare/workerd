@@ -2089,14 +2089,17 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
       observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
-void TraceContext::setError(kj::StringPtr name, kj::StringPtr message) {
+void TraceContext::setError(kj::StringPtr name, kj::Maybe<kj::StringPtr> message) {
   setTag("error.type"_kjc, name);
-  // Bound automatic status descriptions without splitting a UTF-8 code point.
-  constexpr size_t MAX_STATUS_DESCRIPTION_BYTES = 4096;
-  auto length = kj::min(message.size(), MAX_STATUS_DESCRIPTION_BYTES);
-  while (length < message.size() && length > 0 && (message[length] & 0xc0) == 0x80) --length;
-  auto status = tracing::SpanStatus(
-      tracing::SpanStatusCode::ERROR, kj::ConstString(kj::str(message.slice(0, length))));
+  kj::Maybe<kj::ConstString> description;
+  KJ_IF_SOME(text, message) {
+    // Bound automatic status descriptions without splitting a UTF-8 code point.
+    constexpr size_t MAX_STATUS_DESCRIPTION_BYTES = 4096;
+    auto length = kj::min(text.size(), MAX_STATUS_DESCRIPTION_BYTES);
+    while (length < text.size() && length > 0 && (text[length] & 0xc0) == 0x80) --length;
+    description = kj::ConstString(kj::str(text.slice(0, length)));
+  }
+  auto status = tracing::SpanStatus(tracing::SpanStatusCode::ERROR, kj::mv(description));
   span.setStatus(status.clone());
   userSpan.setStatus(kj::mv(status));
 }

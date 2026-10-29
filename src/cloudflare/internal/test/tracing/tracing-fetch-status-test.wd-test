@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fetch-status", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-status-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "target", service = "target")],
+      streamingTails = ["tail"],
+    )),
+    (name = "target", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-errors-mock.js")],
+    )),
+    (name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "tracing-fetch-status-tail.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

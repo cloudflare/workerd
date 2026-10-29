@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import assert from 'node:assert/strict';
 import {
   createInstrumentationState,
   createTailStreamHandler,
@@ -31,6 +32,18 @@ export const test = {
         return span;
       },
     });
+    const fetchUpdates = state.spanUpdates.filter(
+      ({ invocationId, spanContext }) =>
+        state.spans.get(`${invocationId}#${spanContext.spanId}`)?.name ===
+        'fetch'
+    );
+    assert.deepEqual(
+      fetchUpdates.map(({ event }) => event.info),
+      [
+        { type: 'status', status: { code: 'error' } },
+        { type: 'status', status: { code: 'error' } },
+      ]
+    );
   },
 };
 
@@ -477,6 +490,7 @@ const expectedSpans = [
     'http.request.header.content-type':
       'multipart/form-data; boundary=<dynamic>',
     'http.response.status_code': 409n,
+    'error.type': '409',
     'http.response.body.size': 22n,
     closed: true,
   },
@@ -737,6 +751,7 @@ const expectedSpans = [
     'http.request.header.content-type':
       'multipart/form-data; boundary=<dynamic>',
     'http.response.status_code': 409n,
+    'error.type': '409',
     'http.response.body.size': 22n,
     closed: true,
   },

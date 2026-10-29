@@ -1784,6 +1784,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
   response.body = response.body.attach(kj::mv(client));
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
+    // HTTP client error responses use the decimal status as error.type (e.g. "404", "503")
+    // and ERROR status without a description. Transport failures instead use the error name.
+    if (response.statusCode >= 400) ctx.setError(kj::str(response.statusCode));
     KJ_IF_SOME(length, response.body->tryGetLength()) {
       ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
     }
@@ -2112,7 +2115,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         if (!trace->responseHandled && !aborted) {
           KJ_IF_SOME(ctx, trace->context) {
             auto info = getFetchErrorInfoForTrace(js, jsg::JsValue(error.getHandle(js)));
-            ctx.setError(info.name, info.message);
+            ctx.setError(info.name, info.message.asPtr());
           }
         }
         trace->end();
