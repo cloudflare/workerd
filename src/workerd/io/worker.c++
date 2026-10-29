@@ -2804,8 +2804,9 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
       maybeTracer = ioContext.getWorkerTracer();
     }
     KJ_IF_SOME(tracer, maybeTracer) {
+      auto tracerRef = tracer.clone();
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
-        addExceptionToTrace(impl->inner, ioContext, tracer, incomingRequest, source, exception,
+        addExceptionToTrace(impl->inner, ioContext, *tracerRef, incomingRequest, source, exception,
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }

@@ -11,6 +11,7 @@ void DiagnosticsChannelModule::publishToTracer(
     jsg::Lock& js, jsg::JsValue nameValue, jsg::JsValue message) {
   auto& context = IoContext::current();
   KJ_IF_SOME(tracer, context.getWorkerTracer()) {
+    auto tracerRef = tracer.clone();
     // Converted here rather than taken as jsg::Name and jsg::Value parameters, so that publish()
     // stays cheap when there is no tracer. The TypeScript side passes a string or a symbol.
     auto name = [&] {
@@ -31,7 +32,7 @@ void DiagnosticsChannelModule::publishToTracer(
           Error,
           "Diagnostic events cannot be published with SharedArrayBuffer or "
           "transferred ArrayBuffer instances");
-      tracer.addDiagnosticChannelEvent(
+      tracerRef->addDiagnosticChannelEvent(
           context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
     } JSG_CATCH(exception KJ_UNUSED) {
       // There was an error serializing the message. This is most likely due to
@@ -45,13 +46,13 @@ void DiagnosticsChannelModule::publishToTracer(
             });
         ser.write(js, js.str("[[ Diagnostic event was not serializable ]]"_kj));
         auto tmp = ser.release();
-        tracer.addDiagnosticChannelEvent(
+        tracerRef->addDiagnosticChannelEvent(
             context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
       } JSG_CATCH(exception) {
         // This should not happen, but if it does, we don't want to crash. We'll
         // log the error and continue.
         LOG_PERIODICALLY(WARNING, "Diagnostic event fallback serialization failed: ", exception.getHandle(js));
-        tracer.addException(context.getInvocationSpanContext(), context.now(), kj::str("Error"),
+        tracerRef->addException(context.getInvocationSpanContext(), context.now(), kj::str("Error"),
             kj::str("Failed to publish diagnostics channel message"), kj::none);
       }
     }
