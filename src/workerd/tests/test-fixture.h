@@ -87,6 +87,8 @@ struct TestFixture {
     // If set, passed to the Script. The feature flags must enable the new module registry,
     // and the registry must contain the fixture's main module, named "main".
     kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
+    // Override the byte-counting entropy source for tests needing more than 256 distinct bytes.
+    kj::Maybe<kj::Own<kj::EntropySource>> entropySource;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});

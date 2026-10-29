@@ -1533,6 +1533,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
   SpanParent userSpan(nullptr);
+  SpanParent invocationRoot(nullptr);
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   bool otel = opentelemetryApiEnabled;
@@ -1545,6 +1546,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     if (otel) {
       inherited = hasCurrentUserTraceOwner();
       KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+        invocationRoot = owner.getInvocationRoot();
         localSampled = owner.getLocalSampled();
         rootObserved = owner.isRootObserved();
         tracerLess = owner.isTracerLess();
@@ -1559,9 +1561,11 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     userSpan = getRootUserTraceSpan();
   }
 
-  // Owner-less entry frames (including RPC and hibernatable WebSocket handlers) inherit the
-  // current request. A captured owner without a tracer is deliberately not replaced.
+  // Fresh request scopes and overrides without a captured owner inherit the current request.
+  // RPC, constructor, restore and hibernatable WebSocket entry points install request scopes.
+  // A captured owner without a tracer is deliberately not replaced.
   if ((!otel || !inherited) && !incomingRequests.empty()) {
+    if (otel) invocationRoot = getRootUserTraceSpan();
     if (!otel && !userSpan.isObserved()) {
       return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
     }
@@ -1592,7 +1596,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
       kj::mv(invocationSpanContext), tracing::TraceFlags(localSampled ? 1 : 0),
       tracerLess ? UserTraceAsyncContext::TracerPresence::ABSENT
                  : UserTraceAsyncContext::TracerPresence::PRESENT,
-      rootObserved ? RootUserSpanObserved::YES : RootUserSpanObserved::NO);
+      rootObserved ? RootUserSpanObserved::YES : RootUserSpanObserved::NO, kj::mv(invocationRoot));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
@@ -1667,6 +1671,14 @@ bool IoContext::isRootUserTraceObserved() {
   KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) return owner.isRootObserved();
   if (hasCurrentUserTraceOwner() || incomingRequests.empty()) return false;
   return getRootUserTraceSpan().isObserved();
+}
+
+SpanParent IoContext::getUserTraceInvocationRoot() {
+  if (opentelemetryApiEnabled) {
+    KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) return owner.getInvocationRoot();
+    if (hasCurrentUserTraceOwner()) return SpanParent(nullptr);
+  }
+  return getRootUserTraceSpan();
 }
 
 kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationContext() {

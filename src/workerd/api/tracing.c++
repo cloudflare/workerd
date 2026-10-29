@@ -872,11 +872,11 @@ kj::StringPtr rootCreationMode() {
   if (!io.isOpentelemetryApiEnabled() || io.getWorkerTracer() == kj::none ||
       !io.isRootUserTraceObserved())
     return "untraced"_kj;
-  if (!KJ_ASSERT_NONNULL(io.getWorkerTracer()).supportsDetachedRoots()) return "attached"_kj;
+  bool attached = !KJ_ASSERT_NONNULL(io.getWorkerTracer()).supportsDetachedRoots();
   KJ_IF_SOME(flags, io.getUserTraceInvocationFlags()) {
-    if (!flags.isSampled()) return "unsampled"_kj;
+    if (!flags.isSampled()) return attached ? "attached-unsampled"_kj : "unsampled"_kj;
   }
-  return "recording"_kj;
+  return attached ? "attached"_kj : "recording"_kj;
 }
 }  // namespace
 
@@ -886,7 +886,9 @@ kj::StringPtr TracingContext::getRootCreationMode(jsg::Lock& js) {
 
 kj::String TracingContext::createRootTraceId(jsg::Lock& js) {
   auto& io = IoContext::current();
-  return KJ_ASSERT_NONNULL(io.getWorkerTracer()).makeDetachedTraceId(io.getEntropySource()).toW3C();
+  return KJ_ASSERT_NONNULL(io.getWorkerTracer())
+      .makeDetachedTraceId(js, io.getEntropySource())
+      .toW3C();
 }
 
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
@@ -945,9 +947,8 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
               !root.getTraceFlags().map([](auto flags) {
             return !flags.isSampled();
           }).orDefault(false)) {
-            // Legacy factories accept invocation roots, but may decline carriers with a span ID.
-            parent = tracer.makeUserRequestSpan(
-                root.getTraceId(), root.getTraceFlags(), root.cloneTraceState());
+            // Reuse the owner's submitter and its predictable span-ID sequence.
+            parent = io.getUserTraceInvocationRoot();
             attached = parent.isObserved();
           }
         }
@@ -1008,7 +1009,7 @@ CreatedSpan createSpan(jsg::Lock& js,
     if (detached == DetachedRoot::YES) {
       auto mode = rootCreationMode();
       parent = SpanParent(nullptr);
-      if (mode == "attached"_kj) {
+      if (mode == "attached"_kj || mode == "attached-unsampled"_kj) {
         KJ_IF_SOME(invocation, context.getUserTraceInvocationContext()) {
           if (invocation.getTraceFlags().map([](auto flags) {
             return !flags.isSampled();
@@ -1016,9 +1017,8 @@ CreatedSpan createSpan(jsg::Lock& js,
             parent = SpanParent(kj::rc<PropagationOnlySpanObserver>(
                 tracing::SpanContext(invocation.getTraceId(), invocation.getSpanId(),
                     invocation.getTraceFlags(), invocation.cloneTraceState())));
-          } else KJ_IF_SOME(tracer, context.getWorkerTracer()) {
-            parent = tracer.makeUserRequestSpan(
-                invocation.getTraceId(), invocation.getTraceFlags(), invocation.cloneTraceState());
+          } else {
+            parent = context.getUserTraceInvocationRoot();
           }
         }
       }
@@ -1027,7 +1027,7 @@ CreatedSpan createSpan(jsg::Lock& js,
         KJ_IF_SOME(invocation, context.getUserTraceInvocationContext()) {
           KJ_IF_SOME(tracer, context.getWorkerTracer()) {
             parent = tracer.makeUserSpanParent(
-                tracing::SpanContext(tracer.makeDetachedTraceId(context.getEntropySource()),
+                tracing::SpanContext(tracer.makeDetachedTraceId(js, context.getEntropySource()),
                     kj::none, invocation.getTraceFlags()),
                 DetachedRoot::YES);
           }

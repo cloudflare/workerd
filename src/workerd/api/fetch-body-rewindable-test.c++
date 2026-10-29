@@ -7,6 +7,8 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
+#include <workerd/io/trace-stream.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/strings.h>
@@ -195,6 +197,114 @@ struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFact
     return kj::heap<MockFetchTarget>();
   }
 };
+
+struct LegacySpanCounter final: public kj::Refcounted {
+  uint64_t nextId = 0;
+};
+
+class LegacyEgressObserver final: public SpanObserver {
+ public:
+  LegacyEgressObserver(kj::Rc<LegacySpanCounter> counter, tracing::SpanContext identity)
+      : counter(kj::mv(counter)),
+        identity(kj::mv(identity)) {}
+  kj::Rc<SpanObserver> newChild() override {
+    return kj::rc<LegacyEgressObserver>(counter.addRef(),
+        tracing::SpanContext(
+            identity.getTraceId(), tracing::SpanId(++counter->nextId), identity.getTraceFlags()));
+  }
+  void onOpen(kj::ConstString, kj::Date) override {}
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  kj::Maybe<tracing::SpanContext> toSpanContext() override {
+    return tracing::SpanContext::clone(identity);
+  }
+  tracing::SpanId getSpanId() override {
+    return identity.getSpanId().orDefault(tracing::SpanId::nullId);
+  }
+
+ private:
+  kj::Rc<LegacySpanCounter> counter;
+  tracing::SpanContext identity;
+};
+
+class LegacyEgressChannels final: public TestFixture::DummyIoChannelFactory {
+ public:
+  LegacyEgressChannels(TimerChannel& timer, uint& requests)
+      : DummyIoChannelFactory(timer),
+        requests(requests) {}
+  kj::Own<WorkerInterface> startSubrequest(uint, SubrequestMetadata metadata) override {
+    auto identity = KJ_ASSERT_NONNULL(metadata.userSpanParent.toSpanContext());
+    auto id = KJ_ASSERT_NONNULL(identity.getSpanId());
+    KJ_EXPECT(id.getId() == ++requests);
+    KJ_EXPECT(identity.getTraceFlags() == tracing::TraceFlags(3));
+    auto expected =
+        tracing::formatW3CTraceparent(identity.getTraceId(), id, tracing::TraceFlags(3));
+    return kj::heap<MockFetchTarget>(kj::none,
+        kj::Function<void(const kj::HttpHeaders&)>(
+            [expected = kj::mv(expected)](const auto& headers) {
+      uint parents = 0;
+      headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+        if (strcaseeq(name, "traceparent"_kj)) {
+          ++parents;
+          KJ_EXPECT(value == expected);
+        }
+      });
+      KJ_EXPECT(parents == 1);
+    }));
+  }
+
+ private:
+  uint& requests;
+};
+
+KJ_TEST("legacy attached roots reuse predictable IDs for real HTTP egress") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setOpentelemetryApi(true);
+  uint requests = 0;
+  TestFixture fixture({.featureFlags = flags.asReader(),
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<LegacyEgressChannels>(timer, requests);
+  })});
+  auto context = fixture.newIoContext();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
+  uint factories = 0;
+  tracer->setMakeUserRequestSpanFunc(
+      [&](tracing::TraceId id, kj::Maybe<tracing::TraceFlags> flags) {
+    ++factories;
+    return SpanParent(kj::rc<LegacyEgressObserver>(
+        kj::rc<LegacySpanCounter>(), tracing::SpanContext(id, kj::none, flags)));
+  });
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.clone());
+  auto& invocation = request->getInvocationSpanContext();
+  invocation = tracing::InvocationSpanContext(invocation.getTraceId(), invocation.getInvocationId(),
+      invocation.getSpanId(), tracing::TraceFlags(3));
+  request->delivered();
+  kj::Maybe<kj::Promise<void>> done;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    auto primitive = env.js.alloc<TracingContext>();
+    auto fetcher = env.js.alloc<Fetcher>(
+        IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+    kj::Vector<kj::Promise<void>> pending;
+    for (uint i = 0; i < 2; ++i) {
+      primitive->withActiveSpanContext(
+          env.js, kj::none, jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+        auto response = fetcher->fetch(js, kj::str("http://example.com/"), kj::none);
+        pending.add(env.context.awaitJs(js, kj::mv(response)).ignoreResult());
+        return jsg::JsRef(js, js.undefined());
+      }));
+    }
+    done = kj::joinPromises(pending.releaseAsArray()).attach(kj::mv(fetcher));
+  });
+  KJ_ASSERT_NONNULL(done).wait(fixture.getWaitScope());
+  KJ_EXPECT(requests == 2);
+  KJ_EXPECT(factories == 1);
+  fixture.drainAndDestroy(kj::mv(request));
+}
 
 // fetchImplNoOutputLock forwards payload and target retryability to RequestObserver so edgeworker
 // can classify disconnected outgoing actor calls. The stashed signal is per-call, not sticky: one

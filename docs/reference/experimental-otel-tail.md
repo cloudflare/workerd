@@ -39,6 +39,12 @@ Keep shared predictable counters and forward metadata-aware opens. Consumers mus
 triggering event's trace for issue attribution. Invocation navigation, billing, root quotas,
 platform links and parentless RPC method enrichment remain product decisions.
 
+The minted-ID registry is charged conservatively at 128 bytes per allocated hash-table row
+against the isolate's external-memory budget, including unsampled roots. The isolate memory
+limit, rather than an eviction policy, bounds this storage. IDs are never evicted while their
+tracer lives: eviction could reinterpret a live root's rewrapped identity as a foreign sampling
+decision. Accounting is released with the tracer and does not keep the isolate alive.
+
 The `opentelemetry_api` adapter emits optional kind, instrumentation scope and start time on
 `spanOpen`, separate `spanEvent` and `spanLinks` marks, optional exception time, and optional end
 time on `spanClose`. Native spans and flag-off output keep their existing schema. Runtime
@@ -69,6 +75,13 @@ the creator's weak tracer (`runIfAlive`), never the current request's tracer. In
 likewise use the stored invocation context and tracer. A span reused across actor requests
 continues writing to its creator's stream and cannot keep a dead tracer alive.
 
+With the flag on, logs, diagnostics and exceptions also follow the frame owner's tracer.
+Long-lived work started by a Durable Object constructor (timers, listeners or background loops)
+therefore loses its logs and spans once the constructing request's tracer expires; an unsampled
+constructing request cannot record spans in the first place. There is no fallback to the newest
+request: that would put frame-owned logs and spans in different streams, or misattribute them to
+an unrelated overlapping request. Start request-specific work in that request's scope instead.
+
 A root retained in Durable Object memory is not a cross-request recording session. Once its
 creator's tracer expires, later children, marks and closure can be dropped; no later stream
 receives that root's close. A hibernatable WebSocket captures a real active accept-time identity,
@@ -76,8 +89,8 @@ unless its trace was minted as a detached root by the invocation's tracer. In th
 without a real active identity, it uses the invocation identity when one exists. Later
 message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
 inside a detached root does not pull later events into that root's trace.
-There is no dedicated per-invocation root quota. Recording spans share the existing export
-budgets; minted trace IDs remain in the tracer until it expires.
+There is no dedicated per-invocation root-count quota. Recording spans share the existing export
+budgets; minted trace IDs remain memory-accounted until the tracer expires.
 
 Forward corresponding `BaseTracer` methods and all metadata/time fields over each transport,
 including process-sandbox boundaries. The default hooks intentionally preserve old embedders:

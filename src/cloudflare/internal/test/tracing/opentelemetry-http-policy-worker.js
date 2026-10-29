@@ -87,9 +87,15 @@ export default {
         span.end();
       });
       // No shim startSpan: native activation must apply the owning platform decision too.
-      const echo = await context.with(foreign, () =>
-        get('http://echo/platform-unsampled')
-      );
+      const echo = await context.with(foreign, () => {
+        const carrier = {};
+        propagation.inject(context.active(), carrier);
+        assert.strictEqual(
+          carrier.traceparent,
+          '00-11111111111111111111111111111111-2222222222222222-01'
+        );
+        return get('http://echo/platform-unsampled');
+      });
       assert.strictEqual(
         echo.traceparent,
         '00-11111111111111111111111111111111-2222222222222222-00'

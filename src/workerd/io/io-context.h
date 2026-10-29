@@ -82,8 +82,10 @@ class UserTraceAsyncContext final {
       kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
       tracing::TraceFlags jsSamplingDecision,
       TracerPresence tracerPresence,
-      RootUserSpanObserved rootObserved = RootUserSpanObserved::NO)
+      RootUserSpanObserved rootObserved = RootUserSpanObserved::NO,
+      SpanParent invocationRoot = SpanParent(nullptr))
       : span(kj::mv(span)),
+        invocationRoot(kj::mv(invocationRoot)),
         tracer(kj::mv(tracer)),
         invocationSpanContext(kj::mv(invocationSpanContext)),
         localSampled(jsSamplingDecision.isSampled()),
@@ -103,6 +105,10 @@ class UserTraceAsyncContext final {
 
   SpanParent getSpan() {
     return span.addRef();
+  }
+
+  SpanParent getInvocationRoot() {
+    return invocationRoot.addRef();
   }
 
   kj::Maybe<workerd::WeakRef<BaseTracer>&> getTracer() {
@@ -133,6 +139,7 @@ class UserTraceAsyncContext final {
 
  private:
   SpanParent span;
+  SpanParent invocationRoot;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   const bool localSampled;
@@ -411,6 +418,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     if (incomingRequests.empty()) return SpanParent(nullptr);
     return getCurrentIncomingRequest().getRootUserTraceSpan();
   }
+
+  // The frame owner's existing carrier, even while another actor request is current.
+  SpanParent getUserTraceInvocationRoot();
 
   // The Cloudflare Access auth info for the current incoming request, if any was provided by
   // the embedder. Used to populate `ctx.access` in JavaScript.

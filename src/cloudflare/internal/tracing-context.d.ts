@@ -40,7 +40,8 @@ declare const tracingContext: {
     }
   ): Span;
   getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';
-  getRootCreationMode(): 'untraced' | 'unsampled' | 'recording' | 'attached';
+  getRootCreationMode():
+    'untraced' | 'unsampled' | 'recording' | 'attached' | 'attached-unsampled';
   createRootTraceId(): string;
   hasTracer(): boolean;
   getInvocationSpanContext(): TracingSpanContext | undefined;

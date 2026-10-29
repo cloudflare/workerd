@@ -66,8 +66,11 @@ export const validate = {
         if (
           type === 'exception' &&
           event.event.message.includes('uncaught-root-error')
-        )
+        ) {
+          assert.strictEqual(ctx.traceId, onset.spanContext.traceId);
+          assert.strictEqual(ctx.spanId, onset.event.spanId);
           uncaught = true;
+        }
         if (['return', 'outcome'].includes(type)) {
           assert.strictEqual(ctx.traceId, onset.spanContext.traceId);
           assert.strictEqual(ctx.spanId, onset.event.spanId);

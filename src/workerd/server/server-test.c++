@@ -4319,8 +4319,9 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `  async webSocketMessage(ws) {
               `    const expected = ws.deserializeAttachment();
               `    const active = identity();
-              `    if (active.traceId !== expected.traceId || active.traceFlags !== 0 ||
+              `    if (active.traceId !== expected.traceId ||
               `        active.traceState !== undefined) throw new Error('wrong restored identity');
+              `    console.log(JSON.stringify({marker: 'socket-parent', ...expected}));
               `    const response = await fetch('http://origin/');
               `    ws.send(this.reqCount + ':' + await response.text());
               `  }
@@ -4330,12 +4331,28 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
             durableObjectNamespaces = [(className = "Actor", uniqueKey = "capture-socket")],
             durableObjectStorage = (inMemory = void),
         )",
-            traced ? "tails = [\"tail\"],"_kj : ""_kj, R"(
+            traced ? "streamingTails = [\"tail\"],"_kj : ""_kj, R"(
           )), (name = "tail", worker = (
             compatibilityDate = "2026-07-01",
-            modules = [(name = "worker", esModule = "export default { tail() {} };")],
+            modules = [(name = "worker", esModule =
+              `let checks = 0;
+              `export default { fetch() { return new Response(String(checks)); }, tailStream(onset) {
+              `  return { log(event) {
+              `    const data = JSON.parse(event.event.message[0]);
+              `    if (data.marker !== 'socket-parent') return;
+              `    if (onset.spanContext.traceId !== data.traceId ||
+              `        onset.spanContext.spanId !== data.spanId)
+              `      throw new Error('socket lost exact accept-time parent');
+              `    if (onset.spanContext.traceFlags !== undefined ||
+              `        event.spanContext.traceFlags !== undefined)
+              `      throw new Error('socket retained accept-time native flags');
+              `    ++checks;
+              `  }};
+              `}};
+            )],
           ))],
-          sockets = [(name = "main", address = "test-addr", service = "main")],
+          sockets = [(name = "main", address = "test-addr", service = "main"),
+                     (name = "tail", address = "tail-addr", service = "tail")],
         ))"));
         test.server.allowExperimental();
         test.start();
@@ -4355,14 +4372,20 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
           if (hibernate) test.wait(10);
           socket.send(kj::str("\x81\x01", "x"));
           auto origin = test.receiveInternetSubrequest("origin");
-          origin.recvRegex("GET / HTTP/1.1\nHost: origin\n"
-                           "traceparent: 00-11111111111111111111111111111111-[0-9a-f]{16}-00\n\n");
+          origin.recvRegex(kj::str("GET / HTTP/1.1\nHost: origin\n"
+                                   "traceparent: 00-11111111111111111111111111111111-[0-9a-f]{16}-",
+              traced ? "01" : "00", "\n\n"));
           origin.send(R"(
             HTTP/1.1 200 OK
             Content-Length: 2
 
             OK)"_blockquote);
           socket.recvWebSocket(hibernate ? "0:OK" : "1:OK");
+          if (traced) {
+            test.wait(1);
+            auto tail = test.connect("tail-addr");
+            tail.httpGet200("/", hibernate ? "2" : "1");
+          }
         }
       }
     }

@@ -28,12 +28,17 @@ and automatic injection within that async scope; it does not remove explicit hea
 
 Without a tracer, an invocation with an adopted or native trigger retains a propagation-only
 root visible to JS and egress, using the trigger's span ID rather than an unexported local
-span. An invocation without either a trigger or a tracer does not invent a new identity,
-including owner-less handlers such as hibernatable WebSocket callbacks. Clearing an explicit
-context in such a handler cannot reveal an invented invocation parent. Explicit `00`
+span. An invocation without either a trigger or a tracer does not invent a new identity.
+Hibernatable WebSocket callbacks install request scopes and may inherit an accept-time trigger;
+callbacks without a trigger or tracer remain identity-less. Clearing an explicit context in
+such a callback cannot reveal an invented invocation parent. Explicit `00` and `02`
 invocations retain propagation identities without
 recording shim or native spans, even under a foreign explicitly sampled parent. Native
 activation retains the foreign identity with the owning invocation's unsampled flags.
+JS `propagation.inject()` serializes the supplied OTel context, not the native platform decision:
+under a foreign `-01` context in an explicitly unsampled invocation it writes `-01`, while automatic
+native egress writes `-00` (or `-02` for an explicit `02` invocation). Explicit application headers
+still win, including headers produced by JS injection; platform-wins governs automatic native work.
 
 Binding fetchers, actors, and JS RPC use native trigger propagation rather than automatic
 HTTP injection. This conservative channel-based exclusion also covers bindings configured

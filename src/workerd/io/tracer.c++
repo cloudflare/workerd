@@ -667,10 +667,15 @@ void BaseTracer::setMakeUserSpanParentFunc(MakeUserSpanParentFunc func) {
   detachedRootsSupported = true;
 }
 
-tracing::TraceId BaseTracer::makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy) {
+tracing::TraceId BaseTracer::makeDetachedTraceId(
+    jsg::Lock& js, kj::Maybe<kj::EntropySource&> entropy) {
   KJ_REQUIRE(detachedRootsSupported);
   auto id = tracing::TraceId::fromEntropy(entropy);
   detachedTraceIds.insert(id);
+  if (detachedTraceMemory == kj::none) detachedTraceMemory = js.getExternalMemoryAdjustment();
+  // Cover row storage, hash buckets and allocation overhead conservatively. Charging capacity
+  // also covers spare rows; the isolate's memory limit bounds sampled and unsampled root loops.
+  KJ_ASSERT_NONNULL(detachedTraceMemory).setNow(js, detachedTraceIds.capacity() * 128);
   return id;
 }
 

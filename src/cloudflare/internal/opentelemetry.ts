@@ -522,7 +522,12 @@ class Tracer {
       let detached =
         options.root === true || (parentSpan === undefined && parent !== ROOT);
       const rootMode = tracingContext.getRootCreationMode();
-      if (detached && rootMode === 'attached') {
+      const invocationUnsampled =
+        rootMode === 'unsampled' || rootMode === 'attached-unsampled';
+      if (
+        detached &&
+        (rootMode === 'attached' || rootMode === 'attached-unsampled')
+      ) {
         detached = false;
         parentSpan = undefined;
         parent = ROOT;
@@ -545,7 +550,11 @@ class Tracer {
       // Decide under the explicit parent, not an unrelated surrounding context. Native
       // activation restores same-trace invocation flags before selecting the recording mode.
       const create = (): Span => {
-        const mode = detached ? rootMode : tracingContext.getSpanCreationMode();
+        const mode = invocationUnsampled
+          ? 'unsampled'
+          : detached
+            ? rootMode
+            : tracingContext.getSpanCreationMode();
         if (mode === 'untraced') {
           if (
             detached ||
@@ -605,7 +614,7 @@ class Tracer {
         return span;
       };
       // A root uses the owning invocation, never an unrelated explicit/active remote context.
-      return detached || rootMode === 'unsampled'
+      return detached || invocationUnsampled
         ? create()
         : context.with(parent, create);
     }, new Span());

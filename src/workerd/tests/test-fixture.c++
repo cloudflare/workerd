@@ -356,7 +356,9 @@ TestFixture::TestFixture(SetupParams&& params)
               ? kj::Own<TimerChannel>(
                     kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
               : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
-      entropySource(kj::heap<MockEntropySource>()),
+      entropySource(kj::mv(params.entropySource).orDefault([]() -> kj::Own<kj::EntropySource> {
+        return kj::heap<MockEntropySource>();
+      })),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
           capnp::HttpOverCapnpFactory::HeaderIdBundle(headerTableBuilder),

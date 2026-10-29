@@ -151,9 +151,9 @@ class BaseTracer: public kj::Refcounted {
   bool supportsDetachedRoots() const {
     return detachedRootsSupported;
   }
-  // Retained until the tracer expires, including after the root span has closed. Rewrapped
-  // identities in these traces retain the owning invocation's native sampling flags.
-  tracing::TraceId makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy);
+  // Charged to the isolate until the tracer expires, including after closure. Never evicting
+  // identities preserves the owner's native sampling flags for live and rewrapped roots.
+  tracing::TraceId makeDetachedTraceId(jsg::Lock& js, kj::Maybe<kj::EntropySource&> entropy);
   bool isDetachedTraceId(const tracing::TraceId& id) const {
     return detachedTraceIds.contains(id);
   }
@@ -188,6 +188,7 @@ class BaseTracer: public kj::Refcounted {
  private:
   friend class workerd::WeakRef<BaseTracer>;
   bool detachedRootsSupported = false;
+  kj::Maybe<jsg::ExternalMemoryAdjustment> detachedTraceMemory;
   kj::HashSet<tracing::TraceId> detachedTraceIds;
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<BaseTracer>(), *this);
 };
