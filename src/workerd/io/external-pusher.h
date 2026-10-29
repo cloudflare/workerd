@@ -87,13 +87,15 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 // session in use, and it remains usable after the session ends. An abort that arrives after the
 // receiving request has ended still reaches the signal's pending abort reason.
 //
-// The returned `signal` is still wrapped: the caller sends it back inside a serialized value, and
-// ExternalPusherImpl::unwrapAbortSignal() recognizes it only once the membrane has unwrapped it
-// again on the way back in.
+// The returned `signal` is wrapped in the membrane's DetachedMembranePolicy: the caller sends it
+// back inside a serialized value, and ExternalPusherImpl::unwrapAbortSignal() recognizes it only
+// once the membrane has unwrapped it again on the way back in. The caller releases its copy of
+// `signal` only after the receiver has recognized it, which can be after the receiver has returned,
+// so `signal` doesn't keep the session in use either.
 kj::Maybe<capnp::Capability::Client> redirectPushAbortSignal(uint64_t interfaceId,
     uint16_t methodId,
     capnp::Capability::Client target,
-    capnp::MembranePolicy& policy,
+    DetachedMembranePolicy& detachedPolicy,
     MembraneCallDirection direction);
 
 }  // namespace workerd
