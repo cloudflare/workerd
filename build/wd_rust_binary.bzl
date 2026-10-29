@@ -48,6 +48,7 @@ def wd_rust_binary(
         malloc = None,
         tool = False,
         test = True,
+        features = [],
         visibility = None,
         tags = [],
         cxx_bridge_src = None,
@@ -71,6 +72,7 @@ def wd_rust_binary(
         malloc: the malloc implementation to link, if not the default.
         tool: True for a binary where performance matters: linked with linkopts_tool, as
             wd_cc_binary does. False for development tools and tests (linkopts_default).
+        features: additional C++ toolchain features for the binary's link action.
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
@@ -126,7 +128,7 @@ def wd_rust_binary(
             "//build/deps:linkopts_tool" if tool else "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
-        features = [] if tool else LINKOPTS_DEFAULT_FEATURES,
+        features = features + ([] if tool else LINKOPTS_DEFAULT_FEATURES),
         visibility = visibility,
         data = data,
         experimental_use_cc_common_link = 1,
