@@ -4289,6 +4289,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 
     co_await context.run([this, &info, containerRunning](Worker::Lock& lock, IoContext& context) {
       jsg::Lock& js = lock;
+      auto traceScope = context.makeRequestTraceScope(lock);
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_SOME(c, impl->actorCache) {

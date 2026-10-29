@@ -309,6 +309,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
         co_await ioctx.run([this, entrypointName = entrypointName,
                                versionInfo = kj::mv(versionInfo), props = kj::mv(props),
                                isDynamicDispatch](Worker::Lock& lock, IoContext& ioctx) mutable {
+      auto traceScope = ioctx.makeRequestTraceScope(lock);
       // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
       // in the edge runtime, turn dehydrated channel tokens into live channels). See
       // RestoreRehydrateCallback.
@@ -437,6 +438,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
         co_await ioctx.run([this, entrypointName = entrypointName,
                                versionInfo = kj::mv(versionInfo), props = kj::mv(props),
                                isDynamicDispatch](Worker::Lock& lock, IoContext& ioctx) mutable {
+      auto traceScope = ioctx.makeRequestTraceScope(lock);
       // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
       // in the edge runtime, turn dehydrated channel tokens into live channels). See
       // RestoreRehydrateCallback.
