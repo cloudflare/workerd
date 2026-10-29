@@ -204,6 +204,12 @@ wpt_test(
 )
 
 wpt_test(
+    name = "hr-time",
+    config = "hr-time-test.ts",
+    wpt_directory = "@wpt//:hr-time@module",
+)
+
+wpt_test(
     name = "performance-timeline",
     config = "performance-timeline-test.ts",
     wpt_directory = "@wpt//:performance-timeline@module",
