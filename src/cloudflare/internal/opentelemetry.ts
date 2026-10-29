@@ -396,6 +396,12 @@ class ContextManager {
       const span = tracing.getActiveSpan();
       if (state !== undefined && state.native === span) return state.context;
       if (span === undefined) return state?.context ?? ROOT;
+      // The runtime's identity-less invocation placeholder is not an OTel span.
+      if (
+        state === undefined &&
+        !valid(attempt(() => fromRuntime(span.spanContext()), undefined))
+      )
+        return ROOT;
       let contexts = this.#contexts;
       if (state !== undefined) {
         let nested = this.#nested.get(state.context);
@@ -511,6 +517,17 @@ class Tracer {
         () => parentSpan?.spanContext(),
         undefined
       );
+      // Without a tracer, native activation cannot change the span creation policy.
+      if (!tracingContext.hasTracer()) {
+        if (
+          detached ||
+          (parentSpan instanceof Span && parentSpan.suppressNative)
+        )
+          return new Span(undefined, undefined, undefined, true);
+        return valid(parentSpanContext)
+          ? new Span(undefined, parentSpanContext, parentSpanContext)
+          : new Span();
+      }
       // Decide under the explicit parent, not an unrelated surrounding context. Native
       // activation restores same-trace invocation flags before selecting the recording mode.
       const create = (): Span => {
@@ -544,7 +561,7 @@ class Tracer {
             span.spanContext().isRemote = false;
             return span;
           }
-          // The platform invocation's sampling decision wins over an explicitly sampled parent.
+          // An explicitly unsampled owning invocation wins even over a foreign sampled parent.
           // Explicit unsampled parents likewise never override the platform into recording.
           const identity = valid(parentSpanContext)
             ? parentSpanContext

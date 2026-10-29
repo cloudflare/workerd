@@ -142,8 +142,8 @@ class BaseTracer: public kj::Refcounted {
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
   void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
-  // Context-aware callbacks also receive vendor state. The legacy adapter above intentionally
-  // drops state until its caller opts into this interface.
+  // Context-aware callbacks also receive vendor state and external parent IDs. The legacy
+  // adapter creates invocation roots without state and declines externally parented carriers.
   void setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func);
   // Detached-aware embedders register the trace even when the parent span ID is absent.
   void setMakeUserSpanParentFunc(MakeUserSpanParentFunc func);

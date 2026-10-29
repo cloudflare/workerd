@@ -14,7 +14,7 @@ export default class extends WorkerEntrypoint {
     if (new URL(request.url).pathname === '/callee')
       return Response.json(this.identity());
     const tracer = trace.getTracer('roots');
-    const invocation = trace.getActiveSpan().spanContext();
+    const invocation = trace.getActiveSpan()?.spanContext();
     // A foreign unsampled context must not choose a requested root's recording mode.
     const remote = propagation.extract(ROOT_CONTEXT, {
       traceparent: '00-33333333333333333333333333333333-4444444444444444-00',
@@ -31,7 +31,7 @@ export default class extends WorkerEntrypoint {
         const rootId = root.spanContext();
         root.setAttribute('root.trace', rootId.traceId);
         root.addEvent('event');
-        root.addLink({ context: invocation });
+        if (invocation !== undefined) root.addLink({ context: invocation });
         root.recordException(new Error('handled'), [1700000000, 1]);
         root.updateName('detached');
         root.setStatus({ code: 1 });

@@ -21,6 +21,8 @@ export default {
         const sampled = flags !== '00' && flags !== '02';
         assert.strictEqual(result.recording, !untraced && sampled);
         if (untraced) {
+          if (flags === undefined)
+            assert.strictEqual(result.invocation, undefined);
           assert.strictEqual(result.root.traceId, '0'.repeat(32));
           assert.strictEqual(result.echo.traceparent, undefined);
           assert.strictEqual(result.childEcho.traceparent, undefined);

@@ -373,6 +373,7 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
 
   context->incomingRequests.addFront(*this);
   wasDelivered = true;
+  tracerLess = workerTracer == kj::none;
   deliveredLocation = location;
   metrics->delivered();
 
@@ -1538,6 +1539,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   bool inherited = false;
   bool localSampled = false;
   bool rootObserved = false;
+  bool tracerLess = true;
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
     if (otel) {
@@ -1545,6 +1547,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
       KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
         localSampled = owner.getLocalSampled();
         rootObserved = owner.isRootObserved();
+        tracerLess = owner.isTracerLess();
         invocationSpanContext =
             owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
         KJ_IF_SOME(value, owner.getTracer()) {
@@ -1567,6 +1570,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     }
     localSampled = getCurrentIncomingRequest().localSampled;
     rootObserved = getCurrentIncomingRequest().getRootUserTraceSpan().isObserved();
+    tracerLess = getCurrentIncomingRequest().tracerLess;
     if (!otel) {
       auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
       auto id = userSpan.getSpanId();
@@ -1586,6 +1590,8 @@ jsg::Value IoContext::makeUserTraceScopeValue(
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(kj::mv(userSpan), kj::mv(tracer),
       kj::mv(invocationSpanContext), tracing::TraceFlags(localSampled ? 1 : 0),
+      tracerLess ? UserTraceAsyncContext::TracerPresence::ABSENT
+                 : UserTraceAsyncContext::TracerPresence::PRESENT,
       rootObserved ? RootUserSpanObserved::YES : RootUserSpanObserved::NO);
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
@@ -1673,6 +1679,27 @@ kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationConte
       getCurrentIncomingRequest().maybeTriggerInvocationSpan == kj::none)
     return kj::none;
   return getCurrentIncomingRequest().getInvocationSpanContext().clone();
+}
+
+kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationIdentity() {
+  if (!opentelemetryApiEnabled) return getUserTraceInvocationContext();
+  auto context = getUserTraceInvocationContext();
+  bool tracerLess = true;
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    tracerLess = owner.isTracerLess();
+  } else if (!incomingRequests.empty()) {
+    tracerLess = getCurrentIncomingRequest().tracerLess;
+  }
+  if (tracerLess) {
+    KJ_IF_SOME(root, context) {
+      KJ_IF_SOME(trigger, root.getParent()) {
+        return tracing::InvocationSpanContext(root.getTraceId(), root.getInvocationId(),
+            trigger.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
+      }
+      return kj::none;
+    }
+  }
+  return context;
 }
 
 kj::Maybe<tracing::TraceFlags> IoContext::getDefaultJsTraceFlags() {

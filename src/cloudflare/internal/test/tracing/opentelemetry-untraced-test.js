@@ -4,6 +4,7 @@
 
 import assert from 'node:assert';
 import { tracing } from 'cloudflare:workers';
+import { trace } from '@opentelemetry/api';
 
 const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
 const spanKey = Symbol.for('OpenTelemetry Context Key SPAN');
@@ -12,6 +13,7 @@ const tracer = api.trace.getTracer('untraced');
 
 export const propagationWithoutTail = {
   async test() {
+    assert.strictEqual(trace.getActiveSpan(), undefined);
     for (const flags of ['00', '01', '03']) {
       const extracted = api.propagation.extract(
         root,
@@ -80,7 +82,7 @@ export const uppercaseParentWithoutTail = {
     const identity = {
       traceId: 'ABCDEF0123456789ABCDEF0123456789',
       spanId: 'ABCDEF0123456789',
-      traceFlags: 3,
+      traceFlags: 0xff,
     };
     const parent = root.setValue(spanKey, { spanContext: () => identity });
     const span = tracer.startSpan('uppercase-parent', {}, parent);

@@ -835,22 +835,29 @@ jsg::Optional<user_tracing::TracingSpanContext> TracingContext::getInvocationSpa
     jsg::Lock& js) {
   if (!IoContext::hasCurrent()) return kj::none;
   auto& io = IoContext::current();
-  KJ_IF_SOME(root, io.getUserTraceInvocationContext()) {
-    auto id = root.getSpanId();
-    if (io.getWorkerTracer() == kj::none) {
-      KJ_IF_SOME(trigger, root.getParent()) id = trigger.getSpanId();
-    }
-    return user_tracing::toTracingSpanContext(user_tracing::projectJsSpanContext(
-        tracing::SpanContext(root.getTraceId(), id, root.getTraceFlags(), root.cloneTraceState()),
-        io.getDefaultJsTraceFlags()));
+  KJ_IF_SOME(root, io.getUserTraceInvocationIdentity()) {
+    return user_tracing::toTracingSpanContext(
+        user_tracing::projectJsSpanContext(tracing::SpanContext(root.getTraceId(), root.getSpanId(),
+                                               root.getTraceFlags(), root.cloneTraceState()),
+            io.getDefaultJsTraceFlags()));
   }
   return kj::none;
+}
+
+bool TracingContext::hasTracer(jsg::Lock& js) {
+  return IoContext::hasCurrent() && IoContext::current().getWorkerTracer() != kj::none;
 }
 
 kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
   if (!IoContext::hasCurrent()) return "untraced"_kj;
   auto& io = IoContext::current();
   if (io.getWorkerTracer() == kj::none) return "untraced"_kj;
+  KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
+    if (invocation.getTraceFlags().map([](auto flags) {
+      return !flags.isSampled();
+    }).orDefault(false))
+      return "unsampled"_kj;
+  }
   auto parent = io.getCurrentUserTraceSpan();
   if (!parent.isObserved()) return "untraced"_kj;
   KJ_IF_SOME(identity, parent.toSpanContext()) {
@@ -930,24 +937,11 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
       }
     }
     if (parsed == kj::none) {
-      KJ_IF_SOME(owner, io.getCurrentUserTraceAsyncContext()) {
-        KJ_IF_SOME(root, owner.getInvocationSpanContext()) {
-          // Bare ROOT_CONTEXT affects adapter parenting, not runtime instrumentation: without
-          // an active OTel span, native spans remain attached to the owning invocation.
-          auto id = root.getSpanId();
-          if (io.getWorkerTracer() == kj::none) {
-            KJ_IF_SOME(trigger, root.getParent()) id = trigger.getSpanId();
-          }
-          parsed = tracing::SpanContext(
-              root.getTraceId(), id, root.getTraceFlags(), root.cloneTraceState());
-        }
-      }
-      if (parsed == kj::none) {
-        if (io.getWorkerTracer() != kj::none) {
-          auto root = io.getInvocationSpanContext();
-          parsed = tracing::SpanContext(
-              root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
-        }
+      KJ_IF_SOME(root, io.getUserTraceInvocationIdentity()) {
+        // Bare ROOT_CONTEXT affects adapter parenting, not runtime instrumentation: without
+        // an active OTel span, native spans remain attached to the owning invocation.
+        parsed = tracing::SpanContext(
+            root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
       }
     }
     KJ_IF_SOME(value, parsed) {

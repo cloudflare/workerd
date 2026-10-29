@@ -1558,22 +1558,22 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
   if (ioContext.isOpentelemetryApiEnabled() && usesGlobalOutbound &&
       ioContext.getIoChannelFactory().shouldInjectW3cTraceContext()) {
     kj::Maybe<kj::StringPtr> existingParent;
-    kj::Maybe<kj::StringPtr> existingState;
+    kj::Vector<kj::StringPtr> stateFields;
     size_t parentCount = 0;
-    size_t stateCount = 0;
     headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
       if (strcaseeq(name, "traceparent"_kj)) {
         existingParent = value;
         ++parentCount;
       }
       if (strcaseeq(name, "tracestate"_kj)) {
-        existingState = value;
-        ++stateCount;
+        stateFields.add(value);
       }
     });
     bool forwardedParent = false;
     bool forwardedState = false;
-    if (parentCount <= 1) {
+    // Multiple physical fields form one logical vendor-state header, as at adoption.
+    bool hasState = !stateFields.empty();
+    if (parentCount <= 1 && (parentCount == 1 || hasState)) {
       KJ_IF_SOME(invocation, ioContext.getUserTraceInvocationContext()) {
         KJ_IF_SOME(trigger, invocation.getParent()) {
           KJ_IF_SOME(header, existingParent) {
@@ -1583,10 +1583,10 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
                 parent.getTraceFlags() == trigger.getTraceFlags();
           }
           }
-          if (stateCount == 1) {
+          if (hasState) {
             KJ_IF_SOME(state, trigger.cloneTraceState()) {
               KJ_IF_SOME(parsed, tracing::SpanContext::parseTracestate(
-                  KJ_ASSERT_NONNULL(existingState))) {
+                  kj::strArray(stateFields, ","))) {
                 forwardedState = parsed == state;
               }
             }
@@ -1623,7 +1623,7 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
               headers = kj::mv(rewritten);
             }
             headers.addPtr("traceparent"_kj, tracing::formatW3CTraceparent(context.getTraceId(), id, flags));
-            if (stateCount == 0 || forwardedState) {
+            if (!hasState || forwardedState) {
               KJ_IF_SOME(state, context.cloneTraceState()) headers.addPtr("tracestate"_kj, kj::mv(state));
             }
           }
