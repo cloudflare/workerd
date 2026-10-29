@@ -57,6 +57,12 @@ wpt_test(
 )
 
 wpt_test(
+    name = "html/webappapis/microtask-queuing",
+    config = "html/webappapis/microtask-queuing-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/microtask-queuing@module",
+)
+
+wpt_test(
     name = "fetch/api",
     size = "large",
     compat_flags = ["strip_bom_in_read_all_text"],
