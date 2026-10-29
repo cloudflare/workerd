@@ -17,3 +17,15 @@ esbuild node_modules/@opentelemetry/api/dist/index.mjs --bundle --format=esm \
 ```
 
 Restore the attribution and ESLint prelude after regenerating. Bundled with esbuild 0.28.2.
+
+Published tarball integrity (SHA-512 SRI):
+
+- `https://registry.npmjs.org/@opentelemetry/api/-/api-1.10.0.tgz`:
+  `sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==`
+- `https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz`:
+  `sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==`
+
+`opentelemetry-api-1.9.0.js` bundles the published 1.9.0 `build/esm/index.js` entry
+using the same esbuild command and attribution prelude. Both fixtures run the real-package
+tests in separate workers. The runtime registers as 1.10.0: older compatible API clients can
+consume that registration, but cannot replace it with another global provider.
