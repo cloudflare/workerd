@@ -173,8 +173,9 @@ struct TestFixture {
 
   // Like newIncomingRequest(IoContext&), but leaves delivery to the caller. This models code paths
   // that report trace onset immediately before delivered().
-  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(
-      IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer = kj::none);
+  kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(IoContext& context,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer = kj::none,
+      kj::Maybe<tracing::InvocationSpanContext> trigger = kj::none);
 
   // Enter an IoContext. Callback receives Environment& and must return void (NOT a
   // Promise — the Worker::Lock is only valid for the synchronous duration of the
@@ -330,6 +331,9 @@ struct TestFixture {
   struct DummyIoChannelFactory: public IoChannelFactory {
     virtual ~DummyIoChannelFactory() = default;
     DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
+    bool shouldInjectW3cTraceContext() const override {
+      return true;
+    }
 
     void abortIsolate(kj::StringPtr reason) override {
       KJ_FAIL_ASSERT("no abortIsolate");

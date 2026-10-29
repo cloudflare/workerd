@@ -21,7 +21,7 @@ export const jsOnlySampling = {
       const child = tracer.startSpan(`sampling-rebuilt-${i}`, {}, rebuilt);
       // A same-trace projected zero is not a native sampling decision. A buffered sink
       // still supplies recording spans, even though their JS projection remains zero.
-      assert.strictEqual(child.isRecording(), !!env.callee);
+      assert.strictEqual(child.isRecording(), env.expectedRecording);
       assert.strictEqual(child.spanContext().traceFlags, env.expectedFlags);
       child.end();
     }

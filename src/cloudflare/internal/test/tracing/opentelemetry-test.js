@@ -257,7 +257,9 @@ export const externalParentsAndRoots = {
             root: true,
           }
         );
-        assert.strictEqual(requestedRoot.isRecording(), false);
+        // An explicit root restores the invocation's recording policy, not the unrelated
+        // unsampled surrounding context. Its native descendants share an exported parent.
+        assert.strictEqual(requestedRoot.isRecording(), true);
         assert.notStrictEqual(
           requestedRoot.spanContext().traceId,
           '00000000000000000000000000000000'

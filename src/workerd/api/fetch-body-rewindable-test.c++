@@ -151,6 +151,43 @@ KJ_TEST("the embedder can disable the W3C writer without disabling native propag
   }
 }
 
+KJ_TEST("owner-less untraced handlers cannot invent an invocation parent on egress") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setOpentelemetryApi(true);
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<W3cPolicyChannels>(timer, true, false);
+  }),
+  });
+  // Like hibernatable WebSocket handlers, runInIoContext does not install a request trace
+  // scope. A real explicit parent can be activated, but clearing it must not reveal a
+  // lazily minted invocation identity that was never exported.
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto primitive = env.js.alloc<TracingContext>();
+    KJ_EXPECT(primitive->getInvocationSpanContext(env.js) == kj::none);
+    auto fetcher = env.js.alloc<Fetcher>(
+        IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+    kj::Maybe<kj::Promise<void>> pending;
+    primitive->withActiveSpanContext(env.js,
+        user_tracing::TracingSpanContext{.traceId = tracing::TraceId(1, 2).toW3C(),
+          .spanId = tracing::SpanId(42).toGoString(),
+          .traceFlags = 1},
+        jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+      KJ_EXPECT(primitive->getInvocationSpanContext(js) == kj::none);
+      return primitive->withActiveSpanContext(
+          js, kj::none, jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+        auto response = fetcher->fetch(js, kj::str("http://example.com/"), kj::none);
+        pending = env.context.awaitJs(js, kj::mv(response)).ignoreResult();
+        return jsg::JsRef(js, js.undefined());
+      }));
+    }));
+    return kj::mv(KJ_ASSERT_NONNULL(pending)).attach(kj::mv(fetcher));
+  });
+}
+
 struct FetchTargetIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
   FetchTargetIoChannelFactory(TimerChannel& timer): DummyIoChannelFactory(timer) {}
 

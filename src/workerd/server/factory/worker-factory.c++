@@ -771,6 +771,9 @@ kj::Own<AccessInfo> parseAccessBlob(
 // C++ (a dynamic worker's env tables, channel tokens, the debug port).
 class RustIoChannelFactory final: public IoChannelFactory {
  public:
+  bool shouldInjectW3cTraceContext() const override {
+    return true;
+  }
   RustIoChannelFactory(kj::Own<CompiledWorker::Impl> worker, ::rust::Box<ChannelFactory> channels)
       : worker(kj::mv(worker)),
         channels(kj::mv(channels)) {}
@@ -1124,7 +1127,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
         }
       })));
     }
-    tracer->setMakeUserRequestSpanFunc(
+    tracer->setMakeUserRequestSpanContextFunc(
         [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource(),
             counter = kj::refcounted<UserSpanCounter>()](tracing::SpanContext context) mutable {
       return SpanParent(kj::rc<UserSpanObserver>(

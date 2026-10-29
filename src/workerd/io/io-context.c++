@@ -407,14 +407,14 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
       rootUserTraceSpan = workerTracer->makeUserRequestSpan(
           invCtx.getTraceId(), invCtx.getTraceFlags(), invCtx.cloneTraceState());
     }
-  } else if (context->isOpentelemetryApiEnabled()) {
+  } else if (context->isOpentelemetryApiEnabled() && maybeTriggerInvocationSpan != kj::none) {
     auto& invCtx = getInvocationSpanContext();
     // A trigger can be adopted HTTP or native dispatch. Without a sink, retain its identity
     // for JS and egress, but do not invent a context for an otherwise untraced invocation.
-    if (invCtx.getParent() != kj::none) {
+    KJ_IF_SOME(trigger, invCtx.getParent()) {
       rootUserTraceSpan =
           SpanParent(kj::rc<PropagationOnlySpanObserver>(tracing::SpanContext(invCtx.getTraceId(),
-              invCtx.getSpanId(), invCtx.getTraceFlags(), invCtx.cloneTraceState())));
+              trigger.getSpanId(), invCtx.getTraceFlags(), invCtx.cloneTraceState())));
     }
   }
 
@@ -1571,7 +1571,8 @@ jsg::Value IoContext::makeUserTraceScopeValue(
           ? tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), id,
                 base.getTraceFlags(), base.cloneTraceState())
           : base.clone();
-    } else if (tracer != kj::none || userSpan.isObserved()) {
+    } else if (tracer != kj::none ||
+        getCurrentIncomingRequest().maybeTriggerInvocationSpan != kj::none) {
       invocationSpanContext = getCurrentIncomingRequest().getInvocationSpanContext().clone();
     }
   }
@@ -1658,6 +1659,9 @@ kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationConte
   }
   if (opentelemetryApiEnabled && hasCurrentUserTraceOwner()) return kj::none;
   if (incomingRequests.empty()) return kj::none;
+  if (opentelemetryApiEnabled && getCurrentIncomingRequest().getWorkerTracer() == kj::none &&
+      getCurrentIncomingRequest().maybeTriggerInvocationSpan == kj::none)
+    return kj::none;
   return getCurrentIncomingRequest().getInvocationSpanContext().clone();
 }
 

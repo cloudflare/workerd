@@ -26,13 +26,14 @@ export const validate = {
       redirects = 0,
       suppressed = 0;
     for (const { onset, spans, logs } of requests) {
-      const remote = onset.event.info.headers
+      const remote = onset.event.info?.headers
         ?.find((h) => h.name === 'traceparent')
         ?.value?.split('-')[2];
       const known = new Set([
         onset.event.spanId,
         onset.spanContext.spanId,
         remote,
+        '2222222222222222', // Explicit remote parent used by cross-trace policy cases.
         ...spans.map((s) => s.event.spanId),
       ]);
       for (const span of spans) {
@@ -41,7 +42,33 @@ export const validate = {
           `unknown parent ${span.spanContext.spanId}: ${span.event.name}`
         );
       }
+      if (typeof onset.event.info?.url !== 'string') continue;
       const path = new URL(onset.event.info.url).pathname;
+      if (path === '/native-untraced') {
+        const result = logs
+          .filter((s) => s.startsWith('{'))
+          .map((s) => JSON.parse(s))
+          .find((s) => s.path === path);
+        assert.ok(result);
+        const fetch = spans.find(
+          (s) =>
+            s.event.name === 'fetch' &&
+            s.event.spanId === result.received.active.spanId
+        );
+        assert.ok(
+          fetch,
+          'untraced callee must retain its exported trigger span'
+        );
+        assert.strictEqual(fetch.spanContext.spanId, result.caller.spanId);
+      }
+      if (path === '/nested-sampling') {
+        for (const name of ['nested-same-trace', 'rewrapped-same-trace']) {
+          assert.strictEqual(
+            spans.filter((s) => s.event.name === name).length,
+            1
+          );
+        }
+      }
       if (path === '/mixed') {
         mixed++;
         assert.strictEqual(

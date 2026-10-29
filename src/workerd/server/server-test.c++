@@ -1016,6 +1016,47 @@ KJ_TEST("Server: client disconnect cancels a TypeScript-implemented ReadableStre
   testClientDisconnectCancelsResponseBody(R"(["typescript_implemented_streams"])");
 }
 
+KJ_TEST("Server: duplicate HTTP traceparent fields do not adopt a phantom parent") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-01-01",
+    compatibilityFlags = ["opentelemetry_api"],
+    modules = [(name = "worker", esModule =
+        `import {tracing} from 'cloudflare:workers';
+        `export default { fetch() {
+        `  return new Response(tracing.getActiveSpan().spanContext().spanId);
+        `} };
+    )],
+  ))"_kj));
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.send(R"(
+    GET / HTTP/1.1
+    Host: foo
+    traceparent: 00-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01
+    traceparent: 00-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 16
+    Content-Type: text/plain;charset=UTF-8
+
+    0000000000000000)"_blockquote);
+  conn.send(R"(
+    GET / HTTP/1.1
+    Host: foo
+    traceparent: 00-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 16
+    Content-Type: text/plain;charset=UTF-8
+
+    c0ffee0ba902b7aa)"_blockquote);
+}
+
 KJ_TEST("Server: serve basic Service Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
