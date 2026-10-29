@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import tracing, { type Span as RuntimeSpan } from 'cloudflare-internal:tracing';
+import tracingContext from 'cloudflare-internal:tracing-context';
 type SpanValue = Parameters<RuntimeSpan['setAttribute']>[1];
 
 interface Context {
@@ -81,9 +82,9 @@ function valid(ctx: SpanContext | undefined): ctx is SpanContext {
   return attempt(
     () =>
       ctx !== undefined &&
-      /^[0-9a-f]{32}$/.test(ctx.traceId) &&
+      /^[0-9a-f]{32}$/i.test(ctx.traceId) &&
       ctx.traceId !== INVALID.traceId &&
-      /^[0-9a-f]{16}$/.test(ctx.spanId) &&
+      /^[0-9a-f]{16}$/i.test(ctx.spanId) &&
       ctx.spanId !== INVALID.spanId &&
       Number.isInteger(ctx.traceFlags) &&
       ctx.traceFlags >= 0 &&
@@ -107,10 +108,6 @@ class Span implements SpanLike {
     this.#context =
       identity ??
       attempt(() => inner?.spanContext() ?? { ...INVALID }, { ...INVALID });
-    // Native tracing predates OTel registration: recording request spans may have no explicit
-    // W3C sampling flags. A recording native span is sampled, not an unsampled remote parent.
-    if (attempt(() => inner?.isTraced ?? false, false))
-      this.#context.traceFlags |= 1;
     if (parent?.traceState !== undefined)
       this.#context.traceState = parent.traceState;
   }
@@ -193,35 +190,36 @@ class Span implements SpanLike {
   recordException(exception: unknown, _time?: unknown): void {
     if (!this.#ended)
       attempt(() => {
-        let normalized = exception as Parameters<
-          RuntimeSpan['recordException']
-        >[0];
-        if (exception !== null && typeof exception === 'object') {
-          const { code, message, stack } = exception as {
-            code?: unknown;
-            message?: unknown;
-            stack?: unknown;
-          };
-          if ((typeof code === 'string' || typeof code === 'number') && code) {
-            // The tail converter uses name for exception.type; OTel gives code precedence.
-            normalized = {
-              code,
-              name: String(code),
-              ...(typeof message === 'string' ? { message } : {}),
-              ...(typeof stack === 'string' ? { stack } : {}),
-            };
-          }
-        }
-        this.inner?.recordException(normalized);
+        this.inner?.recordException(
+          exception as Parameters<RuntimeSpan['recordException']>[0]
+        );
       }, undefined);
   }
 }
 
 const wrappers = new WeakMap<RuntimeSpan, Span>();
-function wrap(span: RuntimeSpan): Span {
+function nonRecording(parent: SpanContext, inner?: RuntimeSpan): Span {
+  let spanId: string;
+  do {
+    spanId = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) =>
+      b.toString(16).padStart(2, '0')
+    ).join('');
+  } while (spanId === INVALID.spanId);
+  return new Span(inner, parent, {
+    traceId: parent.traceId,
+    spanId,
+    traceFlags: parent.traceFlags & 1,
+  });
+}
+
+function wrap(span: RuntimeSpan, parent?: SpanContext): Span {
   let result = wrappers.get(span);
   if (result === undefined) {
-    result = new Span(span);
+    // A native no-op nested inside a propagated context must not erase that context.
+    result =
+      valid(parent) && !valid(attempt(() => span.spanContext(), undefined))
+        ? nonRecording(parent, span)
+        : new Span(span);
     wrappers.set(span, result);
   }
   return result;
@@ -239,7 +237,7 @@ interface ActiveState {
   native: RuntimeSpan | undefined;
 }
 class ContextManager {
-  readonly #state = tracing.createAsyncContextVariable();
+  readonly #state = tracingContext.createAsyncContextVariable();
   readonly #contexts = new WeakMap<RuntimeSpan, Context>();
   readonly #nested = new WeakMap<Context, WeakMap<RuntimeSpan, Context>>();
   #enabled = true;
@@ -262,7 +260,10 @@ class ContextManager {
       }
       let ctx = contexts.get(span);
       if (ctx === undefined) {
-        ctx = (state?.context ?? ROOT).setValue(SPAN, wrap(span));
+        ctx = (state?.context ?? ROOT).setValue(
+          SPAN,
+          wrap(span, getSpan(state?.context ?? ROOT)?.spanContext())
+        );
         contexts.set(span, ctx);
       }
       return ctx;
@@ -274,16 +275,20 @@ class ContextManager {
     thisArg?: unknown,
     ...args: A
   ): R {
-    if (typeof fn !== 'function') return undefined as R;
     ctx = contextOrRoot(ctx);
     const invoke = (): R => fn.call(thisArg, ...args);
     if (!this.#enabled) return invoke();
-    const span = getSpan(ctx);
+    let span = getSpan(ctx);
+    if (span instanceof tracing.Span) {
+      span = wrap(span);
+      ctx = ctx.setValue(SPAN, span);
+    }
     const inner = attempt(() => {
       const candidate = native(span);
       // IoOwn-backed spans from another invocation cannot be dereferenced here. Their cached
       // serializable identity can still parent a span in this invocation.
-      return valid(candidate?.spanContext()) ? candidate : undefined;
+      if (candidate !== undefined) candidate.spanContext();
+      return candidate;
     }, undefined);
     const spanContext = attempt(() => span?.spanContext(), undefined);
     const run = (): R =>
@@ -292,22 +297,30 @@ class ContextManager {
         invoke
       );
     if (inner !== undefined) return tracing.withActiveSpan(inner, run);
-    return tracing.withActiveSpanContext(
-      valid(spanContext) ? spanContext : undefined,
+    return tracingContext.withActiveSpanContext(
+      valid(spanContext)
+        ? {
+            ...spanContext,
+            traceId: spanContext.traceId.toLowerCase(),
+            spanId: spanContext.spanId.toLowerCase(),
+          }
+        : undefined,
       run
     );
   }
   bind<T>(ctx: Context, target: T): T {
     if (typeof target !== 'function') return target;
     const withContext = this.with.bind(this);
-    return function (this: unknown, ...args: unknown[]): unknown {
+    const bound = function (this: unknown, ...args: unknown[]): unknown {
       return withContext(
         ctx,
         target as (...args: unknown[]) => unknown,
         this,
         ...args
       );
-    } as T;
+    };
+    Object.defineProperty(bound, 'length', { value: target.length });
+    return bound as T;
   }
   enable(): this {
     this.#enabled = true;
@@ -333,27 +346,17 @@ class Tracer {
         () => parentSpan?.spanContext(),
         undefined
       );
-      const nativeParent = attempt(() => native(parentSpan), undefined);
       if (parent.getValue(SUPPRESS)) return new Span();
-      if (
-        nativeParent === undefined &&
-        valid(parentSpanContext) &&
-        !(parentSpanContext.traceFlags & 1)
-      ) {
-        const bytes = crypto.getRandomValues(new Uint8Array(8));
-        const spanId = Array.from(bytes, (b) =>
-          b.toString(16).padStart(2, '0')
-        ).join('');
-        return new Span(undefined, parentSpanContext, {
-          traceId: parentSpanContext.traceId,
-          spanId,
-          traceFlags: 0,
-        });
+      if (valid(parentSpanContext) && !(parentSpanContext.traceFlags & 1)) {
+        return nonRecording(parentSpanContext);
       }
       const inner = context.with(parent, () =>
         tracing.startSpan(typeof name === 'string' ? name : '')
       );
-      const span = new Span(inner, parentSpanContext);
+      const span =
+        !inner.isTraced && valid(parentSpanContext)
+          ? nonRecording(parentSpanContext)
+          : new Span(inner, options.root ? undefined : parentSpanContext);
       wrappers.set(inner, span);
       if (options.attributes !== undefined)
         span.setAttributes(options.attributes);
@@ -376,7 +379,9 @@ class Tracer {
     const fn = args[args.length - 1];
     if (typeof fn !== 'function') return undefined;
     const options = (args.length > 1 ? args[0] : {}) as SpanOptions;
-    const parent = (args.length > 2 ? args[1] : context.active()) as Context;
+    const parent = (
+      args.length > 2 ? (args[1] ?? context.active()) : context.active()
+    ) as Context;
     const span = this.startSpan(name, options, parent);
     const ctx = attempt(
       () => parent.setValue(SPAN, span),
@@ -420,6 +425,7 @@ class TraceState {
   readonly #entries: Map<string, string>;
   constructor(text = '') {
     this.#entries = new Map();
+    if (text.length > 512) return;
     let length = 0;
     for (const part of text.split(',')) {
       const [key, value, ...rest] = part.trim().split('=');
@@ -520,6 +526,7 @@ const propagation = {
       if (baggage !== undefined) {
         const entries = baggage
           .getAllEntries()
+          .filter(([key, entry]) => key.length > 0 && entry.value.length > 0)
           .map(
             ([key, entry]) =>
               `${encodeURIComponent(key)}=${encodeURIComponent(entry.value)}${entry.metadata ? `;${entry.metadata.toString()}` : ''}`
@@ -584,6 +591,7 @@ const propagation = {
           if (index < 1) return;
           const key = decodeURIComponent(pair.slice(0, index).trim());
           const value = decodeURIComponent(pair.slice(index + 1).trim());
+          if (!key || !value) return;
           const text = metadata.map((m) => m.trim()).join(';');
           size += part.length + (entries.length ? 1 : 0);
           entries.push([

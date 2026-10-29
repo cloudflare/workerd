@@ -6,7 +6,10 @@ const unitTests :Workerd.Config = (
       modules = [(name = "worker", esModule = embed "opentelemetry-test.js")],
       compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "streams_enable_constructors"],
       streamingTails = ["tail"],
-      bindings = [(name = "fetchTarget", service = "mock")],
+      bindings = [
+        (name = "fetchTarget", service = "mock"),
+        (name = "serviceWorker", service = "service-worker"),
+      ],
     )),
     ( name = "without-node-compat", worker = (
       modules = [(name = "worker", esModule = embed "opentelemetry-no-node-test.js")],
@@ -15,6 +18,42 @@ const unitTests :Workerd.Config = (
     )),
     ( name = "mock", worker = (
       modules = [(name = "worker", esModule = embed "tracing-hierarchy-mock.js")],
+    )),
+    ( name = "untraced", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-untraced-test.js")],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+    )),
+    ( name = "new-registry", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-no-node-test.js")],
+      compatibilityFlags = ["opentelemetry_api", "new_module_registry"],
+      streamingTails = ["tail"],
+    )),
+    ( name = "service-worker", worker = (
+      serviceWorkerScript = embed "opentelemetry-service-worker-test.js",
+      compatibilityFlags = ["opentelemetry_api"],
+    )),
+    ( name = "real-api", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-real-api-test.js"),
+        (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+      ],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+      streamingTails = ["tail"],
+    )),
+    ( name = "overlapping", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-do-test.js")],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "streams_enable_constructors"],
+      streamingTails = ["tail"],
+      durableObjectNamespaces = [(className = "Overlapping", uniqueKey = "otel-overlap")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "OVERLAPPING", durableObjectNamespace = "Overlapping")],
+    )),
+    ( name = "disabled", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-disable-test.js"),
+        (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+      ],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
     )),
     ( name = "tail", worker = (
       modules = [

@@ -93,6 +93,21 @@ class UserTraceAsyncContext final {
     return invocationSpanContext;
   }
 
+  // The stored context identifies the owning invocation, not its currently active child.
+  kj::Maybe<tracing::InvocationSpanContext> getSpanInvocationContext() {
+    return invocationSpanContext.map([&](auto& base) {
+      KJ_IF_SOME(identity, span.toSpanContext()) {
+        KJ_IF_SOME(id, identity.getSpanId()) {
+          if (id != tracing::SpanId::nullId) {
+            return tracing::InvocationSpanContext(
+                identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+          }
+        }
+      }
+      return base.clone();
+    });
+  }
+
  private:
   SpanParent span;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
@@ -361,10 +376,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().metrics;
   }
 
-  kj::Maybe<BaseTracer&> getWorkerTracer() {
-    if (incomingRequests.empty()) return kj::none;
-    return getCurrentIncomingRequest().getWorkerTracer();
-  }
+  kj::Maybe<BaseTracer&> getWorkerTracer();
 
   // Returns the root user trace span for the current incoming request, if any.
   SpanParent getRootUserTraceSpan() {
@@ -1238,13 +1250,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  // Returns the invocation's traceId/invocationId paired with the currently-active user
-  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
-  // root's spanId when no user span is active.
-  tracing::InvocationSpanContext getInvocationSpanContext() {
-    auto userSpan = getCurrentUserTraceSpan();
-    return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
-  }
+  // Returns the current user span's complete identity with its owning invocationId, falling
+  // back to the invocation root when no user span is active. Foreign parents keep their traceId.
+  tracing::InvocationSpanContext getInvocationSpanContext();
+
+  // Returns only the owner captured in this frame. Never borrows a newer DO request's tracer.
+  kj::Maybe<UserTraceAsyncContext&> getCurrentUserTraceAsyncContext();
+  kj::Maybe<BaseTracer&> getCurrentUserTracer();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async

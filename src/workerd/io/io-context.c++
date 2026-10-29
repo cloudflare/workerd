@@ -319,16 +319,35 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
     return ctx;
   }
 
+  // The OTel API's locally recorded invocations are sampled unless upstream explicitly decided
+  // otherwise. Keep the absent-flags behavior unchanged for workers that have not opted in.
+  auto localFlags = workerTracer != kj::none &&
+          context->getWorker()
+              .getScript()
+              .getIsolate()
+              .getApi()
+              .getFeatureFlags()
+              .getOpentelemetryApi()
+      ? kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(1))
+      : kj::none;
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
       maybeTriggerInvocationSpan.map(
           [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource());
+      context->getEntropySource(), localFlags);
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
 tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
     SpanParent& userSpan) {
   auto& base = getInvocationSpanContext();
+  KJ_IF_SOME(identity, userSpan.toSpanContext()) {
+    KJ_IF_SOME(id, identity.getSpanId()) {
+      if (id != tracing::SpanId::nullId) {
+        return tracing::InvocationSpanContext(
+            identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+      }
+    }
+  }
   tracing::SpanId sid = userSpan.getSpanId();
   if (sid != tracing::SpanId::nullId) {
     return tracing::InvocationSpanContext(
@@ -377,8 +396,10 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
     auto& invCtx = getInvocationSpanContext();
-    rootUserTraceSpan =
-        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
+    if (invCtx.getTraceFlags().map([](auto flags) { return flags.isSampled(); }).orDefault(true)) {
+      rootUserTraceSpan =
+          workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
+    }
   }
 
   KJ_IF_SOME(a, context->actor) {
@@ -1491,35 +1512,27 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
   SpanParent userSpan(nullptr);
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
+    KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+      invocationSpanContext =
+          owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
+      KJ_IF_SOME(value, owner.getTracer()) {
+        tracer = value.addRef();
+      }
+    }
   } else {
     userSpan = getRootUserTraceSpan();
-  }
-
-  if (!userSpan.isObserved()) {
-    return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
-  }
-
-  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
-  auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
-  auto spanId = userSpan.getSpanId();
-  if (spanId != tracing::SpanId::nullId) {
-    auto traceId = baseContext.getTraceId();
-    auto traceFlags = baseContext.getTraceFlags();
-    KJ_IF_SOME(identity, userSpan.toSpanContext()) {
-      traceId = identity.getTraceId();
-      traceFlags = identity.getTraceFlags();
+    KJ_IF_SOME(value, getCurrentIncomingRequest().getWorkerTracer()) {
+      tracer = value.getWeakRef();
+      invocationSpanContext = getCurrentIncomingRequest().getInvocationSpanContext().clone();
     }
-    invocationSpanContext =
-        tracing::InvocationSpanContext(traceId, baseContext.getInvocationId(), spanId, traceFlags);
-  } else {
-    invocationSpanContext = baseContext.clone();
   }
 
-  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
-  KJ_IF_SOME(value, getWorkerTracer()) {
-    tracer = value.getWeakRef();
+  if (!userSpan.isObserved() && tracer == kj::none && invocationSpanContext == kj::none) {
+    return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
   }
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
@@ -1528,6 +1541,60 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
   return js.v8Ref(contextHandle);
+}
+
+kj::Maybe<UserTraceAsyncContext&> IoContext::getCurrentUserTraceAsyncContext() {
+  KJ_IF_SOME(lock, currentLock) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+      KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
+        jsg::Lock& js = lock;
+        auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, value.getHandle(js));
+        KJ_SWITCH_ONEOF(state) {
+          KJ_CASE_ONEOF(id, Id) {
+            return kj::none;
+          }
+          KJ_CASE_ONEOF(owner, IoOwn<UserTraceAsyncContext>) {
+            return owner.tryGet();
+          }
+        }
+      }
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<BaseTracer&> IoContext::getCurrentUserTracer() {
+  kj::Maybe<BaseTracer&> result;
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    KJ_IF_SOME(weak, owner.getTracer()) {
+      weak.runIfAlive([&](BaseTracer& tracer) { result = tracer; });
+    }
+  }
+  return result;
+}
+
+kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
+  if (incomingRequests.empty()) return kj::none;
+  KJ_IF_SOME(lock, currentLock) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+      if (frame.get(*lock.getUserTraceAsyncContextKey()) != kj::none) {
+        // Logs, diagnostics and exceptions need the same sink as spans in this frame. An
+        // untraced or stale frame must not borrow a newer overlapping request's tracer.
+        return getCurrentUserTracer();
+      }
+    }
+  }
+  return getCurrentIncomingRequest().getWorkerTracer();
+}
+
+tracing::InvocationSpanContext IoContext::getInvocationSpanContext() {
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    KJ_IF_SOME(context, owner.getSpanInvocationContext()) {
+      return kj::mv(context);
+    }
+  }
+  auto userSpan = getCurrentUserTraceSpan();
+  return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {

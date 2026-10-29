@@ -29,6 +29,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/async-context.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
@@ -1329,10 +1330,28 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getOpenTelemetryApi(jsg::Lock& js) {
-  KJ_IF_SOME(module, js.resolveInternalModule("cloudflare-internal:opentelemetry"_kj)) {
-    return module.has(js, "default"_kj) ? module.get(js, "default"_kj) : module;
+  // Service-worker syntax has no built-in module registry. A failed module evaluation must
+  // likewise leave the OTel API in its normal unregistered/no-op state, never break API calls.
+  try {
+    return js.tryCatch([&]() -> jsg::JsValue {
+      if (!jsg::IsolateBase::from(js.v8Isolate).isUsingNewModuleRegistry()) {
+        auto& registry =
+            KJ_UNWRAP_OR_RETURN(jsg::getAlignedPointerFromEmbedderData<jsg::ModuleRegistry>(
+                                    js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY),
+                js.undefined());
+        if (registry.resolve(js, kj::Path("cloudflare-internal:opentelemetry"), kj::none,
+                jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY) == kj::none) {
+          return js.undefined();
+        }
+      }
+      KJ_IF_SOME(module, js.resolveInternalModule("cloudflare-internal:opentelemetry"_kj)) {
+        return module.has(js, "default"_kj) ? module.get(js, "default"_kj) : module;
+      }
+      return js.undefined();
+    }, [&](jsg::Value) -> jsg::JsValue { return js.undefined(); });
+  } catch (kj::Exception&) {
+    return js.undefined();
   }
-  return js.undefined();
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {

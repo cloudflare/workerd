@@ -111,6 +111,28 @@ KJ_TEST("shared-symbol instance properties are lazy, cached, and replaceable") {
       "boolean", "true");
 }
 
+KJ_TEST("shared-symbol lazy properties can be deleted before or after materialization") {
+  {
+    Evaluator<LazySymbolContext, LazySymbolIsolate> e(v8System);
+    e.expectEval(R"JS(
+      const key = Symbol.for('test.lazy.symbol');
+      delete globalThis[key];
+      globalThis[key] === undefined && getReads() === 0;
+    )JS",
+        "boolean", "true");
+  }
+  {
+    Evaluator<LazySymbolContext, LazySymbolIsolate> e(v8System);
+    e.expectEval(R"JS(
+      const key = Symbol.for('test.lazy.symbol');
+      const first = globalThis[key];
+      delete globalThis[key];
+      first === 1 && globalThis[key] === undefined && getReads() === 1;
+    )JS",
+        "boolean", "true");
+  }
+}
+
 // ========================================================================================
 
 struct Mixin {

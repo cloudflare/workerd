@@ -17681,8 +17681,8 @@ export declare namespace TailStream {
     //  1. This is an Onset event
     //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
-    // W3C trace flags from an upstream traceparent. Absent when no upstream
-    // sampling decision was made.
+    // W3C trace flags inherited from upstream or chosen locally. Absent when no sampling
+    // decision was made; opentelemetry_api defaults locally recorded invocations to sampled (01).
     readonly traceFlags?: number;
   }
   interface TailEvent<Event extends EventType> {

@@ -10,10 +10,20 @@ import {
 const collector = createHierarchyAwareCollector();
 const traceIds = new Map();
 const exceptions = [];
+const events = [];
+const onsets = new Map();
 export default {
   tailStream(onset) {
+    assert.strictEqual(onset.spanContext.traceFlags, 1);
+    onsets.set(onset.invocationId, onset);
     const collect = collector.tailStream(onset);
     return (event) => {
+      assert.strictEqual(
+        event.invocationId,
+        onset.invocationId,
+        'event must use its owning invocation stream'
+      );
+      events.push(event);
       if (event.event.type === 'spanOpen')
         traceIds.set(event.event.name, event.spanContext.traceId);
       if (event.event.type === 'exception') exceptions.push(event.event);
@@ -48,16 +58,112 @@ export const hierarchy = {
       );
       assert.strictEqual(fetch.parentSpanId, parent.spanId);
     }
-    for (const name of ['otel-new-root', 'otel-deleted-root']) {
-      assert.strictEqual(span(name).parentSpanId, undefined);
+    for (const name of [
+      'otel-new-root',
+      'otel-deleted-root',
+      'otel-root-context',
+    ]) {
+      const child = span(name);
+      const onset = onsets.get(child.invocationId);
+      assert.strictEqual(child.parentSpanId, onset.event.spanId);
+      assert.strictEqual(traceIds.get(name), onset.spanContext.traceId);
     }
     assert.ok(!traceIds.has('otel-unsampled'));
     assert.ok(!traceIds.has('otel-unsampled-child'));
+    assert.ok(!traceIds.has('otel-unsampled-native-child'));
     assert.ok(
       exceptions.some(
-        (event) => event.name === 'E_CODE' && event.message === 'coded'
+        (event) =>
+          event.code === 'E_CODE' &&
+          event.name === 'Ignored' &&
+          event.message === 'coded'
       )
     );
-    assert.ok(exceptions.some((event) => event.name === '503'));
+    assert.ok(
+      exceptions.some((event) => event.code === 503 && event.name === '')
+    );
+    const foreignEvents = events.filter(
+      (event) =>
+        event.invocationId === remote.invocationId &&
+        event.spanContext.spanId === remote.spanId
+    );
+    for (const event of foreignEvents) {
+      assert.strictEqual(
+        event.spanContext.traceId,
+        '11111111111111111111111111111111'
+      );
+    }
+    const log = foreignEvents.find((event) => event.event.type === 'log');
+    assert.ok(log);
+    assert.ok(log.event.message.includes('foreign-log'));
+    assert.ok(
+      foreignEvents.some((event) => event.event.type === 'diagnosticChannel')
+    );
+    assert.ok(
+      foreignEvents.some(
+        (event) =>
+          event.event.type === 'exception' &&
+          event.event.name === 'ForeignError'
+      )
+    );
+    assert.ok(foreignEvents.some((event) => event.event.type === 'spanClose'));
+    assert.strictEqual(remote['foreign.attribute'], 'value');
+    const updates = foreignEvents.filter(
+      (event) => event.event.type === 'spanUpdate'
+    );
+    assert.ok(
+      updates.some((event) => event.event.info.name === 'otel-remote-renamed')
+    );
+    assert.ok(
+      updates.some(
+        (event) =>
+          event.event.info.status?.code === 'error' &&
+          event.event.info.status.message === 'foreign failure'
+      )
+    );
+    // Verify all components of every span, including built-in descendants, use its trace ID.
+    const identities = new Map(
+      events
+        .filter((event) => event.event.type === 'spanOpen')
+        .map((event) => [
+          `${event.invocationId}#${event.event.spanId}`,
+          event.spanContext.traceId,
+        ])
+    );
+    for (const event of events) {
+      const traceId = identities.get(
+        `${event.invocationId}#${event.spanContext.spanId}`
+      );
+      if (traceId !== undefined)
+        assert.strictEqual(event.spanContext.traceId, traceId);
+      if (event.event.type === 'spanOpen') {
+        assert.ok(event.spanContext.spanId);
+        assert.strictEqual(event.spanContext.traceFlags, 1);
+      }
+    }
+    for (const name of ['a', 'b']) {
+      const owner = events.find(
+        (event) =>
+          event.event.type === 'log' &&
+          event.event.message.includes(`otel-do-owner-${name}`)
+      );
+      assert.ok(owner);
+      for (const kind of ['root', 'remote']) {
+        assert.strictEqual(
+          span(`otel-do-${kind}-${name}`).invocationId,
+          owner.invocationId
+        );
+      }
+      const childLog = events.find(
+        (event) =>
+          event.event.type === 'log' &&
+          event.event.message.includes(`otel-do-child-${name}`)
+      );
+      assert.strictEqual(childLog.invocationId, owner.invocationId);
+      assert.strictEqual(
+        childLog.spanContext.traceId,
+        '11111111111111111111111111111111'
+      );
+    }
   },
 };

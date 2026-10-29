@@ -7,6 +7,8 @@
 #include <workerd/io/trace-stream.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <capnp/message.h>
+
 namespace workerd {
 namespace {
 
@@ -67,8 +69,12 @@ KJ_TEST("unobserved scopes retain identity and materialize their no-op span lazi
           KJ_ASSERT_NONNULL(frame.get(*env.lock.getUserTraceAsyncContextKey())).getHandle(env.js);
       auto& userState =
           jsg::unwrapOpaqueRef<IoContext::UserTraceScopeState>(env.isolate, userValue);
-      KJ_EXPECT(userState.is<IoContext::Id>());
-      KJ_EXPECT(userState.get<IoContext::Id>() == context->getId());
+      if (hasTracer) {
+        KJ_EXPECT(userState.is<IoOwn<UserTraceAsyncContext>>());
+      } else {
+        KJ_EXPECT(userState.is<IoContext::Id>());
+        KJ_EXPECT(userState.get<IoContext::Id>() == context->getId());
+      }
       KJ_EXPECT(!context->getCurrentTraceSpan().isObserved());
       KJ_EXPECT(!context->getCurrentUserTraceSpan().isObserved());
 
@@ -193,6 +199,119 @@ KJ_TEST("an unobserved actor continuation masks a newer request's observed spans
     KJ_EXPECT(!context->getCurrentUserTraceSpan().isObserved());
     KJ_EXPECT(!activeSpan(env)->getIsTraced());
   });
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("foreign span event identities retain the owning invocation") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer());
+  request->delivered();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    auto invocation = request->getInvocationSpanContext().clone();
+    auto foreign = SpanParent::fromSpanContext(
+        tracing::SpanContext(tracing::TraceId(3, 4), tracing::SpanId(55), tracing::TraceFlags(1)));
+    auto nested = context->makeUserAsyncTraceScope(env.lock, foreign.addRef());
+    auto event = context->getInvocationSpanContext();
+    KJ_EXPECT(event.getTraceId() == tracing::TraceId(3, 4));
+    KJ_EXPECT(event.getSpanId() == tracing::SpanId(55));
+    KJ_EXPECT(event.getInvocationId() == invocation.getInvocationId());
+    auto direct = request->getInvocationSpanContextForUserSpan(foreign);
+    KJ_EXPECT(direct.getTraceId() == event.getTraceId());
+    KJ_EXPECT(direct.getSpanId() == event.getSpanId());
+  });
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("recorded invocations default to sampled and preserve explicit upstream flags") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  for (uint8_t flags: {0, 1}) {
+    TestFixture fixture({.featureFlags = features.asReader()});
+    auto context = fixture.newIoContext();
+    auto tracer = makeTracer();
+    int parents = 0;
+    tracer->setMakeUserRequestSpanFunc([&](tracing::SpanContext identity) {
+      ++parents;
+      return SpanParent::fromSpanContext(kj::mv(identity));
+    });
+    auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+    auto& invocation = request->getInvocationSpanContext();
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getTraceFlags()).isSampled());
+    invocation = tracing::InvocationSpanContext(invocation.getTraceId(),
+        invocation.getInvocationId(), invocation.getSpanId(), tracing::TraceFlags(flags));
+    request->delivered();
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto scope = context->makeRequestTraceScope(env.lock);
+      KJ_EXPECT(activeSpan(env)->getIsTraced() == (flags == 1));
+      KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == flags);
+      KJ_EXPECT(context->getCurrentUserTraceSpan().isObserved() == (flags == 1));
+      KJ_EXPECT(
+          KJ_ASSERT_NONNULL(context->getInvocationSpanContext().getTraceFlags()).isSampled() ==
+          (flags == 1));
+    });
+    KJ_EXPECT(parents == (flags == 1 ? 1 : 0));
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+}
+
+KJ_TEST("local sampling defaults require both the OTel API flag and a tracer") {
+  for (bool enabled: {false, true}) {
+    for (bool hasTracer: {false, true}) {
+      capnp::MallocMessageBuilder message;
+      auto features = message.initRoot<CompatibilityFlags>();
+      features.setOpentelemetryApi(enabled);
+      TestFixture fixture({.featureFlags = features.asReader()});
+      auto context = fixture.newIoContext();
+      auto request = fixture.newUndeliveredIncomingRequest(
+          *context, hasTracer ? kj::Maybe<kj::Rc<BaseTracer>>(makeObservedTracer()) : kj::none);
+      request->delivered();
+      auto flags = request->getInvocationSpanContext().getTraceFlags();
+      if (enabled && hasTracer) {
+        KJ_EXPECT(KJ_ASSERT_NONNULL(flags).isSampled());
+      } else {
+        KJ_EXPECT(flags == kj::none);
+      }
+      fixture.drainAndDestroy(kj::mv(request));
+    }
+  }
+}
+
+KJ_TEST("overlapping actor frames retain their tracer through explicit-parent activation") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("otel-frame-owner"))});
+  auto context = fixture.newIoContext();
+  auto firstTracer = makeObservedTracer();
+  auto first = fixture.newUndeliveredIncomingRequest(*context, firstTracer.clone());
+  first->delivered();
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    captured = jsg::AsyncContextFrame::currentRef(env.js);
+  });
+  auto secondTracer = makeObservedTracer();
+  auto second = fixture.newUndeliveredIncomingRequest(*context, secondTracer.clone());
+  second->delivered();
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    auto current = context->makeRequestTraceScope(env.lock);
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(context->getCurrentUserTracer()) == secondTracer.get());
+    jsg::AsyncContextFrame::Scope restored(env.js, captured);
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(context->getCurrentUserTracer()) == firstTracer.get());
+    auto tracingContext = env.js.alloc<api::TracingContext>();
+    tracingContext->withActiveSpanContext(env.js,
+        api::user_tracing::TracingSpanContext{
+          kj::str("11111111111111111111111111111111"), kj::str("2222222222222222"), 1},
+        jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(context->getCurrentUserTracer()) == firstTracer.get());
+      auto owner =
+          KJ_ASSERT_NONNULL(context->getCurrentUserTraceAsyncContext()).getInvocationSpanContext();
+      KJ_EXPECT(KJ_ASSERT_NONNULL(owner).getInvocationId() ==
+          first->getInvocationSpanContext().getInvocationId());
+      return jsg::JsRef(js, js.undefined());
+    }));
+  });
+  fixture.drainAndDestroy(kj::mv(first));
   fixture.drainAndDestroy(kj::mv(second));
 }
 

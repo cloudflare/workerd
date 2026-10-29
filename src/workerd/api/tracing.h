@@ -288,29 +288,20 @@ class Tracing: public jsg::Object {
   // end the span. Inside the callback and its async continuations, getActiveSpan() returns `span`,
   // and new user spans and built-in instrumentation (fetch, KV, etc.) are children of it.
   //
-  // A span with no observer (a no-op span, or any span in an untraced request) has nothing for
-  // children to attach to, so the current user trace parent is left in place.
+  // A span with no observer leaves the current parent in place, including when recording is
+  // suppressed in that context.
   v8::Local<v8::Value> withActiveSpan(jsg::Lock& js,
       jsg::Ref<user_tracing::Span> span,
       v8::Local<v8::Function> callback,
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
-  jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
-      jsg::Optional<user_tracing::TracingSpanContext> context,
-      jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
-  jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(Tracing, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
     JSG_METHOD(withActiveSpan);
-    if (flags.getOpentelemetryApi()) {
-      JSG_METHOD(withActiveSpanContext);
-      JSG_METHOD(createAsyncContextVariable);
-    }
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -343,6 +334,22 @@ class Tracing: public jsg::Object {
   }
 };
 
+// Only the built-in OTel adapter can import this module. Neither ctx.tracing nor the public
+// cloudflare:workers export exposes arbitrary trace identities or async-context storage slots.
+class TracingContext: public jsg::Object {
+ public:
+  TracingContext() = default;
+  TracingContext(jsg::Lock&, const jsg::Url&) {}
+  jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
+      jsg::Optional<user_tracing::TracingSpanContext> context,
+      jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
+  jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
+  JSG_RESOURCE_TYPE(TracingContext) {
+    JSG_METHOD(withActiveSpanContext);
+    JSG_METHOD(createAsyncContextVariable);
+  }
+};
+
 // Registers `cloudflare-internal:tracing` as a builtin module. The `Module` suffix on the
 // helper is describing what it registers (a JS module), not the name of the class — the
 // class itself is `Tracing` because that's what users see.
@@ -350,6 +357,10 @@ template <class Registry>
 void registerTracingModule(Registry& registry, CompatibilityFlags::Reader flags) {
   registry.template addBuiltinModule<Tracing>(
       "cloudflare-internal:tracing", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  if (flags.getOpentelemetryApi()) {
+    registry.template addBuiltinModule<TracingContext>(
+        "cloudflare-internal:tracing-context", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
 }
 
 template <typename TypeWrapper>
@@ -358,12 +369,15 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
   static const auto kSpecifier = "cloudflare-internal:tracing"_url;
   builder.addObject<Tracing, TypeWrapper>(kSpecifier);
+  if (featureFlags.getOpentelemetryApi()) {
+    builder.addObject<TracingContext, TypeWrapper>("cloudflare-internal:tracing-context"_url);
+  }
   return builder.finish();
 }
 
 }  // namespace workerd::api
 
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
-  api::Tracing, api::TracingContextVariable, api::user_tracing::Span,                              \
+  api::Tracing, api::TracingContext, api::TracingContextVariable, api::user_tracing::Span,         \
       api::user_tracing::ExceptionData, api::user_tracing::TracingSpanStatus,                      \
       api::user_tracing::TracingSpanContext

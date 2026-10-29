@@ -311,10 +311,12 @@ class InvocationSpanContext final {
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
   // traceId is used as the traceId for the newly created context. Otherwise a new
   // traceId is generated. The invocationId is always generated new and the spanId
-  // will be 0 with no parent span.
+  // is generated. defaultTraceFlags supplies the local sampling decision only when the trigger
+  // has no explicit decision; parent and entropy-source metadata are preserved in either case.
   static InvocationSpanContext newForInvocation(
       kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
-      kj::Maybe<kj::EntropySource&> entropySource = kj::none);
+      kj::Maybe<kj::EntropySource&> entropySource = kj::none,
+      kj::Maybe<TraceFlags> defaultTraceFlags = kj::none);
 
   // Creates a new InvocationSpanContext from a capnp message. The returned
   // InvocationSpanContext will not be capable of creating child spans and
@@ -337,8 +339,8 @@ class InvocationSpanContext final {
   // testing is enabled). The isTrigger() should also return true.
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 
-  // W3C trace flags from an upstream traceparent, propagated through the
-  // invocation chain. kj::none when no upstream sampling decision was made.
+  // W3C trace flags, either inherited or chosen locally, propagated through the invocation
+  // chain. kj::none when no sampling decision was made.
   kj::Maybe<TraceFlags> traceFlags;
 };
 
@@ -369,9 +371,7 @@ struct SpanContext {
     return spanId;
   }
 
-  // W3C trace flags from an upstream traceparent. kj::none when no upstream
-  // sampling decision was made (e.g. subrequest propagation without a
-  // worker_tracing header).
+  // W3C trace flags, inherited or chosen locally. kj::none when no sampling decision was made.
   inline kj::Maybe<TraceFlags> getTraceFlags() const {
     return traceFlags;
   }

@@ -691,36 +691,43 @@ jsg::JsRef<jsg::JsValue> TracingContextVariable::run(
   return callback(js);
 }
 
-jsg::Ref<TracingContextVariable> Tracing::createAsyncContextVariable(jsg::Lock& js) {
+jsg::Ref<TracingContextVariable> TracingContext::createAsyncContextVariable(jsg::Lock& js) {
   return js.alloc<TracingContextVariable>();
 }
 
-jsg::JsRef<jsg::JsValue> Tracing::withActiveSpanContext(jsg::Lock& js,
+jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
     jsg::Optional<user_tracing::TracingSpanContext> context,
     jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
-  // An explicitly absent active JS span must not fall back to the invocation span.
+  // Clear the active JS span before installing the supplied parent (or invocation fallback).
   jsg::AsyncContextFrame::StorageScope activeScope(js,
       jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(),
       js.v8Ref<v8::Value>(v8::Undefined(js.v8Isolate)));
   if (!IoContext::hasCurrent()) return callback(js);
   auto& io = IoContext::current();
-  kj::Maybe<tracing::SpanContext> parsed;
-  KJ_IF_SOME(value, context) {
-    constexpr char HEX[] = "0123456789abcdef";
-    char flags[] = {HEX[value.traceFlags >> 4], HEX[value.traceFlags & 15]};
-    parsed = tracing::SpanContext::tryFromTraceparent(
-        kj::str("00-", value.traceId, "-", value.spanId, "-", kj::ArrayPtr(flags)));
-  }
-  if (parsed == kj::none) {
-    parsed = tracing::SpanContext(tracing::TraceId::fromEntropy(io.getEntropySource()),
-        tracing::SpanId::nullId, tracing::TraceFlags(1));
-  }
   SpanParent parent(nullptr);
-  if ((static_cast<uint8_t>(
-           KJ_ASSERT_NONNULL(parsed).getTraceFlags().orDefault(tracing::TraceFlags(1))) &
-          1) != 0) {
-    KJ_IF_SOME(tracer, io.getWorkerTracer()) {
-      parent = tracer.makeUserSpanParent(kj::mv(KJ_ASSERT_NONNULL(parsed)));
+  KJ_IF_SOME(tracer, io.getCurrentUserTracer()) {
+    kj::Maybe<tracing::SpanContext> parsed;
+    KJ_IF_SOME(value, context) {
+      // Children make a local sampling decision; reserved parent flag bits are not inherited.
+      char flags[] = {'0', (value.traceFlags & 1) ? '1' : '0'};
+      parsed = tracing::SpanContext::tryFromTraceparent(
+          kj::str("00-", value.traceId, "-", value.spanId, "-", kj::ArrayPtr(flags)));
+    }
+    if (parsed == kj::none) {
+      KJ_IF_SOME(owner, io.getCurrentUserTraceAsyncContext()) {
+        KJ_IF_SOME(root, owner.getInvocationSpanContext()) {
+          // The tail-stream contract requires a parent span ID on every spanOpen. Until a
+          // versioned schema adds an explicit span traceId and nullable parentSpanId (with
+          // consumers accepting detached roots instead of inheriting Onset's trace), requested
+          // new roots are invocation children, both here and in OTel-visible spanContext().
+          parsed = tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags());
+        }
+      }
+    }
+    KJ_IF_SOME(value, parsed) {
+      if (value.getTraceFlags().map([](auto flags) { return flags.isSampled(); }).orDefault(true)) {
+        parent = tracer.makeUserSpanParent(kj::mv(value));
+      }
     }
   }
   auto scope = io.makeUserAsyncTraceScope(io.getCurrentLock(), kj::mv(parent));
@@ -926,14 +933,12 @@ v8::Local<v8::Value> Tracing::withActiveSpan(jsg::Lock& js,
     v8::Local<v8::Function> callback,
     jsg::Arguments<jsg::Value> args,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
-  // An unobserved parent would suppress built-in instrumentation inside the callback, so only an
-  // observed parent replaces the current one.
+  // A no-op span leaves the current parent in place. In particular, it must not reset an
+  // already-suppressed context to the invocation's recorded parent.
   kj::Maybe<SpanParent> parent;
   if (IoContext::hasCurrent()) {
     auto spanParent = span->makeSpanParent();
-    if (spanParent.isObserved()) {
-      parent = kj::mv(spanParent);
-    }
+    if (spanParent.isObserved()) parent = kj::mv(spanParent);
   }
 
   return runWithActiveSpan(js, span, kj::mv(parent), spanHandler,
@@ -989,10 +994,8 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
           KJ_IF_SOME(value, asyncContext->getTracer()) {
             tracer = value.addRef();
           }
-          state = kj::refcounted<user_tracing::InvocationSpanState>(asyncContext->getSpan(),
-              kj::mv(tracer), asyncContext->getInvocationSpanContext().map([](auto& context) {
-            return context.clone();
-          }));
+          state = kj::refcounted<user_tracing::InvocationSpanState>(
+              asyncContext->getSpan(), kj::mv(tracer), asyncContext->getSpanInvocationContext());
         }
       }
       auto span = js.alloc<user_tracing::Span>(ioContext.addObject(kj::mv(state)));
