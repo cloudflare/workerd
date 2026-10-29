@@ -521,8 +521,9 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& c
   return incomingRequest;
 }
 
-kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(
-    IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(IoContext& context,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> trigger) {
   kj::Rc<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);
@@ -536,7 +537,7 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(
     observer = kj::refcounted<RequestObserver>();
   }
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
-      kj::mv(channelFactory), kj::mv(observer), kj::mv(workerTracer), kj::none);
+      kj::mv(channelFactory), kj::mv(observer), kj::mv(workerTracer), kj::mv(trigger));
   return incomingRequest;
 }
 

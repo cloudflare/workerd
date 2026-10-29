@@ -93,7 +93,7 @@ KJ_TEST("request trace scopes capture both roots and restore enclosing tracing a
           kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
       auto workerTracer =
           kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
-      workerTracer->setMakeUserRequestSpanFunc(
+      workerTracer->setMakeUserRequestSpanContextFunc(
           [](tracing::SpanContext) { return traceScopeParent(22); });
       tracer = kj::Rc<BaseTracer>(kj::mv(workerTracer));
     }

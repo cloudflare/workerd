@@ -130,11 +130,16 @@ class BaseTracer: public kj::Refcounted {
   // Associates an externally parented span with its trace without changing the invocation.
   virtual void setUserSpanContext(tracing::SpanId spanId, tracing::SpanContext context) {}
 
-  using MakeUserRequestSpanFunc = kj::Function<SpanParent(tracing::SpanContext)>;
+  using MakeUserRequestSpanFunc =
+      kj::Function<SpanParent(tracing::TraceId, kj::Maybe<tracing::TraceFlags>)>;
+  using MakeUserRequestSpanContextFunc = kj::Function<SpanParent(tracing::SpanContext)>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
   void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
+  // Context-aware callbacks also receive vendor state. The legacy adapter above intentionally
+  // drops state until its caller opts into this interface.
+  void setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func);
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -154,7 +159,7 @@ class BaseTracer: public kj::Refcounted {
   void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
-  kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
+  kj::Maybe<MakeUserRequestSpanContextFunc> makeUserRequestSpanFunc;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.

@@ -184,9 +184,12 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
 kj::Maybe<tracing::SpanContext> projectJsSpanContext(
     kj::Maybe<tracing::SpanContext> context, kj::Maybe<tracing::TraceFlags> defaultJsFlags) {
   return context.map([&](auto& value) {
-    return tracing::SpanContext(value.getTraceId(), value.getSpanId(),
-        value.getTraceFlags() == kj::none ? defaultJsFlags : value.getTraceFlags(),
-        value.cloneTraceState());
+    auto flags = value.getTraceFlags() == kj::none ? defaultJsFlags : value.getTraceFlags();
+    if (defaultJsFlags != kj::none) {
+      flags = flags.map([](auto value) { return tracing::TraceFlags(uint8_t(value) & 0x03); });
+    }
+    return tracing::SpanContext(
+        value.getTraceId(), value.getSpanId(), flags, value.cloneTraceState());
   });
 }
 
@@ -833,10 +836,13 @@ jsg::Optional<user_tracing::TracingSpanContext> TracingContext::getInvocationSpa
   if (!IoContext::hasCurrent()) return kj::none;
   auto& io = IoContext::current();
   KJ_IF_SOME(root, io.getUserTraceInvocationContext()) {
-    return user_tracing::toTracingSpanContext(
-        user_tracing::projectJsSpanContext(tracing::SpanContext(root.getTraceId(), root.getSpanId(),
-                                               root.getTraceFlags(), root.cloneTraceState()),
-            io.getDefaultJsTraceFlags()));
+    auto id = root.getSpanId();
+    if (io.getWorkerTracer() == kj::none) {
+      KJ_IF_SOME(trigger, root.getParent()) id = trigger.getSpanId();
+    }
+    return user_tracing::toTracingSpanContext(user_tracing::projectJsSpanContext(
+        tracing::SpanContext(root.getTraceId(), id, root.getTraceFlags(), root.cloneTraceState()),
+        io.getDefaultJsTraceFlags()));
   }
   return kj::none;
 }
@@ -899,8 +905,12 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
           // versioned schema adds an explicit span traceId and nullable parentSpanId (with
           // consumers accepting detached roots instead of inheriting Onset's trace), requested
           // new roots are invocation children, both here and in OTel-visible spanContext().
+          auto id = root.getSpanId();
+          if (io.getWorkerTracer() == kj::none) {
+            KJ_IF_SOME(trigger, root.getParent()) id = trigger.getSpanId();
+          }
           parsed = tracing::SpanContext(
-              root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
+              root.getTraceId(), id, root.getTraceFlags(), root.cloneTraceState());
         }
       }
       if (parsed == kj::none) {

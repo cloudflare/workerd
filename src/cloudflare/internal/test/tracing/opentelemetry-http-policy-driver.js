@@ -21,11 +21,18 @@ export default {
         assert.strictEqual(result.active.traceId, traceId);
         assert.strictEqual(
           result.active.traceFlags,
-          Number.parseInt(flags, 16)
+          Number.parseInt(flags, 16) & 3
         );
         assert.strictEqual(result.active.state, 'upstream=1');
         assert.strictEqual(result.echo.traceparent.split('-')[1], traceId);
-        assert.notStrictEqual(result.echo.traceparent.split('-')[2], parentId);
+        if (binding === env.UNTRACED) {
+          assert.strictEqual(result.active.spanId, parentId);
+          assert.strictEqual(result.echo.traceparent.split('-')[2], parentId);
+        } else
+          assert.notStrictEqual(
+            result.echo.traceparent.split('-')[2],
+            parentId
+          );
         assert.strictEqual(
           result.echo.traceparent.split('-')[3],
           flags === 'ff' ? '03' : flags
@@ -37,6 +44,9 @@ export default {
           tracestate: 'upstream=1',
         });
         assert.strictEqual(fresh.echo.traceparent.split('-')[1], traceId);
+        if (binding === env.UNTRACED) {
+          assert.strictEqual(fresh.echo.traceparent.split('-')[2], parentId);
+        }
         assert.strictEqual(
           fresh.echo.traceparent.split('-')[3],
           flags === 'ff' ? '03' : flags
@@ -49,14 +59,25 @@ export default {
     const future = await call(env.ON, '/fresh', {
       traceparent: parent('ff', '01') + '-extension',
     });
-    assert.strictEqual(future.active.traceFlags, 255);
+    assert.strictEqual(future.active.traceFlags, 3);
     assert.strictEqual(future.echo.traceparent.split('-')[3], '03');
+    const duplicate = await call(env.ON, '/fresh', [
+      ['traceparent', parent('01')],
+      ['traceparent', parent('01')],
+    ]);
+    assert.notStrictEqual(duplicate.active.traceId, traceId);
     for (const path of [
       '/clone',
       '/override',
       '/redirect',
       '/exclude',
       '/suppress',
+      '/state-foreign',
+      '/state-drop',
+      '/state-updated',
+      '/state-custom',
+      '/nested-sampling',
+      '/malformed-context',
     ]) {
       await call(env.ON, path, {
         traceparent: parent('01'),

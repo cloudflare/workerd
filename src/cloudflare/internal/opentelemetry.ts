@@ -441,7 +441,7 @@ class ContextManager {
         { context: ctx, native: inner } satisfies ActiveState,
         invoke
       );
-    if (ctx.getValue(SUPPRESS)) {
+    if (attempt(() => ctx.getValue(SUPPRESS), false)) {
       return tracingContext.withActiveSpanContext(undefined, run, true);
     }
     if (inner !== undefined) return tracing.withActiveSpan(inner, run);
@@ -498,18 +498,7 @@ class Tracer {
     parent: Context = context.active()
   ): Span {
     return attempt(() => {
-      const mode = tracingContext.getSpanCreationMode();
       if (parent.getValue(SUPPRESS)) return new Span();
-      if (mode === 'untraced') {
-        if (options.root) return new Span();
-        const identity = attempt(
-          () => getSpan(parent)?.spanContext(),
-          undefined
-        );
-        return valid(identity)
-          ? new Span(undefined, identity, identity)
-          : new Span();
-      }
       // Requested roots remain invocation children until the tail schema supports detached
       // roots. Even an unsampled invocation must keep its propagation context.
       if (options.root) parent = context.active().deleteValue(SPAN);
@@ -518,54 +507,51 @@ class Tracer {
         () => parentSpan?.spanContext(),
         undefined
       );
-      if (mode === 'unsampled') {
-        // The platform invocation's sampling decision wins over an explicitly sampled parent.
-        // Explicit unsampled parents likewise never override the platform into recording.
-        const identity = valid(parentSpanContext)
-          ? parentSpanContext
-          : attempt(
-              () => fromRuntime(tracingContext.getInvocationSpanContext()),
-              undefined
-            );
-        return valid(identity) ? nonRecording(identity) : new Span();
-      }
-      const invocation = attempt(
-        () => tracingContext.getInvocationSpanContext(),
-        undefined
-      );
-      // Same-trace parents can contain a cached JS sampling projection from a non-exporting
-      // caller. Use the invocation's native decision too, rather than minting a JS-only
-      // identity whose recording native descendants would be orphaned.
-      if (
-        valid(parentSpanContext) &&
-        !(parentSpanContext.traceFlags & 1) &&
-        parentSpanContext.traceId.toLowerCase() !== invocation?.traceId
-      ) {
-        return nonRecording(parentSpanContext);
-      }
-      const startTime = timestamp(options.startTime);
-      const inner = context.with(parent, () =>
-        tracingContext.startSpan(typeof name === 'string' ? name : '', {
-          kind:
-            typeof options.kind === 'number' &&
-            Number.isInteger(options.kind) &&
-            options.kind >= 0 &&
-            options.kind <= 4
-              ? options.kind
-              : 0,
-          scope: this.scope,
-          ...(startTime === undefined ? {} : { startTime }),
-        })
-      );
-      const span =
-        !inner.isTraced && valid(parentSpanContext)
-          ? new Span(undefined, parentSpanContext, parentSpanContext)
-          : new Span(inner, options.root ? undefined : parentSpanContext);
-      wrappers.set(inner, span);
-      if (options.attributes !== undefined)
-        span.setAttributes(options.attributes);
-      if (options.links !== undefined) span.addLinks(options.links);
-      return span;
+      // Decide under the explicit parent, not an unrelated surrounding context. Native
+      // activation restores same-trace invocation flags before selecting the recording mode.
+      return context.with(parent, () => {
+        const mode = tracingContext.getSpanCreationMode();
+        if (mode === 'untraced') {
+          return !options.root && valid(parentSpanContext)
+            ? new Span(undefined, parentSpanContext, parentSpanContext)
+            : new Span();
+        }
+        if (mode === 'unsampled') {
+          // The platform invocation's sampling decision wins over an explicitly sampled parent.
+          // Explicit unsampled parents likewise never override the platform into recording.
+          const identity = valid(parentSpanContext)
+            ? parentSpanContext
+            : attempt(
+                () => fromRuntime(tracingContext.getInvocationSpanContext()),
+                undefined
+              );
+          return valid(identity) ? nonRecording(identity) : new Span();
+        }
+        const startTime = timestamp(options.startTime);
+        const inner = tracingContext.startSpan(
+          typeof name === 'string' ? name : '',
+          {
+            kind:
+              typeof options.kind === 'number' &&
+              Number.isInteger(options.kind) &&
+              options.kind >= 0 &&
+              options.kind <= 4
+                ? options.kind
+                : 0,
+            scope: this.scope,
+            ...(startTime === undefined ? {} : { startTime }),
+          }
+        );
+        const span =
+          !inner.isTraced && valid(parentSpanContext)
+            ? new Span(undefined, parentSpanContext, parentSpanContext)
+            : new Span(inner, options.root ? undefined : parentSpanContext);
+        wrappers.set(inner, span);
+        if (options.attributes !== undefined)
+          span.setAttributes(options.attributes);
+        if (options.links !== undefined) span.addLinks(options.links);
+        return span;
+      });
     }, new Span());
   }
   startActiveSpan<R>(name: string, fn: (span: Span) => R): R;
@@ -728,7 +714,7 @@ const propagation = {
         setter.set(
           carrier,
           'traceparent',
-          `00-${sc.traceId.toLowerCase()}-${sc.spanId.toLowerCase()}-${sc.traceFlags.toString(16).padStart(2, '0')}`
+          `00-${sc.traceId.toLowerCase()}-${sc.spanId.toLowerCase()}-${(sc.traceFlags & 0x03).toString(16).padStart(2, '0')}`
         );
         const state = sc.traceState?.serialize();
         if (state) setter.set(carrier, 'tracestate', state);

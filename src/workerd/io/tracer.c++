@@ -643,6 +643,12 @@ void WorkerTracer::setReturn(
 }
 
 void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
+  setMakeUserRequestSpanContextFunc([func = kj::mv(func)](tracing::SpanContext context) mutable {
+    return func(context.getTraceId(), context.getTraceFlags());
+  });
+}
+
+void BaseTracer::setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func) {
   KJ_ASSERT(
       makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
   makeUserRequestSpanFunc = kj::mv(func);

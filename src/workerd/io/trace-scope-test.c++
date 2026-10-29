@@ -23,9 +23,27 @@ kj::Rc<WorkerTracer> makeTracer() {
   return kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
 }
 
+KJ_TEST("legacy request-span factories retain their two-argument source interface") {
+  auto tracer = makeTracer();
+  bool called = false;
+  BaseTracer::MakeUserRequestSpanFunc legacy = [&](tracing::TraceId id,
+                                                   kj::Maybe<tracing::TraceFlags> flags) {
+    called = true;
+    KJ_EXPECT(id == tracing::TraceId(1, 2));
+    KJ_EXPECT(flags == tracing::TraceFlags(3));
+    return observedParent(42);
+  };
+  tracer->setMakeUserRequestSpanFunc(kj::mv(legacy));
+  auto parent = tracer->makeUserRequestSpan(
+      tracing::TraceId(1, 2), tracing::TraceFlags(3), kj::str("vendor=legacy"));
+  KJ_EXPECT(called);
+  auto identity = KJ_ASSERT_NONNULL(parent.toSpanContext());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(identity.getSpanId()) == tracing::SpanId(42));
+}
+
 kj::Rc<BaseTracer> makeObservedTracer() {
   auto tracer = makeTracer();
-  tracer->setMakeUserRequestSpanFunc([](tracing::SpanContext) { return observedParent(2); });
+  tracer->setMakeUserRequestSpanContextFunc([](tracing::SpanContext) { return observedParent(2); });
   return kj::mv(tracer);
 }
 
@@ -172,7 +190,7 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
       kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
   auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
       kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
-  tracer->setMakeUserRequestSpanFunc([&](tracing::SpanContext identity) {
+  tracer->setMakeUserRequestSpanContextFunc([&](tracing::SpanContext identity) {
     auto submitter =
         kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity));
     return SpanParent(kj::rc<UserSpanObserver>(
@@ -243,7 +261,7 @@ KJ_TEST("actor span marks use their creator stream and rejected spans emit nothi
         kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
     auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
         kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
-    tracer->setMakeUserRequestSpanFunc([ptr = tracer.get()](tracing::SpanContext identity) {
+    tracer->setMakeUserRequestSpanContextFunc([ptr = tracer.get()](tracing::SpanContext identity) {
       return SpanParent(kj::rc<UserSpanObserver>(
           kj::refcounted<FixtureSpanSubmitter>(*ptr, tracing::SpanContext::clone(identity)),
           identity.getTraceId(), identity.getTraceFlags()));
@@ -319,23 +337,24 @@ KJ_TEST("a native trigger without a tracer remains a propagation-only root") {
   TestFixture fixture({.featureFlags = features.asReader()});
   for (int flags: {-1, 0, 1, 255}) {
     auto context = fixture.newIoContext();
-    auto request = fixture.newUndeliveredIncomingRequest(*context);
-    auto& invocation = request->getInvocationSpanContext();
     auto nativeFlags = flags < 0 ? kj::Maybe<tracing::TraceFlags>(kj::none)
                                  : kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(flags));
     auto trigger = tracing::InvocationSpanContext(tracing::TraceId(1, 2), tracing::TraceId::nullId,
         tracing::SpanId(42), nativeFlags, kj::str("vendor=native"));
-    invocation = tracing::InvocationSpanContext::newForInvocation(trigger);
+    auto request = fixture.newUndeliveredIncomingRequest(*context, kj::none, trigger.clone());
     request->delivered();
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto scope = context->makeRequestTraceScope(env.lock);
       auto identity = KJ_ASSERT_NONNULL(context->getCurrentUserTraceSpan().toSpanContext());
       KJ_EXPECT(identity.getTraceId() == trigger.getTraceId());
+      KJ_EXPECT(KJ_ASSERT_NONNULL(identity.getSpanId()) == trigger.getSpanId());
       KJ_EXPECT(identity.getTraceFlags() == nativeFlags);
       KJ_EXPECT(KJ_ASSERT_NONNULL(identity.cloneTraceState()) == "vendor=native");
       auto span = activeSpan(env);
       KJ_EXPECT(!span->getIsTraced());
       KJ_EXPECT(span->spanContext().traceId == trigger.getTraceId().toW3C());
+      KJ_EXPECT(span->spanContext().spanId == trigger.getSpanId().toGoString());
+      KJ_EXPECT(span->spanContext().traceFlags == (flags < 0 ? 0 : flags & 3));
       KJ_EXPECT(context->getWorkerTracer() == kj::none);
       auto child = context->makeUserTraceSpan("untraced-native-child"_kjc);
       auto propagated = KJ_ASSERT_NONNULL(child.getUserSpanParent().toSpanContext());
@@ -358,7 +377,7 @@ kj::Rc<WorkerTracer> makeSinkTracer(kj::TaskSet& tasks,
   auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), level, kj::none, kj::mv(writer));
   tracer->markUnused();
   if (factory == UserSpanFactory::PRESENT) {
-    tracer->setMakeUserRequestSpanFunc([](tracing::SpanContext identity) {
+    tracer->setMakeUserRequestSpanContextFunc([](tracing::SpanContext identity) {
       return SpanParent::fromSpanContext(kj::mv(identity));
     });
   }
@@ -802,7 +821,7 @@ KJ_TEST("unsampled roots remain native carriers with either flag state") {
       auto context = fixture.newIoContext();
       auto tracer = makeTracer();
       int parents = 0;
-      tracer->setMakeUserRequestSpanFunc([&](tracing::SpanContext identity) {
+      tracer->setMakeUserRequestSpanContextFunc([&](tracing::SpanContext identity) {
         ++parents;
         return SpanParent::fromSpanContext(kj::mv(identity));
       });

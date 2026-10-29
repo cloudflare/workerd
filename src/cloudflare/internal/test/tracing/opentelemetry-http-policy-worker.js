@@ -19,6 +19,12 @@ export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     const active = identity();
+    const injected = {};
+    propagation.inject(context.active(), injected);
+    assert.strictEqual(
+      injected.traceparent.split('-')[3],
+      (active.traceFlags & 3).toString(16).padStart(2, '0')
+    );
     let result;
     if (path === '/mixed' && env.CALLEE) {
       assert.strictEqual(active.traceFlags, 0);
@@ -50,7 +56,85 @@ export default {
       console.log(JSON.stringify({ path, echo: result }));
       return Response.json({ active, echo: result, original });
     }
-    if (path === '/override') {
+    if (path.startsWith('/state-')) {
+      const base = trace.getActiveSpan().spanContext();
+      const updated = base.traceState.unset('upstream').set('updated', '1');
+      const foreign = path !== '/state-updated';
+      const state = path === '/state-drop' ? undefined : updated;
+      const selected = trace.setSpanContext(context.active(), {
+        ...base,
+        ...(foreign
+          ? {
+              traceId: '11111111111111111111111111111111',
+              spanId: '2222222222222222',
+            }
+          : {}),
+        traceState: state,
+      });
+      const originalState = request.headers.get('tracestate');
+      const outgoing = new Request(request);
+      if (path === '/state-custom')
+        outgoing.headers.set('tracestate', 'custom=1');
+      result = await context.with(selected, () => get(outgoing));
+      assert.strictEqual(
+        result.traceparent.split('-')[1],
+        foreign ? '11111111111111111111111111111111' : active.traceId
+      );
+      assert.strictEqual(
+        result.tracestate,
+        path === '/state-custom' ? 'custom=1' : state?.serialize()
+      );
+      assert.strictEqual(request.headers.get('tracestate'), originalState);
+    } else if (path === '/nested-sampling') {
+      const same = trace.setSpanContext(context.active(), {
+        ...trace.getActiveSpan().spanContext(),
+        traceFlags: 0,
+      });
+      const foreign = trace.setSpanContext(context.active(), {
+        traceId: '11111111111111111111111111111111',
+        spanId: '2222222222222222',
+        traceFlags: 0,
+      });
+      const tracer = trace.getTracer('nested-sampling');
+      await context.with(foreign, async () => {
+        await tracer.startActiveSpan(
+          'nested-same-trace',
+          {},
+          same,
+          async (span) => {
+            assert.strictEqual(span.isRecording(), true);
+            await get('http://echo/nested');
+            span.end();
+          }
+        );
+        const span = tracer.startSpan('rewrapped-same-trace', {}, same);
+        assert.strictEqual(span.isRecording(), true);
+        const rewrapped = trace.setSpan(
+          context.active(),
+          trace.wrapSpanContext(span.spanContext())
+        );
+        await context.with(rewrapped, () => get('http://echo/rewrapped'));
+        span.end();
+      });
+      result = await get('http://echo/restored');
+    } else if (path === '/malformed-context') {
+      const base = context.active();
+      const malformed = {
+        getValue(key) {
+          if (
+            key === Symbol.for('OpenTelemetry SDK Context Key SUPPRESS_TRACING')
+          )
+            throw new Error('malformed suppression');
+          return base.getValue(key);
+        },
+        setValue: base.setValue.bind(base),
+        deleteValue: base.deleteValue.bind(base),
+      };
+      result = await context.with(malformed, () =>
+        get('http://echo/malformed')
+      );
+      assert.ok(result.traceparent);
+    } else if (path === '/override') {
       const explicit =
         '00-11111111111111111111111111111111-2222222222222222-ff';
       const copy = new Request(request, {
@@ -75,14 +159,25 @@ export default {
         active.traceId
       );
     } else if (path === '/native-untraced') {
-      const received = await env.UNTRACED.fetch('http://callee/fresh').then(
-        (r) => r.json()
-      );
+      const span = tracing.startSpan('native-untraced-caller');
+      const caller = span.spanContext();
+      const received = await tracing
+        .withActiveSpan(span, () => env.UNTRACED.fetch('http://callee/fresh'))
+        .then((r) => r.json());
       assert.strictEqual(received.active.traceId, active.traceId);
+      assert.notStrictEqual(received.active.spanId, caller.spanId);
+      assert.strictEqual(received.active.traceFlags, 0);
+      assert.strictEqual(
+        received.echo.traceparent.split('-')[2],
+        received.active.spanId
+      );
+      assert.strictEqual(received.echo.traceparent.split('-')[3], '00');
       assert.strictEqual(
         received.echo.traceparent.split('-')[1],
         active.traceId
       );
+      span.end();
+      console.log(JSON.stringify({ path, received, caller }));
       return Response.json(received);
     } else if (path === '/suppress') {
       const suppressed = context

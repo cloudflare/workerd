@@ -132,10 +132,10 @@ struct DynamicWorkerSource;
 class IoChannelFactory: public virtual kj::Refcounted {
  public:
   // Single-writer capability for user W3C headers on global outbound HTTP. Embedders that
-  // export context outside the isolate must override this to false, keeping their own export
-  // and forwarding policies authoritative. This does not disable native span metadata.
+  // export context outside the isolate keep their own export and forwarding policies
+  // authoritative by leaving this off. Standalone workerd explicitly opts in.
   virtual bool shouldInjectW3cTraceContext() const {
-    return true;
+    return false;
   }
 
   enum class EvictWebSocketMode {

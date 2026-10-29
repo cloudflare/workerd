@@ -1558,24 +1558,38 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
   if (ioContext.isOpentelemetryApiEnabled() && usesGlobalOutbound &&
       ioContext.getIoChannelFactory().shouldInjectW3cTraceContext()) {
     kj::Maybe<kj::StringPtr> existingParent;
+    kj::Maybe<kj::StringPtr> existingState;
     size_t parentCount = 0;
-    bool hasState = false;
+    size_t stateCount = 0;
     headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
       if (strcaseeq(name, "traceparent"_kj)) {
         existingParent = value;
         ++parentCount;
       }
-      if (strcaseeq(name, "tracestate"_kj)) hasState = true;
+      if (strcaseeq(name, "tracestate"_kj)) {
+        existingState = value;
+        ++stateCount;
+      }
     });
     bool forwardedParent = false;
-    if (parentCount == 1) {
+    bool forwardedState = false;
+    if (parentCount <= 1) {
       KJ_IF_SOME(invocation, ioContext.getUserTraceInvocationContext()) {
         KJ_IF_SOME(trigger, invocation.getParent()) {
-          KJ_IF_SOME(parent, tracing::SpanContext::tryFromHttpTraceparent(
-              KJ_ASSERT_NONNULL(existingParent))) {
+          KJ_IF_SOME(header, existingParent) {
+          KJ_IF_SOME(parent, tracing::SpanContext::tryFromHttpTraceparent(header)) {
             forwardedParent = parent.getTraceId() == trigger.getTraceId() &&
                 parent.getSpanId() == trigger.getSpanId() &&
                 parent.getTraceFlags() == trigger.getTraceFlags();
+          }
+          }
+          if (stateCount == 1) {
+            KJ_IF_SOME(state, trigger.cloneTraceState()) {
+              KJ_IF_SOME(parsed, tracing::SpanContext::parseTracestate(
+                  KJ_ASSERT_NONNULL(existingState))) {
+                forwardedState = parsed == state;
+              }
+            }
           }
         }
       }
@@ -1596,18 +1610,20 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
             // including third parties, as standard OTel auto-instrumentation does. This is user
             // trace context, not the embedder's independent internal trace-context export; an
             // embedder must keep those paths distinct and avoid injecting a second user header.
-            if (forwardedParent) {
+            if (forwardedParent || forwardedState) {
               // Unregistered headers cannot be removed by name. Rebuild only the native
               // copy, keeping its backing storage alive without touching the JS Request.
               kj::HttpHeaders rewritten(ioContext.getHeaderTable());
               headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-                if (!strcaseeq(name, "traceparent"_kj)) rewritten.addPtrPtr(name, value);
+                if (forwardedParent && strcaseeq(name, "traceparent"_kj)) return;
+                if (forwardedState && strcaseeq(name, "tracestate"_kj)) return;
+                rewritten.addPtrPtr(name, value);
               });
               rewritten.takeOwnership(kj::mv(headers));
               headers = kj::mv(rewritten);
             }
             headers.addPtr("traceparent"_kj, tracing::formatW3CTraceparent(context.getTraceId(), id, flags));
-            if (!hasState) {
+            if (stateCount == 0 || forwardedState) {
               KJ_IF_SOME(state, context.cloneTraceState()) headers.addPtr("tracestate"_kj, kj::mv(state));
             }
           }

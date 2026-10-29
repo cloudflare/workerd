@@ -8,6 +8,7 @@ const unitTests :Workerd.Config = (
       streamingTails = ["tail"],
       bindings = [
         (name = "expectedFlags", json = "1"),
+        (name = "expectedRecording", json = "true"),
         (name = "callee", service = "callee"),
         (name = "flagOffCallee", service = "flag-off-callee"),
         (name = "rpc", service = (name = "callee", entrypoint = "RpcLogger")),
@@ -20,6 +21,7 @@ const unitTests :Workerd.Config = (
       tails = ["buffered-tail"],
       bindings = [
         (name = "expectedFlags", json = "0"),
+        (name = "expectedRecording", json = "true"),
         (name = "callee", service = "callee"),
         (name = "flagOffCallee", service = "flag-off-callee"),
       ],
@@ -28,7 +30,7 @@ const unitTests :Workerd.Config = (
       modules = .testModules,
       compatibilityFlags = ["nodejs_compat"],
       streamingTails = ["tail"],
-      bindings = [(name = "expectedFlags", json = "0")],
+      bindings = [(name = "expectedFlags", json = "0"), (name = "expectedRecording", json = "false")],
     )),
     (name = "callee", worker = (
       modules = .calleeModules,
