@@ -58,6 +58,7 @@ use crate::UnitType;
 use crate::isolate_state::IsolateState;
 pub use crate::promise::Promise;
 pub use crate::promise::PromiseResolver;
+pub use crate::promise::VoidPromise;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
