@@ -32,7 +32,7 @@ fn current(lock: &mut jsg::Lock) -> Option<String> {
 
 /// Captures the frame of a new `run_in_async_context` that stores `value`.
 fn frame_storing(lock: &mut jsg::Lock, value: &str) -> AsyncContextFrame {
-    let value = value.to_js(lock);
+    let value = value.to_js(lock).unwrap();
     Harness::run_in_async_context(lock, value, AsyncContextFrame::current)
 }
 
@@ -166,7 +166,7 @@ fn rust_and_cpp_agree_on_root_frame() {
         frame.enter(lock, |lock| assert!(!is_root(lock)));
         assert!(is_root(lock));
 
-        let value = "outer".to_js(lock);
+        let value = "outer".to_js(lock)?;
         Harness::run_in_async_context(lock, value, |lock| {
             assert!(!is_root(lock));
             AsyncContextFrame::root().enter(lock, |lock| assert!(is_root(lock)));
@@ -182,7 +182,7 @@ fn rust_and_cpp_agree_on_root_frame() {
 #[test]
 fn entering_root_frame_leaves_frame_for_its_duration() {
     Harness::new().run_in_context(|lock, _ctx| {
-        let value = "outer".to_js(lock);
+        let value = "outer".to_js(lock)?;
         Harness::run_in_async_context(lock, value, |lock| {
             AsyncContextFrame::root().enter(lock, |lock| assert_eq!(current(lock), None));
             TracedAsyncContextFrame::root().enter(lock, |lock| assert_eq!(current(lock), None));
@@ -229,13 +229,13 @@ fn clone_enters_same_frame() {
 fn enter_returns_closure_result_and_restores_after_error() {
     Harness::new().run_in_context(|lock, _ctx| {
         let a = frame_storing(lock, "a");
-        let value = "outer".to_js(lock);
+        let value = "outer".to_js(lock)?;
         Harness::run_in_async_context(lock, value, |lock| {
             let result: Result<(), jsg::Error> =
                 a.enter(lock, |_lock| Err(jsg::Error::new_type_error("failed")));
             assert_eq!(result.unwrap_err().message, "failed");
             assert_eq!(current(lock).as_deref(), Some("outer"));
-            let handle = a.enter(lock, |lock| "from a".to_js(lock));
+            let handle = a.enter(lock, |lock| "from a".to_js(lock)).unwrap();
             assert_eq!(String::from_js(lock, handle).unwrap(), "from a");
         });
         Ok(())
@@ -246,7 +246,7 @@ fn enter_returns_closure_result_and_restores_after_error() {
 fn enter_restores_after_panic() {
     Harness::new().run_in_context(|lock, _ctx| {
         let a = frame_storing(lock, "a");
-        let value = "outer".to_js(lock);
+        let value = "outer".to_js(lock)?;
         Harness::run_in_async_context(lock, value, |lock| {
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 a.enter(lock, |_lock| panic!("panic in frame"));
@@ -264,9 +264,9 @@ fn enter_restores_after_panic() {
 fn enter_restores_while_terminating() {
     Harness::new().run_in_context(|lock, ctx| {
         let probe = install_probe(lock, ctx);
-        let value = "a".to_js(lock);
+        let value = "a".to_js(lock)?;
         probe.capture_in(lock, value);
-        let value = "outer".to_js(lock);
+        let value = "outer".to_js(lock)?;
         let result = Harness::run_in_async_context(lock, value, |lock| {
             let result = ctx.eval_raw(
                 lock,
@@ -378,11 +378,11 @@ fn frame_in_resource_is_traced() {
         });
         // The probe's wrapper is reachable, but the probe has no strong reference from Rust, so
         // GC traces its frame through the wrapper.
-        let wrapper = probe.clone().to_js(lock);
+        let wrapper = probe.clone().to_js(lock)?;
         let stored = jsg::Rc::new(Stored {
             owner: Cell::new(Some(probe.clone())),
         })
-        .to_js(lock);
+        .to_js(lock)?;
         probe.capture_in(lock, stored);
         kept = Some((wrapper.to_global(lock), probe.downgrade()));
         Ok(())
@@ -445,7 +445,7 @@ fn frame_in_function_data_lives_as_long_as_function() {
     let harness = Harness::new();
     let mut kept = None;
     harness.run_in_context(|lock, _ctx| {
-        let marker = jsg::Rc::new(Marker).to_js(lock);
+        let marker = jsg::Rc::new(Marker).to_js(lock)?;
         let frame = Harness::run_in_async_context(lock, marker, TracedAsyncContextFrame::current);
         let run_in_frame = v8::Function::new(lock, frame, |lock, frame, args| {
             let callback = v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();
@@ -520,7 +520,7 @@ fn frames_dropped_at_or_after_teardown() {
     let mut kept = None;
     harness.run_in_context(|lock, ctx| {
         let probe = install_probe(lock, ctx);
-        let value = "held by the probe".to_js(lock);
+        let value = "held by the probe".to_js(lock)?;
         probe.capture_in(lock, value);
         kept = Some(frame_storing(lock, "held by Rust"));
         Ok(())
