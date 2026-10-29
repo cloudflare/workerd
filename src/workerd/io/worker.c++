@@ -1249,7 +1249,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         // Only add exception to trace when running within an I/O context with a tracer.
         KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
           KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-            addExceptionToTrace(js, ioContext, tracer, kj::none,
+            auto tracerRef = tracer.clone();
+            addExceptionToTrace(js, ioContext, *tracerRef, kj::none,
                 UncaughtExceptionSource::REQUEST_HANDLER, error,
                 api->getErrorInterfaceTypeHandler(js));
           }
@@ -2004,6 +2005,8 @@ void handleLog(jsg::Lock& js,
   // Only check tracing if console.log() was not invoked at the top level.
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      // Error property getters and stringification below can re-enter user JS.
+      auto tracerRef = tracer.clone();
       auto timestamp = ioContext.now();
 
       // Scan all arguments for native Errors and build a positional ErrorInfo array: slot `i`
@@ -2056,7 +2059,7 @@ void handleLog(jsg::Lock& js,
         }
       }
 
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
+      tracerRef->addLog(ioContext.getInvocationSpanContext(), timestamp, level, message(),
           kj::mv(capturedErrors));
     }
   }

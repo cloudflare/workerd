@@ -70,14 +70,22 @@ class IoContext;
 // an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
 // opted-in OTel events remain attributed to the request that created the async context. Workers
 // without the flag retain the newest-request heuristic for logs and invocation attribution.
+// With the flag on, DO continuations whose owning tracer has expired deliberately drop logs
+// rather than attributing them to a newer request. That delivery policy needs product sign-off.
 class UserTraceAsyncContext final {
  public:
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
-      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext)
+      kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
+      tracing::TraceFlags jsSamplingDecision)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
-        invocationSpanContext(kj::mv(invocationSpanContext)) {}
+        invocationSpanContext(kj::mv(invocationSpanContext)),
+        localSampled(jsSamplingDecision.isSampled()) {}
+
+  bool getLocalSampled() const {
+    return localSampled;
+  }
 
   SpanParent getSpan() {
     return span.addRef();
@@ -113,6 +121,7 @@ class UserTraceAsyncContext final {
   SpanParent span;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
+  const bool localSampled;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
@@ -276,6 +285,7 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // IoOwn, kept alive past ~IncomingRequest by the IoContext's delete queue) cannot extend
   // tracer lifetime.
   SpanParent rootUserTraceSpan = SpanParent(nullptr);
+  bool localSampled = false;
 
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
@@ -622,6 +632,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
   bool hasCurrentIncomingRequest() {
     return !incomingRequests.empty();
+  }
+
+  bool isOpentelemetryApiEnabled() const {
+    return opentelemetryApiEnabled;
   }
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
@@ -1259,6 +1273,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<UserTraceAsyncContext&> getCurrentUserTraceAsyncContext();
   kj::Maybe<BaseTracer&> getCurrentUserTracer();
 
+  // JS-only fallback for absent native flags. Never use this in native propagation or exports.
+  kj::Maybe<tracing::TraceFlags> getDefaultJsTraceFlags();
+  kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationContext();
+
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
@@ -1301,6 +1319,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<kj::Own<TmpDirStoreScope>> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
+  const bool opentelemetryApiEnabled;
   kj::Maybe<Worker::Actor&> actor;
   kj::Own<LimitEnforcer> limitEnforcer;
 
@@ -1310,6 +1329,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // List of active IncomingRequests, ordered from most-recently-started to least-recently-started.
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;
+
+  // Unlike key presence, this distinguishes a current explicit no-tracer owner from a frame
+  // captured in another IoContext, which must use this context's owner-less fallback.
+  bool hasCurrentUserTraceOwner();
 
   kj::Maybe<kj::SourceLocation> lastDeliveredLocation;
 

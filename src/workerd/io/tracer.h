@@ -33,6 +33,11 @@ class BaseTracer: public kj::Refcounted {
     return addRefToThis();
   }
 
+  // Whether user spans have an export sink, not merely a tracer or buffered log sink.
+  virtual bool exportsUserSpans() const {
+    return false;
+  }
+
   // Weak reference to this tracer, used by user-tracing SpanSubmitter implementations so
   // abandoned user promises cannot pin tracer lifetime.
   using WeakRef = workerd::WeakRef<BaseTracer>;
@@ -162,6 +167,10 @@ class WorkerTracer final: public BaseTracer {
   // Returns a promise that fulfills when trace is complete. Only one such promise can
   // exist at a time. Used in workerd, where we don't have to worry about pipelines.
   kj::Promise<kj::Own<Trace>> onComplete();
+
+  bool exportsUserSpans() const override {
+    return pipelineLogLevel != PipelineLogLevel::NONE && maybeTailStreamWriter != kj::none;
+  }
 
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,

@@ -35,7 +35,7 @@ export const registrationAndSurface = {
     assert.deepStrictEqual(invocation.spanContext(), {
       ...tracing.getActiveSpan().spanContext(),
     });
-    assert.strictEqual(invocation.spanContext().traceFlags, 0);
+    assert.strictEqual(invocation.spanContext().traceFlags, 1);
     const span = tracer.startSpan('otel-surface', {
       attributes: { a: [true, false] },
     });
@@ -237,45 +237,65 @@ export const externalParentsAndRoots = {
       },
       getter
     );
-    tracer.startActiveSpan('otel-unsampled', {}, unsampled, (span) => {
-      assert.strictEqual(span.isRecording(), false);
-      assert.strictEqual(span.spanContext().traceFlags, 0);
-      assert.strictEqual(
-        span.spanContext().traceId,
-        '11111111111111111111111111111111'
-      );
-      assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
-      assert.strictEqual(api.context.active().getValue(spanKey), span);
-      assert.strictEqual(tracing.getActiveSpan(), undefined);
-      const requestedRoot = tracer.startSpan('otel-unsampled-requested-root', {
-        root: true,
-      });
-      assert.strictEqual(requestedRoot.isRecording(), false);
-      assert.notStrictEqual(
-        requestedRoot.spanContext().traceId,
-        '00000000000000000000000000000000'
-      );
-      requestedRoot.end();
-      const child = tracer.startSpan('otel-unsampled-child');
-      assert.strictEqual(child.isRecording(), false);
-      assert.strictEqual(
-        child.spanContext().traceId,
-        span.spanContext().traceId
-      );
-      child.end();
-      tracing.enterSpan('otel-unsampled-native', (nativeSpan) => {
-        assert.strictEqual(nativeSpan.isTraced, true);
-        const nested = tracer.startSpan('otel-unsampled-native-child');
-        assert.strictEqual(nested.isRecording(), false);
+    await tracer.startActiveSpan(
+      'otel-unsampled',
+      {},
+      unsampled,
+      async (span) => {
+        assert.strictEqual(span.isRecording(), false);
+        assert.strictEqual(span.spanContext().traceFlags, 0);
         assert.strictEqual(
-          nested.spanContext().traceId,
+          span.spanContext().traceId,
+          '11111111111111111111111111111111'
+        );
+        assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
+        assert.strictEqual(api.context.active().getValue(spanKey), span);
+        assert.strictEqual(tracing.getActiveSpan(), undefined);
+        const requestedRoot = tracer.startSpan(
+          'otel-unsampled-requested-root',
+          {
+            root: true,
+          }
+        );
+        assert.strictEqual(requestedRoot.isRecording(), false);
+        assert.notStrictEqual(
+          requestedRoot.spanContext().traceId,
+          '00000000000000000000000000000000'
+        );
+        requestedRoot.end();
+        const child = tracer.startSpan('otel-unsampled-child');
+        assert.strictEqual(child.isRecording(), false);
+        assert.strictEqual(
+          child.spanContext().traceId,
           span.spanContext().traceId
         );
-        assert.strictEqual(nested.spanContext().traceFlags, 0);
-        nested.end();
-      });
-      span.end();
-    });
+        child.end();
+        tracing.enterSpan('otel-unsampled-native', (nativeSpan) => {
+          assert.strictEqual(nativeSpan.isTraced, false);
+          assert.strictEqual(nativeSpan.spanContext().traceFlags, 0);
+          tracing.enterSpan(
+            'otel-unsampled-native-grandchild',
+            (grandchild) => {
+              assert.strictEqual(grandchild.isTraced, false);
+              assert.strictEqual(
+                grandchild.spanContext().traceId,
+                span.spanContext().traceId
+              );
+            }
+          );
+          const nested = tracer.startSpan('otel-unsampled-native-child');
+          assert.strictEqual(nested.isRecording(), false);
+          assert.strictEqual(
+            nested.spanContext().traceId,
+            span.spanContext().traceId
+          );
+          assert.strictEqual(nested.spanContext().traceFlags, 0);
+          nested.end();
+        });
+        await env.fetchTarget.fetch('https://worker/unsampled');
+        span.end();
+      }
+    );
   },
 };
 

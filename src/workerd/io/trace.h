@@ -1353,6 +1353,12 @@ class SpanBuilder {
 // ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
+  // Propagation-only sampled-out observers retain identity across children without submitting
+  // spans. This is distinct from a missing observer or an ended recording span.
+  virtual bool isSampledOut() const {
+    return false;
+  }
+
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.

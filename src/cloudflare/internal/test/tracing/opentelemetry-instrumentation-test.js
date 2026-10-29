@@ -71,6 +71,8 @@ export const hierarchy = {
     assert.ok(!traceIds.has('otel-unsampled'));
     assert.ok(!traceIds.has('otel-unsampled-child'));
     assert.ok(!traceIds.has('otel-unsampled-native-child'));
+    assert.ok(!traceIds.has('otel-unsampled-native'));
+    assert.ok(!traceIds.has('otel-unsampled-native-grandchild'));
     assert.ok(
       exceptions.some(
         (event) =>

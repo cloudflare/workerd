@@ -49,7 +49,14 @@ export const propagationWithoutTail = {
         assert.strictEqual(child.spanContext().traceId, identity.traceId);
         child.end();
         const requestedRoot = tracer.startSpan('root', { root: true });
-        assert.strictEqual(requestedRoot.spanContext(), identity);
+        assert.strictEqual(
+          requestedRoot.spanContext().traceId,
+          '00000000000000000000000000000000'
+        );
+        assert.strictEqual(
+          requestedRoot.spanContext().spanId,
+          '0000000000000000'
+        );
         requestedRoot.end();
         tracing.enterSpan('native-noop', () => {
           const nativeChild = tracer.startSpan('native-child');

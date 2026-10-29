@@ -48,6 +48,352 @@ jsg::Ref<api::user_tracing::Span> activeSpan(const TestFixture::Environment& env
   return kj::mv(KJ_ASSERT_NONNULL(span));
 }
 
+class TraceTaskErrors final: public kj::TaskSet::ErrorHandler {
+ public:
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_FAIL_EXPECT(exception);
+  }
+};
+
+// Deliver real tail-stream events to a fixture's JS handler.
+class FixtureTail final: public WorkerInterface {
+ public:
+  FixtureTail(TestFixture& fixture, kj::TaskSet& tasks): fixture(fixture), tasks(tasks) {}
+  kj::Promise<void> request(kj::HttpMethod,
+      kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncInputStream&,
+      kj::HttpService::Response&) override {
+    KJ_FAIL_ASSERT("unexpected HTTP request");
+  }
+  kj::Promise<void> connect(kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncIoStream&,
+      ConnectResponse&,
+      kj::HttpConnectSettings) override {
+    KJ_FAIL_ASSERT("unexpected connect");
+  }
+  kj::Promise<void> prewarm(kj::StringPtr) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date, kj::StringPtr) override {
+    KJ_FAIL_ASSERT("unexpected scheduled event");
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
+    KJ_FAIL_ASSERT("unexpected alarm");
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    auto context = fixture.newIoContext();
+    return event
+        ->run(fixture.newUndeliveredIncomingRequest(*context), kj::none, kj::none, Frankenvalue(),
+            tasks)
+        .attach(kj::mv(event), kj::mv(context));
+  }
+
+ private:
+  TestFixture& fixture;
+  kj::TaskSet& tasks;
+};
+
+class FixtureSpanSubmitter final: public SpanSubmitter {
+ public:
+  FixtureSpanSubmitter(BaseTracer& tracer, tracing::SpanContext context)
+      : tracer(tracer.getWeakRef()),
+        context(kj::mv(context)) {}
+  bool submitSpanOpen(
+      tracing::SpanId id, tracing::SpanId parent, kj::ConstString name, kj::Date time) override {
+    return tracer->runIfAlive([&](BaseTracer& tracer) {
+      tracer.setUserSpanContext(
+          id, tracing::SpanContext(context.getTraceId(), id, context.getTraceFlags()));
+      tracer.addSpanOpen(id, parent, kj::mv(name), time);
+    });
+  }
+  void submitSpanClose(
+      tracing::SpanId id, kj::Date start, kj::Date end, Span::TagMap&& tags) override {
+    tracer->runIfAlive([&](BaseTracer& tracer) {
+      tracer.addSpanClose(tracing::SpanEndData(id, end, kj::mv(tags)), start);
+    });
+  }
+  void submitSpanUpdate(tracing::SpanId id, tracing::SpanUpdate&& update) override {
+    tracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanUpdate(id, kj::mv(update)); });
+  }
+  void submitSpanException(tracing::SpanId id,
+      kj::Date time,
+      kj::Maybe<tracing::Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override {
+    tracer->runIfAlive([&](BaseTracer& tracer) {
+      tracer.addSpanException(id, time, kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+    });
+  }
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(next++);
+  }
+
+ private:
+  kj::Own<BaseTracer::WeakRef> tracer;
+  tracing::SpanContext context;
+  uint64_t next = 100;
+};
+
+KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span events") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader(), .mainModuleSource = R"JS(
+    globalThis.childEvents = 0;
+    export default {
+      tailStream(onset) {
+        if (onset.spanContext.traceFlags !== 3) throw new Error('onset flags');
+        return event => {
+          if (event.spanContext.traceFlags !== 3) throw new Error('child flags');
+          if (event.event.type === 'spanOpen') globalThis.childEvents++;
+        };
+      }
+    };
+  )JS"_kj});
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  auto tails = kj::heapArray<kj::Own<WorkerInterface>>(1);
+  tails[0] = kj::heap<FixtureTail>(fixture, tasks);
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
+      kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
+  tracer->setMakeUserRequestSpanFunc([&](tracing::SpanContext identity) {
+    auto submitter =
+        kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity));
+    return SpanParent(kj::rc<UserSpanObserver>(
+        kj::mv(submitter), identity.getTraceId(), identity.getTraceFlags()));
+  });
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.clone());
+  auto& invocation = request->getInvocationSpanContext();
+  invocation = tracing::InvocationSpanContext(invocation.getTraceId(), invocation.getInvocationId(),
+      invocation.getSpanId(), tracing::TraceFlags(3));
+  tracer->setEventInfoInternal(invocation, kj::none, kj::UNIX_EPOCH, tracing::CustomEventInfo());
+  request->delivered();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    auto tracing = env.js.alloc<api::Tracing>();
+    auto child = context->getCurrentUserTraceSpan().newChild("native-child"_kjc);
+    auto nested = context->makeUserAsyncTraceScope(env.lock, SpanParent(child));
+    KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == 3);
+    auto grandchild = tracing->startSpan(env.js, kj::str("native-grandchild"));
+    KJ_EXPECT(grandchild->spanContext().traceFlags == 3);
+    grandchild->end();
+    child.end();
+  });
+  fixture.drainAndDestroy(kj::mv(request));
+  tracer = nullptr;
+  tasks.onEmpty().wait(fixture.getWaitScope());
+  fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto script = jsg::check(v8::Script::Compile(env.js.v8Context(),
+        env.js.str(
+            "if (globalThis.childEvents !== 2) throw new Error('missing tail child events');"_kj)));
+    jsg::check(script->Run(env.js.v8Context()));
+  });
+}
+
+kj::Rc<WorkerTracer> makeSinkTracer(
+    kj::TaskSet& tasks, bool streaming, PipelineLogLevel level = PipelineLogLevel::FULL) {
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  kj::Maybe<kj::Own<tracing::TailStreamWriter>> writer;
+  if (streaming)
+    writer = kj::heap<tracing::TailStreamWriter>(tracing::TailStreamWriter::Pending(), tasks);
+  auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), level, kj::none, kj::mv(writer));
+  tracer->markUnused();
+  tracer->setMakeUserRequestSpanFunc(
+      [](tracing::SpanContext identity) { return SpanParent::fromSpanContext(kj::mv(identity)); });
+  return tracer;
+}
+
+KJ_TEST("JS sampling projection uses export capability without changing native decisions") {
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  for (bool enabled: {false, true}) {
+    for (bool streaming: {false, true}) {
+      for (auto level: {PipelineLogLevel::NONE, PipelineLogLevel::FULL}) {
+        for (int flags: {-1, 0, 1, 3}) {
+          capnp::MallocMessageBuilder message;
+          auto features = message.initRoot<CompatibilityFlags>();
+          features.setOpentelemetryApi(enabled);
+          TestFixture fixture({.featureFlags = features.asReader()});
+          auto context = fixture.newIoContext();
+          auto tracer = makeSinkTracer(tasks, streaming, level);
+          KJ_EXPECT(tracer->exportsUserSpans() == (streaming && level == PipelineLogLevel::FULL));
+          auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+          auto& invocation = request->getInvocationSpanContext();
+          if (flags >= 0) {
+            invocation = tracing::InvocationSpanContext(invocation.getTraceId(),
+                invocation.getInvocationId(), invocation.getSpanId(), tracing::TraceFlags(flags));
+          }
+          request->delivered();
+          fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+            auto scope = context->makeRequestTraceScope(env.lock);
+            auto expected = flags >= 0                                    ? flags
+                : enabled && streaming && level == PipelineLogLevel::FULL ? 1
+                                                                          : 0;
+            KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == expected);
+            auto primitive = env.js.alloc<api::TracingContext>();
+            KJ_EXPECT(KJ_ASSERT_NONNULL(primitive->getInvocationSpanContext(env.js)).traceFlags ==
+                expected);
+            auto native = KJ_ASSERT_NONNULL(context->getCurrentUserTraceSpan().toSpanContext());
+            if (flags < 0) {
+              KJ_EXPECT(native.getTraceFlags() == kj::none);
+              KJ_EXPECT(context->getInvocationSpanContext().getTraceFlags() == kj::none);
+            } else {
+              KJ_EXPECT(KJ_ASSERT_NONNULL(native.getTraceFlags()) == tracing::TraceFlags(flags));
+            }
+          });
+          fixture.drainAndDestroy(kj::mv(request));
+        }
+      }
+    }
+  }
+}
+
+KJ_TEST("owner-less tracing overrides are safe without an incoming request") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader()});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  context
+      ->run([&](Worker::Lock& lock) {
+    // Cancel the completed event while still in the context's last JS turn.
+    { auto finished = request->finishScheduled(kj::mv(request)); }
+    jsg::Lock& js = lock;
+    jsg::AsyncContextFrame::Scope fresh(js, kj::none);
+    KJ_EXPECT(!context->hasCurrentIncomingRequest());
+    auto primitive = js.alloc<api::TracingContext>();
+    primitive->withActiveSpanContext(js, kj::none,
+        jsg::Function<jsg::JsRef<jsg::JsValue>()>(
+            [](jsg::Lock& js) { return jsg::JsRef(js, js.undefined()); }));
+  }).wait(fixture.getWaitScope());
+}
+
+KJ_TEST("foreign trace owners use the current request") {
+  for (bool observed: {false, true}) {
+    capnp::MallocMessageBuilder message;
+    auto features = message.initRoot<CompatibilityFlags>();
+    features.setOpentelemetryApi(true);
+    TestFixture fixture({.featureFlags = features.asReader()});
+    auto sourceContext = fixture.newIoContext();
+    auto source = fixture.newUndeliveredIncomingRequest(
+        *sourceContext, observed ? kj::Maybe<kj::Rc<BaseTracer>>(makeObservedTracer()) : kj::none);
+    source->delivered();
+    kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+    fixture.enterContext(*source, [&](const TestFixture::Environment& env) {
+      auto scope = sourceContext->makeRequestTraceScope(env.lock);
+      captured = jsg::AsyncContextFrame::currentRef(env.js);
+    });
+    auto targetContext = fixture.newIoContext();
+    auto tracer = makeObservedTracer();
+    auto target = fixture.newUndeliveredIncomingRequest(*targetContext, tracer.clone());
+    target->delivered();
+    fixture.enterContext(*target, [&](const TestFixture::Environment& env) {
+      jsg::AsyncContextFrame::Scope restored(env.js, captured);
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(targetContext->getWorkerTracer()) == tracer.get());
+      auto nested = targetContext->makeUserAsyncTraceScope(env.lock, observedParent(9));
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(targetContext->getWorkerTracer()) == tracer.get());
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(targetContext->getCurrentUserTracer()) == tracer.get());
+    });
+    fixture.drainAndDestroy(kj::mv(source));
+    fixture.drainAndDestroy(kj::mv(target));
+  }
+}
+
+KJ_TEST("actor frames retain their JS sampling decision after their exporting request expires") {
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader(),
+    .actorId = Worker::Actor::Id(kj::str("sampling-owner"))});
+  auto context = fixture.newIoContext();
+  auto first = fixture.newUndeliveredIncomingRequest(*context, makeSinkTracer(tasks, true));
+  first->delivered();
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == 1);
+    captured = jsg::AsyncContextFrame::currentRef(env.js);
+  });
+  auto second = fixture.newUndeliveredIncomingRequest(*context, makeSinkTracer(tasks, false));
+  second->delivered();
+  fixture.drainAndDestroy(kj::mv(first));
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    auto current = context->makeRequestTraceScope(env.lock);
+    KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == 0);
+    jsg::AsyncContextFrame::Scope restored(env.js, captured);
+    KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == 1);
+    KJ_EXPECT(!activeSpan(env)->getIsTraced());
+    auto nested = context->makeUserAsyncTraceScope(env.lock, observedParent(9));
+    KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == 1);
+    KJ_EXPECT(context->getWorkerTracer() == kj::none);
+  });
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("current no-tracer actor frames never borrow a newer invocation's sampling decision") {
+  capnp::MallocMessageBuilder message;
+  auto features = message.initRoot<CompatibilityFlags>();
+  features.setOpentelemetryApi(true);
+  TestFixture fixture({.featureFlags = features.asReader(),
+    .actorId = Worker::Actor::Id(kj::str("untraced-owner"))});
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  auto context = fixture.newIoContext();
+  auto first = fixture.newIncomingRequest(*context);
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    auto scope = context->makeRequestTraceScope(env.lock);
+    captured = jsg::AsyncContextFrame::currentRef(env.js);
+  });
+  auto second = fixture.newUndeliveredIncomingRequest(*context, makeSinkTracer(tasks, true));
+  second->delivered();
+  fixture.drainAndDestroy(kj::mv(first));
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    auto current = context->makeRequestTraceScope(env.lock);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(context->getDefaultJsTraceFlags()).isSampled());
+    jsg::AsyncContextFrame::Scope restored(env.js, captured);
+    KJ_EXPECT(context->getWorkerTracer() == kj::none);
+    KJ_EXPECT(!KJ_ASSERT_NONNULL(context->getDefaultJsTraceFlags()).isSampled());
+    KJ_EXPECT(context->getUserTraceInvocationContext() == kj::none);
+    auto nested = context->makeUserAsyncTraceScope(env.lock, observedParent(9));
+    KJ_EXPECT(context->getWorkerTracer() == kj::none);
+    KJ_EXPECT(!KJ_ASSERT_NONNULL(context->getDefaultJsTraceFlags()).isSampled());
+  });
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("active invocation identity uses the observer only when the flag is enabled") {
+  for (bool enabled: {false, true}) {
+    capnp::MallocMessageBuilder message;
+    auto features = message.initRoot<CompatibilityFlags>();
+    features.setOpentelemetryApi(enabled);
+    TestFixture fixture({.featureFlags = features.asReader()});
+    auto context = fixture.newIoContext();
+    auto request = fixture.newUndeliveredIncomingRequest(*context, makeObservedTracer());
+    request->delivered();
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto scope = context->makeRequestTraceScope(env.lock);
+      auto identity = activeSpan(env)->spanContext();
+      auto& invocation = request->getInvocationSpanContext();
+      KJ_EXPECT(identity.traceId ==
+          (enabled ? tracing::TraceId(1, 2).toW3C() : invocation.getTraceId().toW3C()));
+      KJ_EXPECT(identity.spanId ==
+          (enabled ? tracing::SpanId(2).toGoString() : invocation.getSpanId().toGoString()));
+    });
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+}
+
 KJ_TEST("unobserved scopes retain identity and materialize their no-op span lazily") {
   for (bool hasTracer: {false, true}) {
     TestFixture fixture;

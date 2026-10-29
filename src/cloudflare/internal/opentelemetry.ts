@@ -343,6 +343,7 @@ class Tracer {
       const mode = tracingContext.getSpanCreationMode();
       if (parent.getValue(SUPPRESS)) return new Span();
       if (mode === 'untraced') {
+        if (options.root) return new Span();
         const identity = attempt(
           () => getSpan(parent)?.spanContext(),
           undefined
@@ -354,28 +355,20 @@ class Tracer {
       // Requested roots remain invocation children until the tail schema supports detached
       // roots. Even an unsampled invocation must keep its propagation context.
       if (options.root) parent = context.active().deleteValue(SPAN);
-      const invocation = attempt(
-        () => tracingContext.getInvocationSpanContext(),
-        undefined
-      );
       const parentSpan = getSpan(parent);
       const parentSpanContext = attempt(
         () => parentSpan?.spanContext(),
         undefined
       );
       if (mode === 'unsampled') {
+        // The platform invocation's sampling decision wins over an explicitly sampled parent.
+        // Explicit unsampled parents likewise never override the platform into recording.
         const identity = valid(parentSpanContext)
           ? parentSpanContext
-          : invocation;
+          : attempt(() => tracingContext.getInvocationSpanContext(), undefined);
         return valid(identity) ? nonRecording(identity) : new Span();
       }
-      // Native spans expose absent flags as zero; that is not a head-sampling decision.
-      if (
-        valid(parentSpanContext) &&
-        !(parentSpanContext.traceFlags & 1) &&
-        !(parentSpan instanceof tracing.Span) &&
-        !(parentSpan instanceof Span && parentSpan.inner !== undefined)
-      ) {
+      if (valid(parentSpanContext) && !(parentSpanContext.traceFlags & 1)) {
         return nonRecording(parentSpanContext);
       }
       const inner = context.with(parent, () =>

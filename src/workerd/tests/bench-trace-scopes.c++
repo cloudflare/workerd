@@ -15,7 +15,8 @@ jsg::AsyncContextFrame::StorageScope makeLegacyTraceScope(const TestFixture::Env
   static SpanParent unobservedSpan(nullptr);
   auto span = kj::Own<SpanParent>(&unobservedSpan, kj::NullDisposer::instance);
   auto internalValue = jsg::wrapOpaque(env.js.v8Context(), env.context.addObject(kj::mv(span)));
-  auto userContext = kj::heap<UserTraceAsyncContext>(SpanParent(nullptr), kj::none, kj::none);
+  auto userContext = kj::heap<UserTraceAsyncContext>(
+      SpanParent(nullptr), kj::none, kj::none, tracing::TraceFlags(0));
   auto userValue = jsg::wrapOpaque(env.js.v8Context(), env.context.addObject(kj::mv(userContext)));
   jsg::AsyncContextFrame::StorageEntry entries[] = {
     {env.lock.getTraceAsyncContextKey(), env.js.v8Ref(internalValue)},

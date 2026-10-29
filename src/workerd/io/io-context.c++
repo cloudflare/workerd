@@ -237,6 +237,8 @@ IoContext::IoContext(ThreadContext& thread,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
       worker(kj::mv(workerParam)),
+      opentelemetryApiEnabled(
+          worker->getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       asyncTracker(makeAsyncTracker(*worker, actor)),
@@ -329,7 +331,7 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
 tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
     SpanParent& userSpan) {
   auto& base = getInvocationSpanContext();
-  if (context->getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+  if (context->isOpentelemetryApiEnabled()) {
     KJ_IF_SOME(identity, userSpan.toSpanContext()) {
       KJ_IF_SOME(id, identity.getSpanId()) {
         if (id != tracing::SpanId::nullId) {
@@ -387,6 +389,13 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
     auto& invCtx = getInvocationSpanContext();
+    if (context->isOpentelemetryApiEnabled()) {
+      // Experimental JS-only policy: absent and exported means sampled. This local policy
+      // still needs product sign-off. Cache it once per invocation, never in native flags.
+      localSampled = invCtx.getTraceFlags().map([](auto flags) {
+        return flags.isSampled();
+      }).orDefault([&] { return workerTracer->exportsUserSpans(); });
+    }
     rootUserTraceSpan =
         workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
   }
@@ -1507,15 +1516,15 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   SpanParent userSpan(nullptr);
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
-  bool otel = getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi();
+  bool otel = opentelemetryApiEnabled;
   bool inherited = false;
+  bool localSampled = false;
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
     if (otel) {
-      KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
-        inherited = frame.get(*lock.getUserTraceAsyncContextKey()) != kj::none;
-      }
+      inherited = hasCurrentUserTraceOwner();
       KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+        localSampled = owner.getLocalSampled();
         invocationSpanContext =
             owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
         KJ_IF_SOME(value, owner.getTracer()) {
@@ -1529,13 +1538,14 @@ jsg::Value IoContext::makeUserTraceScopeValue(
 
   // Owner-less entry frames (including RPC and hibernatable WebSocket handlers) inherit the
   // current request. A captured owner without a tracer is deliberately not replaced.
-  if (!otel || !inherited) {
+  if ((!otel || !inherited) && !incomingRequests.empty()) {
     if (!otel && !userSpan.isObserved()) {
       return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
     }
     KJ_IF_SOME(value, getCurrentIncomingRequest().getWorkerTracer()) {
       tracer = value.getWeakRef();
     }
+    localSampled = getCurrentIncomingRequest().localSampled;
     if (!otel) {
       auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
       auto id = userSpan.getSpanId();
@@ -1552,12 +1562,32 @@ jsg::Value IoContext::makeUserTraceScopeValue(
     return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
   }
 
-  auto asyncContext = kj::heap<UserTraceAsyncContext>(
-      kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
+  auto asyncContext = kj::heap<UserTraceAsyncContext>(kj::mv(userSpan), kj::mv(tracer),
+      kj::mv(invocationSpanContext), tracing::TraceFlags(localSampled ? 1 : 0));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
   return js.v8Ref(contextHandle);
+}
+
+bool IoContext::hasCurrentUserTraceOwner() {
+  KJ_IF_SOME(lock, currentLock) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+      KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
+        jsg::Lock& js = lock;
+        auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, value.getHandle(js));
+        KJ_SWITCH_ONEOF(state) {
+          KJ_CASE_ONEOF(id, Id) {
+            return id.isCurrent();
+          }
+          KJ_CASE_ONEOF(owner, IoOwn<UserTraceAsyncContext>) {
+            return owner.tryGet() != kj::none;
+          }
+        }
+      }
+    }
+  }
+  return false;
 }
 
 kj::Maybe<UserTraceAsyncContext&> IoContext::getCurrentUserTraceAsyncContext() {
@@ -1583,7 +1613,8 @@ kj::Maybe<UserTraceAsyncContext&> IoContext::getCurrentUserTraceAsyncContext() {
 kj::Maybe<BaseTracer&> IoContext::getCurrentUserTracer() {
   KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
     KJ_IF_SOME(weak, owner.getTracer()) {
-      // The isolate lock prevents tracer destruction until this synchronous caller returns.
+      // Synchronous single-threaded use is safe until re-entering user JS. Callers that do
+      // re-enter JS must clone the tracer first so property getters cannot invalidate it.
       return weak.tryGet();
     }
   }
@@ -1592,23 +1623,38 @@ kj::Maybe<BaseTracer&> IoContext::getCurrentUserTracer() {
 
 kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
   if (incomingRequests.empty()) return kj::none;
-  if (!getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+  if (!opentelemetryApiEnabled) {
     return getCurrentIncomingRequest().getWorkerTracer();
   }
-  KJ_IF_SOME(lock, currentLock) {
-    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
-      if (frame.get(*lock.getUserTraceAsyncContextKey()) != kj::none) {
-        // Logs, diagnostics and exceptions need the same sink as spans in this frame. An
-        // untraced or stale frame must not borrow a newer overlapping request's tracer.
-        return getCurrentUserTracer();
-      }
-    }
+  if (hasCurrentUserTraceOwner()) {
+    // Logs, diagnostics and exceptions need the same sink as spans in this frame. An
+    // untraced or stale frame must not borrow a newer overlapping request's tracer.
+    return getCurrentUserTracer();
   }
   return getCurrentIncomingRequest().getWorkerTracer();
 }
 
+kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationContext() {
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    return owner.getInvocationSpanContext().map([](auto& context) { return context.clone(); });
+  }
+  if (opentelemetryApiEnabled && hasCurrentUserTraceOwner()) return kj::none;
+  if (incomingRequests.empty()) return kj::none;
+  return getCurrentIncomingRequest().getInvocationSpanContext().clone();
+}
+
+kj::Maybe<tracing::TraceFlags> IoContext::getDefaultJsTraceFlags() {
+  if (!opentelemetryApiEnabled) return kj::none;
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+    return tracing::TraceFlags(owner.getLocalSampled() ? 1 : 0);
+  }
+  if (hasCurrentUserTraceOwner()) return tracing::TraceFlags(0);
+  return tracing::TraceFlags(
+      !incomingRequests.empty() && getCurrentIncomingRequest().localSampled ? 1 : 0);
+}
+
 tracing::InvocationSpanContext IoContext::getInvocationSpanContext() {
-  if (getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+  if (opentelemetryApiEnabled) {
     KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
       KJ_IF_SOME(context, owner.getSpanInvocationContext()) {
         return kj::mv(context);
