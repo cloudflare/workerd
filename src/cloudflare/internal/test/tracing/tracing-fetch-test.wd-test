@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fetch-test", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [
+        (name = "target", service = "fetch-target"),
+        (name = "unreachable", service = "unreachable"),
+      ],
+      streamingTails = ["tail"],
+    )),
+    (name = "fetch-target", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-mock.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+    (name = "unreachable", external = (address = "127.0.0.1:0", http = ())),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-tail.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

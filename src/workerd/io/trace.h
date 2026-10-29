@@ -1544,6 +1544,9 @@ class TraceContext {
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+
+  // Mark both spans as failed and record the user-visible exception.
+  void recordException(kj::StringPtr name, kj::StringPtr message);
   bool isObserved() {
     return span.isObserved() || userSpan.isObserved();
   }

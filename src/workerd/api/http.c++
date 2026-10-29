@@ -1574,11 +1574,12 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
       KJ_UNREACHABLE;
   }
 
+  auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
     ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
     ctx.setTag("http.request.method"_kjc, kj::str(request.getMethodEnum()));
-    ctx.setTag("url.full"_kjc, request.getUrl());
+    ctx.setTag("url.full"_kjc, url.asPtr());
 
     KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
       ctx.setTag("user_agent.original"_kjc, userAgent);
@@ -1597,8 +1598,44 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
     }
   }
 
-  auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
   return {kj::mv(headers), kj::mv(url)};
+}
+
+struct FetchFailure {
+  kj::Exception exception;
+};
+
+template <typename T>
+using FetchResponseResult = kj::OneOf<T, FetchFailure>;
+
+template <typename T>
+kj::Promise<FetchResponseResult<T>> captureFetchResponse(kj::Promise<T> promise) {
+  return promise.then([](T&& response) -> FetchResponseResult<T> { return kj::mv(response); },
+      [](kj::Exception&& exception) -> FetchResponseResult<T> {
+    return FetchFailure{kj::mv(exception)};
+  });
+}
+
+[[noreturn]] void throwFetchException(jsg::Lock& js,
+    kj::Maybe<TraceContext>& traceContext,
+    kj::Exception exception) {
+  KJ_IF_SOME(ctx, traceContext) {
+    if (ctx.isObserved()) {
+      // Convert once so the span sees the same sanitized exception as the caller, never an
+      // internal KJ description (which can contain implementation details).
+      auto error = js.exceptionToJsValue(kj::mv(exception));
+      auto value = error.getHandle(js);
+      KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
+        auto name = object.get(js, "name").toString(js);
+        auto message = object.get(js, "message").toString(js);
+        ctx.recordException(name, message);
+      } else {
+        ctx.recordException("Error", value.toString(js));
+      }
+      js.throwException(value);
+    }
+  }
+  js.throwException(kj::mv(exception));
 }
 
 struct ActorFetchFailure {
@@ -1723,6 +1760,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
   response.body = response.body.attach(kj::mv(client));
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
+    if (response.statusCode >= 400) {
+      ctx.setTag("error.type"_kjc, kj::str(response.statusCode));
+    }
     KJ_IF_SOME(length, response.body->tryGetLength()) {
       ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
     }
@@ -2018,13 +2058,17 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
           });
       }
     }
-    responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
-    return ioContext.awaitIo(js, kj::mv(responsePromise),
+    auto resultPromise = captureFetchResponse(kj::mv(responsePromise));
+    resultPromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(resultPromise));
+    return ioContext.awaitIo(js, kj::mv(resultPromise),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
             client = kj::mv(client), traceContext = kj::mv(traceContext), callStart](
-            jsg::Lock& js, kj::HttpClient::Response&& response) mutable {
+            jsg::Lock& js, FetchResponseResult<kj::HttpClient::Response>&& result) mutable {
+      KJ_IF_SOME(failure, result.tryGet<FetchFailure>()) {
+        throwFetchException(js, traceContext, kj::mv(failure.exception));
+      }
       return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          kj::mv(client), traceContext, kj::mv(response), callStart);
+          kj::mv(client), traceContext, kj::mv(result.get<kj::HttpClient::Response>()), callStart);
     });
   }
 }

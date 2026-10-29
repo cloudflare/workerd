@@ -2089,6 +2089,14 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
       observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void TraceContext::recordException(kj::StringPtr name, kj::StringPtr message) {
+  setTag("error.type"_kjc, name);
+  span.setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR));
+  userSpan.setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR));
+  span.recordException(kj::none, kj::str(name), kj::str(message), kj::none);
+  userSpan.recordException(kj::none, kj::str(name), kj::str(message), kj::none);
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (asyncTraceResource.getId() != 0) {
     kj::String text;
