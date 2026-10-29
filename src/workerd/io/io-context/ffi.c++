@@ -5,7 +5,6 @@
 #include "ffi.h"
 
 #include <workerd/io/io-context/ffi.rs.h>
-#include <workerd/rust/jsg/jsg.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -102,8 +101,11 @@ void io_context_await_io(
           case IoCallbackOutcome::Succeeded:
             return;
           case IoCallbackOutcome::Failed:
-            // IoContext::run() logs the exception and fails the task with it.
-            ::workerd::rust::jsg::propagatePendingException();
+            // The exception, or termination, is pending in V8. JsExceptionThrown is how
+            // IoContext::run() expects to learn of it: it then logs the exception as uncaught,
+            // with its stack, and fails the task with it, as for C++ code it runs. This is the one
+            // use of C++ JSG here, counted in src/rust/jsg/cpp-jsg-allowlist.txt.
+            throw jsg::JsExceptionThrown();
           case IoCallbackOutcome::Panicked:
             // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
             // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception

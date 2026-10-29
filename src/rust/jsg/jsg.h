@@ -27,19 +27,13 @@ namespace workerd::rust::jsg {
 // on the IoContext, so the scope is a template parameter, with no default so that every caller
 // has to choose it.
 
-// Propagates the exception or termination that Rust left pending in the isolate to the C++
-// caller, as C++ JSG's `JsExceptionThrown`, which callers such as `IoContext::run()` handle.
-[[noreturn]] inline void propagatePendingException() {
-  throw ::workerd::jsg::JsExceptionThrown();
-}
-
 // Calls a Rust module callback in a `CallScope`. An empty result means it panicked and threw.
 template <typename CallScope>
 v8::Local<v8::Value> callModuleCallback(ModuleCallback callback, ::workerd::jsg::Lock& js) {
   CallScope scope;
   v8::Local<v8::Value> value;
   if (!maybe_local_from_ffi<v8::Value>(callback(js.v8Isolate)).ToLocal(&value)) {
-    propagatePendingException();
+    throw ::workerd::jsg::JsExceptionThrown();
   }
   return value;
 }

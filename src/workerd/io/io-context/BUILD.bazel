@@ -27,7 +27,6 @@ wd_cc_library(
     hdrs = ["ffi.h"],
     deps = [
         ":ffi.rs@cxx",
-        "//src/rust/jsg:bridge",
         "//src/workerd/io",
     ],
 )
