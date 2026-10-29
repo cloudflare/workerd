@@ -51,6 +51,12 @@ wpt_test(
 )
 
 wpt_test(
+    name = "webmessaging",
+    config = "webmessaging-test.ts",
+    wpt_directory = "@wpt//:webmessaging@module",
+)
+
+wpt_test(
     name = "dom/events",
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
