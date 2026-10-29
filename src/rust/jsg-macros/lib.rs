@@ -46,6 +46,7 @@ use utils::extract_named_fields;
 use utils::fast_api_signature;
 use utils::is_lock_ref;
 use utils::is_named_this;
+use utils::is_null_or_undefined_type;
 use utils::is_option_type;
 use utils::is_rc_self;
 use utils::is_result_type;
@@ -62,6 +63,8 @@ use utils::this_param;
 /// Only `pub` fields are projected into the JavaScript object. Each converts with its `ToJS`
 /// impl, and a field whose conversion fails fails the struct's conversion with that error.
 /// The generated `Traced` impl visits every field, so a field can be a `jsg::Rc<R>`.
+/// Optional fields use `Option<T>` or `jsg::NullOrUndefined<T>`; prefer the latter to
+/// `Option<jsg::Nullable<T>>` to distinguish `null` from `undefined`.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata (used in diagnostics/type reporting), not to define a JS class.
 #[proc_macro_attribute]
@@ -92,10 +95,16 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
         let field_name_str = field_name.to_string();
         let field_type = &field.ty;
-        let optional = is_option_type(field_type);
-        all_optional &= optional;
+        let present = if is_option_type(field_type) {
+            Some(quote! { this.#field_name.is_some() })
+        } else if is_null_or_undefined_type(field_type) {
+            Some(quote! { !this.#field_name.is_undefined() })
+        } else {
+            None
+        };
+        all_optional &= present.is_some();
 
-        to_js_fields.push((field_name, field_name_str.clone(), optional));
+        to_js_fields.push((field_name, field_name_str.clone(), present));
         // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
             let prop = obj.get(lock, #field_name_str)?;
@@ -107,7 +116,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Like C++ JSG, null or undefined is an empty dictionary, which is an
     // error if a field is required.
     let empty = if all_optional {
-        quote! { return Ok(Self { #(#field_names: None),* }); }
+        quote! { return Ok(Self { #(#field_names: Default::default()),* }); }
     } else {
         quote! {
             return Err(jsg::Error::new_type_error(format!(
@@ -195,31 +204,30 @@ fn struct_traced_impl(
 }
 
 /// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
-/// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
-/// `fast_jsg_struct` flag.
-fn to_js_fn_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
+/// JavaScript name and the condition for its present state, if optional. Like C++ JSG's
+/// `JSG_STRUCT`, it follows the `fast_jsg_struct` flag.
+fn to_js_fn_body(
+    fields: &[(&syn::Ident, String, Option<proc_macro2::TokenStream>)],
+) -> proc_macro2::TokenStream {
     // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
-    let data_properties = fields.iter().map(|(field_name, js_name, optional)| {
-        let value = if *optional {
-            quote! {
-                match this.#field_name {
-                    Some(value) => jsg::ToJS::to_js(value, lock)?,
-                    None => lock.undefined(),
-                }
-            }
-        } else {
-            quote! { jsg::ToJS::to_js(this.#field_name, lock)? }
-        };
-        quote! { properties.push((#js_name, #value)); }
+    let data_properties = fields.iter().map(|(field_name, js_name, _)| {
+        quote! {
+            properties.push((#js_name, jsg::ToJS::to_js(this.#field_name, lock)?));
+        }
     });
     // Set() skips an absent optional field rather than setting it to undefined.
-    let field_sets = fields.iter().map(|(field_name, js_name, optional)| {
+    let field_sets = fields.iter().map(|(field_name, js_name, present)| {
         let set = quote! {
             let value = jsg::ToJS::to_js(value, lock)?;
             obj.set(lock, #js_name, value)?;
         };
-        if *optional {
-            quote! { if let Some(value) = this.#field_name { #set } }
+        if let Some(present) = present {
+            quote! {
+                if #present {
+                    let value = this.#field_name;
+                    #set
+                }
+            }
         } else {
             quote! { { let value = this.#field_name; #set } }
         }
@@ -528,7 +536,7 @@ fn unwrap_argument(
     };
     // Like C++ JSG (TypeWrapper::unwrap() in type-wrapper.h), a missing
     // required argument or a top-level type mismatch is "Failed to execute
-    // ...". Only Option and Lenient arguments may be omitted.
+    // ...". FromJS::is_optional() determines whether an argument may be omitted.
     quote! {
         let not_of_type = || jsg::Error::new_type_error(format!(
             "Failed to execute '{}' on '{}': parameter {} is not of type '{}'.",

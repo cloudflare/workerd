@@ -25,6 +25,13 @@ it, the fields are defined as data properties, an absent optional field as `unde
 JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
 setter on `Object.prototype` runs, and what it throws is passed on.
 
+Optional fields can use `Option<T>` (`None` is absent) or `jsg::NullOrUndefined<T>`
+(`Undefined` is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>`
+when a field must distinguish `null` from `undefined`; its `Null` state always
+produces a property whose value is `null`. An absent input property becomes `None`
+or `Undefined`, respectively. If all public fields are optional, a `null` or
+`undefined` input is accepted as an empty dictionary.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
@@ -69,6 +76,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
   `this`, the lock comes right after `this`.
+- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::Lenient<T>` arguments may be omitted.
+  Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` for three distinct
+  `Some(T)`, `Null`, and `Undefined` states; omission produces `Undefined`.
+  A `jsg::Nullable<T>` argument remains required, although explicitly passing
+  `undefined` converts to `Null`. See [nullish value conversions](../jsg/README.md#nullablet-and-nullorundefinedt).
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
@@ -468,7 +480,8 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
-| `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
+| `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
+| `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
 | `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
 | `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |

@@ -20,6 +20,35 @@ Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<
 
 Per-isolate state for Rust resources exposed to JavaScript. Stores cached function templates.
 
+### `Nullable<T>` and `NullOrUndefined<T>`
+
+Use `Nullable<T>` for `T | null`: it coerces `undefined` to `null` on input and
+method arguments remain required. Use `NullOrUndefined<T>` for `T | null | undefined`
+with distinct `Some(T)`, `Null`, and `Undefined` states and optional method arguments.
+Prefer it to `Option<Nullable<T>>`. Both wrappers trace their contained value.
+
+| Rust type | Nullish input conversion | Omitted method argument |
+|---|---|---|
+| `Option<T>` | `undefined` → `None`; `null` is converted by `T` | `None` |
+| `Nullable<T>` | `null` or `undefined` → `Null` | `TypeError` |
+| `NullOrUndefined<T>` | `null` → `Null`; `undefined` → `Undefined` | `Undefined` |
+
+`NullOrUndefined::default()` is `Undefined`, without requiring `T: Default`.
+`as_ref()`, `as_mut()`, and `map()` preserve `Null` and `Undefined`.
+Conversions to and from `Option<Nullable<T>>` preserve all three states;
+`Nullable<T>` also converts into `NullOrUndefined<T>`.
+
+In a `#[jsg_struct]`, a missing `NullOrUndefined<T>` field reads as `Undefined`.
+When converting back to JavaScript, `Null` produces a `null` property; `Undefined`
+is omitted without `fast_jsg_struct`, or becomes an own `undefined` property with
+that flag, just as `None` does for an `Option<T>` field.
+
+`Lenient<T>` additionally preserves shallow conversion mismatches as `Unconvertable`.
+Converting it to `NullOrUndefined<T>` maps those mismatches to `Undefined`;
+`Lenient::to_parts()` returns `(NullOrUndefined<T>, Option<TracedGlobal<Value>>)`,
+with the original mismatched JavaScript value in the second element when present.
+Errors from nested conversions or JavaScript execution still propagate.
+
 ## Safety rules
 
 Every change to Rust JSG, and to the C++ shims under it, must follow these four rules. Each rule
@@ -153,6 +182,7 @@ struct MyResource {
     child: jsg::Rc<OtherResource>,
     maybe_child: Option<jsg::Rc<OtherResource>>,
     nullable_child: jsg::Nullable<jsg::Rc<OtherResource>>,
+    optional_nullable_child: jsg::NullOrUndefined<jsg::Rc<OtherResource>>,
 
     // jsg::Weak<T> fields — weak reference, does not keep the target alive
     observer: jsg::Weak<OtherResource>,
@@ -239,10 +269,12 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `jsg::Rc<T>` | Yes — strong edge | Keeps target alive through GC |
 | `Option<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
+| `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
 | `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
 | `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Vec<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` in the vec |
 | `HashMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
 | `BTreeMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
@@ -255,6 +287,7 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `jsg::v8::TracedGlobal<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
 | `Option<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
+| `jsg::NullOrUndefined<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction |
 | `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
