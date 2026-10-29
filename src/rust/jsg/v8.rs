@@ -4530,6 +4530,13 @@ impl GcVisitor {
         r.visit(self);
     }
 
+    /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
+    /// reference Rust JSG doesn't know, such as a C++ JSG `jsg::Ref`, through its own FFI. The
+    /// pointer is valid for the duration of the visit.
+    pub fn as_ffi(&mut self) -> *mut ffi::GcVisitor {
+        &raw mut self.handle
+    }
+
     /// Visits a `v8::TracedGlobal<T>` field during GC tracing.
     ///
     /// Implements the same strong↔traced dual-mode switching that `jsg::Data`

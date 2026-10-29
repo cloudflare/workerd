@@ -287,7 +287,11 @@ impl Error {
 
     /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
     /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
-    pub(crate) fn pending() -> Self {
+    ///
+    /// Outside this crate, it is for FFI shims that leave an exception pending and return an
+    /// empty result, as C++ code that calls into JavaScript does.
+    #[must_use]
+    pub fn pending() -> Self {
         Self {
             pending: true,
             ..Self::new_internal_error("a JavaScript exception is pending")
