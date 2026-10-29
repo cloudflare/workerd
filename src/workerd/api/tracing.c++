@@ -844,7 +844,8 @@ struct CreatedSpan {
   kj::Maybe<SpanParent> childSpanForAsyncContext;
 };
 
-CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
+CreatedSpan createSpan(
+    jsg::Lock& js, kj::String operationName, kj::Maybe<tracing::SpanMetadata> metadata = kj::none) {
   // We use qualified `user_tracing::Span` / `user_tracing::SpanState` throughout because an
   // unqualified `Span` in this namespace resolves to workerd::Span (the runtime span struct),
   // which is a different type.
@@ -868,6 +869,9 @@ CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
         // newChildFromUserCode (vs newChild) signals user-origin to the submitter so it can
         // skip the operation-name allowlist that gates runtime spans.
         auto childObserver = observer.newChildFromUserCode();
+        KJ_IF_SOME(value, metadata) {
+          childObserver->setOpenMetadata(kj::mv(value));
+        }
         state = kj::refcounted<user_tracing::UserSpanState>(kj::mv(childObserver),
             kj::ConstString(kj::heapString(operationName)), context.getDefaultJsTraceFlags());
         // Capture a SpanParent for the child so startActiveSpan() / enterSpan() can push it onto
@@ -1027,6 +1031,25 @@ v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
 
 jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operationName) {
   return createSpan(js, kj::mv(operationName)).span;
+}
+
+jsg::Ref<user_tracing::Span> TracingContext::startSpan(
+    jsg::Lock& js, kj::String operationName, SpanOptions options) {
+  JSG_REQUIRE(!IoContext::hasCurrent() || IoContext::current().isOpentelemetryApiEnabled(), Error,
+      "OpenTelemetry API is disabled");
+  tracing::SpanMetadata metadata;
+  JSG_REQUIRE(options.kind <= 4, TypeError, "Invalid span kind");
+  metadata.kind = static_cast<rpc::SpanKind>(options.kind + 1);
+  tracing::InstrumentationScope scope{
+    kj::ConstString(kj::mv(options.scope.name)), kj::none, kj::none};
+  KJ_IF_SOME(value, options.scope.version) {
+    scope.version = kj::ConstString(kj::mv(value));
+  }
+  KJ_IF_SOME(value, options.scope.schemaUrl) {
+    scope.schemaUrl = kj::ConstString(kj::mv(value));
+  }
+  metadata.scope = kj::mv(scope);
+  return createSpan(js, kj::mv(operationName), kj::mv(metadata)).span;
 }
 
 v8::Local<v8::Value> Tracing::withActiveSpan(jsg::Lock& js,

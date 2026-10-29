@@ -356,6 +356,11 @@ class ContextManager {
 const context = new ContextManager();
 
 class Tracer {
+  readonly scope: { name: string; version?: string; schemaUrl?: string };
+  constructor(scope: { name: string; version?: string; schemaUrl?: string }) {
+    this.scope = scope;
+  }
+
   startSpan(
     name: string,
     options: SpanOptions = {},
@@ -408,7 +413,16 @@ class Tracer {
         return nonRecording(parentSpanContext);
       }
       const inner = context.with(parent, () =>
-        tracing.startSpan(typeof name === 'string' ? name : '')
+        tracingContext.startSpan(typeof name === 'string' ? name : '', {
+          kind:
+            typeof options.kind === 'number' &&
+            Number.isInteger(options.kind) &&
+            options.kind >= 0 &&
+            options.kind <= 4
+              ? options.kind
+              : 0,
+          scope: this.scope,
+        })
       );
       const span =
         !inner.isTraced && valid(parentSpanContext)
@@ -461,7 +475,13 @@ const trace = {
     );
     let tracer = tracers.get(key);
     if (tracer === undefined) {
-      tracer = new Tracer();
+      tracer = new Tracer({
+        name: typeof name === 'string' ? name : '',
+        ...(typeof version === 'string' ? { version } : {}),
+        ...(typeof options?.schemaUrl === 'string'
+          ? { schemaUrl: options.schemaUrl }
+          : {}),
+      });
       tracers.set(key, tracer);
     }
     return tracer;

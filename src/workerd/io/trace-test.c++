@@ -712,6 +712,43 @@ KJ_TEST("Read/Write SpanClose works") {
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
 }
 
+KJ_TEST("Span metadata survives cloning and both RPC representations") {
+  SpanMetadata metadata;
+  metadata.kind = rpc::SpanKind::CONSUMER;
+  metadata.scope = InstrumentationScope{
+    "library"_kjc, kj::ConstString("1.2"_kjc), kj::ConstString("https://example.com/schema"_kjc)};
+  SpanOpen open(42, "operation"_kjc);
+  open.metadata = metadata.clone();
+  capnp::MallocMessageBuilder message;
+  open.clone().copyTo(message.initRoot<rpc::Trace::SpanOpen>());
+  SpanOpen copy(message.getRoot<rpc::Trace::SpanOpen>());
+  auto& result = KJ_ASSERT_NONNULL(copy.metadata);
+  KJ_ASSERT(result.kind == rpc::SpanKind::CONSUMER);
+  auto& scope = KJ_ASSERT_NONNULL(result.scope);
+  KJ_ASSERT(scope.name == "library");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(scope.version) == "1.2");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(scope.schemaUrl) == "https://example.com/schema");
+
+  SpanOpenData data(42, 41, "operation"_kjc, kj::UNIX_EPOCH, metadata.clone());
+  capnp::MallocMessageBuilder rpcMessage;
+  data.copyTo(rpcMessage.initRoot<rpc::SpanOpenData>());
+  SpanOpenData rpcCopy(rpcMessage.getRoot<rpc::SpanOpenData>());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(rpcCopy.metadata).kind == rpc::SpanKind::CONSUMER);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(rpcCopy.metadata).scope).name == "library");
+}
+
+KJ_TEST("Span metadata preserves missing optional fields") {
+  SpanMetadata metadata;
+  metadata.kind = rpc::SpanKind::INTERNAL;
+  metadata.scope = InstrumentationScope{"library"_kjc, kj::none, kj::none};
+  capnp::MallocMessageBuilder builder;
+  metadata.copyTo(builder.initRoot<rpc::SpanMetadata>());
+  SpanMetadata copy(builder.getRoot<rpc::SpanMetadata>());
+  auto& scope = KJ_ASSERT_NONNULL(copy.scope);
+  KJ_ASSERT(scope.version == kj::none);
+  KJ_ASSERT(scope.schemaUrl == kj::none);
+}
+
 KJ_TEST("Read/Write SpanUpdate name works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();

@@ -62,6 +62,15 @@ class BaseTracer: public kj::Refcounted {
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
+  // Open an OTel span, retaining its immutable metadata when supported by the backend.
+  virtual void addSpanOpenWithMetadata(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      tracing::SpanMetadata metadata) {
+    addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+
   // Add a span close event.
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
   virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
@@ -183,6 +192,11 @@ class WorkerTracer final: public BaseTracer {
       kj::ConstString operationName,
       kj::Date startTime) override;
   void setUserSpanContext(tracing::SpanId spanId, tracing::SpanContext context) override;
+  void addSpanOpenWithMetadata(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      tracing::SpanMetadata metadata) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
@@ -258,6 +272,11 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
   kj::HashMap<uint64_t, tracing::SpanContext> userSpanContexts;
   tracing::InvocationSpanContext spanEventContext(tracing::SpanId spanId);
+  void addSpanOpenImpl(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      kj::Maybe<tracing::SpanMetadata> metadata);
 };
 
 class SpanSubmitter: public kj::Refcounted {
@@ -276,6 +295,15 @@ class SpanSubmitter: public kj::Refcounted {
       kj::ConstString operationName,
       kj::Date startTime) {
     return submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+
+  // Open a user span carrying OTel metadata. Older backends can retain their existing policy.
+  virtual bool submitUserSpanOpenWithMetadata(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      tracing::SpanMetadata metadata) {
+    return submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 
   // Called when a span is closed. Together with the open data, provides all span information.
@@ -341,6 +369,9 @@ class UserSpanObserver final: public SpanObserver {
   kj::Rc<SpanObserver> newChild() override;
   kj::Rc<SpanObserver> newChildFromUserCode() override;
   void onOpen(kj::ConstString operationName, kj::Date startTime) override;
+  void setOpenMetadata(tracing::SpanMetadata metadata) override {
+    openMetadata = kj::mv(metadata);
+  }
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
   void onUpdateStatus(tracing::SpanStatus&& status) override;
@@ -369,6 +400,7 @@ class UserSpanObserver final: public SpanObserver {
   // children created via `newChild()` — runtime sub-operations nested inside an enterSpan
   // callback (e.g. `kv_get`) should remain subject to runtime-span policies.
   bool fromUserCode = false;
+  kj::Maybe<tracing::SpanMetadata> openMetadata;
 };
 
 }  // namespace workerd

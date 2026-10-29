@@ -2,10 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import type { TracingSpanContext } from './tracing';
+import type { Span, TracingSpanContext } from './tracing';
 
 // Private native primitives for the built-in OTel adapter, not a public Workers API.
 declare const tracingContext: {
+  startSpan(
+    name: string,
+    options: {
+      kind: number;
+      scope: { name: string; version?: string; schemaUrl?: string };
+    }
+  ): Span;
   getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';
   getInvocationSpanContext(): TracingSpanContext | undefined;
   withActiveSpanContext<T>(

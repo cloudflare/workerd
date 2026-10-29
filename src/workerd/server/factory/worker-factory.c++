@@ -571,6 +571,25 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     return tracing::SpanId::fromEntropy(entropySource);
   }
 
+  bool submitUserSpanOpenWithMetadata(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      tracing::SpanMetadata metadata) override {
+    bool submitted = false;
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      if (isPredictableModeForTest()) startTime = kj::UNIX_EPOCH;
+      if (context.getSpanId() != kj::none) {
+        tracer.setUserSpanContext(
+            spanId, tracing::SpanContext(context.getTraceId(), spanId, context.getTraceFlags()));
+      }
+      tracer.addSpanOpenWithMetadata(
+          spanId, parentSpanId, kj::mv(operationName), startTime, kj::mv(metadata));
+      submitted = true;
+    });
+    return submitted;
+  }
+
  private:
   kj::Own<BaseTracer::WeakRef> weakTracer;
   kj::EntropySource& entropySource;

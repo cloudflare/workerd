@@ -84,8 +84,29 @@ struct UserSpanData {
   parentSpanId @5 :UInt64;
 }
 
+enum SpanKind {
+  unspecified @0;
+  internal @1;
+  server @2;
+  client @3;
+  producer @4;
+  consumer @5;
+}
+
+struct InstrumentationScope {
+  name @0 :Text;
+  version @1 :Text;
+  schemaUrl @2 :Text;
+}
+
+struct SpanMetadata {
+  kind @0 :SpanKind;
+  scope @1 :InstrumentationScope;
+}
+
 struct SpanOpenData {
   # Representation of a SpanOpen event, created when a user span is opened.
+  metadata @4 :SpanMetadata;
   operationName @0 :Text;
 
   startTimeNs @1 :Int64;

@@ -304,6 +304,7 @@ struct Trace @0x8e8d911203762d34 {
       fetch @4 :FetchEventInfo;
       jsRpc @5 :JsRpcEventInfo;
     }
+    metadata @6 :import "trace.capnp".SpanMetadata;
   }
 
   struct SpanClose {

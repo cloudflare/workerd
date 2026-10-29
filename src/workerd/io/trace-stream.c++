@@ -508,6 +508,43 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   // Export span ID as non-truncated hex value – in practice this will be a random span ID.
   obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
 
+  KJ_IF_SOME(metadata, spanOpen.metadata) {
+    kj::Maybe<kj::StringPtr> kind;
+    switch (metadata.kind) {
+      case rpc::SpanKind::UNSPECIFIED:
+        break;
+      case rpc::SpanKind::INTERNAL:
+        kind = "internal"_kj;
+        break;
+      case rpc::SpanKind::SERVER:
+        kind = "server"_kj;
+        break;
+      case rpc::SpanKind::CLIENT:
+        kind = "client"_kj;
+        break;
+      case rpc::SpanKind::PRODUCER:
+        kind = "producer"_kj;
+        break;
+      case rpc::SpanKind::CONSUMER:
+        kind = "consumer"_kj;
+        break;
+    }
+    KJ_IF_SOME(value, kind) {
+      obj.set(js, "kind", js.str(value));
+    }
+    KJ_IF_SOME(value, metadata.scope) {
+      auto scope = js.obj();
+      scope.set(js, NAME_STR, js.str(value.name));
+      KJ_IF_SOME(version, value.version) {
+        scope.set(js, "version", js.str(version));
+      }
+      KJ_IF_SOME(schemaUrl, value.schemaUrl) {
+        scope.set(js, "schemaUrl", js.str(schemaUrl));
+      }
+      obj.set(js, "scope", scope);
+    }
+  }
+
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(fetch, FetchEventInfo) {

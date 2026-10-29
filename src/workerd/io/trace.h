@@ -828,6 +828,27 @@ struct Attribute final {
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 
+// Immutable OTel metadata, carried only on the span's opening event.
+struct InstrumentationScope {
+  kj::ConstString name;
+  kj::Maybe<kj::ConstString> version;
+  kj::Maybe<kj::ConstString> schemaUrl;
+
+  InstrumentationScope clone() const;
+  size_t size() const;
+};
+
+struct SpanMetadata {
+  rpc::SpanKind kind = rpc::SpanKind::UNSPECIFIED;
+  kj::Maybe<InstrumentationScope> scope;
+
+  SpanMetadata() = default;
+  SpanMetadata(rpc::SpanMetadata::Reader reader);
+  void copyTo(rpc::SpanMetadata::Builder builder) const;
+  SpanMetadata clone() const;
+  size_t size() const;
+};
+
 struct SpanOpenData {
   // Represents the data needed for a SpanOpen event
   tracing::SpanId spanId;
@@ -835,17 +856,20 @@ struct SpanOpenData {
 
   kj::ConstString operationName;
   kj::Date startTime;
+  kj::Maybe<SpanMetadata> metadata;
 
   SpanOpenData(rpc::SpanOpenData::Reader reader);
   void copyTo(rpc::SpanOpenData::Builder builder) const;
   explicit SpanOpenData(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
-      kj::Date startTime)
+      kj::Date startTime,
+      kj::Maybe<SpanMetadata> metadata = kj::none)
       : spanId(spanId),
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
-        startTime(startTime) {}
+        startTime(startTime),
+        metadata(kj::mv(metadata)) {}
 };
 
 struct SpanEndData {
@@ -903,6 +927,8 @@ struct SpanOpen final {
   kj::ConstString operationName;
   kj::Maybe<Info> info = kj::none;
   SpanId spanId;
+
+  kj::Maybe<SpanMetadata> metadata;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -1405,6 +1431,9 @@ class SpanObserver: public kj::Refcounted {
   [[nodiscard]] virtual kj::Rc<SpanObserver> newChildFromUserCode() {
     return newChild();
   }
+
+  // Called before onOpen(), only for spans created through the private OTel adapter.
+  virtual void setOpenMetadata(tracing::SpanMetadata metadata) {}
 
   // Called when the span is opened. Delivers the initial operation name and start time.
   // Called exactly once, before any other lifecycle method.

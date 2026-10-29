@@ -243,6 +243,22 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
     kj::Date startTime) {
+  addSpanOpenImpl(spanId, parentSpanId, kj::mv(operationName), startTime, kj::none);
+}
+
+void WorkerTracer::addSpanOpenWithMetadata(tracing::SpanId spanId,
+    tracing::SpanId parentSpanId,
+    kj::ConstString operationName,
+    kj::Date startTime,
+    tracing::SpanMetadata metadata) {
+  addSpanOpenImpl(spanId, parentSpanId, kj::mv(operationName), startTime, kj::mv(metadata));
+}
+
+void WorkerTracer::addSpanOpenImpl(tracing::SpanId spanId,
+    tracing::SpanId parentSpanId,
+    kj::ConstString operationName,
+    kj::Date startTime,
+    kj::Maybe<tracing::SpanMetadata> metadata) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -255,11 +271,15 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
     parentSpanId = topLevelContext.getSpanId();
   }
   size_t spanNameSize = operationName.size();
+  KJ_IF_SOME(value, metadata) {
+    spanNameSize += value.size();
+  }
+  auto open = tracing::SpanOpen(spanId, kj::mv(operationName));
+  open.metadata = kj::mv(metadata);
   auto childContext = spanEventContext(spanId);
   auto spanOpenContext = tracing::InvocationSpanContext(childContext.getTraceId(),
       childContext.getInvocationId(), parentSpanId, childContext.getTraceFlags());
-  tailStreamWriter->report(
-      spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
+  tailStreamWriter->report(spanOpenContext, kj::mv(open), startTime, spanNameSize);
 }
 
 void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
@@ -738,6 +758,12 @@ void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
 
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
   this->startTime = startTime;
+  KJ_IF_SOME(metadata, openMetadata) {
+    wasAccepted = submitter->submitUserSpanOpenWithMetadata(
+        spanId, parentSpanId, kj::mv(operationName), startTime, kj::mv(metadata));
+    openMetadata = kj::none;
+    return;
+  }
   if (fromUserCode) {
     wasAccepted =
         submitter->submitUserSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);

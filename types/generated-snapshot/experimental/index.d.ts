@@ -18031,6 +18031,14 @@ declare namespace TailStream {
     readonly message?: string;
   }
   interface SpanOpen {
+    /** OpenTelemetry span kind, when supplied by the instrumentation. */
+    kind?: "internal" | "server" | "client" | "producer" | "consumer";
+    /** The instrumentation that created this span. Carried only on spanOpen. */
+    scope?: {
+      name: string;
+      version?: string;
+      schemaUrl?: string;
+    };
     readonly type: "spanOpen";
     readonly name: string;
     // id for the span being opened by this SpanOpen event.

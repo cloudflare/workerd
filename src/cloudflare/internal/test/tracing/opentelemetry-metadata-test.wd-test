@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "enabled", worker = (
+      modules = .testModules,
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+      streamingTails = ["tail"],
+      bindings = [(name = "enabled", json = "true")],
+    )),
+    (name = "disabled", worker = (
+      modules = .testModules,
+      compatibilityFlags = ["nodejs_compat"],
+      streamingTails = ["tail"],
+      bindings = [(name = "enabled", json = "false")],
+    )),
+    (name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-metadata-tail.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "opentelemetry-metadata-test.js"),
+  (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+];

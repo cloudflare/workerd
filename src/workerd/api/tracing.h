@@ -348,8 +348,21 @@ class Tracing: public jsg::Object {
 // cloudflare:workers export exposes arbitrary trace identities or async-context storage slots.
 class TracingContext: public jsg::Object {
  public:
+  struct Scope {
+    kj::String name;
+    jsg::Optional<kj::String> version;
+    jsg::Optional<kj::String> schemaUrl;
+    JSG_STRUCT(name, version, schemaUrl);
+  };
+  struct SpanOptions {
+    uint16_t kind;
+    Scope scope;
+    JSG_STRUCT(kind, scope);
+  };
   TracingContext() = default;
   TracingContext(jsg::Lock&, const jsg::Url&) {}
+  jsg::Ref<user_tracing::Span> startSpan(
+      jsg::Lock& js, kj::String operationName, SpanOptions options);
   jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
       jsg::Optional<user_tracing::TracingSpanContext> context,
       jsg::Function<jsg::JsRef<jsg::JsValue>()> callback,
@@ -358,6 +371,7 @@ class TracingContext: public jsg::Object {
   kj::StringPtr getSpanCreationMode(jsg::Lock& js);
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
+    JSG_METHOD(startSpan);
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
@@ -395,4 +409,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
   api::Tracing, api::TracingContext, api::TracingContextVariable, api::user_tracing::Span,         \
       api::user_tracing::ExceptionData, api::user_tracing::TracingSpanStatus,                      \
-      api::user_tracing::TracingSpanContext
+      api::user_tracing::TracingSpanContext, api::TracingContext::Scope,                           \
+      api::TracingContext::SpanOptions

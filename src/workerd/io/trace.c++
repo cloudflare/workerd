@@ -1411,9 +1411,14 @@ kj::Maybe<SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader)
 SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      spanId(reader.getSpanId()) {}
+      spanId(reader.getSpanId()) {
+  if (reader.hasMetadata()) metadata = SpanMetadata(reader.getMetadata());
+}
 
 void SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
+  KJ_IF_SOME(value, metadata) {
+    value.copyTo(builder.initMetadata());
+  }
   builder.setOperationName(operationName.asPtr());
   builder.setSpanId(spanId);
   KJ_IF_SOME(i, info) {
@@ -1452,7 +1457,9 @@ SpanOpen SpanOpen::clone() const {
       KJ_UNREACHABLE;
     });
   };
-  return SpanOpen(spanId, operationName.clone(), cloneInfo(info));
+  SpanOpen result(spanId, operationName.clone(), cloneInfo(info));
+  result.metadata = metadata.map([](const auto& value) { return value.clone(); });
+  return result;
 }
 
 kj::String KJ_STRINGIFY(const SpanOpen::Info& info) {
@@ -1991,13 +1998,63 @@ TailEvent TailEvent::clone() const {
       sequence, cloneEvent(event), spanContext.getTraceFlags());
 }
 
+InstrumentationScope InstrumentationScope::clone() const {
+  return {name.clone(), version.map([](const auto& value) { return value.clone(); }),
+    schemaUrl.map([](const auto& value) { return value.clone(); })};
+}
+
+size_t InstrumentationScope::size() const {
+  return name.size() + version.map([](const auto& value) { return value.size(); }).orDefault(0) +
+      schemaUrl.map([](const auto& value) { return value.size(); }).orDefault(0);
+}
+
+SpanMetadata::SpanMetadata(rpc::SpanMetadata::Reader reader): kind(reader.getKind()) {
+  if (reader.hasScope()) {
+    auto value = reader.getScope();
+    InstrumentationScope result{kj::ConstString(kj::str(value.getName())), kj::none, kj::none};
+    if (value.hasVersion()) result.version = kj::ConstString(kj::str(value.getVersion()));
+    if (value.hasSchemaUrl()) result.schemaUrl = kj::ConstString(kj::str(value.getSchemaUrl()));
+    scope = kj::mv(result);
+  }
+}
+
+void SpanMetadata::copyTo(rpc::SpanMetadata::Builder builder) const {
+  builder.setKind(kind);
+  KJ_IF_SOME(value, scope) {
+    auto target = builder.initScope();
+    target.setName(value.name.asPtr());
+    KJ_IF_SOME(version, value.version) {
+      target.setVersion(version.asPtr());
+    }
+    KJ_IF_SOME(schemaUrl, value.schemaUrl) {
+      target.setSchemaUrl(schemaUrl.asPtr());
+    }
+  }
+}
+
+SpanMetadata SpanMetadata::clone() const {
+  SpanMetadata result;
+  result.kind = kind;
+  result.scope = scope.map([](const auto& value) { return value.clone(); });
+  return result;
+}
+
+size_t SpanMetadata::size() const {
+  return sizeof(kind) + scope.map([](const auto& value) { return value.size(); }).orDefault(0);
+}
+
 SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
     : spanId(reader.getSpanId()),
       parentSpanId(reader.getParentSpanId()),
       operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {
+  if (reader.hasMetadata()) metadata = SpanMetadata(reader.getMetadata());
+}
 
 void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
+  KJ_IF_SOME(value, metadata) {
+    value.copyTo(builder.initMetadata());
+  }
   builder.setOperationName(operationName.asPtr());
   builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
