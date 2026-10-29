@@ -1,12 +1,16 @@
 # Termination propagation for streams transferred over JS RPC, in every pairing of the legacy and
 # TypeScript stream implementations (runner = stream origin for the argument-direction cases, peer
 # = origin for the return-direction cases). See the header comment in the JS file.
+#
+# A cancel reason reaches the origin only from a receiver with enhanced error serialization, so
+# every cell enables it; js-rpc-streams-cancel-reason-mixed-test covers receivers without it.
 using Workerd = import "/workerd/workerd.capnp";
 
 const legacyFlags :List(Text) = [
   "nodejs_compat",
   "experimental",
   "streams_enable_constructors",
+  "enhanced_error_serialization",
 ];
 
 const tsFlags :List(Text) = [
@@ -14,6 +18,7 @@ const tsFlags :List(Text) = [
   "experimental",
   "streams_enable_constructors",
   "typescript_implemented_streams",
+  "enhanced_error_serialization",
 ];
 
 const unitTests :Workerd.Config = (
