@@ -83,9 +83,19 @@ void JsObject::setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& v
       js.v8Context(), name.inner, value.inner, v8::PropertyAttribute::DontEnum));
 }
 
+void JsObject::setPrivate(Lock& js, const JsString& name, const JsValue& value) {
+  auto p = v8::Private::ForApi(js.v8Isolate, name);
+  check(inner->SetPrivate(js.v8Context(), p, value.inner));
+}
+
 void JsObject::setPrivate(Lock& js, kj::StringPtr name, const JsValue& value) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   check(inner->SetPrivate(js.v8Context(), p, value.inner));
+}
+
+JsValue JsObject::getPrivate(Lock& js, const jsg::JsString& name) {
+  auto p = v8::Private::ForApi(js.v8Isolate, name);
+  return JsValue(check(inner->GetPrivate(js.v8Context(), p)));
 }
 
 JsValue JsObject::getPrivate(Lock& js, kj::StringPtr name) {

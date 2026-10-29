@@ -92,6 +92,10 @@ source or TransformStream readable delivering less than it declared
 failing the transfer with 'Network connection lost.', as a request body
 and as a response body.
 
+`pollution.js` also asserts that queued streams, native Response bodies, and
+cloned bodies expose no internal bridge brands or extraction hooks through
+`Reflect.ownKeys`; both implementations still deliver the original bytes.
+
 The ts cell additionally sets the internal-testing
 `expose_draining_reader` flag, installing the
 `ReadableStreamDrainingReader` global — the bulk-drain conduit the C++

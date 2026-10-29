@@ -23,6 +23,36 @@ function helloBody() {
   });
 }
 
+// Public reflection must not reveal native handles, their extraction functions,
+// or the bridge's recognition brands.
+export const nativeHandlesAreNotReflectable = {
+  async test() {
+    const response = new Response(new Uint8Array([1, 2, 3]));
+    const copy = response.clone();
+    const internalNames = new Set([
+      'kNativeSource',
+      'kNativeSink',
+      'kExtractNativeSource',
+      'kExtractNativeSink',
+      'kReadableStreamBrand',
+      'kWritableStreamBrand',
+    ]);
+    for (const stream of [
+      new ReadableStream(),
+      new WritableStream(),
+      response.body,
+      copy.body,
+    ]) {
+      const exposed = Reflect.ownKeys(stream).filter((key) =>
+        internalNames.has(typeof key === 'symbol' ? key.description : key)
+      );
+      deepStrictEqual(exposed, []);
+    }
+    deepStrictEqual(await response.bytes(), new Uint8Array([1, 2, 3]));
+    deepStrictEqual(await copy.bytes(), new Uint8Array([1, 2, 3]));
+  },
+};
+
 // A patched %ArrayIteratorPrototype%.next must not empty a body.
 export const patchedArrayIteratorKeepsBody = {
   async test() {

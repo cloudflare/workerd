@@ -19,18 +19,13 @@ namespace workerd::api {
 
 namespace {
 
-// Recognizes the TypeScript implementation's WritableStream (including subclasses) by the own
-// api-symbol brand its constructor stamps on every instance; the writable counterpart of
-// isTypeScriptReadableStream(), where the reasoning is spelled out. Runs no JavaScript, answers
-// false for proxies, and is recognition rather than authentication: user code can stamp the
-// reflection-visible brand on an object of its own, so consumers re-validate against the real
-// #-brand -- here, the writer acquisition that JsWritableStream::serialize() performs before it
-// writes anything to the wire.
+// The WritableStream constructor stamps the private brand used for no-JS recognition,
+// matching isTypeScriptReadableStream(). Proxies do not convey the private-field brand.
 bool isTypeScriptWritableStream(jsg::Lock& js, jsg::JsObject obj) {
   if (v8::Local<v8::Value>(obj)->IsProxy()) {
     return false;
   }
-  return obj.has(js, js.symbolInternal("kWritableStreamBrand"), jsg::JsObject::HasOption::OWN);
+  return obj.getPrivate(js, "kWritableStreamBrand"_kj).isTrue();
 }
 
 bool getWritableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {

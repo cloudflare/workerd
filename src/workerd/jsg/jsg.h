@@ -494,11 +494,9 @@ namespace workerd::jsg {
     registry.template registerStaticConstant<NAME, decltype(constant)>(constant);                  \
   } while (false)
 
-// Use inside a JSG_RESOURCE_TYPE block to attach a marker property to every instance of
-// the resource type. The property is keyed by a symbol acquired from V8's API symbol
-// registry (v8::Symbol::ForApi) using the stringified `name`, and its value is the symbol
-// itself. The property is created directly on each instance (not the prototype) as
-// read-only, non-enumerable, and non-configurable:
+// Use inside a JSG_RESOURCE_TYPE block to attach a V8-private marker to every instance.
+// The key is v8::Private::ForApi with the stringified `name`, and its value is true.
+// The marker is not inherited or visible to JavaScript property reflection:
 //
 //     class Foo: public jsg::Object {
 //      public:
@@ -507,18 +505,9 @@ namespace workerd::jsg {
 //       }
 //     };
 //
-// Because the symbol lives in the per-isolate API symbol registry, C++ code can re-acquire
-// the exact same symbol at any time via v8::Symbol::ForApi(isolate, "kUniqueSymbol") --
-// there is nothing to store or plumb around. Runtime-provided JavaScript can likewise be
-// handed the symbol (e.g. the per-isolate bootstrap exposes utils.getApiSymbol()), while
-// user code cannot mint it: the API registry is distinct from the Symbol.for() registry.
-// This makes the property a tamper-resistant brand/marker that both C++ and
-// runtime-provided JavaScript can recognize on instances via an own-property check.
-//
-// Note that the symbol registry is keyed process-wide by name (per isolate), so two
-// resource types declaring JSG_PRIVATE_SYMBOL with the same identifier share the same
-// symbol. The property itself remains visible to reflection (Object.getOwnPropertySymbols)
-// on instances, so it is a brand, not a secret.
+// C++ reads it with JsObject::getPrivate(js, "kUniqueSymbol"); bootstrap code uses
+// utils.getPrivate(object, "kUniqueSymbol"). Both resolve the same isolate-local key.
+// Ordinary JavaScript symbols, including API-registry symbols, do not address this slot.
 #define JSG_PRIVATE_SYMBOL(name)                                                                   \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
