@@ -6,6 +6,7 @@
 
 #include <workerd/io/trace.h>
 #include <workerd/io/tracer.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/thread-scopes.h>
 
 namespace workerd::api::user_tracing {
@@ -675,6 +676,57 @@ workerd::SpanParent Span::makeSpanParent() {
 
 namespace workerd::api {
 
+jsg::Optional<jsg::Value> TracingContextVariable::get(jsg::Lock& js) {
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_SOME(value, frame.get(*key)) {
+      return jsg::Value(js.v8Isolate, value.getHandle(js));
+    }
+  }
+  return kj::none;
+}
+
+jsg::JsRef<jsg::JsValue> TracingContextVariable::run(
+    jsg::Lock& js, jsg::Value value, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
+  jsg::AsyncContextFrame::StorageScope scope(js, key.addRef(), kj::mv(value));
+  return callback(js);
+}
+
+jsg::Ref<TracingContextVariable> Tracing::createAsyncContextVariable(jsg::Lock& js) {
+  return js.alloc<TracingContextVariable>();
+}
+
+jsg::JsRef<jsg::JsValue> Tracing::withActiveSpanContext(jsg::Lock& js,
+    jsg::Optional<user_tracing::TracingSpanContext> context,
+    jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
+  // An explicitly absent active JS span must not fall back to the invocation span.
+  jsg::AsyncContextFrame::StorageScope activeScope(js,
+      jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(),
+      js.v8Ref<v8::Value>(v8::Undefined(js.v8Isolate)));
+  if (!IoContext::hasCurrent()) return callback(js);
+  auto& io = IoContext::current();
+  kj::Maybe<tracing::SpanContext> parsed;
+  KJ_IF_SOME(value, context) {
+    constexpr char HEX[] = "0123456789abcdef";
+    char flags[] = {HEX[value.traceFlags >> 4], HEX[value.traceFlags & 15]};
+    parsed = tracing::SpanContext::tryFromTraceparent(
+        kj::str("00-", value.traceId, "-", value.spanId, "-", kj::ArrayPtr(flags)));
+  }
+  if (parsed == kj::none) {
+    parsed = tracing::SpanContext(tracing::TraceId::fromEntropy(io.getEntropySource()),
+        tracing::SpanId::nullId, tracing::TraceFlags(1));
+  }
+  SpanParent parent(nullptr);
+  if ((static_cast<uint8_t>(
+           KJ_ASSERT_NONNULL(parsed).getTraceFlags().orDefault(tracing::TraceFlags(1))) &
+          1) != 0) {
+    KJ_IF_SOME(tracer, io.getWorkerTracer()) {
+      parent = tracer.makeUserSpanParent(kj::mv(KJ_ASSERT_NONNULL(parsed)));
+    }
+  }
+  auto scope = io.makeUserAsyncTraceScope(io.getCurrentLock(), kj::mv(parent));
+  return callback(js);
+}
+
 namespace {
 
 enum class SpanEndMode { AUTO_END, MANUAL_END };
@@ -898,6 +950,7 @@ jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
     auto key = jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey();
     KJ_IF_SOME(value, frame.get(*key)) {
+      if (value.getHandle(js)->IsUndefined()) return kj::none;
       KJ_IF_SOME(span, spanHandler.tryUnwrap(js, value.getHandle(js))) {
         return kj::mv(span);
       }

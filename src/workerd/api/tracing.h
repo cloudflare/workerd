@@ -214,6 +214,24 @@ class Span: public jsg::Object {
 
 namespace workerd::api {
 
+// An internal AsyncContextFrame slot, independent of Node.js compatibility.
+class TracingContextVariable final: public jsg::Object {
+ public:
+  ~TracingContextVariable() noexcept(false) {
+    key->reset();
+  }
+  jsg::Optional<jsg::Value> get(jsg::Lock& js);
+  jsg::JsRef<jsg::JsValue> run(
+      jsg::Lock& js, jsg::Value value, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
+  JSG_RESOURCE_TYPE(TracingContextVariable) {
+    JSG_METHOD(get);
+    JSG_METHOD(run);
+  }
+
+ private:
+  kj::Arc<jsg::AsyncContextFrame::StorageKey> key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
+};
+
 // User-tracing module. Exposed to JS as the `Tracing` class, reachable both via
 // `import { tracing } from 'cloudflare:workers'` and as `ctx.tracing`, and registered as
 // the builtin module `cloudflare-internal:tracing`. The class name (not "TracingModule")
@@ -278,12 +296,21 @@ class Tracing: public jsg::Object {
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
-  JSG_RESOURCE_TYPE(Tracing) {
+  jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
+      jsg::Optional<user_tracing::TracingSpanContext> context,
+      jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
+  jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(Tracing, CompatibilityFlags::Reader flags) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
     JSG_METHOD(withActiveSpan);
+    if (flags.getOpentelemetryApi()) {
+      JSG_METHOD(withActiveSpanContext);
+      JSG_METHOD(createAsyncContextVariable);
+    }
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.
@@ -337,5 +364,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 }  // namespace workerd::api
 
 #define EW_TRACING_ISOLATE_TYPES                                                                   \
-  api::Tracing, api::user_tracing::Span, api::user_tracing::ExceptionData,                         \
-      api::user_tracing::TracingSpanStatus, api::user_tracing::TracingSpanContext
+  api::Tracing, api::TracingContextVariable, api::user_tracing::Span,                              \
+      api::user_tracing::ExceptionData, api::user_tracing::TracingSpanStatus,                      \
+      api::user_tracing::TracingSpanContext

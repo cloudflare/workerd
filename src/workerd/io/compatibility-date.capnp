@@ -1761,4 +1761,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
   # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
   # and module name.
+
+  opentelemetryApi @200 :Bool
+      $compatEnableFlag("opentelemetry_api")
+      $experimental;
+  # Installs an OpenTelemetry JS API provider and context manager on the API's global symbol.
+  # The TypeScript implementation is evaluated lazily when an API copy first reads the symbol.
 }

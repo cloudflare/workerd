@@ -128,6 +128,14 @@ declare const tracing: {
   // Returns the span associated with the current async context. Returns undefined
   // outside an invocation or when execution is detached into the root async context.
   getActiveSpan(): Span | undefined;
+  withActiveSpanContext<T>(
+    context: TracingSpanContext | undefined,
+    callback: () => T
+  ): T;
+  createAsyncContextVariable(): {
+    get(): unknown;
+    run<T>(value: unknown, callback: () => T): T;
+  };
 
   // Makes `span` the active span while invoking `callback(...args)`, then restores the previous
   // active span. Returns the callback result as-is and does not end the span. User spans and

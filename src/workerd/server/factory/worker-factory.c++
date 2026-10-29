@@ -498,11 +498,20 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
 };
 
+struct UserSpanCounter: public kj::Refcounted {
+  uint64_t next = 1;
+};
+
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer, kj::EntropySource& entropySource)
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer,
+      kj::EntropySource& entropySource,
+      tracing::SpanContext context,
+      kj::Own<UserSpanCounter> counter)
       : weakTracer(kj::mv(weakTracer)),
-        entropySource(entropySource) {}
+        entropySource(entropySource),
+        context(kj::mv(context)),
+        counter(kj::mv(counter)) {}
   KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
   void submitSpanClose(
@@ -545,6 +554,10 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       if (isPredictableModeForTest()) {
         startTime = kj::UNIX_EPOCH;
       }
+      if (context.getSpanId() != kj::none) {
+        tracer.setUserSpanContext(
+            spanId, tracing::SpanContext(context.getTraceId(), spanId, context.getTraceFlags()));
+      }
       tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
       submitted = true;
     });
@@ -553,15 +566,16 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
 
   tracing::SpanId makeSpanId() override {
     if (isPredictableModeForTest()) {
-      return tracing::SpanId(nextSpanId++);
+      return tracing::SpanId(counter->next++);
     }
     return tracing::SpanId::fromEntropy(entropySource);
   }
 
  private:
-  uint64_t nextSpanId = 1;
   kj::Own<BaseTracer::WeakRef> weakTracer;
   kj::EntropySource& entropySource;
+  tracing::SpanContext context;
+  kj::Own<UserSpanCounter> counter;
 };
 
 }  // namespace
@@ -1111,11 +1125,12 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
       })));
     }
     tracer->setMakeUserRequestSpanFunc(
-        [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
-            tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+        [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource(),
+            counter = kj::refcounted<UserSpanCounter>()](tracing::SpanContext context) mutable {
       return SpanParent(kj::rc<UserSpanObserver>(
-          kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
-          kj::mv(traceId), traceFlags));
+          kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource,
+              tracing::SpanContext::clone(context), kj::addRef(*counter)),
+          kj::mv(context)));
     });
     workerTracer = kj::mv(tracer);
   }

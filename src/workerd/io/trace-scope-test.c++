@@ -23,8 +23,7 @@ kj::Rc<WorkerTracer> makeTracer() {
 
 kj::Rc<BaseTracer> makeObservedTracer() {
   auto tracer = makeTracer();
-  tracer->setMakeUserRequestSpanFunc(
-      [](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) { return observedParent(2); });
+  tracer->setMakeUserRequestSpanFunc([](tracing::SpanContext) { return observedParent(2); });
   return kj::mv(tracer);
 }
 

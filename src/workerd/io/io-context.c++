@@ -1505,8 +1505,14 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
   auto spanId = userSpan.getSpanId();
   if (spanId != tracing::SpanId::nullId) {
-    invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
-        baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
+    auto traceId = baseContext.getTraceId();
+    auto traceFlags = baseContext.getTraceFlags();
+    KJ_IF_SOME(identity, userSpan.toSpanContext()) {
+      traceId = identity.getTraceId();
+      traceFlags = identity.getTraceFlags();
+    }
+    invocationSpanContext =
+        tracing::InvocationSpanContext(traceId, baseContext.getInvocationId(), spanId, traceFlags);
   } else {
     invocationSpanContext = baseContext.clone();
   }

@@ -104,9 +104,12 @@ class BaseTracer: public kj::Refcounted {
 
   SpanParent makeUserRequestSpan(
       tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags);
+  SpanParent makeUserSpanParent(tracing::SpanContext context);
 
-  using MakeUserRequestSpanFunc =
-      kj::Function<SpanParent(tracing::TraceId, kj::Maybe<tracing::TraceFlags>)>;
+  // Associates an externally parented span with its trace without changing the invocation.
+  virtual void setUserSpanContext(tracing::SpanId spanId, tracing::SpanContext context) {}
+
+  using MakeUserRequestSpanFunc = kj::Function<SpanParent(tracing::SpanContext)>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
@@ -169,6 +172,7 @@ class WorkerTracer final: public BaseTracer {
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
+  void setUserSpanContext(tracing::SpanId spanId, tracing::SpanContext context) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
@@ -242,6 +246,8 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+  kj::HashMap<uint64_t, tracing::SpanContext> userSpanContexts;
+  tracing::InvocationSpanContext spanEventContext(tracing::SpanId spanId);
 };
 
 class SpanSubmitter: public kj::Refcounted {
@@ -288,6 +294,13 @@ class UserSpanObserver final: public SpanObserver {
         parentSpanId(tracing::SpanId::nullId),
         traceId(nullptr) {}
   // constructor for top-level observer with trace ID and optional trace flags
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter, tracing::SpanContext context)
+      : submitter(kj::mv(submitter)),
+        spanId(context.getSpanId().orDefault(tracing::SpanId::nullId)),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(context.getTraceId()),
+        traceFlags(context.getTraceFlags()) {}
+
   UserSpanObserver(kj::Own<SpanSubmitter> submitter,
       tracing::TraceId traceId,
       kj::Maybe<tracing::TraceFlags> traceFlags = kj::none)
