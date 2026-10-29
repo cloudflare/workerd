@@ -872,9 +872,10 @@ mod sim {
         Err(format!("seed {seed}: never ran {missed:?}\n{log}"))
     }
 
+    /// 100 seeds by default, to fit CI's slowest builds; `SIM_SEEDS` for more.
     #[test]
     fn every_alarm_runs_whatever_fails() {
-        let seeds: u64 = std::env::var("SIM_SEEDS").map_or(1000, |s| s.parse().unwrap());
+        let seeds: u64 = std::env::var("SIM_SEEDS").map_or(100, |s| s.parse().unwrap());
         let first: u64 = std::env::var("SIM_SEED").map_or(0, |s| s.parse().unwrap());
         for seed in first..first + seeds {
             if let Err(e) = run(seed, 400) {

@@ -888,7 +888,9 @@ test("cluster: a killed owner's alarm runs without its record", async () => {
     // With the record gone, no listing of nodes finds the dead owner: only
     // the look for orphaned alarms does, which a starting node runs first.
     await bucket.delete(`nodes/${nodeKeys.get(set.body.nodeId)}.json`);
-    await survivor.stop();
+    // Killed, as SIGTERM does on Windows: the survivor's previous instance
+    // keeps its lease a while, and may be assigned the alarm meanwhile.
+    await survivor.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
     await survivor.start();
     await sleep(30_000);
     const res = await fetchJson(survivor.httpPort, '/alarms?name=unrecorded', {

@@ -84,6 +84,9 @@ pub struct Cluster {
     alarms: Index,
     /// When the next round looks for orphaned alarms.
     orphans_at: Cell<u64>,
+    /// What the last look found, adopted from as dead nodes are until the
+    /// next: the live node a share is assigned to may be about to lapse.
+    orphans: RefCell<Vec<String>>,
 }
 
 impl Cluster {
@@ -105,6 +108,7 @@ impl Cluster {
         Ok(Rc::new(Self {
             alarms: Index::new(bucket.clone(), &setup.node, 2 * setup.ttl_ms),
             orphans_at: Cell::new(0),
+            orphans: RefCell::default(),
             owners: Owners::new(bucket.clone()),
             ownership: Ownership::new(bucket.clone(), registry.clone()),
             bucket,
@@ -273,10 +277,11 @@ impl Cluster {
         if !live.is_empty() && now_ms >= self.orphans_at.get() {
             self.orphans_at.set(now_ms + ORPHANS_EVERY_MS);
             match self.orphans(&live, &dead).await {
-                Ok(orphans) => dead.extend(orphans),
+                Ok(orphans) => drop(self.orphans.replace(orphans)),
                 Err(e) => tracing::warn!("looking for orphaned alarms: {e}"),
             }
         }
+        dead.extend(self.orphans.borrow().iter().cloned());
         self.alarms.adopt(&live, &dead, adopted).await;
         self.alarms.tidy().await;
     }
