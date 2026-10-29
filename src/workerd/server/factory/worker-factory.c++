@@ -1141,8 +1141,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   kj::Maybe<tracing::InvocationSpanContext> triggerContext;
   KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
     KJ_IF_SOME(spanId, ctx.getSpanId()) {
-      triggerContext = tracing::InvocationSpanContext(
-          ctx.getTraceId(), tracing::TraceId::nullId, spanId, ctx.getTraceFlags());
+      triggerContext = tracing::InvocationSpanContext(ctx.getTraceId(), tracing::TraceId::nullId,
+          spanId, ctx.getTraceFlags(), ctx.cloneTraceState());
     }
   }
 
@@ -1170,6 +1170,12 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   Frankenvalue propsValue;
   KJ_IF_SOME(p, props) propsValue = kj::mv(*p);
   auto meta = kj::mv(*metadata);
+  if (impl.getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi() &&
+      meta.userSpanParent.toSpanContext() == kj::none) {
+    KJ_IF_SOME(remote, meta.httpTraceContext) {
+      meta.userSpanParent = SpanParent::fromSpanContext(kj::mv(remote));
+    }
+  }
   // A static worker's entrypoint mints its own self-token: a caller-supplied one could read and
   // manipulate the parameters of the entrypoint's own `[restore]()` method. An actor's requests
   // get theirs from the server instead (the token names the actor, not the class), and nothing
@@ -1237,6 +1243,30 @@ kj::Own<RequestMetadata> new_request_metadata(
 }
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata) {
   return metadata.cfBlobJson.map([](const kj::String& s) { return toRustString(s); });
+}
+
+void request_metadata_read_http_trace_context(
+    RequestMetadata& metadata, const kj::HttpHeaders& headers) {
+  kj::Maybe<kj::StringPtr> parent;
+  size_t parentCount = 0;
+  kj::Vector<kj::StringPtr> states;
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    if (strcaseeq(name, "traceparent"_kj)) {
+      parent = value;
+      ++parentCount;
+    }
+    if (strcaseeq(name, "tracestate"_kj)) states.add(value);
+  });
+  if (parentCount != 1) return;
+  KJ_IF_SOME(value, parent) {
+    metadata.httpTraceContext = tracing::SpanContext::tryFromHttpTraceparent(value);
+    KJ_IF_SOME(context, metadata.httpTraceContext) {
+      if (!states.empty()) {
+        context.setTraceState(
+            tracing::SpanContext::parseTracestate(kj::strArray(states.asPtr(), ",")));
+      }
+    }
+  }
 }
 
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent) {

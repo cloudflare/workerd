@@ -489,8 +489,15 @@ struct HttpConnection {
 }
 
 impl HttpConnection {
-    fn start_request(&self, cf_blob: Option<&str>) -> Result<CxxWorkerInterface> {
-        let metadata = ffi::new_request_metadata(cf_blob.into(), KjMaybe::None);
+    fn start_request(
+        &self,
+        cf_blob: Option<&str>,
+        headers: Option<HeadersRef<'_>>,
+    ) -> Result<CxxWorkerInterface> {
+        let mut metadata = ffi::new_request_metadata(cf_blob.into(), KjMaybe::None);
+        if let Some(headers) = headers {
+            ffi::request_metadata_read_http_trace_context(metadata.pin_mut(), headers.as_ffi());
+        }
         Ok(CxxWorkerInterface::new(
             self.socket.channel.start_request(metadata)?,
         ))
@@ -522,11 +529,11 @@ impl Handler for HttpConnection {
                 return send_error(response, 400, "Bad Request", &Headers::new(table)).await;
             };
             let cf_blob = cf_blob.or_else(|| self.cf_blob.clone());
-            let mut worker = self.start_request(cf_blob.as_deref())?;
             let headers = rewritten
                 .headers
                 .as_deref()
                 .map_or(headers, HeadersRef::from);
+            let mut worker = self.start_request(cf_blob.as_deref(), Some(headers))?;
             let mut response =
                 bridge::rewriting_response(response.into_ffi(), table, rewriter.response_edits())?;
             worker
@@ -562,7 +569,7 @@ impl Handler for HttpConnection {
                 let factory = self.context.factory.raw();
                 return Ok(ffi::factory_accept_bootstrap(factory, stream, target).await?);
             }
-            let mut worker = self.start_request(self.cf_blob.as_deref())?;
+            let mut worker = self.start_request(self.cf_blob.as_deref(), None)?;
             let (mut tunnel, mut response) = connect.into_kj();
             worker
                 .connect(

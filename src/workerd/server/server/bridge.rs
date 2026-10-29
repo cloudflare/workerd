@@ -498,6 +498,10 @@ pub mod ffi {
         ) -> KjOwn<RequestMetadata>;
         /// The cf blob the request carries, as JSON.
         fn request_metadata_cf_blob_json(metadata: &RequestMetadata) -> KjMaybe<String>;
+        fn request_metadata_read_http_trace_context(
+            metadata: Pin<&mut RequestMetadata>,
+            headers: &HttpHeaders,
+        );
         /// Marks the request as coming through a stub that was, or may be, stored durably.
         fn request_metadata_set_from_persistent_stub(
             metadata: Pin<&mut RequestMetadata>,

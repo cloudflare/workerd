@@ -71,7 +71,12 @@ using ActorIdHandle = Worker::Actor::Id;
 // capabilities in its `env` become the worker's own channel tables (`CompiledWorker::Impl`).
 using DynamicSource = kj::Function<kj::Promise<DynamicWorkerSource>()>;
 // One request's metadata.
-using RequestMetadata = IoChannelFactory::SubrequestMetadata;
+struct RequestMetadata: public IoChannelFactory::SubrequestMetadata {
+  explicit RequestMetadata(IoChannelFactory::SubrequestMetadata metadata)
+      : IoChannelFactory::SubrequestMetadata(kj::mv(metadata)) {}
+  // Set only by the standalone HTTP listener, never by native worker dispatch.
+  kj::Maybe<tracing::SpanContext> httpTraceContext;
+};
 // What a channel token is for: RPC, or Durable Object storage.
 using TokenUsage = IoChannelFactory::ChannelTokenUsage;
 // A channel token as the ChannelTokenHandler encodes it: ready bytes, or a promise of them.
@@ -307,6 +312,8 @@ kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
 kj::Own<RequestMetadata> new_request_metadata(
     kj::Maybe<::rust::Str> cfBlobJson, kj::Maybe<::rust::Str> clientAddress);
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata);
+void request_metadata_read_http_trace_context(
+    RequestMetadata& metadata, const kj::HttpHeaders& headers);
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent);
 void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     RequestMetadata& metadata,

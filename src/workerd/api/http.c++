@@ -1549,10 +1549,41 @@ struct PreparedFetchRequest {
 
 PreparedFetchRequest prepareFetchRequest(Request& request,
     kj::ArrayPtr<const kj::Url> urlList,
-    kj::Maybe<TraceContext>& traceContext) {
+    kj::Maybe<TraceContext>& traceContext,
+    bool usesGlobalOutbound) {
   auto& ioContext = IoContext::current();
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   request.shallowCopyHeadersTo(headers);
+
+  if (ioContext.isOpentelemetryApiEnabled() && usesGlobalOutbound) {
+    bool hasParent = false;
+    bool hasState = false;
+    headers.forEach([&](kj::StringPtr name, kj::StringPtr) {
+      if (strcaseeq(name, "traceparent"_kj)) hasParent = true;
+      if (strcaseeq(name, "tracestate"_kj)) hasState = true;
+    });
+    if (!hasParent) {
+      kj::Maybe<tracing::SpanContext> identity;
+      KJ_IF_SOME(span, traceContext) identity = span.getUserSpanParent().toSpanContext();
+      if (identity == kj::none) identity = ioContext.getCurrentUserTraceSpan().toSpanContext();
+      KJ_IF_SOME(context, identity) {
+        auto flags = context.getTraceFlags().orDefault(
+            ioContext.getDefaultJsTraceFlags().orDefault(tracing::TraceFlags(0)));
+        KJ_IF_SOME(id, context.getSpanId()) {
+          if (context.getTraceId() && id != tracing::SpanId::nullId) {
+            // Opting into OTel HTTP propagation exposes trace IDs and vendor state to origins,
+            // including third parties, as standard OTel auto-instrumentation does. This is user
+            // trace context, not the embedder's independent internal trace-context export; an
+            // embedder must keep those paths distinct and avoid injecting a second user header.
+            headers.addPtr("traceparent"_kj, tracing::formatW3CTraceparent(context.getTraceId(), id, flags));
+            if (!hasState) {
+              KJ_IF_SOME(state, context.cloneTraceState()) headers.addPtr("tracestate"_kj, kj::mv(state));
+            }
+          }
+        }
+      }
+    }
+  }
 
   auto headerIds = ioContext.getHeaderIds();
   switch (request.getCacheMode()) {
@@ -1905,7 +1936,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
-  auto [headers, url] = prepareFetchRequest(*jsRequest, urlList.asPtr(), traceContext);
+  auto [headers, url] = prepareFetchRequest(*jsRequest, urlList.asPtr(), traceContext, fetcher->usesGlobalOutbound());
 
   if (headers.isWebSocket()) {
     if (!FeatureFlags::get(js).getWebSocketCompression()) {

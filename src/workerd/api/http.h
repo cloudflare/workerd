@@ -336,6 +336,15 @@ class Fetcher: public JsRpcClientProvider {
     kj::Maybe<TraceContext> traceContext;
   };
 
+  // Bindings and actor/RPC factories carry userSpanParent natively. Restrict automatic HTTP
+  // injection to global outbound channels; this also conservatively excludes HTTP bindings.
+  bool usesGlobalOutbound() const {
+    KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
+      return channel < IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+    }
+    return false;
+  }
+
   // Get client and optionally create trace context, all in one call.
   //
   [[nodiscard]] ClientWithTracing getClientWithTracing(

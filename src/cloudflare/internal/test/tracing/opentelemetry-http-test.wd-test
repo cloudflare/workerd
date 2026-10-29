@@ -1,0 +1,65 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "driver", worker = (
+      modules = [(name = "worker", esModule = embed "opentelemetry-http-driver.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [
+        (name = "ON", service = "http-on"),
+        (name = "OFF", service = "http-off"),
+        (name = "UNTRACED", service = "http-untraced"),
+      ],
+    )),
+    (name = "on", worker = (
+      modules = .modules,
+      compatibilityFlags = ["nodejs_compat", "opentelemetry_api", "rpc"],
+      globalOutbound = "http-echo",
+      streamingTails = ["tail"],
+      bindings = [(name = "ON", json = "true"), (name = "NATIVE", service = (name = "native", entrypoint = "Native"))],
+    )),
+    (name = "off", worker = (
+      modules = .modules,
+      compatibilityFlags = ["nodejs_compat", "rpc"],
+      globalOutbound = "http-echo",
+      streamingTails = ["tail"],
+      bindings = [(name = "ON", json = "false")],
+    )),
+    (name = "untraced", worker = (
+      modules = .modules,
+      compatibilityFlags = ["nodejs_compat", "opentelemetry_api", "rpc"],
+      globalOutbound = "http-echo",
+      bindings = [(name = "ON", json = "true"), (name = "UNTRACED", json = "true")],
+    )),
+    (name = "native", worker = (
+      modules = .modules,
+      compatibilityFlags = ["nodejs_compat", "opentelemetry_api", "rpc"],
+      streamingTails = ["tail"],
+    )),
+    (name = "echo", worker = (
+      modules = [(name = "worker", esModule = "export default { fetch(r) { return Response.json(Object.fromEntries(r.headers)); } };")],
+    )),
+    (name = "http-on", external = (address = "loopback:otel-http-on", http = ())),
+    (name = "http-off", external = (address = "loopback:otel-http-off", http = ())),
+    (name = "http-untraced", external = (address = "loopback:otel-http-untraced", http = ())),
+    (name = "http-echo", external = (address = "loopback:otel-http-echo", http = ())),
+    (name = "tail", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-http-tail.js"),
+        (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+  sockets = [
+    (name = "on", address = "loopback:otel-http-on", http = (), service = "on"),
+    (name = "off", address = "loopback:otel-http-off", http = (), service = "off"),
+    (name = "untraced", address = "loopback:otel-http-untraced", http = (), service = "untraced"),
+    (name = "echo", address = "loopback:otel-http-echo", http = (), service = "echo"),
+  ],
+);
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "opentelemetry-http-worker.js"),
+  (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+];
