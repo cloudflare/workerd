@@ -2089,6 +2089,18 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
       observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void TraceContext::setError(kj::StringPtr name, kj::StringPtr message) {
+  setTag("error.type"_kjc, name);
+  // Bound automatic status descriptions without splitting a UTF-8 code point.
+  constexpr size_t MAX_STATUS_DESCRIPTION_BYTES = 4096;
+  auto length = kj::min(message.size(), MAX_STATUS_DESCRIPTION_BYTES);
+  while (length < message.size() && length > 0 && (message[length] & 0xc0) == 0x80) --length;
+  auto status = tracing::SpanStatus(
+      tracing::SpanStatusCode::ERROR, kj::ConstString(kj::str(message.slice(0, length))));
+  span.setStatus(status.clone());
+  userSpan.setStatus(kj::mv(status));
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (asyncTraceResource.getId() != 0) {
     kj::String text;

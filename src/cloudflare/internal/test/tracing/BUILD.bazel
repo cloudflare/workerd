@@ -1,6 +1,16 @@
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "tracing-fetch-errors-test.wd-test",
+    data = glob(["*.js"]),
+)
+
+wd_test(
+    src = "tracing-fetch-stack-test.wd-test",
+    data = glob(["*.js"]),
+)
+
+wd_test(
     src = "tracing-fetch-url-test.wd-test",
     data = glob(["*.js"]),
 )

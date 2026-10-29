@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "untraced", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-stack-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "unreachable", service = "unreachable")],
+    )),
+    (name = "traced", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-stack-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "unreachable", service = "unreachable")],
+      streamingTails = ["tail"],
+    )),
+    (name = "unreachable", external = (address = "127.0.0.1:1", http = ())),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = "export default { tailStream() { return () => {}; } }")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);
