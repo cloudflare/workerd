@@ -265,19 +265,15 @@ namespace {
 
 // Receives a pushAbortSignal() call redirected by redirectPushAbortSignal() and forwards it to
 // `target`, which is on the far side of the membrane. The membrane wraps neither the params nor the
-// results of a redirected call, so this wraps `signal` itself and returns `trigger` as is.
-//
-// The forwarded call waits for its response rather than pipelining on it. Over RPC, a capability
-// pipelined on a call keeps the callee's copy of the call's results, including the wrapped
-// `signal`, alive until the capability is dropped, so a held `trigger` would keep the membrane in
-// use after all.
+// results of a redirected call, so this wraps `signal` itself, in the membrane's
+// DetachedMembranePolicy, and returns `trigger` as is.
 class PushAbortSignalForwarder final: public rpc::JsValue::ExternalPusher::Server {
  public:
   PushAbortSignalForwarder(rpc::JsValue::ExternalPusher::Client target,
-      kj::Own<capnp::MembranePolicy> policy,
+      kj::Own<capnp::MembranePolicy> detachedPolicy,
       MembraneCallDirection direction)
       : target(kj::mv(target)),
-        policy(kj::mv(policy)),
+        detachedPolicy(kj::mv(detachedPolicy)),
         direction(direction) {}
 
   kj::Promise<void> pushAbortSignal(PushAbortSignalContext context) override {
@@ -290,16 +286,16 @@ class PushAbortSignalForwarder final: public rpc::JsValue::ExternalPusher::Serve
 
  private:
   rpc::JsValue::ExternalPusher::Client target;
-  kj::Own<capnp::MembranePolicy> policy;
+  kj::Own<capnp::MembranePolicy> detachedPolicy;
   MembraneCallDirection direction;
 
   rpc::JsValue::ExternalPusher::AbortSignal::Client wrapInMembrane(
       rpc::JsValue::ExternalPusher::AbortSignal::Client signal) {
     switch (direction) {
       case MembraneCallDirection::INBOUND:
-        return capnp::membrane(kj::mv(signal), policy->addRef());
+        return capnp::membrane(kj::mv(signal), detachedPolicy->addRef());
       case MembraneCallDirection::OUTBOUND:
-        return capnp::reverseMembrane(kj::mv(signal), policy->addRef());
+        return capnp::reverseMembrane(kj::mv(signal), detachedPolicy->addRef());
     }
     KJ_UNREACHABLE;
   }
@@ -313,14 +309,14 @@ constexpr uint16_t PUSH_ABORT_SIGNAL_METHOD_ID = 1;
 kj::Maybe<capnp::Capability::Client> redirectPushAbortSignal(uint64_t interfaceId,
     uint16_t methodId,
     capnp::Capability::Client target,
-    capnp::MembranePolicy& policy,
+    DetachedMembranePolicy& detachedPolicy,
     MembraneCallDirection direction) {
   if (interfaceId != capnp::typeId<rpc::JsValue::ExternalPusher>() ||
       methodId != PUSH_ABORT_SIGNAL_METHOD_ID) {
     return kj::none;
   }
   return capnp::Capability::Client(kj::heap<PushAbortSignalForwarder>(
-      target.castAs<rpc::JsValue::ExternalPusher>(), policy.addRef(), direction));
+      target.castAs<rpc::JsValue::ExternalPusher>(), detachedPolicy.addRef(), direction));
 }
 
 // =======================================================================================
