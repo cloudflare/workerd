@@ -118,10 +118,13 @@ impl Panicker {
     }
 }
 
-fn panicker() -> jsg::Rc<Panicker> {
-    jsg::Rc::new(Panicker {
-        trigger: "panic".to_owned(),
-    })
+fn panicker(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Panicker> {
+    jsg::Rc::new(
+        lock,
+        Panicker {
+            trigger: "panic".to_owned(),
+        },
+    )
 }
 
 /// Has one of two wildcard properties, depending on a compatibility flag.
@@ -156,20 +159,20 @@ impl Resource for Versioned {
 fn with_proxy(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(
+        let p = jsg::Rc::new(
             lock,
-            "p",
-            jsg::Rc::new(ProxyImpl {
+            ProxyImpl {
                 foo: "bar".to_owned(),
-            }),
+            },
         );
-        ctx.set_global(
+        ctx.set_global(lock, "p", p);
+        let echo = jsg::Rc::new(
             lock,
-            "echo",
-            jsg::Rc::new(Echo {
+            Echo {
                 prefix: "echo ".to_owned(),
-            }),
+            },
         );
+        ctx.set_global(lock, "echo", echo);
         f(lock, ctx);
         Ok(())
     });
@@ -335,7 +338,8 @@ fn custom_members_choose_the_wildcard_property() {
         let harness =
             crate::Harness::with_flags(|mut flags| flags.set_cache_option_enabled(enabled));
         harness.run_in_context(|lock, ctx| {
-            ctx.set_global(lock, "v", jsg::Rc::new(Versioned));
+            let v = jsg::Rc::new(lock, Versioned);
+            ctx.set_global(lock, "v", v);
             expect_eval(lock, ctx, "v.x", expected);
             Ok(())
         });
@@ -406,14 +410,15 @@ fn error_does_not_replace_termination() {
     for read in ["caller.call", "'call' in caller"] {
         let harness = crate::Harness::new();
         harness.run_in_context(|lock, ctx| {
-            ctx.set_global(
+            let caller = jsg::Rc::new(
                 lock,
-                "caller",
-                jsg::Rc::new(Caller {
+                Caller {
                     callback: RefCell::new(None),
-                }),
+                },
             );
-            ctx.set_global(lock, "panicker", panicker());
+            ctx.set_global(lock, "caller", caller);
+            let panicker = panicker(lock);
+            ctx.set_global(lock, "panicker", panicker);
             let result = ctx.eval::<bool>(
                 lock,
                 &format!(
@@ -435,7 +440,8 @@ fn panic_is_an_internal_error() {
     for read in ["panicker.panic", "'panic' in panicker"] {
         let harness = crate::Harness::new();
         harness.run_in_context(|lock, ctx| {
-            ctx.set_global(lock, "panicker", panicker());
+            let panicker = panicker(lock);
+            ctx.set_global(lock, "panicker", panicker);
             let err = ctx
                 .eval::<String>(lock, read)
                 .unwrap_err()

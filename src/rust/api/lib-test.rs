@@ -10,7 +10,7 @@ use super::*;
 fn test_wrap_resource_equality() {
     let harness = Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let dns_util = DnsUtil::new();
+        let dns_util = DnsUtil::new(lock);
 
         let lhs = dns_util.clone().to_js(lock)?;
         let rhs = dns_util.to_js(lock)?;

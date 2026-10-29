@@ -153,7 +153,7 @@ fn nullable_to_js() {
 fn nullable_argument_is_required_but_accepts_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock)?;
+        let args = jsg::Rc::new(lock, Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         let not_of_type = "TypeError: Failed to execute 'takeNullable' on 'Args': parameter 1 \
                            is not of type 'string'.";

@@ -102,7 +102,7 @@ impl Terminator {
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
         crate::Harness::terminate_and_deliver(lock);
-        let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
+        let result = jsg::ToJS::to_js(jsg::Rc::new(lock, Self), lock);
         RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
     }
@@ -148,7 +148,8 @@ fn termination_survives(method: &str) {
 /// [`termination_survives`] in `harness`.
 fn termination_survives_in(harness: &crate::Harness, method: &str) {
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "obj", jsg::Rc::new(Terminator));
+        let obj = jsg::Rc::new(lock, Terminator);
+        ctx.set_global(lock, "obj", obj);
         let script = format!(
             "globalThis.caught = 'nothing'; globalThis.after = false;
              try {{ obj.{method}(); }} catch (e) {{ globalThis.caught = String(e); }}

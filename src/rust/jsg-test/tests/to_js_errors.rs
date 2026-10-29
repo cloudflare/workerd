@@ -114,14 +114,15 @@ impl WildcardConverter {
 }
 
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    ctx.set_global(lock, "converter", jsg::Rc::new(Converter));
-    ctx.set_global(
+    let converter = jsg::Rc::new(lock, Converter);
+    ctx.set_global(lock, "converter", converter);
+    let wildcard = jsg::Rc::new(
         lock,
-        "wildcard",
-        jsg::Rc::new(WildcardConverter {
+        WildcardConverter {
             callback: RefCell::new(None),
-        }),
+        },
     );
+    ctx.set_global(lock, "wildcard", wildcard);
 }
 
 #[test]

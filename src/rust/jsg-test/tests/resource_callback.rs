@@ -80,9 +80,12 @@ impl DirectReturnResource {
 fn resource_method_callback_receives_correct_self() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: "Hello, ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echoResource", wrapped);
 
@@ -98,9 +101,12 @@ fn resource_method_callback_receives_correct_self() {
 fn resource_method_can_be_called_multiple_times() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: ">> ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: ">> ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echo", wrapped);
 
@@ -120,9 +126,12 @@ fn resource_method_can_be_called_multiple_times() {
 fn resource_method_accepts_str_ref_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: "Hello, ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echo", wrapped);
 
@@ -138,10 +147,13 @@ fn resource_method_returns_non_result_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Rc::new(Cell::new(42));
-        let resource = jsg::Rc::new(DirectReturnResource {
-            name: "TestResource".to_owned(),
-            counter: counter.clone(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            DirectReturnResource {
+                name: "TestResource".to_owned(),
+                counter: counter.clone(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -222,7 +234,7 @@ fn instance_and_static_methods_coexist() {
         ctx.set_global(lock, "MathResource", constructor);
 
         // Allocate and expose an instance as a global
-        let resource = jsg::Rc::new(MathResource);
+        let resource = jsg::Rc::new(lock, MathResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "math", wrapped);
 
@@ -285,10 +297,13 @@ fn static_method_throws_exception() {
 fn resource_method_returns_null_for_none() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(DirectReturnResource {
-            name: String::new(),
-            counter: Rc::new(Cell::new(0)),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            DirectReturnResource {
+                name: String::new(),
+                counter: Rc::new(Cell::new(0)),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -358,7 +373,7 @@ fn static_constant_accessible_on_constructor() {
 fn static_constant_accessible_on_instance() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ConstantResource {});
+        let resource = jsg::Rc::new(lock, ConstantResource {});
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
@@ -394,7 +409,7 @@ fn static_constant_is_read_only() {
 fn static_constant_coexists_with_methods() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ConstantResource {});
+        let resource = jsg::Rc::new(lock, ConstantResource {});
 
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global(lock, "ConstantResource", constructor);
@@ -450,7 +465,7 @@ impl PanicResource {
 fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(PanicResource);
+        let resource = jsg::Rc::new(lock, PanicResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
@@ -517,7 +532,7 @@ impl CatchPanicResource {
 fn catch_panic_returns_none_and_leaves_exception_pending() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let wrapped = jsg::Rc::new(CatchPanicResource).to_js(lock)?;
+        let wrapped = jsg::Rc::new(lock, CatchPanicResource).to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
         let err = ctx
             .eval::<bool>(lock, "obj.catchNestedPanic(); true")
@@ -570,10 +585,13 @@ impl ReentrantResource {
 fn method_can_be_reentered() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            depth: Cell::new(0),
-            max_depth: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                depth: Cell::new(0),
+                max_depth: Cell::new(0),
+            },
+        );
         let wrapped = resource.clone().to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
         ctx.eval_raw(
@@ -698,12 +716,16 @@ fn calling_resource(
     lock: &mut jsg::Lock,
     ctx: &crate::EvalContext<'_>,
 ) -> jsg::Rc<CallingResource> {
-    let resource = jsg::Rc::new(CallingResource {
-        saw_pending: Cell::new(false),
-        saved: Cell::new(None),
-    });
+    let resource = jsg::Rc::new(
+        lock,
+        CallingResource {
+            saw_pending: Cell::new(false),
+            saved: Cell::new(None),
+        },
+    );
     ctx.set_global(lock, "obj", resource.clone());
-    ctx.set_global(lock, "panicker", jsg::Rc::new(PanicResource));
+    let panicker = jsg::Rc::new(lock, PanicResource);
+    ctx.set_global(lock, "panicker", panicker);
     resource
 }
 
@@ -897,9 +919,12 @@ fn pending_error_kept_after_exception_was_caught_throws_internal_error() {
 fn instance_method_throws_on_missing_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: "Hello, ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
@@ -927,9 +952,12 @@ fn instance_method_throws_on_missing_receiver() {
 fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: "Hello, ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
@@ -954,9 +982,12 @@ fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
 fn instance_method_works_on_correct_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(EchoResource {
-            prefix: "Hi, ".to_owned(),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hi, ".to_owned(),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
@@ -974,14 +1005,20 @@ fn instance_method_works_on_correct_receiver() {
 fn instance_method_throws_on_other_resource_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let echo = jsg::Rc::new(EchoResource {
-            prefix: "Hi, ".to_owned(),
-        })
+        let echo = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hi, ".to_owned(),
+            },
+        )
         .to_js(lock)?;
         ctx.set_global(lock, "obj", echo);
-        let greeting = jsg::Rc::new(Greeting {
-            message: "hello".to_owned(),
-        })
+        let greeting = jsg::Rc::new(
+            lock,
+            Greeting {
+                message: "hello".to_owned(),
+            },
+        )
         .to_js(lock)?;
         ctx.set_global(lock, "other", greeting);
 
@@ -1006,9 +1043,12 @@ fn instance_method_throws_on_other_resource_receiver() {
 fn instance_method_throws_on_object_inheriting_from_resource() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let echo = jsg::Rc::new(EchoResource {
-            prefix: "Hi, ".to_owned(),
-        })
+        let echo = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hi, ".to_owned(),
+            },
+        )
         .to_js(lock)?;
         ctx.set_global(lock, "obj", echo);
 
@@ -1032,14 +1072,20 @@ fn instance_method_throws_on_object_inheriting_from_resource() {
 fn resolve_receiver_rejects_everything_but_the_resource_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let echo = jsg::Rc::new(EchoResource {
-            prefix: "Hi, ".to_owned(),
-        })
+        let echo = jsg::Rc::new(
+            lock,
+            EchoResource {
+                prefix: "Hi, ".to_owned(),
+            },
+        )
         .to_js(lock)?;
         ctx.set_global(lock, "obj", echo);
-        let greeting = jsg::Rc::new(Greeting {
-            message: "hello".to_owned(),
-        })
+        let greeting = jsg::Rc::new(
+            lock,
+            Greeting {
+                message: "hello".to_owned(),
+            },
+        )
         .to_js(lock)?;
         ctx.set_global(lock, "other", greeting);
 

@@ -559,7 +559,7 @@ fn value_to_js_string_passes_on_what_to_string_throws() {
             assert_eq!(err.message, message, "{expr}");
         }
 
-        let resource = jsg::Rc::new(Strings).to_js(lock)?;
+        let resource = jsg::Rc::new(lock, Strings).to_js(lock)?;
         ctx.set_global(lock, "r", resource);
         assert_eq!(ctx.eval::<String>(lock, "r.coerce(7)").unwrap(), "7");
         let err = ctx
@@ -714,7 +714,8 @@ fn to_js_of_an_overlong_string_is_a_range_error() {
 #[test]
 fn method_returning_an_overlong_string_throws_a_range_error() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "overlong", jsg::Rc::new(Overlong));
+        let overlong = jsg::Rc::new(lock, Overlong);
+        ctx.set_global(lock, "overlong", overlong);
         assert!(
             ctx.eval::<bool>(
                 lock,

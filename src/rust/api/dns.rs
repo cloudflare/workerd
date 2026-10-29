@@ -247,8 +247,8 @@ pub struct DnsUtil;
 
 #[jsg_resource]
 impl DnsUtil {
-    pub fn new() -> jsg::Rc<Self> {
-        jsg::Rc::new(Self {})
+    pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {
+        jsg::Rc::new(lock, Self {})
     }
 
     /// Parses an unknown RR format returned from Cloudflare DNS.

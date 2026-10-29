@@ -47,11 +47,14 @@ struct Leaf {
     owner: RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
-fn leaf(value: u32) -> jsg::Rc<Leaf> {
-    jsg::Rc::new(Leaf {
-        value,
-        owner: RefCell::new(None),
-    })
+fn leaf(lock: &mut jsg::Lock<'_>, value: u32) -> jsg::Rc<Leaf> {
+    jsg::Rc::new(
+        lock,
+        Leaf {
+            value,
+            owner: RefCell::new(None),
+        },
+    )
 }
 
 /// Has each of `leaves` keep `owner`, the wrapper of their parent.
@@ -108,13 +111,16 @@ fn vec_rc_children_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let c1 = leaf(1);
-        let c2 = leaf(2);
-        let c3 = leaf(3);
+        let c1 = leaf(lock, 1);
+        let c2 = leaf(lock, 2);
+        let c3 = leaf(lock, 3);
 
-        let parent = jsg::Rc::new(VecParent {
-            children: vec![c1.clone(), c2.clone(), c3.clone()],
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            VecParent {
+                children: vec![c1.clone(), c2.clone(), c3.clone()],
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&c1, &c2, &c3]);
         ctx.set_global(lock, "parent", wrapped);
@@ -148,7 +154,7 @@ fn vec_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(VecParent { children: vec![] });
+        let parent = jsg::Rc::new(lock, VecParent { children: vec![] });
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -193,14 +199,14 @@ fn hashmap_rc_values_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let a = leaf(10);
-        let b = leaf(20);
+        let a = leaf(lock, 10);
+        let b = leaf(lock, 20);
 
         let mut map = HashMap::new();
         map.insert("a".to_owned(), a.clone());
         map.insert("b".to_owned(), b.clone());
 
-        let parent = jsg::Rc::new(HashMapParent { children: map });
+        let parent = jsg::Rc::new(lock, HashMapParent { children: map });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&a, &b]);
         ctx.set_global(lock, "parent", wrapped);
@@ -230,9 +236,12 @@ fn hashmap_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(HashMapParent {
-            children: HashMap::new(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            HashMapParent {
+                children: HashMap::new(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -277,14 +286,14 @@ fn btreemap_rc_values_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let x = leaf(100);
-        let y = leaf(200);
+        let x = leaf(lock, 100);
+        let y = leaf(lock, 200);
 
         let mut map = BTreeMap::new();
         map.insert("x".to_owned(), x.clone());
         map.insert("y".to_owned(), y.clone());
 
-        let parent = jsg::Rc::new(BTreeMapParent { children: map });
+        let parent = jsg::Rc::new(lock, BTreeMapParent { children: map });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&x, &y]);
         ctx.set_global(lock, "parent", wrapped);
@@ -314,9 +323,12 @@ fn btreemap_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(BTreeMapParent {
-            children: BTreeMap::new(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            BTreeMapParent {
+                children: BTreeMap::new(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -368,14 +380,14 @@ fn hashset_rc_elements_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let p = leaf(1);
-        let q = leaf(2);
+        let p = leaf(lock, 1);
+        let q = leaf(lock, 2);
 
         let mut set = HashSet::new();
         set.insert(p.clone());
         set.insert(q.clone());
 
-        let parent = jsg::Rc::new(HashSetParent { children: set });
+        let parent = jsg::Rc::new(lock, HashSetParent { children: set });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&p, &q]);
         ctx.set_global(lock, "parent", wrapped);
@@ -405,9 +417,12 @@ fn hashset_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(HashSetParent {
-            children: HashSet::new(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            HashSetParent {
+                children: HashSet::new(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -457,14 +472,14 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let r = leaf(7);
-        let s = leaf(8);
+        let r = leaf(lock, 7);
+        let s = leaf(lock, 8);
 
         let mut set = BTreeSet::new();
         set.insert(r.clone());
         set.insert(s.clone());
 
-        let parent = jsg::Rc::new(BTreeSetParent { children: set });
+        let parent = jsg::Rc::new(lock, BTreeSetParent { children: set });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&r, &s]);
         ctx.set_global(lock, "parent", wrapped);
@@ -494,9 +509,12 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(BTreeSetParent {
-            children: BTreeSet::new(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            BTreeSetParent {
+                children: BTreeSet::new(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -541,15 +559,18 @@ fn dict_rc_values_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let a = leaf(1);
-        let b = leaf(2);
+        let a = leaf(lock, 1);
+        let b = leaf(lock, 2);
 
-        let parent = jsg::Rc::new(DictParent {
-            children: jsg::Dict::from(vec![
-                ("a".to_owned(), a.clone()),
-                ("b".to_owned(), b.clone()),
-            ]),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            DictParent {
+                children: jsg::Dict::from(vec![
+                    ("a".to_owned(), a.clone()),
+                    ("b".to_owned(), b.clone()),
+                ]),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&a, &b]);
         ctx.set_global(lock, "parent", wrapped);
@@ -600,12 +621,15 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let c1 = leaf(11);
-        let c2 = leaf(22);
+        let c1 = leaf(lock, 11);
+        let c2 = leaf(lock, 22);
 
-        let parent = jsg::Rc::new(CellVecParent {
-            children: Cell::new(vec![c1.clone(), c2.clone()]),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            CellVecParent {
+                children: Cell::new(vec![c1.clone(), c2.clone()]),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&c1, &c2]);
         ctx.set_global(lock, "parent", wrapped);
@@ -635,9 +659,12 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(CellVecParent {
-            children: Cell::new(vec![]),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            CellVecParent {
+                children: Cell::new(vec![]),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -682,14 +709,17 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let m = leaf(99);
+        let m = leaf(lock, 99);
 
         let mut map = HashMap::new();
         map.insert("m".to_owned(), m.clone());
 
-        let parent = jsg::Rc::new(CellHashMapParent {
-            children: Cell::new(map),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            CellHashMapParent {
+                children: Cell::new(map),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&m]);
         ctx.set_global(lock, "parent", wrapped);
@@ -741,18 +771,21 @@ fn mixed_collection_fields_all_traced() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let vec_child = leaf(1);
-        let map_child = leaf(2);
-        let direct_child = leaf(3);
+        let vec_child = leaf(lock, 1);
+        let map_child = leaf(lock, 2);
+        let direct_child = leaf(lock, 3);
 
         let mut named = HashMap::new();
         named.insert("key".to_owned(), map_child.clone());
 
-        let parent = jsg::Rc::new(MixedParent {
-            singles: vec![vec_child.clone()],
-            named,
-            direct: direct_child.clone(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            MixedParent {
+                singles: vec![vec_child.clone()],
+                named,
+                direct: direct_child.clone(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&vec_child, &map_child, &direct_child]);
         ctx.set_global(lock, "parent", wrapped);
@@ -790,11 +823,14 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let child = leaf(42);
+        let child = leaf(lock, 42);
 
-        let parent = jsg::Rc::new(VecParent {
-            children: vec![child.clone()],
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            VecParent {
+                children: vec![child.clone()],
+            },
+        );
 
         // Wrap parent so it gets a JS object.
         let wrapped = parent.clone().to_js(lock)?;
@@ -849,13 +885,13 @@ fn hashmap_integer_key_rc_values_traced() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let v = leaf(55);
+        let v = leaf(lock, 55);
 
         let mut map = HashMap::new();
         map.insert(0u32, v.clone());
         map.insert(1u32, v.clone()); // same child twice
 
-        let parent = jsg::Rc::new(IntKeyMapParent { children: map });
+        let parent = jsg::Rc::new(lock, IntKeyMapParent { children: map });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&v]);
         ctx.set_global(lock, "parent", wrapped);
@@ -925,13 +961,16 @@ fn trace_delegation_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = leaf(77);
+        let child = leaf(lock, 77);
 
-        let parent = jsg::Rc::new(TraceDelegationParent {
-            data: PrivateData {
-                child: child.clone(),
+        let parent = jsg::Rc::new(
+            lock,
+            TraceDelegationParent {
+                data: PrivateData {
+                    child: child.clone(),
+                },
             },
-        });
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&child]);
         ctx.set_global(lock, "parent", wrapped);
@@ -992,11 +1031,14 @@ fn custom_trace_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = leaf(88);
+        let child = leaf(lock, 88);
 
-        let parent = jsg::Rc::new(CustomTraceParent {
-            child: child.clone(),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            CustomTraceParent {
+                child: child.clone(),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&child]);
         ctx.set_global(lock, "parent", wrapped);

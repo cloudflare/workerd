@@ -389,25 +389,47 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
   });
 }
 
+// Runs `func` with an isolate locked, a Rust realm attached and a context entered, as creating
+// a Rust resource requires.
+void withRealm(auto func) {
+  // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
+  auto& v8System = system();
+  JsgConfig config = {};
+  BenchIsolate isolate(v8System, newIsolateGroup(), config, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](auto& js) {
+    capnp::MallocMessageBuilder message;
+    auto flags = capnp::canonicalize(message.initRoot<CompatibilityFlags>().asReader());
+    // The realm stays attached to the isolate until it is dropped, after everything `func`
+    // creates.
+    auto realm =
+        rustJsg::realm_create(js.v8Isolate, {flags.asBytes().begin(), flags.asBytes().size()});
+    auto context = js.template newContext<Context>();
+    v8::Context::Scope scope(context.getHandle(js.v8Isolate));
+    func(js.v8Isolate);
+  });
+}
+
 void nativeLifetime(benchmark::State& state, Binding binding, uint32_t clones) {
   const uint32_t COUNT = smokeTesting() ? 4 : 1024;
-  for (auto _: state) {
-    if (binding == Binding::RUST) {
-      benchmark::DoNotOptimize(rustBench::native_lifetime(COUNT, clones));
-    } else {
-      uint32_t result = 0;
-      for (uint32_t i = 0; i < COUNT; ++i) {
-        auto node = jsg::alloc<Node>(i);
-        benchmark::DoNotOptimize(&node);
-        for (uint32_t j = 0; j < clones; ++j) {
-          auto copy = node.addRef();
-          benchmark::DoNotOptimize(&copy);
+  withRealm([&](v8::Isolate* isolate) {
+    for (auto _: state) {
+      if (binding == Binding::RUST) {
+        benchmark::DoNotOptimize(rustBench::native_lifetime(isolate, COUNT, clones));
+      } else {
+        uint32_t result = 0;
+        for (uint32_t i = 0; i < COUNT; ++i) {
+          auto node = jsg::alloc<Node>(i);
+          benchmark::DoNotOptimize(&node);
+          for (uint32_t j = 0; j < clones; ++j) {
+            auto copy = node.addRef();
+            benchmark::DoNotOptimize(&copy);
+          }
+          result ^= node->getValue();
         }
-        result ^= node->getValue();
+        benchmark::DoNotOptimize(result);
       }
-      benchmark::DoNotOptimize(result);
     }
-  }
+  });
   state.SetItemsProcessed(state.iterations() * COUNT);
   state.counters["ops/batch"] = COUNT;
 }
@@ -420,33 +442,35 @@ int registerCases() {
         binding == Binding::CPP ? "Metadata/native-memory-cpp" : "Metadata/native-memory-rust";
     benchmark::RegisterBenchmark(name, [binding](benchmark::State& state) {
       const uint32_t COUNT = smokeTesting() ? 4 : 100000;
-      // Populate allocator caches before taking the live-allocation baseline.
-      benchmark::DoNotOptimize(rustBench::native_lifetime(1024, 0));
-      for (uint32_t i = 0; i < 1024; ++i) {
-        auto node = jsg::alloc<Node>(i);
-        benchmark::DoNotOptimize(&node);
-      }
-      malloc_statistics_t before;
-      malloc_zone_statistics(nullptr, &before);
-      auto record = [&](auto& owner) {
-        malloc_statistics_t after;
-        malloc_zone_statistics(nullptr, &after);
-        state.counters["malloc-bytes/resource"] =
-            static_cast<double>(after.size_in_use - before.size_in_use) / COUNT;
-        state.counters["malloc-blocks/resource"] =
-            static_cast<double>(after.blocks_in_use - before.blocks_in_use) / COUNT;
-        state.counters["ops/batch"] = 1;
-        for (auto _: state) benchmark::DoNotOptimize(&owner);
-      };
-      if (binding == Binding::RUST) {
-        auto resources = rustBench::retain_native(COUNT);
-        record(resources);
-      } else {
-        auto builder = kj::heapArrayBuilder<Ref<Node>>(COUNT);
-        for (uint32_t i = 0; i < COUNT; ++i) builder.add(jsg::alloc<Node>(i));
-        auto resources = builder.finish();
-        record(resources);
-      }
+      withRealm([&](v8::Isolate* isolate) {
+        // Populate allocator caches before taking the live-allocation baseline.
+        benchmark::DoNotOptimize(rustBench::native_lifetime(isolate, 1024, 0));
+        for (uint32_t i = 0; i < 1024; ++i) {
+          auto node = jsg::alloc<Node>(i);
+          benchmark::DoNotOptimize(&node);
+        }
+        malloc_statistics_t before;
+        malloc_zone_statistics(nullptr, &before);
+        auto record = [&](auto& owner) {
+          malloc_statistics_t after;
+          malloc_zone_statistics(nullptr, &after);
+          state.counters["malloc-bytes/resource"] =
+              static_cast<double>(after.size_in_use - before.size_in_use) / COUNT;
+          state.counters["malloc-blocks/resource"] =
+              static_cast<double>(after.blocks_in_use - before.blocks_in_use) / COUNT;
+          state.counters["ops/batch"] = 1;
+          for (auto _: state) benchmark::DoNotOptimize(&owner);
+        };
+        if (binding == Binding::RUST) {
+          auto resources = rustBench::retain_native(isolate, COUNT);
+          record(resources);
+        } else {
+          auto builder = kj::heapArrayBuilder<Ref<Node>>(COUNT);
+          for (uint32_t i = 0; i < COUNT; ++i) builder.add(jsg::alloc<Node>(i));
+          auto resources = builder.finish();
+          record(resources);
+        }
+      });
     });
   }
 #endif

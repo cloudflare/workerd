@@ -126,10 +126,13 @@ fn count_fast_calls<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
 }
 
 fn set_resource(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, base: i32) {
-    let resource = jsg::Rc::new(FastResource {
-        base,
-        touched: Cell::new(0),
-    });
+    let resource = jsg::Rc::new(
+        lock,
+        FastResource {
+            base,
+            touched: Cell::new(0),
+        },
+    );
     ctx.set_global(lock, "r", resource);
     let constructor = jsg::resource::function_template_of::<FastResource>(lock);
     ctx.set_global(lock, "FastResource", constructor);

@@ -147,7 +147,7 @@ impl ArrayResource {
 fn resource_accepts_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -168,7 +168,7 @@ fn resource_accepts_array_parameter() {
 fn resource_accepts_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -190,7 +190,7 @@ fn resource_accepts_slice_parameter() {
 fn resource_returns_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -212,7 +212,7 @@ fn resource_returns_array() {
 fn resource_accepts_typed_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -238,7 +238,7 @@ fn resource_accepts_typed_array_parameter() {
 fn resource_returns_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -259,7 +259,7 @@ fn resource_returns_typed_array() {
 fn typed_array_parameter_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -291,7 +291,7 @@ fn typed_array_parameter_rejects_wrong_type() {
 fn resource_accepts_and_returns_struct_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -361,7 +361,7 @@ fn vec_of_bool_and_number_converts_to_an_array() {
             .unwrap();
         assert!(ok);
 
-        let wrapped = jsg::Rc::new(ArrayResource).to_js(lock)?;
+        let wrapped = jsg::Rc::new(lock, ArrayResource).to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
         let ok: bool = ctx
             .eval(
@@ -413,7 +413,7 @@ fn vec_of_numbers_converts_to_an_array() {
             .unwrap();
         assert!(ok);
 
-        let wrapped = jsg::Rc::new(ArrayResource).to_js(lock)?;
+        let wrapped = jsg::Rc::new(lock, ArrayResource).to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
         let ok: bool = ctx
             .eval(
@@ -432,7 +432,10 @@ fn vec_of_numbers_converts_to_an_array() {
 fn vec_of_resource_references_converts_to_an_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resources = vec![jsg::Rc::new(ArrayResource), jsg::Rc::new(ArrayResource)];
+        let resources = vec![
+            jsg::Rc::new(lock, ArrayResource),
+            jsg::Rc::new(lock, ArrayResource),
+        ];
         let js_val = resources.to_js(lock)?;
         ctx.set_global(lock, "resources", js_val);
 
@@ -629,7 +632,7 @@ fn to_js_array_buffer_creates_array_buffer() {
 fn resource_returns_array_buffer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -855,7 +858,7 @@ fn typed_array_empty() {
 fn float32_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -893,7 +896,7 @@ fn float32_array_parameter_and_return() {
 fn float64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -926,7 +929,7 @@ fn float64_array_parameter_and_return() {
 fn bigint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -959,7 +962,7 @@ fn bigint64_array_parameter_and_return() {
 fn biguint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
@@ -1046,7 +1049,7 @@ impl SliceResource {
 fn typed_array_as_slice_zero_copy_sum() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let res = jsg::Rc::new(SliceResource);
+        let res = jsg::Rc::new(lock, SliceResource);
         ctx.set_global(lock, "r", res);
 
         // Uint8Array
@@ -1086,7 +1089,7 @@ fn typed_array_as_slice_empty() {
 fn typed_array_as_mut_slice_mutations_visible_in_js() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let res = jsg::Rc::new(SliceResource);
+        let res = jsg::Rc::new(lock, SliceResource);
         ctx.set_global(lock, "r", res);
 
         // fill_ff writes 0xFF into every element in-place.
@@ -1198,7 +1201,7 @@ fn typed_array_data_pointer_and_byte_offset() {
 fn typed_array_from_js_local_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let res = jsg::Rc::new(SliceResource);
+        let res = jsg::Rc::new(lock, SliceResource);
         ctx.set_global(lock, "r", res);
 
         // sumU8Local expects Uint8Array — Int8Array must be rejected.
@@ -1312,7 +1315,7 @@ fn is_float16_array_check() {
 fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
     let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
         ctx.eval_raw(
@@ -1430,7 +1433,7 @@ fn struct_to_js_without_fast_jsg_struct_runs_object_prototype_setters() {
 fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ArrayResource);
+        let resource = jsg::Rc::new(lock, ArrayResource);
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
         ctx.eval_raw(

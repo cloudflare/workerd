@@ -30,13 +30,13 @@ mod ffi {
         unsafe fn make_target(isolate: *mut Isolate) -> MaybeLocal;
         unsafe fn node_constructor(isolate: *mut Isolate) -> MaybeLocal;
         fn fast_call_count() -> KjMaybe<u64>;
-        fn native_lifetime(count: u32, clones: u32) -> u32;
+        unsafe fn native_lifetime(isolate: *mut Isolate, count: u32, clones: u32) -> u32;
         type NativeResources;
         #[expect(
             clippy::unnecessary_box_returns,
             reason = "cxx takes an opaque Rust type boxed"
         )]
-        fn retain_native(count: u32) -> Box<NativeResources>;
+        unsafe fn retain_native(isolate: *mut Isolate, count: u32) -> Box<NativeResources>;
     }
 }
 
@@ -242,8 +242,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn new_node(&self, a: u32) -> jsg::Rc<Node> {
-        jsg::Rc::new(Node::constructor(a))
+    fn new_node(&self, lock: &mut jsg::Lock<'_>, a: u32) -> jsg::Rc<Node> {
+        jsg::Rc::new(lock, Node::constructor(a))
     }
 
     #[jsg_method]
@@ -285,7 +285,7 @@ unsafe fn make_target(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
         v8::run_ffi_callback(isolate, |lock| {
             let target = Target {
                 value: Cell::new(0),
-                child: jsg::Rc::new(Node::constructor(7)),
+                child: jsg::Rc::new(lock, Node::constructor(7)),
             };
             target.to_js(lock)
         })
@@ -313,10 +313,14 @@ fn fast_call_count() -> KjMaybe<u64> {
     count.into()
 }
 
-fn native_lifetime(count: u32, clones: u32) -> u32 {
+/// # Safety
+/// As for `make_target`.
+unsafe fn native_lifetime(isolate: *mut v8::ffi::Isolate, count: u32, clones: u32) -> u32 {
+    // SAFETY: forwarded from the caller.
+    jsg::callback_scope!(unsafe let lock, isolate);
     let mut result = 0;
     for i in 0..count {
-        let node = jsg::Rc::new(Node::constructor(i));
+        let node = jsg::Rc::new(lock, Node::constructor(i));
         black_box(&node);
         for _ in 0..clones {
             let copy = node.clone();
@@ -335,10 +339,14 @@ pub struct NativeResources {
     clippy::unnecessary_box_returns,
     reason = "cxx takes an opaque Rust type boxed"
 )]
-fn retain_native(count: u32) -> Box<NativeResources> {
+/// # Safety
+/// As for `make_target`.
+unsafe fn retain_native(isolate: *mut v8::ffi::Isolate, count: u32) -> Box<NativeResources> {
+    // SAFETY: forwarded from the caller.
+    jsg::callback_scope!(unsafe let lock, isolate);
     Box::new(NativeResources {
         _nodes: (0..count)
-            .map(|i| jsg::Rc::new(Node::constructor(i)))
+            .map(|i| jsg::Rc::new(lock, Node::constructor(i)))
             .collect::<Vec<_>>()
             .into_boxed_slice(),
     })

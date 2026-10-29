@@ -540,9 +540,12 @@ impl Leaf {}
 fn then_or_catch_data_holds_a_resource() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let leaf = jsg::Rc::new(Leaf {
-            _drops: DropCounter(&SHARED_LEAF_DROPS),
-        });
+        let leaf = jsg::Rc::new(
+            lock,
+            Leaf {
+                _drops: DropCounter(&SHARED_LEAF_DROPS),
+            },
+        );
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let settled = resolver
             .promise()
@@ -598,9 +601,12 @@ fn reaction_data_of_pending_promise_is_dropped_with_its_isolate() {
         let promise = resolver.promise();
         let data = TeardownData {
             _drops: DropCounter(&TEARDOWN_DATA_DROPS),
-            leaf: jsg::Rc::new(Leaf {
-                _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
-            }),
+            leaf: jsg::Rc::new(
+                lock,
+                Leaf {
+                    _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
+                },
+            ),
             promise: promise.to_traced_global(lock),
         };
         promise
@@ -684,11 +690,13 @@ impl Watcher {
 #[test]
 fn reaction_calls_back_into_the_resource_that_registered_it() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let watcher = jsg::Rc::new(Watcher {
-            state: jsg::Rc::new(WatcherState {
+        let state = jsg::Rc::new(
+            lock,
+            WatcherState {
                 seen: RefCell::new(Vec::new()),
-            }),
-        });
+            },
+        );
+        let watcher = jsg::Rc::new(lock, Watcher { state });
         ctx.set_global(lock, "watcher", watcher);
         let code = format!(
             "{RECORD}
@@ -798,10 +806,13 @@ impl TerminatingPromises {
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises.clone());
         let result = ctx.eval_raw(
             lock,
@@ -885,9 +896,12 @@ impl Deferred {
 #[test]
 fn resource_settles_promise_from_later_call() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(Deferred {
-            resolver: RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            Deferred {
+                resolver: RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         let code = format!(
             "{RECORD}
@@ -929,10 +943,13 @@ impl DroppedDeferred {
 fn cycle_through_held_resolver_is_collected() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(DroppedDeferred {
-            _drops: DropCounter(&DEFERRED_DROPS),
-            resolver: RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            DroppedDeferred {
+                _drops: DropCounter(&DEFERRED_DROPS),
+                resolver: RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         // The promise's reaction holds the resource, which holds the resolver of the promise.
         ctx.eval_raw(
@@ -1074,12 +1091,14 @@ impl ReadThroughCache {
 }
 
 fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let cache = jsg::Rc::new(ReadThroughCache {
-        store: jsg::Rc::new(CacheStore {
+    let store = jsg::Rc::new(
+        lock,
+        CacheStore {
             entries: RefCell::new(HashMap::new()),
             in_flight: RefCell::new(HashMap::new()),
-        }),
-    });
+        },
+    );
+    let cache = jsg::Rc::new(lock, ReadThroughCache { store });
     ctx.set_global(lock, "cache", cache);
 }
 
@@ -1221,10 +1240,13 @@ fn cache_fallback_that_throws_rejects_the_read() {
 fn cache_removes_in_flight_fill_when_fallback_terminates() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises);
         let result = ctx.eval_raw(
             lock,

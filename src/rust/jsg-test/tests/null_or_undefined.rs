@@ -59,11 +59,14 @@ fn gc_traces_the_contained_resource() {
     let harness = crate::Harness::new();
     let mut weak_child = None;
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(Child {});
+        let child = jsg::Rc::new(lock, Child {});
         weak_child = Some(child.downgrade());
-        let parent = jsg::Rc::new(Parent {
-            child: NullOrUndefined::Some(child),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            Parent {
+                child: NullOrUndefined::Some(child),
+            },
+        );
         let wrapped = parent.to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         crate::Harness::request_gc(lock);
@@ -75,7 +78,7 @@ fn gc_traces_the_contained_resource() {
         crate::Harness::request_gc(lock);
         assert!(!weak_child.as_ref().unwrap().is_alive());
         for child in [NullOrUndefined::Null, NullOrUndefined::Undefined] {
-            let parent = jsg::Rc::new(Parent { child });
+            let parent = jsg::Rc::new(lock, Parent { child });
             let _wrapped = parent.to_js(lock)?;
             crate::Harness::request_gc(lock);
         }
@@ -120,7 +123,7 @@ fn conversion_preserves_all_states() {
 fn methods_accept_omission_and_report_inner_type_errors() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let args = jsg::Rc::new(Args {}).to_js(lock)?;
+        let args = jsg::Rc::new(lock, Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
         assert!(ctx.eval::<bool>(lock, "args.echo() === undefined && args.echo(undefined) === undefined && args.echo(null) === null && args.echo('x') === 'x'").unwrap());
         assert_eq!(ctx.eval::<String>(lock, "try { args.strict(123) } catch(e) { e.message }").unwrap(),
@@ -136,7 +139,7 @@ fn optional_arguments_do_not_count_toward_web_idl_length() {
             flags.set_spec_compliant_property_attributes(enabled);
         });
         harness.run_in_context(|lock, ctx| {
-            let args = jsg::Rc::new(Args {}).to_js(lock)?;
+            let args = jsg::Rc::new(lock, Args {}).to_js(lock)?;
             ctx.set_global(lock, "args", args);
             assert_eq!(
                 ctx.eval::<u32>(lock, "args.withPrefix.length").unwrap(),

@@ -254,7 +254,8 @@ fn unserializable_values_throw_data_clone_error() {
             "Symbol(s) could not be cloned.",
         );
 
-        ctx.set_global(lock, "resource", jsg::Rc::new(Unserializable));
+        let resource = jsg::Rc::new(lock, Unserializable);
+        ctx.set_global(lock, "resource", resource);
         let exception = serialize_exception(lock, ctx, "[resource]");
         assert_error(
             lock,
@@ -410,7 +411,8 @@ impl Terminator {
 #[test]
 fn nothing_runs_while_execution_is_terminating() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "terminator", jsg::Rc::new(Terminator));
+        let terminator = jsg::Rc::new(lock, Terminator);
+        ctx.set_global(lock, "terminator", terminator);
         // The harness reports a termination as a failure or as a null exception.
         match ctx.eval_raw(lock, "terminator.serializeWhileTerminating()") {
             Err(crate::EvalError::EvalFailed) => {}
