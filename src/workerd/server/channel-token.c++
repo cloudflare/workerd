@@ -9,6 +9,7 @@
 #include <workerd/util/entropy.h>
 
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/sha.h>
 
 #include <capnp/serialize-packed.h>
@@ -22,8 +23,18 @@
 
 namespace workerd::server {
 
-ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver): resolver(resolver) {
-  getEntropy(tokenKey);
+ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey)
+    : resolver(resolver) {
+  KJ_IF_SOME(key, clusterKey) {
+    // Labeled so this key never equals another one derived from the cluster key.
+    auto label = "workerd channel token v1"_kj;
+    uint outLen = 0;
+    KJ_ASSERT(HMAC(EVP_sha256(), label.begin(), label.size(), key.asBytes().begin(), key.size(),
+                  tokenKey, &outLen) != nullptr);
+    KJ_ASSERT(outLen == sizeof(tokenKey));
+  } else {
+    getEntropy(tokenKey);
+  }
 
   SHA256_CTX ctx{};
   KJ_ASSERT(SHA256_Init(&ctx));

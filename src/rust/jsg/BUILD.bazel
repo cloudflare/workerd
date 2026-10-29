@@ -8,6 +8,8 @@ CPP_SHIMS = glob([
     "*.c++",
     "*.h",
 ]) + [
+    "//src/rust/api:inspector.c++",
+    "//src/rust/api:inspector.h",
     "//src/workerd/io/io-context:ffi.c++",
     "//src/workerd/io/io-context:ffi.h",
 ]
@@ -78,6 +80,7 @@ wd_cc_library(
         ":v8.rs@cxx",
         "//src/rust/cxx/kj-rs",
         "//src/workerd/jsg:jsg-core",
+        "//src/workerd/util:autogate",
         "@workerd-v8//:v8",
     ],
 )

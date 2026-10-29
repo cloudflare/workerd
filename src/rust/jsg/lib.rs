@@ -16,6 +16,7 @@ mod isolate_state;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
+pub mod null_or_undefined;
 pub mod nullable;
 mod promise;
 pub mod resource;
@@ -30,6 +31,7 @@ pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
 pub use resource::NestedType;
 pub use resource::Rc;
@@ -115,6 +117,11 @@ mod ffi {
         /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
         /// the isolate is disposed.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
+
+        // Autogates
+        /// Whether the `JSG_INTEGER_ENFORCE_RANGE` autogate is enabled; see
+        /// `wrappable::integer_part_for_range_check`.
+        pub fn integer_enforce_range_autogate_enabled() -> bool;
     }
 }
 

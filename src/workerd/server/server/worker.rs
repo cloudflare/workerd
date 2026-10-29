@@ -54,6 +54,7 @@ use crate::channels::WorkerEntrypoint;
 use crate::channels::WorkerInterface;
 use crate::channels::WorkerInterfaceList;
 use crate::channels::WorkerStub;
+use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::config::Server;
@@ -462,6 +463,7 @@ impl WorkerService {
             });
             let namespace = ActorNamespace::new(
                 Rc::clone(&self.factory),
+                self.service_name.clone().unwrap_or_default(),
                 class_name.clone(),
                 config.clone(),
                 actor_class,
@@ -474,7 +476,8 @@ impl WorkerService {
     /// Creates the namespace backing one configured Workflow, keyed by `key`, its unique key.
     /// Its actors are `actor_class`, the engine's class with the Workflow's props bound, and its
     /// storage is in `storage_path`, the directory of the Workflow's `bindingService` worker.
-    /// `persistent_self_tokens` is the engine worker's.
+    /// `persistent_self_tokens` is the engine worker's. In cluster mode the namespace joins
+    /// `cluster` before its storage opens.
     pub fn init_workflow_namespace(
         &self,
         key: &str,
@@ -482,14 +485,19 @@ impl WorkerService {
         actor_class: Rc<dyn ActorClass>,
         storage_path: Option<&str>,
         persistent_self_tokens: Persistent,
+        cluster: Option<&Rc<ClusterNode>>,
     ) -> Result<Rc<ActorNamespace>> {
         let namespace = ActorNamespace::new(
             Rc::clone(&self.factory),
+            self.service_name.clone().unwrap_or_default(),
             key.to_owned(),
             config,
             actor_class,
             persistent_self_tokens,
         );
+        if let Some(cluster) = cluster {
+            namespace.set_cluster(Rc::clone(cluster));
+        }
         namespace.link(storage_path)?;
         self.namespaces
             .borrow_mut()

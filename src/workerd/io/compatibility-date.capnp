@@ -1761,4 +1761,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
   # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
   # and module name.
+
+  temporal @200 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-12-01");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
 }

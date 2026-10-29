@@ -34,6 +34,7 @@ fn holds_gc_references_follows_the_contents() {
     assert!(<v8::TracedGlobal<v8::Value>>::holds_gc_references());
     assert_forwards!(Option);
     assert_forwards!(Nullable);
+    assert_forwards!(NullOrUndefined);
     assert_forwards!(NonCoercible);
     assert_forwards!(Vec);
     assert_forwards!(HashSet);
