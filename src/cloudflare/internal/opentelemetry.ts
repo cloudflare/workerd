@@ -44,6 +44,12 @@ const INVALID: SpanContext = {
 function timestamp(
   value: unknown
 ): { seconds: number; nanoseconds: number } | undefined {
+  return attempt(() => normalizeTimestamp(value), undefined);
+}
+
+function normalizeTimestamp(
+  value: unknown
+): { seconds: number; nanoseconds: number } | undefined {
   if (value instanceof Date) value = value.getTime();
   if (typeof value === 'number' && Number.isFinite(value)) {
     let seconds = Math.floor(value / 1000);
@@ -278,17 +284,23 @@ class Span implements SpanLike {
       }, undefined);
     return this;
   }
-  end(_endTime?: unknown): void {
+  end(endTime?: unknown): void {
     if (this.#ended) return;
     this.#ended = true;
-    attempt(() => this.inner?.end(), undefined);
+    attempt(() => {
+      if (this.inner !== undefined)
+        tracingContext.end(this.inner, timestamp(endTime));
+    }, undefined);
   }
-  recordException(exception: unknown, _time?: unknown): void {
+  recordException(exception: unknown, time?: unknown): void {
     if (!this.#ended)
       attempt(() => {
-        this.inner?.recordException(
-          exception as Parameters<RuntimeSpan['recordException']>[0]
-        );
+        if (this.inner !== undefined)
+          tracingContext.recordException(
+            this.inner,
+            exception,
+            timestamp(time)
+          );
       }, undefined);
   }
 }
@@ -496,6 +508,7 @@ class Tracer {
       ) {
         return nonRecording(parentSpanContext);
       }
+      const startTime = timestamp(options.startTime);
       const inner = context.with(parent, () =>
         tracingContext.startSpan(typeof name === 'string' ? name : '', {
           kind:
@@ -506,6 +519,7 @@ class Tracer {
               ? options.kind
               : 0,
           scope: this.scope,
+          ...(startTime === undefined ? {} : { startTime }),
         })
       );
       const span =

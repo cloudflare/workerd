@@ -501,6 +501,11 @@ jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanTimestamp& time) {
+  auto tuple = kj::arr(static_cast<double>(time.seconds), static_cast<double>(time.nanoseconds));
+  return js.arr(tuple.asPtr(), [](jsg::Lock& js, double value) { return js.num(value); });
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
@@ -509,6 +514,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
 
   KJ_IF_SOME(metadata, spanOpen.metadata) {
+    KJ_IF_SOME(time, metadata.startTime) {
+      obj.set(js, "startTime", ToJs(js, time));
+    }
     kj::Maybe<kj::StringPtr> kind;
     switch (metadata.kind) {
       case rpc::SpanKind::UNSPECIFIED:
@@ -569,9 +577,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanEvent& event, StringCache& cache) {
       js.arr(event.attributes.asPtr(),
           [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
   KJ_IF_SOME(time, event.time) {
-    auto tuple = kj::arr(static_cast<double>(time.seconds), static_cast<double>(time.nanoseconds));
-    obj.set(js, "time",
-        js.arr(tuple.asPtr(), [](jsg::Lock& js, double value) { return js.num(value); }));
+    obj.set(js, "time", ToJs(js, time));
   }
   return obj;
 }
@@ -606,6 +612,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache)
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
+  KJ_IF_SOME(time, spanClose.endTime) {
+    obj.set(js, "endTime", ToJs(js, time));
+  }
   return obj;
 }
 
@@ -642,6 +651,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache&
 jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
+  KJ_IF_SOME(time, ex.time) {
+    obj.set(js, "time", ToJs(js, time));
+  }
   KJ_IF_SOME(code, ex.code) {
     KJ_SWITCH_ONEOF(code) {
       KJ_CASE_ONEOF(text, kj::String) {

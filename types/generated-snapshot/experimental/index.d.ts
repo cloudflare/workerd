@@ -18055,6 +18055,8 @@ declare namespace TailStream {
     readonly links: SpanLink[];
   }
   interface SpanOpen {
+    /** Explicit application start time as [Unix seconds, nanoseconds]. */
+    readonly startTime?: [number, number];
     /** OpenTelemetry span kind, when supplied by the instrumentation. */
     kind?: "internal" | "server" | "client" | "producer" | "consumer";
     /** The instrumentation that created this span. Carried only on spanOpen. */
@@ -18070,6 +18072,8 @@ declare namespace TailStream {
     readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
+    /** Explicit application end time as [Unix seconds, nanoseconds]. */
+    readonly endTime?: [number, number];
     readonly type: "spanClose";
     readonly outcome: EventOutcome;
   }
@@ -18092,6 +18096,8 @@ declare namespace TailStream {
     readonly message: any;
   }
   interface Exception {
+    /** Explicit application event time as [Unix seconds, nanoseconds]. */
+    readonly time?: [number, number];
     readonly type: "exception";
     readonly code?: string | number;
     readonly name: string;

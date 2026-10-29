@@ -734,6 +734,23 @@ struct Log final {
   Log clone() const;
 };
 
+// An explicit application timestamp, independent of the tail event's observation timestamp.
+struct SpanTimestamp {
+  int64_t seconds;
+  uint32_t nanoseconds;
+
+  explicit SpanTimestamp(rpc::SpanTimestamp::Reader reader)
+      : seconds(reader.getSeconds()),
+        nanoseconds(reader.getNanoseconds()) {}
+  SpanTimestamp(int64_t seconds, uint32_t nanoseconds)
+      : seconds(seconds),
+        nanoseconds(nanoseconds) {}
+  void copyTo(rpc::SpanTimestamp::Builder builder) const {
+    builder.setSeconds(seconds);
+    builder.setNanoseconds(nanoseconds);
+  }
+};
+
 // Describes an exception event
 struct Exception final {
   using Code = kj::OneOf<kj::String, double>;
@@ -756,6 +773,7 @@ struct Exception final {
 
   kj::Maybe<kj::String> stack;
   kj::Maybe<Code> code;
+  kj::Maybe<SpanTimestamp> time;
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
@@ -829,23 +847,6 @@ using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 size_t attributeValueSize(const Attribute::Value& value);
 
-// An explicit application timestamp, independent of the tail event's observation timestamp.
-struct SpanTimestamp {
-  int64_t seconds;
-  uint32_t nanoseconds;
-
-  explicit SpanTimestamp(rpc::SpanTimestamp::Reader reader)
-      : seconds(reader.getSeconds()),
-        nanoseconds(reader.getNanoseconds()) {}
-  SpanTimestamp(int64_t seconds, uint32_t nanoseconds)
-      : seconds(seconds),
-        nanoseconds(nanoseconds) {}
-  void copyTo(rpc::SpanTimestamp::Builder builder) const {
-    builder.setSeconds(seconds);
-    builder.setNanoseconds(nanoseconds);
-  }
-};
-
 // Immutable OTel metadata, carried only on the span's opening event.
 struct InstrumentationScope {
   kj::ConstString name;
@@ -859,6 +860,7 @@ struct InstrumentationScope {
 struct SpanMetadata {
   rpc::SpanKind kind = rpc::SpanKind::UNSPECIFIED;
   kj::Maybe<InstrumentationScope> scope;
+  kj::Maybe<SpanTimestamp> startTime;
 
   SpanMetadata() = default;
   SpanMetadata(rpc::SpanMetadata::Reader reader);
@@ -895,6 +897,7 @@ struct SpanEndData {
   tracing::SpanId spanId;
 
   kj::Date endTime;
+  kj::Maybe<SpanTimestamp> explicitEndTime;
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
@@ -964,6 +967,7 @@ struct SpanClose final {
   KJ_DISALLOW_COPY(SpanClose);
 
   EventOutcome outcome = EventOutcome::OK;
+  kj::Maybe<SpanTimestamp> endTime;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
@@ -1499,6 +1503,8 @@ class SpanObserver: public kj::Refcounted {
 
   // Called before onOpen(), only for spans created through the private OTel adapter.
   virtual void setOpenMetadata(tracing::SpanMetadata metadata) {}
+  // An application end time does not replace the observation clock used by onClose().
+  virtual void setEndTimestamp(tracing::SpanTimestamp time) {}
 
   // Called when the span is opened. Delivers the initial operation name and start time.
   // Called exactly once, before any other lifecycle method.

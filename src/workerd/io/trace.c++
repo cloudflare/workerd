@@ -1018,6 +1018,7 @@ Exception::Exception(rpc::Trace::Exception::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       name(kj::str(reader.getName())),
       message(kj::str(reader.getMessage())) {
+  if (reader.hasTime()) time = SpanTimestamp(reader.getTime());
   if (reader.hasStack()) {
     stack = kj::str(reader.getStack());
   }
@@ -1035,6 +1036,9 @@ Exception::Exception(rpc::Trace::Exception::Reader reader)
 }
 
 void Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
+  KJ_IF_SOME(value, time) {
+    value.copyTo(builder.initTime());
+  }
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setName(name);
   builder.setMessage(message);
@@ -1065,7 +1069,9 @@ Exception Exception::clone() const {
       }
     }
   }
-  return Exception(timestamp, kj::str(name), kj::str(message), stack.clone(), kj::mv(clonedCode));
+  Exception result(timestamp, kj::str(name), kj::str(message), stack.clone(), kj::mv(clonedCode));
+  result.time = time;
+  return result;
 }
 }  // namespace tracing
 
@@ -1489,14 +1495,21 @@ kj::String SpanOpen::toString() const {
 
 SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
 
-SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
+SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {
+  if (reader.hasEndTime()) endTime = SpanTimestamp(reader.getEndTime());
+}
 
 void SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
+  KJ_IF_SOME(value, endTime) {
+    value.copyTo(builder.initEndTime());
+  }
   builder.setOutcome(outcome);
 }
 
 SpanClose SpanClose::clone() const {
-  return SpanClose(outcome);
+  SpanClose result(outcome);
+  result.endTime = endTime;
+  return result;
 }
 
 kj::String SpanClose::toString() const {
@@ -2142,6 +2155,7 @@ size_t InstrumentationScope::size() const {
 }
 
 SpanMetadata::SpanMetadata(rpc::SpanMetadata::Reader reader): kind(reader.getKind()) {
+  if (reader.hasStartTime()) startTime = SpanTimestamp(reader.getStartTime());
   if (reader.hasScope()) {
     auto value = reader.getScope();
     InstrumentationScope result{kj::ConstString(kj::str(value.getName())), kj::none, kj::none};
@@ -2152,6 +2166,9 @@ SpanMetadata::SpanMetadata(rpc::SpanMetadata::Reader reader): kind(reader.getKin
 }
 
 void SpanMetadata::copyTo(rpc::SpanMetadata::Builder builder) const {
+  KJ_IF_SOME(value, startTime) {
+    value.copyTo(builder.initStartTime());
+  }
   builder.setKind(kind);
   KJ_IF_SOME(value, scope) {
     auto target = builder.initScope();
@@ -2168,12 +2185,14 @@ void SpanMetadata::copyTo(rpc::SpanMetadata::Builder builder) const {
 SpanMetadata SpanMetadata::clone() const {
   SpanMetadata result;
   result.kind = kind;
+  result.startTime = startTime;
   result.scope = scope.map([](const auto& value) { return value.clone(); });
   return result;
 }
 
 size_t SpanMetadata::size() const {
-  return sizeof(kind) + scope.map([](const auto& value) { return value.size(); }).orDefault(0);
+  return sizeof(kind) + scope.map([](const auto& value) { return value.size(); }).orDefault(0) +
+      (startTime == kj::none ? 0 : sizeof(SpanTimestamp));
 }
 
 SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
@@ -2197,6 +2216,7 @@ void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
 SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
     : spanId(reader.getSpanId()),
       endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  if (reader.hasExplicitEndTime()) explicitEndTime = SpanTimestamp(reader.getExplicitEndTime());
   auto tagsParam = reader.getTags();
   tags.reserve(tagsParam.size());
   for (auto tagParam: tagsParam) {
@@ -2206,6 +2226,9 @@ SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
 }
 
 void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
+  KJ_IF_SOME(value, explicitEndTime) {
+    value.copyTo(builder.initExplicitEndTime());
+  }
   builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
 

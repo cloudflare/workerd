@@ -76,6 +76,10 @@ class BaseTracer: public kj::Refcounted {
   virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
   virtual void addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) {}
   virtual void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
+  virtual void addSpanExceptionWithTimestamp(tracing::SpanId spanId, tracing::Exception exception) {
+    addSpanException(spanId, exception.timestamp, kj::mv(exception.code), kj::mv(exception.name),
+        kj::mv(exception.message), kj::mv(exception.stack));
+  }
   virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) = 0;
@@ -203,6 +207,7 @@ class WorkerTracer final: public BaseTracer {
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
   void addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) override;
   void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) override;
+  void addSpanExceptionWithTimestamp(tracing::SpanId spanId, tracing::Exception exception) override;
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
@@ -313,6 +318,13 @@ class SpanSubmitter: public kj::Refcounted {
   // Called when a span is closed. Together with the open data, provides all span information.
   virtual void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
+  virtual void submitSpanCloseWithTimestamp(tracing::SpanId spanId,
+      kj::Date startTime,
+      kj::Date endTime,
+      Span::TagMap&& tags,
+      tracing::SpanTimestamp explicitTime) {
+    submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+  }
 
   virtual void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
 
@@ -376,6 +388,9 @@ class UserSpanObserver final: public SpanObserver {
   void setOpenMetadata(tracing::SpanMetadata metadata) override {
     openMetadata = kj::mv(metadata);
   }
+  void setEndTimestamp(tracing::SpanTimestamp time) override {
+    endTimestamp = time;
+  }
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   void onUpdateName(kj::ConstString operationName) override;
   void onUpdateStatus(tracing::SpanStatus&& status) override;
@@ -405,6 +420,7 @@ class UserSpanObserver final: public SpanObserver {
   // callback (e.g. `kv_get`) should remain subject to runtime-span policies.
   bool fromUserCode = false;
   kj::Maybe<tracing::SpanMetadata> openMetadata;
+  kj::Maybe<tracing::SpanTimestamp> endTimestamp;
 };
 
 }  // namespace workerd

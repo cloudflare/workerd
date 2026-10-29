@@ -19,6 +19,9 @@ namespace {
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
 // streaming tail worker, this is the maximum size per tail event.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
+// Optional application timestamps are charged separately, preserving the absent-field budget.
+static constexpr size_t EXCEPTION_BASE_BYTES =
+    sizeof(tracing::Exception) - sizeof(kj::Maybe<tracing::SpanTimestamp>);
 
 void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
     const tracing::InvocationSpanContext& context,
@@ -276,7 +279,10 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
     };
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.endTime, spanTagsSize);
   }
-  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
+  tracing::SpanClose close;
+  close.endTime = span.explicitEndTime;
+  tailStreamWriter->report(spanComponentContext, kj::mv(close), span.endTime,
+      span.explicitEndTime == kj::none ? 0 : sizeof(tracing::SpanTimestamp));
   userSpanContexts.erase(span.spanId.getId());
 }
 
@@ -294,6 +300,28 @@ void WorkerTracer::addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links
   auto size = links.size();
   if (size > MAX_TRACE_BYTES) return;
   writer->report(spanEventContext(spanId), kj::mv(links), getTime(), size);
+}
+
+void WorkerTracer::addSpanExceptionWithTimestamp(
+    tracing::SpanId spanId, tracing::Exception exception) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) return;
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto size = EXCEPTION_BASE_BYTES + sizeof(tracing::SpanTimestamp) + exception.name.size() +
+      exception.message.size() +
+      exception.stack.map([](const auto& value) { return value.size(); }).orDefault(0);
+  KJ_IF_SOME(code, exception.code) {
+    KJ_SWITCH_ONEOF(code) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        size += text.size();
+      }
+      KJ_CASE_ONEOF(number, double) {
+        size += sizeof(double);
+      }
+    }
+  }
+  if (size > MAX_TRACE_BYTES) return;
+  auto timestamp = exception.timestamp;
+  writer->report(spanEventContext(spanId), kj::mv(exception), timestamp, size);
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -319,7 +347,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     return;
   }
 
-  size_t messageSize = sizeof(tracing::Exception) + name.size() + message.size();
+  size_t messageSize = EXCEPTION_BASE_BYTES + name.size() + message.size();
   KJ_IF_SOME(s, stack) {
     messageSize += s.size();
   }
@@ -724,6 +752,10 @@ void UserSpanObserver::onClose(
   // span logs are not supported in user tracing.
   (void)logs;
   if (wasAccepted) {
+    KJ_IF_SOME(time, endTimestamp) {
+      submitter->submitSpanCloseWithTimestamp(spanId, startTime, endTime, kj::mv(tags), time);
+      return;
+    }
     submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
   }
 }

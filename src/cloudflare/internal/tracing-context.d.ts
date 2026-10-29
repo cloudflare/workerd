@@ -6,6 +6,12 @@ import type { Span, TracingSpanContext } from './tracing';
 
 // Private native primitives for the built-in OTel adapter, not a public Workers API.
 declare const tracingContext: {
+  end(span: Span, time?: { seconds: number; nanoseconds: number }): void;
+  recordException(
+    span: Span,
+    exception: unknown,
+    time?: { seconds: number; nanoseconds: number }
+  ): void;
   addLink(
     span: Span,
     context: TracingSpanContext,
@@ -27,6 +33,7 @@ declare const tracingContext: {
     options: {
       kind: number;
       scope: { name: string; version?: string; schemaUrl?: string };
+      startTime?: { seconds: number; nanoseconds: number };
     }
   ): Span;
   getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';

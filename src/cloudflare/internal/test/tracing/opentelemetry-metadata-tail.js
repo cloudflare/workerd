@@ -4,6 +4,7 @@
 
 import assert from 'node:assert';
 const opens = [];
+const received = [];
 const spanEvents = [];
 const links = [];
 const markSpanIds = [];
@@ -11,6 +12,7 @@ let outcomes = 0;
 export default {
   tailStream(onset) {
     return (event) => {
+      received.push(event);
       if (event.event.type === 'spanEvent') spanEvents.push(event.event);
       if (event.event.type === 'spanLinks') links.push(...event.event.links);
       if (['spanEvent', 'spanLinks'].includes(event.event.type))
@@ -97,5 +99,38 @@ export const metadata = {
     ]);
     assert.deepStrictEqual(links[3], links[1]);
     assert(markSpanIds.every((id) => id === open('kind-0').spanId));
+    const starts = [
+      [1700000000, 123456789],
+      [1700000000, 123000000],
+      [1700000000, 456000000],
+    ];
+    const ends = [
+      [1700000001, 987654321],
+      [1700000001, 123000000],
+      [1700000001, 456000000],
+    ];
+    for (let kind = 0; kind <= 4; kind++) {
+      const opening = open(`kind-${kind}`);
+      const closing = received.find(
+        (entry) =>
+          entry.event.type === 'spanClose' &&
+          entry.spanContext.spanId === opening.spanId
+      );
+      assert.deepStrictEqual(opening.startTime, starts[kind]);
+      assert.deepStrictEqual(closing.event.endTime, ends[kind]);
+      if (kind >= 3) {
+        assert.strictEqual(Object.hasOwn(opening, 'startTime'), false);
+        assert.strictEqual(Object.hasOwn(closing.event, 'endTime'), false);
+      }
+    }
+    const exceptions = received.filter(
+      (entry) => entry.event.type === 'exception'
+    );
+    assert.strictEqual(exceptions.length, 1);
+    assert.deepStrictEqual(exceptions[0].event.time, [1700000000, 223456789]);
+    assert.strictEqual(exceptions[0].event.message, 'timed exception');
+    assert.strictEqual(exceptions[0].spanContext.spanId, open('kind-0').spanId);
+    // Application timestamps do not replace the outer I/O observation time.
+    assert.notStrictEqual(exceptions[0].timestamp.getTime(), 1700000000223);
   },
 };

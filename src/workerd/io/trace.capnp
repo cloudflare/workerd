@@ -107,6 +107,7 @@ struct InstrumentationScope {
 struct SpanMetadata {
   kind @0 :SpanKind;
   scope @1 :InstrumentationScope;
+  startTime @2 :SpanTimestamp;
 }
 
 struct SpanOpenData {
@@ -131,4 +132,5 @@ struct SpanEndData {
   # List of span attributes
   tags @1 :List(Tag);
   spanId @2 :UInt64;
+  explicitEndTime @3 :SpanTimestamp;
 }

@@ -525,6 +525,19 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     });
   }
 
+  void submitSpanCloseWithTimestamp(tracing::SpanId spanId,
+      kj::Date startTime,
+      kj::Date endTime,
+      Span::TagMap&& tags,
+      tracing::SpanTimestamp explicitTime) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
+      spanEnd.explicitEndTime = explicitTime;
+      if (isPredictableModeForTest()) startTime = spanEnd.endTime = kj::UNIX_EPOCH;
+      tracer.addSpanClose(kj::mv(spanEnd), startTime);
+    });
+  }
+
   void submitSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override {
     weakTracer->runIfAlive(
         [&](BaseTracer& tracer) { tracer.addSpanUpdate(spanId, kj::mv(update)); });

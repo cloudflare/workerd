@@ -122,6 +122,7 @@ struct Trace @0x8e8d911203762d34 {
 
   exceptions @1 :List(Exception);
   struct Exception {
+    time @7 :import "trace.capnp".SpanTimestamp;
     timestampNs @0 :Int64;
     name @1 :Text;
     message @2 :Text;
@@ -308,6 +309,7 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   struct SpanClose {
+    endTime @1 :import "trace.capnp".SpanTimestamp;
     # Marks the closing of a child span within the streaming tail session.
     # Once emitted, no further mark events should occur within the closed
     # span.

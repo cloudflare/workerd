@@ -780,6 +780,38 @@ KJ_TEST("Span links preserve identities, flags, trace state and attributes") {
   KJ_ASSERT(link.attributes[0].value[0].get<kj::ConstString>() == "test");
 }
 
+KJ_TEST("Explicit span times survive cloning and both RPC representations") {
+  SpanMetadata metadata;
+  metadata.startTime = SpanTimestamp(1700000000, 123456789);
+  capnp::MallocMessageBuilder openMessage;
+  metadata.clone().copyTo(openMessage.initRoot<rpc::SpanMetadata>());
+  SpanMetadata openCopy(openMessage.getRoot<rpc::SpanMetadata>());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(openCopy.startTime).nanoseconds == 123456789);
+
+  SpanEndData end(42, kj::UNIX_EPOCH);
+  end.explicitEndTime = SpanTimestamp(1700000001, 987654321);
+  capnp::MallocMessageBuilder endMessage;
+  end.copyTo(endMessage.initRoot<rpc::SpanEndData>());
+  SpanEndData endCopy(endMessage.getRoot<rpc::SpanEndData>());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(endCopy.explicitEndTime).nanoseconds == 987654321);
+
+  SpanClose close;
+  close.endTime = endCopy.explicitEndTime;
+  capnp::MallocMessageBuilder closeMessage;
+  close.clone().copyTo(closeMessage.initRoot<rpc::Trace::SpanClose>());
+  SpanClose closeCopy(closeMessage.getRoot<rpc::Trace::SpanClose>());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(closeCopy.endTime).seconds == 1700000001);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(closeCopy.endTime).nanoseconds == 987654321);
+
+  Exception exception(kj::UNIX_EPOCH, kj::str("Error"), kj::str("timed"), kj::none);
+  exception.time = SpanTimestamp(1700000000, 223456789);
+  capnp::MallocMessageBuilder exceptionMessage;
+  exception.clone().copyTo(exceptionMessage.initRoot<rpc::Trace::Exception>());
+  Exception exceptionCopy(exceptionMessage.getRoot<rpc::Trace::Exception>());
+  KJ_ASSERT(exceptionCopy.timestamp == kj::UNIX_EPOCH);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(exceptionCopy.time).nanoseconds == 223456789);
+}
+
 KJ_TEST("Read/Write SpanUpdate name works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();

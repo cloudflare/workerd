@@ -22,8 +22,16 @@ export const metadata = {
       traceState: createTraceState('vendor=value'),
     };
     for (let kind = 0; kind <= 4; kind++) {
+      const startTime = [
+        [1700000000, 123456789],
+        new Date(1700000000123),
+        1700000000456,
+        new Date(NaN),
+        [1700000000, 1000000000],
+      ][kind];
       const span = tracer.startSpan(`kind-${kind}`, {
         kind,
+        ...(startTime === undefined ? {} : { startTime }),
         links:
           kind === 0
             ? [{ context: linkedContext, attributes: { source: 'options' } }]
@@ -31,6 +39,10 @@ export const metadata = {
       });
       assert.strictEqual(span.isRecording(), env.enabled);
       if (kind === 0) {
+        span.recordException(
+          new Error('timed exception'),
+          [1700000000, 223456789]
+        );
         assert.strictEqual(span.addLink({ context: linkedContext }), span);
         span.addLinks([
           {
@@ -51,8 +63,18 @@ export const metadata = {
         span.addEvent('implicit');
       }
       span.updateName(`renamed-kind-${kind}`);
-      span.end();
+      span.end(
+        [
+          [1700000001, 987654321],
+          new Date(1700000001123),
+          1700000001456,
+          Infinity,
+          [1700000001, -1],
+        ][kind]
+      );
+      span.end([1700000010, 0]);
       span.addEvent('after-end');
+      span.recordException(new Error('after-end'), [1700000010, 0]);
       span.addLink({ context: linkedContext });
     }
     tracer.startSpan('default-kind').end();

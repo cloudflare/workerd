@@ -157,6 +157,8 @@ interface SpanLinks {
 }
 
 interface SpanOpen {
+  /** Explicit application start time as [Unix seconds, nanoseconds]. */
+  readonly startTime?: [number, number];
   /** OpenTelemetry span kind, when supplied by the instrumentation. */
   kind?: 'internal' | 'server' | 'client' | 'producer' | 'consumer';
   /** The instrumentation that created this span. Carried only on spanOpen. */
@@ -173,6 +175,8 @@ interface SpanOpen {
 }
 
 interface SpanClose {
+  /** Explicit application end time as [Unix seconds, nanoseconds]. */
+  readonly endTime?: [number, number];
   readonly type: "spanClose";
   readonly outcome: EventOutcome;
 }
@@ -193,6 +197,8 @@ interface DiagnosticChannelEvent {
 }
 
 interface Exception {
+  /** Explicit application event time as [Unix seconds, nanoseconds]. */
+  readonly time?: [number, number];
   readonly type: "exception";
   readonly code?: string | number;
   readonly name: string;

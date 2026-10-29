@@ -103,7 +103,8 @@ class SpanState: public kj::Refcounted {
   void recordException(kj::Maybe<tracing::Exception::Code> code,
       kj::String name,
       kj::String message,
-      kj::Maybe<kj::String> stack);
+      kj::Maybe<kj::String> stack,
+      kj::Maybe<tracing::SpanTimestamp> time = kj::none);
 
  protected:
   SpanState() = default;
@@ -220,6 +221,10 @@ class Span: public jsg::Object {
   kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
   workerd::SpanParent makeSpanParent();
+  void recordExceptionWithTimestamp(jsg::Lock& js,
+      jsg::Value exception,
+      const jsg::TypeHandler<ExceptionData>& exceptionHandler,
+      kj::Maybe<tracing::SpanTimestamp> time);
 
   friend class ::workerd::api::Tracing;
   friend class ::workerd::api::TracingContext;
@@ -367,12 +372,19 @@ class TracingContext: public jsg::Object {
   struct SpanOptions {
     uint16_t kind;
     Scope scope;
-    JSG_STRUCT(kind, scope);
+    jsg::Optional<Timestamp> startTime;
+    JSG_STRUCT(kind, scope, startTime);
   };
   TracingContext() = default;
   TracingContext(jsg::Lock&, const jsg::Url&) {}
   jsg::Ref<user_tracing::Span> startSpan(
       jsg::Lock& js, kj::String operationName, SpanOptions options);
+  void end(jsg::Ref<user_tracing::Span> span, jsg::Optional<Timestamp> time);
+  void recordException(jsg::Lock& js,
+      jsg::Ref<user_tracing::Span> span,
+      jsg::Value exception,
+      jsg::Optional<Timestamp> time,
+      const jsg::TypeHandler<user_tracing::ExceptionData>& exceptionHandler);
   void addEvent(jsg::Lock& js,
       jsg::Ref<user_tracing::Span> span,
       kj::String name,
@@ -395,6 +407,8 @@ class TracingContext: public jsg::Object {
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
     JSG_METHOD(startSpan);
+    JSG_METHOD(end);
+    JSG_METHOD(recordException);
     JSG_METHOD(addEvent);
     JSG_METHOD(addLink);
     JSG_METHOD(withActiveSpanContext);
