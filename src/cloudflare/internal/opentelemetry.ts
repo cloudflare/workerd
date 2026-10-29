@@ -154,7 +154,10 @@ function contextOrRoot(value: unknown): Context {
     : ROOT;
 }
 function getSpan(ctx: Context): SpanLike | undefined {
-  return attempt(() => ctx.getValue(SPAN) as SpanLike | undefined, undefined);
+  return attempt(
+    () => (ctx.getValue(SPAN) as SpanLike | null | undefined) ?? undefined,
+    undefined
+  );
 }
 function valid(ctx: SpanContext | undefined): ctx is SpanContext {
   return attempt(
@@ -453,7 +456,11 @@ class ContextManager {
     if (attempt(() => ctx.getValue(SUPPRESS), false)) {
       return tracingContext.withActiveSpanContext(undefined, run, true);
     }
-    if (span instanceof Span && span.suppressNative) {
+    if (
+      span instanceof Span &&
+      span.suppressNative &&
+      tracingContext.getSpanCreationMode() === 'untraced'
+    ) {
       return tracingContext.withActiveSpanContext(undefined, run, true);
     }
     if (inner !== undefined) return tracing.withActiveSpan(inner, run);
@@ -511,8 +518,17 @@ class Tracer {
   ): Span {
     return attempt(() => {
       if (parent.getValue(SUPPRESS)) return new Span();
-      const parentSpan = getSpan(parent);
-      const detached = options.root === true || parentSpan === undefined;
+      let parentSpan = getSpan(parent);
+      let detached =
+        options.root === true || (parentSpan === undefined && parent !== ROOT);
+      const rootMode = detached
+        ? tracingContext.getRootCreationMode()
+        : undefined;
+      if (rootMode === 'attached') {
+        detached = false;
+        parentSpan = undefined;
+        parent = ROOT;
+      }
       const parentSpanContext = attempt(
         () => parentSpan?.spanContext(),
         undefined
@@ -531,9 +547,7 @@ class Tracer {
       // Decide under the explicit parent, not an unrelated surrounding context. Native
       // activation restores same-trace invocation flags before selecting the recording mode.
       const create = (): Span => {
-        const mode = detached
-          ? tracingContext.getRootCreationMode()
-          : tracingContext.getSpanCreationMode();
+        const mode = detached ? rootMode : tracingContext.getSpanCreationMode();
         if (mode === 'untraced') {
           if (
             detached ||
@@ -546,13 +560,7 @@ class Tracer {
         }
         if (mode === 'unsampled') {
           if (detached) {
-            let traceId: string;
-            do {
-              traceId = Array.from(
-                crypto.getRandomValues(new Uint8Array(16)),
-                (b) => b.toString(16).padStart(2, '0')
-              ).join('');
-            } while (traceId === INVALID.traceId);
+            const traceId = tracingContext.createRootTraceId();
             const span = nonRecording({
               traceId,
               spanId: INVALID.spanId,

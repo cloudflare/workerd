@@ -109,6 +109,9 @@ class TraceId final {
   constexpr bool operator==(const TraceId& other) const {
     return low == other.low && high == other.high;
   }
+  uint hashCode() const {
+    return kj::hashCode(low, high);
+  }
   constexpr bool operator==(decltype(nullptr)) const {
     return low == 0 && high == 0;
   }

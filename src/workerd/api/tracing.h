@@ -417,6 +417,7 @@ class TracingContext: public jsg::Object {
   jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
   kj::StringPtr getSpanCreationMode(jsg::Lock& js);
   kj::StringPtr getRootCreationMode(jsg::Lock& js);
+  kj::String createRootTraceId(jsg::Lock& js);
   bool hasTracer(jsg::Lock& js);
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
@@ -429,6 +430,7 @@ class TracingContext: public jsg::Object {
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
     JSG_METHOD(getRootCreationMode);
+    JSG_METHOD(createRootTraceId);
     JSG_METHOD(hasTracer);
     JSG_METHOD(getInvocationSpanContext);
   }

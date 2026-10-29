@@ -45,7 +45,9 @@ export default {
           );
           assert.strictEqual(
             result.echo.traceparent.split('-')[3],
-            result.root.traceFlags.toString(16).padStart(2, '0')
+            flags === '02'
+              ? '02'
+              : result.root.traceFlags.toString(16).padStart(2, '0')
           );
         }
         assert.strictEqual(result.echo.tracestate, undefined);
@@ -57,5 +59,6 @@ export default {
           );
       }
     }
+    assert.strictEqual((await env.ON.fetch('http://worker/throw')).status, 500);
   },
 };

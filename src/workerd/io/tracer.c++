@@ -655,14 +655,23 @@ void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
 }
 
 void BaseTracer::setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func) {
-  setMakeUserSpanParentFunc([func = kj::mv(func)](tracing::SpanContext context,
-                                DetachedRoot) mutable { return func(kj::mv(context)); });
+  KJ_ASSERT(makeUserRequestSpanFunc == kj::none, "user span factory can only be set once");
+  makeUserRequestSpanFunc = [func = kj::mv(func)](tracing::SpanContext context,
+                                DetachedRoot) mutable { return func(kj::mv(context)); };
 }
 
 void BaseTracer::setMakeUserSpanParentFunc(MakeUserSpanParentFunc func) {
   KJ_ASSERT(
       makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
   makeUserRequestSpanFunc = kj::mv(func);
+  detachedRootsSupported = true;
+}
+
+tracing::TraceId BaseTracer::makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy) {
+  KJ_REQUIRE(detachedRootsSupported);
+  auto id = tracing::TraceId::fromEntropy(entropy);
+  detachedTraceIds.insert(id);
+  return id;
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {

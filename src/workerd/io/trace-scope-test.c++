@@ -152,15 +152,20 @@ class FixtureTail final: public WorkerInterface {
 
 class FixtureSpanSubmitter final: public SpanSubmitter {
  public:
-  FixtureSpanSubmitter(BaseTracer& tracer, tracing::SpanContext context)
+  enum class Registration { ENABLED, DISABLED };
+  FixtureSpanSubmitter(BaseTracer& tracer,
+      tracing::SpanContext context,
+      Registration registration = Registration::ENABLED)
       : tracer(tracer.getWeakRef()),
-        context(kj::mv(context)) {}
+        context(kj::mv(context)),
+        registration(registration) {}
   bool submitSpanOpen(
       tracing::SpanId id, tracing::SpanId parent, kj::ConstString name, kj::Date time) override {
     if (name == "rejected") return false;
     return tracer->runIfAlive([&](BaseTracer& tracer) {
-      tracer.setUserSpanContext(
-          id, tracing::SpanContext(context.getTraceId(), id, context.getTraceFlags()));
+      if (registration == Registration::ENABLED)
+        tracer.setUserSpanContext(
+            id, tracing::SpanContext(context.getTraceId(), id, context.getTraceFlags()));
       tracer.addSpanOpen(id, parent, kj::mv(name), time);
     });
   }
@@ -184,7 +189,7 @@ class FixtureSpanSubmitter final: public SpanSubmitter {
     });
   }
   tracing::SpanId makeSpanId() override {
-    return tracing::SpanId(next++);
+    return tracing::SpanId::fromEntropy();
   }
   void submitSpanEvent(tracing::SpanId id, tracing::SpanEvent event) override {
     tracer->runIfAlive([&](BaseTracer& tracer) { tracer.addSpanEvent(id, kj::mv(event)); });
@@ -200,7 +205,7 @@ class FixtureSpanSubmitter final: public SpanSubmitter {
  private:
   kj::Own<BaseTracer::WeakRef> tracer;
   tracing::SpanContext context;
-  uint64_t next = 100;
+  Registration registration;
 };
 
 KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span events") {
@@ -290,6 +295,138 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
 
 enum class UserSpanFactory { PRESENT, ABSENT };
 
+KJ_TEST("root factory capability keeps JS and tail identities aligned and rewraps retain flags") {
+  enum class Factory { LEGACY, CONTEXT, DETACHED };
+  for (auto factory: {Factory::LEGACY, Factory::CONTEXT, Factory::DETACHED}) {
+    for (bool explicitFlags: {false, true}) {
+      capnp::MallocMessageBuilder message;
+      auto features = message.initRoot<CompatibilityFlags>();
+      features.setOpentelemetryApi(true);
+      TestFixture fixture({.featureFlags = features.asReader(), .mainModuleSource = R"JS(
+        import { tracing } from 'cloudflare:workers';
+        globalThis.nativeTracing = tracing;
+        globalThis.events = [];
+        const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
+        globalThis.moduleRoot = api.trace.getTracer('module').startSpan('module-root', {root:true});
+        export default {
+          tailStream(onset) {
+            events.push(onset);
+            return event => events.push(event);
+          }
+        };
+      )JS"_kj});
+      TraceTaskErrors errors;
+      kj::TaskSet tasks(errors);
+      auto tails = kj::heapArray<kj::Own<WorkerInterface>>(1);
+      tails[0] = kj::heap<FixtureTail>(fixture, tasks);
+      auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+          kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+      auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
+          kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
+      auto makeParent = [&](tracing::SpanContext identity) {
+        return SpanParent(kj::rc<UserSpanObserver>(
+            kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity),
+                factory == Factory::DETACHED ? FixtureSpanSubmitter::Registration::ENABLED
+                                             : FixtureSpanSubmitter::Registration::DISABLED),
+            tracing::SpanContext::clone(identity)));
+      };
+      if (factory == Factory::LEGACY) {
+        tracer->setMakeUserRequestSpanFunc(
+            [&](tracing::TraceId id, kj::Maybe<tracing::TraceFlags> flags) {
+          return makeParent(tracing::SpanContext(id, kj::none, flags));
+        });
+      } else if (factory == Factory::CONTEXT) {
+        tracer->setMakeUserRequestSpanContextFunc(makeParent);
+      } else {
+        tracer->setMakeUserSpanParentFunc([&](tracing::SpanContext identity, DetachedRoot) {
+          return makeParent(kj::mv(identity));
+        });
+      }
+      KJ_EXPECT(tracer->supportsDetachedRoots() == (factory == Factory::DETACHED));
+      auto context = fixture.newIoContext();
+      auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.clone());
+      if (explicitFlags) {
+        auto& invocation = request->getInvocationSpanContext();
+        invocation = tracing::InvocationSpanContext(invocation.getTraceId(),
+            invocation.getInvocationId(), invocation.getSpanId(), tracing::TraceFlags(3));
+      }
+      auto run = [](const TestFixture::Environment& env, kj::StringPtr source) {
+        auto script = jsg::check(v8::Script::Compile(env.js.v8Context(), env.js.str(source)));
+        jsg::check(script->Run(env.js.v8Context()));
+      };
+      request->delivered();
+      fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+        tracer->setEventInfo(*request, tracing::CustomEventInfo());
+        auto scope = context->makeRequestTraceScope(env.lock);
+        run(env,
+            factory == Factory::DETACHED ? "globalThis.detached = true"_kj
+                                         : "globalThis.detached = false"_kj);
+        run(env, R"JS(
+          const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
+          const tracer = api.trace.getTracer('factory');
+          const key = Symbol.for('OpenTelemetry Context Key SPAN');
+          globalThis.rootIdentity = undefined;
+          const root = tracer.startSpan('factory-root', {root:true});
+          globalThis.rootIdentity = root.spanContext();
+          api.context.with(api.context.active().setValue(key, root), () => {
+            console.log('factory-root-log');
+            nativeTracing.startSpan('factory-native').end();
+          });
+          root.end();
+          // Replay the serializable identity outside activation, and after the root has closed.
+          const rewrapped = { spanContext: () => rootIdentity };
+          api.context.with(api.context.active().setValue(key, rewrapped), () => {
+            tracer.startSpan('rewrapped-child').end();
+            console.log('rewrapped-log');
+          });
+          // An INVALID root from module evaluation must not suppress this traced request.
+          api.context.with(api.context.active().setValue(key, moduleRoot), () => {
+            nativeTracing.startSpan('reused-invalid-native').end();
+          });
+        )JS"_kj);
+        auto primitive = env.js.alloc<api::TracingContext>();
+        auto foreign = [](uint8_t flags) {
+          return api::user_tracing::TracingSpanContext{
+            .traceId = kj::str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            .spanId = kj::str("bbbbbbbbbbbbbbbb"),
+            .traceFlags = flags};
+        };
+        primitive->withActiveSpanContext(
+            env.js, foreign(1), jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+          return primitive->withActiveSpanContext(
+              js, foreign(0), jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+            auto identity = KJ_ASSERT_NONNULL(context->getCurrentUserTraceSpan().toSpanContext());
+            KJ_EXPECT(identity.getTraceFlags() == tracing::TraceFlags(0));
+            return jsg::JsRef(js, js.undefined());
+          }));
+        }));
+      });
+      fixture.drainAndDestroy(kj::mv(request));
+      tracer = nullptr;
+      tasks.onEmpty().wait(fixture.getWaitScope());
+      fixture.runInIoContext([&](const TestFixture::Environment& env) {
+        run(env, R"JS(
+          const onset = events.find(e => e.event.type === 'onset');
+          const openedRoot = events.find(e => e.event.name === 'factory-root');
+          const reused = events.find(e => e.event.name === 'reused-invalid-native');
+          if (!openedRoot || openedRoot.spanContext.traceId !== rootIdentity.traceId) throw new Error('JS/tail root trace');
+          if ((openedRoot.event.root === true) !== detached) throw new Error('root capability');
+          if ((rootIdentity.traceId !== onset.spanContext.traceId) !== detached) throw new Error('root identity');
+          for (const event of events) {
+            if (event.spanContext.traceFlags !== onset.spanContext.traceFlags) throw new Error('native flags');
+            if (['log','spanClose'].includes(event.event.type) &&
+                event.spanContext.spanId !== reused?.event.spanId && event.spanContext.traceId !== rootIdentity.traceId)
+              throw new Error('log/close trace');
+          }
+          for (const name of ['factory-native', ...(detached ? ['rewrapped-child'] : []), 'reused-invalid-native']) {
+            if (!events.some(e => e.event.name === name)) throw new Error('missing ' + name);
+          }
+        )JS"_kj);
+      });
+    }
+  }
+}
+
 KJ_TEST("actor span marks use their creator stream and rejected spans emit nothing") {
   for (bool detached: {false, true}) {
     capnp::MallocMessageBuilder message;
@@ -317,8 +454,8 @@ KJ_TEST("actor span marks use their creator stream and rejected spans emit nothi
           kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
       auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
           kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
-      tracer->setMakeUserRequestSpanContextFunc(
-          [ptr = tracer.get()](tracing::SpanContext identity) {
+      tracer->setMakeUserSpanParentFunc(
+          [ptr = tracer.get()](tracing::SpanContext identity, DetachedRoot) {
         return SpanParent(kj::rc<UserSpanObserver>(
             kj::refcounted<FixtureSpanSubmitter>(*ptr, tracing::SpanContext::clone(identity)),
             identity.getTraceId(), identity.getTraceFlags()));
@@ -884,7 +1021,7 @@ KJ_TEST("unsampled roots remain native carriers with either flag state") {
       auto context = fixture.newIoContext();
       auto tracer = makeTracer();
       int parents = 0;
-      tracer->setMakeUserRequestSpanContextFunc([&](tracing::SpanContext identity) {
+      tracer->setMakeUserSpanParentFunc([&](tracing::SpanContext identity, DetachedRoot) {
         ++parents;
         return SpanParent::fromSpanContext(kj::mv(identity));
       });

@@ -148,6 +148,16 @@ class BaseTracer: public kj::Refcounted {
   // Detached-aware embedders register the trace even when the parent span ID is absent.
   void setMakeUserSpanParentFunc(MakeUserSpanParentFunc func);
 
+  bool supportsDetachedRoots() const {
+    return detachedRootsSupported;
+  }
+  // Retained until the tracer expires, including after the root span has closed. Rewrapped
+  // identities in these traces retain the owning invocation's native sampling flags.
+  tracing::TraceId makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy);
+  bool isDetachedTraceId(const tracing::TraceId& id) const {
+    return detachedTraceIds.contains(id);
+  }
+
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
@@ -177,6 +187,8 @@ class BaseTracer: public kj::Refcounted {
 
  private:
   friend class workerd::WeakRef<BaseTracer>;
+  bool detachedRootsSupported = false;
+  kj::HashSet<tracing::TraceId> detachedTraceIds;
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<BaseTracer>(), *this);
 };
 

@@ -12,7 +12,7 @@ const api = globalThis[key];
 // Registration must precede user module evaluation.
 assert.strictEqual(api.version, '1.10.0');
 assert.strictEqual(api, globalThis[key]);
-const root = api.context.active();
+const root = api.context.active().deleteValue(spanKey);
 const tracer = api.trace.getTracer('test', '1', { schemaUrl: 'schema' });
 
 export const registrationAndSurface = {

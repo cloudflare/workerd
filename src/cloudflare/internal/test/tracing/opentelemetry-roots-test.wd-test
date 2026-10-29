@@ -12,7 +12,9 @@ const unitTests :Workerd.Config = (
       compatibilityFlags = ["nodejs_compat", "opentelemetry_api", "rpc"],
       streamingTails = ["tail"],
       globalOutbound = "http-echo",
-      bindings = [(name = "CALLEE", service = "callee")],
+      bindings = [(name = "CALLEE", service = "callee"), (name = "OBJECT", durableObjectNamespace = "RootActor")],
+      durableObjectNamespaces = [(className = "RootActor", uniqueKey = "root-actor")],
+      durableObjectStorage = (inMemory = void),
     )),
     (name = "buffered", worker = (
       modules = .modules,

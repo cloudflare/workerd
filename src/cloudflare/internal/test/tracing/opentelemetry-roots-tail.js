@@ -22,6 +22,7 @@ export const validate = {
       await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(pending, 0);
     let roots = 0;
+    let uncaught = false;
     for (const events of requests) {
       const onset = events[0];
       const opens = new Map([
@@ -38,6 +39,7 @@ export const validate = {
         const { type } = event.event;
         const ctx = event.spanContext;
         if (type === 'onset') continue;
+        assert.strictEqual(ctx.traceFlags, onset.spanContext.traceFlags);
         if (event.event.root) {
           assert.strictEqual(ctx.spanId, undefined);
           assert.notStrictEqual(ctx.traceId, onset.spanContext.traceId);
@@ -52,7 +54,20 @@ export const validate = {
           );
         } else assert(ctx.spanId);
         const owner = opens.get(ctx.spanId);
-        if (owner) assert.strictEqual(ctx.traceId, owner.spanContext.traceId);
+        if (owner) {
+          assert.strictEqual(ctx.traceId, owner.spanContext.traceId);
+          assert.strictEqual(ctx.traceFlags, owner.spanContext.traceFlags);
+        }
+        if (type === 'spanOpen') {
+          const parent = opens.get(ctx.spanId);
+          if (parent)
+            assert.strictEqual(ctx.traceFlags, parent.spanContext.traceFlags);
+        }
+        if (
+          type === 'exception' &&
+          event.event.message.includes('uncaught-root-error')
+        )
+          uncaught = true;
         if (['return', 'outcome'].includes(type)) {
           assert.strictEqual(ctx.traceId, onset.spanContext.traceId);
           assert.strictEqual(ctx.spanId, onset.event.spanId);
@@ -92,5 +107,6 @@ export const validate = {
         assert.strictEqual(marked.length, 0);
     }
     assert(roots >= 12);
+    assert.ok(uncaught);
   },
 };

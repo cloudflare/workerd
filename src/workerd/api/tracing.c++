@@ -875,6 +875,7 @@ kj::StringPtr rootCreationMode() {
   if (!io.isOpentelemetryApiEnabled() || io.getWorkerTracer() == kj::none ||
       !io.isRootUserTraceObserved())
     return "untraced"_kj;
+  if (!KJ_ASSERT_NONNULL(io.getWorkerTracer()).supportsDetachedRoots()) return "attached"_kj;
   KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
     KJ_IF_SOME(flags, invocation.getTraceFlags()) {
       if (!flags.isSampled()) return "unsampled"_kj;
@@ -887,6 +888,11 @@ kj::StringPtr rootCreationMode() {
 
 kj::StringPtr TracingContext::getRootCreationMode(jsg::Lock& js) {
   return rootCreationMode();
+}
+
+kj::String TracingContext::createRootTraceId(jsg::Lock& js) {
+  auto& io = IoContext::current();
+  return KJ_ASSERT_NONNULL(io.getWorkerTracer()).makeDetachedTraceId(io.getEntropySource()).toW3C();
 }
 
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
@@ -915,24 +921,19 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
           }
         }
         KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
-          if (io.isOpentelemetryApiEnabled() && identity.getTraceId() == invocation.getTraceId()) {
-            // Same-trace JS identities inherit the owner's native decision, including absent
-            // flags and reserved bits. Neither projected 0 nor 1 becomes an explicit decision.
+          bool minted = io.getWorkerTracer()
+                            .map([&](auto& tracer) {
+            return tracer.isDetachedTraceId(identity.getTraceId());
+          }).orDefault(false);
+          if (io.isOpentelemetryApiEnabled() &&
+              (identity.getTraceId() == invocation.getTraceId() || minted)) {
+            // Invocation and locally minted trace identities inherit the owner's native decision,
+            // including absent flags and reserved bits. Projected JS flags are not new decisions.
             identity = tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
                 invocation.getTraceFlags(), identity.cloneTraceState());
           }
           // A projected identity cached in module/DO memory and replayed in a different
           // invocation trace is indistinguishable from a remote parent with explicit flags.
-        }
-        // Rewrapping a detached span's projected JS identity must not turn absent native
-        // flags into an explicit decision. An active native observer remains authoritative.
-        if (io.isOpentelemetryApiEnabled()) {
-          KJ_IF_SOME(active, io.getCurrentUserTraceSpan().toSpanContext()) {
-            if (identity.getTraceId() == active.getTraceId()) {
-              identity = tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
-                  active.getTraceFlags(), identity.cloneTraceState());
-            }
-          }
         }
       }
     }
@@ -940,8 +941,21 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
       KJ_IF_SOME(root, io.getUserTraceInvocationIdentity()) {
         // Bare ROOT_CONTEXT affects adapter parenting, not runtime instrumentation: without
         // an active OTel span, native spans remain attached to the owning invocation.
-        parsed = tracing::SpanContext(
-            root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
+        bool attached = false;
+        KJ_IF_SOME(tracer, io.getWorkerTracer()) {
+          if (io.isOpentelemetryApiEnabled() && !tracer.supportsDetachedRoots() &&
+              !root.getTraceFlags().map([](auto flags) {
+            return !flags.isSampled();
+          }).orDefault(false)) {
+            // Legacy factories accept invocation roots, but may decline carriers with a span ID.
+            parent = tracer.makeUserRequestSpan(
+                root.getTraceId(), root.getTraceFlags(), root.cloneTraceState());
+            attached = parent.isObserved();
+          }
+        }
+        if (!attached)
+          parsed = tracing::SpanContext(
+              root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
       }
     }
     KJ_IF_SOME(value, parsed) {
@@ -994,13 +1008,28 @@ CreatedSpan createSpan(jsg::Lock& js,
     auto& context = IoContext::current();
     SpanParent parent = context.getCurrentUserTraceSpan();
     if (detached == DetachedRoot::YES) {
+      auto mode = rootCreationMode();
       parent = SpanParent(nullptr);
+      if (mode == "attached"_kj) {
+        KJ_IF_SOME(invocation, context.getUserTraceInvocationContext()) {
+          if (invocation.getTraceFlags().map([](auto flags) {
+            return !flags.isSampled();
+          }).orDefault(false)) {
+            parent = SpanParent(kj::rc<PropagationOnlySpanObserver>(
+                tracing::SpanContext(invocation.getTraceId(), invocation.getSpanId(),
+                    invocation.getTraceFlags(), invocation.cloneTraceState())));
+          } else KJ_IF_SOME(tracer, context.getWorkerTracer()) {
+            parent = tracer.makeUserRequestSpan(
+                invocation.getTraceId(), invocation.getTraceFlags(), invocation.cloneTraceState());
+          }
+        }
+      }
       // Decide before generating entropy. A requested root never changes native sampling.
-      if (rootCreationMode() == "recording"_kj) {
+      if (mode == "recording"_kj) {
         KJ_IF_SOME(invocation, context.getUserTraceInvocationContext()) {
           KJ_IF_SOME(tracer, context.getWorkerTracer()) {
             parent = tracer.makeUserSpanParent(
-                tracing::SpanContext(tracing::TraceId::fromEntropy(context.getEntropySource()),
+                tracing::SpanContext(tracer.makeDetachedTraceId(context.getEntropySource()),
                     kj::none, invocation.getTraceFlags()),
                 DetachedRoot::YES);
           }

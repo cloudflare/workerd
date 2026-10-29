@@ -63,7 +63,11 @@ export const realPackage = {
         }
       );
     });
-    for (const parent of [ROOT_CONTEXT, trace.deleteSpan(context.active())]) {
+    for (const parent of [
+      ROOT_CONTEXT,
+      trace.deleteSpan(context.active()),
+      trace.setSpan(context.active(), null),
+    ]) {
       const span = tracer.startSpan('real-api-root', {}, parent);
       assert.strictEqual(span.isRecording(), true);
       assert.notStrictEqual(

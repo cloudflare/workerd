@@ -11,6 +11,7 @@ import {
 const collector = createHierarchyAwareCollector();
 const logs = [];
 const onsets = [];
+const entrypoints = new Set();
 export default {
   tailStream(onset) {
     // Includes both flag states, service-binding/RPC triggers and hibernatable WebSocket turns.
@@ -34,6 +35,19 @@ export default {
         !['spanEvent', 'spanLinks', 'exception'].includes(event.event.type)
       );
       assert.strictEqual(event.spanContext.traceFlags, expectedFlags);
+      if (
+        ['sampling-constructor-child', 'sampling-message-child'].includes(
+          event.event.name
+        )
+      ) {
+        assert.strictEqual(event.event.root, undefined);
+        assert.strictEqual(
+          event.spanContext.traceId,
+          onset.spanContext.traceId
+        );
+        assert.strictEqual(event.spanContext.spanId, onset.event.spanId);
+        entrypoints.add(event.event.name);
+      }
       if (event.event.type === 'log') logs.push(event.event.message);
       collect(event);
     };
@@ -43,6 +57,10 @@ export default {
 export const exportedContexts = {
   async test() {
     await collector.waitForCompletion();
+    assert.deepStrictEqual([...entrypoints].sort(), [
+      'sampling-constructor-child',
+      'sampling-message-child',
+    ]);
     const first = findSpanByName(collector.state, 'sampling-rebuilt-0');
     const parent = findSpanByName(
       collector.state,

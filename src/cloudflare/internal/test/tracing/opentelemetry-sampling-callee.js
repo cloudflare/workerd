@@ -34,6 +34,11 @@ export class RpcLogger extends WorkerEntrypoint {
 export class SocketLogger {
   constructor(state) {
     this.state = state;
+    assert.ok(tracing.getActiveSpan());
+    trace
+      .getTracer('entrypoints')
+      .startSpan('sampling-constructor-child')
+      .end();
   }
   fetch() {
     const [server, client] = Object.values(new WebSocketPair());
@@ -41,6 +46,8 @@ export class SocketLogger {
     return new Response(null, { status: 101, webSocket: client });
   }
   webSocketMessage(socket) {
+    assert.ok(tracing.getActiveSpan());
+    trace.getTracer('entrypoints').startSpan('sampling-message-child').end();
     tracing.enterSpan('sampling-websocket', () => {
       console.log('sampling-websocket-log');
     });

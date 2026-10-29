@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { tracing, WorkerEntrypoint } from 'cloudflare:workers';
+import { tracing, WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 import { context, propagation, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 
 export default class extends WorkerEntrypoint {
@@ -14,7 +14,49 @@ export default class extends WorkerEntrypoint {
     if (new URL(request.url).pathname === '/callee')
       return Response.json(this.identity());
     const tracer = trace.getTracer('roots');
+    if (new URL(request.url).pathname === '/throw') {
+      return tracer.startActiveSpan(
+        'throwing-root',
+        { root: true },
+        async (root) => {
+          console.log(
+            JSON.stringify({ marker: 'root', ...root.spanContext() })
+          );
+          await Promise.resolve();
+          throw new Error('uncaught-root-error');
+        }
+      );
+    }
     const invocation = trace.getActiveSpan()?.spanContext();
+    const sampledRemote = trace.setSpanContext(ROOT_CONTEXT, {
+      traceId: '55555555555555555555555555555555',
+      spanId: '6666666666666666',
+      traceFlags: 1,
+      isRemote: true,
+    });
+    if (
+      this.env.CALLEE &&
+      /-(00|02)$/.test(request.headers.get('traceparent') ?? '')
+    ) {
+      const ordinary = tracer.startSpan(
+        'foreign-under-unsampled',
+        {},
+        sampledRemote
+      );
+      const requested = tracer.startSpan(
+        'root-under-unsampled',
+        { root: true },
+        sampledRemote
+      );
+      assert.strictEqual(ordinary.isRecording(), false);
+      assert.strictEqual(requested.isRecording(), ordinary.isRecording());
+      assert.strictEqual(
+        requested.spanContext().traceFlags,
+        ordinary.spanContext().traceFlags
+      );
+      ordinary.end();
+      requested.end();
+    }
     // A foreign unsampled context must not choose a requested root's recording mode.
     const remote = propagation.extract(ROOT_CONTEXT, {
       traceparent: '00-33333333333333333333333333333333-4444444444444444-00',
@@ -56,6 +98,12 @@ export default class extends WorkerEntrypoint {
           assert.strictEqual(callee.traceId, rootId.traceId);
           const rpc = await this.env.CALLEE.identity();
           assert.strictEqual(rpc.traceId, rootId.traceId);
+          const object = await this.env.OBJECT.get(
+            this.env.OBJECT.idFromName(rootId.traceId)
+          )
+            .fetch('http://object/')
+            .then((r) => r.json());
+          assert.strictEqual(object.traceId, rootId.traceId);
         }
         tracing.startActiveSpan('native-child', (native) => {
           if (root.isRecording())
@@ -93,5 +141,11 @@ export default class extends WorkerEntrypoint {
     // Destructor-driven closure must precede outcome, even for roots not explicitly ended.
     tracer.startSpan('left-open', { root: true });
     return Response.json(result);
+  }
+}
+
+export class RootActor extends DurableObject {
+  fetch() {
+    return Response.json(trace.getActiveSpan().spanContext());
   }
 }

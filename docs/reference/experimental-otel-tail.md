@@ -9,16 +9,29 @@ never detach on their own, including runtime spans under bare ROOT_CONTEXT. Nati
 of an active adapter root follow that root's trace, as do logs, marks, HTTP propagation and
 service-binding/RPC triggers. Invocation-scoped events retain onset identity.
 
+The adapter's internal empty context is an invocation fallback, not an explicit request to
+detach. Actor constructors, constructor-started concurrency blocks, hibernatable WebSocket
+handlers and restore callbacks install request trace scopes; ordinary spans there attach to
+the event's invocation just as in fetch handlers.
+
 Roots inherit the owning invocation's native sampling and flags, not the active remote context's.
-Unsampled roots have fresh JS-only non-recording identities with flags 0 and emit no spans.
-Untraced roots remain INVALID. Recording roots generate native entropy once, with empty state
+Unsampled roots have fresh non-recording identities with JS flags 0 and emit no spans. Native
+carriers retain the invocation's flags, including reserved bits and absence, even when a root
+identity is rewrapped after activation or closure in the same invocation.
+Untraced roots remain INVALID and suppress native spans and propagation while the current frame
+is also untraced. Reusing an INVALID root in a traced request does not suppress that request.
+Recording roots generate native entropy once, with empty state
 and isRemote false. The runtime derives `spanOpen.root: true` only when a parentless open has a
-registered trace different from onset; missing registration safely falls back to attachment.
+registered trace different from onset. Only detached-aware factories enable new trace creation.
+Legacy factories use attached roots, so JS identity, logs, egress and tail stay in the invocation's
+trace. Missing registration at an opted-in factory is still a backend defect: attachment of the
+tail alone cannot repair inconsistent JS identities or propagation.
 All later events retain their span's trace. Group by invocationId across traces, not traceId.
 
 Production must deploy root-aware converters before producers and add a temporary autogate in
 addition to the experimental flag (the PoC intentionally has no autogate). Consumers must accept
-only marked parentless opens, audit R1–R8 in the schema/types, and close all spans at outcome.
+only marked parentless opens, enforce the identity and lifetime contract in the schema/types,
+and close all spans at outcome.
 No embedder changes are included here. Embedders must adopt the detached-aware span factory,
 register every placeholder's trace/flags (including foreign-parent spans), forward metadata and
 `SpanOpenData.trace @5` through every process transport, and register it before opening the span.
@@ -55,6 +68,14 @@ to `SpanSubmitter::submitUserSpanOpenWithMetadata`, `submitSpanCloseWithTimestam
 the creator's weak tracer (`runIfAlive`), never the current request's tracer. Invocation marks
 likewise use the stored invocation context and tracer. A span reused across actor requests
 continues writing to its creator's stream and cannot keep a dead tracer alive.
+
+A root retained in Durable Object memory is not a cross-request recording session. Once its
+creator's tracer expires, later children, marks and closure can be dropped; no later stream
+receives that root's close. A hibernatable WebSocket accepted while a root is active retains
+that root's identity. Later message/close/error invocations join its trace without inherited
+flags, forming a multi-invocation trace rather than extending the creator's span lifetime.
+There is no dedicated per-invocation root quota. Recording spans share the existing export
+budgets; minted trace IDs remain in the tracer until it expires.
 
 Forward corresponding `BaseTracer` methods and all metadata/time fields over each transport,
 including process-sandbox boundaries. The default hooks intentionally preserve old embedders:
