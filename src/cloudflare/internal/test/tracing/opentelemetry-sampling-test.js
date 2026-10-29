@@ -23,9 +23,36 @@ export const jsOnlySampling = {
       assert.strictEqual(child.spanContext().traceFlags, env.expectedFlags);
       child.end();
     }
+    if (env.expectedFlags === 0 && env.callee) {
+      const checkCallees = async (kind) => {
+        for (const [callee, label, expected] of [
+          [env.callee, 'on', 1],
+          [env.flagOffCallee, 'off', 0],
+        ]) {
+          const response = await callee.fetch(
+            `https://callee/sampling-buffered-${kind}-${label}`
+          );
+          assert.strictEqual(await response.json(), expected);
+        }
+      };
+      await tracer.startActiveSpan(
+        'sampling-buffered-active',
+        {},
+        rebuilt,
+        async (span) => {
+          assert.strictEqual(span.isRecording(), false);
+          assert.strictEqual(span.spanContext().traceFlags, 0);
+          await checkCallees('active');
+          span.end();
+        }
+      );
+      await context.with(rebuilt, () => checkCallees('rebuilt'));
+    }
     if (env.expectedFlags === 1) {
+      // A foreign explicit 00 is a sampling decision, unlike this invocation's projected 0.
       const unsampled = trace.setSpanContext(context.active(), {
         ...invocation,
+        traceId: '11111111111111111111111111111111',
         traceFlags: 0,
       });
       await tracer.startActiveSpan(
@@ -40,7 +67,7 @@ export const jsOnlySampling = {
             assert.strictEqual(child.spanContext().traceFlags, 0);
           });
           assert.strictEqual(
-            await (await env.callee.fetch('https://callee/flags')).json(),
+            await (await env.callee.fetch('https://callee/unsampled')).json(),
             0
           );
           span.end();

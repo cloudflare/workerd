@@ -3,13 +3,24 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { WorkerEntrypoint, tracing } from 'cloudflare:workers';
+import assert from 'node:assert';
+import { trace } from '@opentelemetry/api';
 
 export default {
   fetch(request, env) {
-    if (new URL(request.url).pathname === '/socket') {
+    const path = new URL(request.url).pathname;
+    if (path === '/socket') {
       return env.SOCKET.get(env.SOCKET.idFromName('logger')).fetch(request);
     }
-    return Response.json(tracing.getActiveSpan().spanContext().traceFlags);
+    const flags = tracing.getActiveSpan().spanContext().traceFlags;
+    if (path.startsWith('/sampling-buffered-')) {
+      const span = trace
+        .getTracer('sampling-callee')
+        .startSpan(`sampling-callee${path}`);
+      assert.strictEqual(span.isRecording(), flags === 1);
+      span.end();
+    }
+    return Response.json(flags);
   },
 };
 

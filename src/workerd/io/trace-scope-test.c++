@@ -196,8 +196,12 @@ KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span 
   });
 }
 
-kj::Rc<WorkerTracer> makeSinkTracer(
-    kj::TaskSet& tasks, bool streaming, PipelineLogLevel level = PipelineLogLevel::FULL) {
+enum class UserSpanFactory { PRESENT, ABSENT };
+
+kj::Rc<WorkerTracer> makeSinkTracer(kj::TaskSet& tasks,
+    bool streaming,
+    PipelineLogLevel level = PipelineLogLevel::FULL,
+    UserSpanFactory factory = UserSpanFactory::PRESENT) {
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
       kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> writer;
@@ -205,9 +209,80 @@ kj::Rc<WorkerTracer> makeSinkTracer(
     writer = kj::heap<tracing::TailStreamWriter>(tracing::TailStreamWriter::Pending(), tasks);
   auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), level, kj::none, kj::mv(writer));
   tracer->markUnused();
-  tracer->setMakeUserRequestSpanFunc(
-      [](tracing::SpanContext identity) { return SpanParent::fromSpanContext(kj::mv(identity)); });
+  if (factory == UserSpanFactory::PRESENT) {
+    tracer->setMakeUserRequestSpanFunc([](tracing::SpanContext identity) {
+      return SpanParent::fromSpanContext(kj::mv(identity));
+    });
+  }
   return tracer;
+}
+
+KJ_TEST("rebuilt contexts inherit native invocation flags with or without a user-span factory") {
+  TraceTaskErrors errors;
+  kj::TaskSet tasks(errors);
+  for (auto factory: {UserSpanFactory::PRESENT, UserSpanFactory::ABSENT}) {
+    for (bool streaming: {false, true}) {
+      for (auto level: {PipelineLogLevel::NONE, PipelineLogLevel::FULL}) {
+        for (int nativeFlags: {-1, 0, 1, 3}) {
+          capnp::MallocMessageBuilder message;
+          auto features = message.initRoot<CompatibilityFlags>();
+          features.setOpentelemetryApi(true);
+          TestFixture fixture({.featureFlags = features.asReader()});
+          auto context = fixture.newIoContext();
+          auto request = fixture.newUndeliveredIncomingRequest(
+              *context, makeSinkTracer(tasks, streaming, level, factory));
+          auto& invocation = request->getInvocationSpanContext();
+          if (nativeFlags >= 0) {
+            invocation = tracing::InvocationSpanContext(invocation.getTraceId(),
+                invocation.getInvocationId(), invocation.getSpanId(),
+                tracing::TraceFlags(nativeFlags));
+          }
+          request->delivered();
+          fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+            auto scope = context->makeRequestTraceScope(env.lock);
+            auto primitive = env.js.alloc<api::TracingContext>();
+            for (bool sameTrace: {false, true}) {
+              for (uint8_t jsFlags: {0, 1, 3}) {
+                auto expectedFlags = sameTrace
+                    ? invocation.getTraceFlags()
+                    : kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(jsFlags & 1));
+                primitive->withActiveSpanContext(env.js,
+                    api::user_tracing::TracingSpanContext{
+                      .traceId =
+                          (sameTrace ? invocation.getTraceId() : tracing::TraceId(1, 2)).toW3C(),
+                      .spanId = tracing::SpanId(42).toGoString(),
+                      .traceFlags = jsFlags,
+                    },
+                    jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
+                  auto parent = context->getCurrentUserTraceSpan();
+                  auto identity = KJ_ASSERT_NONNULL(parent.toSpanContext());
+                  KJ_EXPECT(identity.getTraceFlags() == expectedFlags);
+                  KJ_EXPECT(KJ_ASSERT_NONNULL(identity.getSpanId()) == tracing::SpanId(42));
+                  KJ_EXPECT(context->getInvocationSpanContext().getTraceFlags() == expectedFlags);
+                  if (factory == UserSpanFactory::ABSENT) {
+                    auto child = parent.newChild("propagation-only-child"_kjc);
+                    auto grandchild = SpanParent(child).newChild("propagation-only-grandchild"_kjc);
+                    auto nestedIdentity = KJ_ASSERT_NONNULL(SpanParent(grandchild).toSpanContext());
+                    KJ_EXPECT(nestedIdentity.getTraceFlags() == expectedFlags);
+                    KJ_EXPECT(nestedIdentity.getTraceId() == identity.getTraceId());
+                    auto tracing = js.alloc<api::Tracing>();
+                    auto span = tracing->startSpan(js, kj::str("no-factory"));
+                    KJ_EXPECT(!span->getIsTraced());
+                  }
+                  return jsg::JsRef(js, js.undefined());
+                }));
+              }
+            }
+            KJ_EXPECT(invocation.getTraceFlags() ==
+                (nativeFlags < 0
+                        ? kj::none
+                        : kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(nativeFlags))));
+          });
+          fixture.drainAndDestroy(kj::mv(request));
+        }
+      }
+    }
+  }
 }
 
 KJ_TEST("JS sampling projection uses export capability without changing native decisions") {

@@ -14,18 +14,23 @@ const onsets = [];
 export default {
   tailStream(onset) {
     // Includes both flag states, service-binding/RPC triggers and hibernatable WebSocket turns.
-    // Only the explicitly unsampled call may carry flags. The JS-only sampled bit must not.
-    assert.ok(
-      onset.spanContext.traceFlags === undefined ||
-        onset.spanContext.traceFlags === 0
-    );
+    // Only this explicitly unsampled invocation may carry 00, never a projected JS 0 or 1.
+    const expectedFlags =
+      onset.event.info.type === 'fetch' &&
+      new URL(onset.event.info.url).pathname === '/unsampled'
+        ? 0
+        : undefined;
+    assert.strictEqual(onset.spanContext.traceFlags, expectedFlags);
+    if (expectedFlags === 0) {
+      assert.strictEqual(
+        onset.spanContext.traceId,
+        '11111111111111111111111111111111'
+      );
+    }
     onsets.push(onset);
     const collect = collector.tailStream(onset);
     return (event) => {
-      assert.ok(
-        event.spanContext.traceFlags === undefined ||
-          event.spanContext.traceFlags === 0
-      );
+      assert.strictEqual(event.spanContext.traceFlags, expectedFlags);
       if (event.event.type === 'log') logs.push(event.event.message);
       collect(event);
     };
@@ -53,6 +58,30 @@ export const exportedContexts = {
       assert.strictEqual(child.parentSpanId, parent.spanId);
     }
     assert.ok(onsets.length >= 6);
+    assert.strictEqual(
+      onsets.filter(
+        (onset) =>
+          onset.event.info.type === 'fetch' &&
+          new URL(onset.event.info.url).pathname.startsWith(
+            '/sampling-buffered-'
+          )
+      ).length,
+      4
+    );
+    for (const kind of ['active', 'rebuilt']) {
+      assert.ok(
+        findSpanByName(
+          collector.state,
+          `sampling-callee/sampling-buffered-${kind}-on`
+        )
+      );
+      assert.ok(
+        ![...collector.state.spans.values()].some(
+          (span) =>
+            span.name === `sampling-callee/sampling-buffered-${kind}-off`
+        )
+      );
+    }
     assert.ok(logs.some((message) => message.includes('sampling-rpc-log')));
     assert.ok(
       logs.some((message) => message.includes('sampling-websocket-log'))

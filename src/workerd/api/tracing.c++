@@ -747,11 +747,11 @@ kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
 
 namespace {
 
-// Keep the unsampled identity through any number of built-in/user children, but never submit
-// spans beneath the shim's fresh, non-exported IDs. Reusing this carrier avoids child allocations.
-class UnsampledSpanObserver final: public SpanObserver {
+// Keep propagation identity through built-in/user children without submitting spans, either for
+// unsampled contexts or tracers without a user-span factory. Reuse avoids child allocations.
+class NonRecordingContextObserver final: public SpanObserver {
  public:
-  explicit UnsampledSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
+  explicit NonRecordingContextObserver(tracing::SpanContext context): context(kj::mv(context)) {}
   bool isSampledOut() const override {
     return true;
   }
@@ -789,22 +789,20 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
   KJ_IF_SOME(tracer, io.getWorkerTracer()) {
     kj::Maybe<tracing::SpanContext> parsed;
     KJ_IF_SOME(value, context) {
-      // Children make a local sampling decision; reserved parent flag bits are not inherited.
+      // Remote parents carry a sampling bit; same-invocation native flags are restored below.
       char flags[] = {'0', (value.traceFlags & 1) ? '1' : '0'};
       parsed = tracing::SpanContext::tryFromTraceparent(
           kj::str("00-", value.traceId, "-", value.spanId, "-", kj::ArrayPtr(flags)));
       KJ_IF_SOME(identity, parsed) {
         KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
-          if (io.isOpentelemetryApiEnabled() &&
-              identity.getTraceFlags().map([](auto flags) {
-            return flags.isSampled();
-          }).orDefault(false) &&
-              identity.getTraceId() == invocation.getTraceId() &&
-              invocation.getTraceFlags() == kj::none) {
-            // A rebuilt JS context must not promote the JS-only sampling projection into
-            // an explicit native decision that reaches tails, callees or other embedders.
-            identity = tracing::SpanContext(identity.getTraceId(), identity.getSpanId());
+          if (io.isOpentelemetryApiEnabled() && identity.getTraceId() == invocation.getTraceId()) {
+            // Same-trace JS identities inherit the owner's native decision, including absent
+            // flags and reserved bits. Neither projected 0 nor 1 becomes an explicit decision.
+            identity = tracing::SpanContext(
+                identity.getTraceId(), identity.getSpanId(), invocation.getTraceFlags());
           }
+          // A projected identity cached in module/DO memory and replayed in a different
+          // invocation trace is indistinguishable from a remote parent with explicit flags.
         }
       }
     }
@@ -827,9 +825,12 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
       if (value.getTraceFlags().map([](auto flags) {
         return !flags.isSampled();
       }).orDefault(false)) {
-        parent = SpanParent(kj::rc<UnsampledSpanObserver>(kj::mv(value)));
+        parent = SpanParent(kj::rc<NonRecordingContextObserver>(kj::mv(value)));
       } else {
-        parent = tracer.makeUserSpanParent(kj::mv(value));
+        parent = tracer.makeUserSpanParent(tracing::SpanContext::clone(value));
+        if (!parent.isObserved()) {
+          parent = SpanParent(kj::rc<NonRecordingContextObserver>(kj::mv(value)));
+        }
       }
     }
   }
