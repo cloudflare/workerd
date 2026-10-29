@@ -89,7 +89,7 @@ impl Caller {
         }
         let callback = self.callback.borrow().as_ref().map(|f| f.as_local(lock));
         if let Some(callback) = callback {
-            let _ = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+            let _ = callback.call(lock, None, &[]);
         }
         Err(jsg::Error::new_type_error("replaced"))
     }

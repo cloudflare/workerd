@@ -153,6 +153,23 @@ export default {
     if (url.hostname === 'body') {
       return new Response(url.searchParams.get('text'));
     }
+    if (url.hostname === 'failing') {
+      // One chunk, then an error.
+      let sent = false;
+      return new Response(
+        new ReadableStream({
+          async pull(c) {
+            if (!sent) {
+              sent = true;
+              c.enqueue(enc.encode('part'));
+              return;
+            }
+            await scheduler.wait(10);
+            c.error(new Error('the body failed'));
+          },
+        })
+      );
+    }
     return Response.json({
       length: request.headers.get('Content-Length'),
       text: await request.text(),
@@ -260,6 +277,38 @@ export const stringChunksCrossAsUtf8 = {
     );
     const returned = await env.PEER.makeStringChunkReadable();
     assert.strictEqual(await new Response(returned).text(), 'abcd\u00e9');
+  },
+};
+
+// A native body piped into a writable received over RPC: once the pipe settles, both endpoints
+// are unlocked, whether it resolved (with or without a write made before it) or rejected on a
+// source error.
+export const nativePipeIntoRpcWritableReleasesLocks = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+    for (const header of [undefined, 'header|']) {
+      const { readable, writable } =
+        await env.PEER.makeConstructorBackedEchoPair();
+      const text = new Response(readable).text();
+      if (header !== undefined) {
+        const writer = writable.getWriter();
+        await writer.write(enc.encode(header));
+        writer.releaseLock();
+      }
+      const body = new Response(enc.encode('body')).body;
+      await body.pipeTo(writable);
+      assert.strictEqual(await text, `${header ?? ''}body`);
+      assert.strictEqual(body.locked, false, header);
+      assert.strictEqual(writable.locked, false, header);
+    }
+
+    const { readable, writable } =
+      await env.PEER.makeConstructorBackedEchoPair();
+    readable.pipeTo(new WritableStream()).catch(() => {});
+    const body = (await env.HTTP.fetch('http://failing/')).body;
+    await assert.rejects(body.pipeTo(writable), { message: 'the body failed' });
+    assert.strictEqual(body.locked, false);
+    assert.strictEqual(writable.locked, false);
   },
 };
 

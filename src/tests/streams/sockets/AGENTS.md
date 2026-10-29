@@ -28,7 +28,7 @@ service allowing `private`. The suite's `.wd-test` files take no
 
 ## Coverage
 
-Two implementation divergences are pinned:
+Three implementation divergences are pinned:
 
 1. `cancelReadableSettlesSocket`: canceling a pending read rejects with a
    re-created `Error` carrying the cancel reason under C++, while
@@ -41,6 +41,13 @@ Two implementation divergences are pinned:
    (`awaitIoLegacy`, then `drain()`). Neither order is specified
    (`startTls` and flush are workerd extensions); the TypeScript one
    reports the failed writes before the upgrade.
+3. `nativePipeReleasesEndpoints`: once a native-to-native pipe settles,
+   TypeScript's source reads done whatever the outcome, as it has been
+   closed since its native half was extracted at the start; on an abort
+   that is the spec's cancel. C++ errors the source with the pipe's error
+   when the pipe is aborted or the source fails, and with an
+   already-aborted signal touches neither endpoint. The spec leaves a
+   failed source errored, as C++ does.
 
 | Test | Shape |
 | --- | --- |
@@ -56,6 +63,7 @@ Two implementation divergences are pinned:
 | `pipeSocketToSocket` | greet socket's readable piped into the echo socket's writable |
 | `pipeSocketToSocketClosesSource` | the same native-to-native pipe leaves the source locked and (TS, via the interop closed-promise) closed at the start |
 | `pipeBehindUnawaitedWrite` | header write not awaited, writer released, Response body piped in: echo is header then body; both endpoints unlocked after the pipe |
+| `nativePipeReleasesEndpoints` | a Response body, an idle socket's readable (aborted mid-pipe), a Response body with an already-aborted signal, and a service-binding body that fails, each piped into a socket writable: both endpoints unlocked after the pipe; the writable closed or errored with the pipe's error (C++: untouched by the already-aborted signal); the source's state diverges (3) |
 | `pipeBehindWriteBeforeStart` | the same within connect()'s turn, with the header still queued before the writable starts |
 | `pipeOptionGetterLocksNativeEndpoint` | an option getter that takes a reader on a Response body, or a writer on the socket writable, fails the native-to-native pipe with a TypeError and leaves both endpoints as they were: the reader still reads the whole body, the body piped toward the locked writable still reads in full, and the writer's write is echoed |
 | `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |
