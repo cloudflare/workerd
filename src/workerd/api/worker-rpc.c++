@@ -6,6 +6,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
 #include <workerd/io/tracer.h>
@@ -3498,8 +3499,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
-    capFulfiller->fulfill(capnp::membrane(
-        revocableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+    capFulfiller->fulfill(capnp::membrane(revocableTarget.getClient(),
+        kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller), redirectPushAbortSignal)));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -3549,7 +3550,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
 
   rpc::JsRpcTarget::Client cap = sent.getTopLevel();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap),
+      kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise), redirectPushAbortSignal));
 
   // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
   // This is needed in particular for the case where the client is dropped without making any calls
@@ -3562,8 +3564,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
   // TODO(cleanup): It feels like there's something wrong with the design here. Can we make this
   //   less ugly?
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap),
+      kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller), redirectPushAbortSignal));
 
   this->capFulfiller->fulfill(kj::mv(cap));
 

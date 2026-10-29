@@ -123,7 +123,10 @@ request's context can arm it — the underlying promise belongs to that request 
 requested from any other context is routed there through the signal's
 `IoCrossContextExecutor` and takes effect on the receiving request's next turn. If the
 receiving request is already gone, the routing is dropped: no delivery is possible anymore.
-Polling stays accurate regardless: the box holds any abort the peer delivered before the
-receiving request ended, and a signal whose trigger capability is dropped without an abort
-never aborts. Registrations made after that point observe a delivered abort through the
-already-aborted pre-checks instead.
+Polling stays accurate regardless: the box holds any abort the peer delivers, including one
+that arrives after the receiving request ended, and a signal whose trigger capability is
+dropped without an abort never aborts. Registrations made after that point observe a
+delivered abort through the already-aborted pre-checks instead. The trigger capability doesn't
+keep the JS RPC session that delivered the signal open (see `redirectPushAbortSignal()` in
+`src/workerd/io/external-pusher.h`), so the receiving request can end while the sender still
+holds it.

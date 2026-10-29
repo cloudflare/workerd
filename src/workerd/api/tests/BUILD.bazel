@@ -620,6 +620,16 @@ wd_test(
 )
 
 wd_test(
+    src = "abortsignal-rpc-session-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "abortsignal-rpc-session-test.js",
+        "abortsignal-rpc-session-test-callee.js",
+        "abortsignal-rpc-session-test-tail.js",
+    ],
+)
+
+wd_test(
     src = "abortsignal-test.wd-test",
     args = ["--experimental"],
     data = ["abortsignal-test.js"],

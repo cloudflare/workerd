@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# An AbortSignal sent over JS RPC must not keep the callee's session open after the callee
+# returns. The "results" tail worker reports the outcome of each callee invocation while the
+# caller still holds the AbortController whose signal it sent.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "abortsignal-rpc-session-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "abortsignal-rpc-session-test.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc", "enable_abortsignal_rpc", "experimental"],
+        bindings = [
+          (name = "CALLEE", service = (name = "callee", entrypoint = "Callee")),
+          (name = "RESULTS", service = (name = "results", entrypoint = "Results")),
+          (name = "ACTOR", durableObjectNamespace = (className = "CalleeActor", serviceName = "callee")),
+        ],
+      )
+    ),
+    ( name = "callee",
+      worker = (
+        modules = [(name = "worker", esModule = embed "abortsignal-rpc-session-test-callee.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc", "enable_abortsignal_rpc", "experimental"],
+        durableObjectNamespaces = [(className = "CalleeActor", uniqueKey = "callee-actor")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["results"],
+      )
+    ),
+    ( name = "results",
+      worker = (
+        modules = [(name = "worker", esModule = embed "abortsignal-rpc-session-test-tail.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      )
+    ),
+  ],
+);
