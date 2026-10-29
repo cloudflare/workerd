@@ -1,0 +1,19 @@
+deps/rust/cargo-bazel-lock.json
+  s_6d8d1659fe0481::t_f7d71417115a4e 5,3013-3016,8629-8723,16118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f727d85be49e2e3e2edef5998e5d4b7b29536d7e",
+  "prompts": {},
+  "sessions": {
+    "s_6d8d1659fe0481": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e87bc33fbffePzoYe75dj2441T",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "William Perron <wperron@cloudflare.com>"
+    }
+  }
+}
