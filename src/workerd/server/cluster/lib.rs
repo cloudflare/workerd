@@ -36,6 +36,8 @@ mod alarms;
 mod bucket;
 mod capture;
 pub mod cluster;
+#[cfg(test)]
+mod dst;
 mod http;
 mod log;
 #[cfg(test)]

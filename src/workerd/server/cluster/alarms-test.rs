@@ -273,141 +273,20 @@ fn a_failed_adoption_still_schedules_and_retries() {
     });
 }
 
-/// Deterministic simulation: the real `Index` on several nodes over a store
-/// whose every call the simulation completes, fails or leaves hanging, in an
-/// order a seed picks, among crashes, takeovers, arming, firing and adoption
-/// rounds. The server's part (ownership, the local scheduler, commits,
-/// opening an object) is modelled here. Once the faults stop, every alarm
-/// an object's database holds must run.
-mod sim {
+/// Deterministic simulation (`crate::dst`): the real `Index` on several
+/// nodes, among crashes, takeovers, arming, firing and adoption rounds. The
+/// server's part (ownership, the local scheduler, commits, opening an
+/// object) is modelled here. Once the faults stop, every alarm an object's
+/// database holds must run.
+mod dst {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::rc::Rc;
 
-    use futures::FutureExt;
-    use futures::channel::oneshot;
-    use futures::executor::LocalPool;
-    use futures::future::AbortHandle;
-    use futures::future::Abortable;
-    use futures::task::LocalSpawnExt;
-
     use super::*;
-    use crate::Error;
-    use crate::Guard;
-    use crate::Store as _;
-    use crate::Version;
-    use crate::bucket::Entry as Listed;
-    use crate::bucket::Payload;
-    use crate::bucket::memory::Memory;
-
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n as u64) as usize
-        }
-        fn chance(&mut self, percent: u64) -> bool {
-            self.next() % 100 < percent
-        }
-    }
-
-    enum Verdict {
-        Apply,
-        FailBefore,
-        FailAfter,
-    }
-
-    /// A call waiting for the simulation's verdict.
-    struct Call {
-        what: String,
-        verdict: oneshot::Sender<Verdict>,
-    }
-
-    /// The memory store, each call held until the simulation decides it.
-    #[derive(Default)]
-    struct Store {
-        inner: Memory,
-        calls: RefCell<Vec<Call>>,
-    }
-
-    impl Store {
-        async fn decide(&self, what: String) -> Verdict {
-            let (verdict, decided) = oneshot::channel();
-            self.calls.borrow_mut().push(Call { what, verdict });
-            decided.await.unwrap_or(Verdict::FailBefore)
-        }
-        fn peek(&self, key: &str) -> Option<Vec<u8>> {
-            let got = self.inner.get(key, None).now_or_never().unwrap();
-            got.unwrap().map(|(body, _)| body)
-        }
-        fn keys(&self, prefix: &str) -> Vec<String> {
-            let listed = self.inner.list(prefix).now_or_never().unwrap();
-            listed.unwrap().into_iter().map(|e| e.key).collect()
-        }
-    }
-
-    fn failed() -> Error {
-        Error::Http("503 (simulated)".into())
-    }
-
-    /// The simulation's handle on the store, shared with every bucket.
-    #[derive(Clone)]
-    struct Shared(Rc<Store>);
-
-    #[async_trait::async_trait(?Send)]
-    impl crate::Store for Shared {
-        async fn get(
-            &self,
-            key: &str,
-            to: Option<&std::path::Path>,
-        ) -> Result<Option<(Vec<u8>, Version)>> {
-            match self.0.decide(format!("get {key}")).await {
-                Verdict::Apply => self.0.inner.get(key, to).await,
-                _ => Err(failed()),
-            }
-        }
-        async fn put(
-            &self,
-            key: &str,
-            body: Payload,
-            guard: Option<Guard>,
-            metadata: &[(&str, String)],
-        ) -> Result<Option<Version>> {
-            let verdict = self.0.decide(format!("put {key}")).await;
-            if matches!(verdict, Verdict::FailBefore) {
-                return Err(failed());
-            }
-            let put = self.0.inner.put(key, body, guard, metadata).await;
-            if matches!(verdict, Verdict::FailAfter) {
-                return Err(failed());
-            }
-            put
-        }
-        async fn list(&self, prefix: &str) -> Result<Vec<Listed>> {
-            match self.0.decide(format!("list {prefix}")).await {
-                Verdict::Apply => self.0.inner.list(prefix).await,
-                _ => Err(failed()),
-            }
-        }
-        async fn delete(&self, key: &str) -> Result<()> {
-            let verdict = self.0.decide(format!("delete {key}")).await;
-            if matches!(verdict, Verdict::FailBefore) {
-                return Err(failed());
-            }
-            self.0.inner.delete(key).await?;
-            if matches!(verdict, Verdict::FailAfter) {
-                return Err(failed());
-            }
-            Ok(())
-        }
-    }
+    use crate::dst::Harness;
+    use crate::dst::Store;
 
     const NS: &str = "ns";
     const OBJECTS: usize = 8;
@@ -464,28 +343,18 @@ mod sim {
     }
 
     struct Sim {
-        rng: Rng,
-        store: Rc<Store>,
-        bucket: Bucket,
+        dst: Harness,
         world: Rc<RefCell<World>>,
         indexes: Vec<Option<Rc<Index>>>,
-        aborts: Vec<Vec<AbortHandle>>,
-        pool: LocalPool,
         faults: bool,
     }
 
     impl Sim {
         fn new(seed: u64) -> Self {
-            let store = Rc::new(Store::default());
-            let bucket = Bucket::new(Shared(Rc::clone(&store)), "");
             let mut sim = Self {
-                rng: Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1),
-                store,
-                bucket,
+                dst: Harness::new(seed),
                 world: Rc::default(),
                 indexes: Vec::new(),
-                aborts: Vec::new(),
-                pool: LocalPool::new(),
                 faults: true,
             };
             for _ in 0..3 {
@@ -501,11 +370,10 @@ mod sim {
         }
 
         fn start(&mut self) {
-            let n = self.indexes.len();
+            let n = self.dst.node();
             let id = format!("n{n}");
-            self.indexes
-                .push(Some(Rc::new(Index::new(self.bucket.clone(), &id, GRACE))));
-            self.aborts.push(Vec::new());
+            let index = Index::new(self.dst.bucket.clone(), &id, GRACE);
+            self.indexes.push(Some(Rc::new(index)));
             self.world.borrow_mut().nodes.push(Node {
                 id,
                 alive: true,
@@ -518,9 +386,7 @@ mod sim {
         }
 
         fn crash(&mut self, n: usize) {
-            for abort in self.aborts[n].drain(..) {
-                abort.abort();
-            }
+            self.dst.crash(n);
             self.indexes[n] = None;
             let mut world = self.world.borrow_mut();
             let until = world.now + LEASE;
@@ -531,13 +397,6 @@ mod sim {
             node.busy.clear();
             drop(world);
             self.log(&format!("crash n{n}"));
-        }
-
-        fn spawn(&mut self, n: usize, task: impl std::future::Future<Output = ()> + 'static) {
-            let (abort, registration) = AbortHandle::new_pair();
-            self.aborts[n].push(abort);
-            let task = Abortable::new(task, registration).map(drop);
-            self.pool.spawner().spawn_local(task).unwrap();
         }
 
         fn alive(&self) -> Vec<usize> {
@@ -565,48 +424,48 @@ mod sim {
             OPENS.with(|opens| opens.borrow_mut().push((n, Box::pin(task))));
         }
 
-        /// One step: drive every task until it waits on the store, then do
-        /// one thing.
-        fn step(&mut self) {
-            self.pool.run_until_stalled();
+        /// Drive every task until it waits on the store, opens' included.
+        fn run(&mut self) {
+            self.dst.run();
             for (n, task) in OPENS.with(|opens| std::mem::take(&mut *opens.borrow_mut())) {
-                self.spawn(n, task);
+                self.dst.spawn(n, task);
             }
-            self.pool.run_until_stalled();
-            self.store
-                .calls
-                .borrow_mut()
-                .retain(|c| !c.verdict.is_canceled());
+            self.dst.run();
+        }
+
+        /// One step: run, then do one thing.
+        fn step(&mut self) {
+            self.run();
             let alive = self.alive();
-            let pending = self.store.calls.borrow().len();
-            match self.rng.below(100) {
+            let pending = self.dst.pending();
+            match self.dst.rng.below(100) {
                 0..45 if pending > 0 => self.decide(),
                 45..50 if self.faults && alive.len() > 1 => {
-                    let n = alive[self.rng.below(alive.len())];
+                    let n = alive[self.dst.rng.below(alive.len())];
                     self.crash(n);
                     self.start();
                 }
                 50..62 if self.faults => {
-                    let n = alive[self.rng.below(alive.len())];
-                    let o = format!("o{}", self.rng.below(OBJECTS));
-                    let at = self.world.borrow().now + self.rng.below(30) as u64;
-                    if self.rng.chance(15) {
+                    let n = alive[self.dst.rng.below(alive.len())];
+                    let o = format!("o{}", self.dst.rng.below(OBJECTS));
+                    let at = self.world.borrow().now + self.dst.rng.below(30) as u64;
+                    if self.dst.rng.chance(15) {
                         self.set(n, &o, None);
                     } else {
                         self.set(n, &o, Some(at));
                     }
                 }
                 62..67 if self.faults => {
-                    let n = alive[self.rng.below(alive.len())];
-                    let o = format!("o{}", self.rng.below(OBJECTS));
+                    let n = alive[self.dst.rng.below(alive.len())];
+                    let o = format!("o{}", self.dst.rng.below(OBJECTS));
                     self.request(n, &o);
                 }
                 67..80 => {
-                    let n = alive[self.rng.below(alive.len())];
+                    let n = alive[self.dst.rng.below(alive.len())];
                     self.round(n);
                 }
                 80..92 => {
-                    let n = alive[self.rng.below(alive.len())];
+                    let n = alive[self.dst.rng.below(alive.len())];
                     self.fire(n);
                 }
                 _ => self.world.borrow_mut().now += 1,
@@ -614,21 +473,8 @@ mod sim {
         }
 
         fn decide(&mut self) {
-            let i = self.rng.below(self.store.calls.borrow().len());
-            let call = self.store.calls.borrow_mut().swap_remove(i);
-            let verdict = match self.rng.below(100) {
-                _ if !self.faults => Verdict::Apply,
-                0..8 => Verdict::FailBefore,
-                8..16 => Verdict::FailAfter,
-                _ => Verdict::Apply,
-            };
-            let tag = match verdict {
-                Verdict::Apply => "ok",
-                Verdict::FailBefore => "fail",
-                Verdict::FailAfter => "fail-after",
-            };
-            self.log(&format!("{tag} {}", call.what));
-            let _ = call.verdict.send(verdict);
+            let decided = self.dst.decide(self.faults);
+            self.log(&decided);
         }
 
         /// A request to `o` through `n`: claims it if its owner is gone.
@@ -636,7 +482,7 @@ mod sim {
             let index = Rc::clone(self.indexes[n].as_ref().unwrap());
             let mut world = self.world.borrow_mut();
             if matches!(route(&world, n, o), Route::Claim) {
-                Self::open(&mut world, &self.store, &index, n, o);
+                Self::open(&mut world, &self.dst.store, &index, n, o);
             }
         }
 
@@ -648,7 +494,7 @@ mod sim {
                 let mut world = self.world.borrow_mut();
                 match route(&world, n, o) {
                     Route::Here => {}
-                    Route::Claim => Self::open(&mut world, &self.store, &index, n, o),
+                    Route::Claim => Self::open(&mut world, &self.dst.store, &index, n, o),
                     Route::Remote(_) => return,
                 }
                 if !world.nodes[n].busy.insert(o.to_owned()) {
@@ -658,11 +504,11 @@ mod sim {
             self.log(&format!("set {o} {at:?} on n{n}"));
             let (world, bucket, store) = (
                 Rc::clone(&self.world),
-                self.bucket.clone(),
-                Rc::clone(&self.store),
+                self.dst.bucket.clone(),
+                Rc::clone(&self.dst.store),
             );
             let o = o.to_owned();
-            self.spawn(n, async move {
+            self.dst.spawn(n, async move {
                 let current = store.peek(&db_key(&o)).map(|b| parse_at(&b));
                 let earlier = at.is_some_and(|at| current.is_none_or(|c| at < c));
                 let commit = async {
@@ -713,7 +559,7 @@ mod sim {
                 )
             };
             let world = Rc::clone(&self.world);
-            self.spawn(n, async move {
+            self.dst.spawn(n, async move {
                 let schedule = |a: Adopted| {
                     let mut world = world.borrow_mut();
                     let adopted = format!("adopt {} {} on n{n}", a.actor, a.at_ms);
@@ -745,13 +591,13 @@ mod sim {
                 node.local.remove(&o);
                 match route(&world, n, &o) {
                     Route::Here => {}
-                    Route::Claim => Self::open(&mut world, &self.store, &index, n, &o),
+                    Route::Claim => Self::open(&mut world, &self.dst.store, &index, n, &o),
                     Route::Remote(m) => {
                         world.log.push(format!("fire {o} on n{n}: on n{m}"));
                         let (now, owner) = (world.now, world.nodes[m].id.clone());
                         drop(world);
                         let world = Rc::clone(&self.world);
-                        self.spawn(n, async move {
+                        self.dst.spawn(n, async move {
                             // The scheduler retries it, unless dropped.
                             if index.elsewhere(NS, &o, &owner, now).await.unwrap_or(true) {
                                 let mut world = world.borrow_mut();
@@ -769,10 +615,10 @@ mod sim {
             };
             let (world, bucket, store) = (
                 Rc::clone(&self.world),
-                self.bucket.clone(),
-                Rc::clone(&self.store),
+                self.dst.bucket.clone(),
+                Rc::clone(&self.dst.store),
             );
-            self.spawn(n, async move {
+            self.dst.spawn(n, async move {
                 let now = world.borrow().now;
                 match store.peek(&db_key(&o)).map(|b| parse_at(&b)) {
                     Some(at) if at <= now => {
@@ -812,12 +658,8 @@ mod sim {
                 }
                 // Drain every call, then let each node round and fire.
                 loop {
-                    self.pool.run_until_stalled();
-                    for (n, task) in OPENS.with(|o| std::mem::take(&mut *o.borrow_mut())) {
-                        self.spawn(n, task);
-                    }
-                    self.pool.run_until_stalled();
-                    if self.store.calls.borrow().is_empty() {
+                    self.run();
+                    if self.dst.pending() == 0 {
                         break;
                     }
                     self.decide();
@@ -828,7 +670,8 @@ mod sim {
                 }
                 self.world.borrow_mut().now += 10;
             }
-            self.store
+            self.dst
+                .store
                 .keys("db/")
                 .into_iter()
                 .map(|k| k.strip_prefix("db/").unwrap().to_owned())
@@ -867,19 +710,13 @@ mod sim {
                 log += &format!("\nn{n} {o}: indexed/want {a:?} local {local:?}");
             }
         }
-        log += &format!("\nbucket {:?}", sim.store.keys(""));
-        Err(format!("seed {seed}: never ran {missed:?}\n{log}"))
+        log += &format!("\nbucket {:?}", sim.dst.store.keys(""));
+        Err(format!("never ran {missed:?}\n{log}"))
     }
 
-    /// 100 seeds by default, to fit CI's slowest builds; `SIM_SEEDS` for more.
+    /// 100 seeds by default, to fit CI's slowest builds.
     #[test]
     fn every_alarm_runs_whatever_fails() {
-        let seeds: u64 = std::env::var("SIM_SEEDS").map_or(100, |s| s.parse().unwrap());
-        let first: u64 = std::env::var("SIM_SEED").map_or(0, |s| s.parse().unwrap());
-        for seed in first..first + seeds {
-            if let Err(e) = run(seed, 400) {
-                panic!("{e}");
-            }
-        }
+        crate::dst::seeds(100, |seed| run(seed, 400));
     }
 }
