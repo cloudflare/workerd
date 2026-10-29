@@ -51,8 +51,12 @@ that root-count-dependent isolate-kill failure mode, including for unsampled roo
 A foreign ID has a 2^-64 false-match probability under an unknown random key. A false match
 only applies the invocation's native flags or rejects that trace as a WebSocket trigger; this
 is not an authentication boundary. Nonce collisions have ordinary 64-bit birthday probability.
-Predictable test mode uses a fixed SipHash key and the existing process-wide deterministic
-trace-ID counter for nonces, consumes no entropy, and remains distinct across invocations.
+Predictable test mode gives each tracer a deterministic SipHash key from a dedicated static
+counter, independent of the trace-ID counter. It consumes no entropy or extra trace IDs; nonces
+use the existing deterministic trace sequence, and one tracer rejects another's minted IDs.
+The 100k direct-mint memory assertion measures live bytes only with uninterposed glibc, not
+ASan/tcmalloc or other platforms. The adapter-to-createSpan test additionally counts native
+carrier creation and reclamation after GC, independently of the allocator, while retaining a root.
 
 The `opentelemetry_api` adapter emits optional kind, instrumentation scope and start time on
 `spanOpen`, separate `spanEvent` and `spanLinks` marks, optional exception time, and optional end
@@ -92,17 +96,22 @@ constructing request cannot record spans in the first place. There is no fallbac
 request: that would put frame-owned logs and spans in different streams, or misattribute them to
 an unrelated overlapping request. Uncaught timer/callback task failures are an exception: the
 frame has unwound before task-failure reporting, so those exceptions still go to the newest
-request's tracer and invocation, possibly a different stream than the callback's logs. This
-limitation is unchanged with the flag off. Start request-specific work in that request's scope
-instead.
+request's tracer and invocation, possibly a different stream than the callback's logs.
+With the flag off, logs and task failures both go to the newest request while spans follow the
+frame. With the flag on, logs follow the frame but task failures still go to the newest request.
+The main-side exception-routing problem is tracked separately. Start request-specific work in
+that request's scope instead.
 
 A root retained in Durable Object memory is not a cross-request recording session. Once its
 creator's tracer expires, later children, marks and closure can be dropped; no later stream
 receives that root's close. A hibernatable WebSocket captures a real active accept-time identity,
-unless its trace was minted as a detached root by the invocation's tracer. In that case, or
-without a real active identity, it uses the invocation identity when one exists. Later
+unless the active native observer belongs to a detached root (including native descendants
+and roots retained across requests), or its rewrapped ID matches the current tracer's key.
+In that case, or without a real active identity, it uses the invocation identity when one exists. Later
 message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
-inside a detached root does not pull later events into that root's trace.
+inside a native detached root or child does not pull later events into that root's trace.
+Serialized identities and JS non-recording roots carry no native provenance across requests;
+after their owning tracer expires they are treated as foreign parents, not recognized roots.
 There is no dedicated per-invocation root-count quota. Recording spans share the existing export
 budgets; self-identifying minted IDs use constant per-tracer memory regardless of root count.
 

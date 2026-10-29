@@ -12,6 +12,8 @@
 
 #include <capnp/message.h>  // for capnp::clone()
 
+#include <atomic>
+
 namespace workerd {
 
 namespace {
@@ -674,10 +676,15 @@ tracing::TraceId BaseTracer::makeDetachedTraceId(kj::Maybe<kj::EntropySource&> e
   if (detachedTraceKey == kj::none) {
     // Predictable mode must not consume entropy. Normal keys have 128 random bits from the
     // invocation's source (or the runtime's cryptographic source when none is supplied).
-    detachedTraceKey = isPredictableModeForTest()
-        ? DetachedTraceKey{{0x0706050403020100, 0x0f0e0d0c0b0a0908}}
-        : DetachedTraceKey{{tracing::SpanId::fromEntropy(entropy).getId(),
-            tracing::SpanId::fromEntropy(entropy).getId()}};
+    if (isPredictableModeForTest()) {
+      // Separate from the trace-ID sequence: first use of a tracer consumes no trace IDs.
+      static std::atomic<uint64_t> nextKey{0};
+      auto k = nextKey.fetch_add(1, std::memory_order_relaxed);
+      detachedTraceKey = DetachedTraceKey{{0x0706050403020100 ^ k, 0x0f0e0d0c0b0a0908}};
+    } else {
+      detachedTraceKey = DetachedTraceKey{{tracing::SpanId::fromEntropy(entropy).getId(),
+        tracing::SpanId::fromEntropy(entropy).getId()}};
+    }
   }
   // Use the existing process-wide deterministic trace sequence in predictable mode, avoiding
   // collisions between invocations. Non-zero nonces also rule out the all-zero W3C identity.
@@ -739,7 +746,11 @@ SpanParent BaseTracer::makeUserRequestSpan(tracing::TraceId traceId,
 
 SpanParent BaseTracer::makeUserSpanParent(tracing::SpanContext context, DetachedRoot detached) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(context), detached);
+    auto parent = func(kj::mv(context), detached);
+    if (detached == DetachedRoot::YES) {
+      KJ_IF_SOME(observer, parent.getObserver()) observer.markDetachedTrace();
+    }
+    return parent;
   } else {
     return SpanParent(nullptr);
   }
@@ -773,13 +784,14 @@ void WorkerTracer::markUnused() {
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
-  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags, false,
-      traceState.map([](auto& value) { return kj::str(value); }));
+  return inheritTraceProvenance(kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId,
+      traceFlags, false, traceState.map([](auto& value) { return kj::str(value); })));
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChildFromUserCode() {
-  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags,
-      /*fromUserCode=*/true, traceState.map([](auto& value) { return kj::str(value); }));
+  return inheritTraceProvenance(
+      kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags,
+          /*fromUserCode=*/true, traceState.map([](auto& value) { return kj::str(value); })));
 }
 
 kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {

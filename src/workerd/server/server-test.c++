@@ -4286,7 +4286,10 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
   for (auto tailMode: {"none"_kj, "buffered"_kj, "streaming"_kj}) {
     bool streaming = tailMode == "streaming";
     for (auto flags: {"00"_kj, "01"_kj}) {
-      for (auto mode: {"invocation"_kj, "active"_kj, "detached"_kj}) {
+      for (auto mode:
+          {"invocation"_kj, "active"_kj, "detached"_kj, "retained-root"_kj, "retained-child"_kj}) {
+        bool retained = mode.startsWith("retained-");
+        if (retained && (!streaming || flags != "01")) continue;
         TestServer test(kj::str(R"((
           services = [(name = "main", worker = (
             compatibilityDate = "2026-07-01",
@@ -4302,6 +4305,17 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `  fetch(request) {
               `    ++this.reqCount;
               `    const invocation = identity();
+              `    if (request.url.endsWith('/remember')) {
+              `      this.root = api.trace.getTracer('accept').startSpan('remembered-root', {root:true});
+              `      api.context.with(api.context.active().setValue(key, this.root), () => {
+              `        this.child = tracing.startSpan('remembered-child');
+              `      });
+              `      if (this.root.spanContext().traceId === invocation.traceId ||
+              `          this.child.spanContext().traceId !== this.root.spanContext().traceId)
+              `        throw new Error('missing retained native detached identities');
+              `      this.root.end(); this.child.end();
+              `      return new Response('OK');
+              `    }
               `    const [client, server] = Object.values(new WebSocketPair());
               `    let expected = invocation;
               `    const accept = () => this.ctx.acceptWebSocket(server);
@@ -4313,6 +4327,10 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `      const root = api.trace.getTracer('accept').startSpan('accept-root', {root:true});
               `      api.context.with(api.context.active().setValue(key, root), accept);
               `      root.end();
+              `    } else if (request.url.endsWith('/retained-root')) {
+              `      api.context.with(api.context.active().setValue(key, this.root), accept);
+              `    } else if (request.url.endsWith('/retained-child')) {
+              `      tracing.withActiveSpan(this.child, accept);
               `    } else { accept(); }
               `    server.serializeAttachment({traceId: expected.traceId, spanId: expected.spanId});
               `    return new Response(null, {status: 101, webSocket: client});
@@ -4366,6 +4384,18 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
         ))"));
         test.server.allowExperimental();
         test.start();
+        if (retained) {
+          auto prime = test.connect("test-addr");
+          prime.send(
+              "GET /remember HTTP/1.1\r\nHost: foo\r\n"
+              "traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01\r\n\r\n"_kj);
+          prime.recv(R"(
+            HTTP/1.1 200 OK
+            Content-Length: 2
+            Content-Type: text/plain;charset=UTF-8
+
+            OK)"_blockquote);
+        }
         auto socket = test.connect("test-addr");
         socket.send(kj::str("GET /", mode, " HTTP/1.1\r\nHost: foo\r\nUpgrade: websocket\r\n",
             "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n",
@@ -4393,7 +4423,7 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
             Content-Length: 2
 
             OK)"_blockquote);
-          socket.recvWebSocket(hibernate ? "0:OK" : "1:OK");
+          socket.recvWebSocket(hibernate ? "0:OK" : retained ? "2:OK" : "1:OK");
           if (streaming) {
             test.wait(1);
             auto tail = test.connect("tail-addr");

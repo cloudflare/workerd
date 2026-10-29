@@ -152,15 +152,31 @@ class FixtureTail final: public WorkerInterface {
 
 class FixtureSpanSubmitter final: public SpanSubmitter {
  public:
+  struct Lifetime {
+    uint created = 0;
+    uint live = 0;
+  };
   enum class Registration { ENABLED, DISABLED };
   FixtureSpanSubmitter(BaseTracer& tracer,
       tracing::SpanContext context,
       Registration registration = Registration::ENABLED,
-      kj::Maybe<uint64_t&> sharedCounter = globalCounter)
+      kj::Maybe<uint64_t&> sharedCounter = globalCounter,
+      kj::Maybe<Lifetime&> lifetime = kj::none)
       : tracer(tracer.getWeakRef()),
         context(kj::mv(context)),
         registration(registration),
-        sharedCounter(sharedCounter) {}
+        sharedCounter(sharedCounter),
+        lifetime(lifetime) {
+    KJ_IF_SOME(count, lifetime) {
+      ++count.created;
+      ++count.live;
+    }
+  }
+  ~FixtureSpanSubmitter() noexcept(false) {
+    KJ_IF_SOME(count, lifetime) {
+      --count.live;
+    }
+  }
   bool submitSpanOpen(
       tracing::SpanId id, tracing::SpanId parent, kj::ConstString name, kj::Date time) override {
     if (name == "rejected") return false;
@@ -211,6 +227,7 @@ class FixtureSpanSubmitter final: public SpanSubmitter {
   static inline uint64_t globalCounter = 0;
   uint64_t nextSpanId = 0;
   kj::Maybe<uint64_t&> sharedCounter;
+  kj::Maybe<Lifetime&> lifetime;
 };
 
 KJ_TEST("native children preserve explicit 03 in JS and actual tail-stream span events") {
@@ -313,6 +330,8 @@ class RootEntropy final: public kj::EntropySource {
 
 KJ_TEST("sampled and unsampled root loops use constant identity memory and retain live roots") {
   for (int flags: {-1, 0, 2, 3}) {
+    FixtureSpanSubmitter::Lifetime lifetime;
+    uint64_t spanCounter = 0;
     capnp::MallocMessageBuilder message;
     auto features = message.initRoot<CompatibilityFlags>();
     features.setOpentelemetryApi(true);
@@ -328,7 +347,8 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
     tracer->markUnused();
     tracer->setMakeUserSpanParentFunc([&](tracing::SpanContext identity, DetachedRoot) {
       return SpanParent(kj::rc<UserSpanObserver>(
-          kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity)),
+          kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity),
+              FixtureSpanSubmitter::Registration::ENABLED, spanCounter, lifetime),
           tracing::SpanContext::clone(identity)));
     });
     auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.clone());
@@ -374,6 +394,28 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
         KJ_EXPECT(context->getInvocationSpanContext().getTraceFlags() == nativeFlags);
         return jsg::JsRef(js, js.undefined());
       }));
+    });
+    // Release V8 wrappers, then re-enter to drain IoOwn's native deletion queue. Count real
+    // carriers on the adapter -> createSpan path, independently of glibc or allocator hooks.
+    fixture.enterContext(*request,
+        [&](const TestFixture::Environment& env) { env.js.v8Isolate->LowMemoryNotification(); });
+    fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+      bool recording = flags < 0 || (flags & 1);
+      KJ_EXPECT(lifetime.created == (recording ? 4099 : 0));
+      // Only the invocation, retained live root and at most one cached/rewrapped carrier may
+      // remain. In particular, none of the 4096 ended loop-root carriers may accumulate.
+      KJ_EXPECT(lifetime.live <= (recording ? 3 : 0));
+      if (recording) KJ_EXPECT(lifetime.created - lifetime.live >= 4096);
+    });
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto script = jsg::check(v8::Script::Compile(
+          env.js.v8Context(), env.js.str("live.end(); globalThis.live = null;"_kj)));
+      jsg::check(script->Run(env.js.v8Context()));
+    });
+    fixture.enterContext(*request,
+        [&](const TestFixture::Environment& env) { env.js.v8Isolate->LowMemoryNotification(); });
+    fixture.enterContext(*request, [&](const TestFixture::Environment&) {
+      KJ_EXPECT(lifetime.live <= (flags < 0 || (flags & 1) ? 2 : 0));
     });
     fixture.drainAndDestroy(kj::mv(request));
   }

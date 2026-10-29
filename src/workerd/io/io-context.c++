@@ -1730,9 +1730,17 @@ kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationIdent
 
 kj::Maybe<tracing::SpanContext> IoContext::getUserTraceWebSocketContext() {
   // Detached traces belong to one recording session, not the socket's later invocations.
-  KJ_IF_SOME(active, getCurrentUserTraceSpan().toSpanContext()) {
-    bool detached = getWorkerTracer()
-                        .map([&](auto& tracer) {
+  auto parent = getCurrentUserTraceSpan();
+  KJ_IF_SOME(active, parent.toSpanContext()) {
+    bool detached =
+        parent.getObserver().map([](auto& observer) {
+      return observer.isDetachedTrace();
+    }).orDefault(false);
+    // Only rewrapped identities need membership under this request's key. A retained native
+    // observer carries its original provenance even after its creator's tracer has expired.
+    detached = detached ||
+        getWorkerTracer()
+            .map([&](auto& tracer) {
       return tracer.isDetachedTraceId(active.getTraceId());
     }).orDefault(false);
     KJ_IF_SOME(id, active.getSpanId()) {

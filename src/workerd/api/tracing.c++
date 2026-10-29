@@ -1037,7 +1037,7 @@ CreatedSpan createSpan(jsg::Lock& js,
       KJ_IF_SOME(observer, parent.getObserver()) {
         // newChildFromUserCode (vs newChild) signals user-origin to the submitter so it can
         // skip the operation-name allowlist that gates runtime spans.
-        auto childObserver = observer.newChildFromUserCode();
+        auto childObserver = observer.inheritTraceProvenance(observer.newChildFromUserCode());
         bool adapterCreated = metadata != kj::none;
         KJ_IF_SOME(value, metadata) {
           childObserver->setOpenMetadata(kj::mv(value));

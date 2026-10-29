@@ -1488,6 +1488,17 @@ class SpanBuilder {
 // ends, and update methods are called when mutable properties change between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
+  // Native provenance survives closure and reuse in another request, unlike a serialized ID.
+  bool isDetachedTrace() const {
+    return detachedTrace;
+  }
+  void markDetachedTrace() {
+    detachedTrace = true;
+  }
+  kj::Rc<SpanObserver> inheritTraceProvenance(kj::Rc<SpanObserver> child) const {
+    if (child != nullptr && detachedTrace) child->markDetachedTrace();
+    return child;
+  }
   // Propagation-only sampled-out observers retain identity across children without submitting
   // spans. This is distinct from a missing observer or an ended recording span.
   virtual bool isSampledOut() const {
@@ -1567,6 +1578,9 @@ class SpanObserver: public kj::Refcounted {
   virtual tracing::SpanId getSpanId() {
     return tracing::SpanId::nullId;
   }
+
+ private:
+  bool detachedTrace = false;
 };
 
 // A propagation-only identity retained through descendants without submitting spans. Used for
@@ -1639,19 +1653,22 @@ inline SpanParent SpanParent::addRef() {
 inline SpanBuilder SpanParent::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   if (observer == nullptr) return nullptr;
-  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
+  return SpanBuilder(
+      observer->inheritTraceProvenance(observer->newChild()), kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanParent::newOptionalChild(kj::ConstString operationName) {
   if (observer == nullptr) return nullptr;
-  auto childObserver = observer->newOptionalChild(operationName.clone());
+  auto childObserver =
+      observer->inheritTraceProvenance(observer->newOptionalChild(operationName.clone()));
   return SpanBuilder(kj::mv(childObserver), kj::mv(operationName));
 }
 
 inline SpanBuilder SpanBuilder::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   if (observer == nullptr) return nullptr;
-  return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
+  return SpanBuilder(
+      observer->inheritTraceProvenance(observer->newChild()), kj::mv(operationName), startTime);
 }
 
 class TraceContext;

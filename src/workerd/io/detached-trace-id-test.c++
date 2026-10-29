@@ -4,9 +4,6 @@
 
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
-#include <workerd/util/thread-scopes.h>
-
-#include <openssl/siphash.h>
 
 #include <kj/test.h>
 
@@ -72,7 +69,10 @@ KJ_TEST("self-identifying trace IDs use SipHash-2-4 and reject foreign and modif
   KJ_EXPECT(tracer->isDetachedTraceId(first));
 }
 
-KJ_TEST("minting many trace IDs retains constant native memory and always returns W3C IDs") {
+// mallinfo counts actual live native bytes only with the un-interposed glibc allocator. It is
+// not an allocation assertion under ASan/tcmalloc, or on platforms without glibc. The adapter
+// path separately checks native carrier lifetimes without depending on the allocator.
+KJ_TEST("minting many trace IDs retains constant glibc memory and always returns W3C IDs") {
   Entropy entropy;
   auto tracer = makeTracer();
   auto first = tracer->makeDetachedTraceId(entropy);  // Warm up the key and crypto library.
@@ -98,23 +98,6 @@ KJ_TEST("minting many trace IDs retains constant native memory and always return
   KJ_EXPECT(id != nullptr);
   KJ_EXPECT(id.toW3C().size() == 32);
   KJ_EXPECT(zeroTracer->isDetachedTraceId(id));
-}
-
-KJ_TEST(
-    "predictable roots have a fixed key and deterministic process-wide nonces without entropy") {
-  setPredictableModeForTest();
-  Entropy entropy;
-  const uint64_t key[] = {0x0706050403020100, 0x0f0e0d0c0b0a0908};
-  for (uint n = 0; n < 2; ++n) {
-    auto tracer = makeTracer();
-    auto id = tracer->makeDetachedTraceId(entropy);
-    auto nonce = tracing::staticSpanId ^ n;
-    uint8_t bytes[8];
-    for (uint i = 0; i < sizeof(bytes); ++i) bytes[i] = nonce >> (8 * (7 - i));
-    KJ_EXPECT(id == tracing::TraceId(SIPHASH_24(key, bytes, sizeof(bytes)), nonce));
-    KJ_EXPECT(tracer->isDetachedTraceId(id));
-  }
-  KJ_EXPECT(entropy.calls == 0);
 }
 
 }  // namespace

@@ -755,6 +755,11 @@ kj_test(
 )
 
 kj_test(
+    src = "predictable-detached-trace-id-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
     src = "io-own-test.c++",
     deps = [
         ":io",
