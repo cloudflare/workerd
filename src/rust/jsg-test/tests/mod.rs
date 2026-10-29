@@ -26,6 +26,7 @@ mod jsg_struct;
 mod local_cast;
 mod local_handle;
 mod local_value;
+mod lock_errors;
 mod name;
 mod nested_type;
 mod non_coercible;

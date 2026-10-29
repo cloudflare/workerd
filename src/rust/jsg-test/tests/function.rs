@@ -81,8 +81,8 @@ fn call_zero_args() {
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(() => 42)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
-        let result = func.call::<u32>(lock, None::<v8::Local<v8::Value>>, &[])?;
-        assert_eq!(result, 42);
+        let result = func.call(lock, None, &[])?;
+        assert_eq!(u32::from_js(lock, result)?, 42);
         Ok(())
     });
 }
@@ -97,8 +97,8 @@ fn call_with_args() {
 
         let a = 10_i32.to_js(lock)?;
         let b = 32_i32.to_js(lock)?;
-        let result = func.call::<i32>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
-        assert_eq!(result, -22);
+        let result = func.call(lock, None, &[a, b])?;
+        assert_eq!(i32::from_js(lock, result)?, -22);
         Ok(())
     });
 }
@@ -112,7 +112,8 @@ fn call_returns_string() {
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
         let arg = String::from("hello").to_js(lock)?;
-        let result = func.call::<String>(lock, None::<v8::Local<v8::Value>>, &[arg])?;
+        let result = func.call(lock, None, &[arg])?;
+        let result = String::from_js(lock, result)?;
         assert_eq!(result, "HELLO");
         Ok(())
     });
@@ -130,8 +131,8 @@ fn call_with_receiver() {
             .unwrap();
         let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
 
-        let result = func.call::<u32>(lock, Some(obj), &[])?;
-        assert_eq!(result, 100);
+        let result = func.call(lock, Some(obj), &[])?;
+        assert_eq!(u32::from_js(lock, result)?, 100);
         Ok(())
     });
 }
@@ -150,7 +151,8 @@ fn call_with_object_receiver_via_into() {
         let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
 
         // Pass Local<Object> as receiver — the Into<Local<Value>> bound handles conversion.
-        let result = func.call::<String>(lock, Some(obj.into()), &[])?;
+        let result = func.call(lock, Some(obj.into()), &[])?;
+        let result = String::from_js(lock, result)?;
         assert_eq!(result, "hello world");
         Ok(())
     });
@@ -168,9 +170,7 @@ fn call_leaves_thrown_exception_pending() {
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
         let caught = lock.try_catch(|lock| {
-            let err = func
-                .call::<v8::Local<v8::Value>>(lock, None, &[])
-                .unwrap_err();
+            let err = func.call(lock, None, &[]).unwrap_err();
             assert!(err.is_pending());
             Err::<(), _>(err)
         })?;
@@ -187,7 +187,10 @@ fn try_catch_catches_thrown_non_error() {
         let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
-        let caught = lock.try_catch(|lock| func.call::<u32>(lock, None, &[]))?;
+        let caught = lock.try_catch(|lock| {
+            let result = func.call(lock, None, &[])?;
+            u32::from_js(lock, result)
+        })?;
         let thrown = u32::from_js(lock, caught.unwrap_err())?;
         assert_eq!(thrown, 42);
         Ok(())
@@ -214,8 +217,7 @@ fn try_catch_does_not_run_thrown_value_accessors() {
             let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
             let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
-            let caught =
-                lock.try_catch(|lock| func.call::<v8::Local<v8::Value>>(lock, None, &[]))?;
+            let caught = lock.try_catch(|lock| func.call(lock, None, &[]))?;
             assert_eq!(caught.unwrap_err(), thrown);
             let reads = ctx.eval::<u32>(lock, "reads").unwrap();
             assert_eq!(reads, 0, "{thrown:?} ran {reads} accessors");
@@ -232,7 +234,10 @@ fn try_catch_returns_result_on_success() {
         let func = ctx.eval_raw(lock, "(() => 7)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
-        let result = lock.try_catch(|lock| func.call::<u32>(lock, None, &[]))?;
+        let result = lock.try_catch(|lock| {
+            let result = func.call(lock, None, &[])?;
+            u32::from_js(lock, result)
+        })?;
         assert_eq!(result.unwrap(), 7);
         Ok(())
     });

@@ -60,33 +60,32 @@ namespace workerd::rust::jsg {
 // BackingStore — the size_t handle is the address of a heap-allocated
 // std::shared_ptr<v8::BackingStore> allocated with `new`.
 
-// Creates a V8 string from UTF-8. NewFromUtf8 fails only when the string is longer than
-// v8::String::kMaxLength, and then leaves no JavaScript exception pending, so an overlong string
-// throws a KJ exception instead. The length is checked before the call, which keeps a length
-// above INT_MAX from reaching NewFromUtf8's int parameter, where a negative value means
-// "NUL-terminated". kMaxLength counts UTF-16 code units and the check counts UTF-8 bytes, of
-// which there are never fewer, so it may reject a long multi-byte string that V8 could hold, but
-// never lets through one that V8 would reject.
-static v8::Local<v8::String> newUtf8String(
+// The longest UTF-8 input that NewFromUtf8 accepts. kMaxLength counts UTF-16 code units, and a
+// string never has more of those than it has UTF-8 bytes, so a UTF-8 input of at most this many
+// bytes always fits.
+static constexpr size_t MAX_UTF8_STRING_SIZE = static_cast<size_t>(v8::String::kMaxLength);
+
+// Creates a V8 string from UTF-8. Returns an empty handle, with no JavaScript exception pending,
+// if the input is longer than MAX_UTF8_STRING_SIZE, as NewFromUtf8 itself does. The length is
+// checked here so that a length above INT_MAX never reaches NewFromUtf8's int parameter, where a
+// negative value means "NUL-terminated". Never throws, and never fails for a shorter input, so
+// each caller decides what an overlong string means.
+static v8::MaybeLocal<v8::String> newUtf8String(
     v8::Isolate* isolate, kj::ArrayPtr<const char> utf8, v8::NewStringType type) {
-  KJ_REQUIRE(utf8.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "string exceeds V8's string length limit", utf8.size());
-  v8::Local<v8::String> result;
-  if (!v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()))
-           .ToLocal(&result)) {
-    KJ_FAIL_REQUIRE("V8 failed to create a string", utf8.size());
-  }
-  return result;
+  if (utf8.size() > MAX_UTF8_STRING_SIZE) return {};
+  return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
-// overlong name is checked here too, so that the error names it.
+// overlong name throws. The property shims, which take a key from arbitrary Rust text, are
+// declared fallible in v8.rs for that reason. The names a resource template interns come from
+// Rust source and are far shorter.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
-  KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "Rust identifier name exceeds V8 string length limit", name);
+  KJ_REQUIRE(name.size() <= MAX_UTF8_STRING_SIZE, "name exceeds V8's string length limit", name);
   return newUtf8String(
-      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
+      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized)
+      .ToLocalChecked();
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
@@ -120,12 +119,6 @@ Global local_to_global(Isolate* isolate, Local value) {
 
 Local local_new_number(Isolate* isolate, double value) {
   v8::Local<v8::Number> val = v8::Number::New(isolate, value);
-  return to_ffi(kj::mv(val));
-}
-
-Local local_new_string(Isolate* isolate, ::rust::Str value) {
-  auto val =
-      newUtf8String(isolate, kj::arrayPtr(value.data(), value.size()), v8::NewStringType::kNormal);
   return to_ffi(kj::mv(val));
 }
 
@@ -1224,12 +1217,14 @@ TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local r
   return {};
 }
 
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message) {
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message) {
+  // `isolate_throw_exception` would throw nothing, so create nothing.
+  if (options->isolate->IsExecutionTerminating()) return;
   v8::HandleScope scope(options->isolate);
-  isolate_throw_exception(options->isolate,
-      exception_create_from_bytes(options->isolate, exceptionType,
-          reinterpret_cast<const uint8_t*>(message.data()), static_cast<int32_t>(message.size())));
+  isolate_throw_exception(
+      options->isolate, exception_create_from_bytes(options->isolate, exceptionType, message));
 }
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
@@ -1376,8 +1371,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   instance->SetInternalFieldCount(workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
+  // A resource's name comes from Rust source, so it is far shorter than V8's limit.
   auto classname = newUtf8String(isolate,
-      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal);
+      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
 
   if (workerd::jsg::getShouldSetToStringTag(isolate)) {
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
@@ -1641,16 +1638,22 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
 }  // namespace
 
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length) {
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
   // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
   // js.str() behavior.
-  auto message = newUtf8String(isolate,
-      kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
-      v8::NewStringType::kNormal);
-  return exceptionCreateFromMessage(exception_type, message);
+  //
+  // A message longer than V8's limit is cut to fit rather than refused, so that creating an
+  // error never fails. The Rust callers cut it at a character boundary first (see
+  // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
+  // after it NewFromUtf8 cannot refuse the string.
+  auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
+  auto v8Message = newUtf8String(
+      isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
+  return exceptionCreateFromMessage(exception_type, v8Message);
 }
 
 namespace {
@@ -1694,16 +1697,6 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
-}
-
-void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
-  // kNormal (not kInternalized): error messages are arbitrary caller-supplied
-  // strings and should not pollute the internalized string table (which is never
-  // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
-  if (isolate->IsExecutionTerminating()) return;
-  auto message = newUtf8String(
-      isolate, kj::arrayPtr(description.data(), description.size()), v8::NewStringType::kNormal);
-  isolate->ThrowError(message);
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {

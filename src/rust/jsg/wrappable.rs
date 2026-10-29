@@ -396,10 +396,12 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 ///
 /// # Errors
 ///
-/// The conversions in this crate fail only with an error for which [`Error::is_pending`] is
-/// true. Creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8
-/// throws or execution is terminating, and a container passes on the first error from converting
-/// an element. A conversion implemented elsewhere may return any `Error`.
+/// A `&str` or `String` longer than [`v8::String::MAX_LENGTH`] bytes fails with
+/// [`Error::invalid_string_length`], a `RangeError` that is not pending. Every other conversion
+/// of a single value in this crate fails only with an error for which [`Error::is_pending`] is
+/// true: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when
+/// V8 throws or execution is terminating. A container passes on the first error from converting
+/// an element, whichever kind it is. A conversion implemented elsewhere may return any `Error`.
 ///
 /// A `#[jsg_method]`, property getter or wildcard property throws an error from converting its
 /// return value with [`Lock::throw_exception`], as it throws an `Err` the method returns. The
@@ -549,11 +551,13 @@ impl<'s> ToJS<'s> for std::string::String {
 }
 
 impl<'s> ToJS<'s> for &str {
+    /// Fails with [`Error::invalid_string_length`] if the string is longer than
+    /// [`v8::String::MAX_LENGTH`] bytes.
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        Ok(unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) })
+        v8::String::new_from_str(lock, self)
+            .map(Into::into)
+            .ok_or_else(Error::invalid_string_length)
     }
 }
 

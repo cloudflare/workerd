@@ -343,7 +343,7 @@ fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
                         .try_into()
                         .unwrap();
                     assert_isolate_check_panics("calling B's function with A's object", || {
-                        let _ = func.call::<u32>(lock_b, None, &[object]);
+                        let _ = func.call(lock_b, None, &[object]);
                     });
                     Ok(())
                 });

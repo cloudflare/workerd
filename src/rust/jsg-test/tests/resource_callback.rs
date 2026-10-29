@@ -558,7 +558,7 @@ impl ReentrantResource {
         let callback: v8::Local<v8::Function> = callback
             .try_into()
             .map_err(|_| jsg::Error::new_type_error("not a function"))?;
-        callback.call::<v8::Local<v8::Value>>(lock, None, &[])?;
+        callback.call(lock, None, &[])?;
         self.depth.set(self.depth.get() - 1);
         Ok(())
     }
@@ -615,7 +615,7 @@ impl CallingResource {
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
         Self::function(callback)?
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .call(lock, None, &[])
             .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
         Ok(())
     }
@@ -628,8 +628,8 @@ impl CallingResource {
         first: v8::Local<'s, v8::Value>,
         second: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let first = Self::function(first)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
-        let second = Self::function(second)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let first = Self::function(first)?.call(lock, None, &[]);
+        let second = Self::function(second)?.call(lock, None, &[]);
         self.saw_pending
             .set(second.is_err_and(|err| err.is_pending()));
         first.map(|_| ())
@@ -644,7 +644,7 @@ impl CallingResource {
     ) -> Result<bool, jsg::Error> {
         let callback = Self::function(callback)?;
         let caught = lock
-            .try_catch(|lock| callback.call::<v8::Local<v8::Value>>(lock, None, &[]))
+            .try_catch(|lock| callback.call(lock, None, &[]))
             .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
         Ok(caught.is_err())
     }
@@ -656,7 +656,7 @@ impl CallingResource {
         lock: &mut jsg::Lock<'s>,
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let _ = Self::function(callback)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let _ = Self::function(callback)?.call(lock, None, &[]);
         Err(jsg::Error::new_type_error("replaced"))
     }
 
@@ -670,7 +670,7 @@ impl CallingResource {
     ) -> Result<(), jsg::Error> {
         let callback = Self::function(callback)?;
         let _ = lock.try_catch(|lock| {
-            let result = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+            let result = callback.call(lock, None, &[]);
             if let Err(err) = &result {
                 self.saved.set(Some(err.clone()));
             }
