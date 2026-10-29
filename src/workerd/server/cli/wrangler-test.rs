@@ -342,6 +342,70 @@ echo '{"inputs":{"index.ts":{},"lib.ts":{},"node_modules/x/index.js":{}}}' > "$m
     assert!(!dir.join(".wrangler/tmp").read_dir().unwrap().any(|_| true));
 }
 
+#[test]
+fn runnable_files_are_javascript_or_typescript() {
+    for file in ["app.js", "app.mjs", "src/app.ts", "APP.TSX"] {
+        assert!(is_runnable(file), "{file}");
+    }
+    for file in ["app.py", "wrangler.jsonc", "app", "README.md"] {
+        assert!(!is_runnable(file), "{file}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn run_serves_the_bundle_of_one_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _spawn = SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = project(&[("app.ts", "export default {}")]);
+    // Found as the project's own esbuild, as `npm i -D esbuild` installs it.
+    let esbuild = stub_esbuild(
+        &dir,
+        r#"echo 'export default {}' > "$out/index.js"
+echo '{"inputs":{"app.ts":{}}}' > "$meta""#,
+    );
+    let bin = dir.join("node_modules/.bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::rename(&esbuild, bin.join("esbuild")).unwrap();
+    fs::set_permissions(bin.join("esbuild"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let options = RunOptions {
+        port: 9000,
+        compatibility_date: "2026-01-01".to_owned(),
+        compatibility_flags: vec!["nodejs_compat".to_owned()],
+    };
+    let process = Process::new(None, None, Vec::new());
+    let message = read(load_file(dir.join("app.ts").to_str().unwrap(), options, &process).unwrap());
+
+    let config = message.get_root::<config::Reader>().unwrap();
+    let services = config.get_services().unwrap();
+    assert_eq!(services.len(), 1);
+    assert_eq!(services.get(0).get_name().unwrap(), "main");
+    let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
+        panic!("expected a worker service")
+    };
+    let worker = worker.unwrap();
+    assert_eq!(worker.get_compatibility_date().unwrap(), "2026-01-01");
+    let flags = worker.get_compatibility_flags().unwrap();
+    assert_eq!(flags.len(), 1);
+    assert_eq!(flags.get(0).unwrap(), "nodejs_compat");
+    let worker::Which::Modules(modules) = worker.which().unwrap() else {
+        panic!("expected a modules worker")
+    };
+    let modules = modules.unwrap();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules.get(0).get_name().unwrap(), "index.js");
+    assert_eq!(worker.get_bindings().unwrap().len(), 0);
+    let socket = config.get_sockets().unwrap().get(0);
+    assert_eq!(socket.get_address().unwrap(), "localhost:9000");
+    assert_eq!(socket.get_service().unwrap().get_name().unwrap(), "main");
+    let args = fs::read_to_string(dir.join("args.txt")).unwrap();
+    assert!(args.lines().any(|l| l == "app.ts"), "{args}");
+}
+
 #[cfg(unix)]
 #[test]
 fn failed_bundle_watches_sources_and_missing_main() {

@@ -77,6 +77,26 @@ pub enum Command {
         serve: ServeArgs,
     },
 
+    /// serve one JavaScript or TypeScript file as a Worker, with no config file
+    #[command(
+        long_about = "Serves one JavaScript or TypeScript file as a Worker, with no config file.",
+        after_long_help = RUN_HELP,
+    )]
+    Run {
+        /// The Worker's entry module.
+        #[arg(value_name = "file")]
+        file: String,
+
+        #[command(flatten)]
+        run: RunArgs,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        serve: ServeArgs,
+    },
+
     /// create a self-contained binary
     #[command(
         long_about = "Builds a self-contained binary from a config.",
@@ -156,6 +176,23 @@ pub enum Command {
     },
 }
 
+const RUN_HELP: &str = "\
+Serves <file> on http://localhost:8787 (see --port) as a Worker that has no bindings and the \
+newest compatibility date this build supports (see --compat-date). Example:
+    export default {
+      async fetch(request, env, ctx) {
+        return new Response('Hello World');
+      }
+    }
+<file> is bundled with esbuild, as `wrangler` bundles a Worker's `main`: from WORKERD_ESBUILD, \
+else the nearest node_modules/.bin/esbuild, else `esbuild` on PATH. So TypeScript, and the npm \
+packages <file> imports, work. With --watch, the server reloads when any file in the bundle \
+changes.
+
+For bindings, Durable Objects and other configuration, serve a wrangler.jsonc or a Cap'n Proto \
+config with `serve` instead.
+";
+
 const TEST_HELP: &str = "\
 Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
 tests to run. It has one of the following formats:
@@ -226,6 +263,21 @@ pub struct ConfigFileArgs {
     /// bundled with esbuild as `wrangler` does.
     #[arg(value_name = "config-file")]
     pub config_file: String,
+}
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    /// Listen on localhost:<port>.
+    #[arg(long, value_name = "port", default_value_t = crate::wrangler::DEFAULT_PORT)]
+    pub port: u16,
+
+    /// The Worker's compatibility date. The default is the newest this build supports.
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    /// A compatibility flag for the Worker. May be repeated.
+    #[arg(long = "compat-flag", value_name = "flag")]
+    pub compat_flags: Vec<String>,
 }
 
 #[derive(Args, Debug)]

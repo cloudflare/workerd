@@ -15,6 +15,10 @@
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
 //! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//!
+//! `workerd run <file>` ([`load_file`]) is served as a wrangler config with `<file>` as its
+//! `main` and nothing else: bundled with esbuild, its bundle in `.wrangler/tmp` next to it while
+//! it is read.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,7 +33,8 @@ use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
-const DEFAULT_ADDRESS: &str = "localhost:8787";
+/// The port the server listens on unless told otherwise, as `wrangler dev` does.
+pub const DEFAULT_PORT: u16 = 8787;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,26 +115,81 @@ pub fn is_wrangler_config(path: &str) -> bool {
     ext.eq_ignore_ascii_case("json") || ext.eq_ignore_ascii_case("jsonc")
 }
 
+/// The `Config` of the wrangler config at `path`, registering every file it depends on with
+/// `process`'s watcher.
 pub fn load(path: &str, process: &Process) -> Result<Config, String> {
-    let watch = |p: &Path| {
-        process
-            .watch_file(p.as_os_str().as_encoded_bytes())
-            .map_err(|e| e.description().to_owned())
-    };
+    let watch = watcher(process);
     let file = fs::canonicalize(path).map_err(|e| e.to_string())?;
     watch(&file)?;
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     let root = file.parent().unwrap_or(&file);
+    build(
+        &wrangler,
+        root,
+        &format!("localhost:{DEFAULT_PORT}"),
+        &watch,
+    )
+}
 
+/// What `workerd run` takes besides the file: the command line's choices.
+pub struct RunOptions {
+    pub port: u16,
+    pub compatibility_date: String,
+    pub compatibility_flags: Vec<String>,
+}
+
+/// The extensions of the entry modules `workerd run` accepts: the JavaScript and TypeScript
+/// files esbuild bundles.
+pub const RUN_EXTENSIONS: &[&str] = &["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"];
+
+/// Whether `workerd run` accepts `path` as an entry module, by its extension.
+pub fn is_runnable(path: &str) -> bool {
+    let ext = Path::new(path).extension().unwrap_or_default();
+    RUN_EXTENSIONS.iter().any(|e| ext.eq_ignore_ascii_case(e))
+}
+
+/// The `Config` of `workerd run <file>`: a wrangler config with `file` as its `main` and nothing
+/// else, so `file` is bundled with esbuild, and listening on `localhost:<port>`.
+pub fn load_file(file: &str, options: RunOptions, process: &Process) -> Result<Config, String> {
+    let path = fs::canonicalize(file).map_err(|e| e.to_string())?;
+    let (Some(root), Some(main)) = (path.parent(), path.file_name()) else {
+        return Err("not a file.".to_owned());
+    };
+    let wrangler = Wrangler {
+        _schema: None,
+        name: None,
+        main: main.to_string_lossy().into_owned(),
+        compatibility_date: options.compatibility_date,
+        compatibility_flags: options.compatibility_flags,
+        vars: BTreeMap::new(),
+        durable_objects: None,
+        migrations: Vec::new(),
+        no_bundle: false,
+    };
+    let address = format!("localhost:{}", options.port);
+    build(&wrangler, root, &address, &watcher(process))
+}
+
+/// Registers a file with `process`'s watcher, if it has one.
+fn watcher(process: &Process) -> impl Fn(&Path) -> Result<(), String> {
+    |p: &Path| {
+        process
+            .watch_file(p.as_os_str().as_encoded_bytes())
+            .map_err(|e| e.description().to_owned())
+    }
+}
+
+/// The `Config` of `wrangler`, whose paths are relative to `root`, serving on `address`.
+fn build(wrangler: &Wrangler, root: &Path, address: &str, watch: Watch) -> Result<Config, String> {
     let sources = if wrangler.no_bundle {
-        unbundled(root, &wrangler.main, &watch)?
+        unbundled(root, &wrangler.main, watch)?
     } else {
-        bundle(&esbuild(root), root, &wrangler.main, &watch)?
+        bundle(&esbuild(root), root, &wrangler.main, watch)?
     };
 
-    let classes = do_classes(&wrangler)?;
+    let classes = do_classes(wrangler)?;
     let name = wrangler.name.clone().unwrap_or_else(|| "main".to_owned());
     let storage = root.join(".wrangler/state/workerd");
     if !classes.is_empty() {
@@ -210,7 +270,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
 
     let mut socket = conf.init_sockets(1).get(0);
     socket.set_name("http");
-    socket.set_address(DEFAULT_ADDRESS);
+    socket.set_address(address);
     socket.reborrow().init_http();
     socket.init_service().set_name(&name);
 
@@ -341,8 +401,9 @@ fn run_esbuild(
         .output()
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => format!(
-                "esbuild not found ({}). wrangler configs are bundled with esbuild: install it \
-                 (`npm i -D esbuild`), set WORKERD_ESBUILD to its path, or set \"no_bundle\": true.",
+                "esbuild not found ({}). Workers are bundled with esbuild: install it \
+                 (`npm i -D esbuild`) or set WORKERD_ESBUILD to its path. A wrangler config can \
+                 set \"no_bundle\": true instead.",
                 esbuild.display()
             ),
             _ => format!("{}: {e}", esbuild.display()),

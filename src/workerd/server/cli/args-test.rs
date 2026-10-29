@@ -43,6 +43,42 @@ fn wd_test_invocation() {
 }
 
 #[test]
+fn run_invocation() {
+    let Command::Run {
+        file,
+        run,
+        serve_or_test,
+        serve,
+    } = parse(&[
+        "run",
+        "app.ts",
+        "--port=9000",
+        "--compat-date=2026-01-01",
+        "--compat-flag=nodejs_compat",
+        "--compat-flag=experimental",
+        "--watch",
+        "--socket-addr=http=*:0",
+    ])
+    .command
+    else {
+        panic!("expected run")
+    };
+    assert_eq!(file, "app.ts");
+    assert_eq!(run.port, 9000);
+    assert_eq!(run.compat_date.as_deref(), Some("2026-01-01"));
+    assert_eq!(run.compat_flags, ["nodejs_compat", "experimental"]);
+    assert!(serve_or_test.watch);
+    assert_eq!(serve.socket_addr_overrides.len(), 1);
+
+    let Command::Run { run, .. } = parse(&["run", "app.js"]).command else {
+        panic!("expected run")
+    };
+    assert_eq!(run.port, 8787);
+    assert_eq!(run.compat_date, None);
+    assert!(run.compat_flags.is_empty());
+}
+
+#[test]
 fn serve_options() {
     let Command::Serve {
         config,

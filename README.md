@@ -114,6 +114,11 @@ are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
 `durable_objects`, `migrations`, `no_bundle` and `$schema`; any other field
 is an error.
 
+A Worker that needs no configuration at all can be served from its file:
+`workerd run worker.ts` bundles it with esbuild and serves it on
+`localhost:8787` with the newest compatibility date the build supports. See
+`workerd run --help` for its options.
+
 A simple "Hello World!" config file might look like:
 
 ```capnp

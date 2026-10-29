@@ -129,6 +129,12 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 watching(process),
             )
         }
+        args::Command::Run {
+            file,
+            run,
+            serve_or_test,
+            serve,
+        } => run_file(verbose, &file, run, &serve_or_test, serve, executable),
         args::Command::Compile {
             config,
             const_name,
@@ -375,6 +381,59 @@ fn load_config<T: CommandFactory>(
     }
 
     config_errors(&compiled.errors, process)
+}
+
+/// `workerd run <file>`: serves one file as a Worker (`wrangler::load_file`).
+fn run_file(
+    verbose: bool,
+    file: &str,
+    run: args::RunArgs,
+    serve_or_test: &args::ServeOrTestArgs,
+    serve: args::ServeArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    check_serve_or_test::<T>(serve_or_test);
+    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
+    let (options, inherited_sockets) = serve_options::<T>(serve, serve_or_test);
+    let process = Process::new(executable, watcher, inherited_sockets);
+    let config = load_file::<T>(file, run, &process)?;
+    entry::serve(
+        verbose,
+        config.into_words(),
+        serve_or_test.into(),
+        options,
+        watching(process),
+    )
+}
+
+/// The config of `workerd run <file>`. A file that does not exist or is not JavaScript or
+/// TypeScript is a usage error; a failed bundle is a config error, which `--watch` waits out.
+fn load_file<T: CommandFactory>(
+    file: &str,
+    run: args::RunArgs,
+    process: &Process,
+) -> workerd_server::Result<Config> {
+    if !wrangler::is_runnable(file) {
+        usage_error::<T>(format!(
+            "{file}: Expected a JavaScript or TypeScript file (.{}).",
+            wrangler::RUN_EXTENSIONS.join(", .")
+        ));
+    }
+    if !std::path::Path::new(file).is_file() {
+        usage_error::<T>(format!("{file}: No such file."));
+    }
+    let options = wrangler::RunOptions {
+        port: run.port,
+        compatibility_date: match run.compat_date {
+            Some(date) => date,
+            None => server::newest_compat_date()?,
+        },
+        compatibility_flags: run.compat_flags,
+    };
+    Ok(wrangler::load_file(file, options, process)
+        .unwrap_or_else(|error| config_errors(&[format!("{file}: {error}")], process)))
 }
 
 /// Prints errors in the config. Without `--watch` they end the process; with it the process waits
