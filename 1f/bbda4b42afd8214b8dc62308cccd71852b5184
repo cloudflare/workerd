@@ -1,0 +1,24 @@
+src/workerd/jsg/wrappable.h
+  s_c855efb1c295a0::t_21b2cd7b222a35 482-495
+src/workerd/jsg/wrappable.c++
+  s_c855efb1c295a0::t_76a4b384a2311c 15,20,134-138,296-298,302-432
+  s_c855efb1c295a0::t_9a65a1db80cd0e 433
+src/workerd/jsg/setup.c++
+  s_c855efb1c295a0::t_b10abeedd4a38a 367-377,382-384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1fbbda4b42afd8214b8dc62308cccd71852b5184",
+  "prompts": {},
+  "sessions": {
+    "s_c855efb1c295a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad125e721c08aa65a",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
