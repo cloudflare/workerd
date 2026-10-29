@@ -293,3 +293,11 @@ wpt_test(
     config = "mimesniff/mime-types-test.ts",
     wpt_directory = "@wpt//:mimesniff/mime-types@module",
 )
+
+wpt_test(
+    name = "html/webappapis/atob",
+    config = "html/webappapis/atob-test.ts",
+    # base64.any.js fetches ../../../fetch/data-urls/resources/base64.json
+    extra_wpt_directories = ["@wpt//:fetch/data-urls@module"],
+    wpt_directory = "@wpt//:html/webappapis/atob@module",
+)
