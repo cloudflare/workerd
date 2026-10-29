@@ -256,7 +256,8 @@ impl VariantContext {
     ) -> Result<String, jsg::Error> {
         Ok(match value {
             FunctionOrNumber::Function(f) => {
-                let result = f.call::<String>(lock, None, &[])?;
+                let result = f.call(lock, None, &[])?;
+                let result = String::from_js(lock, result)?;
                 format!("function:{result}")
             }
             FunctionOrNumber::Number(n) => format!("number:{n}"),
