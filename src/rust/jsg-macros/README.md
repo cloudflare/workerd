@@ -138,7 +138,7 @@ impl DnsUtil {
 
     // Static — DnsUtil.create(…)
     #[jsg_method]
-    pub fn create(name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
+    pub fn create(lock: &mut Lock, name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
 }
 ```
 

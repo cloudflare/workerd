@@ -44,16 +44,20 @@ impl Handle {
     }
 }
 
-fn new_handle() -> jsg::Rc<Handle> {
-    jsg::Rc::new(Handle {
-        disposals: Cell::new(0),
-    })
+fn new_handle(lock: &mut jsg::Lock) -> jsg::Rc<Handle> {
+    jsg::Rc::new(
+        lock,
+        Handle {
+            disposals: Cell::new(0),
+        },
+    )
 }
 
 #[test]
 fn using_disposes_at_scope_exit() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "handle", new_handle());
+        let handle = new_handle(lock);
+        ctx.set_global(lock, "handle", handle);
         let result: String = ctx
             .eval(
                 lock,
@@ -80,7 +84,8 @@ fn using_disposes_at_scope_exit() {
 #[test]
 fn disposer_is_a_hidden_prototype_method() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "handle", new_handle());
+        let handle = new_handle(lock);
+        ctx.set_global(lock, "handle", handle);
         let result: String = ctx
             .eval(
                 lock,
@@ -102,8 +107,10 @@ fn disposer_is_a_hidden_prototype_method() {
 #[test]
 fn disposer_checks_its_receiver_and_is_not_a_constructor() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "handle", new_handle());
-        ctx.set_global(lock, "failing", jsg::Rc::new(Failing));
+        let handle = new_handle(lock);
+        ctx.set_global(lock, "handle", handle);
+        let failing = jsg::Rc::new(lock, Failing);
+        ctx.set_global(lock, "failing", failing);
         let result: String = ctx
             .eval(
                 lock,
@@ -164,20 +171,20 @@ impl DisposeFirst {
 #[test]
 fn disposer_can_also_be_a_named_method() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(
+        let close_first = jsg::Rc::new(
             lock,
-            "closeFirst",
-            jsg::Rc::new(CloseFirst {
+            CloseFirst {
                 closes: Cell::new(0),
-            }),
+            },
         );
-        ctx.set_global(
+        ctx.set_global(lock, "closeFirst", close_first);
+        let dispose_first = jsg::Rc::new(
             lock,
-            "disposeFirst",
-            jsg::Rc::new(DisposeFirst {
+            DisposeFirst {
                 closes: Cell::new(0),
-            }),
+            },
         );
+        ctx.set_global(lock, "disposeFirst", dispose_first);
         let result: String = ctx
             .eval(
                 lock,
@@ -215,7 +222,8 @@ impl Failing {
 #[test]
 fn disposer_error_propagates_and_suppresses_the_scope_error() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "failing", jsg::Rc::new(Failing));
+        let failing = jsg::Rc::new(lock, Failing);
+        ctx.set_global(lock, "failing", failing);
         let result: String = ctx
             .eval(
                 lock,
@@ -290,13 +298,13 @@ const AWAIT_USING: &str = "globalThis.log = [];
 #[test]
 fn await_using_awaits_the_disposer_promise() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(
+        let closer = jsg::Rc::new(
             lock,
-            "closer",
-            jsg::Rc::new(AsyncCloser {
+            AsyncCloser {
                 resolver: jsg::RefCell::new(None),
-            }),
+            },
         );
+        ctx.set_global(lock, "closer", closer);
         assert_eq!(log_after_microtasks(lock, ctx, AWAIT_USING), "body");
         assert_eq!(
             log_after_microtasks(lock, ctx, "closer.finish()"),
@@ -340,13 +348,13 @@ impl TypedAsyncCloser {
 #[test]
 fn async_disposer_can_return_a_typed_promise() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(
+        let closer = jsg::Rc::new(
             lock,
-            "closer",
-            jsg::Rc::new(TypedAsyncCloser {
+            TypedAsyncCloser {
                 disposals: Cell::new(0),
-            }),
+            },
         );
+        ctx.set_global(lock, "closer", closer);
         let code = "globalThis.log = [];
             (async () => {
               { await using c = closer; log.push('body'); }
@@ -387,7 +395,8 @@ impl Resource for Chooser {
 fn chosen_disposer(harness: &Harness) -> String {
     let mut result = String::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "chooser", jsg::Rc::new(Chooser));
+        let chooser = jsg::Rc::new(lock, Chooser);
+        ctx.set_global(lock, "chooser", chooser);
         let code = "globalThis.log = [];
             log.push(Symbol.dispose in chooser, Symbol.asyncDispose in chooser);
             (async () => {
@@ -440,14 +449,14 @@ impl Both {
 #[test]
 fn using_calls_the_sync_disposer_and_await_using_the_async_one() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(
+        let both = jsg::Rc::new(
             lock,
-            "both",
-            jsg::Rc::new(Both {
+            Both {
                 sync_disposals: Cell::new(0),
                 async_disposals: Cell::new(0),
-            }),
+            },
         );
+        ctx.set_global(lock, "both", both);
         let log = log_after_microtasks(
             lock,
             ctx,
@@ -488,7 +497,8 @@ impl Resource for BothCustom {
 #[test]
 fn custom_members_may_register_both_disposers() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "both", jsg::Rc::new(BothCustom));
+        let both = jsg::Rc::new(lock, BothCustom);
+        ctx.set_global(lock, "both", both);
         let kinds: String = ctx
             .eval(
                 lock,
@@ -515,7 +525,8 @@ impl FailingAsyncCloser {
 #[test]
 fn await_using_rejects_with_a_synchronous_async_disposer_error() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "closer", jsg::Rc::new(FailingAsyncCloser));
+        let closer = jsg::Rc::new(lock, FailingAsyncCloser);
+        ctx.set_global(lock, "closer", closer);
         assert_eq!(
             log_after_microtasks(lock, ctx, AWAIT_USING),
             "body|RangeError: cannot close"
