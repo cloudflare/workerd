@@ -64,8 +64,9 @@ export const realPackage = {
       );
     });
     for (const parent of [ROOT_CONTEXT, trace.deleteSpan(context.active())]) {
-      const span = tracer.startSpan('real-api-root-fallback', {}, parent);
-      assert.strictEqual(
+      const span = tracer.startSpan('real-api-root', {}, parent);
+      assert.strictEqual(span.isRecording(), true);
+      assert.notStrictEqual(
         span.spanContext().traceId,
         tracing.getActiveSpan().spanContext().traceId
       );

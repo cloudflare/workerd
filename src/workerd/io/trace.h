@@ -877,6 +877,7 @@ struct SpanOpenData {
   kj::ConstString operationName;
   kj::Date startTime;
   kj::Maybe<SpanMetadata> metadata;
+  kj::Maybe<SpanContext> trace;
 
   SpanOpenData(rpc::SpanOpenData::Reader reader);
   void copyTo(rpc::SpanOpenData::Builder builder) const;
@@ -950,6 +951,7 @@ struct SpanOpen final {
   SpanId spanId;
 
   kj::Maybe<SpanMetadata> metadata;
+  bool root = false;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -1103,6 +1105,12 @@ struct SpanLinks {
 // always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
 // SpanClose, and Mark events. Every SpanOpen *must* be associated with a
 // SpanClose unless the stream was abruptly terminated.
+// R1-R8: spanContext identifies this event's span trace, immutable for each span and equal
+// to an in-stream parent's trace. invocationId groups multiple traces in one sequence space;
+// span IDs are unique within it. Missing context span ID is allowed only for onset without
+// inherited context or a runtime-marked adapter root. Marked roots have no parent and a trace
+// different from onset, inherit onset flags verbatim, and require opentelemetry_api. Remote
+// parents may be outside the stream. At outcome consumers close all spans, across all traces.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,

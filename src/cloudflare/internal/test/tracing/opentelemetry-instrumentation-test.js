@@ -65,8 +65,16 @@ export const hierarchy = {
     ]) {
       const child = span(name);
       const onset = onsets.get(child.invocationId);
-      assert.strictEqual(child.parentSpanId, onset.event.spanId);
-      assert.strictEqual(traceIds.get(name), onset.spanContext.traceId);
+      assert.strictEqual(child.parentSpanId, undefined);
+      assert.notStrictEqual(traceIds.get(name), onset.spanContext.traceId);
+      const open = events.find(
+        (e) =>
+          e.invocationId === child.invocationId &&
+          e.event.type === 'spanOpen' &&
+          e.event.spanId === child.spanId
+      );
+      assert.strictEqual(open.event.root, true);
+      assert.strictEqual(open.spanContext.spanId, undefined);
     }
     assert.ok(!traceIds.has('otel-unsampled'));
     assert.ok(!traceIds.has('otel-unsampled-child'));
@@ -139,7 +147,9 @@ export const hierarchy = {
       if (traceId !== undefined)
         assert.strictEqual(event.spanContext.traceId, traceId);
       if (event.event.type === 'spanOpen') {
-        assert.ok(event.spanContext.spanId);
+        if (event.event.root === true)
+          assert.strictEqual(event.spanContext.spanId, undefined);
+        else assert.ok(event.spanContext.spanId);
       }
     }
     for (const name of ['a', 'b']) {

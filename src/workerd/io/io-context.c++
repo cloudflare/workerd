@@ -1537,12 +1537,14 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   bool otel = opentelemetryApiEnabled;
   bool inherited = false;
   bool localSampled = false;
+  bool rootObserved = false;
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
     if (otel) {
       inherited = hasCurrentUserTraceOwner();
       KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
         localSampled = owner.getLocalSampled();
+        rootObserved = owner.isRootObserved();
         invocationSpanContext =
             owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
         KJ_IF_SOME(value, owner.getTracer()) {
@@ -1564,6 +1566,7 @@ jsg::Value IoContext::makeUserTraceScopeValue(
       tracer = value.getWeakRef();
     }
     localSampled = getCurrentIncomingRequest().localSampled;
+    rootObserved = getCurrentIncomingRequest().getRootUserTraceSpan().isObserved();
     if (!otel) {
       auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
       auto id = userSpan.getSpanId();
@@ -1582,7 +1585,8 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   }
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(kj::mv(userSpan), kj::mv(tracer),
-      kj::mv(invocationSpanContext), tracing::TraceFlags(localSampled ? 1 : 0));
+      kj::mv(invocationSpanContext), tracing::TraceFlags(localSampled ? 1 : 0),
+      rootObserved ? RootUserSpanObserved::YES : RootUserSpanObserved::NO);
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle =
       jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
@@ -1651,6 +1655,12 @@ kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
     return getCurrentUserTracer();
   }
   return getCurrentIncomingRequest().getWorkerTracer();
+}
+
+bool IoContext::isRootUserTraceObserved() {
+  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) return owner.isRootObserved();
+  if (hasCurrentUserTraceOwner() || incomingRequests.empty()) return false;
+  return getRootUserTraceSpan().isObserved();
 }
 
 kj::Maybe<tracing::InvocationSpanContext> IoContext::getUserTraceInvocationContext() {

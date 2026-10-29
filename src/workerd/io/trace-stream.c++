@@ -512,6 +512,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
   // Export span ID as non-truncated hex value – in practice this will be a random span ID.
   obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
+  if (spanOpen.root) obj.set(js, "root", js.boolean(true));
 
   KJ_IF_SOME(metadata, spanOpen.metadata) {
     KJ_IF_SOME(time, metadata.startTime) {

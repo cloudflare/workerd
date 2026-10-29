@@ -110,9 +110,21 @@ struct SpanMetadata {
   startTime @2 :SpanTimestamp;
 }
 
+struct SpanTraceContext {
+  traceIdHigh @0 :UInt64;
+  traceIdLow @1 :UInt64;
+  traceFlags :union {
+    unset @2 :Void;
+    set @3 :UInt8;
+  }
+}
+
 struct SpanOpenData {
   # Representation of a SpanOpen event, created when a user span is opened.
   metadata @4 :SpanMetadata;
+  trace @5 :SpanTraceContext;
+  # Absent means invocation trace/flags. Forward a foreign or detached span's trace and
+  # register it before opening the span; the runtime derives the detached-root marker.
   operationName @0 :Text;
 
   startTimeNs @1 :Int64;

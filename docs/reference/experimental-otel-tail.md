@@ -1,5 +1,31 @@
 # Experimental OpenTelemetry tail metadata
 
+## Detached roots (multi-trace invocations)
+
+The adapter creates detached roots for `root: true` or a parent context without a span
+(`trace.deleteSpan`, `ROOT_CONTEXT`). A foreign remote parent without `root: true` remains an
+ordinary child; an invalid all-zero parent does not mint a trace. Native/public tracing APIs
+never detach on their own, including runtime spans under bare ROOT_CONTEXT. Native descendants
+of an active adapter root follow that root's trace, as do logs, marks, HTTP propagation and
+service-binding/RPC triggers. Invocation-scoped events retain onset identity.
+
+Roots inherit the owning invocation's native sampling and flags, not the active remote context's.
+Unsampled roots have fresh JS-only non-recording identities with flags 0 and emit no spans.
+Untraced roots remain INVALID. Recording roots generate native entropy once, with empty state
+and isRemote false. The runtime derives `spanOpen.root: true` only when a parentless open has a
+registered trace different from onset; missing registration safely falls back to attachment.
+All later events retain their span's trace. Group by invocationId across traces, not traceId.
+
+Production must deploy root-aware converters before producers and add a temporary autogate in
+addition to the experimental flag (the PoC intentionally has no autogate). Consumers must accept
+only marked parentless opens, audit R1–R8 in the schema/types, and close all spans at outcome.
+No embedder changes are included here. Embedders must adopt the detached-aware span factory,
+register every placeholder's trace/flags (including foreign-parent spans), forward metadata and
+`SpanOpenData.trace @5` through every process transport, and register it before opening the span.
+Keep shared predictable counters and forward metadata-aware opens. Consumers must also use the
+triggering event's trace for issue attribution. Invocation navigation, billing, root quotas,
+platform links and parentless RPC method enrichment remain product decisions.
+
 The `opentelemetry_api` adapter emits optional kind, instrumentation scope and start time on
 `spanOpen`, separate `spanEvent` and `spanLinks` marks, optional exception time, and optional end
 time on `spanClose`. Native spans and flag-off output keep their existing schema. Runtime

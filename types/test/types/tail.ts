@@ -4,6 +4,13 @@
 
 import { expectTypeOf } from 'expect-type';
 
+expectTypeOf<TailStream.SpanOpen['root']>().toEqualTypeOf<true | undefined>();
+const detachedOpen: TailStream.SpanOpen = { type: 'spanOpen', name: 'root', spanId: '1', root: true };
+void detachedOpen;
+// @ts-expect-error marker is omitted, never false
+const notDetached: TailStream.SpanOpen = { type: 'spanOpen', name: 'child', spanId: '2', root: false };
+void notDetached;
+
 // The runtime only sets `attributes` on an Onset event when there is at least one attribute.
 expectTypeOf<TailStream.Onset['attributes']>().toEqualTypeOf<
   TailStream.Attribute[] | undefined

@@ -380,7 +380,8 @@ class TracingContext: public jsg::Object {
     uint16_t kind;
     Scope scope;
     jsg::Optional<Timestamp> startTime;
-    JSG_STRUCT(kind, scope, startTime);
+    jsg::Optional<bool> root;
+    JSG_STRUCT(kind, scope, startTime, root);
   };
   struct Link {
     user_tracing::TracingSpanContext context;
@@ -415,6 +416,7 @@ class TracingContext: public jsg::Object {
       jsg::Optional<bool> suppress = kj::none);
   jsg::Ref<TracingContextVariable> createAsyncContextVariable(jsg::Lock& js);
   kj::StringPtr getSpanCreationMode(jsg::Lock& js);
+  kj::StringPtr getRootCreationMode(jsg::Lock& js);
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
     JSG_METHOD(startSpan);
@@ -425,6 +427,7 @@ class TracingContext: public jsg::Object {
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
+    JSG_METHOD(getRootCreationMode);
     JSG_METHOD(getInvocationSpanContext);
   }
 };

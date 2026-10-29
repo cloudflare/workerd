@@ -214,7 +214,7 @@ export const externalParentsAndRoots = {
       span.spanContext().traceId,
       '11111111111111111111111111111111'
     );
-    assert.strictEqual(
+    assert.notStrictEqual(
       span.spanContext().traceId,
       tracing.getActiveSpan().spanContext().traceId
     );

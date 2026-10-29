@@ -50,15 +50,14 @@ struct InvocationSpanContext {
 
 # Span context for a tail event – this is provided for each tail event.
 struct SpanContext {
-  # The 128-bit ID uniquely identifying a trace.
+  # R1: the trace of this event's span, not necessarily onset's trace. Immutable per span;
+  # an open with an in-stream parent carries the parent's trace. Group by invocationId.
   traceId @0 :TraceId;
   # spanId in which this event is handled
   # for Onset and SpanOpen events this would be the parent span id
   # for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
   # For Hibernate and Mark this would be the span under which they were emitted.
-  # This is only empty if:
-  #  1. This is an Onset event
-  #  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  # R3: empty only for onset without inherited context, or spanOpen with root = true.
   info :union {
     empty @1 :Void;
     spanId @2 :UInt64;
@@ -306,6 +305,10 @@ struct Trace @0x8e8d911203762d34 {
       jsRpc @5 :JsRpcEventInfo;
     }
     metadata @6 :import "trace.capnp".SpanMetadata;
+    root @7 :Bool;
+    # R3/R4: a detached new-trace root has no spanContext.spanId and a trace different from
+    # onset. Unmarked parentless opens are malformed. R8: set only by the runtime for spans
+    # created through the experimental OpenTelemetry adapter, behind opentelemetry_api.
   }
 
   struct SpanClose {
@@ -387,7 +390,12 @@ struct Trace @0x8e8d911203762d34 {
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
     # SpanOpen, SpanUpdate, SpanClose, and Mark events. Every SpanOpen *must* be associated with a
     # SpanClose unless the stream was abruptly terminated.
-    # Inherited spanContext for this event.
+    # R1/R2: context belongs to the event's span. Group by invocationId, not traceId: an
+    # invocation can contain its own, foreign and detached traces, sharing one sequence space.
+    # Span IDs are unique within the invocation; key spans by ID within the invocation.
+    # R5: an open's parent can be outside the stream (remote or onset trigger).
+    # R6: detached subtrees copy onset traceFlags verbatim, including absence.
+    # R7: force-close all remaining spans at outcome, regardless of trace.
     spanContext @0: SpanContext;
     # invocation id of the currently invoked worker stage.
     # invocation id will always be unique to every Onset event and will be the same until the Outcome event.

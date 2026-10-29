@@ -36,9 +36,11 @@ declare const tracingContext: {
       kind: number;
       scope: { name: string; version?: string; schemaUrl?: string };
       startTime?: { seconds: number; nanoseconds: number };
+      root?: boolean;
     }
   ): Span;
   getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';
+  getRootCreationMode(): 'untraced' | 'unsampled' | 'recording';
   getInvocationSpanContext(): TracingSpanContext | undefined;
   withActiveSpanContext<T>(
     context: TracingSpanContext | undefined,

@@ -60,6 +60,7 @@ WD_STRONG_BOOL(SpanAwaitedNext);
 // Whether IoContext::cancelPendingWork() also clears `tasks`, which in an actor holds the
 // abortWhen() watchers.
 WD_STRONG_BOOL(ClearTasks);
+WD_STRONG_BOOL(RootUserSpanObserved);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -77,11 +78,17 @@ class UserTraceAsyncContext final {
   UserTraceAsyncContext(SpanParent span,
       kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer,
       kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext,
-      tracing::TraceFlags jsSamplingDecision)
+      tracing::TraceFlags jsSamplingDecision,
+      RootUserSpanObserved rootObserved = RootUserSpanObserved::NO)
       : span(kj::mv(span)),
         tracer(kj::mv(tracer)),
         invocationSpanContext(kj::mv(invocationSpanContext)),
-        localSampled(jsSamplingDecision.isSampled()) {}
+        localSampled(jsSamplingDecision.isSampled()),
+        rootObserved(rootObserved == RootUserSpanObserved::YES) {}
+
+  bool isRootObserved() const {
+    return rootObserved;
+  }
 
   bool getLocalSampled() const {
     return localSampled;
@@ -122,6 +129,7 @@ class UserTraceAsyncContext final {
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   const bool localSampled;
+  const bool rootObserved;
 };
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
@@ -1276,6 +1284,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // JS-only fallback for absent native flags. Never use this in native propagation or exports.
   kj::Maybe<tracing::TraceFlags> getDefaultJsTraceFlags();
   kj::Maybe<tracing::InvocationSpanContext> getUserTraceInvocationContext();
+  bool isRootUserTraceObserved();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async

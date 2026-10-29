@@ -1424,11 +1424,13 @@ kj::Maybe<SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader)
 SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      spanId(reader.getSpanId()) {
+      spanId(reader.getSpanId()),
+      root(reader.getRoot()) {
   if (reader.hasMetadata()) metadata = SpanMetadata(reader.getMetadata());
 }
 
 void SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
+  builder.setRoot(root);
   KJ_IF_SOME(value, metadata) {
     value.copyTo(builder.initMetadata());
   }
@@ -1471,6 +1473,7 @@ SpanOpen SpanOpen::clone() const {
     });
   };
   SpanOpen result(spanId, operationName.clone(), cloneInfo(info));
+  result.root = root;
   result.metadata = metadata.map([](const auto& value) { return value.clone(); });
   return result;
 }
@@ -2212,9 +2215,21 @@ SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
       operationName(kj::str(reader.getOperationName())),
       startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {
   if (reader.hasMetadata()) metadata = SpanMetadata(reader.getMetadata());
+  if (reader.hasTrace()) {
+    auto value = reader.getTrace();
+    kj::Maybe<TraceFlags> flags;
+    if (value.getTraceFlags().isSet()) flags = TraceFlags(value.getTraceFlags().getSet());
+    trace = SpanContext(TraceId(value.getTraceIdLow(), value.getTraceIdHigh()), spanId, flags);
+  }
 }
 
 void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
+  KJ_IF_SOME(value, trace) {
+    auto out = builder.initTrace();
+    out.setTraceIdHigh(value.getTraceId().getHigh());
+    out.setTraceIdLow(value.getTraceId().getLow());
+    KJ_IF_SOME(flags, value.getTraceFlags()) out.initTraceFlags().setSet(uint8_t(flags));
+  }
   KJ_IF_SOME(value, metadata) {
     value.copyTo(builder.initMetadata());
   }

@@ -13,6 +13,30 @@
 namespace workerd::tracing {
 namespace {
 
+KJ_TEST("detached root marker and optional process span trace round trip") {
+  SpanOpen open(SpanId(42), "detached"_kjc);
+  open.root = true;
+  capnp::MallocMessageBuilder message;
+  open.clone().copyTo(message.initRoot<rpc::Trace::SpanOpen>());
+  KJ_EXPECT(SpanOpen(message.getRoot<rpc::Trace::SpanOpen>()).root);
+  // Bool occupies spare bits in the existing two-word data section; no extra queue charge.
+  KJ_EXPECT(capnp::AnyStruct::Reader(message.getRoot<rpc::Trace::SpanOpen>().asReader())
+                .getDataSection()
+                .size() == 16);
+  for (auto flags: {kj::Maybe<TraceFlags>(kj::none), kj::Maybe<TraceFlags>(TraceFlags(3))}) {
+    SpanOpenData data(SpanId(42), SpanId::nullId, "detached"_kjc, kj::UNIX_EPOCH);
+    data.trace = SpanContext(TraceId(1, 2), SpanId(42), flags);
+    data.copyTo(message.initRoot<rpc::SpanOpenData>());
+    SpanOpenData copy(message.getRoot<rpc::SpanOpenData>());
+    auto& trace = KJ_ASSERT_NONNULL(copy.trace);
+    KJ_EXPECT(trace.getTraceId() == TraceId(1, 2));
+    KJ_EXPECT(trace.getTraceFlags() == flags);
+  }
+  SpanOpenData legacy(SpanId(42), SpanId::nullId, "legacy"_kjc, kj::UNIX_EPOCH);
+  legacy.copyTo(message.initRoot<rpc::SpanOpenData>());
+  KJ_EXPECT(SpanOpenData(message.getRoot<rpc::SpanOpenData>()).trace == kj::none);
+}
+
 KJ_TEST("Tail batches skip unknown union members and retain subsequent events") {
   capnp::MallocMessageBuilder message;
   auto batch = message.initRoot<capnp::List<rpc::Trace::TailEvent>>(3);

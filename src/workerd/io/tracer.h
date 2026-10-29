@@ -17,6 +17,8 @@ class TailStreamWriter;
 
 class WorkerTracer;
 
+WD_STRONG_BOOL(DetachedRoot);
+
 // An abstract class that defines shares functionality for tracers that have different
 // characteristics. This interface is used to submit both buffered and streaming tail events.
 // TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
@@ -125,7 +127,8 @@ class BaseTracer: public kj::Refcounted {
   SpanParent makeUserRequestSpan(tracing::TraceId traceId,
       kj::Maybe<tracing::TraceFlags> traceFlags,
       kj::Maybe<kj::String> traceState = kj::none);
-  SpanParent makeUserSpanParent(tracing::SpanContext context);
+  SpanParent makeUserSpanParent(
+      tracing::SpanContext context, DetachedRoot detached = DetachedRoot::NO);
 
   // Associates an externally parented span with its trace without changing the invocation.
   virtual void setUserSpanContext(tracing::SpanId spanId, tracing::SpanContext context) {}
@@ -133,6 +136,8 @@ class BaseTracer: public kj::Refcounted {
   using MakeUserRequestSpanFunc =
       kj::Function<SpanParent(tracing::TraceId, kj::Maybe<tracing::TraceFlags>)>;
   using MakeUserRequestSpanContextFunc = kj::Function<SpanParent(tracing::SpanContext)>;
+  using MakeUserSpanParentFunc =
+      kj::Function<SpanParent(tracing::SpanContext, DetachedRoot detached)>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
@@ -140,6 +145,8 @@ class BaseTracer: public kj::Refcounted {
   // Context-aware callbacks also receive vendor state. The legacy adapter above intentionally
   // drops state until its caller opts into this interface.
   void setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func);
+  // Detached-aware embedders register the trace even when the parent span ID is absent.
+  void setMakeUserSpanParentFunc(MakeUserSpanParentFunc func);
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -159,7 +166,7 @@ class BaseTracer: public kj::Refcounted {
   void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
-  kj::Maybe<MakeUserRequestSpanContextFunc> makeUserRequestSpanFunc;
+  kj::Maybe<MakeUserSpanParentFunc> makeUserRequestSpanFunc;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.

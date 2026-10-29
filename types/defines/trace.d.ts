@@ -157,6 +157,10 @@ interface SpanLinks {
 }
 
 interface SpanOpen {
+  /** R3/R4/R8: runtime-only adapter root, behind opentelemetry_api. Present only when true;
+   * spanContext.spanId is absent and traceId differs from onset. Unmarked parentless opens
+   * are malformed. A remote parent outside the stream is allowed (R5), not a root. */
+  readonly root?: true;
   /** Explicit application start time as [Unix seconds, nanoseconds]. */
   readonly startTime?: [number, number];
   /** OpenTelemetry span kind, when supplied by the instrumentation. */
@@ -276,25 +280,25 @@ type EventType =
 
 // Context in which this trace event lives.
 interface SpanContext {
-  // Single id for the entire top-level invocation
-  // This should be a new traceId for the first worker stage invoked in the eyeball request and then
-  // same-account service-bindings should reuse the same traceId but cross-account service-bindings
-  // should use a new traceId.
+  // R1: trace of this event's span, not necessarily the onset's trace. Immutable per span;
+  // an open whose parent is in the stream carries the parent's trace.
   readonly traceId: string;
   // spanId in which this event is handled
   // for Onset and SpanOpen events this would be the parent span id
   // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
   // For Hibernate and Mark this would be the span under which they were emitted.
-  // spanId is not set ONLY if:
-  //  1. This is an Onset event
-  //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  // R3: absent only on onset without inherited context, or spanOpen with root: true.
   readonly spanId?: string;
   // W3C trace flags from an upstream traceparent. Absent when no upstream
   // sampling decision was made.
+  // R6: detached subtrees inherit onset flags verbatim, including absence.
   readonly traceFlags?: number;
 }
 
 interface TailEvent<Event extends EventType> {
+  // R2: group by invocationId, not traceId. Multiple traces share one invocation sequence
+  // space; span IDs are unique within it. Consumers key spans by ID within the invocation.
+  // R7: force-close all open spans at outcome, regardless of trace.
   // invocation id of the currently invoked worker stage.
   // invocation id will always be unique to every Onset event and will be the same until the Outcome event.
   readonly invocationId: string;

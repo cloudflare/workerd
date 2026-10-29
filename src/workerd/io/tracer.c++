@@ -241,9 +241,12 @@ void WorkerTracer::addSpanOpenImpl(tracing::SpanId spanId,
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Only Onset can lack a parent in the current tail-stream schema. Explicit new roots are
-  // represented as invocation children until detached roots have a versioned representation.
-  if (parentSpanId == tracing::SpanId::nullId) {
+  auto childContext = spanEventContext(spanId);
+  // Derive the marker from registered identity. Older submitters that do not register the
+  // detached trace safely retain the invocation-child fallback.
+  bool root = parentSpanId == tracing::SpanId::nullId &&
+      childContext.getTraceId() != topLevelContext.getTraceId();
+  if (parentSpanId == tracing::SpanId::nullId && !root) {
     parentSpanId = topLevelContext.getSpanId();
   }
   size_t spanNameSize = operationName.size();
@@ -252,7 +255,7 @@ void WorkerTracer::addSpanOpenImpl(tracing::SpanId spanId,
   }
   auto open = tracing::SpanOpen(spanId, kj::mv(operationName));
   open.metadata = kj::mv(metadata);
-  auto childContext = spanEventContext(spanId);
+  open.root = root;
   auto spanOpenContext = tracing::InvocationSpanContext(childContext.getTraceId(),
       childContext.getInvocationId(), parentSpanId, childContext.getTraceFlags());
   tailStreamWriter->report(spanOpenContext, kj::mv(open), startTime, spanNameSize);
@@ -649,6 +652,11 @@ void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
 }
 
 void BaseTracer::setMakeUserRequestSpanContextFunc(MakeUserRequestSpanContextFunc func) {
+  setMakeUserSpanParentFunc([func = kj::mv(func)](tracing::SpanContext context,
+                                DetachedRoot) mutable { return func(kj::mv(context)); });
+}
+
+void BaseTracer::setMakeUserSpanParentFunc(MakeUserSpanParentFunc func) {
   KJ_ASSERT(
       makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
   makeUserRequestSpanFunc = kj::mv(func);
@@ -692,9 +700,9 @@ SpanParent BaseTracer::makeUserRequestSpan(tracing::TraceId traceId,
       tracing::SpanContext(kj::mv(traceId), kj::none, traceFlags, kj::mv(traceState)));
 }
 
-SpanParent BaseTracer::makeUserSpanParent(tracing::SpanContext context) {
+SpanParent BaseTracer::makeUserSpanParent(tracing::SpanContext context, DetachedRoot detached) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(context));
+    return func(kj::mv(context), detached);
   } else {
     return SpanParent(nullptr);
   }

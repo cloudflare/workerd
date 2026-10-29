@@ -183,6 +183,7 @@ function fromRuntime(
 
 class Span implements SpanLike {
   readonly inner: RuntimeSpan | undefined;
+  readonly suppressNative: boolean;
   readonly #context: SpanContext;
   #ended = false;
   #status = 0;
@@ -192,9 +193,11 @@ class Span implements SpanLike {
   constructor(
     inner?: RuntimeSpan,
     parent?: SpanContext,
-    identity?: SpanContext
+    identity?: SpanContext,
+    suppressNative = false
   ) {
     this.inner = inner;
+    this.suppressNative = suppressNative;
     this.#context =
       identity ??
       attempt(() => fromRuntime(inner?.spanContext()) ?? { ...INVALID }, {
@@ -444,6 +447,9 @@ class ContextManager {
     if (attempt(() => ctx.getValue(SUPPRESS), false)) {
       return tracingContext.withActiveSpanContext(undefined, run, true);
     }
+    if (span instanceof Span && span.suppressNative) {
+      return tracingContext.withActiveSpanContext(undefined, run, true);
+    }
     if (inner !== undefined) return tracing.withActiveSpan(inner, run);
     return tracingContext.withActiveSpanContext(
       valid(spanContext)
@@ -499,24 +505,45 @@ class Tracer {
   ): Span {
     return attempt(() => {
       if (parent.getValue(SUPPRESS)) return new Span();
-      // Requested roots remain invocation children until the tail schema supports detached
-      // roots. Even an unsampled invocation must keep its propagation context.
-      if (options.root) parent = context.active().deleteValue(SPAN);
       const parentSpan = getSpan(parent);
+      const detached = options.root === true || parentSpan === undefined;
       const parentSpanContext = attempt(
         () => parentSpan?.spanContext(),
         undefined
       );
       // Decide under the explicit parent, not an unrelated surrounding context. Native
       // activation restores same-trace invocation flags before selecting the recording mode.
-      return context.with(parent, () => {
-        const mode = tracingContext.getSpanCreationMode();
+      const create = (): Span => {
+        const mode = detached
+          ? tracingContext.getRootCreationMode()
+          : tracingContext.getSpanCreationMode();
         if (mode === 'untraced') {
-          return !options.root && valid(parentSpanContext)
+          if (
+            detached ||
+            (parentSpan instanceof Span && parentSpan.suppressNative)
+          )
+            return new Span(undefined, undefined, undefined, true);
+          return valid(parentSpanContext)
             ? new Span(undefined, parentSpanContext, parentSpanContext)
             : new Span();
         }
         if (mode === 'unsampled') {
+          if (detached) {
+            let traceId: string;
+            do {
+              traceId = Array.from(
+                crypto.getRandomValues(new Uint8Array(16)),
+                (b) => b.toString(16).padStart(2, '0')
+              ).join('');
+            } while (traceId === INVALID.traceId);
+            const span = nonRecording({
+              traceId,
+              spanId: INVALID.spanId,
+              traceFlags: 0,
+            });
+            span.spanContext().isRemote = false;
+            return span;
+          }
           // The platform invocation's sampling decision wins over an explicitly sampled parent.
           // Explicit unsampled parents likewise never override the platform into recording.
           const identity = valid(parentSpanContext)
@@ -539,19 +566,23 @@ class Tracer {
                 ? options.kind
                 : 0,
             scope: this.scope,
+            ...(detached ? { root: true } : {}),
             ...(startTime === undefined ? {} : { startTime }),
           }
         );
         const span =
-          !inner.isTraced && valid(parentSpanContext)
+          !detached && !inner.isTraced && valid(parentSpanContext)
             ? new Span(undefined, parentSpanContext, parentSpanContext)
-            : new Span(inner, options.root ? undefined : parentSpanContext);
+            : new Span(inner, detached ? undefined : parentSpanContext);
         wrappers.set(inner, span);
+        if (detached) span.spanContext().isRemote = false;
         if (options.attributes !== undefined)
           span.setAttributes(options.attributes);
         if (options.links !== undefined) span.addLinks(options.links);
         return span;
-      });
+      };
+      // A root uses the owning invocation, never an unrelated explicit/active remote context.
+      return detached ? create() : context.with(parent, create);
     }, new Span());
   }
   startActiveSpan<R>(name: string, fn: (span: Span) => R): R;
