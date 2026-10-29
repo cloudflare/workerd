@@ -67,3 +67,25 @@ export const propagationWithoutTail = {
     assert.strictEqual(tracer.startSpan('no-parent').isRecording(), false);
   },
 };
+
+export const uppercaseParentWithoutTail = {
+  test() {
+    const identity = {
+      traceId: 'ABCDEF0123456789ABCDEF0123456789',
+      spanId: 'ABCDEF0123456789',
+      traceFlags: 3,
+    };
+    const parent = root.setValue(spanKey, { spanContext: () => identity });
+    const span = tracer.startSpan('uppercase-parent', {}, parent);
+    assert.strictEqual(span.spanContext(), identity);
+    const carrier = {};
+    api.propagation.inject(parent, carrier, { set: (c, k, v) => (c[k] = v) });
+    assert.strictEqual(
+      carrier.traceparent,
+      '00-abcdef0123456789abcdef0123456789-abcdef0123456789-03'
+    );
+    assert.strictEqual(identity.traceId, 'ABCDEF0123456789ABCDEF0123456789');
+    assert.strictEqual(identity.spanId, 'ABCDEF0123456789');
+    span.end();
+  },
+};

@@ -545,7 +545,7 @@ const propagation = {
         setter.set(
           carrier,
           'traceparent',
-          `00-${sc.traceId}-${sc.spanId}-${sc.traceFlags.toString(16).padStart(2, '0')}`
+          `00-${sc.traceId.toLowerCase()}-${sc.spanId.toLowerCase()}-${sc.traceFlags.toString(16).padStart(2, '0')}`
         );
         const state = sc.traceState?.serialize();
         if (state) setter.set(carrier, 'tracestate', state);
