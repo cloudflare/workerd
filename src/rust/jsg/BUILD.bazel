@@ -10,6 +10,8 @@ CPP_SHIMS = glob([
 ]) + [
     "//src/rust/api:inspector.c++",
     "//src/rust/api:inspector.h",
+    "//src/workerd/io/io-context:ffi.c++",
+    "//src/workerd/io/io-context:ffi.h",
 ]
 
 # Fails when a shim adds a use of C++ JSG; see cpp-jsg-allowlist-test.py.
