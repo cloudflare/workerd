@@ -1656,7 +1656,21 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
     ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
     ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
     ctx.setTag("http.request.method"_kjc, kj::str(request.getMethodEnum()));
-    ctx.setTag("url.full"_kjc, request.getUrl());
+    // Legacy Durable Object requests can have relative URLs. Keep their original form rather
+    // than exposing the implementation-only host used to resolve them for transmission.
+    auto originalUrl = request.getUrl();
+    if (urlList.size() == 1 && !originalUrl.startsWith("//") &&
+        kj::Url::tryParse(originalUrl, kj::Url::REMOTE_HREF,
+            {.percentDecode = false, .allowEmpty = true}) == kj::none) {
+      ctx.setTag("url.full"_kjc, uriEncodeControlChars(originalUrl.asBytes()));
+    } else {
+      auto spanUrl = urlList.back().clone();
+      KJ_IF_SOME(info, spanUrl.userInfo) {
+        info.username = kj::str("REDACTED");
+        info.password = kj::str("REDACTED");
+      }
+      ctx.setTag("url.full"_kjc, uriEncodeControlChars(spanUrl.toString().asBytes()));
+    }
 
     KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
       ctx.setTag("user_agent.original"_kjc, userAgent);
