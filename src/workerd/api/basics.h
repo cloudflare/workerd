@@ -667,8 +667,7 @@ class AbortSignal final: public EventTarget {
 
   // Arms the RPC abort subscription whenever an 'abort' listener is registered — via
   // addEventListener() or the onabort trampoline's activation. Registrations for other
-  // event types must not arm it: the subscription's pending awaitIo blocks hibernation in
-  // actors.
+  // event types must not arm it: the subscription holds the signal until the abort arrives.
   void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) override;
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {

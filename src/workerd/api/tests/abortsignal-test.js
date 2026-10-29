@@ -220,14 +220,22 @@ export class CalleeActor extends DurableObject {
     return 'ok';
   }
 
-  // Keeps the signal and listens for its abort after this method has returned. The listener keeps
-  // this request open until the abort arrives.
+  // Keeps the signal and listens for its abort after this method has returned.
   async actorListensForAbort(signal) {
     this.signal = signal;
     this.abortedWith = undefined;
     signal.addEventListener('abort', () => {
       this.abortedWith = signal.reason;
     });
+    return 'ok';
+  }
+
+  async actorListensForOnabort(signal) {
+    this.signal = signal;
+    this.abortedWith = undefined;
+    signal.onabort = () => {
+      this.abortedWith = signal.reason;
+    };
     return 'ok';
   }
 
@@ -1255,6 +1263,28 @@ export const abortAfterActorMethodReturnedFiresListener = {
       abortedWith: 'after listener',
     });
     await assertCalleeSucceeded(env, 'actorListensForAbort');
+  },
+};
+
+// A pending abort listener doesn't keep the actor's request open: its outcome is reported before
+// the abort, which then still fires the listener.
+export const pendingListenerDoesNotHoldActor = {
+  async test(ctrl, env) {
+    const ac = new AbortController();
+    const actor = env.ACTOR.get(env.ACTOR.idFromName('listens-no-hold'));
+    strictEqual(await actor.actorListensForOnabort(ac.signal), 'ok');
+    await assertCalleeSucceeded(env, 'actorListensForOnabort');
+
+    ac.abort('after outcome');
+    const state = await waitForState(
+      () => actor.actorHeldSignalState(),
+      (s) => s.abortedWith !== undefined
+    );
+    deepStrictEqual(state, {
+      aborted: true,
+      reason: 'after outcome',
+      abortedWith: 'after outcome',
+    });
   },
 };
 
