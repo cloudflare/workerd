@@ -311,7 +311,7 @@ class RootEntropy final: public kj::EntropySource {
   uint64_t counter = 1;
 };
 
-KJ_TEST("sampled and unsampled root loops charge isolate memory without forgetting live roots") {
+KJ_TEST("sampled and unsampled root loops use constant identity memory and retain live roots") {
   for (int flags: {-1, 0, 2, 3}) {
     capnp::MallocMessageBuilder message;
     auto features = message.initRoot<CompatibilityFlags>();
@@ -338,12 +338,12 @@ KJ_TEST("sampled and unsampled root loops charge isolate memory without forgetti
     invocation = tracing::InvocationSpanContext(
         invocation.getTraceId(), invocation.getInvocationId(), invocation.getSpanId(), nativeFlags);
     request->delivered();
-    size_t chargedMemory = 0;
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto scope = context->makeRequestTraceScope(env.lock);
       auto primitive = env.js.alloc<api::TracingContext>();
       KJ_EXPECT(primitive->getRootCreationMode(env.js) ==
           (flags == 0 || flags == 2 ? "unsampled"_kj : "recording"_kj));
+      auto before = env.js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(0);
       auto script = jsg::check(v8::Script::Compile(env.js.v8Context(), env.js.str(R"JS(
         const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
         const tracer = api.trace.getTracer('memory');
@@ -359,8 +359,8 @@ KJ_TEST("sampled and unsampled root loops charge isolate memory without forgetti
         if (ids.size !== 4097) throw new Error('root loop did not mint every identity: ' + ids.size);
       )JS"_kj)));
       jsg::check(script->Run(env.js.v8Context()));
-      chargedMemory = 4097 * 128;
-      KJ_EXPECT(env.js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(0) >= chargedMemory);
+      // Fixed-size native span metadata may remain live; there must be no per-root charge.
+      KJ_EXPECT(env.js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(0) - before < 4096);
       auto liveTrace = jsg::JsValue(jsg::check(env.js.v8Context()->Global()->Get(
                                         env.js.v8Context(), env.js.str("liveTrace"_kj))))
                            .toString(env.js);
@@ -376,15 +376,6 @@ KJ_TEST("sampled and unsampled root loops charge isolate memory without forgetti
       }));
     });
     fixture.drainAndDestroy(kj::mv(request));
-    size_t beforeRelease = 0;
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      beforeRelease = env.js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(0);
-    });
-    tracer = nullptr;
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      KJ_EXPECT(env.js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(0) + chargedMemory <=
-          beforeRelease);
-    });
   }
 }
 
@@ -411,12 +402,16 @@ KJ_TEST("legacy attached unsampled roots bypass native span allocation under for
     request->delivered();
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto scope = context->makeRequestTraceScope(env.lock);
+      auto primitive = env.js.alloc<api::TracingContext>();
+      KJ_EXPECT(primitive->getRootCreationMode(env.js) == "attached-unsampled"_kj);
       auto script = jsg::check(v8::Script::Compile(env.js.v8Context(), env.js.str(R"JS(
         const api = globalThis[Symbol.for('opentelemetry.js.api.1')];
         const key = Symbol.for('OpenTelemetry Context Key SPAN');
-        const foreign = {spanContext() { throw new Error('must not activate'); }};
+        let calls = 0;
+        const foreign = {spanContext() { ++calls; return {
+          traceId: '1'.repeat(32), spanId: '2'.repeat(16), traceFlags: 1
+        }; }};
         const parent = api.context.active().setValue(key, foreign);
-        // A malformed activation is never entered on the owning invocation's unsampled path.
         const tracer = api.trace.getTracer('attached-unsampled');
         for (const root of [false, true]) {
           const span = tracer.startSpan('unsampled', {root}, parent);
@@ -424,6 +419,7 @@ KJ_TEST("legacy attached unsampled roots bypass native span allocation under for
             throw new Error('unsampled path allocated a native span or lost the invocation');
           span.end();
         }
+        if (calls !== 1) throw new Error('foreign context activated on unsampled path: ' + calls);
       )JS"_kj)));
       jsg::check(script->Run(env.js.v8Context()));
     });
@@ -462,7 +458,11 @@ KJ_TEST("root factory capability keeps JS and tail identities aligned and rewrap
           kj::heap<tracing::TailStreamWriter>(kj::mv(tails), tasks));
       uint64_t sharedCounter = 0;
       uint legacyCalls = 0;
+      uint invocationCarriers = 0;
+      kj::Maybe<tracing::TraceId> factoryInvocation;
       auto makeParent = [&](tracing::SpanContext identity) {
+        if (factoryInvocation == kj::none) factoryInvocation = identity.getTraceId();
+        if (identity.getTraceId() == KJ_ASSERT_NONNULL(factoryInvocation)) ++invocationCarriers;
         return SpanParent(kj::rc<UserSpanObserver>(
             kj::refcounted<FixtureSpanSubmitter>(*tracer, tracing::SpanContext::clone(identity),
                 factory == Factory::DETACHED ? FixtureSpanSubmitter::Registration::ENABLED
@@ -526,6 +526,7 @@ KJ_TEST("root factory capability keeps JS and tail identities aligned and rewrap
           });
         )JS"_kj);
         auto primitive = env.js.alloc<api::TracingContext>();
+        auto beforeBareActivation = invocationCarriers;
         for (uint i = 0; i < 3; ++i)
           primitive->withActiveSpanContext(
               env.js, kj::none, jsg::Function<jsg::JsRef<jsg::JsValue>()>([&](jsg::Lock& js) {
@@ -533,6 +534,7 @@ KJ_TEST("root factory capability keeps JS and tail identities aligned and rewrap
             KJ_EXPECT(child.getUserSpanParent().isObserved());
             return jsg::JsRef(js, js.undefined());
           }));
+        KJ_EXPECT(invocationCarriers == beforeBareActivation);
         auto foreign = [](uint8_t flags) {
           return api::user_tracing::TracingSpanContext{
             .traceId = kj::str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -623,7 +625,7 @@ KJ_TEST("WebSocket capture retains real parenting but drops flags state and deta
           check(tracing::TraceId(3, 4), tracing::SpanId(55));
         }
         if (hasTracer) {
-          auto detachedId = tracer->makeDetachedTraceId(env.js, context->getEntropySource());
+          auto detachedId = tracer->makeDetachedTraceId(context->getEntropySource());
           auto detached = context->makeUserAsyncTraceScope(env.lock,
               SpanParent::fromSpanContext(tracing::SpanContext(
                   detachedId, tracing::SpanId(66), nativeFlags, kj::str("vendor=detached"))));

@@ -164,9 +164,9 @@ KJ_TEST("owner-less untraced handlers cannot invent an invocation parent on egre
     return kj::rc<W3cPolicyChannels>(timer, true, false);
   }),
   });
-  // Like hibernatable WebSocket handlers, runInIoContext does not install a request trace
-  // scope. A real explicit parent can be activated, but clearing it must not reveal a
-  // lazily minted invocation identity that was never exported.
+  // This synthetic owner-less entry has neither a trigger nor a tracer, unlike real
+  // hibernatable WebSocket handlers which install request scopes. An explicit parent can be
+  // activated, but clearing it must not reveal a lazily minted unexported invocation identity.
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto primitive = env.js.alloc<TracingContext>();
     KJ_EXPECT(primitive->getInvocationSpanContext(env.js) == kj::none);

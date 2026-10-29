@@ -60,5 +60,9 @@ export default {
       }
     }
     assert.strictEqual((await env.ON.fetch('http://worker/throw')).status, 500);
+    assert.strictEqual(
+      (await env.ON.fetch('http://worker/process-exit')).status,
+      500
+    );
   },
 };

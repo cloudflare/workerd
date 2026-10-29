@@ -1660,8 +1660,9 @@ kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
     return getCurrentIncomingRequest().getWorkerTracer();
   }
   if (hasCurrentUserTraceOwner()) {
-    // Logs, diagnostics and exceptions need the same sink as spans in this frame. An
-    // untraced or stale frame must not borrow a newer overlapping request's tracer.
+    // Logs, diagnostics and exceptions reported while the frame is entered use its span sink.
+    // Uncaught task failures (including timers) are reported after the frame unwinds and still
+    // use the newest request. An entered stale/untraced frame must not borrow that tracer.
     return getCurrentUserTracer();
   }
   return getCurrentIncomingRequest().getWorkerTracer();

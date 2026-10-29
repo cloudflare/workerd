@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { channel } from 'node:diagnostics_channel';
+import { exit } from 'node:process';
 import { tracing, WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 import { context, propagation, ROOT_CONTEXT, trace } from '@opentelemetry/api';
 
@@ -14,6 +16,18 @@ export default class extends WorkerEntrypoint {
     if (new URL(request.url).pathname === '/callee')
       return Response.json(this.identity());
     const tracer = trace.getTracer('roots');
+    if (new URL(request.url).pathname === '/process-exit') {
+      return tracer.startActiveSpan(
+        'process-exit-root',
+        { root: true },
+        (root) => {
+          console.log(
+            JSON.stringify({ marker: 'root', ...root.spanContext() })
+          );
+          exit(17);
+        }
+      );
+    }
     if (new URL(request.url).pathname === '/throw') {
       return tracer.startActiveSpan(
         'throwing-root',
@@ -78,6 +92,11 @@ export default class extends WorkerEntrypoint {
         root.updateName('detached');
         root.setStatus({ code: 1 });
         console.log(JSON.stringify({ marker: 'root', ...rootId }));
+        const diagnostic = channel('otel-detached-root');
+        const listener = () => {};
+        diagnostic.subscribe(listener);
+        diagnostic.publish({ message: 'root-diagnostic' });
+        diagnostic.unsubscribe(listener);
         const echo = await fetch('http://echo/').then((r) => r.json());
         const childEcho = await tracer.startActiveSpan(
           'otel-child',

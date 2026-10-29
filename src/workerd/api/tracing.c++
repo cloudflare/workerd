@@ -886,9 +886,7 @@ kj::StringPtr TracingContext::getRootCreationMode(jsg::Lock& js) {
 
 kj::String TracingContext::createRootTraceId(jsg::Lock& js) {
   auto& io = IoContext::current();
-  return KJ_ASSERT_NONNULL(io.getWorkerTracer())
-      .makeDetachedTraceId(js, io.getEntropySource())
-      .toW3C();
+  return KJ_ASSERT_NONNULL(io.getWorkerTracer()).makeDetachedTraceId(io.getEntropySource()).toW3C();
 }
 
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
@@ -942,8 +940,8 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
         // Bare ROOT_CONTEXT affects adapter parenting, not runtime instrumentation: without
         // an active OTel span, native spans remain attached to the owning invocation.
         bool attached = false;
-        KJ_IF_SOME(tracer, io.getWorkerTracer()) {
-          if (io.isOpentelemetryApiEnabled() && !tracer.supportsDetachedRoots() &&
+        if (io.getWorkerTracer() != kj::none) {
+          if (io.isOpentelemetryApiEnabled() &&
               !root.getTraceFlags().map([](auto flags) {
             return !flags.isSampled();
           }).orDefault(false)) {
@@ -1027,7 +1025,7 @@ CreatedSpan createSpan(jsg::Lock& js,
         KJ_IF_SOME(invocation, context.getUserTraceInvocationContext()) {
           KJ_IF_SOME(tracer, context.getWorkerTracer()) {
             parent = tracer.makeUserSpanParent(
-                tracing::SpanContext(tracer.makeDetachedTraceId(js, context.getEntropySource()),
+                tracing::SpanContext(tracer.makeDetachedTraceId(context.getEntropySource()),
                     kj::none, invocation.getTraceFlags()),
                 DetachedRoot::YES);
           }

@@ -8,6 +8,8 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <openssl/siphash.h>
+
 #include <capnp/message.h>  // for capnp::clone()
 
 namespace workerd {
@@ -667,16 +669,34 @@ void BaseTracer::setMakeUserSpanParentFunc(MakeUserSpanParentFunc func) {
   detachedRootsSupported = true;
 }
 
-tracing::TraceId BaseTracer::makeDetachedTraceId(
-    jsg::Lock& js, kj::Maybe<kj::EntropySource&> entropy) {
+tracing::TraceId BaseTracer::makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy) {
   KJ_REQUIRE(detachedRootsSupported);
-  auto id = tracing::TraceId::fromEntropy(entropy);
-  detachedTraceIds.insert(id);
-  if (detachedTraceMemory == kj::none) detachedTraceMemory = js.getExternalMemoryAdjustment();
-  // Cover row storage, hash buckets and allocation overhead conservatively. Charging capacity
-  // also covers spare rows; the isolate's memory limit bounds sampled and unsampled root loops.
-  KJ_ASSERT_NONNULL(detachedTraceMemory).setNow(js, detachedTraceIds.capacity() * 128);
-  return id;
+  if (detachedTraceKey == kj::none) {
+    // Predictable mode must not consume entropy. Normal keys have 128 random bits from the
+    // invocation's source (or the runtime's cryptographic source when none is supplied).
+    detachedTraceKey = isPredictableModeForTest()
+        ? DetachedTraceKey{{0x0706050403020100, 0x0f0e0d0c0b0a0908}}
+        : DetachedTraceKey{{tracing::SpanId::fromEntropy(entropy).getId(),
+            tracing::SpanId::fromEntropy(entropy).getId()}};
+  }
+  // Use the existing process-wide deterministic trace sequence in predictable mode, avoiding
+  // collisions between invocations. Non-zero nonces also rule out the all-zero W3C identity.
+  auto nonce = isPredictableModeForTest() ? tracing::TraceId::fromEntropy().getHigh()
+                                          : tracing::SpanId::fromEntropy(entropy).getId();
+  if (nonce == 0) nonce = 1;
+  return tracing::TraceId(hashDetachedNonce(nonce), nonce);
+}
+
+uint64_t BaseTracer::hashDetachedNonce(uint64_t nonce) const {
+  // Hash the nonce's W3C (big-endian) bytes, independent of the host's byte order.
+  uint8_t bytes[8];
+  for (uint i = 0; i < sizeof(bytes); ++i) bytes[i] = nonce >> (8 * (7 - i));
+  return SIPHASH_24(KJ_ASSERT_NONNULL(detachedTraceKey).words, bytes, sizeof(bytes));
+}
+
+bool BaseTracer::isDetachedTraceId(const tracing::TraceId& id) const {
+  return detachedTraceKey != kj::none && id != nullptr &&
+      id.getLow() == hashDetachedNonce(id.getHigh());
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {

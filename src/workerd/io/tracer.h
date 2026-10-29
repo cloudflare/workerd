@@ -151,12 +151,10 @@ class BaseTracer: public kj::Refcounted {
   bool supportsDetachedRoots() const {
     return detachedRootsSupported;
   }
-  // Charged to the isolate until the tracer expires, including after closure. Never evicting
-  // identities preserves the owner's native sampling flags for live and rewrapped roots.
-  tracing::TraceId makeDetachedTraceId(jsg::Lock& js, kj::Maybe<kj::EntropySource&> entropy);
-  bool isDetachedTraceId(const tracing::TraceId& id) const {
-    return detachedTraceIds.contains(id);
-  }
+  // Self-identifying IDs need only a per-tracer key, not a growing registry. Membership survives
+  // span closure and preserves native flags for rewrapped roots (foreign false match: 2^-64).
+  tracing::TraceId makeDetachedTraceId(kj::Maybe<kj::EntropySource&> entropy);
+  bool isDetachedTraceId(const tracing::TraceId& id) const;
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -188,8 +186,11 @@ class BaseTracer: public kj::Refcounted {
  private:
   friend class workerd::WeakRef<BaseTracer>;
   bool detachedRootsSupported = false;
-  kj::Maybe<jsg::ExternalMemoryAdjustment> detachedTraceMemory;
-  kj::HashSet<tracing::TraceId> detachedTraceIds;
+  struct DetachedTraceKey {
+    uint64_t words[2];
+  };
+  kj::Maybe<DetachedTraceKey> detachedTraceKey;
+  uint64_t hashDetachedNonce(uint64_t nonce) const;
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<BaseTracer>(), *this);
 };
 

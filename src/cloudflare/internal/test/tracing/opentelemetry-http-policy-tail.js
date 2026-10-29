@@ -98,7 +98,7 @@ export const validate = {
         );
       }
       if (path === '/forward' || path === '/clone' || path === '/redirect') {
-        if (onset.spanContext.traceFlags === 0) continue;
+        if ((onset.spanContext.traceFlags & 1) === 0) continue;
         const result = logs
           .filter((s) => s.startsWith('{'))
           .map((s) => JSON.parse(s))

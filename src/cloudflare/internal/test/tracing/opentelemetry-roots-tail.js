@@ -23,6 +23,8 @@ export const validate = {
     assert.strictEqual(pending, 0);
     let roots = 0;
     let uncaught = false;
+    let processExit = false;
+    let diagnostics = 0;
     for (const events of requests) {
       const onset = events[0];
       const opens = new Map([
@@ -65,6 +67,22 @@ export const validate = {
         }
         if (
           type === 'exception' &&
+          event.event.message.includes('process.exit(17)')
+        ) {
+          const root = marked.find((e) => e.event.name === 'process-exit-root');
+          assert.ok(root);
+          if (ctx.traceId === root.spanContext.traceId) {
+            assert.strictEqual(ctx.spanId, root.event.spanId);
+            processExit = true;
+          } else {
+            // The final uncaught response failure is invocation-scoped, unlike process.exit's
+            // synchronous report inside the root. Pin both rather than accepting either anywhere.
+            assert.strictEqual(ctx.traceId, onset.spanContext.traceId);
+            assert.strictEqual(ctx.spanId, onset.event.spanId);
+          }
+        }
+        if (
+          type === 'exception' &&
           event.event.message.includes('uncaught-root-error')
         ) {
           assert.strictEqual(ctx.traceId, onset.spanContext.traceId);
@@ -86,6 +104,20 @@ export const validate = {
       }
       const detached = marked.find((e) => e.event.name === 'detached');
       if (detached) {
+        const diagnostic = events.find(
+          (e) => e.event.type === 'diagnosticChannel'
+        );
+        assert.ok(diagnostic);
+        assert.strictEqual(diagnostic.event.channel, 'otel-detached-root');
+        assert.strictEqual(
+          diagnostic.spanContext.traceId,
+          detached.spanContext.traceId
+        );
+        assert.strictEqual(
+          diagnostic.spanContext.spanId,
+          detached.event.spanId
+        );
+        ++diagnostics;
         assert(events.some((e) => e.event.type === 'spanEvent'));
         assert(events.some((e) => e.event.type === 'spanLinks'));
         assert(events.some((e) => e.event.type === 'exception'));
@@ -111,5 +143,7 @@ export const validate = {
     }
     assert(roots >= 12);
     assert.ok(uncaught);
+    assert.ok(processExit);
+    assert.ok(diagnostics >= 3);
   },
 };

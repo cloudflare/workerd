@@ -57,7 +57,7 @@ export default {
       return Response.json({ active, echo: result, original });
     }
     if (path === '/platform-unsampled') {
-      assert.strictEqual(active.traceFlags, 0);
+      assert.strictEqual(active.traceFlags & 1, 0);
       const foreign = trace.setSpanContext(context.active(), {
         traceId: '11111111111111111111111111111111',
         spanId: '2222222222222222',
@@ -98,7 +98,8 @@ export default {
       });
       assert.strictEqual(
         echo.traceparent,
-        '00-11111111111111111111111111111111-2222222222222222-00'
+        '00-11111111111111111111111111111111-2222222222222222-' +
+          request.headers.get('traceparent').split('-')[3]
       );
       return Response.json({ active });
     } else if (path.startsWith('/state-')) {

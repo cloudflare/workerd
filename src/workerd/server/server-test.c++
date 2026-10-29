@@ -4283,7 +4283,8 @@ KJ_TEST("Server: tail-less hibernatable sockets do not invent HTTP trace parents
 }
 
 KJ_TEST("Server: hibernatable socket capture drops accept flags state and detached traces") {
-  for (bool traced: {false, true}) {
+  for (auto tailMode: {"none"_kj, "buffered"_kj, "streaming"_kj}) {
+    bool streaming = tailMode == "streaming";
     for (auto flags: {"00"_kj, "01"_kj}) {
       for (auto mode: {"invocation"_kj, "active"_kj, "detached"_kj}) {
         TestServer test(kj::str(R"((
@@ -4297,7 +4298,7 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `const identity = () => api.context.active().getValue(key).spanContext();
               `export default { fetch(r, env) { return env.ns.getByName('socket').fetch(r); } };
               `export class Actor {
-              `  constructor(ctx) { this.ctx = ctx; this.reqCount = 0; }
+              `  constructor(ctx, env) { this.ctx = ctx; this.env = env; this.reqCount = 0; }
               `  fetch(request) {
               `    ++this.reqCount;
               `    const invocation = identity();
@@ -4321,22 +4322,31 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `    const active = identity();
               `    if (active.traceId !== expected.traceId ||
               `        active.traceState !== undefined) throw new Error('wrong restored identity');
+              `    if (active.traceFlags !== (this.env.tailMode === 'streaming' ? 1 : 0))
+              `      throw new Error('wrong restored JS sampling flags');
+              `    if (this.env.tailMode === 'none' && active.spanId !== expected.spanId)
+              `      throw new Error('unexported socket lost exact accept-time span');
               `    console.log(JSON.stringify({marker: 'socket-parent', ...expected}));
-              `    const response = await fetch('http://origin/');
+              `    const response = await fetch('http://origin/' + active.spanId);
               `    ws.send(this.reqCount + ':' + await response.text());
               `  }
               `}
             )],
-            bindings = [(name = "ns", durableObjectNamespace = "Actor")],
+            bindings = [(name = "ns", durableObjectNamespace = "Actor"),
+                        (name = "tailMode", text = ")",
+            tailMode, R"(")],
             durableObjectNamespaces = [(className = "Actor", uniqueKey = "capture-socket")],
             durableObjectStorage = (inMemory = void),
         )",
-            traced ? "streamingTails = [\"tail\"],"_kj : ""_kj, R"(
+            streaming                    ? "streamingTails = [\"tail\"],"_kj
+                : tailMode == "buffered" ? "tails = [\"tail\"],"_kj
+                                         : ""_kj,
+            R"(
           )), (name = "tail", worker = (
             compatibilityDate = "2026-07-01",
             modules = [(name = "worker", esModule =
               `let checks = 0;
-              `export default { fetch() { return new Response(String(checks)); }, tailStream(onset) {
+              `export default { tail() {}, fetch() { return new Response(String(checks)); }, tailStream(onset) {
               `  return { log(event) {
               `    const data = JSON.parse(event.event.message[0]);
               `    if (data.marker !== 'socket-parent') return;
@@ -4372,16 +4382,19 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
           if (hibernate) test.wait(10);
           socket.send(kj::str("\x81\x01", "x"));
           auto origin = test.receiveInternetSubrequest("origin");
-          origin.recvRegex(kj::str("GET / HTTP/1.1\nHost: origin\n"
-                                   "traceparent: 00-11111111111111111111111111111111-[0-9a-f]{16}-",
-              traced ? "01" : "00", "\n\n"));
+          origin.recvRegex(kj::str("GET /([0-9a-f]{16}) HTTP/1.1\nHost: origin\n"
+                                   "traceparent: 00-11111111111111111111111111111111-",
+              streaming                ? "[0-9a-f]{16}-01"
+                  : tailMode == "none" ? "\\1-00"
+                                       : "[0-9a-f]{16}-00",
+              "\n\n"));
           origin.send(R"(
             HTTP/1.1 200 OK
             Content-Length: 2
 
             OK)"_blockquote);
           socket.recvWebSocket(hibernate ? "0:OK" : "1:OK");
-          if (traced) {
+          if (streaming) {
             test.wait(1);
             auto tail = test.connect("tail-addr");
             tail.httpGet200("/", hibernate ? "2" : "1");

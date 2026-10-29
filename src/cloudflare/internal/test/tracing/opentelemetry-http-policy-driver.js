@@ -13,7 +13,7 @@ const call = (binding, path, headers) =>
 export default {
   async test(ctrl, env) {
     for (const binding of [env.ON, env.UNTRACED, env.BUFFERED]) {
-      for (const flags of ['00', '01', '03', 'ff']) {
+      for (const flags of ['00', '01', '02', '03', 'ff']) {
         const result = await call(binding, '/forward', {
           traceparent: parent(flags),
           tracestate: 'upstream=1',
@@ -56,7 +56,9 @@ export default {
     }
     const buffered = await call(env.BUFFERED, '/fresh');
     assert.strictEqual(buffered.echo.traceparent.split('-')[3], '00');
-    await call(env.ON, '/platform-unsampled', { traceparent: parent('00') });
+    for (const flags of ['00', '02']) {
+      await call(env.ON, '/platform-unsampled', { traceparent: parent(flags) });
+    }
     await call(env.ON, '/state-multi', [
       ['traceparent', parent('01')],
       ['tracestate', 'upstream=1'],

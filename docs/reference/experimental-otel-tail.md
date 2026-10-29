@@ -20,7 +20,7 @@ carriers retain the invocation's flags, including reserved bits and absence, eve
 identity is rewrapped after activation or closure in the same invocation.
 Untraced roots remain INVALID and suppress native spans and propagation while the current frame
 is also untraced. Reusing an INVALID root in a traced request does not suppress that request.
-Recording roots generate native entropy once, with empty state
+Recording roots generate native identities once, with empty state
 and isRemote false. The runtime derives `spanOpen.root: true` only when a parentless open has a
 registered trace different from onset. Only detached-aware factories enable new trace creation.
 Legacy factories use attached roots, so JS identity, logs, egress and tail stay in the invocation's
@@ -35,15 +35,24 @@ and close all spans at outcome.
 No embedder changes are included here. Embedders must adopt the detached-aware span factory,
 register every placeholder's trace/flags (including foreign-parent spans), forward metadata and
 `SpanOpenData.trace @5` through every process transport, and register it before opening the span.
-Keep shared predictable counters and forward metadata-aware opens. Consumers must also use the
-triggering event's trace for issue attribution. Invocation navigation, billing, root quotas,
+No-parent activation reuses the invocation's existing carrier for every factory type. Keep shared
+predictable counters across distinct parent carriers and forward metadata-aware opens. Consumers
+must also use the triggering event's trace for issue attribution. Invocation navigation, billing, root quotas,
 platform links and parentless RPC method enrichment remain product decisions.
 
-The minted-ID registry is charged conservatively at 128 bytes per allocated hash-table row
-against the isolate's external-memory budget, including unsampled roots. The isolate memory
-limit, rather than an eviction policy, bounds this storage. IDs are never evicted while their
-tracer lives: eviction could reinterpret a live root's rewrapped identity as a foreign sampling
-decision. Accounting is released with the tracer and does not keep the isolate alive.
+Minted IDs are self-identifying: a random 64-bit nonce followed by SipHash-2-4's 64-bit tag of
+the nonce's big-endian bytes. BoringSSL supplies SipHash; each tracer lazily draws its 128-bit
+key from its invocation entropy source (or the runtime's cryptographic source). A zero nonce
+is replaced with 1 so the W3C trace ID is always non-zero and 32 hex digits. Membership recomputes
+the tag, even after closure, without retaining IDs or allocating per root. Only the key is
+stored: constant memory, no eviction and no external-memory accounting. The former growing
+registry could exhaust the isolate's memory budget during long-lived requests; this removes
+that root-count-dependent isolate-kill failure mode, including for unsampled roots.
+A foreign ID has a 2^-64 false-match probability under an unknown random key. A false match
+only applies the invocation's native flags or rejects that trace as a WebSocket trigger; this
+is not an authentication boundary. Nonce collisions have ordinary 64-bit birthday probability.
+Predictable test mode uses a fixed SipHash key and the existing process-wide deterministic
+trace-ID counter for nonces, consumes no entropy, and remains distinct across invocations.
 
 The `opentelemetry_api` adapter emits optional kind, instrumentation scope and start time on
 `spanOpen`, separate `spanEvent` and `spanLinks` marks, optional exception time, and optional end
@@ -75,12 +84,17 @@ the creator's weak tracer (`runIfAlive`), never the current request's tracer. In
 likewise use the stored invocation context and tracer. A span reused across actor requests
 continues writing to its creator's stream and cannot keep a dead tracer alive.
 
-With the flag on, logs, diagnostics and exceptions also follow the frame owner's tracer.
+With the flag on, logs, diagnostics and exceptions reported while the frame is entered follow
+the frame owner's tracer.
 Long-lived work started by a Durable Object constructor (timers, listeners or background loops)
 therefore loses its logs and spans once the constructing request's tracer expires; an unsampled
 constructing request cannot record spans in the first place. There is no fallback to the newest
 request: that would put frame-owned logs and spans in different streams, or misattribute them to
-an unrelated overlapping request. Start request-specific work in that request's scope instead.
+an unrelated overlapping request. Uncaught timer/callback task failures are an exception: the
+frame has unwound before task-failure reporting, so those exceptions still go to the newest
+request's tracer and invocation, possibly a different stream than the callback's logs. This
+limitation is unchanged with the flag off. Start request-specific work in that request's scope
+instead.
 
 A root retained in Durable Object memory is not a cross-request recording session. Once its
 creator's tracer expires, later children, marks and closure can be dropped; no later stream
@@ -90,7 +104,7 @@ without a real active identity, it uses the invocation identity when one exists.
 message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
 inside a detached root does not pull later events into that root's trace.
 There is no dedicated per-invocation root-count quota. Recording spans share the existing export
-budgets; minted trace IDs remain memory-accounted until the tracer expires.
+budgets; self-identifying minted IDs use constant per-tracer memory regardless of root count.
 
 Forward corresponding `BaseTracer` methods and all metadata/time fields over each transport,
 including process-sandbox boundaries. The default hooks intentionally preserve old embedders:
