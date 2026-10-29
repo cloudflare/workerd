@@ -516,18 +516,13 @@ impl ActorNamespaceHandle {
     }
 
     pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
-        let ns = self.namespace();
-        let cluster = ns
-            .as_ref()
-            .and_then(|ns| ns.cluster())
-            .map(|n| Rc::clone(&n.cluster));
-        let unique_key = ns
-            .as_ref()
-            .and_then(|ns| ns.unique_key())
-            .map(str::to_owned);
+        let target = self.namespace().and_then(|ns| {
+            let unique_key = ns.unique_key()?.to_owned();
+            Some((Rc::clone(&ns.cluster()?.cluster), unique_key))
+        });
         let (actor, name) = (actor.to_owned(), name.to_owned());
         Box::new(ResultTask(Box::pin(async move {
-            let (Some(cluster), Some(unique_key)) = (cluster, unique_key) else {
+            let Some((cluster, unique_key)) = target else {
                 return Ok(());
             };
             let name = (!name.is_empty()).then_some(name.as_str());

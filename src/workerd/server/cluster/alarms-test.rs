@@ -139,3 +139,66 @@ fn survivors_split_a_dead_nodes_alarms() {
         assert_eq!(named.at_ms, 102);
     });
 }
+
+/// The memory store, but `alarms/d/` DELETEs fail while `fail` is set.
+#[derive(Default)]
+struct FlakyDeletes {
+    inner: crate::bucket::memory::Memory,
+    fail: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl crate::Store for FlakyDeletes {
+    async fn get(
+        &self,
+        key: &str,
+        to: Option<&std::path::Path>,
+    ) -> Result<Option<(Vec<u8>, crate::Version)>> {
+        self.inner.get(key, to).await
+    }
+    async fn put(
+        &self,
+        key: &str,
+        body: crate::bucket::Payload,
+        guard: Option<crate::Guard>,
+        metadata: &[(&str, String)],
+    ) -> Result<Option<crate::Version>> {
+        self.inner.put(key, body, guard, metadata).await
+    }
+    async fn list(&self, prefix: &str) -> Result<Vec<crate::bucket::Entry>> {
+        self.inner.list(prefix).await
+    }
+    async fn delete(&self, key: &str) -> Result<()> {
+        if self.fail.get() && key.contains("alarms/d/") {
+            return Err(crate::Error::Http("503".into()));
+        }
+        self.inner.delete(key).await
+    }
+}
+
+#[test]
+fn a_failed_adoption_still_schedules_and_retries() {
+    block_on(async {
+        let store = FlakyDeletes::default();
+        let fail = std::rc::Rc::clone(&store.fail);
+        let bucket = Bucket::new(store, "");
+        let dead = Index::new(bucket.clone(), "d");
+        for i in 0..8 {
+            dead.arm("ns", &format!("{i:x}"), None, Some(100 + i))
+                .await
+                .unwrap();
+        }
+        let (live, dead_nodes) = (["a".to_owned()], ["d".to_owned()]);
+        let a = Index::new(bucket.clone(), "a");
+        fail.set(true);
+        // Indexed here but still there: every one is scheduled once.
+        assert_eq!(a.adopt(&live, &dead_nodes).await.unwrap().len(), 8);
+        assert_eq!(
+            Alarms::new(bucket.clone()).list("d").await.unwrap().len(),
+            8
+        );
+        fail.set(false);
+        assert!(a.adopt(&live, &dead_nodes).await.unwrap().is_empty());
+        assert!(Alarms::new(bucket).list("d").await.unwrap().is_empty());
+    });
+}

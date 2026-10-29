@@ -46,7 +46,6 @@ mod registry;
 pub mod s3;
 
 pub use alarms::Adopted;
-pub use alarms::Alarms;
 pub use bucket::Bucket;
 pub use bucket::Guard;
 pub use bucket::Store;

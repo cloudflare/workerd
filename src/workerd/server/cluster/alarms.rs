@@ -244,7 +244,8 @@ impl Index {
     /// Take over this node's share of `dead` nodes' alarms among the `live`
     /// ones: each is indexed here before it goes there, so it is never in
     /// neither. Answers those to schedule here; an object this node already
-    /// knows keeps the alarm it has.
+    /// knows keeps the alarm it has. An entry that fails stays where it is,
+    /// for the next round.
     pub async fn adopt(&self, live: &[String], dead: &[String]) -> Result<Vec<Adopted>> {
         let mut adopted = Vec::new();
         for node in dead {
@@ -258,29 +259,37 @@ impl Index {
                 .collect()
                 .await;
             for result in results {
-                adopted.extend(result?);
+                match result {
+                    Ok(a) => adopted.extend(a),
+                    Err(e) => tracing::warn!("adopting {node}'s alarm: {e}"),
+                }
             }
         }
         Ok(adopted)
     }
 
+    /// Index `entry` here, then delete it from `node`. `armed` changes only
+    /// once the entry is indexed, so a failure leaves it to adopt again.
     async fn adopt_one(&self, node: &str, entry: Entry) -> Result<Option<Adopted>> {
         let name = self.alarms.name(node, &entry).await?;
         let key = (entry.namespace.clone(), entry.actor.clone());
         let (known, indexed) = {
-            let mut armed = self.armed.borrow_mut();
-            let known = armed.contains_key(&key);
-            let armed = armed.entry(key.clone()).or_default();
-            if !known {
-                armed.want = Some(entry.at_ms);
-                armed.name.clone_from(&name);
-            }
-            (known, armed.indexed)
+            let armed = self.armed.borrow();
+            let armed = armed.get(&key);
+            (armed.is_some(), armed.and_then(|a| a.indexed))
         };
         if indexed.is_none_or(|i| entry.at_ms < i) {
-            self.put(key, entry.at_ms, name.as_deref()).await?;
+            self.put(key.clone(), entry.at_ms, name.as_deref()).await?;
         }
-        self.alarms.delete(node, &entry).await?;
+        if !known {
+            let mut armed = self.armed.borrow_mut();
+            let armed = armed.entry(key).or_default();
+            armed.want = Some(entry.at_ms);
+            armed.name.clone_from(&name);
+        }
+        if let Err(e) = self.alarms.delete(node, &entry).await {
+            tracing::warn!("deleting {node}'s adopted alarm: {e}");
+        }
         Ok((!known).then_some(Adopted {
             namespace: entry.namespace,
             actor: entry.actor,
