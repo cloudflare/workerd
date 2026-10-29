@@ -37,12 +37,12 @@ constexpr bool isSpecialEventType(kj::StringPtr type) {
 }  // namespace
 
 const jsg::HashableV8Ref<v8::Object>& EventTarget::EventHandlerHashCallbacks::keyForRow(
-    const kj::Own<EventHandler>& row) const {
+    const jsg::TracedOwn<EventHandler>& row) const {
   return row->identity;
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
+    const jsg::TracedOwn<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
   return a->identity == b;
 }
 
@@ -1375,9 +1375,7 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& entry: typeMap) {
-    for (auto& handler: entry.value.handlers) {
-      visitor.visit(*handler);
-    }
+    visitor.visitAll(entry.value.handlers);
   }
   for (auto& entry: eventHandlerAttributes) {
     KJ_IF_SOME(handler, entry.value.handler) {

@@ -67,6 +67,7 @@ Checks: >
   readability-reference-to-constructed-temporary,
   readability-static-accessed-through-instance,
   readability-use-concise-preprocessor-directives,
+  jsg-traced-own,
   jsg-visit-for-gc,
   workerd-angled-includes,
   workerd-consume,

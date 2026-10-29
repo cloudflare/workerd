@@ -319,6 +319,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   // uncollectable. Detail is shared only between Request instances, all of
   // which visit it here, so the handle is re-traced on every GC cycle.
   void visitForGc(jsg::GcVisitor& visitor) {
+    // NOLINTNEXTLINE(jsg-traced-own): Detail is shared through kj::addRef and never moved out.
     visitor.visit(detail->cf);
   }
 

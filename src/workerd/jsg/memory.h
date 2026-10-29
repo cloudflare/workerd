@@ -124,6 +124,8 @@ template <typename T>
 class V8Ref;
 template <typename T>
 class Ref;
+template <typename T>
+class TracedOwn;
 
 enum class MemoryInfoDetachedState {
   UNKNOWN,
@@ -189,6 +191,11 @@ class MemoryTracker final {
   template <MemoryRetainer T>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Arc<T>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none);
+
+  template <MemoryRetainer T>
+  inline void trackField(kj::StringPtr edgeName,
+      const TracedOwn<T>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <MemoryRetainer T, typename D>
@@ -393,6 +400,14 @@ void MemoryTracker::trackField(
 template <MemoryRetainer T>
 void MemoryTracker::trackField(
     kj::StringPtr edgeName, const kj::Arc<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
+  if (value.get() != nullptr) {
+    trackField(edgeName, value.get(), nodeName);
+  }
+}
+
+template <MemoryRetainer T>
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const TracedOwn<T>& value, kj::Maybe<kj::StringPtr> nodeName) {
   if (value.get() != nullptr) {
     trackField(edgeName, value.get(), nodeName);
   }
