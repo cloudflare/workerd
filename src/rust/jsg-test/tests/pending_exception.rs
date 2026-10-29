@@ -27,8 +27,7 @@ impl Fresh {}
 
 #[jsg_resource]
 struct Thrower {
-    /// Whether the operation failed with a pending error, or for `throwThenUtf8Value`, whether
-    /// it converted nothing.
+    /// Whether the operation failed with a pending error.
     saw_pending: Cell<Option<bool>>,
 }
 
@@ -41,24 +40,13 @@ impl Thrower {
         first: v8::Local<'s, v8::Value>,
         operation: impl FnOnce(&mut jsg::Lock<'s>) -> jsg::Result<T>,
     ) -> jsg::Result<()> {
-        self.throw_then_check(lock, first, |lock| {
-            operation(lock).is_err_and(|err| err.is_pending())
-        })
-    }
-
-    /// Calls `first`, which must throw, then runs `operation`, records what it returns, and
-    /// fails as `first` did.
-    fn throw_then_check<'s>(
-        &self,
-        lock: &mut jsg::Lock<'s>,
-        first: v8::Local<'s, v8::Value>,
-        operation: impl FnOnce(&mut jsg::Lock<'s>) -> bool,
-    ) -> jsg::Result<()> {
         let first = v8::Local::<v8::Function>::try_from(first)
             .unwrap()
             .call(lock, None, &[]);
         assert!(first.as_ref().is_err_and(jsg::Error::is_pending));
-        self.saw_pending.set(Some(operation(lock)));
+        let result = operation(lock);
+        self.saw_pending
+            .set(Some(result.is_err_and(|err| err.is_pending())));
         first.map(drop)
     }
 }
@@ -106,6 +94,21 @@ impl Thrower {
         self.throw_then(lock, first, jsg::resource::function_template_of::<Fresh>)
     }
 
+    /// Detaches a new `ArrayBuffer`, which leaves it attached.
+    #[jsg_method]
+    fn throw_then_detach<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            let buffer = v8::ArrayBuffer::new(lock, &[1u8]);
+            let result = buffer.detach(lock);
+            assert!(!buffer.was_detached());
+            result
+        })
+    }
+
     /// Converts `value` with `Utf8Value`, whose `toString` must not run.
     #[jsg_method]
     fn throw_then_utf8_value<'s>(
@@ -114,9 +117,7 @@ impl Thrower {
         first: v8::Local<'s, v8::Value>,
         value: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        self.throw_then_check(lock, first, |lock| {
-            v8::Utf8Value::new(lock, &value).length() == 0
-        })
+        self.throw_then(lock, first, |lock| v8::Utf8Value::new(lock, &value))
     }
 }
 
@@ -169,6 +170,11 @@ fn wrapping_a_wrapped_resource_while_exception_pending_fails() {
 #[test]
 fn getting_a_constructor_while_exception_pending_fails() {
     exception_survives("throwThenGetConstructor(first)");
+}
+
+#[test]
+fn detaching_while_exception_pending_fails() {
+    exception_survives("throwThenDetach(first)");
 }
 
 #[test]

@@ -320,13 +320,16 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
 
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
-  // Utf8Value converts with ToString, which can run JavaScript. While an exception or a
-  // termination is pending, the value is left unconverted, which reads as a failed conversion
-  // (null data, zero length), like a Symbol's.
-  auto v8Value =
-      exceptionPending(isolate) ? v8::Local<v8::Value>() : local_from_ffi<v8::Value>(kj::mv(value));
-  auto* v = new v8::String::Utf8Value(isolate, v8Value);
-  return Utf8Value{reinterpret_cast<size_t>(v)};
+  if (exceptionPending(isolate)) return Utf8Value{0};
+  // Converted here rather than by Utf8Value, which would catch and discard what `toString`
+  // throws. Utf8Value then copies a string, which runs no JavaScript.
+  v8::Local<v8::String> str;
+  if (!local_from_ffi<v8::Value>(kj::mv(value))
+           ->ToString(isolate->GetCurrentContext())
+           .ToLocal(&str)) {
+    return Utf8Value{0};
+  }
+  return Utf8Value{reinterpret_cast<size_t>(new v8::String::Utf8Value(isolate, str))};
 }
 
 void utf8_value_drop(Utf8Value value) {
@@ -799,8 +802,12 @@ bool backing_store_is_resizable_by_user_javascript(size_t ptr) {
 }
 
 // ArrayBuffer detach/detachable/was-detached
-void local_array_buffer_detach(Isolate* isolate, Local& buffer) {
+bool local_array_buffer_detach(Isolate* isolate, const Local& buffer) {
+  // Detach() runs no JavaScript, but enters V8 with the current context, which V8 does not allow
+  // while an exception or a termination is pending.
+  if (exceptionPending(isolate)) return false;
   local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Detach(v8::Local<v8::Value>()).Check();
+  return true;
 }
 
 bool local_array_buffer_was_detached(const Local& buffer) {

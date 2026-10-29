@@ -277,14 +277,12 @@ struct Fresh;
 impl Fresh {}
 
 /// Is terminated and then uses a shim that checks `exceptionPending()` (`ffi.c++`) before it
-/// calls a V8 API that takes a context. The operation fails with a pending error or converts
-/// nothing, calls nothing in V8, and the termination keeps propagating. A call, a `Date`, a
-/// resource's wrapper and the conversions are tested above, in `resource_callback.rs` and in
-/// `coercion_safety.rs`.
+/// calls a V8 API that takes a context. The operation fails with a pending error, calls nothing
+/// in V8, and the termination keeps propagating. A call, a `Date`, a resource's wrapper and the
+/// conversions are tested above, in `resource_callback.rs` and in `coercion_safety.rs`.
 #[jsg_resource]
 struct Guarded {
-    /// Whether the operation failed with a pending error, or for `terminateThenUtf8Value`,
-    /// whether it converted nothing.
+    /// Whether the operation failed with a pending error.
     saw_pending: Cell<Option<bool>>,
 }
 
@@ -314,8 +312,21 @@ impl Guarded {
         value: jsg::v8::Local<'s, jsg::v8::Value>,
     ) {
         crate::Harness::terminate_and_deliver(lock);
-        let utf8 = jsg::v8::Utf8Value::new(lock, &value);
-        self.saw_pending.set(Some(utf8.length() == 0));
+        let result = jsg::v8::Utf8Value::new(lock, &value);
+        self.record(&result);
+    }
+
+    /// Is terminated and then detaches a new `ArrayBuffer`, which leaves it attached:
+    /// `ArrayBuffer::Detach` runs no JavaScript, but V8 does not allow entering it while
+    /// execution is terminating.
+    #[jsg_method]
+    fn terminate_then_detach(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
+        crate::Harness::terminate_and_deliver(lock);
+        let buffer = jsg::v8::ArrayBuffer::new(lock, &[1u8]);
+        let result = buffer.detach(lock);
+        assert!(!buffer.was_detached());
+        self.record(&result);
+        result
     }
 }
 
@@ -335,6 +346,11 @@ fn guarded_termination_survives(
 #[test]
 fn getting_a_constructor_while_terminating_keeps_the_termination() {
     guarded_termination_survives("terminateThenGetConstructor()", |_, _| {});
+}
+
+#[test]
+fn detaching_while_terminating_keeps_the_termination() {
+    guarded_termination_survives("terminateThenDetach()", |_, _| {});
 }
 
 #[test]

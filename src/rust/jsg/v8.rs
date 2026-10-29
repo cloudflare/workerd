@@ -608,7 +608,7 @@ pub mod ffi {
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
 
         // ArrayBuffer detach/detachable/was-detached
-        pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
+        pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &Local) -> bool;
         pub unsafe fn local_array_buffer_was_detached(buffer: &Local) -> bool;
         pub unsafe fn local_array_buffer_is_detachable(buffer: &Local) -> bool;
 
@@ -2439,10 +2439,18 @@ impl<'s> Local<'s, ArrayBuffer> {
     ///
     /// Takes the lock mutably so that a detach cannot happen while a slice
     /// borrowed from it (see [`as_slice`](Self::as_slice)) is live.
-    pub fn detach(self, lock: &mut Lock<'_>) {
-        let mut handle = *self.raw();
-        // SAFETY: lock guarantees the isolate is locked; handle is valid.
-        unsafe { ffi::local_array_buffer_detach(lock.isolate().as_ffi(), &mut handle) }
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, detaches nothing and fails with an error for
+    /// which [`Error::is_pending`] is true, as [`Local::<Function>::call`] does: V8 does not allow
+    /// detaching then.
+    pub fn detach(self, lock: &mut Lock<'_>) -> crate::Result<()> {
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid.
+            let ok = unsafe { ffi::local_array_buffer_detach(lock.isolate().as_ffi(), self.raw()) };
+            Ok(ok.then_some(()))
+        })
     }
 
     /// Returns `true` if this `ArrayBuffer` has been detached.
@@ -3559,22 +3567,17 @@ impl Local<'_, Date> {
 
 /// Rust equivalent of `v8::String::Utf8Value`.
 ///
-/// Converts any V8 value to its UTF-8 string representation (analogous to calling
-/// `.toString()` in JavaScript) and holds the result for the duration of its lifetime.
+/// Converts a value to a string with V8's `ToString` (as `String(value)` does in JavaScript,
+/// except that a `Symbol` throws) and holds its UTF-8 bytes for the duration of its lifetime.
 ///
 /// The UTF-8 bytes are a **heap-allocated copy** independent of the V8 heap — the data
 /// remains valid and stable for the full lifetime of this `Utf8Value` regardless of GC
 /// activity.
 ///
-/// If the value cannot be converted to a string (e.g. a `Symbol`), V8 stores a null
-/// pointer internally. In that case [`as_ptr`](Self::as_ptr) returns null,
-/// [`length`](Self::length) returns `0`, and [`as_bytes`](Self::as_bytes) /
-/// [`as_str`](Self::as_str) return empty slices.
-///
 /// # Example
 ///
 /// ```ignore
-/// let utf8 = Utf8Value::new(lock, &value);
+/// let utf8 = Utf8Value::new(lock, &value)?;
 /// println!("{}", utf8.as_str().unwrap_or(""));
 /// ```
 pub struct Utf8Value {
@@ -3585,21 +3588,26 @@ impl Utf8Value {
     /// Constructs a `Utf8Value` by converting `value` to its UTF-8 string representation.
     ///
     /// Produces a heap-allocated copy of the UTF-8 bytes that is independent of the V8
-    /// heap. If `value` cannot be converted to a string (e.g. a `Symbol`), or an exception or a
-    /// termination is pending, so that the conversion (which can run `toString`) is not
-    /// attempted, the internal data pointer will be null and [`length`](Self::length) will
-    /// return `0`.
+    /// heap.
     ///
-    /// Corresponds to `v8::String::Utf8Value(isolate, obj)`.
-    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> Self {
-        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-        let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), *value.raw()) };
-        Self { inner }
+    /// Corresponds to `v8::String::Utf8Value(isolate, obj)`, except that what the conversion
+    /// throws is not discarded.
+    ///
+    /// # Errors
+    ///
+    /// If the conversion throws (a `Symbol`, or a `toString` that throws), or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> crate::Result<Self> {
+        value.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+            let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), *value.raw()) };
+            Ok((inner.ptr != 0).then(|| Self { inner }))
+        })
     }
 
     /// Returns the number of UTF-8 bytes in the string, excluding the null terminator.
-    ///
-    /// Returns `0` if V8 could not convert the value to a string.
     ///
     /// Corresponds to `v8::String::Utf8Value::length()`.
     #[inline]
@@ -3613,8 +3621,6 @@ impl Utf8Value {
     /// The pointer points into a heap-allocated buffer owned by this `Utf8Value`, not into
     /// V8 memory. It is valid for the lifetime of this `Utf8Value`.
     ///
-    /// Returns null if V8 could not convert the value to a string (e.g. a `Symbol`).
-    ///
     /// Corresponds to `v8::String::Utf8Value::operator*()`.
     #[inline]
     pub fn as_ptr(&self) -> *const u8 {
@@ -3623,17 +3629,11 @@ impl Utf8Value {
     }
 
     /// Returns the UTF-8 content as a byte slice.
-    ///
-    /// Returns an empty slice if V8 could not convert the value to a string (e.g. a `Symbol`),
-    /// in which case `operator*()` returns a null pointer.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        let ptr = self.as_ptr();
-        if ptr.is_null() {
-            return &[];
-        }
-        // SAFETY: ptr is non-null and points to length() valid bytes for the lifetime of self.
-        unsafe { std::slice::from_raw_parts(ptr, self.length()) }
+        // SAFETY: the pointer is non-null (the conversion succeeded) and points to length()
+        // valid bytes for the lifetime of self.
+        unsafe { std::slice::from_raw_parts(self.as_ptr(), self.length()) }
     }
 
     /// Returns the UTF-8 content as a `&str`, or `None` if the bytes are not valid UTF-8.
