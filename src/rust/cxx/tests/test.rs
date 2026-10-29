@@ -816,6 +816,17 @@ fn test_kj_exception_with_details() {
 }
 
 #[test]
+fn test_kj_exception_with_empty_detail() {
+    let err = ffi::c_fail_kj_exception_with_empty_detail_return_primitive().unwrap_err();
+    assert_eq!("test exception with empty detail", err.what());
+
+    let details = err.details().expect("Expected details to be present");
+    assert_eq!(1, details.len());
+    assert_eq!(7, details[0].0);
+    assert!(details[0].1.is_empty());
+}
+
+#[test]
 fn test_rust_to_cpp_to_rust_cancellation() {
     // Test Rust->C++->Rust cancellation roundtrip
     let result = panic::catch_unwind(|| {

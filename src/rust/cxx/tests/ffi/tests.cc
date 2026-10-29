@@ -825,6 +825,13 @@ size_t c_fail_kj_exception_with_details_return_primitive() {
   kj::throwException(kj::mv(ex));
 }
 
+size_t c_fail_kj_exception_with_empty_detail_return_primitive() {
+  auto ex = KJ_EXCEPTION(FAILED, "test exception with empty detail");
+  // An empty kj::Array has a null data pointer.
+  ex.setDetail(7, nullptr);
+  kj::throwException(kj::mv(ex));
+}
+
 size_t c_cancel_return_primitive() { throw kj::CanceledException{}; }
 
 // Call Rust function that panics with CanceledException
