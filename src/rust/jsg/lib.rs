@@ -995,6 +995,8 @@ pub enum Member {
     },
     Method {
         name: String,
+        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
+        /// receiver; don't use one in any other member.
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
         length: u32,

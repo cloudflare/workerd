@@ -862,7 +862,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -879,7 +879,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -930,6 +930,13 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
+// For an object already known to be a Rust resource wrapper, from the marker or a signature.
+// Anything else is an invariant violation and aborts.
+Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
+  return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
+      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange));
+}
+
 // Creates no handles, so fast callbacks can use it without a HandleScope.
 kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
@@ -944,15 +951,7 @@ kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Val
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
-  // The WORKERD_RUST_WRAPPABLE_TAG marker check above established that this is one of our Rust
-  // wrappables, so the pointer can be taken directly through the shim.
-  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, v8_obj);
-  if (wrappable == nullptr) {
-    // unwrapFromShimAnyType() should never return null for a marked object.
-    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
-    abort();
-  }
-  return *static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
+  return unwrapRustWrapper(isolate, v8_obj);
 }
 }  // namespace
 
@@ -961,6 +960,19 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
     return wrappable.toRc();
   }
   return kj::none;
+}
+
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value) {
+  KJ_IF_SOME(wrappable, tryUnwrapRustWrappable(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    return &wrappable.trait_object;
+  }
+  return nullptr;
+}
+
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
+  // V8 has checked the receiver against the method's Signature, so it is a wrapper made from a
+  // Rust resource template, and needs no marker check.
+  return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
 }
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
