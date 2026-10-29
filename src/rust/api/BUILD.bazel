@@ -1,3 +1,4 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
@@ -10,6 +11,7 @@ wd_rust_crate(
         # C++ ada library. Provide the symbols via workerd's existing C++
         # @ada-url instead, avoiding a duplicate copy of ada in the binary.
         "@ada-url",
+        ":inspector",
     ],
     proc_macro_deps = [
         "//src/rust/jsg-macros",
@@ -20,5 +22,23 @@ wd_rust_crate(
         "//src/rust/jsg",
         "@crates_vendor//:ada-url",
         "@crates_vendor//:thiserror",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
+exports_files([
+    "inspector.c++",
+    "inspector.h",
+])
+
+# The C++ half of `node-internal:inspector`. A separate library, so that the heavy dependencies
+# it needs stay off `:lib.rs@cxx`, which every includer of the bridge header depends on.
+wd_cc_library(
+    name = "inspector",
+    srcs = ["inspector.c++"],
+    implementation_deps = [
+        ":lib.rs@cxx",
+        "//src/workerd/io",
+        "//src/workerd/util:thread-scopes",
     ],
 )

@@ -2,6 +2,8 @@
 
 C++ implementations of Node.js built-in modules. Each module = JSG-bound class registered via `NODEJS_MODULES(V)` macro in `node.h`. TypeScript counterpart lives in `src/node/`. Exception: `diagnostics-channel` only forwards messages to tail workers (`publishToTracer`); the module itself is in `src/node/diagnostics_channel.ts`.
 
+Some `node-internal:` modules (`dns`, `inspector`, `url`) are implemented in Rust instead, in `src/rust/api/`, and registered by `register_nodejs_modules()` in `src/rust/api/lib.rs`, not in `NODEJS_MODULES`. See `src/rust/AGENTS.md`.
+
 ## BUILD TARGETS
 
 - **`node-core`**: buffer, i18n. **No `//src/workerd/io` dep** — do not add one. Depends on the `i18n` Rust crate, `nbytes`, `simdutf`.
