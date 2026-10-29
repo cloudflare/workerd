@@ -42,6 +42,11 @@ declare global {
     properties?: unknown
   ): Test;
   function test(func: TestFn, name?: string, properties?: unknown): void;
+  function generate_tests(
+    func: UnknownFunc,
+    args: [string, ...unknown[]][],
+    properties?: unknown
+  ): void;
 }
 
 type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
@@ -205,6 +210,98 @@ export class Test {
     );
   }
 
+  /**
+   * Poll a condition until it becomes true, then run a function as a step of the test.
+   *
+   * @param cond - Function that returns true once the awaited state is reached.
+   * @param func - Function to run as a test step once ``cond`` returns true.
+   * @param [description] - Error message to add to assert in case of
+   * timeout.
+   * @param [timeout] - Time in ms to wait for ``cond`` before failing.
+   * @param [interval] - Time in ms between evaluations of ``cond``.
+   */
+  step_wait_func(
+    cond: () => unknown,
+    func: UnknownFunc,
+    description?: string,
+    timeout = 3000,
+    interval = 100
+  ): void {
+    let remaining = Math.ceil(timeout / interval);
+
+    const waitForInner = this.step_func(() => {
+      if (cond()) {
+        func();
+        return;
+      }
+
+      if (remaining === 0) {
+        assert_unreached(
+          `${description ?? 'step_wait_func'}: Timed out waiting on condition`
+        );
+      }
+
+      remaining--;
+      setTimeout(waitForInner, interval);
+    });
+
+    waitForInner();
+  }
+
+  /**
+   * Like :js:func:`Test.step_wait_func`, but marks the test as complete
+   * once ``func`` has run.
+   */
+  step_wait_func_done(
+    cond: () => unknown,
+    func?: UnknownFunc,
+    description?: string,
+    timeout = 3000,
+    interval = 100
+  ): void {
+    this.step_wait_func(
+      cond,
+      () => {
+        if (func) {
+          func();
+        }
+        this.done();
+      },
+      description,
+      timeout,
+      interval
+    );
+  }
+
+  /**
+   * Poll a condition until it becomes true.
+   *
+   * Unlike upstream testharness.js, which leaves the promise pending on timeout and relies on
+   * the harness timeout, the returned promise rejects so the awaiting promise_test fails.
+   *
+   * @param cond - Function that returns true once the awaited state is reached.
+   * @param [description] - Error message to add to assert in case of
+   * timeout.
+   * @param [timeout] - Time in ms to wait for ``cond`` before failing.
+   * @param [interval] - Time in ms between evaluations of ``cond``.
+   */
+  async step_wait(
+    cond: () => unknown,
+    description?: string,
+    timeout = 3000,
+    interval = 100
+  ): Promise<void> {
+    for (let remaining = Math.ceil(timeout / interval); !cond(); remaining--) {
+      if (remaining === 0) {
+        assert_unreached(
+          `${description ?? 'step_wait'}: Timed out waiting on condition`
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
   add_cleanup(func: UnknownFunc): void {
     this.cleanup_callbacks.push(func);
   }
@@ -353,6 +450,40 @@ globalThis.test = (func, name, properties): void => {
   testCase.step(func, testCase, testCase);
   testCase.done();
 };
+
+/**
+ * Create a synchronous test for each set of arguments.
+ *
+ * @param func - Test function, called with the arguments after the name.
+ * @param args - List of ``[name, ...arguments]`` arrays, one for each test.
+ * @param [properties] - Test properties, either shared or one per test.
+ */
+globalThis.generate_tests = (func, args, properties): void => {
+  args.forEach(([name, ...params], i) => {
+    test(
+      function (this: Test) {
+        return func.apply(this, params);
+      },
+      name,
+      Array.isArray(properties) ? (properties as unknown[])[i] : properties
+    );
+  });
+};
+
+/**
+ * Turn the whole test file into a single test, as requested by
+ * ``setup({single_test: true})``. The test completes when the file calls ``done()``.
+ */
+export function startSingleTest(): void {
+  const name = globalThis.state.testFileName;
+  if (maybeAddSkippedTest(name)) {
+    return;
+  }
+
+  const testCase = new AsyncTest(name, undefined);
+  globalThis.state.subtests.push(testCase);
+  globalThis.state.singleTest = testCase;
+}
 
 function maybeAddSkippedTest(message: string): boolean {
   const disabledTests = new FilterList(globalThis.state.options.disabledTests);

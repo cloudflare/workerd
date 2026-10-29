@@ -25,6 +25,7 @@
 
 import crypto from 'node:crypto';
 import { type UnknownFunc, type HostInfo, getHostInfo } from './common';
+import { startSingleTest } from './test';
 
 declare global {
   var GLOBAL: {
@@ -54,7 +55,10 @@ declare global {
 
   function get_host_info(): HostInfo;
   function token(): string;
-  function setup(func: UnknownFunc | Record<string, unknown>): void;
+  function setup(
+    funcOrProperties: UnknownFunc | Record<string, unknown>,
+    maybeProperties?: Record<string, unknown>
+  ): void;
   function add_completion_callback(func: UnknownFunc): void;
   // Provided by /common/gc.js
   function garbageCollect(): Promise<void>;
@@ -66,6 +70,7 @@ declare global {
   ): ArrayBuffer | SharedArrayBuffer;
   // Used by idlharness.js to fetch IDL files
   function fetch_spec(spec: string): Promise<{ spec: string; idl: string }>;
+  function fetch_json(resource: string): Promise<unknown>;
 }
 
 globalThis.get_host_info = (): HostInfo => {
@@ -84,7 +89,12 @@ globalThis.GLOBAL = {
   },
 };
 
-globalThis.done = (): undefined => undefined;
+// Completes the test started by setup({single_test: true}). Otherwise, files are complete once all
+// of their subtests are.
+globalThis.done = (): undefined => {
+  globalThis.state.singleTest?.done();
+  return undefined;
+};
 
 globalThis.subsetTestByKey = (
   _key: string,
@@ -133,12 +143,17 @@ globalThis.token = (): string => {
   return crypto.randomUUID();
 };
 
-globalThis.setup = (func): void => {
-  if (typeof func === 'object') {
-    return;
+globalThis.setup = (funcOrProperties, maybeProperties): void => {
+  const properties =
+    typeof funcOrProperties === 'object' ? funcOrProperties : maybeProperties;
+
+  if (properties?.single_test) {
+    startSingleTest();
   }
 
-  func();
+  if (typeof funcOrProperties === 'function') {
+    funcOrProperties();
+  }
 };
 
 globalThis.add_completion_callback = (func: UnknownFunc): void => {
@@ -179,4 +194,9 @@ globalThis.fetch_spec = (
     );
   }
   return Promise.resolve({ spec, idl });
+};
+
+globalThis.fetch_json = async (resource: string): Promise<unknown> => {
+  const response = await fetch(resource);
+  return response.json();
 };

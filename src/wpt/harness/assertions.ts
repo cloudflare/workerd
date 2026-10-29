@@ -129,6 +129,13 @@ declare global {
     description?: string
   ): void;
 
+  function assert_approx_equals(
+    actual: unknown,
+    expected: number,
+    epsilon: number,
+    description?: string
+  ): void;
+
   function promise_rejects_exactly(
     test: Test,
     exception: typeof Error,
@@ -801,6 +808,36 @@ globalThis.assert_less_than = (actual, expected, description): void => {
  */
 globalThis.assert_less_than_equal = (actual, expected, description): void => {
   ok(actual <= expected, description);
+};
+
+/**
+ * Assert that ``actual`` is within ``epsilon`` of ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Expected value.
+ * @param epsilon - Magnitude of the allowed difference between ``actual`` and ``expected``.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_approx_equals = (
+  actual,
+  expected,
+  epsilon,
+  description
+): void => {
+  ok(
+    typeof actual === 'number',
+    `${description ?? ''}: expected a number but got a ${typeof actual}`
+  );
+
+  // The epsilon math doesn't work with NaN and Infinity
+  if (isFinite(actual) || isFinite(expected)) {
+    ok(
+      Math.abs(actual - expected) <= epsilon,
+      `${description ?? ''}: expected ${expected} +/- ${epsilon} but got ${actual}`
+    );
+  } else {
+    strictEqual(actual, expected, description);
+  }
 };
 
 /**
