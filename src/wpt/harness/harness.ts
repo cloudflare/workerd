@@ -320,6 +320,24 @@ function replaceInterpolation(code: string): string {
     .replace(/\{\{ports\[h2\]\[0\]\}\}/g, hostInfo.HTTPS_PORT);
 }
 
+// Test files in the tested directory are bound under module-relative names, but META scripts may
+// refer to them by absolute path within the WPT tree (e.g.
+// `/html/webappapis/structured-clone/x.js`). Map such paths to their module-relative binding,
+// resolving other paths relative to the test file's directory as usual.
+function getScriptCode(
+  env: Env,
+  wptPath: string,
+  testFile: string,
+  script: string
+): string {
+  const modulePrefix = `/${wptPath}/`;
+  if (script.startsWith(modulePrefix)) {
+    return getCodeAtPath(env, './', script.slice(modulePrefix.length));
+  }
+
+  return getCodeAtPath(env, path.dirname(testFile), script);
+}
+
 function getCodeAtPath(
   env: Env,
   base: string,
@@ -463,7 +481,7 @@ async function runTest(
   const files = [];
 
   for (const script of meta.scripts) {
-    files.push(getCodeAtPath(env, path.dirname(file), script));
+    files.push(getScriptCode(env, wptPath, file, script));
   }
 
   files.push(getCodeAtPath(env, './', file, options.replace));

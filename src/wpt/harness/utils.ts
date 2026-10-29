@@ -167,13 +167,13 @@ globalThis.format_value = (val): string => {
 globalThis.createBuffer = (
   type,
   length,
-  _opts
+  opts
 ): ArrayBuffer | SharedArrayBuffer => {
   switch (type) {
     case 'ArrayBuffer':
-      return new ArrayBuffer(length);
+      return new ArrayBuffer(length, opts);
     case 'SharedArrayBuffer':
-      return new SharedArrayBuffer(length);
+      return new SharedArrayBuffer(length, opts);
     default:
       throw new TypeError(`Unsupported buffer type: ${type}`);
   }
