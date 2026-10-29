@@ -18,6 +18,7 @@ pub mod macros;
 pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
+mod oneof;
 mod promise;
 pub mod resource;
 mod scope;
@@ -33,6 +34,18 @@ use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
+#[doc(hidden)]
+pub use oneof::UnionMember;
+#[doc(hidden)]
+pub use oneof::UnionTypes;
+#[doc(hidden)]
+pub use oneof::UnionVariant;
+#[doc(hidden)]
+pub use oneof::concat_union_names;
+#[doc(hidden)]
+pub use oneof::try_union_from_js;
+#[doc(hidden)]
+pub use oneof::validate_union_names;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -481,8 +494,8 @@ impl Error {
 ///
 /// # Supported Types
 ///
-/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
-/// implementations include:
+/// `T` is one of the types a value is otherwise coerced to, those that implement
+/// [`Coercible`]:
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
@@ -547,6 +560,33 @@ impl<T> Deref for NonCoercible<T> {
         &self.value
     }
 }
+
+/// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
+///
+/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
+/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
+///
+/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
+/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
+/// a coarse test. The trait is sealed.
+#[diagnostic::on_unimplemented(
+    message = "`NonCoercible<{Self}>` is not supported",
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+)]
+pub trait Coercible: Type + coercible::Sealed {}
+
+mod coercible {
+    pub trait Sealed {}
+}
+
+macro_rules! impl_coercible {
+    ($($t:ty),* $(,)?) => {
+        $(impl coercible::Sealed for $t {}
+        impl Coercible for $t {})*
+    };
+}
+
+impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
 
 #[expect(
     unsafe_code,
@@ -913,7 +953,28 @@ pub trait Type: Sized {
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    ///
+    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
+    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
+    /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+
+    /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
+    /// at compile time; see [`UnionTypes`].
+    #[doc(hidden)]
+    const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
+
+    /// Names that identify the type in a `#[jsg_oneof]` union, flattened as
+    /// [`Self::UNION_TYPES`] is: a union's are those of its variants, and a `Nullable<T>`'s are
+    /// `T`'s. A union may not contain a name twice, as C++ JSG's `webidl::FlattenedTypeTraits`
+    /// rejects a type that appears twice in a flattened `kj::OneOf`.
+    ///
+    /// Resources, handles and `SystemTime` have a name, since most of them are in no category, or
+    /// in one with no limit, so [`UnionTypes::validate`] can't tell that one appears twice. The
+    /// other types that `jsg` implements `Type` for need none: each is in a category that a union
+    /// may hold at most one type of.
+    #[doc(hidden)]
+    const UNION_NAMES: &'static [&'static str] = &[];
 }
 
 /// Represents a constant value that can be exposed to JavaScript.
