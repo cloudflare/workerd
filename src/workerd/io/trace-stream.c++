@@ -561,6 +561,21 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanEvent& event, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, js.str("spanEvent"_kj));
+  obj.set(js, NAME_STR, js.str(event.name));
+  obj.set(js, "attributes",
+      js.arr(event.attributes.asPtr(),
+          [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
+  KJ_IF_SOME(time, event.time) {
+    auto tuple = kj::arr(static_cast<double>(time.seconds), static_cast<double>(time.nanoseconds));
+    obj.set(js, "time",
+        js.arr(tuple.asPtr(), [](jsg::Lock& js, double value) { return js.num(value); }));
+  }
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
@@ -727,6 +742,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
       obj.set(js, EVENT_STR, ToJs(js, spanUpdate, cache));
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, spanEvent, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -762,6 +780,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanOpen) {
       return SPANOPEN_STR;
+    }
+    KJ_CASE_ONEOF(_, SpanEvent) {
+      return "spanEvent"_kj;
     }
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;

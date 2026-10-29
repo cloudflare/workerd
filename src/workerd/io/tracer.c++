@@ -20,38 +20,6 @@ namespace {
 // streaming tail worker, this is the maximum size per tail event.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 
-// Approximate serialized size of an attribute value, used for MAX_TRACE_BYTES accounting.
-size_t attributeValueSize(const tracing::Attribute::Value& value) {
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(str, kj::ConstString) {
-      return str.size();
-    }
-    KJ_CASE_ONEOF(val, bool) {
-      return 1;
-    }
-    KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
-      size_t size = arr.size() * sizeof(uint64_t);
-      for (auto& str: arr) {
-        KJ_IF_SOME(value, str) {
-          size += value.size();
-        }
-      }
-      return size;
-    }
-    KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
-      return arr.size() * sizeof(uint64_t);
-    }
-    KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
-      return arr.size() * sizeof(double);
-    }
-    // int64_t and double
-    KJ_CASE_ONEOF_DEFAULT {
-      return sizeof(int64_t);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
 void reportExceptionToTailStream(tracing::TailStreamWriter& writer,
     const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
@@ -295,7 +263,7 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 
   size_t spanTagsSize = 0;
   for (const Span::TagMap::Entry& tag: span.tags) {
-    spanTagsSize += tag.key.size() + attributeValueSize(tag.value);
+    spanTagsSize += tag.key.size() + tracing::attributeValueSize(tag.value);
   }
 
   // Compose Attributes and SpanClose, which are available at span completion time and transmitted
@@ -310,6 +278,14 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
   }
   tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
   userSpanContexts.erase(span.spanId.getId());
+}
+
+void WorkerTracer::addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) return;
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto size = event.size();
+  if (size > MAX_TRACE_BYTES) return;
+  writer->report(spanEventContext(spanId), kj::mv(event), getTime(), size);
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
@@ -666,7 +642,7 @@ void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext
   }
 
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-  size_t size = key.size() + attributeValueSize(value);
+  size_t size = key.size() + tracing::attributeValueSize(value);
   if (size > MAX_TRACE_BYTES) {
     return;
   }

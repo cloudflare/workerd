@@ -6,6 +6,15 @@ import type { Span, TracingSpanContext } from './tracing';
 
 // Private native primitives for the built-in OTel adapter, not a public Workers API.
 declare const tracingContext: {
+  addEvent(
+    span: Span,
+    name: string,
+    attributes: Record<string, unknown>,
+    time?: {
+      seconds: number;
+      nanoseconds: number;
+    }
+  ): void;
   startSpan(
     name: string,
     options: {

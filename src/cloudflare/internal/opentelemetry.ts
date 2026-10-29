@@ -41,6 +41,56 @@ const INVALID: SpanContext = {
   traceFlags: 0,
 };
 
+function timestamp(
+  value: unknown
+): { seconds: number; nanoseconds: number } | undefined {
+  if (value instanceof Date) value = value.getTime();
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    let seconds = Math.floor(value / 1000);
+    let nanoseconds = Math.round((value - seconds * 1000) * 1e6);
+    if (nanoseconds === 1e9) {
+      ++seconds;
+      nanoseconds = 0;
+    }
+    if (Number.isSafeInteger(seconds)) return { seconds, nanoseconds };
+  }
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every(Number.isInteger) &&
+    Number.isSafeInteger(value[0]) &&
+    value[1] >= 0 &&
+    value[1] < 1e9
+  ) {
+    return { seconds: value[0] as number, nanoseconds: value[1] as number };
+  }
+  return undefined;
+}
+
+function eventAttributes(input: unknown): Record<string, SpanValue> {
+  const result: Record<string, SpanValue> = {};
+  if (input === null || typeof input !== 'object') return result;
+  const scalar = (value: unknown): boolean =>
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean';
+  for (const [key, value] of Object.entries(input)) {
+    if (!key) continue;
+    if (scalar(value)) result[key] = value as SpanValue;
+    else if (Array.isArray(value)) {
+      const first = value.find((item) => item != null) as unknown;
+      if (
+        value.every(
+          (item) =>
+            item == null || (scalar(item) && typeof item === typeof first)
+        )
+      )
+        result[key] = value as SpanValue;
+    }
+  }
+  return result;
+}
+
 function attempt<T>(fn: () => T, fallback: T): T {
   try {
     return fn();
@@ -159,8 +209,21 @@ class Span implements SpanLike {
     }, undefined);
     return this;
   }
-  // Events, links and explicit times have no representation in the tail stream yet.
-  addEvent(_name: string, _attributesOrTime?: unknown, _time?: unknown): this {
+  addEvent(name: string, attributesOrTime?: unknown, time?: unknown): this {
+    if (this.#ended || this.inner === undefined || typeof name !== 'string')
+      return this;
+    attempt(() => {
+      const secondIsTime =
+        typeof attributesOrTime === 'number' ||
+        attributesOrTime instanceof Date ||
+        Array.isArray(attributesOrTime);
+      tracingContext.addEvent(
+        this.inner as RuntimeSpan,
+        name,
+        eventAttributes(secondIsTime ? undefined : attributesOrTime),
+        timestamp(secondIsTime ? attributesOrTime : time)
+      );
+    }, undefined);
     return this;
   }
   addLink(_link: unknown): this {

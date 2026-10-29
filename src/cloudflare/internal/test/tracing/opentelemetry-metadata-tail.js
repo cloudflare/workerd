@@ -4,10 +4,12 @@
 
 import assert from 'node:assert';
 const opens = [];
+const spanEvents = [];
 let outcomes = 0;
 export default {
   tailStream(onset) {
     return (event) => {
+      if (event.event.type === 'spanEvent') spanEvents.push(event.event);
       if (event.event.type === 'spanOpen') opens.push(event.event);
       else {
         assert.strictEqual(Object.hasOwn(event.event, 'kind'), false);
@@ -58,5 +60,19 @@ export const metadata = {
       ]);
     }
     assert.strictEqual(opens.length, 11);
+    assert.deepStrictEqual(
+      spanEvents.map((event) => event.name),
+      ['step', 'dated', 'millis', 'implicit', 'implicit']
+    );
+    assert.deepStrictEqual(spanEvents[0].time, [1700000000, 123456789]);
+    assert.deepStrictEqual(spanEvents[0].attributes, [
+      { name: 'text', value: 'hello' },
+      { name: 'count', value: 2 },
+      { name: 'flags', value: [true, false] },
+    ]);
+    assert.deepStrictEqual(spanEvents[1].time, [1700000000, 123000000]);
+    assert.deepStrictEqual(spanEvents[2].time, [1700000000, 456000000]);
+    assert.strictEqual(Object.hasOwn(spanEvents[3], 'time'), false);
+    assert.deepStrictEqual(spanEvents[4].attributes, []);
   },
 };

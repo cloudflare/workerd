@@ -331,6 +331,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
       return spanUpdate.toString();
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      return kj::str("SpanEvent: ", spanEvent.name);
+    }
     KJ_CASE_ONEOF(diagnosticChannelEvent, DiagnosticChannelEvent) {
       return kj::str("diagnosticChannelEvent");
     }
@@ -1873,6 +1876,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::SPAN_UPDATE: {
       return SpanUpdate(event.getSpanUpdate());
     }
+    case rpc::Trace::TailEvent::Event::SPAN_EVENT: {
+      return SpanEvent(event.getSpanEvent());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
@@ -1930,6 +1936,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(update, SpanUpdate) {
       update.copyTo(eventBuilder.initSpanUpdate());
     }
+    KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+      spanEvent.copyTo(eventBuilder.initSpanEvent());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1973,6 +1982,9 @@ TailEvent TailEvent::clone() const {
       KJ_CASE_ONEOF(update, SpanUpdate) {
         return update.clone();
       }
+      KJ_CASE_ONEOF(spanEvent, SpanEvent) {
+        return spanEvent.clone();
+      }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
       }
@@ -1996,6 +2008,64 @@ TailEvent TailEvent::clone() const {
   };
   return TailEvent(spanContext.getTraceId(), invocationId, spanContext.getSpanId(), timestamp,
       sequence, cloneEvent(event), spanContext.getTraceFlags());
+}
+
+size_t attributeValueSize(const Attribute::Value& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(str, kj::ConstString) {
+      return str.size();
+    }
+    KJ_CASE_ONEOF(val, bool) {
+      return 1;
+    }
+    KJ_CASE_ONEOF(arr, AttributeStringArray) {
+      size_t size = arr.size() * sizeof(uint64_t);
+      for (auto& str: arr) {
+        KJ_IF_SOME(value, str) {
+          size += value.size();
+        }
+      }
+      return size;
+    }
+    KJ_CASE_ONEOF(arr, AttributeBoolArray) {
+      return arr.size() * sizeof(uint64_t);
+    }
+    KJ_CASE_ONEOF(arr, AttributeDoubleArray) {
+      return arr.size() * sizeof(double);
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      return sizeof(int64_t);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+SpanEvent::SpanEvent(rpc::Trace::SpanEvent::Reader reader)
+    : name(kj::str(reader.getName())),
+      attributes(KJ_MAP(attribute, reader.getAttributes()) { return Attribute(attribute); }) {
+  if (reader.hasTime()) time = SpanTimestamp(reader.getTime());
+}
+
+void SpanEvent::copyTo(rpc::Trace::SpanEvent::Builder builder) const {
+  builder.setName(name.asPtr());
+  auto list = builder.initAttributes(attributes.size());
+  for (size_t i = 0; i < attributes.size(); i++) attributes[i].copyTo(list[i]);
+  KJ_IF_SOME(value, time) {
+    value.copyTo(builder.initTime());
+  }
+}
+
+SpanEvent SpanEvent::clone() const {
+  return SpanEvent(name.clone(), KJ_MAP(attribute, attributes) { return attribute.clone(); }, time);
+}
+
+size_t SpanEvent::size() const {
+  size_t result = name.size() + sizeof(SpanTimestamp);
+  for (const auto& attribute: attributes) {
+    result += attribute.name.size();
+    for (const auto& value: attribute.value) result += attributeValueSize(value);
+  }
+  return result;
 }
 
 InstrumentationScope InstrumentationScope::clone() const {

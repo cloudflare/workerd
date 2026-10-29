@@ -322,6 +322,12 @@ struct Trace @0x8e8d911203762d34 {
     }
   }
 
+  struct SpanEvent {
+    name @0 :Text;
+    attributes @1 :List(Attribute);
+    time @2 :import "trace.capnp".SpanTimestamp;
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -389,6 +395,7 @@ struct Trace @0x8e8d911203762d34 {
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
       spanUpdate @14 :SpanUpdate;
+      spanEvent @15 :SpanEvent;
     }
   }
 }

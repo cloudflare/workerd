@@ -827,6 +827,24 @@ struct Attribute final {
 };
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
+size_t attributeValueSize(const Attribute::Value& value);
+
+// An explicit application timestamp, independent of the tail event's observation timestamp.
+struct SpanTimestamp {
+  int64_t seconds;
+  uint32_t nanoseconds;
+
+  explicit SpanTimestamp(rpc::SpanTimestamp::Reader reader)
+      : seconds(reader.getSeconds()),
+        nanoseconds(reader.getNanoseconds()) {}
+  SpanTimestamp(int64_t seconds, uint32_t nanoseconds)
+      : seconds(seconds),
+        nanoseconds(nanoseconds) {}
+  void copyTo(rpc::SpanTimestamp::Builder builder) const {
+    builder.setSeconds(seconds);
+    builder.setNanoseconds(nanoseconds);
+  }
+};
 
 // Immutable OTel metadata, carried only on the span's opening event.
 struct InstrumentationScope {
@@ -1029,6 +1047,21 @@ struct Outcome final {
   kj::String toString() const;
 };
 
+struct SpanEvent {
+  kj::ConstString name;
+  CustomInfo attributes;
+  kj::Maybe<SpanTimestamp> time;
+
+  SpanEvent(kj::ConstString name, CustomInfo attributes, kj::Maybe<SpanTimestamp> time)
+      : name(kj::mv(name)),
+        attributes(kj::mv(attributes)),
+        time(time) {}
+  SpanEvent(rpc::Trace::SpanEvent::Reader reader);
+  void copyTo(rpc::Trace::SpanEvent::Builder builder) const;
+  SpanEvent clone() const;
+  size_t size() const;
+};
+
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
@@ -1042,6 +1075,7 @@ struct TailEvent final {
       SpanOpen,
       SpanClose,
       SpanUpdate,
+      SpanEvent,
       DiagnosticChannelEvent,
       Exception,
       Log,

@@ -17,8 +17,20 @@ export const metadata = {
     for (let kind = 0; kind <= 4; kind++) {
       const span = tracer.startSpan(`kind-${kind}`, { kind });
       assert.strictEqual(span.isRecording(), env.enabled);
+      if (kind === 0) {
+        span.addEvent(
+          'step',
+          { text: 'hello', count: 2, flags: [true, false], invalid: {} },
+          [1700000000, 123456789]
+        );
+        span.addEvent('dated', new Date(1700000000123));
+        span.addEvent('millis', 1700000000456);
+        span.addEvent('implicit', { key: 'value' });
+        span.addEvent('implicit');
+      }
       span.updateName(`renamed-kind-${kind}`);
       span.end();
+      span.addEvent('after-end');
     }
     tracer.startSpan('default-kind').end();
     trace.getTracer('name-only').startSpan('name-only').end();

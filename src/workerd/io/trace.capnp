@@ -93,6 +93,11 @@ enum SpanKind {
   consumer @5;
 }
 
+struct SpanTimestamp {
+  seconds @0 :Int64;
+  nanoseconds @1 :UInt32;
+}
+
 struct InstrumentationScope {
   name @0 :Text;
   version @1 :Text;

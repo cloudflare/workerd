@@ -10,6 +10,7 @@
 
 namespace workerd::api {
 class Tracing;  // Forward decl; defined further down after user_tracing::Span.
+class TracingContext;
 }  // namespace workerd::api
 
 // The `Span` class exposed to user JavaScript lives in this sub-namespace purely to avoid
@@ -92,6 +93,8 @@ class SpanState: public kj::Refcounted {
 
   virtual void updateName(kj::ConstString operationName) = 0;
   virtual void setStatus(tracing::SpanStatus status) = 0;
+
+  void addEvent(tracing::SpanEvent event);
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<AttributeValue> maybeValue);
@@ -218,6 +221,7 @@ class Span: public jsg::Object {
   workerd::SpanParent makeSpanParent();
 
   friend class ::workerd::api::Tracing;
+  friend class ::workerd::api::TracingContext;
 };
 
 }  // namespace workerd::api::user_tracing
@@ -348,6 +352,11 @@ class Tracing: public jsg::Object {
 // cloudflare:workers export exposes arbitrary trace identities or async-context storage slots.
 class TracingContext: public jsg::Object {
  public:
+  struct Timestamp {
+    int64_t seconds;
+    uint32_t nanoseconds;
+    JSG_STRUCT(seconds, nanoseconds);
+  };
   struct Scope {
     kj::String name;
     jsg::Optional<kj::String> version;
@@ -363,6 +372,12 @@ class TracingContext: public jsg::Object {
   TracingContext(jsg::Lock&, const jsg::Url&) {}
   jsg::Ref<user_tracing::Span> startSpan(
       jsg::Lock& js, kj::String operationName, SpanOptions options);
+  void addEvent(jsg::Lock& js,
+      jsg::Ref<user_tracing::Span> span,
+      kj::String name,
+      jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+      jsg::Optional<Timestamp> time,
+      const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler);
   jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
       jsg::Optional<user_tracing::TracingSpanContext> context,
       jsg::Function<jsg::JsRef<jsg::JsValue>()> callback,
@@ -372,6 +387,7 @@ class TracingContext: public jsg::Object {
   jsg::Optional<user_tracing::TracingSpanContext> getInvocationSpanContext(jsg::Lock& js);
   JSG_RESOURCE_TYPE(TracingContext) {
     JSG_METHOD(startSpan);
+    JSG_METHOD(addEvent);
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);
@@ -410,4 +426,4 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
   api::Tracing, api::TracingContext, api::TracingContextVariable, api::user_tracing::Span,         \
       api::user_tracing::ExceptionData, api::user_tracing::TracingSpanStatus,                      \
       api::user_tracing::TracingSpanContext, api::TracingContext::Scope,                           \
-      api::TracingContext::SpanOptions
+      api::TracingContext::SpanOptions, api::TracingContext::Timestamp

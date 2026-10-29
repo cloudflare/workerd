@@ -17930,6 +17930,14 @@ export declare namespace TailStream {
     /** A developer-facing error message, present only when code is "error". */
     readonly message?: string;
   }
+  /** An application-recorded OpenTelemetry event on the current span. */
+  interface SpanEvent {
+    readonly type: "spanEvent";
+    readonly name: string;
+    readonly attributes: Attribute[];
+    /** Explicit Unix timestamp as [seconds, nanoseconds]; otherwise use the tail timestamp. */
+    readonly time?: [number, number];
+  }
   interface SpanOpen {
     /** OpenTelemetry span kind, when supplied by the instrumentation. */
     kind?: "internal" | "server" | "client" | "producer" | "consumer";
@@ -18030,6 +18038,7 @@ export declare namespace TailStream {
     | Onset
     | Outcome
     | SpanOpen
+    | SpanEvent
     | SpanClose
     | SpanUpdate
     | DiagnosticChannelEvent
@@ -18073,6 +18082,7 @@ export declare namespace TailStream {
   type TailEventHandlerObject = {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
+    spanEvent?: TailEventHandler<SpanEvent>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;

@@ -267,6 +267,24 @@ void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
   recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void SpanState::addEvent(tracing::SpanEvent event) {
+  if (!getIsTraced() || !IoContext::hasCurrent()) return;
+  auto size = event.size();
+  bytesUsed += size;
+  if (bytesUsed > MAX_SPAN_BYTES) {
+    recordSpanDataLimitError("event", event.name, size);
+    return;
+  }
+  auto parent = makeSpanParent();
+  KJ_IF_SOME(context, parent.toSpanContext()) {
+    KJ_IF_SOME(spanId, context.getSpanId()) {
+      KJ_IF_SOME(tracer, IoContext::current().getWorkerTracer()) {
+        tracer.addSpanEvent(spanId, kj::mv(event));
+      }
+    }
+  }
+}
+
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer,
@@ -1031,6 +1049,40 @@ v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
 
 jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operationName) {
   return createSpan(js, kj::mv(operationName)).span;
+}
+
+void TracingContext::addEvent(jsg::Lock& js,
+    jsg::Ref<user_tracing::Span> span,
+    kj::String name,
+    jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+    jsg::Optional<Timestamp> time,
+    const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler) {
+  if (!IoContext::hasCurrent() || !IoContext::current().isOpentelemetryApiEnabled() ||
+      !span->getIsTraced())
+    return;
+  kj::Vector<tracing::Attribute> values;
+  for (auto& field: attributes.fields) {
+    KJ_IF_SOME(value, field.value) {
+      KJ_IF_SOME(converted,
+          user_tracing::toAttributeValue(js, field.name, value.getHandle(js), scalarHandler)) {
+        values.add(tracing::Attribute(kj::ConstString(kj::mv(field.name)), kj::mv(converted)));
+      }
+    }
+  }
+  kj::Maybe<tracing::SpanTimestamp> timestamp;
+  KJ_IF_SOME(value, time) {
+    JSG_REQUIRE(value.nanoseconds < 1000000000, TypeError, "Invalid event timestamp");
+    timestamp = tracing::SpanTimestamp(value.seconds, value.nanoseconds);
+  }
+  tracing::SpanEvent event(kj::ConstString(kj::mv(name)), values.releaseAsArray(), timestamp);
+  KJ_SWITCH_ONEOF(span->state) {
+    KJ_CASE_ONEOF(state, kj::Own<user_tracing::SpanState>) {
+      state->addEvent(kj::mv(event));
+    }
+    KJ_CASE_ONEOF(state, IoOwn<user_tracing::SpanState>) {
+      state->addEvent(kj::mv(event));
+    }
+  }
 }
 
 jsg::Ref<user_tracing::Span> TracingContext::startSpan(

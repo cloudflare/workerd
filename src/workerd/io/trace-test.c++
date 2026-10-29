@@ -749,6 +749,19 @@ KJ_TEST("Span metadata preserves missing optional fields") {
   KJ_ASSERT(scope.schemaUrl == kj::none);
 }
 
+KJ_TEST("Span events preserve attributes and explicit nanosecond times") {
+  SpanEvent event("event"_kjc, kj::arr(Attribute("count"_kjc, Attribute::Value(2.0))),
+      SpanTimestamp(1700000000, 123456789));
+  capnp::MallocMessageBuilder message;
+  event.clone().copyTo(message.initRoot<rpc::Trace::SpanEvent>());
+  SpanEvent copy(message.getRoot<rpc::Trace::SpanEvent>());
+  KJ_ASSERT(copy.name == "event");
+  KJ_ASSERT(copy.attributes[0].name == "count");
+  KJ_ASSERT(copy.attributes[0].value[0].get<double>() == 2.0);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(copy.time).seconds == 1700000000);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(copy.time).nanoseconds == 123456789);
+}
+
 KJ_TEST("Read/Write SpanUpdate name works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();
