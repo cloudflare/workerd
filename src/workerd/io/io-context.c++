@@ -698,6 +698,11 @@ void IoContext::abort(kj::Exception&& e) {
   abortFlag.reject(kj::mv(e));
 }
 
+kj::Exception IoContext::abortWithoutReasonException() {
+  return JSG_KJ_EXCEPTION(
+      FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
+}
+
 void IoContext::abortIsolate(kj::StringPtr reason) {
   getIoChannelFactory().abortIsolate(reason);
 }
