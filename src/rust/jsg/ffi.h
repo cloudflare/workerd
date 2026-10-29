@@ -576,6 +576,10 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
+// Terminates execution and has V8 deliver the termination before returning, so that it is
+// pending, as jsg::Lock::terminateExecutionNow() does. Requires a context to be entered. Returns
+// whether execution is terminating, which it always should be.
+bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context

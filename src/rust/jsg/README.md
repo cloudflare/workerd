@@ -103,6 +103,9 @@ How the code keeps the rule:
   [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
   `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
+- To terminate execution from Rust, as C++ `jsg::Lock::terminateExecutionNow()` does, return the
+  error `Lock::terminate_execution_now` returns. It delivers the termination before returning,
+  so no more JavaScript runs; `Lock::terminate_execution` only requests one.
 - An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
   overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
   with a `v8::TryCatch` in the shim and decide with `catch_exception()` (`ffi.h`).

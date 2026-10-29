@@ -928,6 +928,41 @@ impl<'s> Lock<'s> {
             v8::ffi::isolate_terminate_execution(self.isolate().as_ffi());
         }
     }
+
+    /// Terminates JavaScript execution on this isolate now, as C++
+    /// `jsg::Lock::terminateExecutionNow()` does, and returns the error that carries the
+    /// termination to the code that started the JavaScript.
+    ///
+    /// Unlike [`Lock::terminate_execution`], which only requests a termination that V8 delivers
+    /// at its next interrupt check, this has V8 deliver it before returning, so that no more
+    /// JavaScript runs: not the rest of the calling function, nor a `catch` or `finally` block.
+    /// Where C++ then unwinds with `JsExceptionThrown`, the caller returns the error, for which
+    /// [`Error::is_pending`] is true:
+    ///
+    /// ```ignore
+    /// #[jsg_method]
+    /// fn stop(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+    ///     Err(lock.terminate_execution_now())
+    /// }
+    /// ```
+    ///
+    /// A `#[jsg_method]` that returns it sets no return value and throws nothing. Code that
+    /// goes on instead cannot run JavaScript or throw anyway: calls into JavaScript fail with a
+    /// pending error while execution is terminating, and the `throw_*` methods throw nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 does not deliver the termination, which C++ asserts too. V8 delivers it
+    /// while it runs code in the entered context, so there must be one.
+    #[must_use = "return the error, so that the termination reaches the code that started the \
+                  JavaScript"]
+    pub fn terminate_execution_now(&mut self) -> Error {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        let terminating =
+            unsafe { v8::ffi::isolate_terminate_execution_now(self.isolate().as_ffi()) };
+        assert!(terminating, "V8 did not terminate execution when asked");
+        Error::pending()
+    }
 }
 
 /// Provides metadata about Rust types exposed to JavaScript.
