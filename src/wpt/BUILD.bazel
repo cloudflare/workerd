@@ -189,6 +189,12 @@ wpt_test(
 )
 
 wpt_test(
+    name = "user-timing",
+    config = "user-timing-test.ts",
+    wpt_directory = "@wpt//:user-timing@module",
+)
+
+wpt_test(
     name = "websockets",
     size = "large",
     compat_flags = [
