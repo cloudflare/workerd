@@ -784,9 +784,14 @@ interface StreamCanceler $Cxx.allowCancellation {
   # of the stream is canceled or released before reaching EOF, and the origin then cancels its
   # underlying source. Dropping the capability without calling cancel() carries no meaning.
 
-  cancel @0 (reason :JsValue);
+  cancel @0 (reason :JsValue, reasonUsesEnhancedErrorSerialization :Bool);
   # `reason` is the value the receiver's copy of the stream was canceled with, serialized, when the
   # receiver can supply one. An empty `reason` means the stream was released without one.
+  #
+  # `reasonUsesEnhancedErrorSerialization` is set when `reason` was serialized with enhanced error
+  # serialization, which lets the origin read it without the stacks of any errors it contains.
+  # V8's native error encoding restores each error's stack when read, so the origin ignores a
+  # `reason` without this flag, as if the stream had been released without one.
 }
 
 interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {

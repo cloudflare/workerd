@@ -222,9 +222,15 @@ impl KjException {
 
         let mut result = Vec::with_capacity(count);
         for detail in c_details {
-            let data =
-                // Safety: the bridge representation and ownership invariants satisfy this operation.
-                unsafe { core::slice::from_raw_parts(detail.data_ptr, detail.data_len).to_vec() };
+            // An empty kj::Array has a null data pointer, which from_raw_parts rejects even when
+            // the length is zero.
+            let data = if detail.data_len == 0 {
+                Vec::new()
+            } else {
+                // Safety: the bridge representation and ownership invariants satisfy this
+                // operation.
+                unsafe { core::slice::from_raw_parts(detail.data_ptr, detail.data_len).to_vec() }
+            };
             result.push((detail.type_id, data));
         }
 
