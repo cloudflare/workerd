@@ -321,8 +321,7 @@ class UserSpanObserver final: public SpanObserver {
         spanId(this->submitter->makeSpanId()),
         parentSpanId(parentSpanId),
         traceId(kj::mv(traceId)),
-        traceFlags(traceFlags.map(
-            [](auto flags) { return tracing::TraceFlags(flags.isSampled() ? 1 : 0); })),
+        traceFlags(traceFlags),
         fromUserCode(fromUserCode) {}
   KJ_DISALLOW_COPY(UserSpanObserver);
 

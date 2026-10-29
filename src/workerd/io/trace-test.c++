@@ -196,19 +196,18 @@ KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagat
   KJ_EXPECT(child3.newChild().getTraceFlags() == kj::none);
 }
 
-KJ_TEST("local invocation sampling defaults preserve explicit decisions and trigger metadata") {
+KJ_TEST("invocations preserve absent sampling decisions and trigger metadata") {
   FakeEntropySource entropy;
   for (auto flags: {kj::Maybe<TraceFlags>(), kj::Maybe<TraceFlags>(TraceFlags(0)),
          kj::Maybe<TraceFlags>(TraceFlags(3))}) {
     auto trigger = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), flags);
-    auto invocation = InvocationSpanContext::newForInvocation(trigger, entropy, TraceFlags(1));
-    auto expected = flags.orDefault(TraceFlags(1));
-    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getTraceFlags()) == expected);
+    auto invocation = InvocationSpanContext::newForInvocation(trigger, entropy);
+    KJ_EXPECT(invocation.getTraceFlags() == flags);
     KJ_EXPECT(invocation.getTraceId() == trigger.getTraceId());
     KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParent()).getSpanId() == trigger.getSpanId());
     KJ_EXPECT(!invocation.isTrigger());
     auto child = invocation.newChild();
-    KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == expected);
+    KJ_EXPECT(child.getTraceFlags() == flags);
   }
 }
 

@@ -242,10 +242,9 @@ InvocationSpanContext InvocationSpanContext::newChild() const {
 
 InvocationSpanContext InvocationSpanContext::newForInvocation(
     kj::Maybe<const InvocationSpanContext&> triggerContext,
-    kj::Maybe<kj::EntropySource&> entropySource,
-    kj::Maybe<TraceFlags> defaultTraceFlags) {
+    kj::Maybe<kj::EntropySource&> entropySource) {
   kj::Maybe<const InvocationSpanContext&> parent;
-  kj::Maybe<TraceFlags> flags = defaultTraceFlags;
+  kj::Maybe<TraceFlags> flags;
   auto traceId = triggerContext
                      .map([&](auto& ctx) mutable {
     parent = ctx;

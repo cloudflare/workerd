@@ -14,7 +14,7 @@ const events = [];
 const onsets = new Map();
 export default {
   tailStream(onset) {
-    assert.strictEqual(onset.spanContext.traceFlags, 1);
+    assert.strictEqual(onset.spanContext.traceFlags, undefined);
     onsets.set(onset.invocationId, onset);
     const collect = collector.tailStream(onset);
     return (event) => {
@@ -138,7 +138,6 @@ export const hierarchy = {
         assert.strictEqual(event.spanContext.traceId, traceId);
       if (event.event.type === 'spanOpen') {
         assert.ok(event.spanContext.spanId);
-        assert.strictEqual(event.spanContext.traceFlags, 1);
       }
     }
     for (const name of ['a', 'b']) {

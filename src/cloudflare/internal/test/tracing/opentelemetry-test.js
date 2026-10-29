@@ -35,7 +35,7 @@ export const registrationAndSurface = {
     assert.deepStrictEqual(invocation.spanContext(), {
       ...tracing.getActiveSpan().spanContext(),
     });
-    assert.strictEqual(invocation.spanContext().traceFlags, 1);
+    assert.strictEqual(invocation.spanContext().traceFlags, 0);
     const span = tracer.startSpan('otel-surface', {
       attributes: { a: [true, false] },
     });
@@ -247,6 +247,15 @@ export const externalParentsAndRoots = {
       assert.match(span.spanContext().spanId, /^[0-9a-f]{16}$/);
       assert.strictEqual(api.context.active().getValue(spanKey), span);
       assert.strictEqual(tracing.getActiveSpan(), undefined);
+      const requestedRoot = tracer.startSpan('otel-unsampled-requested-root', {
+        root: true,
+      });
+      assert.strictEqual(requestedRoot.isRecording(), false);
+      assert.notStrictEqual(
+        requestedRoot.spanContext().traceId,
+        '00000000000000000000000000000000'
+      );
+      requestedRoot.end();
       const child = tracer.startSpan('otel-unsampled-child');
       assert.strictEqual(child.isRecording(), false);
       assert.strictEqual(
@@ -255,7 +264,7 @@ export const externalParentsAndRoots = {
       );
       child.end();
       tracing.enterSpan('otel-unsampled-native', (nativeSpan) => {
-        assert.strictEqual(nativeSpan.isTraced, false);
+        assert.strictEqual(nativeSpan.isTraced, true);
         const nested = tracer.startSpan('otel-unsampled-native-child');
         assert.strictEqual(nested.isRecording(), false);
         assert.strictEqual(
@@ -413,6 +422,10 @@ export const overloads = {
 export const serviceWorkerGetter = {
   async test(_ctrl, env) {
     const response = await env.serviceWorker.fetch('https://worker/');
+    assert.strictEqual(
+      await (await env.newServiceWorker.fetch('https://worker/')).text(),
+      'ok'
+    );
     assert.strictEqual(await response.text(), 'ok');
   },
 };

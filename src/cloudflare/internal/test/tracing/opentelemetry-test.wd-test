@@ -9,6 +9,7 @@ const unitTests :Workerd.Config = (
       bindings = [
         (name = "fetchTarget", service = "mock"),
         (name = "serviceWorker", service = "service-worker"),
+        (name = "newServiceWorker", service = "new-service-worker"),
       ],
     )),
     ( name = "without-node-compat", worker = (
@@ -31,11 +32,25 @@ const unitTests :Workerd.Config = (
     ( name = "service-worker", worker = (
       serviceWorkerScript = embed "opentelemetry-service-worker-test.js",
       compatibilityFlags = ["opentelemetry_api"],
+      bindings = [(name = "expectedRegistration", json = "false")],
+    )),
+    ( name = "new-service-worker", worker = (
+      serviceWorkerScript = embed "opentelemetry-service-worker-test.js",
+      compatibilityFlags = ["opentelemetry_api", "new_module_registry"],
+      bindings = [(name = "expectedRegistration", json = "true")],
     )),
     ( name = "real-api", worker = (
       modules = [
         (name = "worker", esModule = embed "opentelemetry-real-api-test.js"),
         (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.10.0.js"),
+      ],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+      streamingTails = ["tail"],
+    )),
+    ( name = "real-api-1.9", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-real-api-test.js"),
+        (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.9.0.js"),
       ],
       compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
       streamingTails = ["tail"],

@@ -3836,23 +3836,20 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
   }
 
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-      // json encoding is required over simply wrapping it in quotes to correctly escape the string.
-      capnp::JsonCodec json;
-      auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
+    // Both tracer selection and event attribution probe async frames. GC finalizers can call
+    // this without a HandleScope, including while V8 has sealed the surrounding scope.
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&] {
+      KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+        // json encoding is required over simply wrapping it in quotes to correctly escape the string.
+        capnp::JsonCodec json;
+        auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
 
-      // The wrapped call needs a HandleScope on the stack, because
-      // `getInvocationSpanContext()` probes the current async context for the
-      // active user span, which creates V8 handles. Our callers are not
-      // required to have a HandleScope and eg. the GC destructors in
-      // worker-rpc.c++ reach here without one.  We establish one here.
-      jsg::Lock& js = lock;
-      js.withinHandleScope([&] {
         auto timestamp = ioContext.now();
         tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
             kj::mv(jsonDescription));
-      });
-    }
+      }
+    });
   }
 }
 

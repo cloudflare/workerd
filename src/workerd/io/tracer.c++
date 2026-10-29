@@ -231,18 +231,12 @@ void WorkerTracer::setUserSpanContext(tracing::SpanId spanId, tracing::SpanConte
 
 tracing::InvocationSpanContext WorkerTracer::spanEventContext(tracing::SpanId spanId) {
   auto& top = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Like UserSpanObserver, children inherit only the sampling bit. An absent decision stays
-  // absent for workers that have not opted into the OTel API's invocation sampling default.
-  auto normalize = [spanId, &top](kj::Maybe<tracing::TraceFlags> flags) {
-    if (spanId == top.getSpanId()) return flags;
-    return flags.map([](auto flags) { return tracing::TraceFlags(flags.isSampled() ? 1 : 0); });
-  };
   KJ_IF_SOME(context, userSpanContexts.find(spanId.getId())) {
     return tracing::InvocationSpanContext(
-        context.getTraceId(), top.getInvocationId(), spanId, normalize(context.getTraceFlags()));
+        context.getTraceId(), top.getInvocationId(), spanId, context.getTraceFlags());
   }
   return tracing::InvocationSpanContext(
-      top.getTraceId(), top.getInvocationId(), spanId, normalize(top.getTraceFlags()));
+      top.getTraceId(), top.getInvocationId(), spanId, top.getTraceFlags());
 }
 
 void WorkerTracer::addSpanOpen(tracing::SpanId spanId,

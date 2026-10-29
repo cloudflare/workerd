@@ -206,9 +206,9 @@ function nonRecording(parent: SpanContext, inner?: RuntimeSpan): Span {
     ).join('');
   } while (spanId === INVALID.spanId);
   return new Span(inner, parent, {
-    traceId: parent.traceId,
+    traceId: parent.traceId.toLowerCase(),
     spanId,
-    traceFlags: parent.traceFlags & 1,
+    traceFlags: 0,
   });
 }
 
@@ -218,7 +218,7 @@ function wrap(span: RuntimeSpan, parent?: SpanContext): Span {
     // A native no-op nested inside a propagated context must not erase that context.
     result =
       valid(parent) && !valid(attempt(() => span.spanContext(), undefined))
-        ? nonRecording(parent, span)
+        ? new Span(span, parent, parent)
         : new Span(span);
     wrappers.set(span, result);
   }
@@ -281,7 +281,7 @@ class ContextManager {
     let span = getSpan(ctx);
     if (span instanceof tracing.Span) {
       span = wrap(span);
-      ctx = ctx.setValue(SPAN, span);
+      ctx = attempt(() => ctx.setValue(SPAN, span), ctx);
     }
     const inner = attempt(() => {
       const candidate = native(span);
@@ -340,14 +340,42 @@ class Tracer {
     parent: Context = context.active()
   ): Span {
     return attempt(() => {
-      if (options.root) parent = parent.deleteValue(SPAN);
+      const mode = tracingContext.getSpanCreationMode();
+      if (parent.getValue(SUPPRESS)) return new Span();
+      if (mode === 'untraced') {
+        const identity = attempt(
+          () => getSpan(parent)?.spanContext(),
+          undefined
+        );
+        return valid(identity)
+          ? new Span(undefined, identity, identity)
+          : new Span();
+      }
+      // Requested roots remain invocation children until the tail schema supports detached
+      // roots. Even an unsampled invocation must keep its propagation context.
+      if (options.root) parent = context.active().deleteValue(SPAN);
+      const invocation = attempt(
+        () => tracingContext.getInvocationSpanContext(),
+        undefined
+      );
       const parentSpan = getSpan(parent);
       const parentSpanContext = attempt(
         () => parentSpan?.spanContext(),
         undefined
       );
-      if (parent.getValue(SUPPRESS)) return new Span();
-      if (valid(parentSpanContext) && !(parentSpanContext.traceFlags & 1)) {
+      if (mode === 'unsampled') {
+        const identity = valid(parentSpanContext)
+          ? parentSpanContext
+          : invocation;
+        return valid(identity) ? nonRecording(identity) : new Span();
+      }
+      // Native spans expose absent flags as zero; that is not a head-sampling decision.
+      if (
+        valid(parentSpanContext) &&
+        !(parentSpanContext.traceFlags & 1) &&
+        !(parentSpan instanceof tracing.Span) &&
+        !(parentSpan instanceof Span && parentSpan.inner !== undefined)
+      ) {
         return nonRecording(parentSpanContext);
       }
       const inner = context.with(parent, () =>
@@ -355,7 +383,7 @@ class Tracer {
       );
       const span =
         !inner.isTraced && valid(parentSpanContext)
-          ? nonRecording(parentSpanContext)
+          ? new Span(undefined, parentSpanContext, parentSpanContext)
           : new Span(inner, options.root ? undefined : parentSpanContext);
       wrappers.set(inner, span);
       if (options.attributes !== undefined)

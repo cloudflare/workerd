@@ -68,7 +68,8 @@ class IoContext;
 // Request-specific user-tracing state captured in an AsyncContextFrame. Durable Object requests
 // share an IoContext and may overlap, so ambient IoContext state can refer to a newer request when
 // an older continuation resumes. Keeping the span, tracer, and invocation context together ensures
-// tracing events remain attributed to the request that created the async context.
+// opted-in OTel events remain attributed to the request that created the async context. Workers
+// without the flag retain the newest-request heuristic for logs and invocation attribution.
 class UserTraceAsyncContext final {
  public:
   UserTraceAsyncContext(SpanParent span,

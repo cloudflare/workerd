@@ -6,6 +6,8 @@ import type { TracingSpanContext } from './tracing';
 
 // Private native primitives for the built-in OTel adapter, not a public Workers API.
 declare const tracingContext: {
+  getSpanCreationMode(): 'untraced' | 'unsampled' | 'recording';
+  getInvocationSpanContext(): TracingSpanContext | undefined;
   withActiveSpanContext<T>(
     context: TracingSpanContext | undefined,
     callback: () => T

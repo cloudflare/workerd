@@ -311,12 +311,10 @@ class InvocationSpanContext final {
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
   // traceId is used as the traceId for the newly created context. Otherwise a new
   // traceId is generated. The invocationId is always generated new and the spanId
-  // is generated. defaultTraceFlags supplies the local sampling decision only when the trigger
-  // has no explicit decision; parent and entropy-source metadata are preserved in either case.
+  // is generated. Trace flags are inherited without inventing a sampling decision.
   static InvocationSpanContext newForInvocation(
       kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
-      kj::Maybe<kj::EntropySource&> entropySource = kj::none,
-      kj::Maybe<TraceFlags> defaultTraceFlags = kj::none);
+      kj::Maybe<kj::EntropySource&> entropySource = kj::none);
 
   // Creates a new InvocationSpanContext from a capnp message. The returned
   // InvocationSpanContext will not be capable of creating child spans and

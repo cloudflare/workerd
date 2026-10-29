@@ -695,6 +695,33 @@ jsg::Ref<TracingContextVariable> TracingContext::createAsyncContextVariable(jsg:
   return js.alloc<TracingContextVariable>();
 }
 
+jsg::Optional<user_tracing::TracingSpanContext> TracingContext::getInvocationSpanContext(
+    jsg::Lock& js) {
+  if (!IoContext::hasCurrent()) return kj::none;
+  auto& io = IoContext::current();
+  KJ_IF_SOME(owner, io.getCurrentUserTraceAsyncContext()) {
+    KJ_IF_SOME(root, owner.getInvocationSpanContext()) {
+      return user_tracing::toTracingSpanContext(
+          tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags()));
+    }
+  }
+  return kj::none;
+}
+
+kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
+  if (!IoContext::hasCurrent()) return "untraced"_kj;
+  auto& io = IoContext::current();
+  if (io.getWorkerTracer() == kj::none) return "untraced"_kj;
+  auto parent = io.getCurrentUserTraceSpan();
+  if (!parent.isObserved()) return "untraced"_kj;
+  KJ_IF_SOME(identity, parent.toSpanContext()) {
+    KJ_IF_SOME(flags, identity.getTraceFlags()) {
+      if (!flags.isSampled()) return "unsampled"_kj;
+    }
+  }
+  return "recording"_kj;
+}
+
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
     jsg::Optional<user_tracing::TracingSpanContext> context,
     jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
@@ -705,7 +732,7 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
   if (!IoContext::hasCurrent()) return callback(js);
   auto& io = IoContext::current();
   SpanParent parent(nullptr);
-  KJ_IF_SOME(tracer, io.getCurrentUserTracer()) {
+  KJ_IF_SOME(tracer, io.getWorkerTracer()) {
     kj::Maybe<tracing::SpanContext> parsed;
     KJ_IF_SOME(value, context) {
       // Children make a local sampling decision; reserved parent flag bits are not inherited.
@@ -723,11 +750,15 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
           parsed = tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags());
         }
       }
+      if (parsed == kj::none) {
+        auto root = io.getInvocationSpanContext();
+        parsed = tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags());
+      }
     }
     KJ_IF_SOME(value, parsed) {
-      if (value.getTraceFlags().map([](auto flags) { return flags.isSampled(); }).orDefault(true)) {
-        parent = tracer.makeUserSpanParent(kj::mv(value));
-      }
+      // Keep an unsampled native carrier for built-ins and cross-worker calls. The OTel
+      // adapter, not the carrier, decides whether to create an OTel span.
+      parent = tracer.makeUserSpanParent(kj::mv(value));
     }
   }
   auto scope = io.makeUserAsyncTraceScope(io.getCurrentLock(), kj::mv(parent));

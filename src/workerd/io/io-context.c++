@@ -319,32 +319,23 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
     return ctx;
   }
 
-  // The OTel API's locally recorded invocations are sampled unless upstream explicitly decided
-  // otherwise. Keep the absent-flags behavior unchanged for workers that have not opted in.
-  auto localFlags = workerTracer != kj::none &&
-          context->getWorker()
-              .getScript()
-              .getIsolate()
-              .getApi()
-              .getFeatureFlags()
-              .getOpentelemetryApi()
-      ? kj::Maybe<tracing::TraceFlags>(tracing::TraceFlags(1))
-      : kj::none;
   invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
       maybeTriggerInvocationSpan.map(
           [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      context->getEntropySource(), localFlags);
+      context->getEntropySource());
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
 tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
     SpanParent& userSpan) {
   auto& base = getInvocationSpanContext();
-  KJ_IF_SOME(identity, userSpan.toSpanContext()) {
-    KJ_IF_SOME(id, identity.getSpanId()) {
-      if (id != tracing::SpanId::nullId) {
-        return tracing::InvocationSpanContext(
-            identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+  if (context->getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+    KJ_IF_SOME(identity, userSpan.toSpanContext()) {
+      KJ_IF_SOME(id, identity.getSpanId()) {
+        if (id != tracing::SpanId::nullId) {
+          return tracing::InvocationSpanContext(
+              identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+        }
       }
     }
   }
@@ -396,10 +387,8 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
     auto& invCtx = getInvocationSpanContext();
-    if (invCtx.getTraceFlags().map([](auto flags) { return flags.isSampled(); }).orDefault(true)) {
-      rootUserTraceSpan =
-          workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
-    }
+    rootUserTraceSpan =
+        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
   }
 
   KJ_IF_SOME(a, context->actor) {
@@ -594,8 +583,12 @@ bool IoContext::isInspectorEnabled() {
 }
 
 bool IoContext::hasWarningHandler() {
-  return isInspectorEnabled() || getWorkerTracer() != kj::none ||
-      ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);
+  if (isInspectorEnabled() || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) return true;
+  KJ_IF_SOME(lock, currentLock) {
+    jsg::Lock& js = lock;
+    return js.withinHandleScope([&] { return getWorkerTracer() != kj::none; });
+  }
+  return getWorkerTracer() != kj::none;
 }
 
 void IoContext::logWarning(kj::StringPtr description) {
@@ -1514,19 +1507,43 @@ jsg::Value IoContext::makeUserTraceScopeValue(
   SpanParent userSpan(nullptr);
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  bool otel = getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi();
+  bool inherited = false;
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
-    KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
-      invocationSpanContext =
-          owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
-      KJ_IF_SOME(value, owner.getTracer()) {
-        tracer = value.addRef();
+    if (otel) {
+      KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+        inherited = frame.get(*lock.getUserTraceAsyncContextKey()) != kj::none;
+      }
+      KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+        invocationSpanContext =
+            owner.getInvocationSpanContext().map([](auto& ctx) { return ctx.clone(); });
+        KJ_IF_SOME(value, owner.getTracer()) {
+          tracer = value.addRef();
+        }
       }
     }
   } else {
     userSpan = getRootUserTraceSpan();
+  }
+
+  // Owner-less entry frames (including RPC and hibernatable WebSocket handlers) inherit the
+  // current request. A captured owner without a tracer is deliberately not replaced.
+  if (!otel || !inherited) {
+    if (!otel && !userSpan.isObserved()) {
+      return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
+    }
     KJ_IF_SOME(value, getCurrentIncomingRequest().getWorkerTracer()) {
       tracer = value.getWeakRef();
+    }
+    if (!otel) {
+      auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
+      auto id = userSpan.getSpanId();
+      invocationSpanContext = id != tracing::SpanId::nullId
+          ? tracing::InvocationSpanContext(
+                base.getTraceId(), base.getInvocationId(), id, base.getTraceFlags())
+          : base.clone();
+    } else if (tracer != kj::none) {
       invocationSpanContext = getCurrentIncomingRequest().getInvocationSpanContext().clone();
     }
   }
@@ -1564,17 +1581,20 @@ kj::Maybe<UserTraceAsyncContext&> IoContext::getCurrentUserTraceAsyncContext() {
 }
 
 kj::Maybe<BaseTracer&> IoContext::getCurrentUserTracer() {
-  kj::Maybe<BaseTracer&> result;
   KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
     KJ_IF_SOME(weak, owner.getTracer()) {
-      weak.runIfAlive([&](BaseTracer& tracer) { result = tracer; });
+      // The isolate lock prevents tracer destruction until this synchronous caller returns.
+      return weak.tryGet();
     }
   }
-  return result;
+  return kj::none;
 }
 
 kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
   if (incomingRequests.empty()) return kj::none;
+  if (!getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+    return getCurrentIncomingRequest().getWorkerTracer();
+  }
   KJ_IF_SOME(lock, currentLock) {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
       if (frame.get(*lock.getUserTraceAsyncContextKey()) != kj::none) {
@@ -1588,9 +1608,11 @@ kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
 }
 
 tracing::InvocationSpanContext IoContext::getInvocationSpanContext() {
-  KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
-    KJ_IF_SOME(context, owner.getSpanInvocationContext()) {
-      return kj::mv(context);
+  if (getWorker().getIsolate().getApi().getFeatureFlags().getOpentelemetryApi()) {
+    KJ_IF_SOME(owner, getCurrentUserTraceAsyncContext()) {
+      KJ_IF_SOME(context, owner.getSpanInvocationContext()) {
+        return kj::mv(context);
+      }
     }
   }
   auto userSpan = getCurrentUserTraceSpan();

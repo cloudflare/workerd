@@ -28,9 +28,9 @@ export const propagationWithoutTail = {
           identity.traceId,
           '11111111111111111111111111111111'
         );
-        assert.notStrictEqual(identity.spanId, '2222222222222222');
+        assert.strictEqual(identity.spanId, '2222222222222222');
         assert.notStrictEqual(identity.spanId, '0000000000000000');
-        assert.strictEqual(identity.traceFlags, parseInt(flags, 16) & 1);
+        assert.strictEqual(identity.traceFlags, parseInt(flags, 16));
         await Promise.resolve();
         const carrier = {};
         api.propagation.inject(api.context.active(), carrier, {
@@ -45,9 +45,12 @@ export const propagationWithoutTail = {
         assert.strictEqual(carrier.tracestate, 'vendor=value');
         const child = tracer.startSpan('child');
         assert.strictEqual(child.isRecording(), false);
-        assert.notStrictEqual(child.spanContext().spanId, identity.spanId);
+        assert.strictEqual(child.spanContext().spanId, identity.spanId);
         assert.strictEqual(child.spanContext().traceId, identity.traceId);
         child.end();
+        const requestedRoot = tracer.startSpan('root', { root: true });
+        assert.strictEqual(requestedRoot.spanContext(), identity);
+        requestedRoot.end();
         tracing.enterSpan('native-noop', () => {
           const nativeChild = tracer.startSpan('native-child');
           assert.strictEqual(nativeChild.isRecording(), false);
