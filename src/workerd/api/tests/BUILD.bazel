@@ -1590,6 +1590,7 @@ wd_test(
     src = "rpc-error-test.wd-test",
     args = ["--experimental"],
     data = [
+        "rpc-error-mixed-test.js",
         "rpc-error-test.js",
         "rpc-error-test.rpc.js",
     ],
