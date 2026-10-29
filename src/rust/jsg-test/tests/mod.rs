@@ -9,6 +9,7 @@ mod buffer_types;
 mod builtin_module;
 mod coercion_safety;
 mod collections_gc;
+mod cpp_interop;
 mod date_bigint;
 mod dict;
 mod eval;
