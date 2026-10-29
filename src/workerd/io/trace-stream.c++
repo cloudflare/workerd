@@ -576,6 +576,32 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanEvent& event, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanLinks& links, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, js.str("spanLinks"_kj));
+  obj.set(js, "links", js.arr(links.links.asPtr(), [&cache](jsg::Lock& js, const SpanLink& link) {
+    auto item = js.obj();
+    auto context = js.obj();
+    context.set(js, TRACEID_STR, js.str(link.context.getTraceId().toGoString()));
+    KJ_IF_SOME(spanId, link.context.getSpanId()) {
+      context.set(js, SPANID_STR, js.str(spanId.toGoString()));
+    }
+    KJ_IF_SOME(flags, link.context.getTraceFlags()) {
+      context.set(js, "traceFlags", js.num(static_cast<uint8_t>(flags)));
+    }
+    context.set(js, "isRemote", js.boolean(link.origin == SpanLink::Origin::REMOTE));
+    KJ_IF_SOME(state, link.traceState) {
+      context.set(js, "traceState", js.str(state));
+    }
+    item.set(js, "context", context);
+    item.set(js, "attributes",
+        js.arr(link.attributes.asPtr(),
+            [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
+    return item;
+  }));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
@@ -745,6 +771,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanEvent, SpanEvent) {
       obj.set(js, EVENT_STR, ToJs(js, spanEvent, cache));
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      obj.set(js, EVENT_STR, ToJs(js, links, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -783,6 +812,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanEvent) {
       return "spanEvent"_kj;
+    }
+    KJ_CASE_ONEOF(_, SpanLinks) {
+      return "spanLinks"_kj;
     }
     KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;

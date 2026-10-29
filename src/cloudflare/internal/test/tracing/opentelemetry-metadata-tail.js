@@ -5,11 +5,16 @@
 import assert from 'node:assert';
 const opens = [];
 const spanEvents = [];
+const links = [];
+const markSpanIds = [];
 let outcomes = 0;
 export default {
   tailStream(onset) {
     return (event) => {
       if (event.event.type === 'spanEvent') spanEvents.push(event.event);
+      if (event.event.type === 'spanLinks') links.push(...event.event.links);
+      if (['spanEvent', 'spanLinks'].includes(event.event.type))
+        markSpanIds.push(event.spanContext.spanId);
       if (event.event.type === 'spanOpen') opens.push(event.event);
       else {
         assert.strictEqual(Object.hasOwn(event.event, 'kind'), false);
@@ -74,5 +79,23 @@ export const metadata = {
     assert.deepStrictEqual(spanEvents[2].time, [1700000000, 456000000]);
     assert.strictEqual(Object.hasOwn(spanEvents[3], 'time'), false);
     assert.deepStrictEqual(spanEvents[4].attributes, []);
+    assert.strictEqual(links.length, 4);
+    assert.deepStrictEqual(links[0], {
+      context: {
+        traceId: '11111111111111111111111111111111',
+        spanId: '2222222222222222',
+        traceFlags: 255,
+        isRemote: true,
+        traceState: 'vendor=value',
+      },
+      attributes: [{ name: 'source', value: 'options' }],
+    });
+    assert.deepStrictEqual(links[1].attributes, []);
+    assert.strictEqual(links[2].context.isRemote, false);
+    assert.deepStrictEqual(links[2].attributes, [
+      { name: 'source', value: 'addLinks' },
+    ]);
+    assert.deepStrictEqual(links[3], links[1]);
+    assert(markSpanIds.every((id) => id === open('kind-0').spanId));
   },
 };

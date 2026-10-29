@@ -17575,6 +17575,22 @@ export declare namespace TailStream {
     /** Explicit Unix timestamp as [seconds, nanoseconds]; otherwise use the tail timestamp. */
     readonly time?: [number, number];
   }
+  /** A link to another local or remote OpenTelemetry span. */
+  interface SpanLink {
+    readonly context: {
+      readonly traceId: string;
+      readonly spanId: string;
+      readonly traceFlags: number;
+      readonly isRemote: boolean;
+      readonly traceState?: string;
+    };
+    readonly attributes: Attribute[];
+  }
+  /** Links appended to the span identified by the outer tail event context. */
+  interface SpanLinks {
+    readonly type: "spanLinks";
+    readonly links: SpanLink[];
+  }
   interface SpanOpen {
     /** OpenTelemetry span kind, when supplied by the instrumentation. */
     kind?: "internal" | "server" | "client" | "producer" | "consumer";
@@ -17676,6 +17692,7 @@ export declare namespace TailStream {
     | Outcome
     | SpanOpen
     | SpanEvent
+    | SpanLinks
     | SpanClose
     | SpanUpdate
     | DiagnosticChannelEvent
@@ -17720,6 +17737,7 @@ export declare namespace TailStream {
     outcome?: TailEventHandler<Outcome>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanEvent?: TailEventHandler<SpanEvent>;
+    spanLinks?: TailEventHandler<SpanLinks>;
     spanClose?: TailEventHandler<SpanClose>;
     spanUpdate?: TailEventHandler<SpanUpdate>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;

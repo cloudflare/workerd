@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { trace } from '@opentelemetry/api';
+import { trace, createTraceState } from '@opentelemetry/api';
 import { tracing } from 'cloudflare:workers';
 
 export const metadata = {
@@ -14,10 +14,32 @@ export const metadata = {
     const tracer = provider.getTracer('metadata-test', '1.2.3', {
       schemaUrl: 'https://example.com/schema',
     });
+    const linkedContext = {
+      traceId: '11111111111111111111111111111111',
+      spanId: '2222222222222222',
+      traceFlags: 255,
+      isRemote: true,
+      traceState: createTraceState('vendor=value'),
+    };
     for (let kind = 0; kind <= 4; kind++) {
-      const span = tracer.startSpan(`kind-${kind}`, { kind });
+      const span = tracer.startSpan(`kind-${kind}`, {
+        kind,
+        links:
+          kind === 0
+            ? [{ context: linkedContext, attributes: { source: 'options' } }]
+            : [],
+      });
       assert.strictEqual(span.isRecording(), env.enabled);
       if (kind === 0) {
+        assert.strictEqual(span.addLink({ context: linkedContext }), span);
+        span.addLinks([
+          {
+            context: { ...linkedContext, isRemote: false },
+            attributes: { source: 'addLinks', invalid: {} },
+          },
+          { context: linkedContext },
+          { context: { ...linkedContext, spanId: '0000000000000000' } },
+        ]);
         span.addEvent(
           'step',
           { text: 'hello', count: 2, flags: [true, false], invalid: {} },
@@ -31,6 +53,7 @@ export const metadata = {
       span.updateName(`renamed-kind-${kind}`);
       span.end();
       span.addEvent('after-end');
+      span.addLink({ context: linkedContext });
     }
     tracer.startSpan('default-kind').end();
     trace.getTracer('name-only').startSpan('name-only').end();

@@ -95,6 +95,7 @@ class SpanState: public kj::Refcounted {
   virtual void setStatus(tracing::SpanStatus status) = 0;
 
   void addEvent(tracing::SpanEvent event);
+  void addLinks(tracing::SpanLinks links);
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
   void setAttribute(kj::String key, kj::Maybe<AttributeValue> maybeValue);
@@ -378,6 +379,13 @@ class TracingContext: public jsg::Object {
       jsg::Dict<jsg::Optional<jsg::Value>> attributes,
       jsg::Optional<Timestamp> time,
       const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler);
+  void addLink(jsg::Lock& js,
+      jsg::Ref<user_tracing::Span> span,
+      user_tracing::TracingSpanContext context,
+      jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+      jsg::Optional<bool> isRemote,
+      jsg::Optional<kj::String> traceState,
+      const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler);
   jsg::JsRef<jsg::JsValue> withActiveSpanContext(jsg::Lock& js,
       jsg::Optional<user_tracing::TracingSpanContext> context,
       jsg::Function<jsg::JsRef<jsg::JsValue>()> callback,
@@ -388,6 +396,7 @@ class TracingContext: public jsg::Object {
   JSG_RESOURCE_TYPE(TracingContext) {
     JSG_METHOD(startSpan);
     JSG_METHOD(addEvent);
+    JSG_METHOD(addLink);
     JSG_METHOD(withActiveSpanContext);
     JSG_METHOD(createAsyncContextVariable);
     JSG_METHOD(getSpanCreationMode);

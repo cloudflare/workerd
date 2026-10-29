@@ -68,7 +68,7 @@ function timestamp(
 }
 
 function eventAttributes(input: unknown): Record<string, SpanValue> {
-  const result: Record<string, SpanValue> = {};
+  const result = Object.create(null) as Record<string, SpanValue>;
   if (input === null || typeof input !== 'object') return result;
   const scalar = (value: unknown): boolean =>
     typeof value === 'string' ||
@@ -226,10 +226,31 @@ class Span implements SpanLike {
     }, undefined);
     return this;
   }
-  addLink(_link: unknown): this {
+  addLink(link: unknown): this {
+    if (this.#ended || this.inner === undefined) return this;
+    attempt(() => {
+      if (link === null || typeof link !== 'object') return;
+      const value = link as { context?: SpanContext; attributes?: unknown };
+      const identity = value.context;
+      if (!valid(identity)) return;
+      tracingContext.addLink(
+        this.inner as RuntimeSpan,
+        {
+          traceId: identity.traceId.toLowerCase(),
+          spanId: identity.spanId.toLowerCase(),
+          traceFlags: identity.traceFlags,
+        },
+        eventAttributes(value.attributes),
+        identity.isRemote === true,
+        identity.traceState?.serialize()
+      );
+    }, undefined);
     return this;
   }
-  addLinks(_links: unknown[]): this {
+  addLinks(links: unknown[]): this {
+    if (!this.#ended && Array.isArray(links)) {
+      for (const link of links) this.addLink(link);
+    }
     return this;
   }
   setStatus(status: { code: number; message?: string }): this {
@@ -494,6 +515,7 @@ class Tracer {
       wrappers.set(inner, span);
       if (options.attributes !== undefined)
         span.setAttributes(options.attributes);
+      if (options.links !== undefined) span.addLinks(options.links);
       return span;
     }, new Span());
   }

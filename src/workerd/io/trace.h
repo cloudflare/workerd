@@ -1062,13 +1062,43 @@ struct SpanEvent {
   size_t size() const;
 };
 
+struct SpanLink {
+  enum class Origin { LOCAL, REMOTE };
+  SpanContext context;
+  CustomInfo attributes;
+  Origin origin;
+  kj::Maybe<kj::ConstString> traceState;
+
+  SpanLink(SpanContext context,
+      CustomInfo attributes,
+      Origin origin,
+      kj::Maybe<kj::ConstString> traceState)
+      : context(kj::mv(context)),
+        attributes(kj::mv(attributes)),
+        origin(origin),
+        traceState(kj::mv(traceState)) {}
+  SpanLink(rpc::Trace::SpanLink::Reader reader);
+  void copyTo(rpc::Trace::SpanLink::Builder builder) const;
+  SpanLink clone() const;
+  size_t size() const;
+};
+
+struct SpanLinks {
+  kj::Array<SpanLink> links;
+
+  explicit SpanLinks(kj::Array<SpanLink> links): links(kj::mv(links)) {}
+  SpanLinks(rpc::Trace::SpanLinks::Reader reader);
+  void copyTo(rpc::Trace::SpanLinks::Builder builder) const;
+  SpanLinks clone() const;
+  size_t size() const;
+};
+
 // A streaming tail worker receives a series of Tail Events. Tail events always
 // occur within an InvocationSpanContext. The first TailEvent delivered to a
 // streaming tail session is always an Onset. The final TailEvent delivered is
 // always an Outcome. Between those can be any number of SpanOpen, SpanUpdate,
 // SpanClose, and Mark events. Every SpanOpen *must* be associated with a
 // SpanClose unless the stream was abruptly terminated.
-// A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
@@ -1076,6 +1106,7 @@ struct TailEvent final {
       SpanClose,
       SpanUpdate,
       SpanEvent,
+      SpanLinks,
       DiagnosticChannelEvent,
       Exception,
       Log,

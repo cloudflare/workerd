@@ -288,6 +288,14 @@ void WorkerTracer::addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event
   writer->report(spanEventContext(spanId), kj::mv(event), getTime(), size);
 }
 
+void WorkerTracer::addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) return;
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto size = links.size();
+  if (size > MAX_TRACE_BYTES) return;
+  writer->report(spanEventContext(spanId), kj::mv(links), getTime(), size);
+}
+
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;

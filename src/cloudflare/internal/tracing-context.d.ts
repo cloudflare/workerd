@@ -6,6 +6,13 @@ import type { Span, TracingSpanContext } from './tracing';
 
 // Private native primitives for the built-in OTel adapter, not a public Workers API.
 declare const tracingContext: {
+  addLink(
+    span: Span,
+    context: TracingSpanContext,
+    attributes: Record<string, unknown>,
+    isRemote: boolean,
+    traceState?: string
+  ): void;
   addEvent(
     span: Span,
     name: string,

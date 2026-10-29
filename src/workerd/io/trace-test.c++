@@ -762,6 +762,24 @@ KJ_TEST("Span events preserve attributes and explicit nanosecond times") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(copy.time).nanoseconds == 123456789);
 }
 
+KJ_TEST("Span links preserve identities, flags, trace state and attributes") {
+  auto parsed =
+      SpanContext::tryFromTraceparent("00-11111111111111111111111111111111-2222222222222222-ff");
+  SpanLinks links(kj::arr(SpanLink(SpanContext::clone(KJ_ASSERT_NONNULL(parsed)),
+      kj::arr(Attribute("source"_kjc, Attribute::Value(kj::ConstString("test"_kjc)))),
+      SpanLink::Origin::REMOTE, kj::ConstString("vendor=value"_kjc))));
+  capnp::MallocMessageBuilder message;
+  links.clone().copyTo(message.initRoot<rpc::Trace::SpanLinks>());
+  SpanLinks copy(message.getRoot<rpc::Trace::SpanLinks>());
+  KJ_ASSERT(copy.links.size() == 1);
+  auto& link = copy.links[0];
+  KJ_ASSERT(link.context == KJ_ASSERT_NONNULL(parsed));
+  KJ_ASSERT(static_cast<uint8_t>(KJ_ASSERT_NONNULL(link.context.getTraceFlags())) == 255);
+  KJ_ASSERT(link.origin == SpanLink::Origin::REMOTE);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(link.traceState) == "vendor=value");
+  KJ_ASSERT(link.attributes[0].value[0].get<kj::ConstString>() == "test");
+}
+
 KJ_TEST("Read/Write SpanUpdate name works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanUpdate>();

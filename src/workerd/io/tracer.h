@@ -75,6 +75,7 @@ class BaseTracer: public kj::Refcounted {
   virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
   virtual void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) = 0;
   virtual void addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) {}
+  virtual void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {}
   virtual void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) = 0;
@@ -201,6 +202,7 @@ class WorkerTracer final: public BaseTracer {
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
   void addSpanEvent(tracing::SpanId spanId, tracing::SpanEvent event) override;
+  void addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) override;
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;

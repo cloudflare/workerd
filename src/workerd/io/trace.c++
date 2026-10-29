@@ -334,6 +334,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(spanEvent, SpanEvent) {
       return kj::str("SpanEvent: ", spanEvent.name);
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      return kj::str("SpanLinks: ", links.links.size());
+    }
     KJ_CASE_ONEOF(diagnosticChannelEvent, DiagnosticChannelEvent) {
       return kj::str("diagnosticChannelEvent");
     }
@@ -1879,6 +1882,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::SPAN_EVENT: {
       return SpanEvent(event.getSpanEvent());
     }
+    case rpc::Trace::TailEvent::Event::SPAN_LINKS: {
+      return SpanLinks(event.getSpanLinks());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
@@ -1939,6 +1945,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(spanEvent, SpanEvent) {
       spanEvent.copyTo(eventBuilder.initSpanEvent());
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      links.copyTo(eventBuilder.initSpanLinks());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1984,6 +1993,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(spanEvent, SpanEvent) {
         return spanEvent.clone();
+      }
+      KJ_CASE_ONEOF(links, SpanLinks) {
+        return links.clone();
       }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
@@ -2038,6 +2050,57 @@ size_t attributeValueSize(const Attribute::Value& value) {
     }
   }
   KJ_UNREACHABLE;
+}
+
+SpanLink::SpanLink(rpc::Trace::SpanLink::Reader reader)
+    : context(SpanContext::fromCapnp(reader.getContext())),
+      attributes(KJ_MAP(attribute, reader.getAttributes()) { return Attribute(attribute); }),
+      origin(reader.getIsRemote() ? Origin::REMOTE : Origin::LOCAL) {
+  if (reader.hasTraceState()) traceState = kj::ConstString(kj::str(reader.getTraceState()));
+}
+
+void SpanLink::copyTo(rpc::Trace::SpanLink::Builder builder) const {
+  context.toCapnp(builder.initContext());
+  auto list = builder.initAttributes(attributes.size());
+  for (size_t i = 0; i < attributes.size(); i++) attributes[i].copyTo(list[i]);
+  builder.setIsRemote(origin == Origin::REMOTE);
+  KJ_IF_SOME(value, traceState) {
+    builder.setTraceState(value.asPtr());
+  }
+}
+
+SpanLink SpanLink::clone() const {
+  return SpanLink(SpanContext::clone(context), KJ_MAP(attribute, attributes) {
+    return attribute.clone();
+  }, origin, traceState.map([](const auto& value) { return value.clone(); }));
+}
+
+size_t SpanLink::size() const {
+  size_t result = sizeof(SpanContext) +
+      traceState.map([](const auto& value) { return value.size(); }).orDefault(0);
+  for (const auto& attribute: attributes) {
+    result += attribute.name.size();
+    for (const auto& value: attribute.value) result += attributeValueSize(value);
+  }
+  return result;
+}
+
+SpanLinks::SpanLinks(rpc::Trace::SpanLinks::Reader reader)
+    : links(KJ_MAP(link, reader.getLinks()) { return SpanLink(link); }) {}
+
+void SpanLinks::copyTo(rpc::Trace::SpanLinks::Builder builder) const {
+  auto list = builder.initLinks(links.size());
+  for (size_t i = 0; i < links.size(); i++) links[i].copyTo(list[i]);
+}
+
+SpanLinks SpanLinks::clone() const {
+  return SpanLinks(KJ_MAP(link, links) { return link.clone(); });
+}
+
+size_t SpanLinks::size() const {
+  size_t result = 0;
+  for (const auto& link: links) result += link.size();
+  return result;
 }
 
 SpanEvent::SpanEvent(rpc::Trace::SpanEvent::Reader reader)

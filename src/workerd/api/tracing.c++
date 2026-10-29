@@ -285,6 +285,24 @@ void SpanState::addEvent(tracing::SpanEvent event) {
   }
 }
 
+void SpanState::addLinks(tracing::SpanLinks links) {
+  if (!getIsTraced() || !IoContext::hasCurrent()) return;
+  auto size = links.size();
+  bytesUsed += size;
+  if (bytesUsed > MAX_SPAN_BYTES) {
+    recordSpanDataLimitError("links", "", size);
+    return;
+  }
+  auto parent = makeSpanParent();
+  KJ_IF_SOME(context, parent.toSpanContext()) {
+    KJ_IF_SOME(spanId, context.getSpanId()) {
+      KJ_IF_SOME(tracer, IoContext::current().getWorkerTracer()) {
+        tracer.addSpanLinks(spanId, kj::mv(links));
+      }
+    }
+  }
+}
+
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer,
@@ -1081,6 +1099,50 @@ void TracingContext::addEvent(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(state, IoOwn<user_tracing::SpanState>) {
       state->addEvent(kj::mv(event));
+    }
+  }
+}
+
+void TracingContext::addLink(jsg::Lock& js,
+    jsg::Ref<user_tracing::Span> span,
+    user_tracing::TracingSpanContext context,
+    jsg::Dict<jsg::Optional<jsg::Value>> attributes,
+    jsg::Optional<bool> isRemote,
+    jsg::Optional<kj::String> traceState,
+    const jsg::TypeHandler<user_tracing::TagValue>& scalarHandler) {
+  if (!IoContext::hasCurrent() || !IoContext::current().isOpentelemetryApiEnabled() ||
+      !span->getIsTraced())
+    return;
+  auto parsed = tracing::SpanContext::tryFromTraceparent(
+      kj::str("00-", context.traceId, "-", context.spanId, "-00"));
+  JSG_REQUIRE(parsed != kj::none, TypeError, "Invalid link context");
+  auto& identity = KJ_ASSERT_NONNULL(parsed);
+  kj::Vector<tracing::Attribute> values;
+  for (auto& field: attributes.fields) {
+    KJ_IF_SOME(value, field.value) {
+      KJ_IF_SOME(converted,
+          user_tracing::toAttributeValue(js, field.name, value.getHandle(js), scalarHandler)) {
+        values.add(tracing::Attribute(kj::ConstString(kj::mv(field.name)), kj::mv(converted)));
+      }
+    }
+  }
+  kj::Maybe<kj::ConstString> serializedTraceState;
+  KJ_IF_SOME(value, traceState) {
+    serializedTraceState = kj::ConstString(kj::mv(value));
+  }
+  tracing::SpanLink link(tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
+                             tracing::TraceFlags(context.traceFlags)),
+      values.releaseAsArray(),
+      isRemote.orDefault(false) ? tracing::SpanLink::Origin::REMOTE
+                                : tracing::SpanLink::Origin::LOCAL,
+      kj::mv(serializedTraceState));
+  tracing::SpanLinks links(kj::arr(kj::mv(link)));
+  KJ_SWITCH_ONEOF(span->state) {
+    KJ_CASE_ONEOF(state, kj::Own<user_tracing::SpanState>) {
+      state->addLinks(kj::mv(links));
+    }
+    KJ_CASE_ONEOF(state, IoOwn<user_tracing::SpanState>) {
+      state->addLinks(kj::mv(links));
     }
   }
 }
