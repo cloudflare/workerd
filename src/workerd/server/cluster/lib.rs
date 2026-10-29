@@ -17,8 +17,8 @@
 //!   (`log.rs`), a session per epoch. A takeover restores the last opened
 //!   epoch's session and starts the next from a snapshot of it, so a late
 //!   write from the old owner lands where nothing reads it.
-//! - `alarms/<node>/<time>/<namespace>/<actor>`: an alarm `node` wakes
-//!   `actor` for no later than `time` (`alarms.rs`).
+//! - `alarms/<node>/<time>/<namespace>/<actor>/<seq>`: an alarm `node`
+//!   wakes `actor` for no later than `time` (`alarms.rs`).
 //!
 //! `<namespace>` is a hash of the namespace's `uniqueKey`, and `<actor>` the
 //! actor ID's hex, so no key's length depends on a name.

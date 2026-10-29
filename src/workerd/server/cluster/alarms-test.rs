@@ -18,7 +18,18 @@ fn entry(at_ms: u64, actor: &str) -> Entry {
         at_ms,
         namespace: "ns".into(),
         actor: actor.into(),
+        seq: 0,
     }
+}
+
+/// `node`'s entries as time and actor, earliest first.
+async fn listed(alarms: &Alarms, node: &str) -> Vec<(u64, String)> {
+    let entries = alarms.list(node).await.unwrap();
+    entries.into_iter().map(|e| (e.at_ms, e.actor)).collect()
+}
+
+fn at(at_ms: u64, actor: &str) -> (u64, String) {
+    (at_ms, actor.to_owned())
 }
 
 #[test]
@@ -81,27 +92,41 @@ fn arming_waits_only_for_new_or_earlier_alarms() {
         let alarms = Alarms::new(bucket.clone());
         let index = Index::new(bucket, "n1");
         index.arm("ns", "a", Some("room"), Some(20)).await.unwrap();
-        assert_eq!(alarms.list("n1").await.unwrap(), [entry(20, "a")]);
+        assert_eq!(listed(&alarms, "n1").await, [at(20, "a")]);
         // Earlier: indexed before arm resolves, the old entry gone on tidy.
         index.arm("ns", "a", Some("room"), Some(10)).await.unwrap();
-        assert_eq!(
-            alarms.list("n1").await.unwrap(),
-            [entry(10, "a"), entry(20, "a")]
-        );
+        assert_eq!(listed(&alarms, "n1").await, [at(10, "a"), at(20, "a")]);
         index.tidy().await;
-        assert_eq!(alarms.list("n1").await.unwrap(), [entry(10, "a")]);
+        assert_eq!(listed(&alarms, "n1").await, [at(10, "a")]);
         // Later: the early entry stays until tidy moves it.
         index.arm("ns", "a", Some("room"), Some(30)).await.unwrap();
-        assert_eq!(alarms.list("n1").await.unwrap(), [entry(10, "a")]);
+        assert_eq!(listed(&alarms, "n1").await, [at(10, "a")]);
         index.tidy().await;
-        assert_eq!(alarms.list("n1").await.unwrap(), [entry(30, "a")]);
-        let name = alarms.name("n1", &entry(30, "a")).await.unwrap();
+        assert_eq!(listed(&alarms, "n1").await, [at(30, "a")]);
+        let entry = alarms.list("n1").await.unwrap().remove(0);
+        let name = alarms.name("n1", &entry).await.unwrap();
         assert_eq!(name.as_deref(), Some("room"));
         // Cleared.
         index.arm("ns", "a", None, None).await.unwrap();
         index.tidy().await;
         assert!(alarms.list("n1").await.unwrap().is_empty());
         assert!(index.armed.borrow().is_empty());
+    });
+}
+
+#[test]
+fn moving_back_to_a_stale_entrys_time_keeps_an_entry() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        let alarms = Alarms::new(bucket.clone());
+        let index = Index::new(bucket, "n1");
+        index.arm("ns", "a", None, Some(59)).await.unwrap();
+        index.arm("ns", "a", None, Some(50)).await.unwrap();
+        // Back to 59: tidy writes 59 again and deletes the first 59 entry,
+        // which must not be the new one.
+        index.arm("ns", "a", None, Some(59)).await.unwrap();
+        index.tidy().await;
+        assert_eq!(listed(&alarms, "n1").await, [at(59, "a")]);
     });
 }
 
@@ -119,7 +144,8 @@ fn survivors_split_a_dead_nodes_alarms() {
         }
         let live: Vec<String> = ["a", "b"].map(String::from).into();
         let (a, b) = (Index::new(bucket.clone(), "a"), Index::new(bucket, "b"));
-        // `a` already owns object 0 with a later alarm: it keeps that.
+        // `a` already owns object 0 with a later alarm: its index keeps
+        // that, and the adopted one only wakes the object early.
         a.arm("ns", "0", Some("name0"), Some(500)).await.unwrap();
         let dead_nodes = ["d".to_owned()];
         let by_a = a.adopt(&live, &dead_nodes).await.unwrap();
@@ -129,9 +155,7 @@ fn survivors_split_a_dead_nodes_alarms() {
             alarms.list("a").await.unwrap(),
             alarms.list("b").await.unwrap(),
         );
-        // Object 0's early entry moved to `a` too, if it was `a`'s to adopt.
-        let zero_to_a = assignee(&live, &entry(100, "0")) == Some("a");
-        assert_eq!(by_a.len() + by_b.len(), 40 - usize::from(zero_to_a));
+        assert_eq!(by_a.len() + by_b.len(), 40);
         assert_eq!(in_a.len() + in_b.len(), 41);
         assert!(!by_a.is_empty() && !by_b.is_empty());
         let named = by_a.iter().chain(&by_b).find(|x| x.actor == "2").unwrap();
@@ -198,7 +222,8 @@ fn a_failed_adoption_still_schedules_and_retries() {
             8
         );
         fail.set(false);
-        assert!(a.adopt(&live, &dead_nodes).await.unwrap().is_empty());
+        // Again, which only schedules what is scheduled already.
+        assert_eq!(a.adopt(&live, &dead_nodes).await.unwrap().len(), 8);
         assert!(Alarms::new(bucket).list("d").await.unwrap().is_empty());
     });
 }

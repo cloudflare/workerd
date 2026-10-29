@@ -277,7 +277,13 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs) {
   auto key = ActorKey(kj::str(actor), name.empty() ? kj::Maybe<kj::String>() : kj::str(name));
-  storage.getImpl().alarmScheduler->setAlarm(key, kj::UNIX_EPOCH + atMs * kj::MILLISECONDS);
+  auto time = kj::UNIX_EPOCH + atMs * kj::MILLISECONDS;
+  auto& scheduler = *storage.getImpl().alarmScheduler;
+  // Only ever earlier: waking an object early is a no-op, late is a missed alarm.
+  KJ_IF_SOME(current, scheduler.getAlarm(key)) {
+    if (current <= time) return;
+  }
+  scheduler.setAlarm(key, time);
 }
 
 namespace {

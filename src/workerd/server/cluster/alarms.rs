@@ -6,13 +6,16 @@
 //!
 //! An object's alarm lives in its own database, which moves with it. The
 //! index lets survivors find the alarms of an owner that died with its
-//! objects idle. An entry `alarms/<node>/<time>/<namespace>/<actor>` says
-//! `node` wakes `actor` no later than `time`: it may be early or stale, but
-//! never late, since waking an object whose alarm moved or went is a no-op.
-//! Its body is the actor's name, if it has one, for `ctx.id.name`.
+//! objects idle. An entry `alarms/<node>/<time>/<namespace>/<actor>/<seq>`
+//! says `node` wakes `actor` no later than `time`: it may be early or stale,
+//! but never late, since waking an object whose alarm next or went is a
+//! no-op. Its body is the actor's name, if it has one, for `ctx.id.name`.
+//! `seq` numbers a node's entries, so that deleting a stale one never
+//! deletes a later one for the same object and time.
 
+use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use futures::StreamExt;
 use futures::stream;
@@ -30,12 +33,13 @@ pub struct Entry {
     /// The namespace's hash (`namespace_hash`).
     pub namespace: String,
     pub actor: String,
+    pub seq: u64,
 }
 
 impl Entry {
     fn key(&self, node: &str) -> String {
-        let at = ascending(self.at_ms);
-        format!("alarms/{node}/{at}/{}/{}", self.namespace, self.actor)
+        let (at, seq) = (ascending(self.at_ms), ascending(self.seq));
+        format!("alarms/{node}/{at}/{}/{}/{seq}", self.namespace, self.actor)
     }
 }
 
@@ -68,10 +72,12 @@ impl Alarms {
                 let at_ms = parse(parts.next()?, true)?;
                 let namespace = parts.next()?.to_owned();
                 let actor = parts.next()?.to_owned();
+                let seq = parse(parts.next()?, true)?;
                 parts.next().is_none().then_some(Entry {
                     at_ms,
                     namespace,
                     actor,
+                    seq,
                 })
             })
             .collect())
@@ -97,7 +103,7 @@ type Key = (String, String);
 /// bucket, and the alarm the entry should be for.
 #[derive(Default)]
 struct Armed {
-    indexed: Option<u64>,
+    indexed: Option<Entry>,
     want: Option<u64>,
     name: Option<String>,
 }
@@ -115,9 +121,11 @@ pub struct Adopted {
 pub struct Index {
     alarms: Alarms,
     node: String,
-    armed: RefCell<HashMap<Key, Armed>>,
+    armed: RefCell<BTreeMap<Key, Armed>>,
     /// Entries of this node's to delete.
     stale: RefCell<Vec<Entry>>,
+    /// The last entry's `seq`.
+    seq: Cell<u64>,
 }
 
 impl Index {
@@ -127,6 +135,17 @@ impl Index {
             node: node.to_owned(),
             armed: RefCell::default(),
             stale: RefCell::default(),
+            seq: Cell::default(),
+        }
+    }
+
+    fn entry(&self, key: &Key, at_ms: u64) -> Entry {
+        self.seq.set(self.seq.get() + 1);
+        Entry {
+            at_ms,
+            namespace: key.0.clone(),
+            actor: key.1.clone(),
+            seq: self.seq.get(),
         }
     }
 
@@ -147,7 +166,7 @@ impl Index {
             let armed = armed.entry(key.clone()).or_default();
             armed.want = at_ms;
             armed.name = name.map(str::to_owned);
-            armed.indexed
+            armed.indexed.as_ref().map(|i| i.at_ms)
         };
         let Some(at_ms) = at_ms.filter(|&at| indexed.is_none_or(|i| at < i)) else {
             return Ok(());
@@ -158,30 +177,15 @@ impl Index {
     /// Put this node's entry for `key` at `at_ms`, and keep it unless an
     /// earlier one landed meanwhile.
     async fn put(&self, key: Key, at_ms: u64, name: Option<&str>) -> Result<()> {
-        let entry = Entry {
-            at_ms,
-            namespace: key.0.clone(),
-            actor: key.1.clone(),
-        };
+        let entry = self.entry(&key, at_ms);
         self.alarms.put(&self.node, &entry, name).await?;
         let mut armed = self.armed.borrow_mut();
         let armed = armed.entry(key).or_default();
-        match armed.indexed {
-            Some(i) if i <= at_ms => {
-                if i != at_ms {
-                    self.stale.borrow_mut().push(entry);
-                }
-            }
-            old => {
-                if let Some(old) = old {
-                    self.stale.borrow_mut().push(Entry {
-                        at_ms: old,
-                        ..entry
-                    });
-                }
-                armed.indexed = Some(at_ms);
-            }
-        }
+        let stale = match &armed.indexed {
+            Some(i) if i.at_ms <= at_ms => Some(entry),
+            _ => armed.indexed.replace(entry),
+        };
+        self.stale.borrow_mut().extend(stale);
         Ok(())
     }
 
@@ -194,22 +198,18 @@ impl Index {
             armed
                 .iter()
                 .filter_map(|(key, a)| {
-                    let indexed = a.indexed?;
-                    let later = a.want.is_none_or(|want| want > indexed);
+                    let indexed = a.indexed.clone()?;
+                    let later = a.want.is_none_or(|want| want > indexed.at_ms);
                     later.then(|| (key.clone(), indexed, a.want, a.name.clone()))
                 })
                 .collect()
         };
         for (key, indexed, want, name) in moves {
-            let entry = Entry {
-                at_ms: want.unwrap_or(indexed),
-                namespace: key.0.clone(),
-                actor: key.1.clone(),
-            };
-            if want.is_some()
+            let next = want.map(|want| self.entry(&key, want));
+            if let Some(next) = &next
                 && self
                     .alarms
-                    .put(&self.node, &entry, name.as_deref())
+                    .put(&self.node, next, name.as_deref())
                     .await
                     .is_err()
             {
@@ -219,16 +219,14 @@ impl Index {
             let Some(a) = armed.get_mut(&key) else {
                 continue;
             };
-            if a.indexed == Some(indexed) {
-                a.indexed = want;
-                self.stale.borrow_mut().push(Entry {
-                    at_ms: indexed,
-                    ..entry
-                });
-            } else if want.is_some() {
+            let stale = if a.indexed.as_ref() == Some(&indexed) {
+                a.indexed = next;
+                Some(indexed)
+            } else {
                 // An earlier alarm was indexed meanwhile.
-                self.stale.borrow_mut().push(entry);
-            }
+                next
+            };
+            self.stale.borrow_mut().extend(stale);
             if a.indexed.is_none() && a.want.is_none() {
                 armed.remove(&key);
             }
@@ -243,9 +241,11 @@ impl Index {
 
     /// Take over this node's share of `dead` nodes' alarms among the `live`
     /// ones: each is indexed here before it goes there, so it is never in
-    /// neither. Answers those to schedule here; an object this node already
-    /// knows keeps the alarm it has. An entry that fails stays where it is,
-    /// for the next round.
+    /// neither. Answers every one to schedule here, whatever this node knows
+    /// of the object: its index says what it wakes, not that its scheduler
+    /// still holds it, since a wake that finds no alarm consumes the one but
+    /// not the other. An entry that fails stays where it is, for the next
+    /// round.
     pub async fn adopt(&self, live: &[String], dead: &[String]) -> Result<Vec<Adopted>> {
         let mut adopted = Vec::new();
         for node in dead {
@@ -260,7 +260,7 @@ impl Index {
                 .await;
             for result in results {
                 match result {
-                    Ok(a) => adopted.extend(a),
+                    Ok(a) => adopted.push(a),
                     Err(e) => tracing::warn!("adopting {node}'s alarm: {e}"),
                 }
             }
@@ -270,13 +270,16 @@ impl Index {
 
     /// Index `entry` here, then delete it from `node`. `armed` changes only
     /// once the entry is indexed, so a failure leaves it to adopt again.
-    async fn adopt_one(&self, node: &str, entry: Entry) -> Result<Option<Adopted>> {
+    async fn adopt_one(&self, node: &str, entry: Entry) -> Result<Adopted> {
         let name = self.alarms.name(node, &entry).await?;
         let key = (entry.namespace.clone(), entry.actor.clone());
         let (known, indexed) = {
             let armed = self.armed.borrow();
             let armed = armed.get(&key);
-            (armed.is_some(), armed.and_then(|a| a.indexed))
+            (
+                armed.is_some(),
+                armed.and_then(|a| a.indexed.as_ref().map(|i| i.at_ms)),
+            )
         };
         if indexed.is_none_or(|i| entry.at_ms < i) {
             self.put(key.clone(), entry.at_ms, name.as_deref()).await?;
@@ -290,12 +293,12 @@ impl Index {
         if let Err(e) = self.alarms.delete(node, &entry).await {
             tracing::warn!("deleting {node}'s adopted alarm: {e}");
         }
-        Ok((!known).then_some(Adopted {
+        Ok(Adopted {
             namespace: entry.namespace,
             actor: entry.actor,
             name,
             at_ms: entry.at_ms,
-        }))
+        })
     }
 }
 

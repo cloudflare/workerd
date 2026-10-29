@@ -463,7 +463,7 @@ pub mod ffi {
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
         /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
-        /// is `name`, empty for none.
+        /// is `name`, empty for none, unless one is scheduled no later.
         fn actor_storage_set_alarm(storage: &ActorStorage, actor: &str, name: &str, at_ms: u64);
         /// What an alarm runs on when another instance owns its object: nothing, successfully.
         fn alarm_owned_elsewhere() -> KjOwn<WorkerInterface>;
