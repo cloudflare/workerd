@@ -204,8 +204,9 @@ export class Test {
     timeout: number,
     ...rest: unknown[]
   ): ReturnType<typeof setTimeout> {
+    // As in upstream testharness.js, `func` runs with the test as `this`.
     return setTimeout(
-      this.step_func(() => func(...rest)),
+      this.step_func(() => func.apply(this, rest)),
       timeout
     );
   }
