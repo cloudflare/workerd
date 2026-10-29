@@ -185,7 +185,8 @@ kj::Maybe<tracing::SpanContext> projectJsSpanContext(
     kj::Maybe<tracing::SpanContext> context, kj::Maybe<tracing::TraceFlags> defaultJsFlags) {
   return context.map([&](auto& value) {
     return tracing::SpanContext(value.getTraceId(), value.getSpanId(),
-        value.getTraceFlags() == kj::none ? defaultJsFlags : value.getTraceFlags());
+        value.getTraceFlags() == kj::none ? defaultJsFlags : value.getTraceFlags(),
+        value.cloneTraceState());
   });
 }
 
@@ -200,6 +201,7 @@ TracingSpanContext toTracingSpanContext(kj::Maybe<tracing::SpanContext> context)
         .traceId = value.getTraceId().toW3C(),
         .spanId = spanId.toGoString(),
         .traceFlags = traceFlags,
+        .traceState = value.cloneTraceState(),
       };
     }
   }
@@ -404,8 +406,8 @@ class InvocationSpanState final: public SpanState {
 
   kj::Maybe<tracing::SpanContext> getSpanContext() override {
     KJ_IF_SOME(value, context) {
-      return projectJsSpanContext(
-          tracing::SpanContext(value.getTraceId(), value.getSpanId(), value.getTraceFlags()),
+      return projectJsSpanContext(tracing::SpanContext(value.getTraceId(), value.getSpanId(),
+                                      value.getTraceFlags(), value.cloneTraceState()),
           defaultJsFlags);
     }
     return kj::none;
@@ -524,6 +526,18 @@ bool Span::getIsTraced() {
     }
   }
   KJ_UNREACHABLE;
+}
+
+jsg::JsObject Span::spanContextForJs(jsg::Lock& js) {
+  auto value = spanContext();
+  auto result = js.obj();
+  result.set(js, "traceId", js.str(value.traceId));
+  result.set(js, "spanId", js.str(value.spanId));
+  result.set(js, "traceFlags", js.num(value.traceFlags));
+  if (IoContext::hasCurrent() && IoContext::current().isOpentelemetryApiEnabled()) {
+    KJ_IF_SOME(state, value.traceState) result.set(js, "traceState", js.str(state));
+  }
+  return result;
 }
 
 TracingSpanContext Span::spanContext() {
@@ -724,9 +738,10 @@ jsg::Optional<user_tracing::TracingSpanContext> TracingContext::getInvocationSpa
   if (!IoContext::hasCurrent()) return kj::none;
   auto& io = IoContext::current();
   KJ_IF_SOME(root, io.getUserTraceInvocationContext()) {
-    return user_tracing::toTracingSpanContext(user_tracing::projectJsSpanContext(
-        tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags()),
-        io.getDefaultJsTraceFlags()));
+    return user_tracing::toTracingSpanContext(
+        user_tracing::projectJsSpanContext(tracing::SpanContext(root.getTraceId(), root.getSpanId(),
+                                               root.getTraceFlags(), root.cloneTraceState()),
+            io.getDefaultJsTraceFlags()));
   }
   return kj::none;
 }
@@ -745,37 +760,6 @@ kj::StringPtr TracingContext::getSpanCreationMode(jsg::Lock& js) {
   return "recording"_kj;
 }
 
-namespace {
-
-// Keep propagation identity through built-in/user children without submitting spans, either for
-// unsampled contexts or tracers without a user-span factory. Reuse avoids child allocations.
-class NonRecordingContextObserver final: public SpanObserver {
- public:
-  explicit NonRecordingContextObserver(tracing::SpanContext context): context(kj::mv(context)) {}
-  bool isSampledOut() const override {
-    return true;
-  }
-  kj::Rc<SpanObserver> newChild() override {
-    return addRefToThis();
-  }
-  kj::Rc<SpanObserver> newOptionalChild(kj::ConstString) override {
-    return addRefToThis();
-  }
-  void onOpen(kj::ConstString, kj::Date) override {}
-  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
-  kj::Maybe<tracing::SpanContext> toSpanContext() override {
-    return tracing::SpanContext::clone(context);
-  }
-  tracing::SpanId getSpanId() override {
-    return context.getSpanId().orDefault(tracing::SpanId::nullId);
-  }
-
- private:
-  tracing::SpanContext context;
-};
-
-}  // namespace
-
 jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
     jsg::Optional<user_tracing::TracingSpanContext> context,
     jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
@@ -786,7 +770,7 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
   if (!IoContext::hasCurrent()) return callback(js);
   auto& io = IoContext::current();
   SpanParent parent(nullptr);
-  KJ_IF_SOME(tracer, io.getWorkerTracer()) {
+  if (io.getWorkerTracer() != kj::none || io.isOpentelemetryApiEnabled()) {
     kj::Maybe<tracing::SpanContext> parsed;
     KJ_IF_SOME(value, context) {
       // Remote parents carry a sampling bit; same-invocation native flags are restored below.
@@ -794,12 +778,17 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
       parsed = tracing::SpanContext::tryFromTraceparent(
           kj::str("00-", value.traceId, "-", value.spanId, "-", kj::ArrayPtr(flags)));
       KJ_IF_SOME(identity, parsed) {
+        if (io.isOpentelemetryApiEnabled()) {
+          KJ_IF_SOME(state, value.traceState) {
+            identity.setTraceState(tracing::SpanContext::parseTracestate(state));
+          }
+        }
         KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
           if (io.isOpentelemetryApiEnabled() && identity.getTraceId() == invocation.getTraceId()) {
             // Same-trace JS identities inherit the owner's native decision, including absent
             // flags and reserved bits. Neither projected 0 nor 1 becomes an explicit decision.
-            identity = tracing::SpanContext(
-                identity.getTraceId(), identity.getSpanId(), invocation.getTraceFlags());
+            identity = tracing::SpanContext(identity.getTraceId(), identity.getSpanId(),
+                invocation.getTraceFlags(), identity.cloneTraceState());
           }
           // A projected identity cached in module/DO memory and replayed in a different
           // invocation trace is indistinguishable from a remote parent with explicit flags.
@@ -813,23 +802,29 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
           // versioned schema adds an explicit span traceId and nullable parentSpanId (with
           // consumers accepting detached roots instead of inheriting Onset's trace), requested
           // new roots are invocation children, both here and in OTel-visible spanContext().
-          parsed = tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags());
+          parsed = tracing::SpanContext(
+              root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
         }
       }
       if (parsed == kj::none) {
-        auto root = io.getInvocationSpanContext();
-        parsed = tracing::SpanContext(root.getTraceId(), root.getSpanId(), root.getTraceFlags());
+        if (io.getWorkerTracer() != kj::none) {
+          auto root = io.getInvocationSpanContext();
+          parsed = tracing::SpanContext(
+              root.getTraceId(), root.getSpanId(), root.getTraceFlags(), root.cloneTraceState());
+        }
       }
     }
     KJ_IF_SOME(value, parsed) {
       if (value.getTraceFlags().map([](auto flags) {
         return !flags.isSampled();
       }).orDefault(false)) {
-        parent = SpanParent(kj::rc<NonRecordingContextObserver>(kj::mv(value)));
+        parent = SpanParent(kj::rc<PropagationOnlySpanObserver>(kj::mv(value)));
       } else {
-        parent = tracer.makeUserSpanParent(tracing::SpanContext::clone(value));
+        KJ_IF_SOME(tracer, io.getWorkerTracer()) {
+          parent = tracer.makeUserSpanParent(tracing::SpanContext::clone(value));
+        }
         if (!parent.isObserved()) {
-          parent = SpanParent(kj::rc<NonRecordingContextObserver>(kj::mv(value)));
+          parent = SpanParent(kj::rc<PropagationOnlySpanObserver>(kj::mv(value)));
         }
       }
     }

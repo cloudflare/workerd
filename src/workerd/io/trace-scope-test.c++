@@ -666,7 +666,7 @@ KJ_TEST("unsampled roots remain native carriers with either flag state") {
       request->delivered();
       fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
         auto scope = context->makeRequestTraceScope(env.lock);
-        KJ_EXPECT(activeSpan(env)->getIsTraced());
+        KJ_EXPECT(activeSpan(env)->getIsTraced() == (!enabled || flags != 0));
         KJ_EXPECT(activeSpan(env)->spanContext().traceFlags == flags);
         KJ_EXPECT(context->getCurrentUserTraceSpan().isObserved());
         KJ_EXPECT(

@@ -222,7 +222,8 @@ InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
     TraceId invocationId,
     SpanId spanId,
     kj::Maybe<const InvocationSpanContext&> parentSpanContext,
-    kj::Maybe<TraceFlags> traceFlags)
+    kj::Maybe<TraceFlags> traceFlags,
+    kj::Maybe<kj::String> traceState)
     : entropySource(entropySource),
       traceId(kj::mv(traceId)),
       invocationId(kj::mv(invocationId)),
@@ -230,14 +231,15 @@ InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
       parentSpanContext(parentSpanContext.map([](const InvocationSpanContext& ctx) {
         return kj::heap<InvocationSpanContext>(ctx.clone());
       })),
-      traceFlags(kj::mv(traceFlags)) {}
+      traceFlags(kj::mv(traceFlags)),
+      traceState(kj::mv(traceState)) {}
 
 InvocationSpanContext InvocationSpanContext::newChild() const {
   KJ_ASSERT(!isTrigger(), "unable to create child spans on this context");
   kj::Maybe<kj::EntropySource&> otherEntropySource = entropySource.map(
       [](auto& es) -> kj::EntropySource& { return const_cast<kj::EntropySource&>(es); });
   return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
-      invocationId, SpanId::fromEntropy(otherEntropySource), *this, traceFlags);
+      invocationId, SpanId::fromEntropy(otherEntropySource), *this, traceFlags, cloneTraceState());
 }
 
 InvocationSpanContext InvocationSpanContext::newForInvocation(
@@ -245,9 +247,11 @@ InvocationSpanContext InvocationSpanContext::newForInvocation(
     kj::Maybe<kj::EntropySource&> entropySource) {
   kj::Maybe<const InvocationSpanContext&> parent;
   kj::Maybe<TraceFlags> flags;
+  kj::Maybe<kj::String> state;
   auto traceId = triggerContext
                      .map([&](auto& ctx) mutable {
     parent = ctx;
+    state = ctx.cloneTraceState();
     KJ_IF_SOME(inherited, ctx.traceFlags) {
       flags = inherited;
     }
@@ -255,7 +259,7 @@ InvocationSpanContext InvocationSpanContext::newForInvocation(
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
   return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource, kj::mv(traceId),
       TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent),
-      kj::mv(flags));
+      kj::mv(flags), kj::mv(state));
 }
 
 TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
@@ -303,7 +307,7 @@ InvocationSpanContext InvocationSpanContext::clone() const {
   return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
       invocationId, spanId,
       parentSpanContext.map([](auto& ctx) -> const InvocationSpanContext& { return *ctx.get(); }),
-      traceFlags);
+      traceFlags, cloneTraceState());
 }
 
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
@@ -415,6 +419,67 @@ kj::Maybe<SpanContext> SpanContext::tryFromTraceparent(kj::StringPtr tp) {
   if (version != 0 || (traceHigh == 0 && traceLow == 0) || parentId == 0) return kj::none;
 
   return SpanContext(TraceId(traceLow, traceHigh), SpanId(parentId), TraceFlags(flags));
+}
+
+kj::Maybe<SpanContext> SpanContext::tryFromHttpTraceparent(kj::StringPtr value) {
+  if (value.size() < 55) return kj::none;
+  for (size_t i = 0; i < 55; ++i) {
+    if (i == 2 || i == 35 || i == 52) continue;
+    auto c = value[i];
+    if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return kj::none;
+  }
+  auto version = value.slice(0, 2);
+  if (version == "ff"_kj || (version == "00"_kj && value.size() != 55) ||
+      (value.size() > 55 && value[55] != '-'))
+    return kj::none;
+  return tryFromTraceparent(kj::str("00", value.slice(2, 55)));
+}
+
+kj::Maybe<kj::String> SpanContext::parseTracestate(kj::StringPtr value) {
+  if (value.size() == 0 || value.size() > 512) return kj::none;
+  kj::Vector<kj::ArrayPtr<const char>> keys;
+  auto lower = [](char c) { return c >= 'a' && c <= 'z'; };
+  auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  size_t start = 0;
+  while (start < value.size()) {
+    size_t end = start;
+    while (end < value.size() && value[end] != ',') ++end;
+    auto entry = value.slice(start, end);
+    while (entry.size() && (entry[0] == ' ' || entry[0] == '\t')) entry = entry.slice(1);
+    while (entry.size() && (entry.back() == ' ' || entry.back() == '\t')) {
+      entry = entry.slice(0, entry.size() - 1);
+    }
+    auto equals = KJ_UNWRAP_OR_RETURN(entry.findFirst('='), kj::none);
+    auto key = entry.slice(0, equals);
+    auto data = entry.slice(equals + 1);
+    if (key.size() == 0 || key.size() > 256 || data.size() == 0 || data.size() > 256 ||
+        keys.size() == 32)
+      return kj::none;
+    for (auto previous: keys)
+      if (previous == key) return kj::none;
+    auto at = key.findFirst('@');
+    if (at == kj::none) {
+      if (!lower(key[0])) return kj::none;
+    } else {
+      auto pos = KJ_ASSERT_NONNULL(at);
+      if (pos == 0 || pos > 241 || pos + 1 == key.size() || key.size() - pos - 1 > 14 ||
+          (!lower(key[0]) && !digit(key[0])) || !lower(key[pos + 1]))
+        return kj::none;
+    }
+    for (size_t i = 0; i < key.size(); ++i) {
+      auto c = key[i];
+      if (lower(c) || digit(c) || c == '_' || c == '-' || c == '*' || c == '/') continue;
+      if (c == '@' && at == i) continue;
+      return kj::none;
+    }
+    for (auto c: data)
+      if (c < 0x20 || c > 0x7e || c == '=') return kj::none;
+    keys.add(key);
+    if (end == value.size()) break;
+    start = end + 1;
+    if (start == value.size()) return kj::none;
+  }
+  return kj::str(value);
 }
 
 kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlags traceFlags) {

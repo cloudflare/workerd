@@ -58,14 +58,15 @@ struct TracingSpanStatus {
 };
 
 // The serializable identity of a span. This matches OpenTelemetry's required SpanContext fields;
-// isRemote and traceState are omitted because workerd does not currently retain either value.
+// Vendor state is serialized here; the OTel adapter exposes a TraceState object.
 struct TracingSpanContext {
   kj::String traceId;
   kj::String spanId;
   // W3C trace-flags are a single byte; OpenTelemetry represents them as a JS number.
   uint8_t traceFlags;
+  jsg::Optional<kj::String> traceState;
 
-  JSG_STRUCT(traceId, spanId, traceFlags);
+  JSG_STRUCT(traceId, spanId, traceFlags, traceState);
 };
 
 // Polymorphic state behind the JS Span wrapper. Concrete states represent recording user spans and
@@ -135,6 +136,7 @@ class Span: public jsg::Object {
 
   // Returns an OpenTelemetry-compatible serializable identity for this span.
   TracingSpanContext spanContext();
+  jsg::JsObject spanContextForJs(jsg::Lock& js);
 
   // Sets a single attribute. Accepts strings, numbers, booleans, and homogeneous arrays of one of
   // those types, following OpenTelemetry attribute semantics:
@@ -171,7 +173,7 @@ class Span: public jsg::Object {
   JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
-    JSG_METHOD(spanContext);
+    JSG_METHOD_NAMED(spanContext, spanContextForJs);
     JSG_METHOD(setAttribute);
     JSG_METHOD(setAttributes);
     JSG_METHOD(recordException);
@@ -179,9 +181,17 @@ class Span: public jsg::Object {
     JSG_METHOD(setStatus);
     JSG_METHOD(end);
 
+    JSG_TS_DEFINE(interface TracingSpanContext {
+      traceId: string;
+      spanId: string;
+      traceFlags: number;
+      traceState?: string;
+    });
+
     // Keep in sync with SpanValue in src/cloudflare/internal/tracing.d.ts and the OpenTelemetry
     // AttributeValue type.
     JSG_TS_OVERRIDE({
+      spanContext(): TracingSpanContext;
       setAttribute(key: string, value: boolean | number | string
         | Array<boolean | null | undefined>
         | Array<number | null | undefined>

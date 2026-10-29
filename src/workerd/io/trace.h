@@ -251,15 +251,20 @@ class InvocationSpanContext final {
       TraceId invocationId,
       SpanId spanId,
       kj::Maybe<const InvocationSpanContext&> parentSpanContext,
-      kj::Maybe<TraceFlags> traceFlags);
+      kj::Maybe<TraceFlags> traceFlags,
+      kj::Maybe<kj::String> traceState = kj::none);
   // Still need a constructor to be available as long as span context is not propagated everywhere
   // we need it.
-  InvocationSpanContext(
-      TraceId traceId, TraceId invocationId, SpanId spanId, kj::Maybe<TraceFlags> traceFlags)
+  InvocationSpanContext(TraceId traceId,
+      TraceId invocationId,
+      SpanId spanId,
+      kj::Maybe<TraceFlags> traceFlags,
+      kj::Maybe<kj::String> traceState = kj::none)
       : traceId(traceId),
         invocationId(invocationId),
         spanId(spanId),
-        traceFlags(traceFlags) {};
+        traceFlags(traceFlags),
+        traceState(kj::mv(traceState)) {};
 
   KJ_DISALLOW_COPY(InvocationSpanContext);
 
@@ -293,6 +298,10 @@ class InvocationSpanContext final {
   // no upstream sampling decision exists.
   inline kj::Maybe<TraceFlags> getTraceFlags() const {
     return traceFlags;
+  }
+
+  kj::Maybe<kj::String> cloneTraceState() const {
+    return traceState.map([](auto& value) { return kj::str(value); });
   }
 
   // Creates a new child span. If the current context does not have an entropy
@@ -340,6 +349,8 @@ class InvocationSpanContext final {
   // W3C trace flags, either inherited or chosen locally, propagated through the invocation
   // chain. kj::none when no sampling decision was made.
   kj::Maybe<TraceFlags> traceFlags;
+  // In-memory W3C vendor state. Not part of the tail-event wire schema or internal export.
+  kj::Maybe<kj::String> traceState;
 };
 
 // Format a W3C traceparent ("{version}-{trace-id}-{parent-id}-{flags}").
@@ -348,11 +359,14 @@ kj::String formatW3CTraceparent(const TraceId& traceId, SpanId spanId, TraceFlag
 // SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
 // events that don't inherit context from another invocation.
 struct SpanContext {
-  SpanContext(
-      TraceId traceId, kj::Maybe<SpanId> spanId, kj::Maybe<TraceFlags> traceFlags = kj::none)
+  SpanContext(TraceId traceId,
+      kj::Maybe<SpanId> spanId,
+      kj::Maybe<TraceFlags> traceFlags = kj::none,
+      kj::Maybe<kj::String> traceState = kj::none)
       : traceId(traceId),
         spanId(spanId),
-        traceFlags(traceFlags) {};
+        traceFlags(traceFlags),
+        traceState(kj::mv(traceState)) {};
   KJ_DISALLOW_COPY(SpanContext);
   SpanContext(SpanContext&& other) = default;
   SpanContext& operator=(SpanContext&& other) = default;
@@ -377,8 +391,20 @@ struct SpanContext {
   static SpanContext fromCapnp(rpc::SpanContext::Reader reader);
   void toCapnp(rpc::SpanContext::Builder writer) const;
   static SpanContext clone(const SpanContext& ctx) {
-    return SpanContext(ctx.traceId, ctx.spanId, ctx.traceFlags);
+    return SpanContext(ctx.traceId, ctx.spanId, ctx.traceFlags, ctx.cloneTraceState());
   }
+
+  kj::Maybe<kj::String> cloneTraceState() const {
+    return traceState.map([](auto& value) { return kj::str(value); });
+  }
+
+  void setTraceState(kj::Maybe<kj::String> value) {
+    traceState = kj::mv(value);
+  }
+
+  // Strict HTTP validation, separate from the internal/JS identity parser below.
+  static kj::Maybe<SpanContext> tryFromHttpTraceparent(kj::StringPtr value);
+  static kj::Maybe<kj::String> parseTracestate(kj::StringPtr value);
 
   // Parse a W3C traceparent string into a SpanContext.
   // Format: "{version}-{trace-id}-{parent-id}-{flags}"
@@ -391,6 +417,7 @@ struct SpanContext {
   TraceId traceId;
   kj::Maybe<SpanId> spanId;
   kj::Maybe<TraceFlags> traceFlags;
+  kj::Maybe<kj::String> traceState;
 };
 
 kj::String KJ_STRINGIFY(const SpanId& id);
@@ -1420,6 +1447,33 @@ class SpanObserver: public kj::Refcounted {
   virtual tracing::SpanId getSpanId() {
     return tracing::SpanId::nullId;
   }
+};
+
+// A propagation-only identity retained through descendants without submitting spans. Used for
+// unsampled HTTP contexts and active JS contexts without a user-span factory.
+class PropagationOnlySpanObserver final: public SpanObserver {
+ public:
+  explicit PropagationOnlySpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
+  bool isSampledOut() const override {
+    return true;
+  }
+  kj::Rc<SpanObserver> newChild() override {
+    return addRefToThis();
+  }
+  kj::Rc<SpanObserver> newOptionalChild(kj::ConstString) override {
+    return addRefToThis();
+  }
+  void onOpen(kj::ConstString, kj::Date) override {}
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  kj::Maybe<tracing::SpanContext> toSpanContext() override {
+    return tracing::SpanContext::clone(context);
+  }
+  tracing::SpanId getSpanId() override {
+    return context.getSpanId().orDefault(tracing::SpanId::nullId);
+  }
+
+ private:
+  tracing::SpanContext context;
 };
 
 // A non-recording SpanObserver that carries a pre-serialized SpanContext for propagation.

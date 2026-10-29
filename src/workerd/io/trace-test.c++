@@ -31,6 +31,37 @@ class FakeEntropySource final: public kj::EntropySource {
   uint64_t counter = 0;
 };
 
+KJ_TEST("HTTP W3C validation and in-memory vendor state inheritance") {
+  constexpr auto parent = "00-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-03"_kj;
+  auto remote = KJ_ASSERT_NONNULL(SpanContext::tryFromHttpTraceparent(parent));
+  KJ_EXPECT(uint8_t(KJ_ASSERT_NONNULL(remote.getTraceFlags())) == 3);
+  for (auto invalid: {"00-A3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01"_kj,
+         "ff-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01"_kj,
+         "00-00000000000000000000000000000000-c0ffee0ba902b7aa-01"_kj,
+         "00-a3ce929d0e0e47364bf92f3577b34da6-0000000000000000-01"_kj}) {
+    KJ_EXPECT(SpanContext::tryFromHttpTraceparent(invalid) == kj::none);
+  }
+  KJ_EXPECT(SpanContext::tryFromHttpTraceparent(kj::str(parent, "-extra")) == kj::none);
+  KJ_EXPECT(SpanContext::tryFromHttpTraceparent(
+                "01-a3ce929d0e0e47364bf92f3577b34da6-c0ffee0ba902b7aa-01-extra") != kj::none);
+  for (auto invalid: {"a=1,a=2"_kj, "a="_kj, "A=value"_kj, "1=value"_kj, "a=b=c"_kj, "a=value,"_kj,
+         "a@b@c=value"_kj, "a=\x7f"_kj}) {
+    KJ_EXPECT(SpanContext::parseTracestate(invalid) == kj::none);
+  }
+  constexpr auto state = "upstream=1,1tenant@vendor=value"_kj;
+  remote.setTraceState(SpanContext::parseTracestate(state));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanContext::clone(remote).cloneTraceState()) == state);
+  auto trigger = InvocationSpanContext(remote.getTraceId(), TraceId::nullId,
+      KJ_ASSERT_NONNULL(remote.getSpanId()), remote.getTraceFlags(), remote.cloneTraceState());
+  FakeEntropySource entropy;
+  auto invocation = InvocationSpanContext::newForInvocation(trigger, entropy);
+  KJ_EXPECT(invocation.getTraceId() == remote.getTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParent()).getSpanId() == remote.getSpanId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.cloneTraceState()) == state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.newChild().cloneTraceState()) == state);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.clone().cloneTraceState()) == state);
+}
+
 KJ_TEST("can read trace ID string format") {
   KJ_EXPECT(TraceId::fromGoString("z"_kj) == kj::none);
 

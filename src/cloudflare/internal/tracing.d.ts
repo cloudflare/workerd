@@ -63,6 +63,7 @@ interface TracingSpanContext {
   traceId: string;
   spanId: string;
   traceFlags: number;
+  traceState?: string;
 }
 
 declare class Span {

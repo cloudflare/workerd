@@ -655,9 +655,11 @@ void WorkerTracer::addSpanAttributeInternal(const tracing::InvocationSpanContext
   tailStreamWriter->report(context, kj::mv(attributes), timestamp, size);
 }
 
-SpanParent BaseTracer::makeUserRequestSpan(
-    tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-  return makeUserSpanParent(tracing::SpanContext(kj::mv(traceId), kj::none, traceFlags));
+SpanParent BaseTracer::makeUserRequestSpan(tracing::TraceId traceId,
+    kj::Maybe<tracing::TraceFlags> traceFlags,
+    kj::Maybe<kj::String> traceState) {
+  return makeUserSpanParent(
+      tracing::SpanContext(kj::mv(traceId), kj::none, traceFlags, kj::mv(traceState)));
 }
 
 SpanParent BaseTracer::makeUserSpanParent(tracing::SpanContext context) {
@@ -696,19 +698,21 @@ void WorkerTracer::markUnused() {
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
-  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags, false,
+      traceState.map([](auto& value) { return kj::str(value); }));
 }
 
 kj::Rc<SpanObserver> UserSpanObserver::newChildFromUserCode() {
-  return kj::rc<UserSpanObserver>(
-      kj::addRef(*submitter), spanId, traceId, traceFlags, /*fromUserCode=*/true);
+  return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags,
+      /*fromUserCode=*/true, traceState.map([](auto& value) { return kj::str(value); }));
 }
 
 kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   if (traceId == nullptr) {
     return kj::none;
   }
-  return tracing::SpanContext(traceId, spanId, traceFlags);
+  return tracing::SpanContext(
+      traceId, spanId, traceFlags, traceState.map([](auto& value) { return kj::str(value); }));
 }
 
 void UserSpanObserver::onClose(

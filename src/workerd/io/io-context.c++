@@ -335,16 +335,16 @@ tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanCont
     KJ_IF_SOME(identity, userSpan.toSpanContext()) {
       KJ_IF_SOME(id, identity.getSpanId()) {
         if (id != tracing::SpanId::nullId) {
-          return tracing::InvocationSpanContext(
-              identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+          return tracing::InvocationSpanContext(identity.getTraceId(), base.getInvocationId(), id,
+              identity.getTraceFlags(), identity.cloneTraceState());
         }
       }
     }
   }
   tracing::SpanId sid = userSpan.getSpanId();
   if (sid != tracing::SpanId::nullId) {
-    return tracing::InvocationSpanContext(
-        base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
+    return tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), sid,
+        base.getTraceFlags(), base.cloneTraceState());
   }
   return base.clone();
 }
@@ -396,8 +396,16 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
         return flags.isSampled();
       }).orDefault([&] { return workerTracer->exportsUserSpans(); });
     }
-    rootUserTraceSpan =
-        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
+    rootUserTraceSpan = workerTracer->makeUserRequestSpan(
+        invCtx.getTraceId(), invCtx.getTraceFlags(), invCtx.cloneTraceState());
+    if (context->isOpentelemetryApiEnabled() &&
+        invCtx.getTraceFlags().map([](auto flags) {
+      return !flags.isSampled();
+    }).orDefault(false)) {
+      rootUserTraceSpan =
+          SpanParent(kj::rc<PropagationOnlySpanObserver>(tracing::SpanContext(invCtx.getTraceId(),
+              invCtx.getSpanId(), invCtx.getTraceFlags(), invCtx.cloneTraceState())));
+    }
   }
 
   KJ_IF_SOME(a, context->actor) {
@@ -1550,8 +1558,8 @@ jsg::Value IoContext::makeUserTraceScopeValue(
       auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
       auto id = userSpan.getSpanId();
       invocationSpanContext = id != tracing::SpanId::nullId
-          ? tracing::InvocationSpanContext(
-                base.getTraceId(), base.getInvocationId(), id, base.getTraceFlags())
+          ? tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), id,
+                base.getTraceFlags(), base.cloneTraceState())
           : base.clone();
     } else if (tracer != kj::none) {
       invocationSpanContext = getCurrentIncomingRequest().getInvocationSpanContext().clone();

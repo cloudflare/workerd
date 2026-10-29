@@ -93,6 +93,16 @@ function valid(ctx: SpanContext | undefined): ctx is SpanContext {
   );
 }
 
+function fromRuntime(
+  raw: ReturnType<RuntimeSpan['spanContext']> | undefined
+): SpanContext | undefined {
+  if (raw === undefined) return undefined;
+  const { traceState, ...ids } = raw;
+  return traceState === undefined
+    ? ids
+    : { ...ids, traceState: new TraceState(traceState) };
+}
+
 class Span implements SpanLike {
   readonly inner: RuntimeSpan | undefined;
   readonly #context: SpanContext;
@@ -107,7 +117,9 @@ class Span implements SpanLike {
     this.inner = inner;
     this.#context =
       identity ??
-      attempt(() => inner?.spanContext() ?? { ...INVALID }, { ...INVALID });
+      attempt(() => fromRuntime(inner?.spanContext()) ?? { ...INVALID }, {
+        ...INVALID,
+      });
     if (parent?.traceState !== undefined)
       this.#context.traceState = parent.traceState;
   }
@@ -217,7 +229,8 @@ function wrap(span: RuntimeSpan, parent?: SpanContext): Span {
   if (result === undefined) {
     // A native no-op nested inside a propagated context must not erase that context.
     result =
-      valid(parent) && !valid(attempt(() => span.spanContext(), undefined))
+      valid(parent) &&
+      !valid(attempt(() => fromRuntime(span.spanContext()), undefined))
         ? new Span(span, parent, parent)
         : new Span(span);
     wrappers.set(span, result);
@@ -291,6 +304,7 @@ class ContextManager {
       return candidate;
     }, undefined);
     const spanContext = attempt(() => span?.spanContext(), undefined);
+    const traceState = spanContext?.traceState;
     const run = (): R =>
       this.#state.run(
         { context: ctx, native: inner } satisfies ActiveState,
@@ -300,9 +314,14 @@ class ContextManager {
     return tracingContext.withActiveSpanContext(
       valid(spanContext)
         ? {
-            ...spanContext,
             traceId: spanContext.traceId.toLowerCase(),
             spanId: spanContext.spanId.toLowerCase(),
+            traceFlags: spanContext.traceFlags,
+            ...(traceState === undefined
+              ? {}
+              : {
+                  traceState: attempt(() => traceState.serialize(), ''),
+                }),
           }
         : undefined,
       run
@@ -365,7 +384,10 @@ class Tracer {
         // Explicit unsampled parents likewise never override the platform into recording.
         const identity = valid(parentSpanContext)
           ? parentSpanContext
-          : attempt(() => tracingContext.getInvocationSpanContext(), undefined);
+          : attempt(
+              () => fromRuntime(tracingContext.getInvocationSpanContext()),
+              undefined
+            );
         return valid(identity) ? nonRecording(identity) : new Span();
       }
       if (valid(parentSpanContext) && !(parentSpanContext.traceFlags & 1)) {

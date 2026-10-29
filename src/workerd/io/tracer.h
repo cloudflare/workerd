@@ -107,8 +107,9 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  SpanParent makeUserRequestSpan(
-      tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags);
+  SpanParent makeUserRequestSpan(tracing::TraceId traceId,
+      kj::Maybe<tracing::TraceFlags> traceFlags,
+      kj::Maybe<kj::String> traceState = kj::none);
   SpanParent makeUserSpanParent(tracing::SpanContext context);
 
   // Associates an externally parented span with its trace without changing the invocation.
@@ -308,7 +309,8 @@ class UserSpanObserver final: public SpanObserver {
         spanId(context.getSpanId().orDefault(tracing::SpanId::nullId)),
         parentSpanId(tracing::SpanId::nullId),
         traceId(context.getTraceId()),
-        traceFlags(context.getTraceFlags()) {}
+        traceFlags(context.getTraceFlags()),
+        traceState(context.cloneTraceState()) {}
 
   UserSpanObserver(kj::Own<SpanSubmitter> submitter,
       tracing::TraceId traceId,
@@ -325,12 +327,14 @@ class UserSpanObserver final: public SpanObserver {
       tracing::SpanId parentSpanId,
       tracing::TraceId traceId,
       kj::Maybe<tracing::TraceFlags> traceFlags,
-      bool fromUserCode = false)
+      bool fromUserCode = false,
+      kj::Maybe<kj::String> traceState = kj::none)
       : submitter(kj::mv(submitter)),
         spanId(this->submitter->makeSpanId()),
         parentSpanId(parentSpanId),
         traceId(kj::mv(traceId)),
         traceFlags(traceFlags),
+        traceState(kj::mv(traceState)),
         fromUserCode(fromUserCode) {}
   KJ_DISALLOW_COPY(UserSpanObserver);
 
@@ -360,6 +364,7 @@ class UserSpanObserver final: public SpanObserver {
   // Allow the submitter to reject spans, causing them to not be reported.
   bool wasAccepted = true;
   kj::Maybe<tracing::TraceFlags> traceFlags;
+  kj::Maybe<kj::String> traceState;
   // True only for spans created directly via `ctx.tracing.enterSpan`. Not inherited by
   // children created via `newChild()` — runtime sub-operations nested inside an enterSpan
   // callback (e.g. `kv_get`) should remain subject to runtime-span policies.

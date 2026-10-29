@@ -4594,6 +4594,12 @@ export interface Tracing {
   ): T;
   Span: typeof Span;
 }
+export interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
+  traceState?: string;
+}
 export declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4649,11 +4655,6 @@ export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
-}
-export interface TracingSpanContext {
-  traceId: string;
-  spanId: string;
-  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.

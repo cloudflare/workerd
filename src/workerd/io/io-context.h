@@ -108,8 +108,8 @@ class UserTraceAsyncContext final {
       KJ_IF_SOME(identity, span.toSpanContext()) {
         KJ_IF_SOME(id, identity.getSpanId()) {
           if (id != tracing::SpanId::nullId) {
-            return tracing::InvocationSpanContext(
-                identity.getTraceId(), base.getInvocationId(), id, identity.getTraceFlags());
+            return tracing::InvocationSpanContext(identity.getTraceId(), base.getInvocationId(), id,
+                identity.getTraceFlags(), identity.cloneTraceState());
           }
         }
       }
