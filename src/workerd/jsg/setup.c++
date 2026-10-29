@@ -696,6 +696,252 @@ void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
   });
 }
 
+namespace {
+// v8_flags.stack_trace_limit's default.
+constexpr int kDefaultStackTraceLimit = 10;
+
+// Fields of a DATA_DEFAULT property's entry in the record pinned into the snapshot.
+constexpr kj::StringPtr PRESENT = "present"_kj;
+constexpr kj::StringPtr VALUE = "value"_kj;
+constexpr kj::StringPtr WRITABLE = "writable"_kj;
+constexpr kj::StringPtr ENUMERABLE = "enumerable"_kj;
+
+constexpr RestoreTimeHolder ALL_HOLDERS[] = {
+  RestoreTimeHolder::GLOBAL,
+  RestoreTimeHolder::ERROR_CTOR,
+  RestoreTimeHolder::ITERATOR_CTOR,
+  RestoreTimeHolder::ITERATOR_PROTOTYPE,
+};
+
+kj::Maybe<ContextDataSlot> slotFor(RestoreTimeHolder holder) {
+  switch (holder) {
+    case RestoreTimeHolder::GLOBAL:
+      return kj::none;
+    case RestoreTimeHolder::ERROR_CTOR:
+      return ContextDataSlot::RESTORE_TIME_ERROR_CTOR;
+    case RestoreTimeHolder::ITERATOR_CTOR:
+      return ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR;
+    case RestoreTimeHolder::ITERATOR_PROTOTYPE:
+      return ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE;
+  }
+  KJ_UNREACHABLE;
+}
+
+v8::Local<v8::Object> getHolder(v8::Local<v8::Context> context, RestoreTimeHolder holder) {
+  KJ_IF_SOME(slot, slotFor(holder)) {
+    KJ_REQUIRE(context->GetNumberOfEmbedderDataFields() > static_cast<int>(slot),
+        "the zygote never captured a restore-time holder", jsNameOf(holder));
+    auto data = getContextDataSlot(context, slot);
+    KJ_REQUIRE(!data.IsEmpty() && data->IsValue() && data.As<v8::Value>()->IsObject(),
+        "the zygote never captured a restore-time holder", jsNameOf(holder));
+    return data.As<v8::Value>().As<v8::Object>();
+  }
+  return context->Global();
+}
+
+// Captures the intrinsics before any JavaScript can rebind their global names.
+void captureHolders(Lock& js, v8::Local<v8::Context> context) {
+  auto isolate = js.v8Isolate;
+  auto get = [&](v8::Local<v8::Object> from, kj::StringPtr name) {
+    return check(from->Get(context, v8StrIntern(isolate, name))).As<v8::Object>();
+  };
+  auto global = context->Global();
+  auto errorCtor = get(global, "Error"_kj);
+  auto iteratorCtor = get(global, "Iterator"_kj);
+  auto iteratorPrototype = get(iteratorCtor, "prototype"_kj);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ERROR_CTOR, errorCtor);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR, iteratorCtor);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE, iteratorPrototype);
+}
+
+// Getter and setter of a FAIL_CLOSED property. `data` is the holder's name.
+void throwFailClosed(
+    v8::Local<v8::Name> property, v8::Local<v8::Value> holderName, v8::Isolate* isolate) {
+  auto& js = Lock::from(isolate);
+  isolate->ThrowError(v8Str(isolate,
+      kj::str("snapshot PoC: ", JsValue(holderName).toString(js), ".",
+          JsValue(property).toString(js), " cannot be used while preparing a startup snapshot")));
+}
+
+void failClosedGetter(
+    v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  throwFailClosed(property, info.DataV2().As<v8::Value>(), info.GetIsolate());
+}
+
+void failClosedSetter(v8::Local<v8::Name> property,
+    v8::Local<v8::Value>,
+    const v8::PropertyCallbackInfo<v8::Boolean>& info) {
+  throwFailClosed(property, info.DataV2().As<v8::Value>(), info.GetIsolate());
+}
+
+// v8::Object has no IsExtensible(), and user code can replace the JavaScript Object.isExtensible.
+// Adding a property to a non-extensible object fails without throwing.
+void requireExtensible(Lock& js, v8::Local<v8::Context> context, RestoreTimeHolder which) {
+  auto holder = getHolder(context, which);
+  auto probe = v8::Symbol::New(js.v8Isolate);
+  bool added = check(holder->DefineOwnProperty(context, probe, v8::Undefined(js.v8Isolate)));
+  KJ_REQUIRE(added,
+      "snapshot PoC: top-level code made an object non-extensible that V8 adds properties to "
+      "when the snapshot is restored",
+      jsNameOf(which));
+  check(holder->Delete(context, probe));
+}
+
+// Records the final state of a DATA_DEFAULT property under its name in `record` and removes it.
+void recordAndRemove(Lock& js,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> holder,
+    const RestoreTimeGlobal& entry,
+    JsObject record) {
+  auto isolate = js.v8Isolate;
+  auto name = v8StrIntern(isolate, entry.name);
+  // Null-prototype, so that reading it back does not consult the restored Object.prototype.
+  auto state = js.objNoProto();
+  v8::Local<v8::Value> descriptor = check(holder->GetOwnPropertyDescriptor(context, name));
+  if (descriptor->IsUndefined()) {
+    // The top level deleted it: the restored context deletes V8's default too.
+    state.set(js, PRESENT, js.boolean(false));
+  } else {
+    auto desc = descriptor.As<v8::Object>();
+    auto field = [&](kj::StringPtr key) {
+      return check(desc->Get(context, v8StrIntern(isolate, key)));
+    };
+    bool configurable = field("configurable"_kj)->IsTrue();
+    bool accessor = check(desc->HasOwnProperty(context, v8StrIntern(isolate, "get"_kj)));
+    KJ_REQUIRE(configurable && !accessor,
+        "snapshot PoC: top-level code made a property non-configurable or an accessor that V8 "
+        "adds as a data property when the snapshot is restored",
+        jsNameOf(entry.holder), entry.name, configurable, accessor);
+    state.set(js, PRESENT, js.boolean(true));
+    state.set(js, VALUE, JsValue(field(VALUE)));
+    state.set(js, WRITABLE, JsValue(field(WRITABLE)));
+    state.set(js, ENUMERABLE, JsValue(field(ENUMERABLE)));
+    KJ_REQUIRE(check(holder->Delete(context, name)));
+  }
+  record.set(js, entry.name, state);
+}
+
+// Removes the zygote's FAIL_CLOSED property. A property the top level put in its place, after
+// deleting the zygote's or by defining over it, is one V8 would add a duplicate of on restore.
+void removeFailClosed(Lock& js,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> holder,
+    const RestoreTimeGlobal& entry) {
+  auto isolate = js.v8Isolate;
+  auto name = v8StrIntern(isolate, entry.name);
+  // Deleted by the top level: V8 adds it on restore.
+  if (!check(holder->HasOwnProperty(context, name))) return;
+  // GetOwnPropertyDescriptor() reads a native data property through its getter, so the zygote's
+  // own property throws, while a JavaScript accessor comes back as {get, set} without being
+  // called and a data property as its value.
+  v8::TryCatch tryCatch(isolate);
+  v8::Local<v8::Value> descriptor;
+  bool ours = !holder->GetOwnPropertyDescriptor(context, name).ToLocal(&descriptor);
+  tryCatch.Reset();
+  KJ_REQUIRE(ours,
+      "snapshot PoC: top-level code defined a property that V8 adds when the snapshot is restored",
+      jsNameOf(entry.holder), entry.name);
+  KJ_REQUIRE(check(holder->Delete(context, name)));
+}
+
+}  // namespace
+
+kj::StringPtr jsNameOf(RestoreTimeHolder holder) {
+  switch (holder) {
+    case RestoreTimeHolder::GLOBAL:
+      return "globalThis"_kj;
+    case RestoreTimeHolder::ERROR_CTOR:
+      return "Error"_kj;
+    case RestoreTimeHolder::ITERATOR_CTOR:
+      return "Iterator"_kj;
+    case RestoreTimeHolder::ITERATOR_PROTOTYPE:
+      return "Iterator.prototype"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+void IsolateBase::installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+    auto isolate = js.v8Isolate;
+    captureHolders(js, context);
+
+    // The callbacks live in V8 AccessorInfo objects. Those go away with the properties before
+    // CreateBlob(); registering the callbacks anyway turns one that stays reachable into an
+    // ordinary failure of the zygote rather than a fatal unknown external reference.
+    registerExternalReference(reinterpret_cast<intptr_t>(&failClosedGetter));
+    registerExternalReference(reinterpret_cast<intptr_t>(&failClosedSetter));
+
+    for (auto& entry: RESTORE_TIME_GLOBALS) {
+      auto holder = getHolder(context, entry.holder);
+      auto name = v8StrIntern(isolate, entry.name);
+      switch (entry.kind) {
+        case RestoreTimeKind::DATA_DEFAULT:
+          // As Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
+          KJ_REQUIRE(check(holder->CreateDataProperty(
+              context, name, v8::Integer::New(isolate, kDefaultStackTraceLimit))));
+          break;
+        case RestoreTimeKind::FAIL_CLOSED:
+          // Non-enumerable, as V8 installs them.
+          KJ_REQUIRE(check(holder->SetNativeDataProperty(context, name, &failClosedGetter,
+              &failClosedSetter, v8StrIntern(isolate, jsNameOf(entry.holder)), v8::DontEnum)));
+          break;
+      }
+    }
+  });
+}
+
+void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+    for (auto holder: ALL_HOLDERS) {
+      requireExtensible(js, context, holder);
+    }
+
+    auto record = js.objNoProto();
+    for (auto& entry: RESTORE_TIME_GLOBALS) {
+      auto holder = getHolder(context, entry.holder);
+      switch (entry.kind) {
+        case RestoreTimeKind::DATA_DEFAULT:
+          recordAndRemove(js, context, holder, entry, record);
+          break;
+        case RestoreTimeKind::FAIL_CLOSED:
+          removeFailClosed(js, context, holder, entry);
+          break;
+      }
+    }
+    mutableSnapshotArtifact().restoreTimeGlobalsIndex =
+        pinIntoSnapshot(context, v8::Local<v8::Object>(record));
+  });
+}
+
+void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  KJ_IF_SOME(index, finalizedSnapshotArtifact().restoreTimeGlobalsIndex) {
+    JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+      auto isolate = js.v8Isolate;
+      auto record = extractOnceFromSnapshot(context, index);
+      for (auto& entry: RESTORE_TIME_GLOBALS) {
+        if (entry.kind != RestoreTimeKind::DATA_DEFAULT) continue;
+        auto holder = getHolder(context, entry.holder);
+        auto name = v8StrIntern(isolate, entry.name);
+        auto state = check(record->Get(context, name)).As<v8::Object>();
+        auto field = [&](kj::StringPtr key) {
+          return check(state->Get(context, v8StrIntern(isolate, key)));
+        };
+        if (field(PRESENT)->IsTrue()) {
+          v8::PropertyDescriptor desc(field(VALUE), field(WRITABLE)->IsTrue());
+          desc.set_enumerable(field(ENUMERABLE)->IsTrue());
+          desc.set_configurable(true);
+          KJ_REQUIRE(check(holder->DefineProperty(context, name, desc)));
+        } else {
+          KJ_REQUIRE(check(holder->Delete(context, name)));
+        }
+      }
+    });
+  }
+}
+
 void IsolateBase::prepareWrappableDeserializeMetadata(
     Lock& js, WrappableDeserializeMetadata& metadata) {
   KJ_REQUIRE(isStartingFromSnapshot());

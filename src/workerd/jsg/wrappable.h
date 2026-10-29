@@ -82,8 +82,14 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO = CONSOLE_ORIGINAL_DEBUG + 2,
   CONSOLE_ORIGINAL_LOG = CONSOLE_ORIGINAL_DEBUG + 3,
   CONSOLE_ORIGINAL_WARN = CONSOLE_ORIGINAL_DEBUG + 4,
+
+  // Intrinsics V8 adds properties to when a context is restored from a startup snapshot,
+  // captured by a zygote before any JavaScript runs.
+  RESTORE_TIME_ERROR_CTOR = CONSOLE_ORIGINAL_WARN + 1,
+  RESTORE_TIME_ITERATOR_CTOR = CONSOLE_ORIGINAL_WARN + 2,
+  RESTORE_TIME_ITERATOR_PROTOTYPE = CONSOLE_ORIGINAL_WARN + 3,
   // The highest ContextDataSlot; update it when adding a slot.
-  MAX_DATA_SLOT = CONSOLE_ORIGINAL_WARN,
+  MAX_DATA_SLOT = RESTORE_TIME_ITERATOR_PROTOTYPE,
 };
 
 #if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8

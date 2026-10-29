@@ -2186,15 +2186,21 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // The zygote has no `WebAssembly` global to shim: V8's bootstrapper skips
+  // InstallSpecialObjects() in a SnapshotCreator isolate, and IsolateBase installs the name as a
+  // fail-closed accessor (RESTORE_TIME_GLOBALS in jsg/setup.h) that throws on any read, the probe
+  // below included. Wasm modules aren't captured in the snapshot anyway, and this runs again on
+  // the context restored from it, installing the shims then.
+  if (lock.isPreparingSnapshot()) {
+    return;
+  }
+
   // V8 only installs the `WebAssembly` global when a Wasm engine is available. It is absent under
-  // the `--jitless` v8Flag, since V8 has no Wasm interpreter, and in isolates created by
-  // SnapshotCreator, whose bootstrapper skips InstallSpecialObjects. Both helpers below reach into
-  // that global unconditionally, so running them in such an isolate aborts the entire process
-  // during context setup, before any script executes. Skip them instead: a Worker that never
-  // touches WebAssembly is perfectly serviceable without either, so an absent optional capability
-  // must not be fatal. For snapshots this is also correct because wasm modules aren't captured in
-  // the snapshot anyway, and this runs again on the context restored from it, installing the shims
-  // then.
+  // the `--jitless` v8Flag, since V8 has no Wasm interpreter. Both helpers below reach into that
+  // global unconditionally, so running them in such an isolate aborts the entire process during
+  // context setup, before any script executes. Skip them instead: a Worker that never touches
+  // WebAssembly is perfectly serviceable without either, so an absent optional capability must
+  // not be fatal.
   bool hasWebAssembly = false;
   JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
     hasWebAssembly = lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() != kj::none;
@@ -2566,6 +2572,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Ref: https://github.com/cloudflare/workerd/issues/5332
       if (script->isolate->impl->inspector == kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
+      }
+
+      if (lock.isPreparingSnapshot() && impl->permanentException == kj::none) {
+        // The zygote's top level has run: record what it left of the properties V8 adds when the
+        // snapshot is restored, and remove them so that V8 can add them.
+        jsg::IsolateBase::from(lock.v8Isolate)
+            .removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
       }
     });
 
