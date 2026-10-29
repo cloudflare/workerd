@@ -4,7 +4,13 @@
 # rules", rule 3). Don't raise a count or add a line. When you remove a use, lower its count,
 # and delete the line when it reaches zero.
 #
-# Format: <path from the repository root> <construct> <count>
+# Format: <path from the repository root> <construct> <count>, or
+# <path from the repository root> interop for the shims of src/rust/jsg-cpp, which may use the
+# constructs in INTEROP_CONSTRUCTS in cpp-jsg-allowlist-test.py (README.md, rule 3). Don't add a
+# file to the interop tier outside src/rust/jsg-cpp.
+
+src/rust/jsg-cpp/ffi.c++ interop
+src/rust/jsg-cpp/jsg-cpp.h interop
 
 src/rust/jsg/ffi.c++ jsg::check 1
 src/rust/jsg/ffi.c++ makeInternalError 1
