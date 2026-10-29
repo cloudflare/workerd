@@ -8,6 +8,8 @@ CPP_SHIMS = glob([
     "*.c++",
     "*.h",
 ]) + [
+    "//src/rust/api:inspector.c++",
+    "//src/rust/api:inspector.h",
     "//src/workerd/io/io-context:ffi.c++",
     "//src/workerd/io/io-context:ffi.h",
 ]

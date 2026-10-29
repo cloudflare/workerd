@@ -1779,7 +1779,11 @@ Worker::Script::~Script() noexcept(false) {
 }
 
 const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
-  auto ptr = js.v8Isolate->GetData(jsg::SET_DATA_ISOLATE);
+  return from(js.v8Isolate);
+}
+
+const Worker::Isolate& Worker::Isolate::from(v8::Isolate* isolate) {
+  auto ptr = isolate->GetData(jsg::SET_DATA_ISOLATE);
   KJ_ASSERT(ptr != nullptr);
   return *static_cast<const Worker::Isolate*>(ptr);
 }
