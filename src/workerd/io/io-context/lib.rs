@@ -89,17 +89,30 @@ impl<'s> IoContext<'s> {
         Ok(bridge::io_context_write_logfwdr(self.id, channel, message)?)
     }
 
-    /// Waits for `future` as part of this request, then calls `callback` with its output, in
-    /// this `IoContext`, with a new lock. `future` may complete on any thread; `callback` runs on
-    /// this `IoContext`'s thread. As for C++ `IoContext::awaitIo()`, which shares its
-    /// implementation, `callback` runs in the async context frame that was current when
-    /// `await_io` was called, the one the I/O was started in, rather than whichever is current
-    /// when `future` completes. In a Durable Object it likewise runs in the critical section, if
-    /// any, of that call. The wait is recorded for async tracing.
+    /// Waits for `future` as part of this request, then calls `callback` with its output in this
+    /// `IoContext`, with a new lock. It shares its implementation with C++
+    /// `IoContext::awaitIo()`, and behaves as it does:
     ///
-    /// If the request is canceled first, both are dropped without `callback` running. `callback`
-    /// returns nothing: what it settles, such as a promise, it settles itself, and an exception
-    /// it leaves pending is a termination.
+    /// - `future` is polled by this `IoContext`'s thread's event loop, without the isolate lock
+    ///   and with no `IoContext` current. Only its wake-ups may come from other threads. It must
+    ///   not block, which would stall every request on the thread.
+    /// - `callback` runs in the async context frame that was current when `await_io` was called,
+    ///   the one the I/O was started in, rather than whichever is current when `future`
+    ///   completes. In a Durable Object it waits for the input gate, or runs in the critical
+    ///   section that was current when `await_io` was called.
+    /// - While it waits, the request is neither finished nor hung. The wait is recorded for async
+    ///   tracing.
+    ///
+    /// If this `IoContext` is destroyed first, both are dropped without `callback` running. In a
+    /// Durable Object, the `IoContext` can outlive the request that called `await_io`.
+    ///
+    /// `callback` settles what it needs to, such as a promise, itself. If it fails, or `future`
+    /// or `callback` panics, the failure is handled as for a task of C++ `IoContext::addTask()`:
+    /// it is logged as an uncaught exception and recorded in the request's `waitUntil()` status.
+    /// A panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
+    ///
+    /// `future` and its output are `Send` because the future is polled without the isolate lock.
+    /// That keeps values bound to the isolate, such as a `jsg::Rc`, out of it.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
@@ -107,7 +120,7 @@ impl<'s> IoContext<'s> {
     where
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
-        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
     {
         let future = ffi::IoFuture(Box::pin(async move {
             let output: Box<dyn Any + Send> = Box::new(future.await);
@@ -118,7 +131,7 @@ impl<'s> IoContext<'s> {
             let output = output
                 .downcast::<T>()
                 .unwrap_or_else(|_| unreachable!("the output of await_io()'s future"));
-            callback(lock, *output);
+            callback(lock, *output)
         }));
         Ok(bridge::io_context_await_io(
             self.id,
@@ -144,6 +157,7 @@ impl<'s> IoContext<'s> {
         )?;
         Ok(IoOwned {
             slot,
+            owner: self.id,
             _object: object,
         })
     }
@@ -158,25 +172,31 @@ impl<'s> IoContext<'s> {
 ///   destroyed, unless [`take`](Self::take) took it first. As with `IoOwn`, dropping the handle
 ///   while its `IoContext` is not current leaves the value to be dropped later, by the
 ///   `IoContext`.
-/// - **Access:** `IoOwn` is dereferenced in place, and only while its `IoContext` is current.
-///   Here the value is moved out with [`take`](Self::take), whichever `IoContext`, if any, is
-///   current.
-/// - **After the `IoContext` is destroyed:** dereferencing an `IoOwn` throws; here
-///   [`take`](Self::take) returns `None`.
-/// - **Threads:** an `IoOwn` is used on its `IoContext`'s thread, but may be dropped on any; the
-///   value is then dropped on the `IoContext`'s thread. `IoOwned` is neither `Send` nor `Sync`,
-///   so it stays on the thread that created it, which is the `IoContext`'s.
+/// - **Access:** `IoOwn` is dereferenced in place; here the value is moved out with
+///   [`take`](Self::take). Both work only while the `IoContext` is current, and fail otherwise,
+///   including once it has been destroyed.
+/// - **Threads:** the value is shared with the `IoContext`, which drops it, unless it was taken,
+///   on its own thread and without the isolate lock. The handle, held by a resource, may be
+///   dropped wherever the resource is, such as by GC on another thread that has locked the
+///   isolate. So a mutex guards the value, which must be `Send`.
 pub struct IoOwned<T> {
     slot: Arc<Mutex<Option<T>>>,
+    // The id of the IoContext that owns the value.
+    owner: u64,
     // Dropping it drops the value, if the IoContext has not already.
     _object: KjOwn<bridge::IoOwnedObject>,
 }
 
 impl<T> IoOwned<T> {
-    /// Takes the value, or returns `None` if it was taken, or its `IoContext` has been
-    /// destroyed.
-    pub fn take(&self) -> Option<T> {
-        lock_slot(&self.slot).take()
+    /// Takes the value, or returns `None` if it was already taken.
+    ///
+    /// # Errors
+    /// Fails unless the `IoContext` that owns the value is the current one, with the error C++
+    /// `IoContext` throws for an I/O object used by another request, as dereferencing an `IoOwn`
+    /// does.
+    pub fn take(&self, _lock: &mut jsg::Lock<'_>) -> jsg::Result<Option<T>> {
+        bridge::io_context_require_current(self.owner)?;
+        Ok(lock_slot(&self.slot).take())
     }
 }
 

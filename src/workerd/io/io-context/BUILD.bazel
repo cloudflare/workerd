@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # The IoContext of the current request, for APIs implemented in Rust. A package of its own
@@ -26,7 +27,20 @@ wd_cc_library(
     hdrs = ["ffi.h"],
     deps = [
         ":ffi.rs@cxx",
+        "//src/rust/jsg:bridge",
         "//src/workerd/io",
+    ],
+)
+
+# Snippets that must not compile against io-context (each annotates the errors it expects) and
+# snippets that must (no annotations). See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    deps = [
+        ":io-context",
+        "//src/rust/jsg",
     ],
 )
 

@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/io/io-context/ffi.rs.h>
+#include <workerd/rust/jsg/jsg.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -37,6 +38,10 @@ IoContext& currentWithId(uint64_t id) {
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
+}
+
+void io_context_require_current(uint64_t id) {
+  IoContext::requireCurrentOrThrowJs(std::bit_cast<IoContext::Id>(id));
 }
 
 int64_t io_context_now(uint64_t id) {
@@ -82,22 +87,39 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
 
 void io_context_await_io(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
-  kj::Promise<::rust::Box<IoOutput>> output = io_future_wait(kj::mv(future));
-  currentWithId(id).awaitIoAndRun(kj::mv(output),
+  auto& context = currentWithId(id);
+  context.awaitIoAndRun(io_future_wait(kj::mv(future)),
       [callback = kj::mv(callback)](
           Worker::Lock& lock, IoContext::ExceptionOr<::rust::Box<IoOutput>>&& result) mutable {
-    // io_future_wait() produces a value and does not fail.
-    auto output = kj::mv(KJ_REQUIRE_NONNULL(result.tryGet<::rust::Box<IoOutput>>(),
-        "the future that IoContext::await_io() waited for failed"));
-    io_callback_run(
-        reinterpret_cast<uintptr_t>(lock.getIsolate()), kj::mv(callback), kj::mv(output));
+    KJ_SWITCH_ONEOF(result) {
+      KJ_CASE_ONEOF(exception, kj::Exception) {
+        // The future panicked. Failing the task drops the callback without running it.
+        kj::throwFatalException(kj::mv(exception));
+      }
+      KJ_CASE_ONEOF(output, ::rust::Box<IoOutput>) {
+        auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
+        switch (io_callback_run(isolate, kj::mv(callback), kj::mv(output))) {
+          case IoCallbackOutcome::Succeeded:
+            return;
+          case IoCallbackOutcome::Failed:
+            // IoContext::run() logs the exception and fails the task with it.
+            ::workerd::rust::jsg::propagatePendingException();
+          case IoCallbackOutcome::Panicked:
+            // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
+            // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception
+            // and convert it, running JavaScript, so the task fails with a KJ exception instead.
+            KJ_FAIL_ASSERT("the callback of IoContext::await_io() panicked");
+        }
+        KJ_UNREACHABLE;
+      }
+    }
   });
 }
 
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {
   auto& context = currentWithId(id);
-  auto object = context.addObject(kj::heap<::rust::Box<IoOwnedSlot>>(kj::mv(slot)));
-  return kj::heap<IoOwnedObject>(kj::heap(kj::mv(object)));
+  return kj::heap<IoOwnedObject>(
+      context.addObject(kj::heap<::rust::Box<IoOwnedSlot>>(kj::mv(slot))));
 }
 
 }  // namespace workerd::io_context

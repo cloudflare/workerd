@@ -12,4 +12,7 @@ namespace workerd::io_context::test {
 // Records the async context frame that is current, in the isolate `isolate`.
 void record_async_context(uintptr_t isolate);
 
+// Records the IoContext that is current, from the callback of an await_io().
+void record_await_context();
+
 }  // namespace workerd::io_context::test

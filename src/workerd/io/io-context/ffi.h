@@ -22,6 +22,10 @@ namespace workerd::io_context {
 // IoContext::tryGetCurrentId(), as a uint64_t.
 kj::Maybe<uint64_t> io_context_try_current_id();
 
+// IoContext::requireCurrentOrThrowJs(): throws the error for an I/O object used by another
+// request unless `id` identifies the current IoContext.
+void io_context_require_current(uint64_t id);
+
 // IoContext::now(), in nanoseconds since the Unix epoch.
 int64_t io_context_now(uint64_t id);
 
@@ -37,7 +41,7 @@ struct IoOwnedSlot;
 // IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and
 // async context frame that are current when this is called. Both are dropped if the IoContext is
-// destroyed first.
+// destroyed first. If `future` panics, or `callback` fails or panics, the task fails.
 void io_context_await_io(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback);
 
@@ -45,10 +49,10 @@ void io_context_await_io(
 // when it is destroyed, unless this is destroyed first.
 class IoOwnedObject {
  public:
-  explicit IoOwnedObject(kj::Own<void> object): object(kj::mv(object)) {}
+  explicit IoOwnedObject(IoOwn<::rust::Box<IoOwnedSlot>> object): object(kj::mv(object)) {}
 
  private:
-  kj::Own<void> object;
+  IoOwn<::rust::Box<IoOwnedSlot>> object;
 };
 
 // IoContext::addObject() for `slot`.

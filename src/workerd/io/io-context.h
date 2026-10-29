@@ -1479,8 +1479,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
   // The I/O half of awaitIoImpl() and awaitIoAndRun(): waits for `promise` as a task of this
-  // IoContext, then calls `func(Worker::Lock&, ExceptionOr<T>&&)` in run(), in the async context
-  // frame that is current when this is called, with an async trace resource as the turn's cause.
+  // IoContext, then calls `func(Worker::Lock&, ExceptionOr<T>&&)` in run(), under `ilOrCs`, in the
+  // async context frame that is current when this is called, with an async trace resource as the
+  // turn's cause. The caller checks that this IoContext is current.
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
   void resumeAfterIo(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
@@ -1738,21 +1739,16 @@ void IoContext::resumeAfterIo(
   // body, `promise` will be destroyed first, before `func`. That's important as often `func`
   // holds ownership of objects that `promise` depends on.
 
-  requireCurrent();
-
-  // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
-  // and pass it into the then(). If the promise is rejected, and there is no rejection
-  // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
-  // that event needs to be done within the appropriate frame to propagate the correct context.
-
-  // We need to catch exceptions from KJ and pass them to `func`, so that they can propagate to
-  // JavaScript.
+  // `func` gets what the KJ promise failed with, rather than the task failing, so that it can
+  // handle it.
   kj::Promise<ExceptionOr<T>> promiseExceptionOrT = promiseForExceptionOrT(kj::mv(promise));
 
   // Settled when the KJ promise completes; causes the turn that resumes JavaScript.
   AsyncResource asyncTraceResource = makeAwaitIoResource();
 
   addTask(promiseExceptionOrT.then(
+      // The frame current now is the one the I/O was started in, which `func` runs in, rather
+      // than whichever is current when the promise completes.
       [this, ilOrCs = kj::mv(ilOrCs), maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
           asyncTraceResource = kj::mv(asyncTraceResource),
           // Reminder: It's important that `func` gets attached to the promise before the whole
@@ -1783,8 +1779,10 @@ void IoContext::resumeAfterIo(
 template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func) {
-  // WARNING: As in resumeAfterIo(), `promise` is passed by value and `func` by reference, so that
-  // if we throw an exception here, `promise` is destroyed before `func`.
+  // WARNING: As in resumeAfterIo(), `promise` is passed by value and `func` by reference, and
+  // `promise` is moved into a local, so that if we throw an exception here, `promise` is destroyed
+  // before `func`.
+  kj::Promise<T> ownedPromise = kj::mv(promise);
 
   requireCurrent();
 
@@ -1793,10 +1791,15 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
   using Result = jsg::ReturnType<Func, T, true>;
 
   // Reminder: This can throw JsExceptionThrown if the execution context has been terminated.
-  // it's important in that case that `promise` will be destroyed before `func`.
+  // it's important in that case that `ownedPromise` will be destroyed before `func`.
   auto [jsPromise, resolver] = js.newPromiseAndResolver<ExceptionOr<Result>>();
 
-  resumeAfterIo<T>(js, kj::mv(promise), kj::mv(ilOrCs),
+  // resumeAfterIo() passes `func` what the KJ promise failed with, so that it can propagate to
+  // JavaScript. It runs `func` in the async context frame that is current now: if the promise is
+  // rejected, and there is no rejection handler attached to it, an unhandledrejection event will
+  // be scheduled, and scheduling that event needs to be done within the appropriate frame to
+  // propagate the correct context.
+  resumeAfterIo<T>(js, kj::mv(ownedPromise), kj::mv(ilOrCs),
       [resolver = kj::mv(resolver), func = kj::fwd<Func>(func)](
           Worker::Lock& lock, ExceptionOr<T>&& exceptionOrT) mutable {
     jsg::Lock& js = lock;
@@ -1870,6 +1873,8 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
 template <typename T, typename Func>
 void IoContext::awaitIoAndRun(kj::Promise<T> promise, Func&& func) {
+  // Takes no jsg::Lock, unlike awaitIo(), because its Rust callers' C++ shims don't use C++ JSG.
+  requireCurrent();
   resumeAfterIo<T>(getCurrentLock(), promise.attach(registerPendingEvent()), getCriticalSection(),
       kj::fwd<Func>(func));
 }
