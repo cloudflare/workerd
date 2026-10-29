@@ -208,6 +208,9 @@ struct TestResource: public Base {
     JSG_READONLY_INSTANCE_PROPERTY(readonlySize, getSize);
     JSG_LAZY_INSTANCE_PROPERTY(lazySize, getSize);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(lazyReadonlySize, getSize);
+    static const char KEY[] = "test.lazy.symbol";
+    registry.template registerLazyInstanceProperty<KEY, decltype(&Self::getSize), &Self::getSize,
+        false, true>();
     JSG_PROTOTYPE_PROPERTY(protoSize, getSize, setSize);
     JSG_READONLY_PROTOTYPE_PROPERTY(protoReadonlySize, getSize);
   }

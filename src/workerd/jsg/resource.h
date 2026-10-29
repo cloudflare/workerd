@@ -1560,9 +1560,15 @@ struct ResourceTypeBuilder {
     registerExternalReference(&Gcb::callback);
   }
 
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
+  template <const char* name,
+      typename Getter,
+      Getter getter,
+      bool readOnly,
+      bool sharedSymbol = false>
   inline void registerLazyInstanceProperty() {
-    auto v8Name = v8StrIntern(isolate, name);
+    v8::Local<v8::Name> v8Name = sharedSymbol
+        ? v8::Local<v8::Name>(v8::Symbol::For(isolate, v8StrIntern(isolate, name)))
+        : v8::Local<v8::Name>(v8StrIntern(isolate, name));
 
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
     if (!Gcb::enumerable) {
@@ -1765,7 +1771,11 @@ struct JsSetup {
   template <const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {}
 
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
+  template <const char* name,
+      typename Getter,
+      Getter getter,
+      bool readOnly,
+      bool sharedSymbol = false>
   inline void registerLazyInstanceProperty() {}
 
   template <const char* name, typename Getter, Getter getter>

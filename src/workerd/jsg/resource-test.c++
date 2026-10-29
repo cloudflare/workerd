@@ -77,6 +77,42 @@ KJ_TEST("methods") {
 
 // ========================================================================================
 
+struct LazySymbolContext: public ContextGlobalObject {
+  int reads = 0;
+  int getLazy() {
+    return ++reads;
+  }
+  int getReads() {
+    return reads;
+  }
+
+  JSG_RESOURCE_TYPE(LazySymbolContext) {
+    static const char KEY[] = "test.lazy.symbol";
+    registry.template registerLazyInstanceProperty<KEY, decltype(&Self::getLazy), &Self::getLazy,
+        false, true>();
+    JSG_METHOD(getReads);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(LazySymbolIsolate, LazySymbolContext);
+
+KJ_TEST("shared-symbol instance properties are lazy, cached, and replaceable") {
+  Evaluator<LazySymbolContext, LazySymbolIsolate> e(v8System);
+  e.expectEval(R"JS(
+    const key = Symbol.for('test.lazy.symbol');
+    const before = getReads();
+    const stringAbsent = globalThis['test.lazy.symbol'] === undefined;
+    const first = globalThis[key];
+    const second = globalThis[key];
+    const after = getReads();
+    globalThis[key] = 42;
+    before === 0 && stringAbsent && first === 1 && second === 1 && after === 1 &&
+      globalThis[key] === 42 && getReads() === 1;
+  )JS",
+      "boolean", "true");
+}
+
+// ========================================================================================
+
 struct Mixin {
   int getValue() {
     return i;

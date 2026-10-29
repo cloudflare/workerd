@@ -673,9 +673,13 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
+  template <const char* name,
+      typename Getter,
+      Getter getter,
+      bool readOnly,
+      bool sharedSymbol = false>
   inline void registerLazyInstanceProperty() {
-    ++members;
+    if constexpr (!sharedSymbol) ++members;
   }
 
   template <const char* name, typename Getter, Getter getter>
@@ -778,8 +782,13 @@ struct MembersBuilder {
   template <const char* name>
   inline void registerPrivateSymbol() { /* not included in RTTI */ }
 
-  template <const char* name, typename Getter, Getter getter, bool readOnly>
+  template <const char* name,
+      typename Getter,
+      Getter getter,
+      bool readOnly,
+      bool sharedSymbol = false>
   inline void registerLazyInstanceProperty() {
+    if constexpr (sharedSymbol) return;
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(readOnly);

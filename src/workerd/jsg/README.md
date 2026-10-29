@@ -5,6 +5,10 @@ see [docs/jsg.md](../../../docs/jsg.md).
 
 For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 
+`registerLazyInstanceProperty` also accepts a final `sharedSymbol` template parameter.
+When true, the name is resolved through `Symbol.for()` rather than as a string property.
+These implementation-only symbol properties are omitted from generated TypeScript declarations.
+
 ## Primitive Type Mapping
 
 | C++ Type         | v8 Type         | JavaScript Type | Notes                                      |
