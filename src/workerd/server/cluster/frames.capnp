@@ -3,12 +3,6 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 @0xf699edadaece33b7;
-# The format of a Durable Object's log in the bucket: the storage relay's
-# (SRS's), field for field, so the two stay wire-compatible, and one lane
-# type of workerd's own, `sqlitePages`, at new ordinals. Workerd leaves
-# unset what it has no use for, noted below. Compression and encryption are
-# not part of it.
-#
 # A log batch is a run of frames, each one message, that starts and ends at
 # a commit. A snapshot is a `SnapshotHeader` and then each lane's content in
 # lane order.
