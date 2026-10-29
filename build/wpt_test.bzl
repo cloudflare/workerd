@@ -591,14 +591,17 @@ def relative_path(from_path, to_path):
 
     length = from_len if from_len < to_len else to_len
     last_common_sep = -1
-    i = 0
 
-    for i in range(length):
+    # Unlike a JS for loop, a Starlark loop variable doesn't advance past the last element, so
+    # count matching characters explicitly. i == length means one path is a prefix of the other.
+    i = 0
+    for _ in range(length):
         from_ch = from_path[from_start + i]
         if from_ch != to_path[to_start + i]:
             break
         elif from_ch == "/":
             last_common_sep = i
+        i += 1
 
     # Compare paths to find the longest common path from root
     if i == length:
@@ -612,15 +615,15 @@ def relative_path(from_path, to_path):
                 # We get here if `from` is the root
                 # For example: from='/'; to='/foo'
                 return to_path[to_start + i:]
-    elif from_len > length:
-        if from_path[from_start + i] == "/":
-            # We get here if `to` is the exact base path for `from`.
-            # For example: from='/foo/bar/baz'; to='/foo/bar'
-            last_common_sep = i
-        elif i == 0:
-            # We get here if `to` is the root.
-            # For example: from='/foo/bar'; to='/'
-            last_common_sep = 0
+        elif from_len > length:
+            if from_path[from_start + i] == "/":
+                # We get here if `to` is the exact base path for `from`.
+                # For example: from='/foo/bar/baz'; to='/foo/bar'
+                last_common_sep = i
+            elif i == 0:
+                # We get here if `to` is the root.
+                # For example: from='/foo/bar'; to='/'
+                last_common_sep = 0
 
     out = ""
 
