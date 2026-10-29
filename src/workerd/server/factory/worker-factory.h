@@ -287,7 +287,7 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Box<ActorNamespaceHandle> actors);
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
-kj::Own<WorkerInterface> alarm_owned_elsewhere();
+kj::Own<WorkerInterface> alarm_owned_elsewhere(bool again);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.

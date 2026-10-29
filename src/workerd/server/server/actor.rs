@@ -494,21 +494,21 @@ impl ActorNamespaceHandle {
             return namespace.container_for(id).start_request(metadata);
         };
         // Only an object's owner runs its alarm. One that moved since this instance scheduled
-        // the alarm has it scheduled where it lives now, since opening an object schedules
-        // its alarm: here the alarm is done.
+        // the alarm has it scheduled where it lives now, since opening an object schedules its
+        // alarm, unless the owner died before indexing it: this instance fires it again until
+        // the owner has outlived that (`Index::elsewhere`).
         let key = ffi::actor_id_key(&id);
         Ok(PromisedInterface::new(async move {
             match namespace.resolve(id).await? {
                 Resolved::Here(client) => client.start_request(metadata),
                 Resolved::Remote(_) => {
-                    let unique_key = namespace.unique_key().unwrap_or_default().to_owned();
-                    let cluster = Rc::clone(&node.cluster);
-                    namespace.factory.spawn_detached(async move {
-                        if let Err(e) = cluster.arm_alarm(&unique_key, &key, None, None).await {
-                            tracing::warn!("unindexing a moved object's alarm: {e}");
-                        }
-                    });
-                    Ok(ffi::alarm_owned_elsewhere())
+                    let unique_key = namespace.unique_key().unwrap_or_default();
+                    let again = node
+                        .cluster
+                        .alarm_elsewhere(unique_key, &key, cluster::now_ms())
+                        .await
+                        .unwrap_or(true);
+                    Ok(ffi::alarm_owned_elsewhere(again))
                 }
             }
         })

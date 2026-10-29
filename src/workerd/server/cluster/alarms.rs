@@ -126,16 +126,24 @@ pub struct Index {
     stale: RefCell<Vec<Entry>>,
     /// The last entry's `seq`.
     seq: Cell<u64>,
+    /// Objects whose alarm fired here while another node owned them, by
+    /// when this node first found that.
+    elsewhere: RefCell<BTreeMap<Key, u64>>,
+    /// How long an owner must outlive that before this node's entry goes:
+    /// past its lease, had it died before indexing the alarm itself.
+    grace_ms: u64,
 }
 
 impl Index {
-    pub fn new(bucket: Bucket, node: &str) -> Self {
+    pub fn new(bucket: Bucket, node: &str, grace_ms: u64) -> Self {
         Self {
             alarms: Alarms::new(bucket),
             node: node.to_owned(),
             armed: RefCell::default(),
             stale: RefCell::default(),
             seq: Cell::default(),
+            elsewhere: RefCell::default(),
+            grace_ms,
         }
     }
 
@@ -161,6 +169,7 @@ impl Index {
         at_ms: Option<u64>,
     ) -> Result<()> {
         let key = (namespace.to_owned(), actor.to_owned());
+        self.elsewhere.borrow_mut().remove(&key);
         let indexed = {
             let mut armed = self.armed.borrow_mut();
             let armed = armed.entry(key.clone()).or_default();
@@ -190,18 +199,16 @@ impl Index {
     }
 
     /// Bring this node's entries in line with what `arm` asked for: move
-    /// later alarms' entries later and delete cleared ones.
+    /// later alarms' entries later, delete cleared ones, and write again
+    /// those whose write failed.
     pub async fn tidy(&self) {
         let moves: Vec<_> = {
             let mut armed = self.armed.borrow_mut();
             armed.retain(|_, a| a.indexed.is_some() || a.want.is_some());
             armed
                 .iter()
-                .filter_map(|(key, a)| {
-                    let indexed = a.indexed.clone()?;
-                    let later = a.want.is_none_or(|want| want > indexed.at_ms);
-                    later.then(|| (key.clone(), indexed, a.want, a.name.clone()))
-                })
+                .filter(|(_, a)| a.indexed.as_ref().map(|i| i.at_ms) != a.want)
+                .map(|(key, a)| (key.clone(), a.indexed.clone(), a.want, a.name.clone()))
                 .collect()
         };
         for (key, indexed, want, name) in moves {
@@ -219,11 +226,10 @@ impl Index {
             let Some(a) = armed.get_mut(&key) else {
                 continue;
             };
-            let stale = if a.indexed.as_ref() == Some(&indexed) {
-                a.indexed = next;
-                Some(indexed)
+            let stale = if a.indexed == indexed && a.want == want {
+                std::mem::replace(&mut a.indexed, next)
             } else {
-                // An earlier alarm was indexed meanwhile.
+                // Armed meanwhile: the next tidy moves what this did not.
                 next
             };
             self.stale.borrow_mut().extend(stale);
@@ -239,6 +245,21 @@ impl Index {
         }
     }
 
+    /// An alarm of this node's fired for an object another node owns. That
+    /// node indexed the alarm when it opened the object, unless it died
+    /// first, which its lease hides for a while: this node keeps its entry
+    /// until the owner has outlived the grace since it first found it
+    /// there. Answers whether to look again later.
+    pub async fn elsewhere(&self, namespace: &str, actor: &str, now_ms: u64) -> Result<bool> {
+        let key = (namespace.to_owned(), actor.to_owned());
+        let first = *self.elsewhere.borrow_mut().entry(key).or_insert(now_ms);
+        if now_ms < first + self.grace_ms {
+            return Ok(true);
+        }
+        self.arm(namespace, actor, None, None).await?;
+        Ok(false)
+    }
+
     /// Take over this node's share of `dead` nodes' alarms among the `live`
     /// ones: each is indexed here before it goes there, so it is never in
     /// neither. Answers every one to schedule here, whatever this node knows
@@ -246,10 +267,16 @@ impl Index {
     /// still holds it, since a wake that finds no alarm consumes the one but
     /// not the other. An entry that fails stays where it is, for the next
     /// round.
-    pub async fn adopt(&self, live: &[String], dead: &[String]) -> Result<Vec<Adopted>> {
+    pub async fn adopt(&self, live: &[String], dead: &[String]) -> Vec<Adopted> {
         let mut adopted = Vec::new();
         for node in dead {
-            let entries = self.alarms.list(node).await?;
+            let entries = match self.alarms.list(node).await {
+                Ok(entries) => entries,
+                Err(e) => {
+                    tracing::warn!("listing {node}'s alarms: {e}");
+                    continue;
+                }
+            };
             let mine = entries
                 .into_iter()
                 .filter(|e| assignee(live, e) == Some(self.node.as_str()));
@@ -265,7 +292,7 @@ impl Index {
                 }
             }
         }
-        Ok(adopted)
+        adopted
     }
 
     /// Index `entry` here, then delete it from `node`. `armed` changes only

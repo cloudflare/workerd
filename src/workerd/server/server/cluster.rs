@@ -228,14 +228,7 @@ impl ClusterNode {
     pub async fn alarms_loop(&self) {
         loop {
             tokio::time::sleep(ALARMS_INTERVAL).await;
-            let adopted = match self.cluster.alarms_round(cluster::now_ms()).await {
-                Ok(adopted) => adopted,
-                Err(e) => {
-                    tracing::warn!("adopting dead peers' alarms: {e}");
-                    continue;
-                }
-            };
-            for alarm in adopted {
+            for alarm in self.cluster.alarms_round(cluster::now_ms()).await {
                 let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
                 let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
                     // Not configured here: a peer that has it adopts it once this one dies.

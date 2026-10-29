@@ -96,7 +96,7 @@ impl Cluster {
             setup.ttl_ms,
         ));
         Ok(Rc::new(Self {
-            alarms: Index::new(bucket.clone(), &setup.node),
+            alarms: Index::new(bucket.clone(), &setup.node, 2 * setup.ttl_ms),
             owners: Owners::new(bucket.clone()),
             ownership: Ownership::new(bucket.clone(), registry.clone()),
             bucket,
@@ -242,10 +242,18 @@ impl Cluster {
             .await
     }
 
+    /// An indexed alarm fired here for an object another node owns:
+    /// whether to fire it again later (`alarms::Index::elsewhere`).
+    pub async fn alarm_elsewhere(&self, ns: &str, actor: &str, now_ms: u64) -> Result<bool> {
+        self.alarms
+            .elsewhere(&namespace_hash(ns), actor, now_ms)
+            .await
+    }
+
     /// Delete the alarm entries this node no longer needs and move later
     /// ones, then take this node's share of dead nodes' alarms, to schedule
     /// here.
-    pub async fn alarms_round(&self, now_ms: u64) -> Result<Vec<Adopted>> {
+    pub async fn alarms_round(&self, now_ms: u64) -> Vec<Adopted> {
         self.alarms.tidy().await;
         let live = self.registry.listed_nodes(now_ms);
         self.alarms.adopt(&live, &self.registry.dead()).await

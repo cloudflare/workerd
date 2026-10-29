@@ -465,8 +465,9 @@ pub mod ffi {
         /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
         /// is `name`, empty for none, unless one is scheduled no later.
         fn actor_storage_set_alarm(storage: &ActorStorage, actor: &str, name: &str, at_ms: u64);
-        /// What an alarm runs on when another instance owns its object: nothing, successfully.
-        fn alarm_owned_elsewhere() -> KjOwn<WorkerInterface>;
+        /// What an alarm runs on when another instance owns its object: nothing, and then the
+        /// alarm again later (a retry that counts against no limit) if `again`.
+        fn alarm_owned_elsewhere(again: bool) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(

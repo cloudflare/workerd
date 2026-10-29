@@ -90,7 +90,7 @@ fn arming_waits_only_for_new_or_earlier_alarms() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let index = Index::new(bucket, "n1");
+        let index = Index::new(bucket, "n1", 0);
         index.arm("ns", "a", Some("room"), Some(20)).await.unwrap();
         assert_eq!(listed(&alarms, "n1").await, [at(20, "a")]);
         // Earlier: indexed before arm resolves, the old entry gone on tidy.
@@ -119,7 +119,7 @@ fn moving_back_to_a_stale_entrys_time_keeps_an_entry() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let index = Index::new(bucket, "n1");
+        let index = Index::new(bucket, "n1", 0);
         index.arm("ns", "a", None, Some(59)).await.unwrap();
         index.arm("ns", "a", None, Some(50)).await.unwrap();
         // Back to 59: tidy writes 59 again and deletes the first 59 entry,
@@ -131,11 +131,27 @@ fn moving_back_to_a_stale_entrys_time_keeps_an_entry() {
 }
 
 #[test]
+fn tidy_writes_again_what_failed() {
+    block_on(async {
+        let store = Flaky::default();
+        let fail = std::rc::Rc::clone(&store.fail_puts);
+        let bucket = Bucket::new(store, "");
+        let alarms = Alarms::new(bucket.clone());
+        let index = Index::new(bucket, "n1", 0);
+        fail.set(true);
+        assert!(index.arm("ns", "a", None, Some(20)).await.is_err());
+        fail.set(false);
+        index.tidy().await;
+        assert_eq!(listed(&alarms, "n1").await, [at(20, "a")]);
+    });
+}
+
+#[test]
 fn survivors_split_a_dead_nodes_alarms() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let dead = Index::new(bucket.clone(), "d");
+        let dead = Index::new(bucket.clone(), "d", 0);
         for i in 0..40 {
             let name = (i % 2 == 0).then(|| format!("name{i}"));
             dead.arm("ns", &format!("{i:x}"), name.as_deref(), Some(100 + i))
@@ -143,13 +159,16 @@ fn survivors_split_a_dead_nodes_alarms() {
                 .unwrap();
         }
         let live: Vec<String> = ["a", "b"].map(String::from).into();
-        let (a, b) = (Index::new(bucket.clone(), "a"), Index::new(bucket, "b"));
+        let (a, b) = (
+            Index::new(bucket.clone(), "a", 0),
+            Index::new(bucket, "b", 0),
+        );
         // `a` already owns object 0 with a later alarm: its index keeps
         // that, and the adopted one only wakes the object early.
         a.arm("ns", "0", Some("name0"), Some(500)).await.unwrap();
         let dead_nodes = ["d".to_owned()];
-        let by_a = a.adopt(&live, &dead_nodes).await.unwrap();
-        let by_b = b.adopt(&live, &dead_nodes).await.unwrap();
+        let by_a = a.adopt(&live, &dead_nodes).await;
+        let by_b = b.adopt(&live, &dead_nodes).await;
         assert!(alarms.list("d").await.unwrap().is_empty());
         let (in_a, in_b) = (
             alarms.list("a").await.unwrap(),
@@ -164,15 +183,17 @@ fn survivors_split_a_dead_nodes_alarms() {
     });
 }
 
-/// The memory store, but `alarms/d/` DELETEs fail while `fail` is set.
+/// The memory store, but `alarms/d/` DELETEs fail while `fail` is set, and
+/// every PUT while `fail_puts` is.
 #[derive(Default)]
-struct FlakyDeletes {
+struct Flaky {
     inner: crate::bucket::memory::Memory,
     fail: std::rc::Rc<std::cell::Cell<bool>>,
+    fail_puts: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 #[async_trait::async_trait(?Send)]
-impl crate::Store for FlakyDeletes {
+impl crate::Store for Flaky {
     async fn get(
         &self,
         key: &str,
@@ -187,6 +208,9 @@ impl crate::Store for FlakyDeletes {
         guard: Option<crate::Guard>,
         metadata: &[(&str, String)],
     ) -> Result<Option<crate::Version>> {
+        if self.fail_puts.get() {
+            return Err(crate::Error::Http("503".into()));
+        }
         self.inner.put(key, body, guard, metadata).await
     }
     async fn list(&self, prefix: &str) -> Result<Vec<crate::bucket::Entry>> {
@@ -203,27 +227,27 @@ impl crate::Store for FlakyDeletes {
 #[test]
 fn a_failed_adoption_still_schedules_and_retries() {
     block_on(async {
-        let store = FlakyDeletes::default();
+        let store = Flaky::default();
         let fail = std::rc::Rc::clone(&store.fail);
         let bucket = Bucket::new(store, "");
-        let dead = Index::new(bucket.clone(), "d");
+        let dead = Index::new(bucket.clone(), "d", 0);
         for i in 0..8 {
             dead.arm("ns", &format!("{i:x}"), None, Some(100 + i))
                 .await
                 .unwrap();
         }
         let (live, dead_nodes) = (["a".to_owned()], ["d".to_owned()]);
-        let a = Index::new(bucket.clone(), "a");
+        let a = Index::new(bucket.clone(), "a", 0);
         fail.set(true);
         // Indexed here but still there: every one is scheduled once.
-        assert_eq!(a.adopt(&live, &dead_nodes).await.unwrap().len(), 8);
+        assert_eq!(a.adopt(&live, &dead_nodes).await.len(), 8);
         assert_eq!(
             Alarms::new(bucket.clone()).list("d").await.unwrap().len(),
             8
         );
         fail.set(false);
         // Again, which only schedules what is scheduled already.
-        assert_eq!(a.adopt(&live, &dead_nodes).await.unwrap().len(), 8);
+        assert_eq!(a.adopt(&live, &dead_nodes).await.len(), 8);
         assert!(Alarms::new(bucket).list("d").await.unwrap().is_empty());
     });
 }
