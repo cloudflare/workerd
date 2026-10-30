@@ -64,7 +64,6 @@ const {
   ObjectDefineProperty,
   ObjectDefineProperties,
   ObjectFreeze,
-  ObjectGetOwnPropertyDescriptor,
   ObjectSetPrototypeOf,
   PromiseResolve,
   PromiseReject,
@@ -266,14 +265,14 @@ const errorTeeBranchFromCursor: ErrorStreamCallback = (e, owner) => {
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
-// C++-recognition brand (JsReadableStream::tryUnwrapTs): an own,
-// non-enumerable marker stamped on every instance by the constructor, so
-// the C++ bridge can recognize TypeScript streams via an own-property
-// probe, without executing JavaScript. That constraint is load-bearing:
+// C++-recognition brand (JsReadableStream::tryUnwrapTs): a V8-private
+// marker stamped on every instance by the constructor, so the C++ bridge
+// can recognize TypeScript streams without executing JavaScript.
+// That constraint is load-bearing:
 // unwrap runs during RPC deserialization, inside V8's no-JS-execution
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
-const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
+const kReadableStreamBrand = 'kReadableStreamBrand';
 
 // The Node.js stream-interop hooks, keyed by the well-known symbols Node's
 // own web streams carry. node:stream's finished()/eos() observes a web
@@ -390,7 +389,7 @@ let controllerError: (
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
-// on native-backed streams as kExtractNativeSource. Assigned in
+// in native-backed streams' kExtractNativeSource private slots. Assigned in
 // ReadableStream's static block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
@@ -3843,8 +3842,8 @@ class ReadableStream<R> {
 
         // PIPE DISPATCH: if both source and dest are native-backed, take
         // the fast path -- extract both and let the sink's pipeFrom hook
-        // arrange the pipe entirely at the C++ layer. Both markers are
-        // own-property reads (non-destructive); extraction happens only
+        // arrange the pipe entirely at the C++ layer. Private-slot reads
+        // are non-destructive; extraction happens only
         // after both are confirmed. If both are native, pipeFrom MUST
         // exist (invariant -- its absence is a contract violation, not a
         // fallback trigger).
@@ -3866,16 +3865,14 @@ class ReadableStream<R> {
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
-        // The destination is brand-checked above, so a Proxy's
-        // getOwnPropertyDescriptor trap cannot observe the symbol.
-        const sourceExtractor = ObjectGetOwnPropertyDescriptor(
+        const sourceExtractor = utils.getPrivate(
           source,
           kExtractNativeSource
-        )?.value as ((this: ReadableStream<R>) => object) | undefined;
-        const sinkExtractor = ObjectGetOwnPropertyDescriptor(
+        ) as ((this: ReadableStream<R>) => object) | undefined;
+        const sinkExtractor = utils.getPrivate(
           destination,
           kExtractNativeSink
-        )?.value as ((this: object) => object) | undefined;
+        ) as ((this: object) => object) | undefined;
         if (
           sourceExtractor !== undefined &&
           sinkExtractor !== undefined &&
@@ -4302,9 +4299,9 @@ class ReadableStream<R> {
 
     // BACKEND-DISPATCH point #4: JS-to-C++ extraction
     // (prepareReadableStreamForCpp in the design doc). A single shared
-    // function installed as the value of kExtractNativeSource on every
-    // native-backed stream. The TypeWrapper detects the property's
-    // presence (own-property get, no JS code execution) and calls it
+    // function installed in the kExtractNativeSource private slot of every
+    // native-backed stream. The C++ bridge detects the private slot
+    // without executing JS and calls the function
     // to extract the native underlying source; absent means "queued,
     // use DrainingReader". One-shot: subsequent calls throw.
     extractNativeSource = function <R>(this: ReadableStream<R>): object {
@@ -4338,10 +4335,7 @@ class ReadableStream<R> {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
     // shells and native-backed streams included.
-    ObjectDefineProperty(this, kReadableStreamBrand, {
-      __proto__: null,
-      value: true,
-    } as PropertyDescriptor);
+    utils.setPrivate(this, kReadableStreamBrand, true);
 
     // Internal shell creation (makeShell: tee branches, detached copies):
     // skip controller setup entirely — the shell takes over another
@@ -4395,15 +4389,9 @@ class ReadableStream<R> {
       // the stream's R is caller-chosen; same shape as the queued cursor
       // attachments in the controller constructors.
       this.#consumer = conduit as unknown as StreamConsumerType<R>;
-      // BACKEND-DISPATCH point #4: install the JS-to-C++ extraction
-      // marker. Own, non-enumerable, non-writable, non-configurable.
-      // The value is the shared extractor function (this-bound at call
-      // time). Bootstrap phase: a regular symbol; final: private API
-      // symbol (invisible to JS entirely).
-      ObjectDefineProperty(this, kExtractNativeSource, {
-        __proto__: null,
-        value: extractNativeSource,
-      } as PropertyDescriptor);
+      // BACKEND-DISPATCH point #4: the shared, this-bound extractor is
+      // accessible only to C++ and bootstrap code, not symbol reflection.
+      utils.setPrivate(this, kExtractNativeSource, extractNativeSource);
       return;
     }
 
