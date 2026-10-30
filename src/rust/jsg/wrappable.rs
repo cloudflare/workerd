@@ -18,6 +18,7 @@
 //! |-----------|-----------------|
 //! | `()` | `undefined` |
 //! | `String` | `string` |
+//! | `JsString<'s>` | `string` (coerces without copying out of the V8 heap) |
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `f64` | `number`; from any value, with `ToNumber` |

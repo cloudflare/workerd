@@ -662,6 +662,7 @@ fn coercion_exception_propagates_through_method() {
 #[derive(Clone, Copy, Debug)]
 enum Conversion {
     String,
+    JsString,
     Number,
     Int32,
     Uint32,
@@ -677,8 +678,9 @@ enum Conversion {
 }
 
 impl Conversion {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::String,
+        Self::JsString,
         Self::Number,
         Self::Int32,
         Self::Uint32,
@@ -697,6 +699,7 @@ impl Conversion {
     fn run<'s>(self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<()> {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
+            Self::JsString => jsg::JsString::from_js(lock, value).map(drop),
             Self::Number => f64::from_js(lock, value).map(drop),
             Self::Int32 => value.int32_value(lock).map(drop),
             Self::Uint32 => value.uint32_value(lock).map(drop),
@@ -731,7 +734,7 @@ impl Conversion {
     /// A value whose conversion, property `x` or element 0 calls `f`.
     fn value_calling(self, f: &str) -> String {
         match self {
-            Self::String => format!("({{ toString: {f} }})"),
+            Self::String | Self::JsString => format!("({{ toString: {f} }})"),
             Self::Number | Self::Int32 | Self::Uint32 | Self::Integer => {
                 format!("({{ valueOf: {f} }})")
             }

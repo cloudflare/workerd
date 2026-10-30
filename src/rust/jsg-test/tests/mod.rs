@@ -22,6 +22,7 @@ mod harness;
 mod integer;
 mod internal_error;
 mod isolates;
+mod js_string;
 mod jsg_oneof;
 mod jsg_oneof_variants;
 mod jsg_struct;

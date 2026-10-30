@@ -679,9 +679,12 @@ how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be 
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
 that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
-`String` converts from any value with `ToString`, copying it out of the V8 heap. To convert any
-value as C++ JSG's `jsg::JsString` parameter does, without the copy, take a
-`v8::Local<'s, v8::Value>` and call `to_js_string(lock)` on it.
+`String` converts from any value with `ToString`, copying it out of the V8 heap. A
+`jsg::JsString<'s>` parameter performs the same coercion without copying or decoding the string,
+like C++ JSG's `jsg::JsString`. It preserves lone UTF-16 surrogates and returns to JavaScript
+unchanged. It dereferences to `v8::Local<'s, v8::String>` for string operations, and converts to
+and from that handle with `From`/`Into`. Both types stay within their handle scope. For an
+explicit coercion of a `v8::Local<'s, v8::Value>`, call `to_js_string(lock)`.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range; whether a fraction just past a
@@ -813,8 +816,8 @@ exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 
 Variants can be any type that converts from JavaScript and that a `kj::OneOf` can hold:
-strings, numbers, the integer types, booleans, `SystemTime`, resources, structs,
-`Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
+strings (including `jsg::JsString<'s>`), numbers, the integer types, booleans, `SystemTime`,
+resources, structs, `Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
 handles (`v8::Local<'s, T>`). Each is tried in the passes of its C++ counterpart, so a few
 behave as they do in C++ rather than as their position suggests:
 
