@@ -90,6 +90,7 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
 namespace {
 EvalResult runScript(
     v8::Isolate* v8Isolate, v8::Local<v8::Context> ctx, v8::Local<v8::Script> script) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
   v8::TryCatch catcher(v8Isolate);
 
   v8::MaybeLocal<v8::Value> value = script->Run(ctx);
@@ -153,6 +154,7 @@ EvalResult EvalContext::call_builtin_module(
 
   v8::Isolate::Scope isolateScope(v8Isolate);
   v8::Context::Scope contextScope(v8Context.Get(v8Isolate));
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
   v8::TryCatch catcher(v8Isolate);
   auto value = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(callback(v8Isolate));
   bool success = !value.IsEmpty();

@@ -1756,6 +1756,7 @@ void IoContext::runImpl(Runnable& runnable,
       // Run microtask checkpoint with an active IoContext
       {
         // Running the microtask queue can itself trigger a pending exception in the isolate.
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
         v8::TryCatch tryCatch(workerLock.getIsolate());
 
         js.runMicrotasks();
@@ -1795,6 +1796,7 @@ void IoContext::runImpl(Runnable& runnable,
           // It is possible that a microtask got enqueued during pumpMsgLoop execution
           // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
           // without an active IoContext
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
           v8::TryCatch tryCatch(workerLock.getIsolate());
 
           js.runMicrotasks();
@@ -1823,6 +1825,7 @@ void IoContext::runImpl(Runnable& runnable,
           v8::Isolate::kFullGarbageCollection);
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): reset before the exception is used.
     v8::TryCatch tryCatch(workerLock.getIsolate());
     try {
       runnable.run(workerLock);

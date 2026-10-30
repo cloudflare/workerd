@@ -209,6 +209,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // throws a KJ exception, which reaches JavaScript as an internal error; if execution is
   // terminating, returns false.
   bool readHeader(::rust::Slice<const uint8_t> data) {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only turns what it caught into a KJ exception.
     v8::TryCatch tryCatch(isolate);
     if (deser.ReadHeader(isolate->GetCurrentContext()).IsJust()) return true;
     MaybeLocal exception;

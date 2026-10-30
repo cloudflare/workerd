@@ -60,6 +60,7 @@ class Evaluator {
         auto moduleNs = check(module->GetModuleNamespace()->ToObject(js.v8Context()));
         auto runValue = check(moduleNs->Get(js.v8Context(), v8StrIntern(lock.v8Isolate, "run"_kj)));
 
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only stringifies what was thrown.
         v8::TryCatch catcher(js.v8Isolate);
 
         // Run the function to get the result.
@@ -98,6 +99,7 @@ class Evaluator {
           return;
         }
 
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only stringifies what was thrown.
         v8::TryCatch catcher(js.v8Isolate);
 
         // Run the script to get the result.
@@ -143,6 +145,7 @@ class Evaluator {
     getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only tunnels what the test threw.
         v8::TryCatch tryCatch(js.v8Isolate);
 
         try {

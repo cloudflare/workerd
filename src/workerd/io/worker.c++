@@ -215,6 +215,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     // This doesn't appear to be an Error object. Fall back to stringifying the whole value as
     // the message.
     if (!js.v8Isolate->IsExecutionTerminating()) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): its scope ends after the toString().
       v8::TryCatch tryCatch(js.v8Isolate);
       try {
         message = exception.toString(js);
@@ -301,6 +302,7 @@ void reportStartupError(kj::StringPtr id,
     kj::Maybe<kj::Exception>& permanentException,
     SpanParent parentSpan,
     bool isDynamicWorker) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only logs what reporting the exception threw.
   v8::TryCatch catcher2(js.v8Isolate);
   ExceptionOrDuration limitErrorOrTime2 = 0 * kj::NANOSECONDS;
   try {
@@ -981,6 +983,7 @@ struct Worker::Script::Impl {
 
           // We have to wrap the call to handler in a try catch here because
           // we have to tunnel any jsg::JsExceptionThrown instances back.
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): only takes the exception before its scope ends.
           v8::TryCatch tryCatch(js.v8Isolate);
           ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
           try {
@@ -1620,6 +1623,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         });
 
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
@@ -1930,6 +1934,7 @@ void handleLog(jsg::Lock& js,
   // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): forgetCaughtException() resets it.
   v8::TryCatch tryCatch(js.v8Isolate);
 
   // Forgets an exception that stringifying threw, so that it isn't pending while more JavaScript
@@ -2351,6 +2356,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       // Enter the context for compiling and running the script.
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 

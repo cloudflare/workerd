@@ -430,6 +430,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
       return;
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the promise with what it caught.
     v8::TryCatch tryCatch(isolate);
     try {
       try {

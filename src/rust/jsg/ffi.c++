@@ -1680,6 +1680,7 @@ bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
 
 void isolate_try_catch(
     Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): try_catch() takes the exception out first.
   v8::TryCatch tryCatch(isolate);
   if (callback(data)) {
     catch_exception(tryCatch, exception);
