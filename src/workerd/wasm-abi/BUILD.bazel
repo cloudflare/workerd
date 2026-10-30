@@ -1,4 +1,6 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
+load("//:build/wd_test.bzl", "wd_test")
 
 # A Wasm-only worker bundles the launcher, the shim runtime and the shim modules of the Wasm
 # import modules its guest uses; see conventions.md (Launcher).
@@ -47,4 +49,45 @@ py_test(
         exclude = ["generator/self_test.py"],
     ),
     main = "generator/generator_test.py",
+)
+
+wasm_tools_parse(
+    name = "guest.wasm",
+    src = "tests/guest.wat",
+)
+
+wasm_tools_parse(
+    name = "foreign.wasm",
+    src = "tests/foreign.wat",
+)
+
+wasm_tools_parse(
+    name = "jspi.wasm",
+    src = "tests/jspi.wat",
+)
+
+# Wasm-only bundles through the real launcher and shim, with both module registries. The new
+# registry is experimental.
+wd_test(
+    src = "tests/launcher-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "launcher.js",
+        "shim/cf-core-v1.js",
+        "shim/cf-http-v1.js",
+        "shim/runtime.js",
+        "tests/launcher-probe.js",
+        "tests/launcher-test.js",
+        ":foreign.wasm",
+        ":guest.wasm",
+    ],
+)
+
+# The shim relies on JSPI (WebAssembly.Suspending and WebAssembly.promising) in worker contexts.
+wd_test(
+    src = "tests/jspi-test.wd-test",
+    data = [
+        "tests/jspi-test.js",
+        ":jspi.wasm",
+    ],
 )

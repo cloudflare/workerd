@@ -181,6 +181,9 @@ and every set of modules:
 4. It exports `serve(wasm, shims)` of `runtime.js` as the worker's default export, where `shims`
    are the default exports of the shim modules.
 
+Workerd resolves these `import()` calls, whose specifiers are computed at run time, against the
+bundle's own modules with both module registries; `tests/launcher-test.wd-test` covers both.
+
 ### Recognition by embedders
 
 An embedder that wants to serve Wasm-only workers natively can recognize one from its bundle
@@ -738,6 +741,16 @@ the repository root:
   are counted, not failed. `generator/self_test.py --help` shows how to run it
   on RTTI dumps. `//src/workerd/wasm-abi:generator-test` tests the generator's rules on
   synthetic input.
+- **End to end.** `bazel test //src/workerd/wasm-abi:tests/launcher-test@` runs a guest
+  (`tests/guest.wat`) that uses `cf:core/v1` and `cf:http/v1` through the launcher and the shim,
+  and the launcher's error cases, with both module registries. The guest also imports what the
+  first guests written against the ABI use, so a module that loses one of those imports fails
+  the test.
+- **JSPI.** `bazel test //src/workerd/wasm-abi:tests/jspi-test@` (and its `@all-compat-flags`
+  variant) checks that the JSPI API the shim relies on exists in a worker context.
+
+The test guests are WebAssembly text files (`tests/*.wat`), which the build assembles with
+`wasm-tools parse`.
 
 ## Planned modules
 
