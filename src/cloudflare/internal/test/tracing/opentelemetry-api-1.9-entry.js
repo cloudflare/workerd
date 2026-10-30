@@ -3,3 +3,4 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export * from '@opentelemetry/api-1.9';
+export { default } from '@opentelemetry/api-1.9';

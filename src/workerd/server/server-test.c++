@@ -569,6 +569,11 @@ class TestServer final: private kj::EntropySource {
     kj::String destination;
   };
 
+  // Opt in where tests need independent tracer keys rather than the default constant entropy.
+  void useDistinctEntropy() {
+    entropyCounter = uint64_t{0};
+  }
+
   TestServer(kj::StringPtr configText,
       Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
       kj::SourceLocation loc = {})
@@ -725,6 +730,8 @@ class TestServer final: private kj::EntropySource {
   };
   kj::Vector<UdpPeer> udpPeers;
 
+  kj::Maybe<uint64_t> entropyCounter;
+
  public:
   kj::Own<config::Config::Reader> config;
   // The test's filesystem: a real directory, since the server's disk services read the disk.
@@ -823,6 +830,11 @@ class TestServer final: private kj::EntropySource {
   // implements EntropySource
 
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    KJ_IF_SOME(counter, entropyCounter) {
+      ++counter;
+      for (uint i = 0; i < buffer.size(); ++i) buffer[i] = (counter >> (8 * (i % 8))) & 0xff;
+      return;
+    }
     kj::byte random = 4;  // chosen by fair die roll by Randall Munroe in 2007.
                           // guaranteed to be random.
     buffer.fill(random);
@@ -4286,8 +4298,8 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
   for (auto tailMode: {"none"_kj, "buffered"_kj, "streaming"_kj}) {
     bool streaming = tailMode == "streaming";
     for (auto flags: {"00"_kj, "01"_kj}) {
-      for (auto mode:
-          {"invocation"_kj, "active"_kj, "detached"_kj, "retained-root"_kj, "retained-child"_kj}) {
+      for (auto mode: {"invocation"_kj, "active"_kj, "detached"_kj, "retained-root"_kj,
+             "retained-child"_kj, "retained-rewrapped-child"_kj}) {
         bool retained = mode.startsWith("retained-");
         if (retained && (!streaming || flags != "01")) continue;
         TestServer test(kj::str(R"((
@@ -4310,11 +4322,24 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `      api.context.with(api.context.active().setValue(key, this.root), () => {
               `        this.child = tracing.startSpan('remembered-child');
               `      });
+              `      // A non-native carrier, as returned by an API copy's wrapSpanContext.
+              `      const rewrapped = {spanContext: () => ({...this.root.spanContext()})};
+              `      api.context.with(api.context.active().setValue(key, rewrapped), () => {
+              `        this.rewrappedChild = tracing.startSpan('remembered-rewrapped-child');
+              `      });
               `      if (this.root.spanContext().traceId === invocation.traceId ||
-              `          this.child.spanContext().traceId !== this.root.spanContext().traceId)
+              `          this.child.spanContext().traceId !== this.root.spanContext().traceId ||
+              `          this.rewrappedChild.spanContext().traceId !== this.root.spanContext().traceId)
               `        throw new Error('missing retained native detached identities');
-              `      this.root.end(); this.child.end();
+              `      this.root.end(); this.child.end(); this.rewrappedChild.end();
               `      return new Response('OK');
+              `    }
+              `    if (this.root) {
+              `      // Give B a key too: recognition of A must use provenance, not an uninitialized key.
+              `      const probe = api.trace.getTracer('accept').startSpan('request-b-root', {root:true});
+              `      if (probe.spanContext().traceId === this.root.spanContext().traceId)
+              `        throw new Error('requests did not get distinct minted identities');
+              `      probe.end();
               `    }
               `    const [client, server] = Object.values(new WebSocketPair());
               `    let expected = invocation;
@@ -4331,6 +4356,8 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
               `      api.context.with(api.context.active().setValue(key, this.root), accept);
               `    } else if (request.url.endsWith('/retained-child')) {
               `      tracing.withActiveSpan(this.child, accept);
+              `    } else if (request.url.endsWith('/retained-rewrapped-child')) {
+              `      tracing.withActiveSpan(this.rewrappedChild, accept);
               `    } else { accept(); }
               `    server.serializeAttachment({traceId: expected.traceId, spanId: expected.spanId});
               `    return new Response(null, {status: 101, webSocket: client});
@@ -4383,6 +4410,7 @@ KJ_TEST("Server: hibernatable socket capture drops accept flags state and detach
                      (name = "tail", address = "tail-addr", service = "tail")],
         ))"));
         test.server.allowExperimental();
+        if (retained) test.useDistinctEntropy();
         test.start();
         if (retained) {
           auto prime = test.connect("test-addr");

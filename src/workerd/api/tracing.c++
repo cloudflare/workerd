@@ -902,6 +902,7 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
   SpanParent parent(nullptr);
   if (!suppress.orDefault(false) &&
       (io.getWorkerTracer() != kj::none || io.isOpentelemetryApiEnabled())) {
+    bool minted = false;
     kj::Maybe<tracing::SpanContext> parsed;
     KJ_IF_SOME(value, context) {
       // Remote parents carry a sampling bit; same-invocation native flags are restored below.
@@ -915,8 +916,8 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
           }
         }
         KJ_IF_SOME(invocation, io.getUserTraceInvocationContext()) {
-          bool minted = io.getWorkerTracer()
-                            .map([&](auto& tracer) {
+          minted = io.getWorkerTracer()
+                       .map([&](auto& tracer) {
             return tracer.isDetachedTraceId(identity.getTraceId());
           }).orDefault(false);
           if (io.isOpentelemetryApiEnabled() &&
@@ -967,6 +968,11 @@ jsg::JsRef<jsg::JsValue> TracingContext::withActiveSpanContext(jsg::Lock& js,
         if (!parent.isObserved()) {
           parent = SpanParent(kj::rc<PropagationOnlySpanObserver>(kj::mv(value)));
         }
+      }
+      // Rewrapping is not a parentless open: leave the factory's DetachedRoot argument NO,
+      // but preserve local provenance on this carrier and its eventual native descendants.
+      if (io.isOpentelemetryApiEnabled() && minted) {
+        KJ_IF_SOME(observer, parent.getObserver()) observer.markDetachedTrace();
       }
     }
   }

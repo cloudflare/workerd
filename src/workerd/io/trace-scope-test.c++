@@ -399,6 +399,7 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
     // carriers on the adapter -> createSpan path, independently of glibc or allocator hooks.
     fixture.enterContext(*request,
         [&](const TestFixture::Environment& env) { env.js.v8Isolate->LowMemoryNotification(); });
+    uint stageOneLive = 0;
     fixture.enterContext(*request, [&](const TestFixture::Environment&) {
       bool recording = flags < 0 || (flags & 1);
       KJ_EXPECT(lifetime.created == (recording ? 4099 : 0));
@@ -406,6 +407,7 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
       // remain. In particular, none of the 4096 ended loop-root carriers may accumulate.
       KJ_EXPECT(lifetime.live <= (recording ? 3 : 0));
       if (recording) KJ_EXPECT(lifetime.created - lifetime.live >= 4096);
+      stageOneLive = lifetime.live;
     });
     fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
       auto script = jsg::check(v8::Script::Compile(
@@ -415,7 +417,9 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
     fixture.enterContext(*request,
         [&](const TestFixture::Environment& env) { env.js.v8Isolate->LowMemoryNotification(); });
     fixture.enterContext(*request, [&](const TestFixture::Environment&) {
-      KJ_EXPECT(lifetime.live <= (flags < 0 || (flags & 1) ? 2 : 0));
+      // Releasing the retained recording root must reclaim exactly its one native carrier.
+      // Unsampled roots never created one, so their count must remain zero.
+      KJ_EXPECT(stageOneLive == lifetime.live + (flags < 0 || (flags & 1) ? 1 : 0));
     });
     fixture.drainAndDestroy(kj::mv(request));
   }

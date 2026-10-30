@@ -4,6 +4,7 @@
 
 import assert from 'node:assert';
 import {
+  default as api,
   context,
   trace,
   propagation,
@@ -15,12 +16,19 @@ import {
 } from '@opentelemetry/api';
 import { tracing } from 'cloudflare:workers';
 
-// This is the actual 1.10.0 API, not direct calls into its shared-symbol registry.
+// Each worker imports an independent real 1.9.0 or 1.10.0 API copy.
 const tracer = trace.getTracer('real-api', '1.10.0');
 const custom = createContextKey('real-api-value');
 
 export const realPackage = {
   async test() {
+    assert.strictEqual(
+      globalThis[Symbol.for('opentelemetry.js.api.1')].version,
+      '1.10.0'
+    );
+    assert.strictEqual(api.trace, trace);
+    assert.strictEqual(api.context, context);
+    assert.strictEqual(api.propagation, propagation);
     assert.ok(isSpanContextValid(trace.getActiveSpan().spanContext()));
     assert.deepStrictEqual(
       trace.getActiveSpan().spanContext(),

@@ -58,6 +58,14 @@ const unitTests :Workerd.Config = (
       compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
       streamingTails = ["tail"],
     )),
+    ( name = "incompatible-api-1.11", worker = (
+      modules = [
+        (name = "worker", esModule = embed "opentelemetry-incompatible-api-test.js"),
+        (name = "@opentelemetry/api", esModule = embed "opentelemetry-api-1.11.0.js"),
+      ],
+      compatibilityFlags = ["opentelemetry_api", "nodejs_compat"],
+      streamingTails = ["tail"],
+    )),
     ( name = "overlapping", worker = (
       modules = [(name = "worker", esModule = embed "opentelemetry-do-test.js")],
       compatibilityFlags = ["opentelemetry_api", "nodejs_compat", "streams_enable_constructors"],

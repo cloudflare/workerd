@@ -1,8 +1,14 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
+load("@otel_api_1_10__links//:defs.bzl", link_api_1_10 = "npm_link_imported_package")
+load("@otel_api_1_9__links//:defs.bzl", link_api_1_9 = "npm_link_imported_package")
 load("//:build/wd_test.bzl", "wd_test")
 
 # Bundle independent real API copies to exercise their global/version handshake with the runtime.
-# npm aliases pin both versions side by side.
+# Links are local to this test package and cannot change another fixture's optional peers.
+link_api_1_9()
+
+link_api_1_10()
+
 [
     esbuild(
         name = "opentelemetry-api-" + version,
@@ -10,7 +16,8 @@ load("//:build/wd_test.bzl", "wd_test")
         format = "esm",
         output = "opentelemetry-api-" + version + ".0.js",
         sourcemap = False,
-        deps = ["//:node_modules/@opentelemetry/api-" + version],
+        target = "esnext",
+        deps = [":node_modules/@opentelemetry/api-" + version],
     )
     for version in [
         "1.9",
@@ -18,9 +25,21 @@ load("//:build/wd_test.bzl", "wd_test")
     ]
 ]
 
+esbuild(
+    name = "opentelemetry-api-1.11",
+    config = "opentelemetry-incompatible-api.esbuild.mjs",
+    entry_point = "opentelemetry-api-1.10-entry.js",
+    format = "esm",
+    output = "opentelemetry-api-1.11.0.js",
+    sourcemap = False,
+    target = "esnext",
+    deps = [":node_modules/@opentelemetry/api-1.10"],
+)
+
 OTEL_API_BUNDLES = [
     ":opentelemetry-api-1.9",
     ":opentelemetry-api-1.10",
+    ":opentelemetry-api-1.11",
 ]
 
 wd_test(

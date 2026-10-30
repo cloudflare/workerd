@@ -78,7 +78,25 @@ SDK does. Attributes, exceptions, events and links still share the 64 KiB span b
 budgets and dropped counts on close are deferred. Invalid link identities are still dropped,
 including links with attributes: retaining invalid identities requires a separate schema decision.
 
+## API-copy version compatibility
+
+The runtime registers its API implementation as version **1.10.0** under
+`Symbol.for('opentelemetry.js.api.1')`. Older compatible 1.x API copies can use that registration
+but cannot replace it with their own tracer provider. A 1.x copy at **1.11 or later** cannot
+use the runtime's older registration and gets a no-op tracer instead. A 2.x copy uses the
+different `Symbol.for('opentelemetry.js.api.2')` global key and does not find this registration.
+Applications bundling their own API must stay within the supported version range; merely
+enabling the compatibility flag does not make incompatible copies share the runtime's tracer.
+Integration tests build independent 1.9.0 and 1.10.0 packages, plus a simulated 1.11.0 copy whose
+version constant is patched at bundle time. These test-only dependencies are isolated from the
+shared pnpm graph so they do not change unrelated packages' optional peers.
+
 ## Embedder integration
+
+`SpanObserver::newChild`, `newOptionalChild` and `newChildFromUserCode` must return a new observer
+or `this` (or no observer where allowed), never an observer shared across different parents.
+Child creation inherits detached provenance by marking the returned observer; sharing one across
+parents would contaminate unrelated traces.
 
 Override `SpanObserver::setOpenMetadata`, `setEndTimestamp`, `onEvent`, `onLinks` and
 `onExceptionWithTimestamp`. `UserSpanObserver` gates all marks on acceptance, forwarding them
@@ -110,8 +128,10 @@ and roots retained across requests), or its rewrapped ID matches the current tra
 In that case, or without a real active identity, it uses the invocation identity when one exists. Later
 message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
 inside a native detached root or child does not pull later events into that root's trace.
-Serialized identities and JS non-recording roots carry no native provenance across requests;
-after their owning tracer expires they are treated as foreign parents, not recognized roots.
+Serialized identities and JS non-recording roots carry no native provenance across requests.
+Membership uses the current request's tracer key: a serialized ID from another request is a
+foreign parent even while the minting tracer is still alive. Rewrapping a minted identity in
+its own request marks the resulting native carrier and its descendants for later native reuse.
 There is no dedicated per-invocation root-count quota. Recording spans share the existing export
 budgets; self-identifying minted IDs use constant per-tracer memory regardless of root count.
 

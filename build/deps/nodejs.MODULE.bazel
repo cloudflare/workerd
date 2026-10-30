@@ -35,6 +35,26 @@ npm.npm_translate_lock(
 )
 use_repo(npm, "npm")
 
+# Independent test-only copies, deliberately outside the shared pnpm graph. In particular these
+# must not satisfy Next.js's optional @opentelemetry/api peer in the OpenNext test fixture.
+npm.npm_import(
+    name = "otel_api_1_9",
+    integrity = "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==",
+    package = "@opentelemetry/api-1.9",
+    root_package = "src/cloudflare/internal/test/tracing",
+    url = "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz",
+    version = "1.9.0",
+)
+npm.npm_import(
+    name = "otel_api_1_10",
+    integrity = "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==",
+    package = "@opentelemetry/api-1.10",
+    root_package = "src/cloudflare/internal/test/tracing",
+    url = "https://registry.npmjs.org/@opentelemetry/api/-/api-1.10.0.tgz",
+    version = "1.10.0",
+)
+use_repo(npm, "otel_api_1_10", "otel_api_1_10__links", "otel_api_1_9", "otel_api_1_9__links")
+
 rules_ts_ext = use_extension("@aspect_rules_ts//ts:extensions.bzl", "ext")
 rules_ts_ext.deps(
     # This keeps the TypeScript version in-sync with the editor, which is typically best.
