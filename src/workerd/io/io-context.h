@@ -696,24 +696,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
-  // What a KJ promise for T produced: its value, or the exception it failed with.
-  template <typename T>
-  struct ExceptionOr_ {
-    using Type = kj::OneOf<T, kj::Exception>;
-  };
-  template <>
-  struct ExceptionOr_<void> {
-    using Type = kj::Maybe<kj::Exception>;
-  };
-  template <typename T>
-  using ExceptionOr = ExceptionOr_<T>::Type;
-
   // Like awaitIo(), for callers that settle no jsg::Promise, such as APIs implemented in Rust:
   // waits for `promise` as a task of this IoContext, holding a pending event, then calls
-  // `func(Worker::Lock&, ExceptionOr<T>&&)` in run(), in the critical section and async context
-  // frame that are current when this is called. If the IoContext is destroyed first, `func` is
-  // dropped without being called. An exception `func` throws fails the task, as it would for
-  // addTask().
+  // `func(Worker::Lock&, T&&)`, or `func(Worker::Lock&)` if T is void, in run(), in the critical
+  // section and async context frame that are current when this is called. If `promise` fails, or
+  // the IoContext is destroyed first, `func` is dropped without being called. A failure of
+  // `promise`, or an exception `func` throws, fails the task, as it would for addTask().
   template <typename T, typename Func>
   void awaitIoAndRun(kj::Promise<T> promise, Func&& func);
 
@@ -1504,6 +1492,17 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     inline void operator()(jsg::Lock&) const {}
   };
 
+  template <typename T>
+  struct ExceptionOr_ {
+    using Type = kj::OneOf<T, kj::Exception>;
+  };
+  template <>
+  struct ExceptionOr_<void> {
+    using Type = kj::Maybe<kj::Exception>;
+  };
+  template <typename T>
+  using ExceptionOr = ExceptionOr_<T>::Type;
+
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
@@ -1893,10 +1892,12 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
                 func(js, kj::mv(result));
                 resolver.resolve(js, kj::none);
               } else {
-                // Here we can just `resolver.reject` because we already have a JS exception.
                 resolver.resolve(js, func(js, kj::mv(result)));
               }
-            }, [&](jsg::Value error) { resolver.reject(js, error.getHandle(js)); });
+            }, [&](jsg::Value error) {
+              // Here we can just `resolver.reject` because we already have a JS exception.
+              resolver.reject(js, error.getHandle(js));
+            });
           } catch (jsg::JsExceptionThrown&) {
             // An uncatchable JS exception -- presumably, the isolate has been terminated. We
             // can't convert this into a promise rejection, we need to just propagate it up.
@@ -1921,7 +1922,24 @@ void IoContext::awaitIoAndRun(kj::Promise<T> promise, Func&& func) {
   // Takes no jsg::Lock, unlike awaitIo(), because its Rust callers' C++ shims don't use C++ JSG.
   requireCurrent();
   resumeAfterIo<T>(getCurrentLock(), promise.attach(registerPendingEvent()), getCriticalSection(),
-      kj::fwd<Func>(func));
+      [func = kj::fwd<Func>(func)](Worker::Lock& lock, ExceptionOr<T>&& exceptionOrT) mutable {
+    // Rethrowing what `promise` failed with, rather than handing it to `func`, fails the task.
+    if constexpr (jsg::isVoid<T>()) {
+      KJ_IF_SOME(exception, exceptionOrT) {
+        kj::throwFatalException(kj::mv(exception));
+      }
+      func(lock);
+    } else {
+      KJ_SWITCH_ONEOF(exceptionOrT) {
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          kj::throwFatalException(kj::mv(exception));
+        }
+        KJ_CASE_ONEOF(result, T) {
+          func(lock, kj::mv(result));
+        }
+      }
+    }
+  });
 }
 
 template <typename T>
