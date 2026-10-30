@@ -89,7 +89,8 @@ void cpp_ref_visit(GcVisitor* visitor, const CppRef& ref);
 // returns whether it completed. A `jsg::JsExceptionThrown` leaves its exception pending. A
 // `kj::Exception` becomes the JavaScript exception C++ JSG would throw for it: the error of a
 // `JSG_REQUIRE` or a tunneled exception, a DOMException, or an internal error. Unlike liftKj(),
-// it throws nothing while execution is terminating, which would replace the termination.
+// it throws nothing while execution is terminating, which would replace the termination. While an
+// exception or a termination is already pending, it fails without running `func`.
 //
 // Every per-method shim that Rust calls runs its C++ in here, so that no C++ exception crosses
 // the bridge and Rust sees every failure as an exception pending in V8 (`jsg::Error::pending()`).
@@ -97,6 +98,7 @@ void cpp_ref_visit(GcVisitor* visitor, const CppRef& ref);
 // The isolate must be locked by this thread, with a context entered and a HandleScope open.
 template <typename Func>
 bool callCpp(Isolate* isolate, Func&& func) noexcept {
+  if (::workerd::rust::jsg::exceptionPending(isolate)) return false;
   auto throwUnlessTerminating = [&](auto&& throwIt) {
     if (!isolate->IsExecutionTerminating()) {
       throwIt();
