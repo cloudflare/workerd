@@ -1014,25 +1014,29 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   const jsg::Url& url = normalizedPath;
 
   // The path must not already exist. However, if the path is a directory, we
-  // will just return rather than throwing an error.
-  KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = false})) {
-    KJ_SWITCH_ONEOF(node) {
-      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
+  // will just return rather than throwing an error. A temporary directory
+  // (tmp: true) is always created under a new unique name derived from the
+  // path, so an existing node at the path itself does not conflict.
+  if (!options.tmp) {
+    KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = false})) {
+      KJ_SWITCH_ONEOF(node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          // The directory already exists. We will just return.
+          return kj::none;
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
+        }
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          throwFsError(js, err, "mkdir"_kj);
+        }
       }
-      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        // The directory already exists. We will just return.
-        return kj::none;
-      }
-      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        node::THROW_ERR_UV_EEXIST(js, "mkdir"_kj);
-      }
-      KJ_CASE_ONEOF(err, workerd::FsError) {
-        throwFsError(js, err, "mkdir"_kj);
-      }
-    }
-    KJ_UNREACHABLE;
-  };
+      KJ_UNREACHABLE;
+    };
+  }
 
   if (options.recursive) {
     KJ_ASSERT(!options.tmp);
