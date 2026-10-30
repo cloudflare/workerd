@@ -23,6 +23,10 @@ class Response;
 
 // Implements the web standard EventSource API
 // https://developer.mozilla.org/en-US/docs/Web/API/EventSource
+//
+// Under the TS_EVENT_SOURCE autogate, EventSource is instead the TypeScript implementation in
+// src/per_isolate/eventsource/, installed by the per-isolate bootstrap, and this class is
+// registered but never exposed.
 class EventSource: public EventTarget {
  public:
   struct EventSourceInit {

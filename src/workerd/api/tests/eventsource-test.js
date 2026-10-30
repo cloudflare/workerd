@@ -155,6 +155,9 @@ export const messageTest = {
     // We should get two messages...
     let count = 0;
     eventsource.onmessage = (event) => {
+      // A lone `data` line: the TypeScript implementation dispatches a message
+      // with empty data, as the spec says; the C++ one dispatches nothing.
+      if (event.data === '') return;
       switch (count++) {
         case 0: {
           strictEqual(event.data, 'one\ntwo');

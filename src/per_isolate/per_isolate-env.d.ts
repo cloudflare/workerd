@@ -72,6 +72,12 @@ declare const primordials: {
   // if there is none.
   readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
 
+  // Uncurries the getter of a JSG readonly property `name` of `proto`, typed as
+  // T. Under compat dates without workers_api_getters_setters_on_prototype the
+  // property is an own data property of each instance instead, which the
+  // result then reads.
+  readonly captureJsgGetter: <T>(proto: object, name: string) => T;
+
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
     (): Promise<void>;
