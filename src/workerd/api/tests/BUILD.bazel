@@ -1413,6 +1413,11 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-cross-context-promise-test.wd-test",
+    data = ["actor-cross-context-promise-test.js"],
+)
+
+wd_test(
     src = "error-in-error-event-test.wd-test",
     args = ["--experimental"],
     data = ["error-in-error-event-test.js"],
