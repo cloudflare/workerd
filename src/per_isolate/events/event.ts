@@ -79,9 +79,10 @@ export interface EventInternals {
   isEvent(value: unknown): value is Event;
   type(event: Event): string;
   // dispatchEvent() steps 1-2 and dispatch step 1: throw if the event is
-  // being dispatched; otherwise set the dispatch flag, clear isTrusted, and
-  // set the target.
-  beginDispatch(event: Event, target: object): void;
+  // being dispatched; otherwise set the dispatch flag, clear isTrusted if
+  // `untrust` is set, and set the target. dispatchEvent() untrusts; the
+  // runtime's own dispatches keep the event's isTrusted.
+  beginDispatch(event: Event, target: object, untrust: boolean): void;
   // Invoke steps 4-5: false if the stop propagation flag is set; otherwise
   // set currentTarget.
   enterInvoke(event: Event, target: object): boolean;
@@ -110,6 +111,9 @@ let initializeEvent: (
 // with one getter shared by all of them.
 let kIsTrustedProperty: PropertyDescriptor;
 let eventInternals: EventInternals;
+// An event the runtime fires itself: isTrusted, and neither bubbling nor
+// cancelable.
+let createTrustedEvent: (type: string) => Event;
 
 class Event {
   #type: string;
@@ -139,6 +143,12 @@ class Event {
       return true;
     };
 
+    createTrustedEvent = (type) => {
+      const event = new Event(type);
+      event.#flags |= kTrusted;
+      return event;
+    };
+
     // An object literal's getter is named 'get isTrusted', as WebIDL
     // requires.
     const accessor = {
@@ -160,7 +170,7 @@ class Event {
       isEvent: (value: unknown): value is Event =>
         isObject(value) && #flags in value,
       type: (event: Event): string => event.#type,
-      beginDispatch(event: Event, target: object): void {
+      beginDispatch(event: Event, target: object, untrust: boolean): void {
         const flags = event.#flags;
         if (flags & kDispatch) {
           throw new DOMException(
@@ -168,7 +178,9 @@ class Event {
             'InvalidStateError'
           );
         }
-        event.#flags = (flags | kDispatch) & ~kTrusted;
+        event.#flags = untrust
+          ? (flags | kDispatch) & ~kTrusted
+          : flags | kDispatch;
         event.#target = target;
       },
       enterInvoke(event: Event, target: object): boolean {
@@ -469,9 +481,17 @@ ObjectDefineProperties(CustomEvent.prototype, {
 
 export type { Event, CustomEvent };
 
+// For C++, through events/cpp_exports.
+const cppExports = ObjectFreeze({
+  __proto__: null,
+  isEvent: eventInternals.isEvent,
+  createTrustedEvent,
+});
+
 module.exports = {
   Event,
   CustomEvent,
   // For event-target.ts only; never re-exported to users.
   eventInternals,
+  cppExports,
 };

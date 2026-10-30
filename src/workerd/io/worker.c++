@@ -7,6 +7,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/js-event-target.h>
 #include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/common.h>  // for api::StreamEncoding
@@ -2915,11 +2916,11 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
 
     KJ_IF_SOME(c, worker.impl->context) {
       // Service workers syntax.
-      auto handlerNames = c->getHandlerNames();
+      auto handlerNames = api::JsEventTarget::from(js, *c).getListenerTypes(js);
       kj::Vector<kj::String> handlers;
       for (auto& name: handlerNames) {
         if (!ignoredHandlers.contains(name)) {
-          handlers.add(kj::str(name));
+          handlers.add(kj::mv(name));
         }
       }
       if (handlers.empty()) {

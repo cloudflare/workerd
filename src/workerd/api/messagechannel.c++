@@ -2,6 +2,7 @@
 
 #include "blob.h"
 #include "events.h"
+#include "js-event-target.h"
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/ser.h>
@@ -37,6 +38,7 @@ void MessagePort::listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
+  auto target = JsEventTarget::from(js, *this);
   auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
   if (policy == DispatchExceptionPolicy::PROPAGATE) {
     // Compat path (spec_compliant_dispatch_exceptions disabled): the first throwing
@@ -46,25 +48,25 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     // If that second dispatch throws, the exception propagates: the delivery microtask
     // fails.
     JSG_TRY(js) {
-      dispatchEventImpl(
+      target.dispatch(
           js, js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES));
     }
     JSG_CATCH(exception) {
-      dispatchEventImpl(js,
+      target.dispatch(js,
           js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS,
               kj::none, Trusted::YES));
     }
     return;
   }
 
-  auto result = dispatchEventImpl(js,
+  auto result = target.dispatch(js,
       js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
   KJ_IF_SOME(exception, result.firstException) {
     // A 'message' listener threw. Its exception was reported (and the remaining 'message'
     // listeners still ran); additionally surface it as a 'messageerror' event on this port,
     // carrying the exception as the event's data. The 'messageerror' dispatch itself is
     // report-only: a throwing 'messageerror' listener triggers no further reaction.
-    dispatchEventImpl(js,
+    target.dispatch(js,
         js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
             JSG_THIS, kj::none, Trusted::YES),
         DispatchExceptionPolicy::REPORT);
@@ -182,8 +184,8 @@ void MessagePort::close(jsg::Lock& js) {
     }
     other = kj::none;
   }
-  auto closeEvent = js.alloc<Event>(name, Event::Init{}, Trusted::YES);
-  dispatchEventImpl(js, kj::mv(closeEvent));
+  auto target = JsEventTarget::from(js, *this);
+  target.dispatch(js, target.createEvent(js, name));
 }
 
 // Start delivering messages on this port. Any messages that are

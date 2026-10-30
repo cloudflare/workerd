@@ -21,6 +21,10 @@ namespace workerd::api::events {
 // surfaced to user code is intended.
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name);
 
+// Like getCppExport(), but kj::none if the bootstrap did not load the module (e.g. a C++
+// test harness that runs no bootstrap), for callers that fall back to the C++ classes.
+kj::Maybe<jsg::JsFunction> tryGetCppExport(jsg::Lock& js, kj::StringPtr name);
+
 // Calls the named events/cpp_exports function with undefined as the receiver.
 //
 // The assert turns a dispatch attempt inside a no-JS scope (e.g. V8's deserializer) into a
@@ -29,8 +33,7 @@ jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name);
 template <jsg::IsJsValue... Args>
 jsg::JsValue dispatchCall(jsg::Lock& js, kj::StringPtr name, Args... args) {
   KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
-      "attempted to dispatch into the TypeScript events implementation during a no-JS scope",
-      name);
+      "attempted to dispatch into the TypeScript events implementation during a no-JS scope", name);
   auto func = getCppExport(js, name);
   return func.call(js, js.undefined(), kj::fwd<Args>(args)...);
 }

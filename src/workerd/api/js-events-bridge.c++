@@ -17,4 +17,14 @@ jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name) {
   return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(cppExportsObj.get(js, name)));
 }
 
+kj::Maybe<jsg::JsFunction> tryGetCppExport(jsg::Lock& js, kj::StringPtr name) {
+  KJ_ASSERT(!js.isJavascriptExecutionDisallowed(),
+      "attempted to call into the TypeScript events implementation during a no-JS scope", name);
+  KJ_IF_SOME(cppExports, tryGetBootstrapExport(js, "events/cpp_exports")) {
+    auto cppExportsObj = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(cppExports));
+    return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(cppExportsObj.get(js, name)));
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api::events

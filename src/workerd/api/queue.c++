@@ -7,6 +7,7 @@
 #include "util.h"
 
 #include <workerd/api/global-scope.h>
+#include <workerd/api/js-event-target.h>
 #include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
@@ -661,12 +662,13 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     }
   } else {
     isServiceWorkerHandler = true;
-    if (globalEventTarget.getHandlerCount("queue") == 0) {
+    auto target = JsEventTarget::from(lock, globalEventTarget);
+    if (target.getListenerCount(lock, "queue"_kj) == 0) {
       lock.logWarningOnce("Received a QueueEvent but we lack an event listener for queue events. "
                           "Did you remember to call addEventListener(\"queue\", ...)?");
       JSG_FAIL_REQUIRE(Error, "No event listener registered for queue messages.");
     }
-    globalEventTarget.dispatchEventImpl(lock, event.addRef());
+    target.dispatch(lock, event.addRef());
     event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
   }
 

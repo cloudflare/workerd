@@ -178,7 +178,24 @@ function newAbortAlgorithm(type: string, record: ListenerRecord): () => void {
   };
 }
 
-let dispatchEvent: (target: EventTarget, event: Event) => boolean;
+// A dispatch's listener exceptions, for C++: whether a listener threw, and
+// the first exception, which has already been reported.
+interface DispatchOutcome {
+  notCanceled: boolean;
+  threw: boolean;
+  exception: unknown;
+}
+
+// The C++ entry points (see cppExports).
+let isEventTarget: (value: unknown) => boolean;
+let dispatchEvent: (
+  target: unknown,
+  event: unknown,
+  propagate: boolean
+) => DispatchOutcome;
+let getListenerCount: (target: unknown, type: string) => number;
+let getListenerTypes: (target: unknown) => string[];
+let removeAllListeners: (target: unknown) => void;
 
 class EventTarget {
   // A SafeMap from type to listener list, created by the first
@@ -213,9 +230,67 @@ class EventTarget {
       }
     };
 
-    dispatchEvent = (target, event) => {
-      return target.dispatchEvent(event);
-    }
+    isEventTarget = (value) => isObject(value) && #listeners in value;
+
+    // The runtime's own dispatch of an event it fires: the event keeps its
+    // isTrusted. With `propagate`, the first listener exception ends the
+    // dispatch and is thrown to the caller, which the runtime's top-level
+    // event delivery relies on; otherwise listener exceptions are reported,
+    // as dispatchEvent() does, and the first is returned.
+    dispatchEvent = (target, event, propagate) => {
+      assertIsEventTarget(target);
+      if (!isEvent(event)) {
+        throw new TypeError('The value is not an Event.');
+      }
+      const outcome = {
+        __proto__: null,
+        notCanceled: true,
+        threw: false,
+        exception: undefined,
+      } as DispatchOutcome;
+      outcome.notCanceled = (target as EventTarget).#dispatch(
+        event,
+        false,
+        propagate ? undefined : outcome
+      );
+      return outcome;
+    };
+
+    getListenerCount = (target, type) => {
+      assertIsEventTarget(target);
+      return (target as EventTarget).#listeners?.get(type)?.length ?? 0;
+    };
+
+    getListenerTypes = (target) => {
+      assertIsEventTarget(target);
+      const types: string[] = [];
+      const listeners = (target as EventTarget).#listeners;
+      if (listeners !== undefined) {
+        for (const type of listeners.keys()) ArrayPrototypePush(types, type);
+      }
+      return types;
+    };
+
+    // Removes every listener, as removing each would, without notifying
+    // anything per listener.
+    removeAllListeners = (target) => {
+      assertIsEventTarget(target);
+      const self = target as EventTarget;
+      const listeners = self.#listeners;
+      if (listeners === undefined) return;
+      self.#listeners = undefined;
+      listeners.forEach((list) => {
+        for (let i = 0; i < list.length; i++) {
+          const record = list[i] as ListenerRecord;
+          record.removed = true;
+          const registration = record.registration;
+          if (registration !== undefined) {
+            record.registration = undefined;
+            registration.remove();
+          }
+        }
+      });
+    };
   }
 
   addEventListener(
@@ -338,13 +413,27 @@ class EventTarget {
         "Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'."
       );
     }
-    beginDispatch(event, this);
+    return this.#dispatch(event, true, null);
+  }
+
+  // dispatchEvent() from its step 1, and the runtime's own dispatches.
+  // `untrust` clears the event's isTrusted (dispatchEvent() step 2).
+  //
+  // `outcome` selects what happens to a listener's exception: null reports
+  // it, a DispatchOutcome also records it there, and undefined ends the
+  // dispatch and throws it.
+  #dispatch(
+    event: Event,
+    untrust: boolean,
+    outcome: DispatchOutcome | null | undefined
+  ): boolean {
+    beginDispatch(event, this, untrust);
     // The type cannot change during dispatch: initEvent() does nothing then.
     const type = getEventType(event);
     let notCanceled: boolean;
     try {
-      this.#invoke(event, type, true);
-      this.#invoke(event, type, false);
+      this.#invoke(event, type, true, outcome);
+      this.#invoke(event, type, false, outcome);
     } finally {
       notCanceled = endDispatch(event);
     }
@@ -354,8 +443,13 @@ class EventTarget {
   // The spec's invoke and inner invoke at this target, for one pass. The pass
   // runs over a snapshot of the list taken as it starts, so a listener added
   // during the pass does not run in it, and a listener removed during the
-  // pass is skipped because removal marks it.
-  #invoke(event: Event, type: string, capture: boolean): void {
+  // pass is skipped because removal marks it. `outcome` is #dispatch()'s.
+  #invoke(
+    event: Event,
+    type: string,
+    capture: boolean,
+    outcome: DispatchOutcome | null | undefined
+  ): void {
     const list = this.#listeners?.get(type);
     if (list === undefined || !enterInvoke(event, this)) return;
     const snapshot = listenersForPass(list, capture);
@@ -365,10 +459,20 @@ class EventTarget {
       if (record.removed) continue;
       if (record.once) removeListener(this, type, record);
       if (record.passive) setInPassiveListener(event, true);
-      try {
+      if (outcome === undefined) {
+        // An exception ends the dispatch; endDispatch() clears the in passive
+        // listener flag.
         callListener(record.callback, this, event);
-      } catch (exception) {
-        reportException(exception);
+      } else {
+        try {
+          callListener(record.callback, this, event);
+        } catch (exception) {
+          if (outcome !== null && !outcome.threw) {
+            outcome.threw = true;
+            outcome.exception = exception;
+          }
+          reportException(exception);
+        }
       }
       if (record.passive) setInPassiveListener(event, false);
       if (isImmediatePropagationStopped(event)) break;
@@ -394,7 +498,11 @@ function installEventTargetPrototype(target: { prototype: object }): void {
 
 const cppExports = ObjectFreeze({
   __proto__: null,
+  isEventTarget,
   dispatchEvent,
+  getListenerCount,
+  getListenerTypes,
+  removeAllListeners,
   installEventTargetPrototype,
 });
 
