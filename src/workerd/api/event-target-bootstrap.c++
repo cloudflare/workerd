@@ -125,6 +125,12 @@ jsg::JsValue EventTargetBootstrap::dispatchEvent(jsg::Lock& js,
   return js.undefined();
 }
 
+jsg::JsValue EventTargetBootstrap::createTrustedEvent(jsg::Lock& js, jsg::JsValue type) {
+  auto typeStr = requireType(js, type, "createTrustedEvent"_kjc);
+  return jsg::JsValue(
+      eventHandler(js).wrap(js, js.alloc<Event>(kj::mv(typeStr), Event::Init{}, Trusted::YES)));
+}
+
 jsg::JsValue EventTargetBootstrap::createTrustedMessageEvent(
     jsg::Lock& js, jsg::JsValue type, jsg::JsValue data, jsg::JsValue source) {
   static constexpr auto kName = "createTrustedMessageEvent"_kjc;
