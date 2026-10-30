@@ -1850,6 +1850,11 @@ void IoContext::runImpl(Runnable& runnable,
           JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
         } else {
           auto jsException = tryCatch.Exception();
+          auto jsMessage = tryCatch.Message();
+          // Reset, so that the exception isn't pending while it is logged and tunneled: that reads
+          // its properties, whose getters may call into Rust JSG, which fails while an exception
+          // is pending.
+          tryCatch.Reset();
 
           // TODO(someday): We log "uncaught exception" here whenever throwing from JS to C++.
           //   However, the C++ code calling us may still catch the exception and do its own logging,
@@ -1860,7 +1865,7 @@ void IoContext::runImpl(Runnable& runnable,
           //   useful. We should improve the tunneling to include stack traces and ensure that all
           //   consumers do in fact log exceptions, then we can remove this.
           workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
-              jsg::JsValue(jsException), jsg::JsMessage(tryCatch.Message()));
+              jsg::JsValue(jsException), jsg::JsMessage(jsMessage));
 
           jsg::throwTunneledException(workerLock.getIsolate(), jsException);
         }

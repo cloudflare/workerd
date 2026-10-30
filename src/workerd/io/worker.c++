@@ -328,6 +328,10 @@ void reportStartupError(kj::StringPtr id,
         if (catcher.HasCaught()) {
           js.withinHandleScope([&] {
             auto exception = catcher.Exception();
+            auto exceptionMessage = catcher.Message();
+            // Forget the exception before reading its properties, which can run getters: they
+            // may call into Rust JSG, which fails while an exception is pending.
+            if (catcher.CanContinue()) catcher.Reset();
 
             permanentException = js.exceptionToKj(js.v8Ref(exception));
 
@@ -338,21 +342,21 @@ void reportStartupError(kj::StringPtr id,
               lines.add(kj::str("Uncaught ",
                   jsg::extractTunneledExceptionDescription(
                       KJ_ASSERT_NONNULL(permanentException).getDescription())));
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               e.addError(kj::strArray(lines, "\n"));
 
             } else KJ_IF_SOME(i, inspector) {
               auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
               sendExceptionToInspector(js, *i.get(), UncaughtExceptionSource::INTERNAL,
-                  jsg::JsValue(exception), jsg::JsMessage(catcher.Message()));
+                  jsg::JsValue(exception), jsg::JsMessage(exceptionMessage));
               // When the inspector is active, we don't want to throw here because then the inspector
               // won't be able to connect and the developer will never know what happened.
             } else {
               // We should never get here in production if we've validated scripts before deployment.
               // (unless this is a dynamic worker)
               kj::Vector<kj::String> lines;
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
@@ -1928,6 +1932,13 @@ void handleLog(jsg::Lock& js,
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
 
+  // Forgets an exception that stringifying threw, so that it isn't pending while more JavaScript
+  // runs: a toJSON() or toString() may call into Rust JSG, which fails while an exception is
+  // pending.
+  auto forgetCaughtException = [&]() {
+    if (tryCatch.HasCaught() && tryCatch.CanContinue()) tryCatch.Reset();
+  };
+
   auto message = [&]() {
     int length = info.Length();
     kj::Vector<kj::String> stringified(length);
@@ -1969,10 +1980,11 @@ void handleLog(jsg::Lock& js,
           // Check if arg has a `toJSON` property which is a function.
           auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
           v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
-          if (!toJSON.IsEmpty()) {
-            if (jsg::check(toJSON)->IsFunction()) {
-              shouldSerialiseToJson = true;
-            }
+          if (toJSON.IsEmpty()) {
+            // A `toJSON` getter threw.
+            forgetCaughtException();
+          } else if (jsg::check(toJSON)->IsFunction()) {
+            shouldSerialiseToJson = true;
           }
         }
 
@@ -1993,6 +2005,7 @@ void handleLog(jsg::Lock& js,
           }
         }) != kj::none) {
           stringified.add(kj::str("{}"));
+          forgetCaughtException();
         };
       });
     }
