@@ -46,6 +46,10 @@ class EventTargetBootstrap {
       jsg::JsValue event,
       ReportListenerExceptions reportListenerExceptions);
 
+  // Creates a trusted Event of the given type, as the runtime fires one: it neither bubbles nor
+  // is cancelable. Throws a TypeError if `type` is not a string.
+  static jsg::JsValue createTrustedEvent(jsg::Lock& js, jsg::JsValue type);
+
   // Creates a trusted MessageEvent of the given type, as the runtime fires one: `data` as is, an
   // empty lastEventId, a null origin, no ports, and `source` (a MessagePort, or null or
   // undefined for none). Throws a TypeError if `type` is not a string or `source` is neither.

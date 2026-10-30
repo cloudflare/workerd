@@ -126,6 +126,11 @@ namespace workerd::util {
      logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
      than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
   V(TS_STDIO)                                                                                      \
+  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
+     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
+     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
+     cloudflare-internal:messagechannel. */                                                        \
+  V(TS_MESSAGE_CHANNEL)                                                                            \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \

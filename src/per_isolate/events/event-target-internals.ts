@@ -51,6 +51,10 @@
 //   dispatch and is thrown. Unlike the public dispatchEvent(), the event may
 //   be a trusted one.
 //
+// createTrustedEvent(type)
+//   An Event as the runtime fires one: isTrusted, neither bubbling nor
+//   cancelable.
+//
 // createTrustedMessageEvent(type, data, source)
 //   A MessageEvent as the runtime fires one: isTrusted, `data` as is (not
 //   cloned), an empty lastEventId, a null origin, no ports, and `source`, a
@@ -63,6 +67,7 @@ const {
   getEventHandlerAttribute,
   setEventHandlerAttribute,
   dispatchEvent: utilsDispatchEvent,
+  createTrustedEvent,
   createTrustedMessageEvent,
 } = utils;
 
@@ -94,6 +99,7 @@ export type EventTargetInternals = {
   setEventHandlerAttribute: typeof setEventHandlerAttribute;
   effectiveExceptionPolicy: typeof effectiveExceptionPolicy;
   dispatchEvent: typeof dispatchEvent;
+  createTrustedEvent: typeof createTrustedEvent;
   createTrustedMessageEvent: typeof createTrustedMessageEvent;
 };
 
@@ -104,5 +110,6 @@ module.exports = {
   setEventHandlerAttribute,
   effectiveExceptionPolicy,
   dispatchEvent,
+  createTrustedEvent,
   createTrustedMessageEvent,
 };
