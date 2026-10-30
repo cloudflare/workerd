@@ -1,0 +1,51 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The JSG performance.now() and performance.timeOrigin. The @all-autogates
+# variant installs the TypeScript implementation; performance-now-ts-test.wd-test
+# pins it, and additionally checks that it was installed.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "performance-now-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+        ],
+      )
+    ),
+    ( name = "performance-now-spec-compliant-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "spec_compliant_property_attributes",
+          "experimental",
+        ],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+          (name = "specCompliant", json = "true"),
+        ],
+      )
+    ),
+    ( name = "performance-now-perf-hooks-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "enable_nodejs_perf_hooks_module"],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+          (name = "perfHooks", json = "true"),
+        ],
+      )
+    ),
+  ],
+  # optimizedCalls uses %OptimizeFunctionOnNextCall to reach the fast-API path.
+  v8Flags = ["--allow-natives-syntax"],
+);

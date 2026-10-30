@@ -21,7 +21,9 @@ at context creation, before any user code. C++ entry point:
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
-  `expose_draining_reader`.
+  `expose_draining_reader`. It also installs the TypeScript
+  `performance.now()`/`timeOrigin` under the `typescript-performance-now`
+  autogate (see `performance/AGENTS.md`).
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap

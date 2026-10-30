@@ -1,0 +1,59 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the unmodified performance-now-test.js against the TypeScript
+# performance.now() and performance.timeOrigin (src/per_isolate/performance/).
+# Sharing the test file with performance-now-test.wd-test is the point: any
+# behavioral drift between the two implementations fails one config or the
+# other. expectTypeScript turns on the check that the install took effect.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "performance-now-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+          (name = "expectTypeScript", json = "true"),
+        ],
+      )
+    ),
+    ( name = "performance-now-ts-spec-compliant-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "spec_compliant_property_attributes",
+          "experimental",
+        ],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+          (name = "expectTypeScript", json = "true"),
+          (name = "specCompliant", json = "true"),
+        ],
+      )
+    ),
+    ( name = "performance-now-ts-perf-hooks-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "performance-now-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "enable_nodejs_perf_hooks_module"],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
+          (name = "expectTypeScript", json = "true"),
+          (name = "perfHooks", json = "true"),
+        ],
+      )
+    ),
+  ],
+  # optimizedCalls uses %OptimizeFunctionOnNextCall to reach the fast-API path.
+  v8Flags = ["--allow-natives-syntax"],
+  autogates = [
+    "workerd-autogate-typescript-performance-now",
+  ],
+);

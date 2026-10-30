@@ -1468,6 +1468,18 @@ wd_test(
 )
 
 wd_test(
+    src = "performance-now-test.wd-test",
+    args = ["--experimental"],
+    data = ["performance-now-test.js"],
+)
+
+wd_test(
+    src = "performance-now-ts-test.wd-test",
+    args = ["--experimental"],
+    data = ["performance-now-test.js"],
+)
+
+wd_test(
     src = "ts-webfs-writable-test.wd-test",
     args = ["--experimental"],
     data = ["ts-webfs-writable-test.js"],

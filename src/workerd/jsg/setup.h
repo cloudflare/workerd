@@ -1273,6 +1273,16 @@ class Isolate: public IsolateBase {
       KJ_ASSERT(proto.isObject());
       return scope.Escape(v8::Local<v8::Value>(proto).As<v8::Object>());
     }
+
+    virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) override {
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tmpl;
+    }
+
+    virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(
+        const std::type_info& type) override {
+      v8::HandleScope scope(v8Isolate);
+      return jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tagRange;
+    }
   };
 
   // The func must be a callback with the signature: T(jsg::Lock&)

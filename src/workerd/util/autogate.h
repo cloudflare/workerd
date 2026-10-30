@@ -127,7 +127,10 @@ namespace workerd::util {
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)
+  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
+     performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
+  V(TYPESCRIPT_PERFORMANCE_NOW)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
