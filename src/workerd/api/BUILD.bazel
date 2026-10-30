@@ -17,6 +17,7 @@ filegroup(
         "blob.c++",
         "cache.c++",
         "container.c++",
+        "event-target-bootstrap.c++",
         "events.c++",
         "eventsource.c++",
         "export-loopback.c++",
@@ -76,6 +77,7 @@ filegroup(
         "blob.h",
         "cache.h",
         "container.h",
+        "event-target-bootstrap.h",
         "events.h",
         "eventsource.h",
         "export-loopback.h",
@@ -692,6 +694,14 @@ kj_test(
 
 kj_test(
     src = "eventsource-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "event-target-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
