@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+import { spawn } from 'node:child_process';
+import { env } from 'node:process';
+import { test } from 'node:test';
+import assert from 'node:assert';
+
+assert(
+  env.WORKERD_BINARY !== undefined,
+  'You must set the WORKERD_BINARY environment variable.'
+);
+assert(
+  env.WD_TEST_CONFIG !== undefined,
+  'You must set the WD_TEST_CONFIG environment variable.'
+);
+
+// Runs `workerd test` on the config and returns its stdout and stderr, interleaved.
+function runWorkerd(extraArgs) {
+  return new Promise((resolve) => {
+    let output = '';
+    const child = spawn(
+      env.WORKERD_BINARY,
+      ['test', env.WD_TEST_CONFIG, '--experimental', ...extraArgs],
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    child.stdout.on('data', (data) => (output += data));
+    child.stderr.on('data', (data) => (output += data));
+    child.on('close', (code) => resolve({ code, output }));
+  });
+}
+
+const MARKS = [
+  'MARK used log',
+  'MARK used warn',
+  'MARK fallback log',
+  'MARK fallback warn',
+];
+
+// The zygote and the Worker that starts without a snapshot both evaluate the top level, but
+// only one of them may print it.
+function assertEachMarkOnce(output) {
+  for (const mark of MARKS) {
+    const count = output.split(mark).length - 1;
+    assert.strictEqual(
+      count,
+      1,
+      `"${mark}" printed ${count} times:\n${output}`
+    );
+  }
+}
+
+// `workerd test` logs at INFO, so a Worker that fell back to starting without a snapshot says so.
+const SKIPPED = 'startup snapshot skipped';
+
+test('top-level console output is printed once, snapshot used or not', async () => {
+  const { code, output } = await runWorkerd([]);
+  assert.strictEqual(code, 0, output);
+  assertEachMarkOnce(output);
+  const skipped = output.split(SKIPPED).length - 1;
+  assert.strictEqual(skipped, 1, `expected one fallback:\n${output}`);
+  assert(output.includes('fallback'), output);
+});
+
+test('with an inspector configured, the zygote does not run', async () => {
+  const { code, output } = await runWorkerd(['--inspector-addr=127.0.0.1:0']);
+  assert.strictEqual(code, 0, output);
+  assertEachMarkOnce(output);
+  assert(
+    !output.includes(SKIPPED),
+    `zygote ran under an inspector:\n${output}`
+  );
+});

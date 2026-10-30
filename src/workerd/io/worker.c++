@@ -1991,6 +1991,13 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 }
 
 namespace {
+// One console line to stdout or stderr, flushed so that it interleaves with the process's own
+// logging.
+void writeConsoleLine(FILE* fd, kj::StringPtr text) {
+  fprintf(fd, "%s\n", text.cStr());
+  fflush(fd);
+}
+
 void handleLog(jsg::Lock& js,
     const Worker::LoggingOptions& loggingOptions,
     LogLevel level,
@@ -2189,8 +2196,12 @@ void handleLog(jsg::Lock& js,
     args[length + 2] = js.strIntern(levelStr);
     auto formatted = js.toString(
         jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
-    fprintf(fd, "%s\n", formatted.cStr());
-    fflush(fd);
+    if (js.isPreparingSnapshot()) {
+      Worker::Isolate::from(js).deferConsoleLine(
+          {.text = kj::mv(formatted), .toStderr = useStderr});
+    } else {
+      writeConsoleLine(fd, formatted);
+    }
   }
 }
 
@@ -3964,12 +3975,14 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
+  jsg::Lock& js = lock;
   if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
     KJ_LOG(INFO, "console warning", description);
+  } else if (js.isPreparingSnapshot()) {
+    deferConsoleLine({.text = kj::str(description), .toStderr = true});
   } else {
-    fprintf(stderr, "%s\n", description.cStr());
-    fflush(stderr);
+    writeConsoleLine(stderr, description);
   }
 
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
@@ -3983,7 +3996,6 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
       // active user span, which creates V8 handles. Our callers are not
       // required to have a HandleScope and eg. the GC destructors in
       // worker-rpc.c++ reach here without one.  We establish one here.
-      jsg::Lock& js = lock;
       js.withinHandleScope([&] {
         auto timestamp = ioContext.now();
         tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
@@ -3998,6 +4010,17 @@ void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
     logWarning(description, lock);
     return kj::str(description);
   });
+}
+
+void Worker::Isolate::deferConsoleLine(DeferredConsoleLine line) const {
+  deferredConsoleLines.lockExclusive()->add(kj::mv(line));
+}
+
+void Worker::Isolate::flushDeferredConsoleOutput() {
+  auto lines = kj::mv(*deferredConsoleLines.lockExclusive());
+  for (auto& line: lines) {
+    writeConsoleLine(line.toStderr ? stderr : stdout, line.text);
+  }
 }
 
 void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
