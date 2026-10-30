@@ -1,0 +1,50 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventSourceModules = import "eventsource-modules.capnp";
+
+# Opt-in cell, C++ implementation, reading the C++ streams.
+# Adds the dateless flags that change the surface:
+# spec_compliant_property_attributes and immutable_api_prototypes.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - nodejs_compat: node:assert and node:util.
+# - enable_weak_ref: WeakRef, for gc.js.
+# - rpc: gc.js calls its Durable Object's method.
+# - streams_enable_constructors: the ReadableStream constructor.
+# - set_tostring_tag: [object EventSource].
+# - spec_compliant_dispatch_exceptions: listener exceptions are reported.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-eventsource-cpp-opt-in",
+      worker = (
+        modules = EventSourceModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_weak_ref",
+          "rpc",
+          "streams_enable_constructors",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+          (name = "subrequest", service = "events-eventsource-cpp-opt-in"),
+          (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
+          (name = "current", service = "context-current"),
+          (name = "legacy", service = "context-legacy"),
+        ],
+        durableObjectNamespaces = [
+          (className = "EventSourceGcDo", uniqueKey = "6984eceb22924037ab88556a7dc2eb6e"),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+    EventSourceModules.contextCurrent,
+    EventSourceModules.contextLegacy,
+    EventSourceModules.contextHelper,
+  ],
+  v8Flags = ["--expose-gc"],
+);
