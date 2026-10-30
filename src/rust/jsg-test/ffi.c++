@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/io/features.h>
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
@@ -321,6 +322,39 @@ void hold_across_gc(Isolate* isolate,
   }
   held.Reset();
   request_gc(isolate, GcType::Full);
+}
+
+namespace {
+// The storage key of the async context frames the tests create, like the key of one
+// AsyncLocalStorage.
+const kj::Arc<::workerd::jsg::AsyncContextFrame::StorageKey>& testStorageKey() {
+  static const auto key = kj::arc<::workerd::jsg::AsyncContextFrame::StorageKey>();
+  return key;
+}
+}  // namespace
+
+void run_in_async_context(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    size_t data,
+    ::rust::Fn<void(size_t)> callback) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::AsyncContextFrame::StorageScope scope(js, testStorageKey().addRef(),
+      js.v8Ref(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  callback(data);
+}
+
+::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate) {
+  KJ_IF_SOME(frame, ::workerd::jsg::AsyncContextFrame::current(isolate)) {
+    KJ_IF_SOME(value, frame.get(*testStorageKey())) {
+      return ::workerd::rust::jsg::maybe_local_to_ffi(
+          v8::MaybeLocal<v8::Value>(value.getHandle(isolate)));
+    }
+  }
+  return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+}
+
+bool cpp_sees_root_frame(Isolate* isolate) {
+  return ::workerd::jsg::AsyncContextFrame::current(isolate) == kj::none;
 }
 
 }  // namespace rust::jsg_test
