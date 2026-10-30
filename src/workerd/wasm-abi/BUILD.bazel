@@ -1,0 +1,50 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+# A Wasm-only worker bundles the launcher, the shim runtime and the shim modules of the Wasm
+# import modules its guest uses; see conventions.md (Launcher).
+exports_files(
+    ["launcher.js"] + glob(["shim/*.js"]),
+    visibility = ["//visibility:public"],
+)
+
+# Checks that the checked-in modules (modules/*.json and shim/cf-*.js) are what the generator
+# produces from the RTTI of the workerd being built, that they contain exactly the members their
+# include lists name, that deprecated released imports are marked, and that an older
+# compatibility date only lacks flag-gated imports. On failure, regenerate the modules as
+# conventions.md (Tooling) describes. The dates are those of the checked-in modules.
+py_test(
+    name = "generator-self-test",
+    srcs = glob(
+        ["generator/*.py"],
+        exclude = ["generator/generator_test.py"],
+    ),
+    args = [
+        "--workerd",
+        "$(rootpath //src/workerd/server:workerd)",
+        "--compat-date",
+        "2026-10-23",
+        "--old-date",
+        "2023-01-01",
+    ],
+    data = glob([
+        "modules/*.json",
+        "shim/cf-*.js",
+    ]) + [
+        "generator/compat-gates.json",
+        "generator/rtti-server.capnp",
+        "generator/rtti-server.mjs",
+        "//src/workerd/server:workerd",
+        "//types:generated-snapshot/index.d.ts",
+    ],
+    main = "generator/self_test.py",
+)
+
+# The generator's rules for include lists, released and deprecated imports, on synthetic inputs.
+py_test(
+    name = "generator-test",
+    srcs = glob(
+        ["generator/*.py"],
+        exclude = ["generator/self_test.py"],
+    ),
+    main = "generator/generator_test.py",
+)
