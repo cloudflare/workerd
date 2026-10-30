@@ -1,0 +1,41 @@
+types/generated-snapshot/experimental/index.ts
+  s_322adea864e0a2::t_5269e5bd77d123 816-819,834-836
+src/workerd/api/tests/durable-object-restore-kvdata-test.js
+  s_322adea864e0a2::t_21c74a5989d8d6 1-59
+src/workerd/io/actor-cache.h
+  s_d3bcdc021366ba::t_c51321817fd38b 328-338
+types/generated-snapshot/experimental/index.d.ts
+  s_322adea864e0a2::t_0f22ea7b73f64e 816-819,834-836
+src/workerd/api/tests/BUILD.bazel
+  s_322adea864e0a2::t_c6e05bb2cd0dad 226-231
+src/workerd/api/tests/durable-object-restore-kvdata-test.wd-test
+  s_d3bcdc021366ba::t_d70f9f814da907 1-25
+src/workerd/api/actor-state.c++
+  s_322adea864e0a2::t_e956e5e087c3d8 929-949,952,955-957
+src/workerd/api/actor-state.h
+  s_322adea864e0a2::t_253c81cc38b94f 285-298,301-302,889
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5ec740d3236ae9a94f90a1d3d6c99222d1c8e406",
+  "prompts": {},
+  "sessions": {
+    "s_322adea864e0a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21148e11-ff14-4929-b25a-bbd43ac3cb9f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Max McDonnell <mmcdonnell@cloudflare.com>"
+    },
+    "s_d3bcdc021366ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76e257f8-5055-411d-ab1a-2cb9e05ca652",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Max McDonnell <mmcdonnell@cloudflare.com>"
+    }
+  }
+}
