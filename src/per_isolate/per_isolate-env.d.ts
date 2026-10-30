@@ -140,8 +140,12 @@ declare const utils: {
   createTrustedMessageEvent(
     type: string,
     data: unknown,
-    source: object | null
+    source: object | null,
+    lastEventId?: string,
+    origin?: string | null
   ): MessageEvent;
+  createTrustedOpenEvent(): Event;
+  createTrustedErrorEvent(error: unknown): ErrorEvent;
   // Structured-clones a MessagePort message (api/per-isolate-bootstrap.c++:
   // CloneMessageData): serializes it, throwing on a SharedArrayBuffer, and
   // returns the deserialized copy.
@@ -150,7 +154,37 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // The EventSource helpers (api/eventsource-bootstrap.h), consumed by
+  // eventsource/eventsource. createEventSourceIo() binds the I/O handle to the
+  // current request, or returns undefined outside of one.
+  createEventSourceIo(): EventSourceIo | undefined;
+  isFetcher(value: unknown): boolean;
+  // Parses an absolute URL with no base (ada, whatever the global URL is).
+  parseUrl(
+    input: string
+  ): { readonly href: string; readonly origin: string } | undefined;
+  isEventStreamMimeType(input: string): boolean;
+  // Undefined for anything but a ReadableStream of either implementation.
+  readableStreamState(
+    value: unknown
+  ): 'locked' | 'disturbed' | 'readable' | undefined;
 };
+
+// An EventSource's I/O, bound to the request that created it (api/eventsource-bootstrap.h:
+// EventSourceIo). Every method but isCurrent() throws, as the runtime does for I/O objects used
+// across requests, outside that request.
+declare interface EventSourceIo {
+  isCurrent(): boolean;
+  requireCurrent(): void;
+  fetch(
+    fetcher: unknown,
+    url: string,
+    lastEventId: string,
+    signal: AbortSignal
+  ): Promise<Response>;
+  wait(milliseconds: number, signal: AbortSignal): Promise<void>;
+  logUncaughtException(error: unknown): void;
+}
 
 // An abort algorithm registration. Obtained only from
 // utils.addAbortAlgorithm(); it has no JS-reachable constructor.

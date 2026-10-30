@@ -5,6 +5,7 @@
 #pragma once
 #include "basics.h"
 #include "events.h"
+#include "eventsource-bootstrap.h"
 #include "http.h"
 
 #include <workerd/jsg/jsg.h>
@@ -197,4 +198,5 @@ class EventSource: public EventTarget {
 
 }  // namespace workerd::api
 
-#define EW_EVENTSOURCE_ISOLATE_TYPES api::EventSource, api::EventSource::EventSourceInit
+#define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
+  api::EventSource, api::EventSource::EventSourceInit, api::EventSourceIo
