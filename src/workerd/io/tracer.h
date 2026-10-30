@@ -281,6 +281,10 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
+  // Streaming tails use the request's coarsened I/O clock. Native exporters can override this
+  // without changing timestamps exposed to tail workers.
+  virtual kj::Date getTime();
+
   // Called when a span is opened. Submitters may buffer this for later assembly or stream it
   // immediately.
   virtual bool submitSpanOpen(tracing::SpanId spanId,

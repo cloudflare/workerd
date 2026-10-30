@@ -776,6 +776,10 @@ void WorkerTracer::markUnused() {
   markedUnused = true;
 }
 
+kj::Date SpanSubmitter::getTime() {
+  return IoContext::current().now();
+}
+
 kj::Rc<SpanObserver> UserSpanObserver::newChild() {
   return kj::rc<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
 }
@@ -834,9 +838,8 @@ void UserSpanObserver::onException(kj::Date timestamp,
   }
 }
 
-// User spans are timestamped with precise time, not the IoContext's coarsened I/O time.
 kj::Date UserSpanObserver::getTime() {
-  return kj::systemPreciseCalendarClock().now();
+  return submitter->getTime();
 }
 
 tracing::SpanId UserSpanObserver::getSpanId() {

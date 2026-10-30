@@ -662,6 +662,16 @@ kj_test(
 )
 
 kj_test(
+    src = "tracer-test.c++",
+    deps = [
+        ":io",
+        ":otlp-span-submitter",
+        ":timer-test-fixture",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "frankenvalue-test.c++",
     deps = [
         ":frankenvalue",
