@@ -169,6 +169,13 @@ impl<'s> IoContext<'s> {
     /// `promise` settles. If `promise` rejects, the rejection is logged as an uncaught exception,
     /// as for every JavaScript promise that C++ waits for, and the response is unaffected.
     ///
+    /// As with `awaitJs()`, `promise` must settle in this request. Its reactions run in the
+    /// request that settles it, or, under the `handle_cross_request_promise_resolution`
+    /// compatibility flag, in the one it was created in. If that is another request, the
+    /// reaction fails there, as an unhandled rejection, and the wait fails with "Promise will
+    /// never complete.", which is logged as an uncaught exception. So does the wait for a
+    /// promise that is garbage-collected without settling.
+    ///
     /// To take a value of any type, as `ctx.waitUntil()` does, take a [`jsg::v8::VoidPromise`]
     /// argument, and pass it on as it is. It converts the value as C++ JSG converts the
     /// `kj::Promise<void>` argument, before the method runs and so before it looks up the

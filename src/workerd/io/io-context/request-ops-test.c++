@@ -33,6 +33,8 @@ constexpr kj::StringPtr SCENARIOS = R"SCRIPT(
     globalThis.events += (events ? "," : "") + text;
   }
 
+  addEventListener("unhandledrejection", (e) => event(`unhandled ${e.reason}`));
+
   function abortWith(abort) {
     event("before");
     try {
@@ -72,6 +74,25 @@ constexpr kj::StringPtr SCENARIOS = R"SCRIPT(
     },
     waitUntilRejectingThenable(ctx) {
       ctx.waitUntil({ then(resolve, reject) { reject(new RangeError("rejected by thenable")); } });
+      return new Response("ok");
+    },
+    waitUntilThrowingStackGetter(ctx) {
+      // Logging the rejection reads its stack, which the request does at INFO.
+      ctx.waitUntil(Promise.reject({ get stack() { throw new TypeError("from stack getter"); } }));
+      return new Response("ok");
+    },
+    waitUntilNeverSettles(ctx) {
+      ctx.waitUntil(new Promise(() => {}));
+      return new Response("ok");
+    },
+    waitUntilStashedPromise(ctx) {
+      // The gate keeps this request running while another settles the promise.
+      ctx.waitUntil(gate.wait());
+      ctx.waitUntil(new Promise((resolve) => { globalThis.stashedResolve = resolve; }));
+      return new Response("ok");
+    },
+    resolveStashedPromise(ctx) {
+      stashedResolve();
       return new Response("ok");
     },
     waitUntilWithoutArgument(ctx) {
@@ -144,6 +165,12 @@ constexpr kj::StringPtr SCENARIOS = R"SCRIPT(
 )SCRIPT"_kj;
 
 enum class Implementation { CPP, RUST };
+
+// The compatibility flags a scenario's worker runs with.
+struct Flags {
+  bool unwrapCustomThenables = false;
+  bool handleCrossRequestPromiseResolution = false;
+};
 
 // What a scenario's request reports to its RequestObserver and IoChannelFactory.
 struct RequestRecord: public kj::Refcounted {
@@ -282,8 +309,7 @@ struct ScenarioWorker {
   capnp::MallocMessageBuilder flagsMessage;
   TestFixture fixture;
 
-  ScenarioWorker(Implementation implementation, bool unwrapCustomThenables)
-      : fixture(params(unwrapCustomThenables)) {
+  ScenarioWorker(Implementation implementation, Flags flags = {}): fixture(params(flags)) {
     inWorkerContext(fixture, [&](jsg::Lock& js) {
       auto isolate = js.v8Isolate;
       auto global = js.global();
@@ -293,11 +319,12 @@ struct ScenarioWorker {
     });
   }
 
-  TestFixture::SetupParams params(bool unwrapCustomThenables) {
-    auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-    flags.setUnwrapCustomThenables(unwrapCustomThenables);
+  TestFixture::SetupParams params(Flags flags) {
+    auto builder = flagsMessage.initRoot<CompatibilityFlags>();
+    builder.setUnwrapCustomThenables(flags.unwrapCustomThenables);
+    builder.setHandleCrossRequestPromiseResolution(flags.handleCrossRequestPromiseResolution);
     return {
-      .featureFlags = flags.asReader(),
+      .featureFlags = builder.asReader(),
       .mainModuleSource = SCENARIOS,
       .useRealTimers = false,
       .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
@@ -340,9 +367,9 @@ struct ScenarioWorker {
 
 // Runs `scenario` on the given implementation and returns what was observed once the request
 // and everything it waits for are done.
-Outcome run(kj::StringPtr scenario, Implementation implementation, bool unwrapCustomThenables) {
+Outcome run(kj::StringPtr scenario, Implementation implementation, Flags flags) {
   UncaughtExceptionLog log;
-  ScenarioWorker worker(implementation, unwrapCustomThenables);
+  ScenarioWorker worker(implementation, flags);
   auto statusCode = worker.request(scenario);
   worker.fixture.pollEventLoop();
   return worker.outcome(statusCode, log);
@@ -350,16 +377,37 @@ Outcome run(kj::StringPtr scenario, Implementation implementation, bool unwrapCu
 
 // Runs `scenario` on both implementations, checks that they are observed alike, and returns
 // the outcome.
-Outcome runOnBoth(kj::StringPtr scenario, bool unwrapCustomThenables = false) {
-  auto cpp = run(scenario, Implementation::CPP, unwrapCustomThenables);
-  auto rust = run(scenario, Implementation::RUST, unwrapCustomThenables);
+Outcome runOnBoth(kj::StringPtr scenario, Flags flags = {}) {
+  auto cpp = run(scenario, Implementation::CPP, flags);
+  auto rust = run(scenario, Implementation::RUST, flags);
   KJ_EXPECT(cpp.toString() == rust.toString(), scenario, cpp.toString(), rust.toString());
+  return cpp;
+}
+
+// Runs waitUntilStashedPromise, then resolveStashedPromise in a second request while the first
+// still runs, then lets the first finish, and returns what was observed.
+Outcome runCrossRequest(Implementation implementation, Flags flags) {
+  UncaughtExceptionLog log;
+  ScenarioWorker worker(implementation, flags);
+  KJ_EXPECT(worker.request("waitUntilStashedPromise") == 200);
+  worker.fixture.pollEventLoop();
+  auto statusCode = worker.request("resolveStashedPromise");
+  worker.fixture.pollEventLoop();
+  KJ_EXPECT(open_gate());
+  worker.fixture.pollEventLoop();
+  return worker.outcome(statusCode, log);
+}
+
+Outcome runCrossRequestOnBoth(Flags flags) {
+  auto cpp = runCrossRequest(Implementation::CPP, flags);
+  auto rust = runCrossRequest(Implementation::RUST, flags);
+  KJ_EXPECT(cpp.toString() == rust.toString(), cpp.toString(), rust.toString());
   return cpp;
 }
 
 KJ_TEST("waitUntil() keeps the request running after the response, as in C++") {
   for (auto implementation: {Implementation::CPP, Implementation::RUST}) {
-    ScenarioWorker worker(implementation, false);
+    ScenarioWorker worker(implementation);
     KJ_EXPECT(worker.request("waitUntilGate") == 200);
     worker.fixture.pollEventLoop();
     KJ_EXPECT(readEvents(worker.fixture) == "responding");
@@ -373,7 +421,7 @@ KJ_TEST("waitUntil() keeps the request running after the response, as in C++") {
 
 KJ_TEST("without waitUntil(), the request does not wait for the gate") {
   // The control for the test above: the reaction runs only because of waitUntil().
-  ScenarioWorker worker(Implementation::CPP, false);
+  ScenarioWorker worker(Implementation::CPP);
   KJ_EXPECT(worker.request("gateWithoutWaitUntil") == 200);
   worker.fixture.pollEventLoop();
   // The request is done, and the I/O it awaited was canceled with it.
@@ -388,27 +436,68 @@ KJ_TEST("a rejected waitUntil() promise is logged as an uncaught exception, as i
   KJ_EXPECT(outcome.failures == "");
   KJ_EXPECT(outcome.uncaughtExceptions.contains("RangeError: rejected in waitUntil"),
       outcome.uncaughtExceptions);
+  // waitUntil() handles the rejection.
+  KJ_EXPECT(outcome.events == "", outcome.events);
+}
+
+KJ_TEST("what logging a waitUntil() rejection throws rejects unhandled, as in C++") {
+  auto outcome = runOnBoth("waitUntilThrowingStackGetter");
+  KJ_EXPECT(outcome.statusCode == 200);
+  // The reaction fails with the getter's exception, rather than an internal error, and the task
+  // with "Promise will never complete.".
+  KJ_EXPECT(outcome.events == "unhandled TypeError: from stack getter", outcome.events);
+  KJ_EXPECT(outcome.uncaughtExceptions.contains("Promise will never complete."),
+      outcome.uncaughtExceptions);
+}
+
+KJ_TEST("a waitUntil() promise that can never settle fails as in C++") {
+  auto outcome = runOnBoth("waitUntilNeverSettles");
+  KJ_EXPECT(outcome.statusCode == 200);
+  KJ_EXPECT(outcome.events == "", outcome.events);
+  // Once nothing else can run, the request is canceled as hung.
+  KJ_EXPECT(outcome.uncaughtExceptions.contains("detected that your Worker's code had hung"),
+      outcome.uncaughtExceptions);
+}
+
+KJ_TEST("a waitUntil() promise settled by another request fails without "
+        "handle_cross_request_promise_resolution, as in C++") {
+  auto outcome = runCrossRequestOnBoth({});
+  // The reaction runs in the request that settles the promise and fails there.
+  KJ_EXPECT(outcome.events.contains("unhandled Error: Cannot perform I/O on behalf of a different "
+                                    "request"),
+      outcome.events);
+  KJ_EXPECT(outcome.uncaughtExceptions.contains("Promise will never complete."),
+      outcome.uncaughtExceptions);
+}
+
+KJ_TEST("a waitUntil() promise settled by another request completes with "
+        "handle_cross_request_promise_resolution, as in C++") {
+  auto outcome = runCrossRequestOnBoth({.handleCrossRequestPromiseResolution = true});
+  // The reaction runs in the request that created the promise.
+  KJ_EXPECT(outcome.events == "", outcome.events);
+  KJ_EXPECT(!outcome.uncaughtExceptions.contains("Promise will never complete."),
+      outcome.uncaughtExceptions);
 }
 
 KJ_TEST("waitUntil() converts other values as C++ does, following thenables only with the flag") {
-  auto withoutFlag = runOnBoth("waitUntilValues", false);
+  auto withoutFlag = runOnBoth("waitUntilValues");
   KJ_EXPECT(withoutFlag.statusCode == 200);
   KJ_EXPECT(withoutFlag.events == "", withoutFlag.events);
   KJ_EXPECT(withoutFlag.uncaughtExceptions == "", withoutFlag.uncaughtExceptions);
 
-  auto withFlag = runOnBoth("waitUntilValues", true);
+  auto withFlag = runOnBoth("waitUntilValues", {.unwrapCustomThenables = true});
   KJ_EXPECT(withFlag.statusCode == 200);
   KJ_EXPECT(withFlag.events == "has then,then called", withFlag.events);
   KJ_EXPECT(withFlag.uncaughtExceptions == "", withFlag.uncaughtExceptions);
 }
 
 KJ_TEST("a followed thenable that rejects is logged as an uncaught exception, as in C++") {
-  auto withFlag = runOnBoth("waitUntilRejectingThenable", true);
+  auto withFlag = runOnBoth("waitUntilRejectingThenable", {.unwrapCustomThenables = true});
   KJ_EXPECT(withFlag.statusCode == 200);
   KJ_EXPECT(withFlag.uncaughtExceptions.contains("RangeError: rejected by thenable"),
       withFlag.uncaughtExceptions);
 
-  auto withoutFlag = runOnBoth("waitUntilRejectingThenable", false);
+  auto withoutFlag = runOnBoth("waitUntilRejectingThenable");
   KJ_EXPECT(withoutFlag.uncaughtExceptions == "", withoutFlag.uncaughtExceptions);
 }
 
@@ -422,7 +511,7 @@ KJ_TEST("waitUntil() requires an argument, as in C++") {
 }
 
 KJ_TEST("what converting a waitUntil() value throws reaches JavaScript, as in C++") {
-  auto outcome = runOnBoth("waitUntilThrowingHas", true);
+  auto outcome = runOnBoth("waitUntilThrowingHas", {.unwrapCustomThenables = true});
   KJ_EXPECT(outcome.statusCode == 200);
   KJ_EXPECT(outcome.events == "caught TypeError: from has", outcome.events);
 }
@@ -500,7 +589,7 @@ kj::String callOutsideRequest(
 }
 
 KJ_TEST("outside a request, the operations fail as C++'s do") {
-  ScenarioWorker worker(Implementation::CPP, false);
+  ScenarioWorker worker(Implementation::CPP);
   KJ_EXPECT(worker.request("stash") == 200);
   for (auto method: {"waitUntil"_kj, "passThroughOnException"_kj, "abort"_kj}) {
     auto cpp = callOutsideRequest(worker.fixture, "stashedCtx", method, "reason");
