@@ -297,8 +297,10 @@ fn adopting_an_earlier_alarm_of_a_known_object_keeps_it_earlier() {
 /// Deterministic simulation (`crate::dst`): the real `Index` and `Registry`
 /// on several nodes, among crashes, lapsed leases, lost records, takeovers,
 /// arming, firing and alarms rounds. The server's part (ownership, the local
-/// scheduler, commits, opening an object) is modelled here. Once the faults
-/// stop, every alarm an object's database holds must run.
+/// scheduler, commits, opening an object) is modelled here, simply: a claim
+/// always opens the object at once, a restore never fails, and no actor has
+/// a name. After every step, each alarm an object's database holds has an
+/// index entry no later; once the faults stop, every one runs.
 mod dst {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -344,6 +346,8 @@ mod dst {
         nodes: Vec<Node>,
         owner: BTreeMap<String, usize>,
         log: Vec<String>,
+        /// Opens' index writes, for `run` to spawn on their nodes.
+        opens: Vec<(usize, Task)>,
     }
 
     impl World {
@@ -535,13 +539,14 @@ mod dst {
             let task = async move {
                 let _ = index.opened(NS, &o, None, at).await;
             };
-            OPENS.with(|opens| opens.borrow_mut().push((n, Box::pin(task))));
+            world.opens.push((n, Box::pin(task)));
         }
 
         /// Drive every task until it waits on the store, opens' included.
         fn run(&mut self) {
             self.dst.run();
-            for (n, task) in OPENS.with(|opens| std::mem::take(&mut *opens.borrow_mut())) {
+            let opens = std::mem::take(&mut self.world.borrow_mut().opens);
+            for (n, task) in opens {
                 self.dst.spawn(n, task);
             }
             self.dst.run();
@@ -565,7 +570,7 @@ mod dst {
                 45..57 if self.faults && some => {
                     let n = alive[self.dst.rng.below(alive.len())];
                     let o = format!("o{}", self.dst.rng.below(OBJECTS));
-                    let at = self.world.borrow().now + self.dst.rng.below(30) as u64;
+                    let at = self.world.borrow().now + self.dst.rng.below(150) as u64;
                     if self.dst.rng.chance(15) {
                         self.set(n, &o, None);
                     } else {
@@ -752,6 +757,32 @@ mod dst {
             });
         }
 
+        /// Each object whose database's alarm the bucket indexes only later,
+        /// or not at all: the index may be early or stale, never late.
+        fn late(&self) -> Vec<String> {
+            let mut earliest = BTreeMap::new();
+            for key in self.dst.store.keys("alarms/") {
+                let parts: Vec<_> = key.split('/').collect();
+                let at = crate::log::parse(parts[2], true).unwrap();
+                let e = earliest.entry(parts[4].to_owned()).or_insert(at);
+                *e = at.min(*e);
+            }
+            let late = |key: String| {
+                let o = key.strip_prefix("db/").unwrap().to_owned();
+                let at = parse_at(&self.dst.store.peek(&key).unwrap());
+                let indexed = earliest.get(&o).copied();
+                indexed
+                    .is_none_or(|i| i > at)
+                    .then(|| format!("{o} at {at}: {indexed:?}"))
+            };
+            self.dst
+                .store
+                .keys("db/")
+                .into_iter()
+                .filter_map(late)
+                .collect()
+        }
+
         /// Stop faults and requests, which would reopen objects and so
         /// reschedule their alarms, crash every node once things are quiet,
         /// and run until every alarm had its chance; answers the objects
@@ -797,10 +828,6 @@ mod dst {
 
     type Task = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 
-    thread_local! {
-        static OPENS: RefCell<Vec<(usize, Task)>> = RefCell::default();
-    }
-
     fn parse_at(body: &[u8]) -> u64 {
         std::str::from_utf8(body).unwrap().parse().unwrap()
     }
@@ -809,6 +836,11 @@ mod dst {
         let mut sim = Sim::new(seed);
         for _ in 0..steps {
             sim.step();
+            let late = sim.late();
+            if !late.is_empty() {
+                let log = sim.world.borrow().log.join("\n");
+                return Err(format!("indexed late {late:?}\n{log}"));
+            }
         }
         let missed = sim.settle();
         if missed.is_empty() {
