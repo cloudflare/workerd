@@ -183,3 +183,39 @@ fn utf8_value_while_exception_pending_runs_nothing() {
         "throwThenUtf8Value(first, { toString() { globalThis.secondRan = true; return 'x'; } })",
     );
 }
+
+#[cfg(debug_assertions)]
+#[jsg_resource]
+struct Callee {
+    ran: Cell<bool>,
+}
+
+#[cfg(debug_assertions)]
+#[jsg_resource]
+impl Callee {
+    #[jsg_method]
+    fn run(&self) {
+        self.ran.set(true);
+    }
+}
+
+/// V8 entering a Rust JSG callback while a C++ `v8::TryCatch` holds a caught exception fails a
+/// debug assertion, which terminates execution: every operation of the callback would fail
+/// with a pending error.
+#[cfg(debug_assertions)]
+#[test]
+fn callback_entered_while_try_catch_holds_exception_panics() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let callee = jsg::Rc::new(Callee {
+            ran: Cell::new(false),
+        });
+        ctx.set_global(lock, "callee", callee.clone());
+        match ctx.eval_with_caught_exception(lock, "callee.run()") {
+            Err(crate::EvalError::EvalFailed) => {}
+            Err(crate::EvalError::Exception(exception)) => assert!(exception.is_null()),
+            other => panic!("the callback was entered: {other:?}"),
+        }
+        assert!(!callee.ran.get());
+        Ok(())
+    });
+}

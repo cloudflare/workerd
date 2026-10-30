@@ -92,7 +92,8 @@ How the code keeps the rule:
   JavaScript has thrown, the closure should return the error rather than go on. C++ code that
   catches with its own `v8::TryCatch` resets it before calling into Rust JSG or running
   JavaScript that might. The `custom-raw-v8-trycatch` clang-tidy check flags every raw
-  `v8::TryCatch`; each one has a `NOLINT` comment that says why it is safe.
+  `v8::TryCatch`; each one has a `NOLINT` comment that says why it is safe. With debug
+  assertions, a Rust JSG callback that V8 enters while an exception is pending panics.
 - The `isolate_throw_*` shims throw nothing while execution is terminating, so
   `Lock::throw_exception`, `Lock::throw_error`, `Lock::throw_internal_error` and the fast API
   error path are safe. A shim that calls `isolate->ThrowException` itself must check first.
