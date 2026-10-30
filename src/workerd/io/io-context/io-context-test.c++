@@ -173,9 +173,9 @@ kj::String recordedAsyncContext = kj::str("not recorded");
 kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY =
     kj::arc<jsg::AsyncContextFrame::StorageKey>();
 
-// The IoContext the last await_io() callback ran in, if any.
+// The IoContext the last await_io_and_run() callback ran in, if any.
 kj::Maybe<uint64_t> awaitContextId;
-// Fulfilled when an await_io() callback runs, if set.
+// Fulfilled when an await_io_and_run() callback runs, if set.
 kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
 
 }  // namespace
@@ -200,7 +200,7 @@ void record_async_context(uintptr_t isolate) {
 
 namespace {
 
-KJ_TEST("await_io() runs its callback in the async context frame that was current") {
+KJ_TEST("await_io_and_run() runs its callback in the async context frame that was current") {
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
@@ -251,7 +251,7 @@ class BridgeObserver final: public IsolateObserver {
   kj::Vector<kj::String>& events;
 };
 
-KJ_TEST("await_io() is recorded for async tracing, as awaitIo() is") {
+KJ_TEST("await_io_and_run() is recorded for async tracing, as awaitIo() is") {
   kj::Vector<kj::String> events;
   TestFixture fixture({
     .useRealTimers = false,
@@ -278,7 +278,7 @@ KJ_TEST("await_io() is recorded for async tracing, as awaitIo() is") {
   KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
 }
 
-KJ_TEST("await_io() resumes the request when its future completes on another thread") {
+KJ_TEST("await_io_and_run() resumes the request when its future completes on another thread") {
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   uint64_t id = 0;
@@ -302,7 +302,7 @@ KJ_TEST("await_io() resumes the request when its future completes on another thr
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("while await_io() waits, the request is not treated as hung") {
+KJ_TEST("while await_io_and_run() waits, the request is not treated as hung") {
   TestFixture fixture;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -320,7 +320,7 @@ KJ_TEST("while await_io() waits, the request is not treated as hung") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("in a Durable Object, the await_io() callback waits for the input gate") {
+KJ_TEST("in a Durable Object, the await_io_and_run() callback waits for the input gate") {
   TestFixture fixture({
     .actorId = Worker::Actor::Id(kj::str("await-io-actor")),
     .useRealTimers = false,
@@ -344,7 +344,7 @@ KJ_TEST("in a Durable Object, the await_io() callback waits for the input gate")
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("await_io() drops its future and callback when the IoContext is destroyed first") {
+KJ_TEST("await_io_and_run() drops its future and callback when the IoContext is destroyed first") {
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
@@ -358,7 +358,7 @@ KJ_TEST("await_io() drops its future and callback when the IoContext is destroye
   KJ_EXPECT(awaited_future_dropped());
 }
 
-KJ_TEST("an await_io() callback that fails fails the task") {
+KJ_TEST("an await_io_and_run() callback that fails fails the task") {
   TestFixture fixture;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -372,7 +372,7 @@ KJ_TEST("an await_io() callback that fails fails the task") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("an await_io() callback that panics terminates execution and fails the task") {
+KJ_TEST("an await_io_and_run() callback that panics terminates execution and fails the task") {
   TestFixture fixture;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -381,7 +381,7 @@ KJ_TEST("an await_io() callback that panics terminates execution and fails the t
   });
   release_await(1);
   {
-    KJ_EXPECT_LOG(ERROR, "the callback of IoContext::await_io() panicked");
+    KJ_EXPECT_LOG(ERROR, "the callback of IoContext::await_io_and_run() panicked");
     KJ_EXPECT_LOG(ERROR, "internalMessage = the callback panicked");
     fixture.pollEventLoop();
   }
@@ -401,7 +401,7 @@ KJ_TEST("an await_io() callback that panics terminates execution and fails the t
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("an await_io() future that panics fails the task, and its callback is dropped") {
+KJ_TEST("an await_io_and_run() future that panics fails the task, and its callback is dropped") {
   TestFixture fixture;
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -410,7 +410,7 @@ KJ_TEST("an await_io() future that panics fails the task, and its callback is dr
   });
   release_await(1);
   {
-    KJ_EXPECT_LOG(ERROR, "the future that IoContext::await_io() waited for panicked");
+    KJ_EXPECT_LOG(ERROR, "the future that IoContext::await_io_and_run() waited for panicked");
     fixture.pollEventLoop();
   }
   KJ_EXPECT(await_observation() == AwaitObservation::Dropped);

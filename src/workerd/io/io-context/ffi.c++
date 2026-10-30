@@ -84,7 +84,7 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
   }
 }
 
-void io_context_await_io(
+void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
   context.awaitIoAndRun(io_future_wait(kj::mv(future)),
@@ -110,7 +110,7 @@ void io_context_await_io(
             // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
             // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception
             // and convert it, running JavaScript, so the task fails with a KJ exception instead.
-            KJ_FAIL_ASSERT("the callback of IoContext::await_io() panicked");
+            KJ_FAIL_ASSERT("the callback of IoContext::await_io_and_run() panicked");
         }
         KJ_UNREACHABLE;
       }

@@ -216,7 +216,7 @@ unsafe fn await_released(isolate: usize, ending: ffi::AwaitEnding) -> Result<()>
     let callback_observer = CallbackDropObserver;
     IoContext::current(lock)
         .and_then(|context| {
-            context.await_io(future, move |_lock, value| {
+            context.await_io_and_run(future, move |_lock, value| {
                 let _observer = callback_observer;
                 ffi::record_await_context();
                 *AWAITED_VALUE.lock().unwrap_or_else(PoisonError::into_inner) = value;
@@ -326,7 +326,7 @@ unsafe fn await_and_record_async_context(isolate: usize) -> Result<()> {
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     IoContext::current(lock)
         .and_then(|context| {
-            context.await_io(std::future::ready(()), move |_lock, ()| {
+            context.await_io_and_run(std::future::ready(()), move |_lock, ()| {
                 ffi::record_async_context(isolate);
                 Ok(())
             })

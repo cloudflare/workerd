@@ -10,7 +10,7 @@ use jsg::ToJS;
 pub fn start(lock: &mut jsg::Lock<'_>) -> jsg::Result<()> {
     let context = IoContext::current(lock)?;
     let pending = context.add_object(String::from("pending"))?;
-    context.await_io(async { 42_u32 }, move |lock, value| {
+    context.await_io_and_run(async { 42_u32 }, move |lock, value| {
         let label = pending.take(lock)?.unwrap_or_default();
         let object = lock.new_object();
         let value = f64::from(value).to_js(lock)?;

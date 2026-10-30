@@ -90,33 +90,35 @@ impl<'s> IoContext<'s> {
     }
 
     /// Waits for `future` as part of this request, then calls `callback` with its output in this
-    /// `IoContext`, with a new lock. It shares its implementation with C++
-    /// `IoContext::awaitIo()`, and behaves as it does:
+    /// `IoContext`, with a new lock. It wraps C++ `IoContext::awaitIoAndRun()`, which shares its
+    /// implementation with `IoContext::awaitIo()`, and behaves as it does:
     ///
     /// - `future` is polled by this `IoContext`'s thread's event loop, without the isolate lock
     ///   and with no `IoContext` current. Only its wake-ups may come from other threads. It must
     ///   not block, which would stall every request on the thread.
-    /// - `callback` runs in the async context frame that was current when `await_io` was called,
-    ///   the one the I/O was started in, rather than whichever is current when `future`
-    ///   completes. In a Durable Object it waits for the input gate, or runs in the critical
-    ///   section that was current when `await_io` was called.
+    /// - `callback` runs in the async context frame that was current when this was called, the
+    ///   one the I/O was started in, rather than whichever is current when `future` completes.
+    ///   In a Durable Object it waits for the input gate, or runs in the critical section that
+    ///   was current when this was called.
     /// - While it waits, the request is neither finished nor hung. The wait is recorded for async
     ///   tracing.
     ///
     /// If this `IoContext` is destroyed first, both are dropped without `callback` running. In a
-    /// Durable Object, the `IoContext` can outlive the request that called `await_io`.
+    /// Durable Object, the `IoContext` can outlive the request that called this.
     ///
-    /// `callback` settles what it needs to, such as a promise, itself. If it fails, or `future`
-    /// or `callback` panics, the failure is handled as for a task of C++ `IoContext::addTask()`:
-    /// it is logged as an uncaught exception and recorded in the request's `waitUntil()` status.
-    /// A panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
+    /// Unlike `awaitIo()`, this returns no promise: it sits a level below an `await_io` that
+    /// would return one, as `awaitIo()` does. `callback` settles what it needs to, such as a
+    /// promise, itself, and a failure rejects nothing. If `callback` fails, or `future` or
+    /// `callback` panics, the failure is handled as for a task of C++ `IoContext::addTask()`: it
+    /// is logged as an uncaught exception and recorded in the request's `waitUntil()` status. A
+    /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
     /// `future` and its output are `Send` because the future is polled without the isolate lock.
     /// That keeps values bound to the isolate, such as a `jsg::Rc`, out of it.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
-    pub fn await_io<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
+    pub fn await_io_and_run<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
     where
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
@@ -130,10 +132,10 @@ impl<'s> IoContext<'s> {
             // `io_future_wait()` produced `output` from this `F`.
             let output = output
                 .downcast::<T>()
-                .unwrap_or_else(|_| unreachable!("the output of await_io()'s future"));
+                .unwrap_or_else(|_| unreachable!("the output of await_io_and_run()'s future"));
             callback(lock, *output)
         }));
-        Ok(bridge::io_context_await_io(
+        Ok(bridge::io_context_await_io_and_run(
             self.id,
             Box::new(future),
             Box::new(callback),

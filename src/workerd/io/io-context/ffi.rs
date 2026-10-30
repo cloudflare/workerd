@@ -30,7 +30,7 @@ pub mod bridge {
         fn io_context_require_current(id: u64) -> Result<()>;
         fn io_context_now(id: u64) -> Result<i64>;
         fn io_context_write_logfwdr(id: u64, channel: u32, message: &[u8]) -> Result<()>;
-        fn io_context_await_io(
+        fn io_context_await_io_and_run(
             id: u64,
             future: Box<IoFuture>,
             callback: Box<IoCallback>,
@@ -63,7 +63,7 @@ pub mod bridge {
     }
 }
 
-/// The future that `IoContext::await_io()` waits for, with its output type erased.
+/// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.
 pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>);
 
 /// The output of an [`IoFuture`].
@@ -73,7 +73,7 @@ pub struct IoOutput(Box<dyn Any + Send>);
 pub type IoCallbackFn =
     Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()>>;
 
-/// The callback that `IoContext::await_io()` runs with the output of its future.
+/// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);
 
 /// A value that `IoContext::add_object()` hands to C++, which drops it with the `IoContext`.
@@ -90,7 +90,7 @@ async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjE
             Err(payload) => Poll::Ready(Err(cxx::KjError::new(
                 cxx::KjExceptionType::Failed,
                 format!(
-                    "the future that IoContext::await_io() waited for panicked: {}",
+                    "the future that IoContext::await_io_and_run() waited for panicked: {}",
                     panic_message(&*payload)
                 ),
             ))),
@@ -109,7 +109,7 @@ fn panic_message(payload: &(dyn Any + Send)) -> &str {
     }
 }
 
-/// Runs `callback` with `output`, from `io_context_await_io()` in the `IoContext`, with the
+/// Runs `callback` with `output`, from `io_context_await_io_and_run()` in the `IoContext`, with the
 /// isolate locked, a context entered and a `HandleScope` open.
 unsafe fn io_callback_run(
     isolate: usize,

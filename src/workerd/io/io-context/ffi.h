@@ -42,7 +42,7 @@ struct IoOwnedSlot;
 // event, then runs `callback` with its output in IoContext::run(), in the critical section and
 // async context frame that are current when this is called. Both are dropped if the IoContext is
 // destroyed first. If `future` panics, or `callback` fails or panics, the task fails.
-void io_context_await_io(
+void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback);
 
 // Holds what IoContext::addObject() returns for a Rust value, which the IoContext then destroys
