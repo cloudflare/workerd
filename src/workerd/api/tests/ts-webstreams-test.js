@@ -447,7 +447,11 @@ export const requestStreamBodyProxying = {
 // Response::send without JavaScript ever unwrapping it. That drives the native
 // extraction pump path end to end over real HTTP. `/echo` reflects the request body back
 // -- `request.body` is a TypeScript-implemented stream, so `new Response(request.body)`
-// itself exercises jsgTryUnwrap's TS arm.
+// itself exercises jsgTryUnwrap's TS arm. `/endless` responds with a queued stream that
+// never ends, recording when its source is canceled; `/endless-canceled` reports whether
+// it has been.
+let endlessSourceCanceled = false;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -460,7 +464,44 @@ export default {
     if (url.pathname === '/echo') {
       return new Response(request.body);
     }
+    if (url.pathname === '/endless') {
+      return new Response(
+        new ReadableStream({
+          async pull(c) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            c.enqueue(new Uint8Array(1024));
+          },
+          cancel() {
+            endlessSourceCanceled = true;
+          },
+        })
+      );
+    }
+    if (url.pathname === '/endless-canceled') {
+      return new Response(String(endlessSourceCanceled));
+    }
     return new Response('not found', { status: 404 });
+  },
+};
+
+// Canceling a response body over a service binding drops the pump sending it from the
+// other worker, which must cancel the queued stream it was reading.
+export const droppedResponsePumpCancelsSource = {
+  async test(ctrl, env) {
+    const response = await env.SELF.fetch('http://example.org/endless');
+    const reader = response.body.getReader();
+    ok(!(await reader.read()).done);
+    await reader.cancel('done reading');
+
+    let canceled = 'false';
+    for (let i = 0; i < 100 && canceled !== 'true'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const status = await env.SELF.fetch(
+        'http://example.org/endless-canceled'
+      );
+      canceled = await status.text();
+    }
+    strictEqual(canceled, 'true');
   },
 };
 

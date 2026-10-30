@@ -226,7 +226,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // with `allowUnconfirmed = true` since the paired KV write decides confirmation semantics.
   void clearExternalsIfPresent(KeyPtr key, SqliteQueryId queryId);
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(SqliteDatabase::CloseReason reason) override;
 
   // Returns `queryId` if set, otherwise mints a fresh one. Used so every statement of a single
   // top-level KV operation shares one grouping id, while recursive operations (e.g. multi-put)

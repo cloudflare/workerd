@@ -2024,6 +2024,77 @@ KJ_TEST("WritableStream pipe survives termination in the source's cancel algorit
   });
 }
 
+KJ_TEST("ReadableStream async iterator survives GC while return() is settling") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    rs->getController().setup(js, UnderlyingSource{}, StreamQueuingStrategy{});
+
+    auto iterator = rs->values(js, kj::none);
+    // Give the iterator a wrapper so that GC traces it.
+    auto& handler = KJ_ASSERT_NONNULL(
+        js.tryGetTypeHandler<jsg::Ref<ReadableStream::ReadableStreamAsyncIterator>>());
+    handler.wrap(js, iterator.addRef());
+    auto promise = iterator->return_(js, kj::none);
+    // return() has taken the reader, but the iterator stays unfinished until its microtasks run.
+    js.v8Isolate->LowMemoryNotification();
+
+    bool done = false;
+    promise.then(js, [&](jsg::Lock& js, auto next) { done = next.done; });
+    js.runMicrotasks();
+    KJ_ASSERT(done);
+    KJ_ASSERT(!rs->isLocked());
+  });
+}
+
+KJ_TEST("ReadableStream async iterator does not root its reader") {
+  preamble([](jsg::Lock& js) {
+    v8::Global<v8::Object> weakIterator;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+      rs->getController().setup(js, UnderlyingSource{}, StreamQueuingStrategy{});
+      auto& streamHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStream>>());
+      auto stream = jsg::JsObject(streamHandler.wrap(js, rs.addRef()).As<v8::Object>());
+
+      auto& iteratorHandler = KJ_ASSERT_NONNULL(
+          js.tryGetTypeHandler<jsg::Ref<ReadableStream::ReadableStreamAsyncIterator>>());
+      auto iterator = iteratorHandler.wrap(js, rs->values(js, kj::none)).As<v8::Object>();
+      // Cycle: iterator -> reader -> stream -> iterator. Only tracing the reader lets GC see it.
+      stream.set(js, "iterator"_kj, jsg::JsValue(iterator));
+      weakIterator.Reset(js.v8Isolate, iterator);
+      weakIterator.SetWeak();
+    }
+    js.v8Isolate->LowMemoryNotification();
+    KJ_ASSERT(weakIterator.IsEmpty());
+  });
+}
+
+KJ_TEST("ReadableStream async iterator survives return() from inside pull()") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    kj::Maybe<ReadableStream::ReadableStreamAsyncIterator&> iterator;
+    kj::Maybe<jsg::Promise<ReadableStream::ReadableStreamAsyncIterator::Next>> returned;
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, auto controller) {
+        returned = KJ_ASSERT_NONNULL(iterator).return_(js, kj::none);
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+    js.runMicrotasks();
+
+    auto ref = rs->values(js, kj::none);
+    iterator = *ref;
+    bool nextDone = false;
+    auto next = ref->next(js).then(js, [&](jsg::Lock& js, auto result) { nextDone = result.done; });
+    KJ_ASSERT(returned != kj::none);
+    js.runMicrotasks();
+    KJ_ASSERT(nextDone);
+    KJ_ASSERT(!rs->isLocked());
+  });
+}
+
 KJ_TEST("ReadableStream survives its pipe being released during pull") {
   preamble([](jsg::Lock& js) {
     kj::Maybe<jsg::Ref<WritableStreamDefaultController>> sinkController;

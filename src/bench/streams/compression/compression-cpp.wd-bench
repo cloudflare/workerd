@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CompressionModules = import "compression-modules.capnp";
+
+# Runs the compression stream benchmarks against the legacy C++
+# implementation; compression-ts.wd-bench runs the identical modules against
+# the TypeScript implementation. No compatibilityDate and no flags: see
+# src/bench/streams/AGENTS.md.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-cpp",
+      worker = (
+        modules = CompressionModules.modules,
+      )
+    ),
+  ],
+);

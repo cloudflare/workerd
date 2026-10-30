@@ -4,7 +4,7 @@ WORKDIR /workerd
 
 # Replacing build-essential with dpkg-dev here, no need to install gcc.
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends curl dpkg-dev git lsb-release wget software-properties-common gnupg tcl
+RUN apt-get install -y --no-install-recommends curl dpkg-dev git lsb-release wget software-properties-common gnupg
 
 RUN wget https://apt.llvm.org/llvm.sh
 # Drop the install step here so we can install just the packages we need.

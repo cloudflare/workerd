@@ -85,7 +85,9 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           timer, entropySource, headerTableBuilder, httpOverCapnpFactory, byteStreamFactory),
       headerTable(buildHeaderTable(headerTableBuilder, this->config)),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenHandler(factory),
+      channelTokenHandler(factory,
+          this->config.hasCluster() ? kj::Maybe<kj::StringPtr>(this->config.getCluster().getKey())
+                                    : kj::none),
       tasks(*this) {
   // The config's logging settings go on top of the caller's.
   auto& logging = this->options->loggingOptions;

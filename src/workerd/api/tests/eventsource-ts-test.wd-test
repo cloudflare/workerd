@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# eventsource-test.js under the TypeScript streams implementation: an
+# EventSource reads its stream through the C++ bridge, which handles the
+# two implementations' streams differently.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "eventsource-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "eventsource-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "streams_enable_constructors", "spec_compliant_dispatch_exceptions", "typescript_implemented_streams"],
+        bindings = [
+          (name = "subrequest", service = "eventsource-ts-test")
+        ]
+      )
+    ),
+  ],
+);

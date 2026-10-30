@@ -1,5 +1,11 @@
 load("@rules_multirun//:defs.bzl", "command", "multirun")
 
+# Loading an image runs where the container engine is, as building one does.
+_TAGS = [
+    "no-remote-exec",
+    "requires-container-engine",
+]
+
 IMAGES = {
     "container-client-test": "//images/container-client-test:load",
     "proxy-everything": "//images/container-client-test:load-proxy-everything",
@@ -9,6 +15,7 @@ IMAGES = {
     command(
         name = name,
         command = target,
+        tags = _TAGS,
     )
     for (name, target) in IMAGES.items()
 ]
@@ -16,4 +23,5 @@ IMAGES = {
 multirun(
     name = "load_all",
     commands = IMAGES.keys(),
+    tags = _TAGS,
 )

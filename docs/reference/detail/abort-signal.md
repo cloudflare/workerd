@@ -123,6 +123,7 @@ request's context can arm it — the underlying promise belongs to that request 
 requested from any other context is routed there through the signal's
 `IoCrossContextExecutor` and takes effect on the receiving request's next turn. If the
 receiving request is already gone, the routing is dropped: no delivery is possible anymore.
-Polling stays accurate regardless (if the peer could still abort, that request's teardown
-wrote an implicit connection-lost abort into the box), and registrations made after that
-point observe the abort through the already-aborted pre-checks instead.
+Polling stays accurate regardless: the box holds any abort the peer delivered before the
+receiving request ended, and a signal whose trigger capability is dropped without an abort
+never aborts. Registrations made after that point observe a delivered abort through the
+already-aborted pre-checks instead.

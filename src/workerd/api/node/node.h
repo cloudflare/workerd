@@ -2,7 +2,6 @@
 
 #include "crypto.h"
 #include "diagnostics-channel.h"
-#include "inspector.h"
 #include "module-source.h"
 #include "zlib-util.h"
 
@@ -10,10 +9,10 @@
 #include <workerd/api/node/buffer.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
-#include <workerd/api/node/sqlite.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/util.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -35,20 +34,11 @@ namespace workerd::api::node {
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
-  V(TimersUtil, "node-internal:timers")                                                            \
-  V(SqliteUtil, "node-internal:sqlite")                                                            \
-  V(InspectorModule, "node-internal:inspector")
+  V(TimersUtil, "node-internal:timers")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
 // flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
-//
-// Note: `node-internal:inspector` is intentionally in NODEJS_MODULES (always registered) rather
-// than here. It is an internal, non-user-importable module imported by the public
-// `node:inspector` TypeScript layer, so it must resolve whenever that layer loads. Its actual
-// functionality is gated at runtime: a Connection can only be created when the experimental
-// `enable_nodejs_inspector_local_dev` flag created the isolate's V8 inspector, and never in a
-// multi-tenant production process.
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 
 bool isNodeJsCompatEnabled(auto featureFlags) {
@@ -236,7 +226,7 @@ void registerNodeJsCompatModules(
     }
   }
 
-  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);
 }
 
@@ -269,7 +259,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   // by the same registration functions run in
   // getExternalNodeJsCompatModuleBundle().
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
 
@@ -388,7 +378,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   // legacy path registers Rust modules unconditionally with their declared
   // type).
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
   return builder.finish();
@@ -401,5 +391,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES,    \
-      EW_NODE_INSPECTOR_ISOLATE_TYPES
+      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES

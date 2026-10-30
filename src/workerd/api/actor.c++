@@ -328,6 +328,12 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Maybe<kj::String> locationHint;
   kj::Maybe<ActorVersion> version;
   KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(lh, o.locationHint) {
+      auto flags = FeatureFlags::get(js);
+      JSG_REQUIRE(
+          lh != "offpeak"_kj || flags.getOffpeakLocationHint() || flags.getWorkerdExperimental(),
+          TypeError, "get called with an unsupported locationHint: \"offpeak\"");
+    }
     locationHint = kj::mv(o.locationHint);
     if (FeatureFlags::get(js).getEnableVersionApi()) {
       KJ_IF_SOME(v, o.version) {

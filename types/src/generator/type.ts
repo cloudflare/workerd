@@ -32,27 +32,39 @@ export function findLastIndex<T>(
   return -1;
 }
 
-// If `typeNode` has the shape `T | undefined`, returns `T`, otherwise returns
-// `undefined`.
+// Removes a trailing `undefined` from a union with at least two members, returning
+// the remaining type or union. Returns `undefined` when there is nothing to unwrap.
 export function maybeUnwrapOptional(
   typeNode: ts.TypeNode
 ): ts.TypeNode | undefined {
-  if (
-    ts.isUnionTypeNode(typeNode) &&
-    typeNode.types.length === 2 &&
-    ts.isTypeReferenceNode(typeNode.types[1]) &&
-    ts.isIdentifier(typeNode.types[1].typeName) &&
-    typeNode.types[1].typeName.escapedText === 'undefined' // eslint-disable-line @typescript-eslint/no-unsafe-enum-comparison
-  ) {
-    return typeNode.types[0];
+  if (ts.isUnionTypeNode(typeNode) && typeNode.types.length >= 2) {
+    const last = typeNode.types[typeNode.types.length - 1];
+    if (
+      ts.isTypeReferenceNode(last) &&
+      ts.isIdentifier(last.typeName) &&
+      last.typeName.text === 'undefined'
+    ) {
+      return typeNode.types.length === 2
+        ? typeNode.types[0]
+        : f.createUnionTypeNode(typeNode.types.slice(0, -1));
+    }
   }
   return undefined;
 }
 
-// Returns `true` iff this maybe type represents `T | null`, not `T | undefined`
-function isNullMaybe(maybe: MaybeType): boolean {
-  // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/jsg.h#L220-L221
-  return maybe.name === 'kj::Maybe';
+function getMaybeFlags(maybe: MaybeType): {
+  allowsNull: boolean;
+  allowsUndefined: boolean;
+} {
+  if (maybe.allowsNull || maybe.allowsUndefined) {
+    return {
+      allowsNull: maybe.allowsNull,
+      allowsUndefined: maybe.allowsUndefined,
+    };
+  }
+  // Older producers encode the alternative in the native type name.
+  const allowsNull = maybe.name === 'kj::Maybe';
+  return { allowsNull, allowsUndefined: !allowsNull };
 }
 
 // Returns `true` iff this number type represents a character
@@ -129,6 +141,7 @@ export function getTypeName(
     );
     name = structure;
   } else {
+    if (structure.tsName !== '') return structure.tsName;
     name = structure.fullyQualifiedName;
   }
   name = name.replace(replaceEmpty, '');
@@ -140,13 +153,14 @@ export function createParamDeclarationNodes(
   fullyQualifiedParentName: string,
   name: string,
   args: Type[],
-  forMethod = false
+  forMethod = false,
+  argNames: string[] = []
 ): ts.ParameterDeclaration[] {
   // Find the index of the last required parameter, all optional before this
   // will use the `| undefined` syntax, as opposed to a `?` token.
   const lastRequiredParameter = findLastIndex(args, (type) => {
     // Could simplify this to a single return, but this reads clearer
-    if (type._isMaybe && !isNullMaybe(type.maybe)) {
+    if (type._isMaybe && getMaybeFlags(type.maybe).allowsUndefined) {
       // `type` is `T | undefined` so optional
       return false;
     }
@@ -200,7 +214,7 @@ export function createParamDeclarationNodes(
     const param = f.createParameterDeclaration(
       /* modifiers */ undefined,
       dotDotDotToken,
-      getParameterName(fullyQualifiedParentName, name, i),
+      getParameterName(fullyQualifiedParentName, name, i, argNames[i]),
       questionToken,
       typeNode
     );
@@ -303,11 +317,15 @@ export function createTypeNode(
     }
     case Type_Which.MAYBE: {
       const maybe = type.maybe;
-      const alternative = isNullMaybe(maybe) ? 'null' : 'undefined';
-      return f.createUnionTypeNode([
-        createTypeNode(maybe.value, allowCoercion),
-        f.createTypeReferenceNode(alternative),
-      ]);
+      const { allowsNull, allowsUndefined } = getMaybeFlags(maybe);
+      const variants = [createTypeNode(maybe.value, allowCoercion)];
+      if (allowsNull) {
+        variants.push(f.createTypeReferenceNode('null'));
+      }
+      if (allowsUndefined) {
+        variants.push(f.createTypeReferenceNode('undefined'));
+      }
+      return f.createUnionTypeNode(variants);
     }
     case Type_Which.DICT: {
       const dict = type.dict;
@@ -331,6 +349,47 @@ export function createTypeNode(
           return f.createTypeReferenceNode('ArrayBufferView');
         case BuiltinType_Type.V8ARRAY_BUFFER:
           return f.createTypeReferenceNode('ArrayBuffer');
+        case BuiltinType_Type.V8UINT16ARRAY:
+          return f.createTypeReferenceNode('Uint16Array');
+        case BuiltinType_Type.V8UINT32ARRAY:
+          return f.createTypeReferenceNode('Uint32Array');
+        case BuiltinType_Type.V8INT8ARRAY:
+          return f.createTypeReferenceNode('Int8Array');
+        case BuiltinType_Type.V8INT16ARRAY:
+          return f.createTypeReferenceNode('Int16Array');
+        case BuiltinType_Type.V8INT32ARRAY:
+          return f.createTypeReferenceNode('Int32Array');
+        case BuiltinType_Type.V8FLOAT32ARRAY:
+          return f.createTypeReferenceNode('Float32Array');
+        case BuiltinType_Type.V8FLOAT64ARRAY:
+          return f.createTypeReferenceNode('Float64Array');
+        case BuiltinType_Type.V8BIG_INT64ARRAY:
+          return f.createTypeReferenceNode('BigInt64Array');
+        case BuiltinType_Type.V8BIG_UINT64ARRAY:
+          return f.createTypeReferenceNode('BigUint64Array');
+        case BuiltinType_Type.V8UINT8CLAMPED_ARRAY:
+          return f.createTypeReferenceNode('Uint8ClampedArray');
+        case BuiltinType_Type.V8SYMBOL:
+          return f.createTypeReferenceNode('symbol');
+        case BuiltinType_Type.V8TYPED_ARRAY:
+          return f.createUnionTypeNode(
+            [
+              'Uint8Array',
+              'Uint8ClampedArray',
+              'Uint16Array',
+              'Uint32Array',
+              'Int8Array',
+              'Int16Array',
+              'Int32Array',
+              'Float16Array',
+              'Float32Array',
+              'Float64Array',
+              'BigInt64Array',
+              'BigUint64Array',
+            ].map((name) => f.createTypeReferenceNode(name))
+          );
+        case BuiltinType_Type.JSG_ERROR:
+          return f.createTypeReferenceNode('Error');
         case BuiltinType_Type.JSG_BUFFER_SOURCE:
           return f.createUnionTypeNode([
             f.createTypeReferenceNode('ArrayBuffer'),

@@ -2,23 +2,35 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { default as sqliteUtil } from 'node-internal:sqlite';
 import type sqlite from 'node:sqlite';
 
-const {
-  DatabaseSync,
-  StatementSync,
-  SQLITE_CHANGESET_OMIT,
-  SQLITE_CHANGESET_REPLACE,
-  SQLITE_CHANGESET_ABORT,
-  SQLITE_CHANGESET_DATA,
-  SQLITE_CHANGESET_NOTFOUND,
-  SQLITE_CHANGESET_CONFLICT,
-  SQLITE_CHANGESET_CONSTRAINT,
-  SQLITE_CHANGESET_FOREIGN_KEY,
-} = sqliteUtil;
+// `DatabaseSync` and `StatementSync` are not implemented, so they cannot be
+// constructed.
+const DatabaseSync = class DatabaseSync {
+  constructor() {
+    throw new TypeError('Illegal constructor');
+  }
+} as unknown as typeof sqlite.DatabaseSync;
 
-export const backup = sqliteUtil.backup.bind(sqliteUtil);
+const StatementSync = class StatementSync {
+  constructor() {
+    throw new TypeError('Illegal constructor');
+  }
+} as unknown as typeof sqlite.StatementSync;
+
+export function backup(): never {
+  throw new Error('backup is not implemented');
+}
+
+// SQLite session extension conflict resolution codes (from sqlite3.h)
+const SQLITE_CHANGESET_OMIT = 0;
+const SQLITE_CHANGESET_REPLACE = 1;
+const SQLITE_CHANGESET_ABORT = 2;
+const SQLITE_CHANGESET_DATA = 1;
+const SQLITE_CHANGESET_NOTFOUND = 2;
+const SQLITE_CHANGESET_CONFLICT = 3;
+const SQLITE_CHANGESET_CONSTRAINT = 4;
+const SQLITE_CHANGESET_FOREIGN_KEY = 5;
 
 // SQLite authorization action codes (from sqlite3.h)
 const SQLITE_OK = 0;

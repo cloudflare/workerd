@@ -95,7 +95,11 @@ export {
   detachWhileQueuedObservedByReader,
 } from 'buffer-lifecycle';
 
-export { transformStreamGc, transformerCollectedAfterFinish } from 'gc';
+export {
+  transformStreamGc,
+  transformerCollectedAfterFinish,
+  settledWritableReleasesReadable,
+} from 'gc';
 
 export {
   drainingReaderThroughTransform,
@@ -120,6 +124,7 @@ export {
   transformExpectedLengthRejected,
   transformExpectedLengthCoercion,
   transformExpectedLengthRange,
+  transformForkContentLength,
 } from 'expected-length';
 
 // Echo handler for the expectedLength fetch-body tests (roundtrip.js,

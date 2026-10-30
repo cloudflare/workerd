@@ -342,7 +342,7 @@ export class PrivateKeyObject extends AsymmetricKeyObject {
 
 export class SecretKeyObject extends KeyObject {
   get symmetricKeySize(): number {
-    return (this[kHandle].algorithm as unknown as string).length | 0;
+    return cryptoImpl.getSymmetricKeySize(this[kHandle]);
   }
 
   override export(options?: SecretKeyExportOptions): KeyExportResult {

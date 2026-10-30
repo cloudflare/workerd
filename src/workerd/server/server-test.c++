@@ -383,7 +383,7 @@ TempDir newSharedDirectory() {
 
 // The server as the tests drive it, over the Rust server (server/in_process.rs): the worker
 // factory is built here, on what the test supplies, and handed to it.
-class Server {
+class Server: public kj::PtrTarget {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
@@ -420,7 +420,12 @@ class Server {
       config::Config::Reader config,
       kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     auto& server = start(v8System, config);
-    auto drain = drainWhen.then([&server]() { server.drain(); }).eagerlyEvaluate(nullptr);
+    // `get()` returns the server started above: `start()` isn't called again while `drain` is
+    // pending, and TestServer drops `drain` before `close()`.
+    auto drain = drainWhen
+                     .then([weakThis = addWeakToThis()]() {
+      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test server destroyed before drain").get().drain();
+    }).eagerlyEvaluate(nullptr);
     return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
         .attach(kj::mv(drain), reports(server));
   }
@@ -913,9 +918,12 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
   }
 }
 
-KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
-  TestServer test(singleWorker(R"((
+// `compatibilityFlags` is a config list literal.
+void testClientDisconnectCancelsResponseBody(kj::StringPtr compatibilityFlags) {
+  TestServer test(singleWorker(kj::str(R"((
     compatibilityDate = "2024-10-01",
+    compatibilityFlags = )"_kj,
+      compatibilityFlags, R"(,
     modules = [
       ( name = "worker",
         esModule =
@@ -936,8 +944,9 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
           `}
       )
     ]
-  ))"_kj));
+  ))"_kj)));
 
+  test.server.allowExperimental();
   test.start();
 
   {
@@ -955,6 +964,14 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/state", "canceled:undefined");
+}
+
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody("[]");
+}
+
+KJ_TEST("Server: client disconnect cancels a TypeScript-implemented ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody(R"(["typescript_implemented_streams"])");
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
@@ -1056,6 +1073,35 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "wrapped: object");
+}
+
+kj::String clusterConfig(kj::StringPtr key) {
+  return kj::str(R"((
+    services = [(
+      name = "hello",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        modules = [(name = "main.js", esModule = "export default {}")]
+      )
+    )],
+    cluster = (bucket = "s3://bucket", address = "127.0.0.1:0", key = ")",
+      key, R"("),
+  ))");
+}
+
+KJ_TEST("Server: cluster mode requires --experimental") {
+  TestServer test(clusterConfig("0123456789abcdef0123456789abcdef"));
+  test.expectErrors(R"(
+    Cluster mode is experimental; it requires --experimental.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: a short cluster key is refused") {
+  TestServer test(clusterConfig("0123456789abcdef"));
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    cluster.key must be at least 32 bytes.
+  )"_blockquote);
 }
 
 KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
@@ -1855,6 +1901,81 @@ KJ_TEST("Server: connect() to default outbound") {
   subreq.send("goodbye");
 
   conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive designator resolving to a Worker does not crash the process") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      const socket = env.hyperdrive.connect();
+                `      await socket.opened;
+                `      const writer = socket.writable.getWriter();
+                `      await writer.write(new TextEncoder().encode("ping"));
+                `      const { value } = await socket.readable.getReader().read();
+                `      await socket.close();
+                `      return new Response("echoed: " + new TextDecoder().decode(value));
+                `    } catch (err) {
+                `      return new Response("caught: " + err.message);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "db-worker",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "db-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  },
+                `  async connect(socket, env, ctx) {
+                `    await socket.opened;
+                `    const { value } = await socket.readable.getReader().read();
+                `    await socket.writable.getWriter().write(value);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "echoed: ping");
 }
 
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {

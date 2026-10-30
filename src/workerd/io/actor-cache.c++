@@ -235,8 +235,10 @@ kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
-    return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
-      KJ_IF_SOME(p, getBackpressure()) {
+    return lastFlush.addBranch().then([weakThis = addWeakToThis()]() -> kj::Promise<void> {
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during backpressure");
+      KJ_IF_SOME(p, self.getBackpressure()) {
         return kj::mv(p);
       } else {
         return kj::READY_NOW;
@@ -468,8 +470,13 @@ auto ActorCache::getImpl(
   co_return newEntry->getValue();
 }
 
-class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream::Server {
+class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream::Server,
+                                            public kj::PtrTarget {
  public:
+  kj::Weak<GetMultiStreamImpl> addWeak() {
+    return addWeakToThis();
+  }
+
   GetMultiStreamImpl(ActorCache& cache,
       kj::Vector<kj::Own<Entry>> cachedEntries,
       kj::Vector<Key> keysToFetchParam,
@@ -662,8 +669,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  auto promise = sendPromise.then(
+      [weakStream = streamServerRef.addWeak()]() -> kj::Promise<ActorCache::GetResultList> {
+    if (KJ_REQUIRE_NONNULL(weakStream.tryGet(), "stream destroyed before RPC completed")
+            .fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "getMultiple() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -695,8 +704,10 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
         auto req = client.getAlarmRequest();
         return req.send().dropPipeline();
       })
-          .then([this, options](capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults>
-                        response) mutable -> kj::Maybe<kj::Date> {
+          .then(
+              [weakThis = addWeakToThis(), options](
+                  capnp::Response<rpc::ActorStorage::Operations::GetAlarmResults> response) mutable
+              -> kj::Maybe<kj::Date> {
         auto scheduledTimeMs = response.getScheduledTimeMs();
         auto result = [&]() -> kj::Maybe<kj::Date> {
           if (scheduledTimeMs == 0) {
@@ -706,15 +717,19 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
           }
         }();
 
-        if (!options.noCache && currentAlarmTime.is<UnknownAlarmTime>()) {
-          // If we don't end up in this branch, the time that's already in currentAlarmTime must
-          // be at least as fresh as the one we just read.
-          //
-          // If it was created by a setAlarm(), then it is actually fresher. If it was created
-          // by a concurrent getAlarm(), then it should be exactly the same time.
+        if (!options.noCache) {
+          auto& self =
+              KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during getAlarm()");
+          if (self.currentAlarmTime.is<UnknownAlarmTime>()) {
+            // If we don't end up in this branch, the time that's already in currentAlarmTime must
+            // be at least as fresh as the one we just read.
+            //
+            // If it was created by a setAlarm(), then it is actually fresher. If it was created
+            // by a concurrent getAlarm(), then it should be exactly the same time.
 
-          currentAlarmTime =
-              ActorCache::KnownAlarmTime{ActorCache::KnownAlarmTime::Status::CLEAN, result};
+            self.currentAlarmTime =
+                ActorCache::KnownAlarmTime{ActorCache::KnownAlarmTime::Status::CLEAN, result};
+          }
         }
 
         return result;
@@ -771,8 +786,13 @@ inline auto seekOrEnd(auto& map, kj::Maybe<ActorCache::KeyPtr> key) {
 
 }  // namespace
 
-class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
+class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStream::Server,
+                                               public kj::PtrTarget {
  public:
+  kj::Weak<ForwardListStreamImpl> addWeak() {
+    return addWeakToThis();
+  }
+
   ForwardListStreamImpl(ActorCache& cache,
       Key beginKey,
       kj::Maybe<Key> endKey,
@@ -1135,8 +1155,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  auto promise = sendPromise.then(
+      [weakStream = streamServerRef.addWeak()]() -> kj::Promise<ActorCache::GetResultList> {
+    if (KJ_REQUIRE_NONNULL(weakStream.tryGet(), "stream destroyed before RPC completed")
+            .fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -1151,8 +1173,13 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
 
 // -----------------------------------------------------------------------------
 
-class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
+class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStream::Server,
+                                               public kj::PtrTarget {
  public:
+  kj::Weak<ReverseListStreamImpl> addWeak() {
+    return addWeakToThis();
+  }
+
   ReverseListStreamImpl(ActorCache& cache,
       Key beginKey,
       kj::Maybe<Key> endKey,
@@ -1463,8 +1490,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
   // `stream` from being destroyed until we have a result so that if the RPC throws an exception,
   // we don't accidentally report "PromiseFulfiller not fulfilled" instead of the exception.
-  auto promise = sendPromise.then([&streamServerRef]() -> kj::Promise<ActorCache::GetResultList> {
-    if (streamServerRef.fulfiller->isWaiting()) {
+  auto promise = sendPromise.then(
+      [weakStream = streamServerRef.addWeak()]() -> kj::Promise<ActorCache::GetResultList> {
+    if (KJ_REQUIRE_NONNULL(weakStream.tryGet(), "stream destroyed before RPC completed")
+            .fulfiller->isWaiting()) {
       return KJ_EXCEPTION(FAILED, "list() never called stream.end()");
     } else {
       // We'll be canceled momentarily...
@@ -1837,10 +1866,13 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
       [&]() mutable { return function(storage).attach(recordStorageRead(hooks, clock)); });
   return oomCanceler.wrap(
       promise
-          .catch_([this, function = kj::mv(function)](kj::Exception&& e) mutable
+          .catch_(
+              [weakThis = addWeakToThis(), function = kj::mv(function)](kj::Exception&& e) mutable
               -> kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> {
     if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-      return function(storage).attach(recordStorageRead(hooks, clock));
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed before storage read retry");
+      return function(self.storage).attach(recordStorageRead(self.hooks, self.clock));
     } else {
       return kj::mv(e);
     }
@@ -2261,19 +2293,21 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent tr
       flushScheduledWithOutputGate = false;
       // Reset the flush span for the next batch
       currentFlushSpan = nullptr;
-    })).then([this]() {
-      ++flushesEnqueued;
-      return kj::evalNow([this]() {
+    })).then([weakThis = addWeakToThis()]() {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed before flush");
+      ++self.flushesEnqueued;
+      return kj::evalNow([&self]() {
         // `flushImpl()` can throw, so we need to wrap it in `evalNow()` to observe all pathways.
-        return flushImpl();
-      }).attach(kj::defer([this]() { --flushesEnqueued; }));
+        return self.flushImpl();
+      }).attach(kj::defer([&self]() { --self.flushesEnqueued; }));
     });
 
     if (options.allowUnconfirmed) {
       // Don't apply output gate. But, if an exception is thrown, we still want to break the gate,
       // so arrange for that.
-      flushPromise = flushPromise.catch_([this](kj::Exception&& e) {
-        return gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
+      flushPromise = flushPromise.catch_([weakThis = addWeakToThis()](kj::Exception&& e) {
+        return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during flush")
+            .gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
       });
     } else {
       flushPromise = gate.lockWhile(kj::mv(flushPromise), currentFlushSpan.addRef());
@@ -2608,113 +2642,16 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
   auto flushProm = startFlushTransaction();
 
-  bool flushingBeforeDeleteAll = requestedDeleteAll != kj::none;
+  FlushingBeforeDeleteAll flushingBeforeDeleteAll(requestedDeleteAll != kj::none);
   return oomCanceler.wrap(kj::mv(flushProm))
-      .then([this, flushingBeforeDeleteAll]() -> kj::Promise<void> {
-    // We need to process the alarm result before we (potentially) start the delete all because if
-    // we did not our alarm state can't know if it need to flush a new time or not after the delete
-    // all. This might be another reason why delete all should not be considered truly deleting the
-    // durable object: alarms are not cleared by a delete all.
-    KJ_SWITCH_ONEOF(currentAlarmTime) {
-      KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
-        if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
-          if (knownAlarmTime.noCache) {
-            currentAlarmTime = UnknownAlarmTime{};
-          } else {
-            knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
-          }
-        }
-      }
-      KJ_CASE_ONEOF(deferredDelete, ActorCache::DeferredAlarmDelete) {
-        if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
-          bool wasDeleted = KJ_ASSERT_NONNULL(deferredDelete.wasDeleted);
-          if (deferredDelete.noCache || !wasDeleted) {
-            currentAlarmTime = UnknownAlarmTime{};
-          } else {
-            currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
-              .time = kj::none,
-              .noCache = deferredDelete.noCache};
-          }
-        }
-      }
-      KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {}
-    }
-    if (flushingBeforeDeleteAll) {
-      // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
-      // written, we must perform the deleteAll() itself.
-      return flushImplDeleteAll();
-    }
-
-    auto lock = lru.cleanList.lockExclusive();
-
-    KJ_IF_SOME(r, requestedDeleteAll) {
-      // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
-      // time that we were waiting for the flushImpl(). We want to remove the flushing entries
-      // from that vector now.
-      // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
-      auto dst = r.deletedDirty.begin();
-      for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
-        if (!src->get()->flushStarted) {
-          if (dst != src) *dst = kj::mv(*src);
-          ++dst;
-        }
-      }
-      r.deletedDirty.resize(dst - r.deletedDirty.begin());
-    } else {
-      // Mark all flushing entries as `CLEAN`. Note that we know that all flushing entries must
-      // form a prefix of `dirtyList` since any new entries would have been added to the end.
-      for (auto& entry: dirtyList) {
-        if (!entry.flushStarted) {
-          // Completed all flushing entries.
-          break;
-        }
-
-        KJ_ASSERT(entry.flushStarted);
-
-        // We know all `countedDelete` operations were satisfied so we can remove this if it's
-        // present. The `CountedDeleteWaiters` will resolve once the flush is finished, and will
-        // remove the `CountedDelete`s from `countedDeletes`. Even if it doesn't happen by the
-        // next flush, each `CountedDelete` should have `isFinished` set so even if we encounter it
-        // next flush we won't attempt to delete again.
-        entry.isCountedDelete = false;
-
-        dirtyList.remove(entry);
-        if (entry.noCache) {
-          entry.setNotInCache();
-          evictEntry(lock, entry);
-        } else {
-          if (entry.gapIsKnownEmpty && entry.getValueStatus() == EntryValueStatus::ABSENT) {
-            // This is a negative entry, and is followed by a known-empty gap. If the previous entry
-            // also has `gapIsKnownEmpty`, then this entry is entirely redundant.
-            auto& map = currentValues.get(lock);
-            auto entryIter = map.seek(entry.key);
-            KJ_ASSERT(entryIter->get() == &entry);
-
-            if (entryIter != map.ordered().begin()) {
-              auto prevIter = entryIter;
-              --prevIter;
-              if (prevIter->get()->gapIsKnownEmpty) {
-                // Yep!
-                entry.setNotInCache();
-                map.erase(*entryIter);
-                // WARNING: We might have just deleted `entry`.
-                continue;
-              }
-            }
-          }
-
-          addToCleanList(lock, entry);
-        }
-      }
-    }
-
-    evictOrOomIfNeeded(lock);
-
-    return kj::READY_NOW;
-  }, [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
+      .then([weakThis = addWeakToThis(), flushingBeforeDeleteAll]() -> kj::Promise<void> {
+    return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during flush")
+        .finishFlush(flushingBeforeDeleteAll);
+  }, [weakThis = addWeakToThis(), retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flushImpl(retryCount + 1);
+      return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during flush")
+          .flushImpl(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
         jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
@@ -2746,6 +2683,109 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
               wdErrId));
     }
   });
+}
+
+kj::Promise<void> ActorCache::finishFlush(FlushingBeforeDeleteAll flushingBeforeDeleteAll) {
+  // We need to process the alarm result before we (potentially) start the delete all because if
+  // we did not our alarm state can't know if it need to flush a new time or not after the delete
+  // all. This might be another reason why delete all should not be considered truly deleting the
+  // durable object: alarms are not cleared by a delete all.
+  KJ_SWITCH_ONEOF(currentAlarmTime) {
+    KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
+      if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
+        if (knownAlarmTime.noCache) {
+          currentAlarmTime = UnknownAlarmTime{};
+        } else {
+          knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
+        }
+      }
+    }
+    KJ_CASE_ONEOF(deferredDelete, ActorCache::DeferredAlarmDelete) {
+      if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
+        bool wasDeleted = KJ_ASSERT_NONNULL(deferredDelete.wasDeleted);
+        if (deferredDelete.noCache || !wasDeleted) {
+          currentAlarmTime = UnknownAlarmTime{};
+        } else {
+          currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
+            .time = kj::none,
+            .noCache = deferredDelete.noCache};
+        }
+      }
+    }
+    KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {}
+  }
+  if (flushingBeforeDeleteAll) {
+    // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
+    // written, we must perform the deleteAll() itself.
+    return flushImplDeleteAll();
+  }
+
+  auto lock = lru.cleanList.lockExclusive();
+
+  KJ_IF_SOME(r, requestedDeleteAll) {
+    // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
+    // time that we were waiting for the flushImpl(). We want to remove the flushing entries
+    // from that vector now.
+    // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
+    auto dst = r.deletedDirty.begin();
+    for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
+      if (!src->get()->flushStarted) {
+        if (dst != src) *dst = kj::mv(*src);
+        ++dst;
+      }
+    }
+    r.deletedDirty.resize(dst - r.deletedDirty.begin());
+  } else {
+    // Mark all flushing entries as `CLEAN`. Note that we know that all flushing entries must
+    // form a prefix of `dirtyList` since any new entries would have been added to the end.
+    for (auto& entry: dirtyList) {
+      if (!entry.flushStarted) {
+        // Completed all flushing entries.
+        break;
+      }
+
+      KJ_ASSERT(entry.flushStarted);
+
+      // We know all `countedDelete` operations were satisfied so we can remove this if it's
+      // present. The `CountedDeleteWaiters` will resolve once the flush is finished, and will
+      // remove the `CountedDelete`s from `countedDeletes`. Even if it doesn't happen by the
+      // next flush, each `CountedDelete` should have `isFinished` set so even if we encounter it
+      // next flush we won't attempt to delete again.
+      entry.isCountedDelete = false;
+
+      dirtyList.remove(entry);
+      if (entry.noCache) {
+        entry.setNotInCache();
+        evictEntry(lock, entry);
+      } else {
+        if (entry.gapIsKnownEmpty && entry.getValueStatus() == EntryValueStatus::ABSENT) {
+          // This is a negative entry, and is followed by a known-empty gap. If the previous entry
+          // also has `gapIsKnownEmpty`, then this entry is entirely redundant.
+          auto& map = currentValues.get(lock);
+          auto entryIter = map.seek(entry.key);
+          KJ_ASSERT(entryIter->get() == &entry);
+
+          if (entryIter != map.ordered().begin()) {
+            auto prevIter = entryIter;
+            --prevIter;
+            if (prevIter->get()->gapIsKnownEmpty) {
+              // Yep!
+              entry.setNotInCache();
+              map.erase(*entryIter);
+              // WARNING: We might have just deleted `entry`.
+              continue;
+            }
+          }
+        }
+
+        addToCleanList(lock, entry);
+      }
+    }
+  }
+
+  evictOrOomIfNeeded(lock);
+
+  return kj::READY_NOW;
 }
 
 kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
@@ -3073,57 +3113,17 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
   return storage.deleteAllRequest(capnp::MessageSize{2, 0})
       .send()
       .then(
-          [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
+          [weakThis = addWeakToThis()](
+              capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
               -> kj::Promise<void> {
-    auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);
-    deleteAllState.countFulfiller->fulfill(results.getNumDeleted());
-    bool shouldDeleteAlarm = deleteAllState.deleteAlarm;
-
-    // Success! We can now null out `requestedDeleteAll`. Note that we don't have to worry about
-    // `requestedDeleteAll` having changed since we flushed it earlier, because it can't change
-    // until it is first nulled out. If deleteAll() is called multiple times before the first one
-    // finishes, subsequent ones see `requestedDeleteAll` is already non-null and they don't change
-    // it. Instead, the writes that occurred between the deleteAll()s are simply discarded, as if
-    // the two deleteAll()s had been coalesced into a single one.
-    requestedDeleteAll = kj::none;
-
-    if (shouldDeleteAlarm) {
-      // The deleteAll() was requested with deleteAlarm=true. Now that the deleteAll RPC has
-      // succeeded, we dirty the alarm to kj::none so that it will be flushed in the post-deleteAll
-      // flushImpl() call below. This ordering ensures the alarm is only deleted after KV data has
-      // been successfully deleted.
-      //
-      // However, if currentAlarmTime is already DIRTY, that means a subsequent setAlarm() call
-      // was made after the deleteAll() was initiated, and that newer alarm value should take
-      // precedence over the deletion.
-      bool alreadyDirty = false;
-      KJ_IF_SOME(known, currentAlarmTime.tryGet<KnownAlarmTime>()) {
-        alreadyDirty = known.status == KnownAlarmTime::Status::DIRTY;
-      }
-      if (!alreadyDirty) {
-        currentAlarmTime = ActorCache::KnownAlarmTime{
-          .status = ActorCache::KnownAlarmTime::Status::DIRTY,
-          .time = kj::none,
-        };
-      }
-    }
-
-    {
-      auto lock = lru.cleanList.lockExclusive();
-      evictOrOomIfNeeded(lock);
-    }
-
-    // Now we must flush any writes that happened after the deleteAll(). (If there are none, this
-    // will complete quickly.)
-    // TODO(soon) This will use the write options for the deleteAll() even if the options for future
-    // operations differ. This can mean that we will not wait for the output gate when we were asked
-    // to do so. We should fix this.
-    return flushImpl();
+    return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during deleteAll()")
+        .finishFlushDeleteAll(kj::mv(results));
   },
-          [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
+          [weakThis = addWeakToThis(), retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flushImplDeleteAll(retryCount + 1);
+      return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorCache destroyed during deleteAll()")
+          .flushImplDeleteAll(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
         jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
@@ -3148,6 +3148,54 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
               wdErrId));
     }
   });
+}
+
+kj::Promise<void> ActorCache::finishFlushDeleteAll(
+    capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results) {
+  auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);
+  deleteAllState.countFulfiller->fulfill(results.getNumDeleted());
+  bool shouldDeleteAlarm = deleteAllState.deleteAlarm;
+
+  // Success! We can now null out `requestedDeleteAll`. Note that we don't have to worry about
+  // `requestedDeleteAll` having changed since we flushed it earlier, because it can't change
+  // until it is first nulled out. If deleteAll() is called multiple times before the first one
+  // finishes, subsequent ones see `requestedDeleteAll` is already non-null and they don't change
+  // it. Instead, the writes that occurred between the deleteAll()s are simply discarded, as if
+  // the two deleteAll()s had been coalesced into a single one.
+  requestedDeleteAll = kj::none;
+
+  if (shouldDeleteAlarm) {
+    // The deleteAll() was requested with deleteAlarm=true. Now that the deleteAll RPC has
+    // succeeded, we dirty the alarm to kj::none so that it will be flushed in the post-deleteAll
+    // flushImpl() call below. This ordering ensures the alarm is only deleted after KV data has
+    // been successfully deleted.
+    //
+    // However, if currentAlarmTime is already DIRTY, that means a subsequent setAlarm() call
+    // was made after the deleteAll() was initiated, and that newer alarm value should take
+    // precedence over the deletion.
+    bool alreadyDirty = false;
+    KJ_IF_SOME(known, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+      alreadyDirty = known.status == KnownAlarmTime::Status::DIRTY;
+    }
+    if (!alreadyDirty) {
+      currentAlarmTime = ActorCache::KnownAlarmTime{
+        .status = ActorCache::KnownAlarmTime::Status::DIRTY,
+        .time = kj::none,
+      };
+    }
+  }
+
+  {
+    auto lock = lru.cleanList.lockExclusive();
+    evictOrOomIfNeeded(lock);
+  }
+
+  // Now we must flush any writes that happened after the deleteAll(). (If there are none, this
+  // will complete quickly.)
+  // TODO(soon) This will use the write options for the deleteAll() even if the options for future
+  // operations differ. This can mean that we will not wait for the output gate when we were asked
+  // to do so. We should fix this.
+  return flushImpl();
 }
 
 // =======================================================================================

@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The transform benchmarks run the same modules under two configs:
+# transform-cpp against the legacy C++ implementation, transform-ts against
+# the TypeScript implementation.
+
+transform_bench_srcs = glob(["*.js"]) + ["transform-modules.capnp"]
+
+wd_bench(
+    src = "transform-cpp.wd-bench",
+    data = transform_bench_srcs,
+)
+
+wd_bench(
+    src = "transform-ts.wd-bench",
+    args = ["--experimental"],
+    data = transform_bench_srcs,
+)

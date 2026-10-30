@@ -1,4 +1,6 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
+load("@workerd//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def wd_test(
         src,
@@ -41,6 +43,7 @@ def wd_test(
 
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
+    kwargs["exec_properties"] = test_exec_properties(kwargs.get("size", "medium"), kwargs.get("tags", [])) | kwargs.get("exec_properties", {})
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -182,11 +185,13 @@ if [ -n "${{COVERAGE_DIR:-}}" ]; then
     export LLVM_PROFILE_FILE="${{COVERAGE_DIR}}/%p-%m.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
-
+{load_images}
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
-    # These environment variables are processed by the supervisor executable
-    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    # These environment variables are processed by the supervisor executable. The supervisor and
+    # the sidecar aren't instrumented, and under COVERAGE_DIR a js_binary loads a coverage module
+    # that only instrumented ones carry; workerd's profile goes to LLVM_PROFILE_FILE.
+    env -u COVERAGE_DIR PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi
@@ -260,6 +265,10 @@ def _wd_test_impl(ctx):
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
         randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
         sidecar_port_mode = ctx.attr.sidecar_port_mode,
+        load_images = "".join([
+            'docker load --quiet --input "{}"\n'.format(f.short_path)
+            for f in ctx.files.container_images
+        ]),
     )
 
     ctx.actions.write(
@@ -268,7 +277,7 @@ def _wd_test_impl(ctx):
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = ctx.files.data)
+    runfiles = ctx.runfiles(files = ctx.files.data + ctx.files.container_images)
 
     # Add runfiles for the workerd binary, such as shared libraries (if any)
     workerd_runfiles = ctx.attr.workerd[DefaultInfo].default_runfiles
@@ -306,6 +315,7 @@ def _wd_test_impl(ctx):
         if ctx.attr.python_snapshot_test:
             environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
         runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": ctx.file.load_snapshot}))
+    runfiles = runfiles.merge(coverage_llvm_tools(ctx, executable, environment))
 
     return [
         DefaultInfo(
@@ -321,6 +331,7 @@ def _wd_test_impl(ctx):
 _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
+    toolchains = COVERAGE_TOOLCHAINS,
     attrs = {
         # Implicit dependencies used by Bazel to generate coverage reports.
         "_lcov_merger": attr.label(
@@ -347,6 +358,10 @@ _wd_test = rule(
         ),
         # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
+        # Image tarballs (an oci_load's `tarball` output group) that the test loads into the Docker
+        # engine at /var/run/docker.sock before workerd starts, so that a container test brings its
+        # images wherever it runs. Linux only.
+        "container_images": attr.label_list(allow_files = [".tar"]),
         # If set, an executable that is run in parallel with the test, and provides some functionality
         # needed for the test. This is usually a backend server, with workerd serving as the client.
         # The sidecar will be killed once the test completes.

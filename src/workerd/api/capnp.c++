@@ -568,10 +568,12 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
   kj::Promise<void> result = nullptr;
 
   bool live = ioContext->runIfAlive([&](IoContext& rc) {
-    result = rc.run(
-        [this, method, rpcContext](Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
+    result = rc.run([weakThis = addWeakToThis(), method, rpcContext](
+                        Worker::Lock& lock, IoContext& rc) mutable -> kj::Promise<void> {
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "CapnpServer destroyed before RPC call ran");
       jsg::Lock& js = lock;
-      auto handle = object.getHandle(js);
+      auto handle = self.object.getHandle(js);
       auto methodName = method.getProto().getName();
       auto methodHandle =
           jsg::check(handle->Get(lock.getContext(), jsg::v8StrIntern(js.v8Isolate, methodName)));
@@ -580,18 +582,21 @@ kj::Promise<void> CapnpServer::call(capnp::InterfaceSchema::Method method,
         KJ_UNIMPLEMENTED(kj::str("jsg.Error: RPC method not implemented: ", methodName));
       }
 
-      JsCapnpConverter converter{wrapper};
+      JsCapnpConverter converter{self.wrapper};
       auto params = rpcContext.getParams();
       auto jsParams = converter.valueToJs(js, params, params.getSchema(), kj::none);
       rpcContext.releaseParams();
 
       auto result = jsg::check(
           methodHandle.As<v8::Function>()->Call(lock.getContext(), handle, 1, &jsParams));
-      KJ_IF_SOME(promise, wrapper.tryUnwrapPromise(lock, lock.getContext(), result)) {
+      KJ_IF_SOME(promise, self.wrapper.tryUnwrapPromise(lock, lock.getContext(), result)) {
         return rc.awaitJs(js,
-            promise.then(
-                js, rc.addFunctor([this, rpcContext](jsg::Lock& js, jsg::Value result) mutable {
-          JsCapnpConverter converter{wrapper};
+            promise.then(js,
+                rc.addFunctor([weakThis = self.addWeakToThis(), rpcContext](
+                                  jsg::Lock& js, jsg::Value result) mutable {
+          JsCapnpConverter converter{
+            KJ_REQUIRE_NONNULL(weakThis.tryGet(), "CapnpServer destroyed before RPC returned")
+                .wrapper};
           converter.rpcResultsFromJs(js, rpcContext, result.getHandle(js));
         })));
 

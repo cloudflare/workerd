@@ -21,6 +21,8 @@ js_run_binary(
         "open-next.config.mjs",
         "package.json",
         "wrangler.jsonc",
+        # Makes the output tree's root the monorepo root, from which Next.js traces node_modules.
+        "//:pnpm-lock",
         ":node_modules/@opennextjs/cloudflare",
         ":node_modules/esbuild",
         ":node_modules/next",

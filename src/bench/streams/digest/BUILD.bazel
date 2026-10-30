@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The DigestStream benchmarks run the same modules under two configs:
+# digest-cpp against the legacy C++ implementation, digest-ts against the
+# TypeScript implementation.
+
+digest_bench_srcs = glob(["*.js"]) + ["digest-modules.capnp"]
+
+wd_bench(
+    src = "digest-cpp.wd-bench",
+    data = digest_bench_srcs,
+)
+
+wd_bench(
+    src = "digest-ts.wd-bench",
+    args = ["--experimental"],
+    data = digest_bench_srcs,
+)

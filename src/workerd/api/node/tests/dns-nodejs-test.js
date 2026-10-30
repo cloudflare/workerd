@@ -6,6 +6,7 @@ import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { inspect } from 'node:util';
+import { isIPv4, isIPv6 } from 'node:net';
 
 // Taken from Node.js
 // https://github.com/nodejs/node/blob/d5d1e80763202ffa73307213211148571deac27c/test/common/internet.js
@@ -43,6 +44,9 @@ const addresses = {
   CAA_HOST: 'google.com',
   // A host with CNAME records registered
   CNAME_HOST: 'blog.nodejs.org',
+  // A host whose A records are reached through a CNAME the resolver does not
+  // flatten, so the answer section carries both CNAME and A records.
+  CNAME_A_HOST: 'www.github.com',
   // A host with NS records registered
   NS_HOST: 'nodejs.org',
   // A host with TXT records registered
@@ -439,6 +443,66 @@ export const lookupDefaultFamilyResolvesIPv4 = {
       resolve();
     });
     await promise;
+  },
+};
+
+// Regression: the DNS-over-HTTPS answer section includes the CNAME chain
+// followed to reach the requested records; only records of the queried type
+// may be returned as addresses.
+export const lookupThroughCname = {
+  async test() {
+    const all = await dnsPromises.lookup(addresses.CNAME_A_HOST, {
+      all: true,
+    });
+    ok(all.length > 0, 'expected at least one address');
+    for (const { address, family } of all) {
+      ok(
+        (family === 4 && isIPv4(address)) || (family === 6 && isIPv6(address)),
+        `expected an IP address of family ${family}, got ${inspect(address)}`
+      );
+    }
+
+    const single = await dnsPromises.lookup(addresses.CNAME_A_HOST);
+    ok(isIPv4(single.address) || isIPv6(single.address), inspect(single));
+
+    const v4 = await dnsPromises.lookup(addresses.CNAME_A_HOST, {
+      family: 4,
+      all: true,
+    });
+    ok(v4.length > 0);
+    for (const { address } of v4) ok(isIPv4(address), inspect(address));
+
+    // The CNAME target has no AAAA records, so the CNAME record alone is left
+    // in the answer section and must not be reported as an address.
+    try {
+      const v6 = await dnsPromises.lookup(addresses.CNAME_A_HOST, {
+        family: 6,
+        all: true,
+      });
+      for (const { address } of v6) ok(isIPv6(address), inspect(address));
+    } catch (e) {
+      strictEqual(e.code, 'ENOTFOUND');
+    }
+  },
+};
+
+export const resolve4ThroughCname = {
+  async test() {
+    const result = await dnsPromises.resolve4(addresses.CNAME_A_HOST);
+    ok(result.length > 0);
+    for (const item of result) ok(isIPv4(item), inspect(item));
+  },
+};
+
+export const resolveMxThroughCname = {
+  async test() {
+    const result = await dnsPromises.resolveMx(addresses.CNAME_HOST);
+    ok(result.length > 0);
+    for (const { exchange, priority } of result) {
+      strictEqual(typeof exchange, 'string');
+      ok(exchange.length > 0);
+      strictEqual(typeof priority, 'number');
+    }
   },
 };
 

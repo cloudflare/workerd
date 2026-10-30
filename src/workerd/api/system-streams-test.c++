@@ -296,36 +296,175 @@ KJ_TEST("EncodedAsyncInputStream cancel with pending read on AsyncPipe") {
 // Pumps "foobar" from a native source into a native sink through the deferred pump. The pump holds
 // counted pointers to both ends, so with pointer counting enabled, destroying either end before
 // the pump settles would fail an assertion.
-kj::Promise<void> expectNativePump(IoContext& context, kj::Maybe<uint64_t> expectedLength) {
-  auto in = kj::newOneWayPipe(expectedLength);
+kj::Promise<void> expectNativePump(
+    IoContext& context, kj::Maybe<uint64_t> transportLength, uint64_t identityLength) {
+  auto in = kj::newOneWayPipe(transportLength);
   auto out = kj::newOneWayPipe();
-  auto source = newSystemStream(kj::mv(in.in), StreamEncoding::IDENTITY, context);
+  auto source = newSystemStream(kj::mv(in.in), StreamEncoding::IDENTITY, context, identityLength);
   auto sink = newSystemStream(kj::mv(out.out), StreamEncoding::IDENTITY, context);
-  auto received = out.in->readAllText();
+  kj::byte buffer[6]{};
+  auto read = out.in->read(buffer, 6);
 
+  KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == identityLength);
   auto proxy = co_await source->pumpTo(sink->getPtr(), true);
+  KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == transportLength);
   co_await in.out->write("foobar"_kjb);
+  co_await read;
+  KJ_EXPECT(kj::arrayPtr(buffer) == "foobar"_kjb);
   in.out = nullptr;
+  // The pump must settle while the sink's reader stays open without reading EOF.
   co_await proxy.proxyTask;
+  KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
 
   // The pump has settled, so both ends may now be destroyed.
   sink = nullptr;
   source = nullptr;
-  KJ_EXPECT(co_await received == "foobar");
 }
 
-KJ_TEST("Native pump with a known length delivers all bytes") {
+KJ_TEST("Native pumps consume identity length metadata independently of transport length") {
+  TestFixture fixture;
+  kj::Maybe<uint64_t> transportLengths[] = {kj::none, uint64_t{6}};
+  for (auto transportLength: transportLengths) {
+    for (uint64_t identityLength: {uint64_t{0}, uint64_t{5}, uint64_t{6}, uint64_t{7}}) {
+      fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+        return expectNativePump(env.context, transportLength, identityLength);
+      });
+    }
+  }
+}
+
+class BufferedInput final: public kj::AsyncInputStream {
+ public:
+  explicit BufferedInput(kj::ArrayPtr<const kj::byte> bytes): bytes(bytes) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return KJ_ASSERT_NONNULL(
+        tryReadSync(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes), minBytes));
+  }
+
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    auto amount = kj::min(buffer.size(), bytes.size());
+    buffer.write(bytes.first(amount));
+    bytes = bytes.slice(amount);
+    return amount;
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> bytes;
+};
+
+kj::Array<kj::byte> encode(kj::ArrayPtr<const kj::byte> bytes, StreamEncoding encoding) {
+  kj::VectorOutputStream output;
+  if (encoding == StreamEncoding::GZIP) {
+    kj::GzipOutputStream compressor(output);
+    compressor.write(bytes);
+  } else if (encoding == StreamEncoding::BROTLI) {
+    kj::BrotliOutputStream compressor(output);
+    compressor.write(bytes);
+  } else {
+    output.write(bytes);
+  }
+  return kj::heapArray(output.getArray());
+}
+
+KJ_TEST("System stream identity length tracks decoded reads and independent tee branches") {
+  TestFixture fixture;
+  for (auto encoding: {StreamEncoding::IDENTITY, StreamEncoding::GZIP, StreamEncoding::BROTLI}) {
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto bytes = encode("hello world"_kjb, encoding);
+      auto source =
+          newSystemStream(kj::heap<BufferedInput>(bytes), encoding, env.context, uint64_t{11});
+      KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{11});
+      if (encoding != StreamEncoding::IDENTITY) {
+        // Identity metadata is never a compressed-byte length.
+        KJ_EXPECT(source->tryGetLength(encoding) == kj::none);
+      }
+      kj::byte buffer[3]{};
+      KJ_IF_SOME(amount, source->tryReadSync(buffer, 3)) {
+        KJ_EXPECT(amount == 3);
+      } else {
+        KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{11});
+        KJ_EXPECT(co_await source->tryRead(buffer, 3, 3) == 3);
+      }
+      KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{8});
+      auto tee = KJ_ASSERT_NONNULL(source->tryTee(kj::maxValue));
+      for (auto& branch: tee.branches) {
+        KJ_EXPECT(branch->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{8});
+      }
+      KJ_EXPECT(co_await tee.branches[0]->readAllText(100) == "lo world");
+      KJ_EXPECT(tee.branches[0]->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
+      KJ_EXPECT(tee.branches[1]->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{8});
+      KJ_EXPECT(co_await tee.branches[1]->readAllText(100) == "lo world");
+      KJ_EXPECT(tee.branches[1]->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
+    });
+  }
+}
+
+KJ_TEST("System stream identity length survives declined synchronous reads and async reads") {
   TestFixture fixture;
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    return expectNativePump(env.context, static_cast<uint64_t>(6));
+    auto pipe = kj::newOneWayPipe();
+    auto source =
+        newSystemStream(kj::mv(pipe.in), StreamEncoding::IDENTITY, env.context, uint64_t{6});
+    kj::byte buffer[3]{};
+    KJ_EXPECT(source->tryReadSync(buffer, 3) == kj::none);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{6});
+    auto read = source->tryRead(buffer, 3, 3);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{6});
+    auto write = pipe.out->write("foobar"_kjb);
+    KJ_EXPECT(co_await read == 3);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{3});
+    KJ_EXPECT(co_await source->tryRead(buffer, 3, 3) == 3);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
+    co_await write;
+    pipe.out = nullptr;
+    KJ_EXPECT(co_await source->tryRead(buffer, 1, 3) == 0);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
   });
 }
 
-KJ_TEST("Native pump without a known length delivers all bytes") {
+KJ_TEST("System streams without identity metadata retain transport lengths and decoding behavior") {
   TestFixture fixture;
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    return expectNativePump(env.context, kj::none);
+    auto pipe = kj::newOneWayPipe(uint64_t{6});
+    auto source = newSystemStream(kj::mv(pipe.in), StreamEncoding::IDENTITY, env.context);
+    KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{6});
+    auto bytes = encode("foobar"_kjb, StreamEncoding::GZIP);
+    auto compressed = kj::newOneWayPipe(bytes.size());
+    auto decoded = newSystemStream(kj::mv(compressed.in), StreamEncoding::GZIP, env.context);
+    KJ_EXPECT(decoded->tryGetLength(StreamEncoding::GZIP) == bytes.size());
+    KJ_EXPECT(decoded->tryGetLength(StreamEncoding::IDENTITY) == kj::none);
+    auto write = compressed.out->write(bytes);
+    auto read = decoded->readAllText(100);
+    co_await write;
+    compressed.out = nullptr;
+    KJ_EXPECT(co_await read == "foobar");
   });
+}
+
+KJ_TEST("System stream identity length becomes unknown on overrun and zero at early EOF") {
+  TestFixture fixture;
+  for (uint64_t length: {uint64_t{0}, uint64_t{2}, uint64_t{4}}) {
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto source = newSystemStream(
+          kj::heap<BufferedInput>("foo"_kjb), StreamEncoding::IDENTITY, env.context, length);
+      KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == length);
+      kj::byte buffer[3]{};
+      KJ_EXPECT(KJ_ASSERT_NONNULL(source->tryReadSync(buffer, 3)) == 3);
+      KJ_EXPECT(kj::arrayPtr(buffer) == "foo"_kjb);
+      if (length < 3) {
+        KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == kj::none);
+      } else {
+        KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{1});
+      }
+      KJ_EXPECT(co_await source->tryRead(buffer, 1, 3) == 0);
+      if (length < 3) {
+        KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == kj::none);
+      } else {
+        KJ_EXPECT(source->tryGetLength(StreamEncoding::IDENTITY) == uint64_t{0});
+      }
+    });
+  }
 }
 
 }  // namespace

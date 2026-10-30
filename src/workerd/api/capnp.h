@@ -21,7 +21,7 @@ void fillCapnpFieldFromJs(capnp::DynamicStruct::Builder builder,
 capnp::Orphan<capnp::DynamicValue> capnpValueFromJs(
     jsg::Lock& js, capnp::Orphanage orphanage, capnp::Type type, v8::Local<v8::Value> jsValue);
 
-class CapnpServer final: public capnp::DynamicCapability::Server {
+class CapnpServer final: public capnp::DynamicCapability::Server, public kj::PtrTarget {
  public:
   CapnpServer(jsg::Lock& js,
       capnp::InterfaceSchema schema,

@@ -28,6 +28,9 @@ const unitTests :Workerd.Config = (
           "enhanced_error_serialization",
           "pedantic_wpt",
         ],
+        bindings = [
+          ( name = "SELF", service = "streams-identity-cpp-pedantic" ),
+        ],
       )
     ),
   ],

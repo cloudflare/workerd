@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EncodingModules = import "encoding-modules.capnp";
+
+# Runs the encoding stream benchmarks against the legacy C++ implementation;
+# encoding-ts.wd-bench runs the identical modules against the TypeScript
+# implementation. No compatibilityDate and no flags: see
+# src/bench/streams/AGENTS.md.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-encoding-cpp",
+      worker = (
+        modules = EncodingModules.modules,
+      )
+    ),
+  ],
+);

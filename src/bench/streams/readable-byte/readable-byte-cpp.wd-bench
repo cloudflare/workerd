@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+using ReadableByteModules = import "readable-byte-modules.capnp";
+
+# Runs the byte stream benchmarks against the legacy C++ implementation;
+# readable-byte-ts.wd-bench runs the identical modules against the
+# TypeScript implementation. No compatibilityDate and no flags: see
+# src/bench/streams/AGENTS.md.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-readable-byte-cpp",
+      worker = (
+        modules = ReadableByteModules.modules,
+      )
+    ),
+  ],
+);

@@ -64,6 +64,34 @@ class StaticMethodContainer: public jsg::Object {
     return js.str(s).length(js);
   }
 
+  static int32_t staticAdd(int32_t a, int32_t b) {
+    return a + b;
+  }
+
+  static int32_t staticMeasure(kj::String s) {
+    return s.size();
+  }
+
+  static int32_t staticMeasureWithLock(jsg::Lock& js, kj::String s) {
+    return js.str(s).length(js);
+  }
+
+  uint32_t getLabel() const {
+    return label.size();
+  }
+
+  void setLabel(kj::String s) {
+    label = kj::mv(s);
+  }
+
+  uint32_t getLockedLabel(jsg::Lock&) const {
+    return lockedLabelLength;
+  }
+
+  void setLockedLabel(jsg::Lock& js, kj::String s) {
+    lockedLabelLength = js.str(s).length(js);
+  }
+
   JSG_RESOURCE_TYPE(StaticMethodContainer) {
     JSG_STATIC_METHOD(staticMethod);
     JSG_PROTOTYPE_PROPERTY(value, getValue, setValue);
@@ -72,10 +100,17 @@ class StaticMethodContainer: public jsg::Object {
     JSG_METHOD(measure);
     JSG_METHOD(measureTwo);
     JSG_METHOD(measureWithLock);
+    JSG_STATIC_METHOD(staticAdd);
+    JSG_STATIC_METHOD(staticMeasure);
+    JSG_STATIC_METHOD(staticMeasureWithLock);
+    JSG_PROTOTYPE_PROPERTY(label, getLabel, setLabel);
+    JSG_PROTOTYPE_PROPERTY(lockedLabel, getLockedLabel, setLockedLabel);
   }
 
  private:
   uint32_t value = 42;
+  kj::String label = kj::str();
+  uint32_t lockedLabelLength = 0;
 };
 
 class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
@@ -321,40 +356,54 @@ KJ_TEST("Fast methods should work with getters/setters") {
       CallCounter(5, 1));
 }
 
-KJ_TEST("all-primitive fast path on a non-context receiver") {
+// Runs `body` hot in an optimized function and expects it to take the fast path.
+void expectFastEval(kj::StringPtr params,
+    kj::StringPtr body,
+    kj::StringPtr warmup,
+    kj::StringPtr args,
+    kj::StringPtr expectedType,
+    kj::StringPtr expectedValue) {
   jsg::callCounter.reset();
   JsgConfig config = {
     .fastApiEnabled = true,
   };
   FastMethodEvaluator e(v8System, config);
+  e.expectEval(kj::str("const t = newContainer();"
+                       "function hot(",
+                   params, ") { ", body,
+                   " }"
+                   "%PrepareFunctionForOptimization(hot);"
+                   "hot(",
+                   warmup,
+                   ");"
+                   "%OptimizeFunctionOnNextCall(hot);"
+                   "hot(",
+                   args, ")"),
+      expectedType, expectedValue);
+  KJ_EXPECT(jsg::callCounter.fast > 0, body);
+}
 
-  e.expectEval("const t = newContainer();"
-               "function hot(a, b) { return t.addPrimitive(a, b); }"
-               "%PrepareFunctionForOptimization(hot);"
-               "hot(1, 2);"
-               "%OptimizeFunctionOnNextCall(hot);"
-               "hot(3, 4)",
-      "number", "7");
-
-  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+KJ_TEST("all-primitive fast path on a non-context receiver") {
+  expectFastEval("a, b", "return t.addPrimitive(a, b);", "1, 2", "3, 4", "number", "7");
 }
 
 KJ_TEST("all-primitive fast path reports errors") {
-  jsg::callCounter.reset();
-  JsgConfig config = {
-    .fastApiEnabled = true,
-  };
-  FastMethodEvaluator e(v8System, config);
+  expectFastEval("code", "return t.throwPrimitive(code);", "0", "7", "throws",
+      "TypeError: Primitive error with code 7");
+}
 
-  e.expectEval("const t = newContainer();"
-               "function hotThrow(code) { return t.throwPrimitive(code); }"
-               "%PrepareFunctionForOptimization(hotThrow);"
-               "hotThrow(0);"
-               "%OptimizeFunctionOnNextCall(hotThrow);"
-               "hotThrow(7)",
-      "throws", "TypeError: Primitive error with code 7");
+KJ_TEST("two string arguments through the no-scope fast path") {
+  // The first transcode must not invalidate the second argument's pointer (#4625).
+  expectFastEval(
+      "a, b", "return t.measureTwo(a, b);", "'x', 'y'", "'hello', 'worldwide'", "number", "14");
+}
 
-  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+KJ_TEST("Lock& method with a string argument through the no-scope fast path") {
+  expectFastEval("s",
+      "let n = 0;"
+      "for (let i = 0; i < 1000; i++) n += t.measureWithLock(s);"
+      "return n;",
+      "'x'", "'hello'", "number", "5000");
 }
 
 KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
@@ -383,45 +432,6 @@ KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
   // 3 slow path calls (original direct call + non-throwing call + the initial optimization call that didn't throw)
   // 1 fast path call (the optimized call that threw an error)
   KJ_ASSERT(jsg::callCounter == CallCounter(3, 1));
-}
-
-KJ_TEST("two string arguments through the no-scope fast path") {
-  jsg::callCounter.reset();
-  JsgConfig config = {
-    .fastApiEnabled = true,
-  };
-  FastMethodEvaluator e(v8System, config);
-
-  // The first transcode must not invalidate the second argument's pointer (#4625).
-  e.expectEval("const t = newContainer();"
-               "function hot(a, b) { return t.measureTwo(a, b); }"
-               "%PrepareFunctionForOptimization(hot);"
-               "hot('x', 'y');"
-               "%OptimizeFunctionOnNextCall(hot);"
-               "hot('hello', 'worldwide')",
-      "number", "14");
-  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
-}
-
-KJ_TEST("Lock& method with a string argument through the no-scope fast path") {
-  jsg::callCounter.reset();
-  JsgConfig config = {
-    .fastApiEnabled = true,
-  };
-  FastMethodEvaluator e(v8System, config);
-
-  e.expectEval("const t = newContainer();"
-               "function hot(s) {"
-               "  let n = 0;"
-               "  for (let i = 0; i < 1000; i++) n += t.measureWithLock(s);"
-               "  return n;"
-               "}"
-               "%PrepareFunctionForOptimization(hot);"
-               "hot('x');"
-               "%OptimizeFunctionOnNextCall(hot);"
-               "hot('hello')",
-      "number", "5000");
-  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
 }
 
 // Every shape that is not a sequential latin1 string must fall back instead of being reinterpreted.
@@ -480,6 +490,29 @@ KJ_TEST("all string shapes agree between fast and slow paths") {
   }
 }
 
+KJ_TEST("static methods through the no-scope fast path") {
+  expectFastEval(
+      "a, b", "return StaticMethodContainer.staticAdd(a, b);", "1, 2", "3, 4", "number", "7");
+  expectFastEval(
+      "s", "return StaticMethodContainer.staticMeasure(s);", "'x'", "'h\\u00e9llo'", "number", "6");
+  expectFastEval("s",
+      "let n = 0;"
+      "for (let i = 0; i < 1000; i++) n += StaticMethodContainer.staticMeasureWithLock(s);"
+      "return n;",
+      "'x'", "'hello'", "number", "5000");
+}
+
+KJ_TEST("property getters and setters through the no-scope fast path") {
+  expectFastEval("", "return t.label;", "", "", "number", "0");
+  expectFastEval("", "return t.lockedLabel;", "", "", "number", "0");
+  expectFastEval("s", "t.label = s; return t.label;", "'x'", "'h\\u00e9llo'", "number", "6");
+  expectFastEval("s",
+      "let n = 0;"
+      "for (let i = 0; i < 1000; i++) { t.lockedLabel = s; n += t.lockedLabel; }"
+      "return n;",
+      "'x'", "'hello'", "number", "5000");
+}
+
 KJ_TEST("isFastApiNoScope Detection") {
   static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::addPrimitive)>);
   static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::measure)>);
@@ -487,6 +520,11 @@ KJ_TEST("isFastApiNoScope Detection") {
   static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::measureWithLock)>);
 
   static_assert(isFastApiNoScope<void (FastMethodContext::*)(jsg::Lock&, kj::String, kj::String)>);
+
+  // Static methods and properties arrive as plain function pointers.
+  static_assert(isFastApiNoScope<uint32_t (*)(uint32_t)>);
+  static_assert(isFastApiNoScope<void (*)(jsg::Lock&, kj::String)>);
+  static_assert(!isFastApiNoScope<kj::String (*)(int32_t)>);
 
   // Compatible but not no-scope: the argument still needs unwrapping.
   static_assert(isFastApiCompatible<int32_t (FastMethodContext::*)(v8::Local<v8::Value>)>);

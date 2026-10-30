@@ -196,7 +196,7 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
       .staleTimeout = 30 * kj::SECONDS,
       .dirtyListByteLimit = 8 * (1ull << 20),  // 8 MiB
       .maxKeysPerRpc = 128,
-      .neverFlush = true};
+      .neverFlush = !flushActorStorage};
   }
   kj::Own<void> enterStartupJs(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
@@ -237,14 +237,16 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   }
 
   MockIsolateLimitEnforcer() = default;
-  explicit MockIsolateLimitEnforcer(kj::Own<const HeapLimitFlag> heapLimitFlag)
-      : heapLimitFlag(kj::mv(heapLimitFlag)) {}
+  MockIsolateLimitEnforcer(kj::Own<const HeapLimitFlag> heapLimitFlag, bool flushActorStorage)
+      : heapLimitFlag(kj::mv(heapLimitFlag)),
+        flushActorStorage(flushActorStorage) {}
 
  private:
   // When present, drives hasExcessivelyExceededHeapLimit(). Lets tests simulate an isolate that
   // has been condemned for excessively exceeding its heap limit. Shared (refcounted) with the
   // owning TestFixture.
   kj::Maybe<kj::Own<const HeapLimitFlag>> heapLimitFlag;
+  bool flushActorStorage = false;
   TrackedWasmInstanceList trackedWasmInstances;
 };
 
@@ -379,7 +381,9 @@ TestFixture::TestFixture(SetupParams&& params)
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::mv(params.isolateObserver).orDefault(kj::atomicRefcounted<IsolateObserver>()),
           scriptId,
-          kj::rc<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)).toOwn(),
+          kj::rc<MockIsolateLimitEnforcer>(
+              kj::atomicAddRef(*heapLimitFlag), params.flushActorStorage)
+              .toOwn(),
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,

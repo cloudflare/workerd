@@ -420,6 +420,13 @@ kj_test(
 )
 
 kj_test(
+    src = "weak-refs-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
     src = "mimetype-test.c++",
     deps = [
         ":mimetype",

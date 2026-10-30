@@ -1,9 +1,7 @@
 # src/per_isolate/
 
 Per-isolate JavaScript/TypeScript bootstrap: scripts that run synchronously
-at context creation, before any user code. Gated by the
-`per-isolate-javascript-bootstrap` autogate (config:
-`workerd-autogate-per-isolate-javascript-bootstrap`). C++ entry point:
+at context creation, before any user code. C++ entry point:
 `src/workerd/api/per-isolate-bootstrap.c++`.
 
 ## EXECUTION MODEL
@@ -193,7 +191,9 @@ path, and the same pollution breaks the user's own code in every engine:
   object, notably the user's read promise, which the spec resolves with a
   `{ value, done }` result. Internal reads are not exposed: the backends
   settle them with results whose prototype chain has no `Object.prototype`
-  (`createReadResult` in `webstreams/queue.ts`).
+  (`createReadResult` in `webstreams/queue.ts`). Nor is body consumption
+  through the C++ bridge, which resolves a null-prototype record (see
+  KEY RULES in `webstreams/AGENTS.md`).
 
 Internal-only records should still be null-prototype
 (`{ __proto__: null, ... }`) wherever nothing requires the

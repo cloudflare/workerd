@@ -69,19 +69,21 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   void whenResolved(jsg::Lock& js, jsg::Promise<int> promise) {
     // The returned promise should resolve to undefined.
 
-    uint resolved = 0;
+    // Value-initialized to 0.
+    kj::Pin<uint> resolved;
 
-    auto handle = promise.whenResolved(js).then(js, [&resolved](jsg::Lock&) {
-      resolved++;
+    auto handle = promise.whenResolved(js)
+                      .then(js, [weakResolved = resolved.addWeak()](jsg::Lock&) {
+      KJ_REQUIRE_NONNULL(weakResolved.tryGet(), "test returned before promise resolved")++;
     }).consumeHandle(js);
 
     promise.then(js, [&resolved](jsg::Lock&, int v) {
       KJ_ASSERT(v == 1);
-      resolved++;
+      (*resolved)++;
     });
 
     js.runMicrotasks();
-    KJ_ASSERT(resolved == 2);
+    KJ_ASSERT(*resolved == 2);
 
     {
       KJ_ASSERT(handle->State() == v8::Promise::PromiseState::kFulfilled);

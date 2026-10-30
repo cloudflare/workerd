@@ -1682,10 +1682,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   webCryptoModernAlgorithms @191 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
-  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
-  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
-  # explicitly gated because the draft is still changing and workerd does not implement the full
-  # proposal. The API may change as the draft evolves.
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
+  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3 digests, related key encapsulation helpers,
+  # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
+  # the draft is still changing and workerd does not implement the full proposal. The API may
+  # change as the draft evolves.
 
   wasmEsmIntegrationBuiltins @192 :Bool
       $compatEnableFlag("wasm_esm_integration_builtins");
@@ -1725,4 +1726,53 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # bookmark as an opaque handle that can be passed over RPC, and
   # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
   # next session starts. The experimental catch-all flag also exposes these methods.
+
+  connectHandlerStartTls @196 :Bool
+      $compatEnableFlag("connect_handler_starttls")
+      $experimental;
+  # Lets the socket passed to a connect() handler accept a startTls() upgrade when the transport
+  # that delivered the connection offers one: a workerd TCP socket configured with
+  # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
+  # The handler's socket then has secureTransport "starttls". Without the flag, it has
+  # secureTransport "off" and its startTls() throws.
+
+  offpeakLocationHint @197 :Bool
+      $compatEnableFlag("offpeak_location_hint")
+      $experimental;
+  # Allows `locationHint: "offpeak"` when getting a Durable Object stub. In production, a new object
+  # created with this hint is placed in a region that is off-peak at the current UTC time. The
+  # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
+  # unsupported.
+
+  pythonSharedStandardLibrary @198 :Bool
+      $compatEnableFlag("python_shared_standard_library");
+  # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
+  # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
+  # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
+  # archive for writing fails with this flag.
+
+  wasmSourceUrlSupport @199 :Bool
+      $compatEnableFlag("wasm_source_url_support")
+      $compatDisableFlag("no_wasm_source_url_support")
+      $compatEnableDate("2026-12-01");
+  # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
+  # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
+  # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
+  # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
+  # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
+  # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
+  # and module name.
+
+  temporal @200 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-12-01");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
 }

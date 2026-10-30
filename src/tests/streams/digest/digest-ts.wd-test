@@ -22,8 +22,5 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-  ],
   v8Flags = ["--expose-gc"],
 );

@@ -5,7 +5,7 @@ WPT `fetch/api` runs in two cells, one per streams implementation:
 | Target | Config | Streams implementation |
 | --- | --- | --- |
 | `//src/wpt:fetch/api` | `api-test.ts` | legacy C++ (`src/workerd/api/streams/`) |
-| `//src/wpt:fetch/api-ts` | `api-test-ts.ts` | TypeScript (`src/per_isolate/webstreams/`), via `typescript_implemented_streams` and the `per-isolate-javascript-bootstrap` autogate |
+| `//src/wpt:fetch/api-ts` | `api-test-ts.ts` | TypeScript (`src/per_isolate/webstreams/`), via `typescript_implemented_streams` |
 
 Both cells pin the same compatibility flags otherwise
 (`strip_bom_in_read_all_text`). Most entries in either config are fetch API

@@ -10,7 +10,6 @@ interface ENV {
 interface PyodideConfig {
   env: ENV;
   jsglobals: typeof globalThis;
-  resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';

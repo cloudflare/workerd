@@ -416,7 +416,7 @@ class TestPort final: public rpc::Container::Port::Server, private kj::TaskSet::
   // read, or false if the client cleanly closed the connection first. A client close is a normal
   // end-of-connection for a keep-alive server, not an error, so it must not throw (see taskFailed).
   kj::Promise<bool> readRequest(kj::AsyncInputStream& input) {
-    kj::byte buffer[1024];
+    kj::byte buffer[1024]{};
     size_t matched = 0;
     constexpr kj::byte delimiter[] = {'\r', '\n', '\r', '\n'};
     while (matched < kj::size(delimiter)) {

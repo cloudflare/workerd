@@ -71,12 +71,12 @@ pub fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
 /// Handles combined forms like `name = "Foo", custom_trace` by parsing the
 /// token stream as comma-separated `syn::Meta` items and finding the first
 /// `name = "..."` name-value pair.
-pub fn extract_name_attribute(tokens: TokenStream) -> Option<String> {
+pub fn extract_name_attribute(tokens: impl Into<proc_macro2::TokenStream>) -> Option<String> {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
     let parsed: Punctuated<Meta, syn::Token![,]> =
-        syn::parse::Parser::parse(Punctuated::parse_terminated, tokens).ok()?;
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens.into()).ok()?;
 
     for meta in &parsed {
         if let Meta::NameValue(nv) = meta
@@ -145,6 +145,54 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
     }
 }
 
+/// Returns true if the type is `jsg::Rc<Self>` or `Rc<Self>`.
+pub fn is_rc_self(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" => last,
+        _ => return false,
+    };
+    if last.ident != "Rc" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    matches!(args.args.iter().collect::<Vec<_>>().as_slice(),
+        [syn::GenericArgument::Type(syn::Type::Path(p))]
+            if p.qself.is_none() && p.path.is_ident("Self"))
+}
+
+/// Returns true if `arg` is a parameter named `this`.
+pub fn is_named_this(arg: &syn::FnArg) -> bool {
+    matches!(arg, syn::FnArg::Typed(param)
+        if matches!(&*param.pat, syn::Pat::Ident(pat)
+            if pat.ident == "this" && pat.subpat.is_none()))
+}
+
+/// Returns the first parameter of `sig` if it is named `this`. In a method without `&self`, that
+/// parameter stands in for `&self` and receives a `jsg::Rc` of the resource the method was
+/// called on. Whether its type is `jsg::Rc<Self>` is checked separately.
+pub fn this_param(sig: &syn::Signature) -> Option<&syn::PatType> {
+    match sig.inputs.first()? {
+        arg @ syn::FnArg::Typed(param) if is_named_this(arg) => Some(param),
+        _ => None,
+    }
+}
+
+/// Returns true if `ty` is `NullOrUndefined<T>`.
+pub fn is_null_or_undefined_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "NullOrUndefined"))
+}
+
 /// Returns true if `ty` is `Option<T>`.
 pub fn is_option_type(ty: &syn::Type) -> bool {
     matches!(ty, syn::Type::Path(p)
@@ -186,6 +234,94 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
         out.into_iter().collect()
     }
     rewrite(ty.to_token_stream())
+}
+
+/// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
+/// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
+
+/// Returns the argument types of `sig` if V8 can call it through a fast callback.
+///
+/// Types are matched by name: an alias stays on the slow path, and a type that shadows one of
+/// the names fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
+/// parameter stays on the slow path, which is where the `jsg::Rc` of the receiver is made.
+pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
+    if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for input in &sig.inputs {
+        match input {
+            syn::FnArg::Receiver(receiver) => {
+                if receiver.reference.is_none() || receiver.mutability.is_some() {
+                    return None;
+                }
+            }
+            syn::FnArg::Typed(pat_type) => {
+                if !is_named_type(&pat_type.ty, FAST_API_ARG_TYPES) {
+                    return None;
+                }
+                args.push(pat_type.ty.as_ref());
+            }
+        }
+    }
+    let fast_return = match &sig.output {
+        syn::ReturnType::Default => true,
+        syn::ReturnType::Type(_, ty) => match ty.as_ref() {
+            syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
+            ty => is_named_type(ty, FAST_API_RETURN_TYPES),
+        },
+    };
+    fast_return.then_some(args)
+}
+
+/// Whether `ty` is one of `names`, written bare.
+fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let mut segments = type_path.path.segments.iter();
+    let (Some(segment), None) = (segments.next(), segments.next()) else {
+        return false;
+    };
+    segment.arguments.is_none() && names.iter().any(|name| segment.ident == name)
+}
+
+/// Generates the Web IDL `.length` of a method or constructor: the number of leading
+/// JavaScript arguments that are required.
+///
+/// The caller omits a method's `this: jsg::Rc<Self>` receiver. Constructors have no such
+/// receiver, so their parameters named `this` are JavaScript arguments. A leading
+/// `&mut Lock` is not a JavaScript argument.
+/// Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
+pub fn required_argument_count<'a>(
+    inputs: impl Iterator<Item = &'a syn::FnArg>,
+) -> proc_macro2::TokenStream {
+    let mut params = inputs
+        .filter_map(|arg| match arg {
+            syn::FnArg::Typed(pat_type) => Some(pat_type.ty.as_ref()),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .peekable();
+    if params.peek().is_some_and(|ty| is_lock_ref(ty)) {
+        params.next();
+    }
+    let types = params.map(elide_named_lifetimes);
+    quote::quote! {{
+        let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
+        let mut length = 0u32;
+        for &is_optional in optional {
+            if is_optional {
+                break;
+            }
+            length += 1;
+        }
+        length
+    }}
 }
 
 #[cfg(test)]

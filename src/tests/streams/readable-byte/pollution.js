@@ -9,7 +9,8 @@
 // lookup the user's read promise makes. The C++ implementation reads none
 // of these; the TypeScript one must not either. Every mutation is undone
 // before any assertion runs. What that getter does to the stream must not
-// reach the other reads a cancel() or close() answered.
+// reach the other reads a cancel() or close() answered, nor change the
+// order in which reads resolve.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -407,6 +408,71 @@ export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
         delete Object.prototype.then;
       }
     }
+  },
+};
+
+// A then getter that closes the source from the first result of an
+// enqueue() that answers reads on both tee branches. In TypeScript the
+// first branch's read resolves first, so the close reaches the second
+// branch together with the chunk: the chunk fills that branch's first two
+// autoAllocateChunkSize reads and the close answers the third done. The
+// reads resolve in the order they were made.
+export const thenGetterClosesSourceWhileBranchByteReadsFill = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 2,
+      start(c) {
+        controller = c;
+      },
+    });
+    const [first, second] = rs.tee();
+    const firstRead = first.getReader().read();
+    const reader = second.getReader();
+    const order = [];
+    const results = [];
+    const reads = [0, 1, 2].map((i) =>
+      reader.read().then((result) => {
+        order.push(i);
+        results[i] = result;
+      })
+    );
+    let fired = 0;
+    let closeError;
+    Object.defineProperty(Object.prototype, 'then', {
+      get() {
+        if (Object.hasOwn(this, 'done') && fired++ === 0) {
+          try {
+            controller.close();
+          } catch (e) {
+            closeError = e;
+          }
+        }
+        return undefined;
+      },
+      configurable: true,
+    });
+    try {
+      controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+      const settled = await Promise.race([
+        Promise.all(reads),
+        scheduler.wait(250).then(() => 'pending'),
+      ]);
+      strictEqual(settled === 'pending', false, 'a read is still pending');
+      strictEqual(fired > 0, true, 'the then getter did not run');
+    } finally {
+      delete Object.prototype.then;
+    }
+    strictEqual(closeError, undefined);
+    const firstResult = await firstRead;
+    deepStrictEqual([...firstResult.value], [1, 2]);
+    strictEqual(results[0].done, false);
+    deepStrictEqual([...results[0].value], [1, 2]);
+    strictEqual(results[1].done, false);
+    deepStrictEqual([...results[1].value], [3, 4]);
+    strictEqual(results[2].done, true);
+    deepStrictEqual(order, [0, 1, 2]);
   },
 };
 

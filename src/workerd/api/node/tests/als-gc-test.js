@@ -24,3 +24,34 @@ export const test = {
     });
   },
 };
+
+// A store that reaches a Response created inside run() must still be collectable. The Response
+// captures the current frame, and the frame holds the store, so this is a cycle through C++.
+// See https://github.com/cloudflare/workerd/issues/7851.
+export const storeReachingResponseIsCollected = {
+  async test() {
+    const als = new AsyncLocalStorage();
+    const count = 100;
+    let finalized = 0;
+    const registry = new FinalizationRegistry(() => {
+      finalized++;
+    });
+
+    for (let i = 0; i < count; i++) {
+      const store = {};
+      registry.register(store, undefined);
+      als.run(store, () => {
+        store.res = new Response(null);
+      });
+    }
+
+    for (let i = 0; i < 10 && finalized < count; i++) {
+      gc();
+      await scheduler.wait(1);
+    }
+
+    if (finalized !== count) {
+      throw new Error(`Only ${finalized} of ${count} stores were collected.`);
+    }
+  },
+};

@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+using CompressionModules = import "compression-modules.capnp";
+
+# Runs the compression stream benchmarks against the TypeScript
+# implementation (typescript_implemented_streams + the per-isolate bootstrap
+# autogate), with byte-for-byte the same modules as
+# compression-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-compression-ts",
+      worker = (
+        modules = CompressionModules.modules,
+        compatibilityFlags = ["typescript_implemented_streams"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

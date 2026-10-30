@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dan.lapid@gmail.com>
+Date: Sat, 24 Oct 2026 21:00:00 -0400
+Subject: Keep llvm-libc private to v8_libbase
+
+Only src/base/ieee754.cc includes llvm-libc, so its headers are an
+implementation dependency of v8_libbase instead of inputs to every
+dependent's compiles.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 166c685a0a3cd70ca405d68847f75619b120a615..661a10d58964a5b02f2a9f6686a48f8cfe69b195 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4923,8 +4923,10 @@ v8_library(
+         ":v8_shared_internal_headers",
+     ],
+     copts = ["-Wno-implicit-fallthrough"],
++    # Only src/base/ieee754.cc includes llvm-libc, so its headers needn't reach every dependent's
++    # compiles.
++    implementation_deps = ["@llvm-libc"],
+     deps = [
+-        "@llvm-libc",
+         "@abseil-cpp//absl/synchronization",
+         "@abseil-cpp//absl/time",
+         "@abseil-cpp//absl/functional:overload",

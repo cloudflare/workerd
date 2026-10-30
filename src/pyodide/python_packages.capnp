@@ -9,7 +9,7 @@ $Cxx.namespace("workerd::api::pyodide");
 
 # A single file extracted from a Python stdlib package wheel at build time. The CPython stdlib
 # modules and the shared libraries they depend on are extracted and embedded directly in the
-# Pyodide bundle (see src/pyodide/pack_python_packages.py and helpers.bzl) so the runtime no longer
+# Pyodide bundle (see src/pyodide/tools/pack_python_packages.py and helpers.bzl) so the runtime no longer
 # downloads or unpacks wheels at request time.
 struct PythonPackageFile {
   # The mount root this file belongs to, taken from the package's `install_dir` in the lock file

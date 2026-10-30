@@ -14,9 +14,7 @@ import { assertFractionalFillError, drainBytes, rejectionOf } from 'helpers';
 // chunk_size flag): with a DEFAULT reader and no autoAllocateChunkSize,
 // C++ auto-allocates anyway — pull() sees a byobRequest with a real
 // view; TypeScript follows the spec and reports byobRequest null. The
-// C++ default allocation is 4096 bytes, or 16384 with the
-// UPDATED_AUTO_ALLOCATE_CHUNK_SIZE autogate on (the @all-autogates
-// variant), so both exact sizes are pinned.
+// C++ default allocation is 4096 bytes.
 export const byobRequestOnDefaultRead = {
   async test() {
     let seen = 'not-pulled';
@@ -34,10 +32,7 @@ export const byobRequestOnDefaultRead = {
     if (usingTsImpl) {
       strictEqual(seen, 'null');
     } else {
-      ok(
-        seen === 'view(4096)' || seen === 'view(16384)',
-        `unexpected allocation: ${seen}`
-      );
+      ok(seen === 'view(4096)', `unexpected allocation: ${seen}`);
     }
   },
 };

@@ -359,15 +359,16 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
 
     return startStreamPromise.then(js,
         context.addFunctor(
-            [this, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
-                serializePromise = kj::mv(serializePromise),
+            [weakThis = JSG_THIS_WEAK(js), jsRequest = kj::mv(jsRequest),
+                cacheControl = kj::mv(cacheControl), serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
                 enableCompatFlags = flags.getCacheApiCompatFlags(),
                 traceContext = kj::mv(traceContext)](jsg::Lock& js, IoContext& context,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
-      auto httpClient = getHttpClient(
-          context, jsRequest->serializeCfBlobJson(js), traceContext, enableCompatFlags);
+      auto httpClient = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Cache destroyed before put ran")
+                            .getHttpClient(context, jsRequest->serializeCfBlobJson(js),
+                                traceContext, enableCompatFlags);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);
       auto nativeRequest = httpClient->request(kj::HttpMethod::PUT,

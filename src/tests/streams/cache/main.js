@@ -7,6 +7,7 @@
 
 export {
   putJsValueStreamBody,
+  putStringChunkBody,
   putJsByteStreamBody,
   putFixedLengthStreamBody,
   putIdentityStreamBody,

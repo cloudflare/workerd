@@ -278,11 +278,13 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
   // disconnect long-running connections, e.g. on a code update for a Durable Object, and that
   // applies equally to TCP sockets.
   auto wrappedConnection = newNeuterableIoStream(connection);
-  auto* wrappedConnectionPtr = wrappedConnection.get();
   auto revokeTask =
       revokeProm.addBranch()
-          .catch_([&connection, wrappedConnectionPtr](kj::Exception&& e) -> kj::Promise<void> {
-    wrappedConnectionPtr->neuter(e.clone());
+          .catch_([&connection, weakWrappedConnection = wrappedConnection.downgrade()](
+                      kj::Exception&& e) -> kj::Promise<void> {
+    KJ_REQUIRE_NONNULL(
+        weakWrappedConnection.tryGet(), "connection wrapper destroyed before revocation")
+        .neuter(e.clone());
     connection.abortWrite(kj::mv(e));
     connection.abortRead();
     return kj::READY_NOW;

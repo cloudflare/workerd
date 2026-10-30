@@ -57,6 +57,29 @@ export const putJsValueStreamBody = {
   },
 };
 
+// A string chunk is stored as its UTF-8 encoding beside the byte chunk
+// after it: the pattern's first 100 bytes are ASCII, so the string of
+// those characters encodes to exactly them.
+export const putStringChunkBody = {
+  async test(ctrl, env) {
+    const ascii = String.fromCharCode(...patternChunk(0, 100));
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(ascii);
+        c.enqueue(patternChunk(100, 100));
+        c.close();
+      },
+    });
+    await caches.default.put(
+      'https://example.com/string-chunk',
+      new Response(rs)
+    );
+    const record = await lastPut(env);
+    strictEqual(record.byteLength, 200);
+    strictEqual(record.patternOk, true);
+  },
+};
+
 // A JS byte stream, chunked.
 export const putJsByteStreamBody = {
   async test(ctrl, env) {

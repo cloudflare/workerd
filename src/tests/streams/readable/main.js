@@ -7,12 +7,33 @@
 //
 // The default export serves the SELF binding used by the integration
 // tests: it echoes the request body back, letting tests round-trip a
-// ReadableStream through the fetch machinery in both directions.
+// ReadableStream through the fetch machinery in both directions, and
+// reports the Content-Length the request carried. /gzip and /short serve
+// expected-length.js's compressed and short responses, and /strings
+// string-chunks.js's response, instead.
+
+import { compressedResponse, shortResponse } from 'expected-length';
+import { stringsResponse } from 'string-chunks';
 
 export default {
   async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/gzip') {
+      return compressedResponse(url);
+    }
+    if (url.pathname === '/short') {
+      return shortResponse(url);
+    }
+    if (url.pathname === '/strings') {
+      return stringsResponse();
+    }
     return new Response(request.body, {
-      headers: { 'content-type': 'application/octet-stream' },
+      headers: {
+        'content-type': 'application/octet-stream',
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
     });
   },
 };
@@ -200,6 +221,8 @@ export {
   nonBytesChunkInClosingBatch,
   transformExpectedLengthOverflow,
   transformExpectedLengthMet,
+  sourceExpectedLengthOverflow,
+  expectedLengthUnderflow,
 } from 'integration-body-failures';
 
 export {
@@ -208,6 +231,13 @@ export {
   chunkWiderThanABlockAssemblesIntact,
   declaredLengthBodyIsExact,
 } from 'integration-body-memory';
+
+export {
+  forkBeforeReadKeepsDeclaredLength,
+  forkAfterReadSendsChunked,
+  compressedResponseDropsDeclaredLength,
+  shortBodyFailsTransfer,
+} from 'expected-length';
 
 export {
   disturbedStreamIntoResponse,
@@ -241,6 +271,7 @@ export {
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
   thenGetterReleasesReaderWhileReadsSettle,
+  thenPatchOnlyInterceptsConsumptionResult,
 } from 'then-interceptors';
 
 export {
@@ -251,6 +282,8 @@ export {
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,
   drainingReaderLockExclusivity,
+  drainingReaderReportsDeclaredLength,
+  drainingReaderReportsNoLengthAfterRead,
 } from 'draining-reader';
 
 export {
@@ -279,3 +312,9 @@ export {
 } from 'pollution';
 
 export { readerClosedIsMarkedHandled } from 'unhandled-rejection';
+
+export {
+  stringChunksInRequestBody,
+  stringChunksInIterableRequestBody,
+  stringChunksInReturnedResponse,
+} from 'string-chunks';

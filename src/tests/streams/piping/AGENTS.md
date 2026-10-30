@@ -35,15 +35,19 @@ suite pins the unflagged behavior with BOUNDED observations (a pinned
 | 14 | a chunk reaches the source while an abort waits for an in-flight write (destination hwm 2, preventCancel) | not read while the write is in flight: the chunk stays in the source | the pipe's pending read takes it; it is written, and the pipe settles once that write has (spec) | `lateChunkDuringShutdownWait` |
 | 15 | abort with nothing to write while the pipe waits on a read (preventCancel) | the pipe and its read stay pending and the source stays locked; the next chunk completes the read, which drops it, and the pipe then rejects | the pipe settles and releases the source; a later chunk stays readable (spec) | `lateChunkAfterIdleAbort` |
 | 16 | the destination's lock when its reader sees the pipe's abort (the source errors, preventAbort false) | already released | still held: released once the pipe's abort of the destination has settled (spec: the pipe finalizes after its shutdown action); the read rejects inside the abort | `pipeToJsToInternalErroredSource`, `pipeThroughJsToInternalErroredSource` |
+| 17 | an invalid identity chunk last in the source, whose non-fatal write rejection arrives while the pipe waits for its writes before closing the destination (writable highWaterMark 1024; the pipe rejects with the validation TypeError and releases both streams in both) | the invalid write errors the identity stream, with or without preventAbort and preventCancel | the pending close becomes a failure: the destination is aborted, or with preventAbort and preventCancel left open (its next read stays pending) | `invalidLastChunkFailsClosingPipe` |
+| 18 | the message of the TypeError a locked endpoint fails a pipe with (pipeTo rejects, pipeThrough throws; also when an option getter locks the destination) | 'This ReadableStream is currently locked to a reader.' and 'This WritableStream is currently locked to a writer.', the latter without its period from pipeTo | 'Cannot pipe a stream that is locked' and 'Cannot pipe to a locked writable stream' | `pipeToLockedEndpoints`, `pipeThroughLockedEndpoints`, `optionGetterLocksDestination`, `shadowedWritableLocked` |
 
 Parity worth noting (probed, pinned): the whole error-propagation-
 forward core matrix (starts-errored rejection/hook IDENTITY on both
 ends, preventAbort/preventCancel incl. TRUTHY coercion, dest stays
 usable under preventAbort); option plumbing (getter order
 [preventAbort, preventCancel, preventClose, signal], throwing-getter
-identity with no locks taken, bad-signal TypeError); pipeThrough
-locked-endpoint sync throws; a bad destination, an option getter that
-locks it, or a shadowed `locked` fails without locking the source;
+identity with no locks taken, bad-signal TypeError); a locked endpoint
+fails the pipe without locking the other side (pipeThrough throws,
+pipeTo rejects; the messages are #18); a bad destination, an option
+getter that locks it, or a shadowed `locked` fails without locking the
+source;
 custom error type/instance preservation; cancel-propagation through native identity AND JS transforms (source
 ends CLOSED, all locks release); external close()/abort() on a piped
 (locked) destination rejects while the pipe proceeds; backward write-
@@ -79,12 +83,12 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | Module | Coverage |
 | --- | --- |
 | `pipe-matrix.js` | migrated pipe-streams-test.js wholesale (35): pipeThrough + pipeTo across JS↔native in all directions, prevent* combos, pre-aborted and mid-read AbortSignals, tee'd pipes, queued-destination close (ledger #1-#4, #13) |
-| `api-surface.js` | brand checks (ledger #5), option getter order, throwing getters, invalid signal, options as a WebIDL dictionary (parity: null, a function's members, primitives rejected), locked pipeThrough endpoints, lock safety when validation fails |
+| `api-surface.js` | brand checks (ledger #5), option getter order, throwing getters, invalid signal, options as a WebIDL dictionary (parity: null, a function's members, primitives rejected), locked pipeTo and pipeThrough endpoints and their messages (ledger #18), lock safety when validation fails |
 | `abort-signal.js` | the pipe's AbortSignal is an abort algorithm: a synthetic 'abort' event is ignored, a listener's stopImmediatePropagation() cannot block the abort, an abort after the pipe settles does nothing |
 | `error-propagation.js` | forward matrix (starts-errored × prevent* × truthy), hwm-0 dest (ledger #6), custom-error preservation (migrated from streams-error-edge-cases-test.js) |
 | `close-propagation.js` | the WPT-disabled backward territory, bounded: external close/abort on piped dest, write-throw backward propagation, idle dest-controller error and one with a write in flight (ledger #7) |
 | `flow-control.js` | backpressure chain (migrated from streams-backpressure-test.js), stalled-dest read-ahead bound |
-| `shutdown-backlog.js` | shutdown with chunks buffered in the source: abort, source error, invalid identity chunk; what is written and what stays readable (ledger #11, #12) |
+| `shutdown-backlog.js` | shutdown with chunks buffered in the source: abort, source error, invalid identity chunk; what is written and what stays readable (ledger #11, #12); an invalid last chunk failing a pipe that waits to close its destination (ledger #17) |
 | `shutdown-pending-read.js` | abort while the pipe waits on a read: a chunk arriving during the shutdown's wait, in the abort's turn, or after an idle abort (ledger #14, #15) |
 | `interop.js` | cancel propagation ×2 (migrated from api/streams/streams-test.js), FixedLengthStream (ledger #8), pre-settled pairings (ledger #9) |
 | `special-buffers.js` | SharedArrayBuffer-backed and resizable-buffer views through native and JS pipe endpoints (migrated from pipe-write-special-buffer-test.js, strengthened to content checks; ledger #10); the JS path delivers the very view uncopied, resizable buffers stay resizable |

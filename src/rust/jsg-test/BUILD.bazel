@@ -19,6 +19,7 @@ wd_cc_library(
     implementation_deps = [
         ":lib.rs@cxx",
         "//src/workerd/io:features",
+        "//src/workerd/util:autogate",
         "@capnp-cpp//src/capnp:capnp",
     ],
     visibility = ["//visibility:public"],
