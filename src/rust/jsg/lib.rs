@@ -23,6 +23,7 @@ mod promise;
 pub mod resource;
 mod scope;
 pub mod ser;
+mod string;
 pub mod v8;
 mod wrappable;
 
@@ -69,6 +70,7 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use string::JsString;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
