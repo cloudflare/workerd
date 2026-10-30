@@ -278,9 +278,13 @@ DecodedException decodeTunneledException(
       }
     }
 
+    // A payload written without enhanced error serialization uses V8's native error encoding,
+    // which restores each error's original stack whatever the deserializer options say. Only a
+    // trusted reader may use such a payload.
     auto& isolateBase = IsolateBase::from(isolate);
-    if ((options.trusted || isolateBase.getUsingEnhancedErrorSerialization()) &&
-        !options.ignoreDetail) {
+    bool canDropStacks = isolateBase.getUsingEnhancedErrorSerialization() &&
+        exception.getDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID) != kj::none;
+    if ((options.trusted || canDropStacks) && !options.ignoreDetail) {
       // If the error was originally converted from a JS error, then we likely have
       // serialized the original error object as a detail, if so, let's try to use
       // that, otherwise, we'll fall back to constructing a new error object. If
@@ -462,6 +466,11 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
           .version = 15});
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
+    if (js.isUsingEnhancedErrorSerialization()) {
+      exception.setDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID, kj::heapArray<kj::byte>({1}));
+    } else {
+      exception.releaseDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID);
+    }
   } catch (JsExceptionThrown&) {
     if (tryCatch.HasTerminated()) {
       // Execution is being terminated. Let it continue to unwind: swallowing it here would let
