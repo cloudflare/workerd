@@ -41,6 +41,21 @@ pub trait Store {
         metadata: &[(&str, String)],
     ) -> Result<Option<Version>>;
     async fn list(&self, prefix: &str) -> Result<Vec<Entry>>;
+    /// The distinct prefixes under `prefix` up to and including the next
+    /// `/`, in lexical order: a listing with delimiter `/`.
+    async fn prefixes(&self, prefix: &str) -> Result<Vec<String>> {
+        let listed = self.list(prefix).await?;
+        let mut prefixes: Vec<_> = listed
+            .iter()
+            .filter_map(|e| {
+                let (next, _) = e.key.strip_prefix(prefix)?.split_once('/')?;
+                Some(format!("{prefix}{next}/"))
+            })
+            .collect();
+        prefixes.sort();
+        prefixes.dedup();
+        Ok(prefixes)
+    }
     /// Idempotent: deleting an absent key succeeds.
     async fn delete(&self, key: &str) -> Result<()>;
     /// See `S3::clock_skew_ms`.
@@ -139,6 +154,13 @@ impl Bucket {
                 Some(Entry { key })
             })
             .collect())
+    }
+
+    /// See `Store::prefixes`.
+    pub async fn prefixes(&self, prefix: &str) -> Result<Vec<String>> {
+        let listed = self.store.prefixes(&self.key(prefix)).await?;
+        let ours = listed.iter().filter_map(|p| p.strip_prefix(&self.prefix));
+        Ok(ours.map(str::to_owned).collect())
     }
 
     /// Idempotent: deleting an absent key succeeds.

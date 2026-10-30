@@ -26,6 +26,8 @@ use crate::Member;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
+use crate::UnionMember;
+use crate::UnionTypes;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
 use crate::v8;
@@ -180,8 +182,28 @@ impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
     }
 }
 
+impl<R: Resource> Type for Rc<R> {
+    // A Web IDL non-callback interface type.
+    const UNION_TYPES: UnionTypes = UnionTypes::INTERFACE_LIKE;
+    // The resource's, which `#[jsg_resource]` makes its module path and name.
+    const UNION_NAMES: &'static [&'static str] = R::UNION_NAMES;
+
+    fn class_name() -> &'static str {
+        R::class_name()
+    }
+
+    // Any object: telling whether it wraps an `R` takes a lock, which `is_exact` doesn't have.
+    // `FromJS::try_from_js` makes that check. A resource is not `Coercible`, so no
+    // `NonCoercible<Rc<R>>` relies on this.
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_object()
+    }
+}
+
 impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::Resource;
 
     fn type_name() -> String {
         R::class_name().to_owned()
@@ -383,8 +405,8 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// # Errors
 ///
-/// If V8 fails to create the wrapper, or execution is terminating, the exception stays pending
-/// and the error is one for which [`Error::is_pending`] is true.
+/// If V8 fails to create the wrapper, or an exception or a termination is already pending, the
+/// exception stays pending and the error is one for which [`Error::is_pending`] is true.
 ///
 /// # Panics
 /// Panics if the resource already has a JavaScript wrapper in another isolate. The `Rc` is
@@ -413,9 +435,15 @@ pub fn wrap<'s, R: Resource + 'static>(
 ///
 /// Lazily creates and caches the `FunctionTemplate` in the `Realm` on first call.
 /// The returned function can be exposed as a global (e.g., `ctx.set_global("MyClass", func)`).
+///
+/// # Errors
+///
+/// If an exception or a termination is pending, fails with an error for which
+/// [`Error::is_pending`] is true, as [`v8::Global::<v8::FunctionTemplate>::as_local_function`]
+/// does.
 pub fn function_template_of<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
-) -> v8::Local<'s, v8::Function> {
+) -> Result<v8::Local<'s, v8::Function>, Error> {
     let constructor = lock.realm().get_constructor::<R>().as_ffi();
     // SAFETY: the constructor is a function template of the lock's isolate, which the Realm's
     // template cache keeps alive.

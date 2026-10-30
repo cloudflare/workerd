@@ -60,6 +60,7 @@ use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
+use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::config::Factory;
 use crate::tasks::TaskHandle;
@@ -155,7 +156,16 @@ impl ActorNamespace {
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
     pub fn set_cluster(&self, cluster: Rc<ClusterNode>) {
+        if let Some(unique_key) = self.unique_key() {
+            cluster.add_namespace(unique_key, Weak::clone(&self.this));
+        }
         let _ = self.cluster.set(cluster);
+    }
+
+    /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
+    pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
+        Ok(())
     }
 
     /// The cluster, for a namespace linked on disk; in-memory namespaces stay local.
@@ -204,7 +214,7 @@ impl ActorNamespace {
             .route(&unique_key, &self.service, &self.class_name, &key)
             .await?
         {
-            Owner::Remote(connection) => Ok(Resolved::Remote(connection)),
+            Owner::Remote(connection, node) => Ok(Resolved::Remote(connection, node)),
             Owner::Here(epoch) => {
                 // A concurrent request may have taken it meanwhile.
                 if let Some(container) = self.owned_container(&key) {
@@ -409,6 +419,11 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        if self.cluster().is_some() {
+            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
+            // its alarms from the bucket.
+            ffi::actor_storage_delete_all(&storage)?;
+        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -474,9 +489,70 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
-        namespace
-            .container_for(id)
-            .start_request(ffi::new_request_metadata(KjMaybe::None, KjMaybe::None))
+        let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+        let Some(node) = namespace.cluster().map(Rc::clone) else {
+            return namespace.container_for(id).start_request(metadata);
+        };
+        // Only an object's owner runs its alarm. One that moved since this instance scheduled
+        // the alarm has it scheduled where it lives now, since opening an object schedules its
+        // alarm, unless the owner died before indexing it: this instance fires it again until
+        // the owner has outlived that (`Index::elsewhere`).
+        let key = ffi::actor_id_key(&id);
+        Ok(PromisedInterface::new(async move {
+            match namespace.resolve(id).await? {
+                Resolved::Here(client) => client.start_request(metadata),
+                Resolved::Remote(_, owner) => {
+                    let unique_key = namespace.unique_key().unwrap_or_default();
+                    let again = node
+                        .cluster
+                        .alarm_elsewhere(unique_key, &key, &owner, cluster::now_ms())
+                        .await
+                        .unwrap_or(true);
+                    let then = if again {
+                        ffi::AlarmElsewhere::Retry
+                    } else {
+                        ffi::AlarmElsewhere::Done
+                    };
+                    Ok(ffi::alarm_owned_elsewhere(then))
+                }
+            }
+        })
+        .into_kj())
+    }
+
+    pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            let at_ms = (at_ms != 0).then_some(at_ms);
+            cluster.arm_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    pub fn alarm_opened(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            cluster.opened_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    /// A task running `index` with the cluster and the namespace's unique key; nothing outside
+    /// a cluster.
+    fn index_alarm<F: Future<Output = cluster::Result<()>> + 'static>(
+        &self,
+        index: impl FnOnce(Rc<cluster::Cluster>, String) -> F + 'static,
+    ) -> ResultTask {
+        let target = self.namespace().and_then(|ns| {
+            let unique_key = ns.unique_key()?.to_owned();
+            Some((Rc::clone(&ns.cluster()?.cluster), unique_key))
+        });
+        ResultTask(Box::pin(async move {
+            let Some((cluster, unique_key)) = target else {
+                return Ok(());
+            };
+            (index(cluster, unique_key).await).map_err(|e| kj::failed!("indexing an alarm: {e}"))
+        }))
     }
 
     fn namespace(&self) -> Option<Rc<ActorNamespace>> {
@@ -516,7 +592,8 @@ impl ActorNamespaceHandle {
 /// Where a request to a clustered actor goes.
 enum Resolved {
     Here(Client),
-    Remote(Rc<RpcConnection>),
+    /// On the node named.
+    Remote(Rc<RpcConnection>, String),
 }
 
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
@@ -550,7 +627,7 @@ impl Channel for RoutedChannel {
             };
             match &*resolved {
                 Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection) => Ok(attach(
+                Resolved::Remote(connection, _) => Ok(attach(
                     connection.start_request(metadata),
                     Rc::clone(connection),
                 )),
@@ -584,7 +661,7 @@ impl Channel for RoutedChannel {
                 .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
             match namespace.resolve(ffi::actor_id_clone(&self.id)).await? {
                 Resolved::Here(container) => container.evict_for_test(hibernate).await,
-                Resolved::Remote(_) => Err(kj::failed!(
+                Resolved::Remote(..) => Err(kj::failed!(
                     "jsg.Error: Cannot evict a Durable Object another instance owns."
                 )),
             }

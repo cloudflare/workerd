@@ -4,6 +4,8 @@
 
 #include "ffi.h"
 
+#include <workerd/io/io-context/ffi.rs.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 
@@ -35,6 +37,10 @@ IoContext& currentWithId(uint64_t id) {
 kj::Maybe<uint64_t> io_context_try_current_id() {
   return IoContext::tryGetCurrentId().map(
       [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
+}
+
+void io_context_require_current(uint64_t id) {
+  IoContext::requireCurrentOrThrowJs(std::bit_cast<IoContext::Id>(id));
 }
 
 int64_t io_context_now(uint64_t id) {
@@ -76,6 +82,38 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
       builder.set(reader.getRoot<capnp::AnyPointer>());
     });
   }
+}
+
+void io_context_await_io_and_run(
+    uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
+  auto& context = currentWithId(id);
+  // If the future panics, awaitIoAndRun() fails the task, dropping the callback without running it.
+  context.awaitIoAndRun(io_future_wait(kj::mv(future)),
+      [callback = kj::mv(callback)](Worker::Lock& lock, ::rust::Box<IoOutput>&& output) mutable {
+    auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
+    switch (io_callback_run(isolate, kj::mv(callback), kj::mv(output))) {
+      case IoCallbackOutcome::Succeeded:
+        return;
+      case IoCallbackOutcome::Failed:
+        // The exception, or termination, is pending in V8. JsExceptionThrown is how
+        // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
+        // stack, and fails the task with it, as for C++ code it runs. This is the one use of C++
+        // JSG here, counted in src/rust/jsg/cpp-jsg-allowlist.txt.
+        throw jsg::JsExceptionThrown();
+      case IoCallbackOutcome::Panicked:
+        // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
+        // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
+        // convert it, running JavaScript, so the task fails with a KJ exception instead.
+        KJ_FAIL_ASSERT("the callback of IoContext::await_io_and_run() panicked");
+    }
+    KJ_UNREACHABLE;
+  });
+}
+
+kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot) {
+  auto& context = currentWithId(id);
+  return kj::heap<IoOwnedObject>(
+      context.addObject(kj::heap<::rust::Box<IoOwnedSlot>>(kj::mv(slot))));
 }
 
 }  // namespace workerd::io_context

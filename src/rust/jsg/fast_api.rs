@@ -306,7 +306,11 @@ unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Err
         if err.is_internal {
             ffi::fast_api_throw_internal_error(options, &err.message);
         } else {
-            ffi::fast_api_throw_exception(options, err.name, &err.message);
+            ffi::fast_api_throw_exception(
+                options,
+                err.name,
+                crate::error_message_for_v8(err.message.as_bytes()),
+            );
         }
     }
     T::default()

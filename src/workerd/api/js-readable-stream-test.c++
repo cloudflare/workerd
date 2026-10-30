@@ -868,6 +868,65 @@ KJ_TEST("ReadableStreamNativeSource pull from another request leaves no pull in 
   testFixture.runInIoContext([&](const TestFixture::Environment& env) { held.clear(); });
 }
 
+KJ_TEST("ReadableStreamNativeSource rejects pulls reentered from metadata getters") {
+  TestFixture fixture;
+  for (const auto& field: kj::arr("byobRequest"_kj, "view"_kj, "atLeast"_kj, "elementSize"_kj)) {
+    fixture.runInIoContext([field](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto& handler =
+          KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+      auto source = jsg::JsValue(handler.wrap(
+          js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
+      auto script = jsg::NonModuleScript::compile(js, R"js(
+        (async (source, field) => {
+          const signal = new AbortController().signal;
+          const view = new Uint8Array(65536);
+          let responded;
+          let nested;
+          const request = {
+            view,
+            atLeast: 65536,
+            elementSize: 1,
+            respond(amount) { responded = amount; },
+          };
+          const controller = { byobRequest: request, close() {} };
+          const target = field === 'byobRequest' ? controller : request;
+          const value = target[field];
+          Object.defineProperty(target, field, {
+            get() {
+              try {
+                nested = source.pull({ byobRequest: null, enqueue() {}, close() {} }, signal);
+              } catch (error) {
+                nested = Promise.reject(error);
+              }
+              nested.catch(() => {});
+              return value;
+            },
+          });
+          await source.pull(controller, signal);
+          let rejected = false;
+          try {
+            await nested;
+          } catch (error) {
+            if (!(error instanceof TypeError) || !error.message.includes('already in flight')) {
+              throw error;
+            }
+            rejected = true;
+          }
+          if (!rejected) throw new Error(`nested pull from ${field} was accepted`);
+          if (responded !== 11 || new TextDecoder().decode(view.subarray(0, 11)) !== 'hello world') {
+            throw new Error(`outer pull from ${field} lost its own bytes`);
+          }
+        })
+      )js"_kj,
+          "native-pull-reentry.js"_kj);
+      auto fn = KJ_ASSERT_NONNULL(script.runAndReturn(js).tryCast<jsg::JsFunction>());
+      auto result = fn.call(js, js.undefined(), source, js.str(field));
+      return env.context.awaitJs(js, js.toPromise(result)).ignoreResult();
+    });
+  }
+}
+
 KJ_TEST("ReadableStreamNativeSource BYOB under-delivery responds then closes (fused EOF)") {
   TestFixture testFixture;
   MockControllerState state;
@@ -1629,10 +1688,7 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // Wrap an instance via the Lock-acquired TypeHandler -- the same path create()'s
-    // TypeScript arm will use -- then verify the contract's detection shape: an own data
-    // property keyed by the kNativeSource API-registry symbol whose value is the symbol
-    // itself, re-acquirable by name at any time.
+    // Template-created instances carry a private marker, not an ordinary API symbol.
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
     auto handle = handler.wrap(
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData)));
@@ -1640,8 +1696,8 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
 
     auto symbol = jsg::JsValue(
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
-    KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
-    KJ_EXPECT(obj.get(js, symbol) == symbol);
+    KJ_EXPECT(obj.getPrivate(js, "kNativeSource"_kj).isTrue());
+    KJ_EXPECT(!obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
   });
 }
 
@@ -2242,7 +2298,7 @@ KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
 // each pull itself, and can break the contract.
 
 // Every conduit script runs after this prologue, as the body of an async function whose
-// `markers` argument holds the api-registry symbols, which JavaScript cannot name.
+// `markers` argument provides private-slot labels and test-only native accessors.
 // scriptedSource() builds a native source whose pull() records { controller, signal,
 // resolve, reject } in `pulls` and stays pending until the script settles it.
 // erroredBy(reader, read) waits for `read` and the reader's closed promise to reject with
@@ -2256,17 +2312,20 @@ constexpr kj::StringPtr kConduitScriptPrologue = R"js(
   const microtasks = async () => {
     for (let i = 0; i < 10; i++) await undefined;
   };
+  const markNativeSource = (source) => {
+    markers.setPrivate(source, markers.kNativeSource, true);
+    return source;
+  };
   const scriptedSource = (members = {}) => {
     const pulls = [];
-    const source = {
-      [markers.kNativeSource]: markers.kNativeSource,
+    const source = markNativeSource({
       pull(controller, signal) {
         const { promise, resolve, reject } = Promise.withResolvers();
         pulls.push({ controller, signal, resolve, reject });
         return promise;
       },
       ...members,
-    };
+    });
     return { source, pulls };
   };
   const erroredBy = async (reader, read) => {
@@ -2293,8 +2352,23 @@ kj::Promise<void> runConduitScript(const TestFixture::Environment& env, kj::Stri
   auto markers = js.obj();
   for (auto& name: kj::arr("kNativeSource"_kj, "kExtractNativeSource"_kj, "kNativeSink"_kj,
            "kExtractNativeSink"_kj)) {
-    markers.set(js, name, js.symbolInternal(name));
+    markers.set(js, name, js.str(name));
   }
+  markers.set(js, "setPrivate"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+    object.setPrivate(js, name, jsg::JsValue(args[2]));
+  })));
+  markers.set(js, "getPrivate"_kj,
+      jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
+          [](jsg::Lock& js,
+              const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
+    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+    return object.getPrivate(js, name);
+  })));
   auto code = kj::str("(async (markers) => {", kConduitScriptPrologue, body, "})");
   auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "conduit-script.js"_kj)
                                   .runAndReturn(js)
@@ -2310,12 +2384,11 @@ KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk
     // which it signals with close(). The refusal errors the stream, so the read rejects with
     // it rather than handing the reader an empty chunk.
     return runConduitScript(env, R"js(
-      const reader = new ReadableStream({
-        [markers.kNativeSource]: markers.kNativeSource,
+      const reader = new ReadableStream(markNativeSource({
         pull(controller) {
           controller.enqueue(new Uint8Array(0));
         },
-      }).getReader();
+      })).getReader();
       const error = await erroredBy(reader, reader.read());
       assert(error instanceof TypeError && error.message ===
         'enqueue() of an empty chunk is not supported for native streams; an empty ' +
@@ -2332,12 +2405,11 @@ KJ_TEST("TypeScript native stream errors when its source responds with zero byte
     // which the source signals with close(). The refusal errors the stream, so the read
     // rejects with it.
     return runConduitScript(env, R"js(
-      const reader = new ReadableStream({
-        [markers.kNativeSource]: markers.kNativeSource,
+      const reader = new ReadableStream(markNativeSource({
         pull(controller) {
           controller.byobRequest.respond(0);
         },
-      }).getReader({ mode: 'byob' });
+      })).getReader({ mode: 'byob' });
       const error = await erroredBy(reader, reader.read(new Uint8Array(4)));
       assert(error instanceof TypeError && error.message ===
         'respond(0) is not supported for native streams; an empty answer means ' +
@@ -2544,22 +2616,32 @@ KJ_TEST("TypeScript native stream settles every read a cancel or close answers")
   });
 }
 
-KJ_TEST("TypeScript streams take a native marker only as an own data property") {
+KJ_TEST("TypeScript streams recognize only private native markers and hide extractors") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    // An inherited marker, as from a polluted Object.prototype, must not make a plain source
-    // or sink native, and a marker accessor never runs. Any other value at the marker is a
-    // broken native or mock object, never user input, and throws.
+    // Native classification does not consult ordinary properties, symbols, or proxy traps.
+    // Only the fixture's native accessor can create or inspect these private slots.
     return runConduitScript(env, R"js(
       const kinds = [
         [ReadableStream, markers.kNativeSource, markers.kExtractNativeSource, 'source'],
         [WritableStream, markers.kNativeSink, markers.kExtractNativeSink, 'sink'],
       ];
       for (const [Stream, marker, extractor, kind] of kinds) {
-        // Only a native-backed stream carries the extractor.
-        const isNative = (underlying) => Object.hasOwn(new Stream(underlying), extractor);
-        assert(isNative({ [marker]: marker }), `an own ${kind} marker was not taken`);
-        assert(!isNative(Object.create({ [marker]: marker })),
+        const mark = (object, value = true) => {
+          markers.setPrivate(object, marker, value);
+          return object;
+        };
+        const native = new Stream(mark({}));
+        assert(typeof markers.getPrivate(native, extractor) === 'function',
+          `a private ${kind} marker was not taken`);
+        assert(Object.getOwnPropertySymbols(native).length === 0,
+          `the ${kind} extractor or brand was reflected`);
+        assert(!Reflect.ownKeys(native).includes(extractor), `the ${kind} extractor was a property`);
+        const isNative = (underlying) =>
+          markers.getPrivate(new Stream(underlying), extractor) !== undefined;
+        assert(!isNative({ [marker]: true, [Symbol.for(marker)]: true }),
+          `an ordinary ${kind} marker was taken`);
+        assert(!isNative(Object.create(mark({}))),
           `an inherited ${kind} marker was taken`);
         const accessor = Object.defineProperty({}, marker, {
           get() {
@@ -2567,9 +2649,12 @@ KJ_TEST("TypeScript streams take a native marker only as an own data property") 
           },
         });
         assert(!isNative(accessor), `a ${kind} marker accessor was taken`);
+        assert(!isNative(new Proxy({}, {
+          getOwnPropertyDescriptor() { throw new Error(`the ${kind} descriptor trap ran`); },
+        })), `a ${kind} proxy was taken`);
         let error;
         try {
-          new Stream({ [marker]: true });
+          new Stream(mark({}, 'invalid'));
         } catch (e) {
           error = e;
         }
@@ -2623,21 +2708,16 @@ KJ_TEST("JsReadableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
     KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, sourceObj) == kj::none);
 
-    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
-    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
-    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
-    // on the adopted impostor throws.
+    // An ordinary API symbol cannot forge the constructor's private brand.
     auto impostorObj = js.obj();
     impostorObj.setNonEnumerable(js, js.symbolInternal("kReadableStreamBrand"), js.boolean(true));
-    auto impostor = KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
-    bool threw = false;
-    js.tryCatch(
-        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
-      threw = true;
-      auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
-    });
-    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+      KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)) != kj::none);
+      KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    }
   });
 }
 

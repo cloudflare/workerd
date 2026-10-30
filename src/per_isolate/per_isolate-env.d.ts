@@ -93,6 +93,9 @@ declare const utils: {
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
+  // V8-private properties are neither reflected by JavaScript nor inherited.
+  setPrivate(object: object, name: string, value: unknown): void;
+  getPrivate(object: object, name: string): unknown;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;

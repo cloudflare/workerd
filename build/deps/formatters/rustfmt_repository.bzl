@@ -15,18 +15,6 @@ def _rustfmt_standalone_repository_impl(repository_ctx):
     iso_date = repository_ctx.attr.iso_date
     proxy = PROXY_URL
 
-    # Download the rustfmt component (contains bin/rustfmt and bin/cargo-fmt).
-    rustfmt_url = proxy + _URL_TEMPLATE.format(
-        iso_date = iso_date,
-        component = "rustfmt",
-        triple = triple,
-    )
-    repository_ctx.download_and_extract(
-        url = rustfmt_url,
-        sha256 = repository_ctx.attr.rustfmt_sha256,
-        stripPrefix = "rustfmt-nightly-{}/rustfmt-preview".format(triple),
-    )
-
     # Download the rustc component (contains shared libraries that rustfmt
     # dynamically links against, e.g. librustc_driver-*.so / .dylib).
     rustc_url = proxy + _URL_TEMPLATE.format(
@@ -38,6 +26,22 @@ def _rustfmt_standalone_repository_impl(repository_ctx):
         url = rustc_url,
         sha256 = repository_ctx.attr.rustc_sha256,
         stripPrefix = "rustc-nightly-{}/rustc".format(triple),
+    )
+
+    # Delete binaries to reduce disk space usage, we only need librustc_driver
+    repository_ctx.delete("bin")
+    repository_ctx.delete("lib/rustlib")
+
+    # Download the rustfmt component (contains bin/rustfmt and bin/cargo-fmt).
+    rustfmt_url = proxy + _URL_TEMPLATE.format(
+        iso_date = iso_date,
+        component = "rustfmt",
+        triple = triple,
+    )
+    repository_ctx.download_and_extract(
+        url = rustfmt_url,
+        sha256 = repository_ctx.attr.rustfmt_sha256,
+        stripPrefix = "rustfmt-nightly-{}/rustfmt-preview".format(triple),
     )
 
     # Create a wrapper script that sets the library path so the dynamically-linked

@@ -180,7 +180,7 @@ connection.
   `js-readable-stream-test.c++`.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
-- The native source contract (marker symbol, standard pull/cancel hooks,
+- The native source contract (V8-private marker, standard pull/cancel hooks,
   byobRequest discrimination, once-per-pull delivery of a non-empty
   answer, memory handed over that the conduit neither checks nor
   transfers, per-pull abort signal for cancellation, under-delivery =
@@ -199,18 +199,19 @@ connection.
   ordinary property get (`getCppExport`), is frozen and has a null
   prototype, so a name missing from it cannot resolve through
   `Object.prototype`. Keep both when adding exports.
-- `nativeStreamInternals` (markers, extraction symbols, conduit
+- `nativeStreamInternals` (private-slot labels, conduit
   construction) is module-private, consumed only by readable.ts/writable.ts
-  and the C++ bridge via the API-symbol registry. The C++ mocks in
+  and the C++ bridge via `v8::Private::ForApi`. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
   objects, or, for a source that breaks the contract, mark a plain object
-  with the `kNativeSource` symbol from that registry; no JS-visible marker
-  export exists.
-- Every stream instance carries an own, non-enumerable api-symbol brand
+  with a `kNativeSource` private slot through test-only native accessors;
+  no JS-visible private-access utility or marker export exists.
+- Every stream instance carries a V8-private brand
   (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
   top of the constructor (before any early return). The C++ bridge's
-  `tryUnwrapTs` recognizes streams by probing it — an own-data-property
-  read that executes no JS. That constraint is load-bearing: recognition
+  `tryUnwrapTs` recognizes streams by reading the private slot without JS
+  execution. It is neither reflected nor inherited, and an ordinary symbol
+  cannot forge it. That constraint is load-bearing: recognition
   runs during RPC deserialization, inside V8's no-JS-execution scope. Any
   new construction path MUST go through the constructors (or stamp the
   brand itself).
