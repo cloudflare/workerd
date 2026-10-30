@@ -58,10 +58,24 @@ wd_rust_crate(
     cxx_bridge_deps = ["//src/rust/jsg"],
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
+    link_deps = [":test-bridge"],
     deps = [
         ":io-context",
         "//src/rust/jsg",
         "@crates_vendor//:futures",
+    ],
+)
+
+# The C++ functions test_bridge.rs calls, and what they record. Every binary that links the
+# bridge crate needs them, including its generated io-context-test-bridge_test.
+wd_cc_library(
+    name = "test-bridge",
+    testonly = True,
+    srcs = ["test-bridge.c++"],
+    hdrs = ["test-bridge-state.h"],
+    deps = [
+        ":test_bridge.rs@cxx",
+        "//src/workerd/io",
     ],
 )
 
@@ -72,6 +86,7 @@ kj_test(
     deps = [
         ":ffi",
         ":io-context-test-bridge",
+        ":test-bridge",
         "//src/rust/jsg:bridge",
         "//src/workerd/tests:test-fixture",
     ],

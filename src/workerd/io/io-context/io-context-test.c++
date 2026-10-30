@@ -7,6 +7,7 @@
 
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-context/ffi.h>
+#include <workerd/io/io-context/test-bridge-state.h>
 #include <workerd/io/io-context/test_bridge.rs.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
@@ -167,38 +168,6 @@ KJ_TEST("an IoContext id works only while its IoContext is current") {
   fixture.drainAndDestroy(kj::mv(second));
   fixture.drainAndDestroy(kj::mv(first));
 }
-
-// The value of TEST_KEY in the frame record_async_context() last saw, or "none".
-kj::String recordedAsyncContext = kj::str("not recorded");
-kj::Arc<jsg::AsyncContextFrame::StorageKey> TEST_KEY =
-    kj::arc<jsg::AsyncContextFrame::StorageKey>();
-
-// The IoContext the last await_io_and_run() callback ran in, if any.
-kj::Maybe<uint64_t> awaitContextId;
-// Fulfilled when an await_io_and_run() callback runs, if set.
-kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onAwaitCallback;
-
-}  // namespace
-
-void record_await_context() {
-  awaitContextId = IoContext::tryGetCurrentId().map(
-      [](IoContext::Id id) { return std::bit_cast<uint64_t>(id); });
-  KJ_IF_SOME(fulfiller, onAwaitCallback) {
-    fulfiller->fulfill();
-  }
-}
-
-void record_async_context(uintptr_t isolate) {
-  auto& js = jsg::Lock::from(reinterpret_cast<v8::Isolate*>(isolate));
-  recordedAsyncContext = kj::str("none");
-  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
-    KJ_IF_SOME(value, frame.get(*TEST_KEY)) {
-      recordedAsyncContext = jsg::JsValue(value.getHandle(js)).toString(js);
-    }
-  }
-}
-
-namespace {
 
 KJ_TEST("await_io_and_run() runs its callback in the async context frame that was current") {
   TestFixture fixture;

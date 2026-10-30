@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-// What test_bridge.rs calls back in io-context-test.c++, which defines it.
+// What test_bridge.rs calls back in C++, defined in test-bridge.c++.
 namespace workerd::io_context::test {
 
 // Records the async context frame that is current, in the isolate `isolate`.
