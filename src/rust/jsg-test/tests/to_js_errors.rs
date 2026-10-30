@@ -27,6 +27,13 @@ impl<'s> ToJS<'s> for CallsWhenConverted {
     }
 }
 
+/// Converts to whatever the callback returns.
+impl jsg::TypeInfo for CallsWhenConverted {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
+
 #[jsg_resource]
 struct Converter;
 

@@ -4,8 +4,6 @@
 
 use std::pin::Pin;
 
-use jsg::ToJS;
-
 use crate::dns::DnsUtil;
 use crate::inspector::InspectorModule;
 use crate::url::UrlUtil;
@@ -56,7 +54,7 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:dns",
-        |lock| DnsUtil::new().to_js(lock),
+        |_lock| Ok(DnsUtil::new()),
         jsg::modules::ModuleType::Internal,
     );
     // `node-internal:inspector` is always registered: it is imported by the `node:inspector`
@@ -66,13 +64,13 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:inspector",
-        |lock| InspectorModule::new().to_js(lock),
+        |_lock| Ok(InspectorModule::new()),
         jsg::modules::ModuleType::Internal,
     );
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",
-        |lock| UrlUtil::new().to_js(lock),
+        |_lock| Ok(UrlUtil::new()),
         jsg::modules::ModuleType::Internal,
     );
 }

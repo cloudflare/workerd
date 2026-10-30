@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 
 use jsg::ExceptionType;
-use jsg::Member;
+use jsg::MemberRegistry;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
@@ -144,11 +144,11 @@ impl Versioned {
 }
 
 impl Resource for Versioned {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         if flags.get_cache_option_enabled() {
-            vec![Self::get_new_member()]
+            registry.add(Self::get_new_member());
         } else {
-            vec![Self::get_old_member()]
+            registry.add(Self::get_old_member());
         }
     }
 }

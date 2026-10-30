@@ -2,6 +2,55 @@
 
 Rust bindings for the JSG (JavaScript Glue) layer, enabling Rust code to integrate with workerd's JavaScript runtime.
 
+## RTTI and TypeScript declarations
+
+`TypeInfo::describe()` describes a binding's JavaScript representation without
+constructing a resource or acquiring a V8 lock. `#[jsg_struct]`, `#[jsg_resource]`,
+and `#[jsg_oneof]` generate implementations that compose the descriptions of
+their fields, signatures, and variants. Rust resolves aliases and imported types
+through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
+
+- One `jsg::rtti::Context` collects all modules in an export, interning shared and
+  recursive definitions before visiting their members.
+- Rust's fully qualified type identity is separate from the declaration name,
+  which honors `name = "..."`. Explicit names must be unique among emitted Rust
+  and C++ declarations; inactive compatibility variants may reuse a name.
+- `Option<T>` describes `T | undefined` and `Nullable<T>` describes `T | null`,
+  so a `Nullable<T>` parameter is required, as at runtime. `NullOrUndefined<T>`,
+  `Option<Nullable<T>>` and `Lenient<T>` describe an optional `T | null | undefined`.
+- `Dict<V>` describes `Record<string, V>`, as C++ describes `jsg::Dict`.
+- Vectors and slices describe JavaScript arrays, numbers included; a typed array
+  is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
+- Integers of up to 32 bits describe `number`; `i64` and `u64` describe
+  `number | bigint`, as C++ RTTI describes `int64_t`.
+- `v8::Promise` describes `Promise<any>`; as in C++, a promise parameter also
+  accepts a value that is not a promise.
+- Fallible returns describe their success type. Injected `this` and `Lock`
+  parameters and inspect-only properties are omitted.
+- A nested type is described with its whole structure, as in C++, so it is
+  declared as a class even when nesting is the only way to reach it.
+- Parameter names use camelCase, omit unused-parameter underscores, and escape
+  TypeScript reserved words. Bindings with colliding normalized parameter names
+  are rejected. Members are described in registration order, as in C++.
+
+Both C++ and Rust emit `src/workerd/jsg/rtti.capnp` for the `types/` generator.
+Resources are described with the members they register under the context's
+compatibility flags; in `workerd:rtti`, these are the flags `jsg::rtti::Builder`
+gives C++ resources.
+
+Register modules with a callback receiving `&mut Lock<'s>` and returning
+`jsg::Result<Rc<Exports>>`, for example `jsg::modules::add_builtin(registry,
+"node-internal:dns", |_lock| Ok(DnsUtil::new()), ModuleType::Internal)`. The return
+type determines both runtime wrapping and RTTI. `workerd:rtti` collects each module's
+export type and reachable definitions without invoking the callback, using the same
+context for every module. Registration-time compatibility gates also govern RTTI
+discovery.
+
+Definitions are emitted into ambient TypeScript only when reachable from a
+TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
+struct to mark such a root, analogous to C++ `JSG_TS_ROOT`. Internal module
+registration alone does not make a type an ambient declaration.
+
 ## Core Types
 
 ### `Lock`
@@ -392,7 +441,8 @@ scope. There is no public constructor; locks come from:
   accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`, and
   `#[jsg_property(lazy_instance)]` accessors with `jsg::getter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
-  `for<'s> Fn(&mut Lock<'s>) -> Result<Local<'s, Value>, jsg::Error>`,
+  `for<'s> Fn(&mut Lock<'s>) -> Result<Rc<Exports>, jsg::Error>`; registration wraps its
+  result in the caller's scope and derives RTTI from the resource type,
 - `v8::Function::new`, whose closure captures nothing and gets a lock per call,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
   scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
@@ -899,9 +949,10 @@ It does not reproduce worker-specific initialization such as logging, inspectors
 
 ### Compatibility-dependent API surfaces
 
-`#[jsg_resource(custom_members)]` generates member factories while leaving `Resource::members(flags)`
-to the resource author. Use ordinary Rust conditionals to select members and choose property placement
-when the template is built. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
+`#[jsg_resource(custom_members)]` generates member factories while leaving
+`Resource::members(registry, flags)` to the resource author. Use ordinary Rust conditionals to select
+members and choose property placement when the template is built. RTTI export runs the same function
+with the export's flags, so TypeScript declarations follow the same choices. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
 for the factory naming conventions and a complete example.
 
 ### Key types and files

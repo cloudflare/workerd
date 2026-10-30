@@ -297,31 +297,98 @@ fn constant_factory_lowercases_rust_name_without_changing_js_name() {
     };
     let registrations = collect_constant_registrations(&input);
     let registration = &registrations[0];
-    let factory: syn::ImplItemFn = syn::parse2(registration.factory.clone()).unwrap();
+    let factory: syn::ImplItemFn = syn::parse2(registration.factory()).unwrap();
     assert_eq!(factory.sig.ident, "max_bytes_member");
     assert_eq!(registration.source_name, "MAX_BYTES");
     assert_eq!(
         registration.automatic.to_string(),
         quote!(Self::max_bytes_member()).to_string()
     );
-    let syn::Stmt::Expr(member, None) = &factory.block.stmts[0] else {
-        panic!("expected the factory to return a Member");
-    };
+    let member: syn::Expr = syn::parse2(registration.member.clone()).unwrap();
     assert_eq!(
-        member_field(member, "name").to_token_stream().to_string(),
+        member_field(&member, "name").to_token_stream().to_string(),
         quote!("maxPayload".to_owned()).to_string()
     );
     assert_eq!(
-        member_field(member, "value").to_token_stream().to_string(),
+        member_field(&member, "value").to_token_stream().to_string(),
         quote!(jsg::ConstantValue::from(Self::MAX_BYTES)).to_string()
     );
+    let description = description(registration).unwrap();
+    assert_eq!(
+        member_field(&description, "name")
+            .to_token_stream()
+            .to_string(),
+        quote!("maxPayload").to_string()
+    );
+}
+
+/// The `jsg::rtti::Member` expression that a registration's factory describes its member with.
+fn description(registration: &MemberRegistration) -> Option<syn::Expr> {
+    registration
+        .description
+        .clone()
+        .map(|description| syn::parse2(description).unwrap())
+}
+
+#[test]
+fn factories_build_members_and_descriptions_separately() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn foo(&self) {}
+        }
+    };
+    let registrations = collect_method_registrations(&input);
+    let factory: syn::ImplItemFn = syn::parse2(registrations[0].factory()).unwrap();
+    assert_eq!(
+        factory.sig.output.to_token_stream().to_string(),
+        quote!(-> impl jsg::MemberDefinition).to_string()
+    );
+    let syn::Stmt::Expr(syn::Expr::Call(definition), None) = &factory.block.stmts[0] else {
+        panic!("expected a described member");
+    };
+    assert_eq!(
+        definition.func.to_token_stream().to_string(),
+        quote!(jsg::described_member).to_string()
+    );
+    assert_eq!(definition.args.len(), 2);
+}
+
+#[test]
+fn method_descriptions_skip_injected_parameters() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn with_this(this: jsg::Rc<Self>, lock: &mut jsg::Lock, value: u32) {}
+            #[jsg_method]
+            fn with_self(&self, lock: &mut jsg::Lock, value: u32) {}
+            #[jsg_method]
+            fn without_self(lock: &mut jsg::Lock, value: u32) {}
+        }
+    };
+    let registrations = collect_method_registrations(&input);
+    for (registration, is_static) in registrations.iter().zip([false, false, true]) {
+        let description = description(registration).unwrap();
+        assert_eq!(
+            member_field(&description, "is_static")
+                .to_token_stream()
+                .to_string(),
+            quote!(#is_static).to_string()
+        );
+        let syn::Expr::Macro(args) = member_field(&description, "args") else {
+            panic!("expected a vec! of parameters");
+        };
+        let args = args.mac.tokens.to_string();
+        assert!(args.contains("\"value\""), "{args}");
+        assert!(!args.contains("this") && !args.contains("lock"), "{args}");
+    }
 }
 
 /// The arms of the `match placement` in a property factory, by pattern.
 fn placement_arms(registration: MemberRegistration) -> Vec<(String, syn::Expr)> {
-    let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
+    let factory: syn::ImplItemFn = syn::parse2(registration.factory()).unwrap();
     assert_eq!(factory.sig.inputs.len(), 1);
-    let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
+    let syn::Expr::Match(placement) = syn::parse2(registration.member).unwrap() else {
         panic!("expected a placement-dependent factory");
     };
     placement
@@ -371,6 +438,7 @@ fn property_factories_select_matching_getter_and_setter_callback_shapes() {
             Some(parse_quote!(get_value)),
             Some(parse_quote!(set_value)),
             false,
+            &quote!(jsg::rtti::Type::Number),
         )
         .unwrap();
         assert_eq!(
@@ -436,6 +504,7 @@ fn readonly_property_factories_omit_setters_for_every_placement() {
         Some(parse_quote!(get_value)),
         None,
         false,
+        &quote!(jsg::rtti::Type::Number),
     )
     .unwrap();
     let arms = placement_arms(registration);
@@ -470,6 +539,7 @@ fn lazy_instance_property_factory_is_writable_unless_readonly() {
             Some(parse_quote!(get_value)),
             None,
             is_readonly,
+            &quote!(jsg::rtti::Type::Number),
         )
         .unwrap();
         assert_eq!(
@@ -665,4 +735,63 @@ fn nested_types_are_registered_after_members() {
     let method = expanded.find("Self :: foo_member ()").unwrap();
     let nested = expanded.find("jsg :: NestedType :: of :: < Bar >").unwrap();
     assert!(method < nested, "{expanded}");
+}
+
+#[test]
+fn property_descriptions_follow_the_requested_placement() {
+    let ty = quote!(jsg::rtti::Type::Number);
+    for (setter, is_readonly, accessor_readonly, lazy_readonly) in [
+        (Some(parse_quote!(set_value)), false, false, false),
+        (None, false, true, false),
+        (None, true, true, true),
+    ] {
+        let registration = emit_property_group(
+            "value",
+            PropertyKind::Prototype,
+            Some(parse_quote!(get_value)),
+            setter,
+            is_readonly,
+            &ty,
+        )
+        .unwrap();
+        let description = description(&registration).unwrap();
+        assert_eq!(
+            member_field(&description, "ty")
+                .to_token_stream()
+                .to_string(),
+            ty.to_string()
+        );
+        assert_eq!(
+            member_field(&description, "prototype")
+                .to_token_stream()
+                .to_string(),
+            quote!(matches!(placement, jsg::PropertyPlacement::Prototype)).to_string()
+        );
+        let syn::Expr::Match(readonly) = member_field(&description, "readonly") else {
+            panic!("expected a placement-dependent `readonly`");
+        };
+        let arms: Vec<_> = readonly
+            .arms
+            .iter()
+            .map(|arm| arm.body.to_token_stream().to_string())
+            .collect();
+        assert_eq!(
+            arms,
+            [
+                quote!({ #accessor_readonly }).to_string(),
+                quote!(#lazy_readonly).to_string()
+            ]
+        );
+    }
+
+    let inspect = emit_property_group(
+        "value",
+        PropertyKind::Inspect,
+        Some(parse_quote!(get_value)),
+        None,
+        false,
+        &ty,
+    )
+    .unwrap();
+    assert!(inspect.description.is_none());
 }

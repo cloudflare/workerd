@@ -1,7 +1,10 @@
 # Workers Types Generator
 
 This directory contains scripts for automatically generating TypeScript types
-from [JSG RTTI](../src/workerd/jsg/rtti.h).
+from the shared [JSG RTTI schema](../src/workerd/jsg/rtti.capnp). C++ JSG and
+[Rust JSG](../src/rust/jsg/README.md#rtti-and-typescript-declarations) both produce
+these descriptions. Explicit declaration names, parameter names, and nullability
+let the generator consume Rust bindings without interpreting Rust type spellings.
 
 ## Generating Types
 

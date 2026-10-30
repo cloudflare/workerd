@@ -13,7 +13,6 @@ use std::pin::Pin;
 use std::time::UNIX_EPOCH;
 
 use io_context::IoContext;
-use jsg::ToJS;
 use jsg::v8;
 
 /// C++ receives an error as an exception whose description is the `jsg::Error`'s name and
@@ -86,6 +85,16 @@ thread_local! {
         const { Cell::new(ffi::ProbeObservation::NotRun) };
 }
 
+/// The exports of `test:io-context-probe`, which has no members. It is in a module of its own
+/// because the code `#[jsg_resource]` generates names `Result`, which this file redefines.
+mod probe {
+    #[jsg_macros::jsg_resource]
+    pub struct Probe;
+
+    #[jsg_macros::jsg_resource]
+    impl Probe {}
+}
+
 /// Registers the internal module `test:io-context-probe`, whose closure records whether it sees a
 /// request.
 fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
@@ -99,7 +108,7 @@ fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
                 ffi::ProbeObservation::NoRequest
             };
             PROBE_OBSERVATION.with(|cell| cell.set(observation));
-            Vec::<f64>::new().to_js(lock)
+            Ok(jsg::Rc::new(probe::Probe))
         },
         jsg::modules::ModuleType::Internal,
     );

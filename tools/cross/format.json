@@ -38,5 +38,10 @@
     "directory": "src",
     "globs": ["*.rs"],
     "formatter": "rustfmt"
+  },
+  {
+    "directory": "types",
+    "globs": ["*.rs"],
+    "formatter": "rustfmt"
   }
 ]

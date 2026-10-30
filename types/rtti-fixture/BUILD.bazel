@@ -1,0 +1,10 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+wd_rust_binary(
+    name = "rtti-fixture",
+    link_deps = ["//src/workerd/jsg"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test = False,
+    visibility = ["//types:__pkg__"],
+    deps = ["//src/rust/jsg"],
+)
