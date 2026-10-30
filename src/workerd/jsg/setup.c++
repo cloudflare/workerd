@@ -620,10 +620,14 @@ void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contex
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
     const uint32_t* badTagFieldsCount,
-    WrappablesSerializeMetadata* wrappablesMetadata) {
+    WrappablesSerializeMetadata* wrappablesMetadata,
+    kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  // The identity objects referenced by these records were already pinned by the caller.
+  artifact.listenerRecords = kj::mv(listenerRecords);
 
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.

@@ -64,6 +64,12 @@ class Wrappable;
 //   import()/require()). Field types are raw ints to avoid coupling this header to modules.h:
 //   `moduleType` is a jsg::ModuleRegistry::Type (capnp ModuleType), `handleKind` a
 //   jsg::ModuleRegistry::SnapshotHandleKind.
+// * `listenerRecords` are the global scope's event listeners the zygote's top level registered
+//   via addEventListener(), one (type, once) -> context-level AddData index of the listener's
+//   identity object per listener, in per-type registration order. The fresh
+//   ServiceWorkerGlobalScope built by newContext() at load discards the zygote's listener map, so
+//   the loading worker registers each identity again through the global's addEventListener, which
+//   re-derives the callback the same way the zygote registration did.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -93,6 +99,13 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     size_t dataIndex;
   };
   kj::Vector<ModuleRecord> moduleRecords;
+
+  struct ListenerRecord {
+    kj::String type;
+    size_t identityIndex;
+    bool once;
+  };
+  kj::Vector<ListenerRecord> listenerRecords;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
