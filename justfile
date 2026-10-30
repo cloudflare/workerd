@@ -133,9 +133,9 @@ format-head:
 internal-pr:
   ./tools/unix/create-internal-pr.sh
 
-# update dependencies with a given prefix (all by default)
-update-deps prefix="":
-  ./build/deps/update-deps.py {{prefix}}
+# update dependencies with a given prefix (all by default); optionally pin it to a given commit
+update-deps prefix="" commit="":
+  ./build/deps/update-deps.py "{{prefix}}" "{{commit}}"
 
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="":
