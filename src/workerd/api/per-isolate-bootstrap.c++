@@ -248,6 +248,17 @@ static void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(
+              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]))));
+    });
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -345,6 +356,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "getEventHandlerAttribute",
     "setEventHandlerAttribute",
     "dispatchEvent",
+    "createTrustedMessageEvent",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -365,6 +377,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, GetEventHandlerAttribute),
     getMethod(js, SetEventHandlerAttribute),
     getMethod(js, DispatchEvent),
+    getMethod(js, CreateTrustedMessageEvent),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

@@ -5,6 +5,7 @@
 #include "event-target-bootstrap.h"
 
 #include "basics.h"
+#include "events.h"
 
 namespace workerd::api {
 
@@ -122,6 +123,24 @@ jsg::JsValue EventTargetBootstrap::dispatchEvent(jsg::Lock& js,
     return record;
   }
   return js.undefined();
+}
+
+jsg::JsValue EventTargetBootstrap::createTrustedMessageEvent(
+    jsg::Lock& js, jsg::JsValue type, jsg::JsValue data, jsg::JsValue source) {
+  static constexpr auto kName = "createTrustedMessageEvent"_kjc;
+  auto typeStr = requireType(js, type, kName);
+  kj::Maybe<messageevent::MessagePort> maybeSource;
+  if (!source.isNullOrUndefined()) {
+    maybeSource = JSG_REQUIRE_NONNULL(messageevent::MessagePort::tryFrom(js, source), TypeError,
+        kName, "() expects a MessagePort source");
+  }
+
+  // MessageEvent is registered in EW_EVENTS_ISOLATE_TYPES alongside EventTarget.
+  auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<MessageEvent>>(),
+      "MessageEvent is missing from the isolate type list");
+  return jsg::JsValue(handler.wrap(js,
+      js.alloc<MessageEvent>(
+          js, kj::mv(typeStr), data, kj::String(), kj::mv(maybeSource), kj::none, Trusted::YES)));
 }
 
 }  // namespace workerd::api

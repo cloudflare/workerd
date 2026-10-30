@@ -45,6 +45,12 @@ class EventTargetBootstrap {
       jsg::JsValue target,
       jsg::JsValue event,
       ReportListenerExceptions reportListenerExceptions);
+
+  // Creates a trusted MessageEvent of the given type, as the runtime fires one: `data` as is, an
+  // empty lastEventId, a null origin, no ports, and `source` (a MessagePort, or null or
+  // undefined for none). Throws a TypeError if `type` is not a string or `source` is neither.
+  static jsg::JsValue createTrustedMessageEvent(
+      jsg::Lock& js, jsg::JsValue type, jsg::JsValue data, jsg::JsValue source);
 };
 
 }  // namespace workerd::api

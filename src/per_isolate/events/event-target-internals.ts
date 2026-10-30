@@ -50,6 +50,11 @@
 //   is the first. Under 'propagate' the first listener exception ends the
 //   dispatch and is thrown. Unlike the public dispatchEvent(), the event may
 //   be a trusted one.
+//
+// createTrustedMessageEvent(type, data, source)
+//   A MessageEvent as the runtime fires one: isTrusted, `data` as is (not
+//   cloned), an empty lastEventId, a null origin, no ports, and `source`, a
+//   MessagePort or null.
 
 const { EventTarget } = primordials;
 
@@ -58,6 +63,7 @@ const {
   getEventHandlerAttribute,
   setEventHandlerAttribute,
   dispatchEvent: utilsDispatchEvent,
+  createTrustedMessageEvent,
 } = utils;
 
 type ExceptionPolicy = 'report' | 'propagate';
@@ -88,6 +94,7 @@ export type EventTargetInternals = {
   setEventHandlerAttribute: typeof setEventHandlerAttribute;
   effectiveExceptionPolicy: typeof effectiveExceptionPolicy;
   dispatchEvent: typeof dispatchEvent;
+  createTrustedMessageEvent: typeof createTrustedMessageEvent;
 };
 
 module.exports = {
@@ -97,4 +104,5 @@ module.exports = {
   setEventHandlerAttribute,
   effectiveExceptionPolicy,
   dispatchEvent,
+  createTrustedMessageEvent,
 };
