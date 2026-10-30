@@ -474,6 +474,12 @@ class EventTarget: public jsg::Object {
 
   static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
+  // Enumerates JS-registered listeners for the live-snapshot PREPARE pass, in per-type
+  // insertion order. Internally-registered listeners (the on<type> attribute trampolines)
+  // are skipped: their identity is a synthesized object that addEventListener() cannot replay.
+  void forEachSnapshotListener(jsg::Lock& js,
+      kj::FunctionParam<void(kj::StringPtr type, v8::Local<v8::Object> identity, bool once)> cb);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  protected:
