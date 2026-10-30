@@ -67,6 +67,7 @@ wd_test(
     src = "opentelemetry-roots-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES,
+    lint = False,
     tags = ["no-downstream"],
 )
 
@@ -74,6 +75,7 @@ wd_test(
     src = "opentelemetry-http-policy-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    lint = False,
     tags = ["no-downstream"],
 )
 
@@ -81,6 +83,7 @@ wd_test(
     src = "opentelemetry-http-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    lint = False,
     tags = ["no-downstream"],
 )
 
@@ -88,6 +91,7 @@ wd_test(
     src = "opentelemetry-metadata-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    lint = False,
     tags = ["no-downstream"],
 )
 
@@ -95,6 +99,7 @@ wd_test(
     src = "opentelemetry-sampling-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    lint = False,
     tags = ["no-downstream"],
 )
 
@@ -108,6 +113,7 @@ wd_test(
     src = "opentelemetry-api-copies-test.wd-test",
     args = ["--experimental"],
     data = TEST_JS + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    lint = False,
     tags = ["no-downstream"],
 )
 

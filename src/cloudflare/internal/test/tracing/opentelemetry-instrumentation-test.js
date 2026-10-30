@@ -158,6 +158,24 @@ export const hierarchy = {
   },
 };
 
+export async function collectedEvents(expectedInvocations) {
+  // Test handlers can start before queued tail deliveries. Wait for their onsets before
+  // taking the collector's snapshot of invocation-completion promises.
+  for (
+    let attempts = 0;
+    onsets.size < expectedInvocations && attempts < 100;
+    ++attempts
+  )
+    await scheduler.wait(10);
+  assert.strictEqual(
+    onsets.size,
+    expectedInvocations,
+    'expected invocation streams must arrive'
+  );
+  await collector.waitForCompletion();
+  return events;
+}
+
 export const spanIdentities = {
   async test() {
     await collector.waitForCompletion();
