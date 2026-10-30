@@ -207,9 +207,9 @@ where
     // The data stays in the cell, where the garbage collector traces it, while `f` runs.
     let result = match data.0.borrow().as_ref() {
         Some(data) => f(lock, data, args.get(0)),
-        None => Err(Error::new_internal_error(
-            "a promise reaction ran after another reaction to the promise",
-        )),
+        // Only one of the reactions sharing the data ever runs, and only once: V8 never exposes
+        // the reaction functions to JavaScript, and a promise settles once.
+        None => unreachable!("a promise reaction ran after another reaction to the promise"),
     };
     // Dropped after the borrow ends, so that what its drop does cannot find the cell borrowed.
     let data = data.0.borrow_mut().take();
@@ -295,10 +295,10 @@ impl<'s> Local<'s, Promise> {
     /// If no reaction ever runs, as when the promise never settles, execution is terminated or
     /// the isolate is torn down, or if the callback panics, the garbage collector drops `data`
     /// once the reactions are unreachable, or the teardown does. Until then the garbage collector
-    /// traces `data`, so it may hold `TracedGlobal`s and
-    /// `jsg::Rc`s, including ones that lead back to the promise. It must be their only owner that
-    /// the garbage collector traces: to share a resource's state, hold a `jsg::Rc` or
-    /// `jsg::Weak` to the resource rather than an `std::rc::Rc` of the state.
+    /// traces `data`, so it may hold `TracedGlobal`s and `jsg::Rc`s, including ones that lead
+    /// back to the promise. It must be their only owner that the garbage collector traces: to
+    /// share a resource's state, hold a `jsg::Rc` or `jsg::Weak` to the resource rather than an
+    /// `std::rc::Rc` of the state.
     ///
     /// # Errors
     ///
