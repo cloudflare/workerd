@@ -108,34 +108,26 @@ void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const
 void io_context_await_io_and_run(
     uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback) {
   auto& context = currentWithId(id);
+  // If the future panics, awaitIoAndRun() fails the task, dropping the callback without running it.
   context.awaitIoAndRun(io_future_wait(kj::mv(future)),
-      [callback = kj::mv(callback)](
-          Worker::Lock& lock, IoContext::ExceptionOr<::rust::Box<IoOutput>>&& result) mutable {
-    KJ_SWITCH_ONEOF(result) {
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        // The future panicked. Failing the task drops the callback without running it.
-        kj::throwFatalException(kj::mv(exception));
-      }
-      KJ_CASE_ONEOF(output, ::rust::Box<IoOutput>) {
-        auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
-        switch (io_callback_run(isolate, kj::mv(callback), kj::mv(output))) {
-          case IoCallbackOutcome::Succeeded:
-            return;
-          case IoCallbackOutcome::Failed:
-            // The exception, or termination, is pending in V8. JsExceptionThrown is how
-            // IoContext::run() expects to learn of it: it then logs the exception as uncaught,
-            // with its stack, and fails the task with it, as for C++ code it runs. This is the one
-            // use of C++ JSG here, counted in src/rust/jsg/cpp-jsg-allowlist.txt.
-            throw jsg::JsExceptionThrown();
-          case IoCallbackOutcome::Panicked:
-            // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
-            // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception
-            // and convert it, running JavaScript, so the task fails with a KJ exception instead.
-            KJ_FAIL_ASSERT("the callback of IoContext::await_io_and_run() panicked");
-        }
-        KJ_UNREACHABLE;
-      }
+      [callback = kj::mv(callback)](Worker::Lock& lock, ::rust::Box<IoOutput>&& output) mutable {
+    auto isolate = reinterpret_cast<uintptr_t>(lock.getIsolate());
+    switch (io_callback_run(isolate, kj::mv(callback), kj::mv(output))) {
+      case IoCallbackOutcome::Succeeded:
+        return;
+      case IoCallbackOutcome::Failed:
+        // The exception, or termination, is pending in V8. JsExceptionThrown is how
+        // IoContext::run() expects to learn of it: it then logs the exception as uncaught, with its
+        // stack, and fails the task with it, as for C++ code it runs. This is the one use of C++
+        // JSG here, counted in src/rust/jsg/cpp-jsg-allowlist.txt.
+        throw jsg::JsExceptionThrown();
+      case IoCallbackOutcome::Panicked:
+        // The termination takes effect only when V8 next runs JavaScript, in run()'s microtask
+        // checkpoint. Until then, run() would treat JsExceptionThrown as an ordinary exception and
+        // convert it, running JavaScript, so the task fails with a KJ exception instead.
+        KJ_FAIL_ASSERT("the callback of IoContext::await_io_and_run() panicked");
     }
+    KJ_UNREACHABLE;
   });
 }
 

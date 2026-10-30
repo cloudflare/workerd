@@ -576,7 +576,7 @@ class TestServer final: private kj::EntropySource {
   // don't stop the server, so call this before `start()` or `expectErrors()`, which check that
   // every declared warning was actually reported.
   void expectWarnings(kj::StringPtr expected) {
-    expectedWarnings = expected;
+    expectedWarnings = kj::mv(expected);
   }
 
   // Start the server. Call before connect().

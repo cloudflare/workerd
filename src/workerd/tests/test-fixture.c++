@@ -163,7 +163,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -267,15 +267,19 @@ inline server::config::Worker::Reader buildConfig(
   modules[0].setName(mainModuleName);
   modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
 
-  // Initialize autogates (with an empty config unless the test supplied gate names).
+  // Initialize autogates (with an empty config unless the test supplied gates).
   //
   // This needs to happen here because `buildConfig` is called early in the construction of
   // `TestFixture`.
-  KJ_IF_SOME(gates, params.autogates) {
-    util::Autogate::initAutogateNamesForTest(gates);
-  } else {
-    util::Autogate::initAutogate({});
+  kj::Vector<kj::StringPtr> gates;
+  KJ_IF_SOME(names, params.autogates) {
+    gates.addAll(names);
   }
+  for (auto key: params.autogateKeys) {
+    gates.add(kj::toCharSequence(key));
+  }
+  util::Autogate::initAutogateNamesForTest(
+      gates.asPtr(), util::IgnoreAllAutogatesEnv(params.ignoreAllAutogatesEnv));
 
   return config;
 }
@@ -311,7 +315,7 @@ struct MockResponse final: public kj::HttpService::Response {
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
     this->statusCode = statusCode;
-    this->statusText = statusText;
+    this->statusText = kj::mv(statusText);
     return kj::addRef(*body);
   }
 
@@ -506,7 +510,15 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 }
 
 kj::Own<IoContext> TestFixture::newIoContext() {
-  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
+  return newIoContextFor(actor);
+}
+
+kj::Own<IoContext> TestFixture::newStatelessIoContext() {
+  return newIoContextFor(kj::none);
+}
+
+kj::Own<IoContext> TestFixture::newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor) {
+  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), maybeActor,
       kj::heap<MockLimitEnforcer>(checkedSubrequestCount, actorCallReplayMemoryReserver));
 }
 

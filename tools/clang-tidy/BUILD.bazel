@@ -258,8 +258,12 @@ sh_test(
     ],
     tags = ["no-asan"],
     # workerd-tools publishes clang-tidy for macOS arm64 only.
+    # TODO (cleanup): This and the other tests here are compatible with arm64 Linux, but our custom
+    # clang-tidy needs a more recent glibc than is available on the arm64 runner image we currently
+    # use in CI. Enable on arm64 Linux once the image has been updated.
     target_compatible_with = select({
         "@bazel_tools//src/conditions:darwin_x86_64": ["@platforms//:incompatible"],
+        "@bazel_tools//src/conditions:linux_aarch64": ["@platforms//:incompatible"],
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
