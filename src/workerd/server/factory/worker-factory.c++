@@ -1567,6 +1567,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   // The file system roots use their defaults; the config does not expose mount points.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource));
 
+  KJ_REQUIRE(experimental || moduleFallback == kj::none,
+      "The module fallback service is an experimental feature. "
+      "You must run workerd with `--experimental` to use the module fallback service.");
+
   // Python workers never use the new module registry, whatever their flags say.
   bool usingNewModuleRegistry = isNewModuleRegistryEnabled(featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
@@ -1667,9 +1671,6 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
 
   if (!usingNewModuleRegistry) {
     KJ_IF_SOME(fallback, moduleFallback) {
-      KJ_REQUIRE(experimental,
-          "The module fallback service is an experimental feature. "
-          "You must run workerd with `--experimental` to use the module fallback service.");
       auto& apiIsolate = isolate->getApi();
       apiIsolate.setModuleFallbackCallback(
           [client = kj::heap<fallback::FallbackServiceClient>(kj::str(fallback)),

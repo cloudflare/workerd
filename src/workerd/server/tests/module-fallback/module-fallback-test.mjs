@@ -88,12 +88,12 @@ function sendJson(response, value) {
   response.end(JSON.stringify(value));
 }
 
-async function runWorkerd(configPath) {
+async function runWorkerd(configPath, extraArgs = ['--experimental']) {
   return await new Promise((resolve, reject) => {
     let output = '';
     const child = spawn(
       env.WORKERD_BINARY,
-      ['test', configPath, '--experimental'],
+      ['test', configPath, ...extraArgs],
       { stdio: ['ignore', 'pipe', 'pipe'] }
     );
     const timeout = setTimeout(() => {
@@ -113,6 +113,48 @@ async function runWorkerd(configPath) {
     });
   });
 }
+
+test('module fallback requires experimental mode with either registry', async (t) => {
+  const directory = await mkdtemp(
+    join(env.TEST_TMPDIR, 'module-fallback-gate-')
+  );
+  const cases = [
+    ['date-default', '2026-11-12', []],
+    ['explicit-opt-in', '2026-11-11', ['new_module_registry']],
+    ['legacy-opt-out', '2026-11-12', ['legacy_module_registry']],
+    ['legacy-default', '2026-11-11', []],
+  ];
+
+  for (const [name, date, flags] of cases) {
+    await t.test(name, async () => {
+      const configPath = join(directory, `${name}.capnp`);
+      await writeFile(
+        configPath,
+        `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [(
+    name = "worker",
+    worker = (
+      compatibilityFlags = ${JSON.stringify(flags)},
+      moduleFallback = "127.0.0.1:1",
+      modules = [(
+        name = "worker.js",
+        esModule = "export const check = { test() {} };"
+      )]
+    )
+  )]
+);`
+      );
+
+      const result = await runWorkerd(configPath, [`--compat-date=${date}`]);
+      assert.notEqual(result.code, 0, result.output);
+      assert.match(
+        result.output,
+        /The module fallback service is an experimental feature/
+      );
+    });
+  }
+});
 
 test('module fallback serves V1 and V2 module types', async () => {
   const requests = [];
