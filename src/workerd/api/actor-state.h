@@ -282,9 +282,24 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   jsg::Promise<jsg::Ref<DurableObjectSnapshot>> snapshot(
       jsg::Lock& js, jsg::Optional<SnapshotOptions> options);
 
+  struct RestoreOptions {
+    // Key-value pairs to write to the database as KV values after the restore, before the
+    // object's constructor runs. Only supported when restoring from a snapshot.
+    jsg::Optional<jsg::Dict<jsg::JsRef<jsg::JsValue>>> kvData;
+
+    JSG_STRUCT(kvData);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectRestoreOptions);
+  };
+
+  // Limits on `RestoreOptions.kvData`, counting keys and serialized values. The storage back-end
+  // holds the data until the object next starts, so it must stay small.
+  static constexpr size_t MAX_RESTORE_KV_ENTRIES = 20;
+  static constexpr size_t MAX_RESTORE_KV_BYTES = 3 * 1024;
+
   // Arrange for the next session to restore from a snapshot or bookmark.
   using RestoreTarget = kj::OneOf<jsg::Ref<DurableObjectSnapshot>, jsg::NonCoercible<kj::String>>;
-  kj::Promise<kj::String> onNextSessionRestore(RestoreTarget target);
+  kj::Promise<kj::String> onNextSessionRestore(
+      jsg::Lock& js, RestoreTarget target, jsg::Optional<RestoreOptions> options);
 
   // Arrange to create replicas for this Durable Object.
   //
@@ -875,6 +890,7 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorage, api::DurableObjectState::AbortOptions,                            \
       api::DurableObjectState::ReadReplicationOptions,                                             \
       api::DurableObjectStorage::TransactionOptions, api::DurableObjectStorage::SnapshotOptions,   \
+      api::DurableObjectStorage::RestoreOptions,                                                   \
       api::DurableObjectStorageOperations::ListOptions,                                            \
       api::DurableObjectStorageOperations::GetOptions,                                             \
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
