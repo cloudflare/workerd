@@ -57,6 +57,14 @@ wpt_test(
 )
 
 wpt_test(
+    name = "dom/events-ts",
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    compat_flags = ["typescript_implemented_events"],
+    config = "dom/events-test-ts.ts",
+    wpt_directory = "@wpt//:dom/events@module",
+)
+
+wpt_test(
     name = "fetch/api",
     size = "large",
     compat_flags = ["strip_bom_in_read_all_text"],

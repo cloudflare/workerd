@@ -7,6 +7,7 @@
 #include "abort-bootstrap.h"
 #include "actor-state.h"
 #include "global-scope.h"
+#include "js-event-target.h"
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -1112,11 +1113,12 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
   // add more, and could even emit their own events on the signal by using it as an
   // EventTarget directly but that would be rather silly, so stepping outside the lines
   // of the spec here should be just fine.
-  KJ_DEFER(removeAllHandlers());
+  auto target = JsEventTarget::from(js, *this);
+  KJ_DEFER(target.removeAllListeners(js));
 
   // Per spec, "signal abort" cannot throw: listener exceptions are reported, and the
   // remaining listeners (and, for a source signal, the dependents' abort steps) still run.
-  dispatchEventImpl(js, js.alloc<Event>(kAbortEvent, Event::Init{}, Trusted::YES),
+  target.dispatch(js, target.createEvent(js, kAbortEvent),
       effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 }
 

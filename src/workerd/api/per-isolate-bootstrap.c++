@@ -581,7 +581,9 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
 }
 
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
-  auto& state = getBootstrapState(js);
+  auto& state = KJ_UNWRAP_OR(jsg::getAlignedPointerFromEmbedderData<BootstrapState>(
+                                 js.v8Context(), jsg::ContextPointerSlot::BOOTSTRAP_STATE),
+      return kj::none);
   auto normalized = normalizeSpecifier(specifier);
 
   // The cache is populated by require() calls during bootstrap. If the module

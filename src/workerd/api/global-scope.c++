@@ -15,6 +15,7 @@
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/http.h>
+#include <workerd/api/js-event-target.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -225,7 +226,7 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
         // If async context tracking is enabled, then we need to ensure that we enter the frame
         // associated with the promise before we invoke the unhandled rejection callback handling.
         auto ev = js.alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
-        dispatchEventImpl(js, kj::mv(ev));
+        JsEventTarget::from(js, *this).dispatch(js, kj::mv(ev));
       }) {}
 
 void ServiceWorkerGlobalScope::clear() {
@@ -469,7 +470,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
   } else {
     // Fire off the handlers.
-    useDefaultHandling = dispatchEventImpl(lock, event.addRef()).result;
+    useDefaultHandling = JsEventTarget::from(lock, *this).dispatch(lock, event.addRef()).result;
   }
 
   if (useDefaultHandling) {
@@ -590,8 +591,9 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
     // We only create both events here.
     auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kjc, traces);
     auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kjc, traces);
-    dispatchEventImpl(lock, tailEvent.addRef());
-    dispatchEventImpl(lock, traceEvent.addRef());
+    auto target = JsEventTarget::from(lock, *this);
+    target.dispatch(lock, tailEvent.addRef());
+    target.dispatch(lock, traceEvent.addRef());
 
     // We assume no action is necessary for "default" trace handling.
   }
@@ -631,14 +633,15 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
     }
   } else {
     // Fire off the handlers after confirming there is at least one.
-    if (getHandlerCount("scheduled") == 0) {
+    auto target = JsEventTarget::from(lock, *this);
+    if (target.getListenerCount(lock, "scheduled"_kj) == 0) {
       lock.logWarningOnce(
           "Received a ScheduledEvent but we lack an event listener for scheduled events "
           "(a.k.a. Cron Triggers). Did you remember to call addEventListener(\"scheduled\", ...)?");
       context.setNoRetryScheduled();
       JSG_FAIL_REQUIRE(Error, "No event listener registered for scheduled events.");
     }
-    dispatchEventImpl(lock, event.addRef());
+    target.dispatch(lock, event.addRef());
   }
 }
 
@@ -1050,8 +1053,10 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
     jsg::V8Ref<v8::Promise> promise,
     jsg::Value value) {
 
-  const auto hasHandlers = [this] {
-    return getHandlerCount("unhandledrejection"_kj) + getHandlerCount("rejectionhandled"_kj);
+  const auto hasHandlers = [this, &js] {
+    auto target = JsEventTarget::from(js, *this);
+    return target.getListenerCount(js, "unhandledrejection"_kj) +
+        target.getListenerCount(js, "rejectionhandled"_kj);
   };
 
   const auto hasInspector = [] {
@@ -1321,8 +1326,9 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
     .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
     .colno = jsg::check(message->GetStartColumn(js.v8Context())),
     .error = jsg::JsRef(js, error)});
-  if (dispatchEventImpl(
-          js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
+  if (JsEventTarget::from(js, *this)
+          .dispatch(
+              js, kj::mv(event), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT))
           .result) {
     logError(error);
   }

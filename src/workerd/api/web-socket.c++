@@ -6,6 +6,7 @@
 
 #include "blob.h"
 #include "events.h"
+#include "js-event-target.h"
 #include "messagechannel.h"
 #include "util.h"
 
@@ -34,10 +35,10 @@ namespace {
 // exception, if any, so the caller's fail-fast error path engages and errors out the
 // WebSocket. When the compat flag is not set, falls back to PROPAGATE (the old behavior,
 // where the first throwing listener ends the dispatch and the exception propagates directly).
-void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
+void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, JsEvent event) {
   auto policy =
       EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT);
-  auto result = shell.dispatchEventImpl(js, kj::mv(event), policy);
+  auto result = JsEventTarget::from(js, shell).dispatch(js, kj::mv(event), policy);
   KJ_IF_SOME(exception, result.firstException) {
     js.throwException(exception.getHandle(js));
   }
@@ -49,8 +50,8 @@ void dispatchWithFailFast(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event
 // again is useless, and rethrowing would only re-surface an already-reported exception
 // into terminal plumbing (and skip the cleanup that follows the dispatch). When the compat
 // flag is not set, falls back to PROPAGATE (the old behavior).
-void dispatchReportOnly(jsg::Lock& js, WebSocket& shell, jsg::Ref<Event> event) {
-  shell.dispatchEventImpl(js, kj::mv(event),
+void dispatchReportOnly(jsg::Lock& js, WebSocket& shell, JsEvent event) {
+  JsEventTarget::from(js, shell).dispatch(js, kj::mv(event),
       EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
 }
 
@@ -1169,7 +1170,7 @@ kj::Maybe<kj::Date> LegacyWebSocketAdapter::getAutoResponseTimestamp() {
 
 void LegacyWebSocketAdapter::dispatchOpen(jsg::Lock& js) {
   constexpr kj::StringPtr kOpenEvent = "open"_kj;
-  dispatchWithFailFast(js, shell, js.alloc<Event>(kOpenEvent, Event::Init{}, Trusted::YES));
+  dispatchWithFailFast(js, shell, JsEventTarget::from(js, shell).createEvent(js, kOpenEvent));
 }
 
 void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
@@ -1598,10 +1599,9 @@ void LegacyWebSocketAdapter::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue>
     // Report-only dispatch: the WebSocket is already errored out at this point, so a
     // throwing 'error' listener has its exception reported but triggers no further
     // fail-fast reaction.
-    shell.dispatchEventImpl(js,
+    dispatchReportOnly(js, shell,
         js.alloc<ErrorEvent>(
-            ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}),
-        EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
+            ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
   }
 
   // After an error we don't allow further send()s. If the receive loop has also ended then we

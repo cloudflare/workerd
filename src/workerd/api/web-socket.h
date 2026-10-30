@@ -888,7 +888,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // ---------------------------------------------------------------------------
 
   // Back-reference to the JSG-visible shell. Used to dispatch events
-  // (`shell.dispatchEventImpl(...)`) and to build a strong `jsg::Ref<WebSocket>` from
+  // (`JsEventTarget::from(js, shell)`) and to build a strong `jsg::Ref<WebSocket>` from
   // within adapter coroutines (`jsg::_jsgThis(&shell)`). The shell strictly outlives
   // this adapter — the adapter is owned by `shell.impl`.
   WebSocket& shell;

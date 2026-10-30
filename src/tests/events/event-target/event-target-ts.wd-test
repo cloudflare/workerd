@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventTargetModules = import "event-target-modules.capnp";
+
+# Runs the EventTarget suite against the TypeScript implementation, with
+# byte-for-byte the same modules as event-target-cpp.wd-test. The semantic
+# flags pinned there are deliberately absent: the TypeScript implementation
+# hard-codes the modern behaviors, and the `@` / `@all-compat-flags`
+# variants verify that indifference with the flags all off and all on.
+# enable_weak_ref is the tests' own need (gc.js), not the implementation's.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-event-target-ts",
+      worker = (
+        modules = EventTargetModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_events",
+          "experimental",
+          "enable_weak_ref",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

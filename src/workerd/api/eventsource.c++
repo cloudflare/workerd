@@ -5,6 +5,7 @@
 #include "eventsource.h"
 
 #include "http.h"
+#include "js-event-target.h"
 #include "messagechannel.h"
 #include "streams/common.h"
 
@@ -308,7 +309,7 @@ void EventSource::notifyError(
   // Dispatch the error event. Report-only: the EventSource is already errored out at this
   // point, so a throwing 'error' listener has its exception reported but triggers no
   // further fail-fast reaction.
-  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error),
+  JsEventTarget::from(js, *this).dispatch(js, js.alloc<ErrorEvent>(js, error),
       effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
 
   if (alreadyReported == AlreadyReported::NO) {
@@ -321,7 +322,7 @@ void EventSource::notifyOpen(jsg::Lock& js) {
   getContext();
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
-  auto result = dispatchEventImpl(
+  auto result = JsEventTarget::from(js, *this).dispatch(
       js, js.alloc<OpenEvent>(), effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT));
   KJ_IF_SOME(exception, result.firstException) {
     // An 'open' listener threw. Its exception was reported (and the remaining listeners
@@ -333,6 +334,7 @@ void EventSource::notifyOpen(jsg::Lock& js) {
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
   getContext();
   if (readyState == State::CLOSED) return;
+  auto target = JsEventTarget::from(js, *this);
   auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
   // Under PROPAGATE (spec_compliant_dispatch_exceptions disabled), the first throwing
   // listener ends the dispatch and its exception lands in the catch handler below, which
@@ -343,7 +345,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
       kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
-      auto result = dispatchEventImpl(js,
+      auto result = target.dispatch(js,
           js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
               kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; }),
               Trusted::YES),

@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# dont_substitute_null_on_type_error a primitive listener is taken as null,
+# without set_event_target_this a function listener's `this` is the global,
+# without workers_api_getters_setters_on_prototype srcElement reads the
+# current target, and without set_tostring_tag EventTarget is not branded.
+# Without spec_compliant_dispatch_exceptions the first listener exception
+# propagates, which src/workerd/api/tests/legacy-dispatch-exceptions-test.js
+# guards. The BUILD rule disables the @all-compat-flags variant, which would
+# turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-event-target-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-listener-conversion", esModule = embed "legacy-listener-conversion.js"),
+          (name = "legacy-listener-this", esModule = embed "legacy-listener-this.js"),
+          (name = "legacy-dispatch-attributes", esModule = embed "legacy-dispatch-attributes.js"),
+          (name = "legacy-to-string-tag", esModule = embed "legacy-to-string-tag.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
