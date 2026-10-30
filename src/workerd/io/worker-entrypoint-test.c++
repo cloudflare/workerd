@@ -624,6 +624,49 @@ KJ_TEST("actor fetch marks retryable failures of any type as delivered") {
   KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
 }
 
+// A Durable Object whose fetch handler never returns.
+constexpr kj::StringPtr HANGING_FETCH_ACTOR_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    fetch() {
+      globalThis.events += "fetch;";
+      return new Promise(() => {});
+    }
+  }
+)SCRIPT"_kj;
+
+KJ_TEST("aborting an actor fails its in-flight events as delivered") {
+  TestFixture fixture({
+    .mainModuleSource = HANGING_FETCH_ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("abort-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream requestBody;
+  TestResponse response;
+  auto request =
+      entrypoint->request(
+                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+          .eagerlyEvaluate(nullptr);
+  fixture.getWaitScope().poll();
+  KJ_EXPECT(getJsEvents(fixture) == "fetch;");
+
+  auto reason = KJ_EXCEPTION(DISCONNECTED, "jsg.Error: superseded");
+  // A position carried by the reason describes some other request, not the canceled one.
+  jsg::markActorRequestNotDelivered(reason);
+  fixture.getActor().abort(reason);
+
+  auto e =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { request.wait(fixture.getWaitScope()); }));
+  KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  KJ_EXPECT(e.getDescription() == "jsg.Error: superseded", e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+}
+
 KJ_TEST("fetch claims once even without a fetch handler") {
   // The claim precedes the handler lookup, so a worker without a fetch handler still claims, once,
   // before the request fails.

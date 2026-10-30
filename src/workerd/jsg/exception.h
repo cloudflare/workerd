@@ -211,6 +211,33 @@ inline void markActorRequestNotDelivered(kj::Exception& exception) {
 // boundary. The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID = 0x7f6e0bece261e8eeull;
 
+// Where an actor call stood when it failed, for the caller-side actor-call classifier.
+enum class ActorDeliveryPosition {
+  // The call had reached the actor, so user code may have run. It must not be retried as a
+  // delivery failure.
+  MAY_HAVE_RUN_USER_CODE,
+  // The call never reached the actor, so it is safe to retry.
+  NOT_DELIVERED,
+};
+
+// Marks a failed actor call with its delivery position, replacing any position it already
+// carried, such as one from the request whose failure the exception describes. Only DISCONNECTED
+// failures carry a position: the classifier does not retry any other type as a delivery failure.
+inline void setActorDeliveryPosition(kj::Exception& exception, ActorDeliveryPosition position) {
+  if (exception.getType() != kj::Exception::Type::DISCONNECTED) return;
+  exception.releaseDetail(REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID);
+  exception.releaseDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+  switch (position) {
+    case ActorDeliveryPosition::MAY_HAVE_RUN_USER_CODE:
+      exception.setDetail(REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      return;
+    case ActorDeliveryPosition::NOT_DELIVERED:
+      markActorRequestNotDelivered(exception);
+      return;
+  }
+  KJ_UNREACHABLE;
+}
+
 // Set when an actor invocation is rejected before its handler or method runs because its retry
 // token could not be claimed. The actor constructor may already have run. This distinguishes a
 // terminal claim rejection from other delivery failures. The payload is a zero-length array (marker
