@@ -1,0 +1,19 @@
+src/workerd/io/tracer-test.c++
+  s_6d8d1659fe0481::t_4c55eb684201db 1-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "27fb47ae81e6836d1008608e67f3fb84388251c5",
+  "prompts": {},
+  "sessions": {
+    "s_6d8d1659fe0481": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e87bc33fbffePzoYe75dj2441T",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "William Perron <wperron@cloudflare.com>"
+    }
+  }
+}
