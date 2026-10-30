@@ -23,6 +23,7 @@ mod promise;
 pub mod resource;
 mod scope;
 pub mod ser;
+mod string;
 pub mod v8;
 mod wrappable;
 
@@ -69,6 +70,7 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use string::JsString;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
@@ -567,7 +569,7 @@ impl<T> Deref for NonCoercible<T> {
 /// a coarse test. The trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
 pub trait Coercible: Type + coercible::Sealed {}
 

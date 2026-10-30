@@ -3237,7 +3237,8 @@ impl<'s> Local<'s, String> {
     /// Writes the string as UTF-8 into `buffer`.
     ///
     /// Returns the number of bytes written. `flags` is a combination of
-    /// [`WriteFlags`] constants.
+    /// [`WriteFlags`] constants. Use [`WriteFlags::ReplaceInvalidUtf8`] to replace lone
+    /// surrogates with U+FFFD; without it, they are written as WTF-8, not valid UTF-8.
     ///
     /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
@@ -3264,19 +3265,14 @@ impl<'s> Local<'s, String> {
 
     /// Decodes the string to an owned Rust `String` via UTF-8.
     ///
-    /// Allocates a buffer using `utf8_length`, writes into it, and converts.
+    /// Replaces each lone UTF-16 surrogate with U+FFFD.
     pub fn to_string(&self, lock: &mut crate::Lock) -> std::string::String {
         let byte_len = self.utf8_length(lock);
         let mut buf = vec![0u8; byte_len];
-        let written = self.write_utf8(lock, &mut buf, WriteFlags::None);
+        let written = self.write_utf8(lock, &mut buf, WriteFlags::ReplaceInvalidUtf8);
         buf.truncate(written);
-        // V8 guarantees valid UTF-8 output when REPLACE_INVALID_UTF8 is not set and
-        // the string was originally created from valid data. Use from_utf8 to avoid a
-        // redundant allocation in the common (valid UTF-8) case; fall back to
-        // from_utf8_lossy only when the bytes are not valid UTF-8 (e.g. two-byte strings
-        // with unpaired surrogates).
         std::string::String::from_utf8(buf)
-            .unwrap_or_else(|e| std::string::String::from_utf8_lossy(e.as_bytes()).into_owned())
+            .unwrap_or_else(|_| unreachable!("V8 guarantees valid UTF-8 with ReplaceInvalidUtf8"))
     }
 
     // -------------------------------------------------------------------------
