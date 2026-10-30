@@ -164,7 +164,7 @@ impl ActorNamespace {
 
     /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
     pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
-        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms);
+        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
         Ok(())
     }
 
