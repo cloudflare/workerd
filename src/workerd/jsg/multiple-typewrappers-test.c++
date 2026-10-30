@@ -116,6 +116,7 @@ void expectEval(
     return;
   }
 
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only stringifies what was thrown.
   v8::TryCatch catcher(js.v8Isolate);
 
   // Run the script to get the result.

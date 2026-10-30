@@ -131,7 +131,7 @@ fn set_resource(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, base: i32) {
         touched: Cell::new(0),
     });
     ctx.set_global(lock, "r", resource);
-    let constructor = jsg::resource::function_template_of::<FastResource>(lock);
+    let constructor = jsg::resource::function_template_of::<FastResource>(lock).unwrap();
     ctx.set_global(lock, "FastResource", constructor);
 }
 

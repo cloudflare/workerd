@@ -2889,6 +2889,7 @@ class Lock {
     Value error = nullptr;
 
     {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): the handler runs after its scope ends.
       v8::TryCatch tryCatch(v8Isolate);
       try {
         return func();
@@ -3584,6 +3585,7 @@ class JsgCatchScope {
 
   // Simple wrapper to work around v8::TryCatch's deleted operator new.
   struct Holder {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): catchException() destroys it before the handler.
     v8::TryCatch tryCatch;
     explicit Holder(v8::Isolate* isolate): tryCatch(isolate) {}
   };

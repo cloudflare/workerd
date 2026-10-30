@@ -56,6 +56,7 @@ In Rust:
 - `jsg::Ref<T>` is not `Send` — it holds `Rc` and `UnsafeCell`. Flag any path that moves one across threads, and any `unsafe impl Send`/`Sync` whose justification is missing or does not hold.
 - `Ref<T>`, `Option<Ref<T>>` and `Nullable<Ref<T>>` on a `#[jsg_resource]` are traced for GC; `WeakRef<T>` is not. A resource holding an untraced strong reference is a use-after-free once the child is collected early.
 - `Local::from_ffi()`, `Local::into_ffi()` and isolate pointer dereferences are sound only with the isolate locked and a handle scope active.
+- Rust JSG's C++ shims (`src/rust/jsg/ffi.c++`) check `exceptionPending()` before calling a V8 API that takes a `v8::Local<v8::Context>` or uses the current one, or say in a comment why they needn't, and never throw while execution is terminating. Creating strings, numbers, objects, arrays, error objects or templates while an exception or a termination is pending is safe; don't flag it.
 
 ## Output
 

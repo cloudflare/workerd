@@ -1923,10 +1923,12 @@ KJ_TEST("ReadableStream handles execution termination during read") {
   preamble([](jsg::Lock& js) {
     // We need to handle termination at this level because the context scope
     // will propagate the termination exception.
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: catches the termination it injects.
     v8::TryCatch outerTryCatch(js.v8Isolate);
     bool testCompleted = false;
 
     try {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: catches the termination it injects.
       v8::TryCatch tryCatch(js.v8Isolate);
 
       auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
@@ -1980,6 +1982,7 @@ KJ_TEST("ReadableStream handles execution termination during read") {
 // touch the released source.
 KJ_TEST("WritableStream pipe survives termination in the source's cancel algorithm") {
   preamble([](jsg::Lock& js) {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: catches the termination it injects.
     v8::TryCatch outerTryCatch(js.v8Isolate);
 
     auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());

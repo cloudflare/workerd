@@ -75,6 +75,11 @@ mod ffi {
             code: &str,
             resource_name: KjMaybe<&str>,
         ) -> EvalResult;
+        /// Catches an exception with a `v8::TryCatch`, then evaluates `code` without resetting
+        /// it. See `eval_with_caught_exception` in `ffi.h`.
+        #[expect(clippy::allow_attributes)] // Only used with debug assertions
+        #[allow(dead_code)]
+        pub unsafe fn eval_with_caught_exception(self: &EvalContext, code: &str) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
         /// Has `register_modules` add builtin modules, then calls the callback of the one named
         /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
@@ -292,6 +297,20 @@ impl EvalContext<'_> {
     ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
         // SAFETY: self.inner is a valid EvalContext from C++; code and resource_name are valid strs.
         let result = unsafe { self.inner.eval(code, Some(resource_name).into()) };
+        Self::raw_result(lock, result)
+    }
+
+    /// Like [`EvalContext::eval_raw`], but first catches an exception with a C++ `v8::TryCatch`,
+    /// which still holds it while `code` runs.
+    #[expect(clippy::allow_attributes)] // Only used with debug assertions
+    #[allow(dead_code)]
+    pub fn eval_with_caught_exception<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        code: &str,
+    ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
+        // SAFETY: self.inner is a valid EvalContext from C++; code is a valid str.
+        let result = unsafe { self.inner.eval_with_caught_exception(code) };
         Self::raw_result(lock, result)
     }
 

@@ -485,7 +485,7 @@ fn prototype_property_coexists_with_method() {
 fn prototype_property_coexists_with_static_constant() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let constructor = jsg::resource::function_template_of::<Counter>(lock);
+        let constructor = jsg::resource::function_template_of::<Counter>(lock).unwrap();
         ctx.set_global(lock, "Counter", constructor);
         let r = jsg::Rc::new(Counter::new(1, "x"));
         ctx.set_global(lock, "c", r);

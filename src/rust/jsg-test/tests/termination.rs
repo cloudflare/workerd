@@ -9,6 +9,8 @@
 //! Each method first has the harness deliver a termination, as a call into JavaScript that ran
 //! out of CPU time would, so that the termination exception is pending when the method goes on.
 
+use std::cell::Cell;
+
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -147,11 +149,29 @@ fn termination_survives(method: &str) {
 
 /// [`termination_survives`] in `harness`.
 fn termination_survives_in(harness: &crate::Harness, method: &str) {
+    termination_survives_call(
+        harness,
+        jsg::Rc::new(Terminator),
+        &format!("{method}()"),
+        |_, _| {},
+    );
+}
+
+/// Evaluates `obj.{call}` in `harness` from inside a JavaScript `try`/`catch`, and checks that the
+/// termination reaches the harness: the script fails without a catchable exception, and neither
+/// the `catch` block nor the code after it runs. Then runs `check`, once V8 has cleared the
+/// termination.
+fn termination_survives_call<R: jsg::Resource + 'static>(
+    harness: &crate::Harness,
+    obj: jsg::Rc<R>,
+    call: &str,
+    check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
+) {
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "obj", jsg::Rc::new(Terminator));
+        ctx.set_global(lock, "obj", obj);
         let script = format!(
             "globalThis.caught = 'nothing'; globalThis.after = false;
-             try {{ obj.{method}(); }} catch (e) {{ globalThis.caught = String(e); }}
+             try {{ obj.{call}; }} catch (e) {{ globalThis.caught = String(e); }}
              globalThis.after = true;"
         );
         match ctx.eval_raw(lock, &script) {
@@ -159,10 +179,10 @@ fn termination_survives_in(harness: &crate::Harness, method: &str) {
             Err(crate::EvalError::Exception(exception)) => {
                 assert!(
                     exception.is_null(),
-                    "{method}: the termination was replaced by a catchable exception"
+                    "{call}: the termination was replaced by a catchable exception"
                 );
             }
-            other => panic!("{method}: the script was not terminated: {other:?}"),
+            other => panic!("{call}: the script was not terminated: {other:?}"),
         }
         // V8 clears a termination once the last JavaScript frame has unwound, so the isolate
         // runs JavaScript again.
@@ -170,12 +190,13 @@ fn termination_survives_in(harness: &crate::Harness, method: &str) {
         assert_eq!(
             ctx.eval::<String>(lock, "globalThis.caught").unwrap(),
             "nothing",
-            "{method}: JavaScript caught the termination"
+            "{call}: JavaScript caught the termination"
         );
         assert!(
             !ctx.eval::<bool>(lock, "globalThis.after").unwrap(),
-            "{method}: JavaScript ran on after the termination"
+            "{call}: JavaScript ran on after the termination"
         );
+        check(lock, ctx);
         Ok(())
     });
 }
@@ -245,4 +266,102 @@ fn returning_a_wrapped_resource_while_terminating_keeps_the_termination() {
 #[test]
 fn returning_a_big_int_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenReturnBigInt");
+}
+
+/// A resource type that nothing uses before `terminateThenGetConstructor`, so that getting its
+/// constructor creates its template.
+#[jsg_resource]
+struct Fresh;
+
+#[jsg_resource]
+impl Fresh {}
+
+/// Is terminated and then uses a shim that checks `exceptionPending()` (`ffi.c++`) before it
+/// calls a V8 API that takes a context. The operation fails with a pending error, calls nothing
+/// in V8, and the termination keeps propagating. A call, a `Date`, a resource's wrapper and the
+/// conversions are tested above, in `resource_callback.rs` and in `coercion_safety.rs`.
+#[jsg_resource]
+struct Guarded {
+    /// Whether the operation failed with a pending error.
+    saw_pending: Cell<Option<bool>>,
+}
+
+#[jsg_resource]
+impl Guarded {
+    fn record<T>(&self, result: &Result<T, jsg::Error>) {
+        self.saw_pending
+            .set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
+    }
+
+    /// Is terminated and then gets the constructor of a resource type, which creates the
+    /// type's template (fine while terminating) and then its constructor function (not fine:
+    /// `FunctionTemplate::GetFunction` prepares to run JavaScript).
+    #[jsg_method]
+    fn terminate_then_get_constructor(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = jsg::resource::function_template_of::<Fresh>(lock).map(drop);
+        self.record(&result);
+        result
+    }
+
+    /// Is terminated and then converts `value` with `Utf8Value`, whose `toString` must not run.
+    #[jsg_method]
+    fn terminate_then_utf8_value<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: jsg::v8::Local<'s, jsg::v8::Value>,
+    ) {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = jsg::v8::Utf8Value::new(lock, &value);
+        self.record(&result);
+    }
+
+    /// Is terminated and then detaches a new `ArrayBuffer`, which leaves it attached:
+    /// `ArrayBuffer::Detach` runs no JavaScript, but V8 does not allow entering it while
+    /// execution is terminating.
+    #[jsg_method]
+    fn terminate_then_detach(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
+        crate::Harness::terminate_and_deliver(lock);
+        let buffer = jsg::v8::ArrayBuffer::new(lock, &[1u8]);
+        let result = buffer.detach(lock);
+        assert!(!buffer.was_detached());
+        self.record(&result);
+        result
+    }
+}
+
+/// Runs `call` on a `Guarded` as `termination_survives_call` does, and checks that the operation
+/// saw a pending error and that `check` holds afterwards.
+fn guarded_termination_survives(
+    call: &str,
+    check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
+) {
+    let guarded = jsg::Rc::new(Guarded {
+        saw_pending: Cell::new(None),
+    });
+    termination_survives_call(&crate::Harness::new(), guarded.clone(), call, check);
+    assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
+}
+
+#[test]
+fn getting_a_constructor_while_terminating_keeps_the_termination() {
+    guarded_termination_survives("terminateThenGetConstructor()", |_, _| {});
+}
+
+#[test]
+fn detaching_while_terminating_keeps_the_termination() {
+    guarded_termination_survives("terminateThenDetach()", |_, _| {});
+}
+
+#[test]
+fn utf8_value_while_terminating_runs_nothing() {
+    guarded_termination_survives(
+        "terminateThenUtf8Value({ toString() { globalThis.stringified = true; return 'x'; } })",
+        |lock, ctx| {
+            assert!(
+                !ctx.eval::<bool>(lock, "globalThis.stringified === true")
+                    .unwrap()
+            );
+        },
+    );
 }

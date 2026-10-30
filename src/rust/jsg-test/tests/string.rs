@@ -365,7 +365,7 @@ fn utf8_value_length_matches_byte_count() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello".to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), 5);
         Ok(())
     });
@@ -376,7 +376,7 @@ fn utf8_value_as_str_returns_correct_content() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello world".to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_str(), Some("hello world"));
         Ok(())
     });
@@ -388,7 +388,7 @@ fn utf8_value_as_bytes_matches_utf8_encoding() {
     harness.run_in_context(|lock, _ctx| {
         let input = "Rust 🦀";
         let val: Local<'_, Value> = input.to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_bytes(), input.as_bytes());
         Ok(())
     });
@@ -400,7 +400,7 @@ fn utf8_value_from_unicode_string() {
     harness.run_in_context(|lock, _ctx| {
         let input = "こんにちは";
         let val: Local<'_, Value> = input.to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), input.len());
         assert_eq!(utf8.as_str(), Some(input));
         Ok(())
@@ -412,7 +412,7 @@ fn utf8_value_from_empty_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "".to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), 0);
         assert_eq!(utf8.as_str(), Some(""));
         Ok(())
@@ -424,7 +424,7 @@ fn utf8_value_as_ptr_is_non_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "test".to_js(lock)?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert!(!utf8.as_ptr().is_null());
         Ok(())
     });
@@ -437,10 +437,53 @@ fn utf8_value_coerces_number_to_string() {
         let val = ctx
             .eval_raw(lock, "42")
             .map_err(|e| e.unwrap_jsg_err(lock))?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_str(), Some("42"));
         Ok(())
     });
+}
+
+/// Converts the value of `expression` with `Utf8Value`, and returns what the conversion threw.
+fn utf8_value_throws(expression: &str) -> std::string::String {
+    let harness = crate::Harness::new();
+    let mut thrown = None;
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx
+            .eval_raw(lock, expression)
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
+        let exception = lock
+            .try_catch(|lock| {
+                let result = Utf8Value::new(lock, &val);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result.map(drop)
+            })?
+            .unwrap_err();
+        let exception = jsg::v8::Local::<jsg::v8::Object>::try_from(exception).unwrap();
+        let message = exception.get(lock, "message")?;
+        thrown = Some(<std::string::String as jsg::FromJS>::from_js(
+            lock, message,
+        )?);
+        Ok(())
+    });
+    thrown.unwrap()
+}
+
+/// A `Symbol` doesn't convert: V8's `ToString` throws a `TypeError`, which stays pending.
+#[test]
+fn utf8_value_of_symbol_throws() {
+    assert_eq!(
+        utf8_value_throws("Symbol('s')"),
+        "Cannot convert a Symbol value to a string"
+    );
+}
+
+/// What a `toString` throws stays pending, rather than being discarded.
+#[test]
+fn utf8_value_passes_on_what_to_string_throws() {
+    assert_eq!(
+        utf8_value_throws("({ toString() { throw new RangeError('from toString'); } })"),
+        "from toString"
+    );
 }
 
 // =============================================================================
