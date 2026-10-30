@@ -65,5 +65,23 @@ KJ_TEST("SQLite-METADATA") {
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime2);
 }
 
+KJ_TEST("SQLite-METADATA reads throw after close()") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteMetadata metadata(db);
+
+  constexpr kj::Date anAlarmTime = kj::UNIX_EPOCH + 1734099316 * kj::SECONDS;
+  metadata.setAlarm(anAlarmTime, /*allowUnconfirmed=*/false);
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime);
+
+  db.close();
+
+  // Unlike reset(), close() must not make the alarm appear unset: the file still has it.
+  KJ_EXPECT_THROW_MESSAGE("database has been closed", metadata.getAlarm());
+  KJ_EXPECT_THROW_MESSAGE(
+      "database has been closed", metadata.setAlarm(kj::none, /*allowUnconfirmed=*/false));
+}
+
 }  // namespace
 }  // namespace workerd

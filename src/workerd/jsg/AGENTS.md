@@ -76,14 +76,19 @@ The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
 
 - **NEVER** opaque-wrap `V8Ref<T>` — use handle directly
 - **NEVER** use v8::Context embedder data slot 0 (`ContextPointerSlot::RESERVED`)
-- **NEVER** hold traced handles (`Ref<T>`/`V8Ref<T>`) without marking in `visitForGc` — causes GC corruption
+- **NEVER** move a container of visited handles (`auto list = kj::mv(pending)`) without moving
+  each element — the elements stay traced but are no longer visited, causing use-after-free.
+  Use `KJ_MAP(item, pending) { return kj::mv(item); }` or similar (see `visitForGc()` docs in
+  `jsg.h`)
+- **NEVER** silence `jsg-visit-for-gc` by blindly adding a visit — visiting is only safe when
+  the holder is traversed on every GC cycle; deliberate strong roots get a `NOLINT` (invariant 11)
 - **NEVER** use `FastOneByteString` in a Fast API method unless the whole signature satisfies
   `FastApiNoScopeMethod` (fast-api.h) — its `data` pointer dies at the next GC, and unwrapping
   any other argument can trigger one (#4625). `FastApiArgType` enforces this; don't bypass it
 - **NEVER** unwrap `Ref<Object>` — use `V8Ref<v8::Object>` instead
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs
-- Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`
+- Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`. The Rust `Realm` sets `IsolateBase::setDeferredActionHook()`, which `applyDeferredActions()` calls whenever an `IsolateBase::Lock` is taken, to release the handles of Rust `Global`s dropped without the lock, and, when it is dropped, `setDisposeHook()`, which `~IsolateBase()` calls after `Dispose()` to free the handle slots of Rust `Global`s dropped after the Realm, which V8 may write into until then
 
 ## INVARIANTS
 
@@ -92,7 +97,8 @@ These rules MUST be followed when writing or modifying JSG code:
 1. **MUST implement `visitForGc()`** on any Resource Type holding `Ref<T>`, `V8Ref<T>`,
    `JsRef<T>`, `Function<T>`, `Promise<T>`, or `Promise<T>::Resolver` — see
    `README.md` §GC-Visitable Types for the complete list
-2. **MUST visit ALL GC-visitable fields** — missing one causes GC corruption
+2. **MUST visit ALL GC-visitable fields** reachable from the wrapper — an unvisited handle
+   is a strong root, so missing one causes a leak (not use-after-free) when it forms a cycle
 3. **MUST NOT store `v8::Local<T>` or `JsValue` types as class members** — use `V8Ref<T>`
    or `JsRef<T>` for persistence
 4. **MUST NOT put `v8::Global<T>` or `v8::Local<T>` in `JSG_STRUCT` fields** — use
@@ -128,9 +134,16 @@ These rules MUST be followed when writing or modifying JSG code:
     in the slot key used by `CompiledWasmModuleHolder::getOrCompile()` in
     `modules.c++`. Keep its slot selection and `compiled` storage in `modules.h`
     consistent with `compileWasmModule()`. The current key is
-    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. Extend the reuse tests in
-    `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++` when adding a
-    setting, including isolate destruction and a distinct compilation per setting.
+    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. The source URL that
+    `Lock::isWasmSourceUrlSupportEnabled()` controls is not part of the key: it
+    changes no generated code, and the holder compiles without one. Extend the
+    reuse tests in `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++`
+    when adding a setting, including isolate destruction and a distinct
+    compilation per setting. Modules passed to the Worker Loader already compiled
+    are reused by `sharedCompiledWasmModule()` in `io/worker-modules.h`, which
+    must check the same settings. It never reuses a module when either isolate
+    has `wasm_source_url_support`, because the URL is the module's name in the
+    loaded Worker's bundle.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

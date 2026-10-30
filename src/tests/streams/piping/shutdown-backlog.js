@@ -11,7 +11,9 @@
 // the destination queue before the shutdown and waits for those writes
 // (spec); C++ reads and writes one chunk at a time (ledger #11). After a
 // non-fatal write rejection C++ has already read, and drops, the next
-// chunk (ledger #12).
+// chunk (ledger #12). An invalid chunk that fails a pipe waiting to close
+// its destination leaves the destination open under TypeScript with
+// preventAbort, while C++ errors it (ledger #17).
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -170,5 +172,54 @@ export const invalidChunkWithBacklogEndsPipe = {
     strictEqual(outcome.reason.name, 'TypeError');
     const remaining = usingTsImpl ? ['x1', 'x2', 'x3'] : ['x2', 'x3'];
     deepStrictEqual(await readValues(rs, remaining.length), remaining);
+  },
+};
+
+// An invalid chunk last in the source: with the destination's
+// highWaterMark in bytes, the pipe writes both chunks and sees the source
+// close in one batch, so the invalid write's non-fatal rejection arrives
+// while the pipe waits for its writes before closing the destination. The
+// pipe fails with it instead, and releases both streams. TypeScript aborts
+// the destination, or with preventAbort and preventCancel leaves it open;
+// in C++ the invalid write errors the identity stream either way (ledger
+// #17).
+export const invalidLastChunkFailsClosingPipe = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    const invalid = {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'IdentityTransformStream: chunk must be a BufferSource or string'
+        : 'This WritableStream only supports writing byte types.',
+    };
+    for (const options of [{}, { preventAbort: true, preventCancel: true }]) {
+      const rs = new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode('before'));
+          c.enqueue(42);
+          c.close();
+        },
+      });
+      const { readable, writable } = new IdentityTransformStream({
+        highWaterMark: 1024,
+      });
+      const pipeP = rs.pipeTo(writable, options);
+      const reader = readable.getReader();
+      strictEqual(dec.decode((await reader.read()).value), 'before');
+      const next = await outcomeOf(reader.read());
+      if (usingTsImpl && options.preventAbort) {
+        strictEqual(next.state, 'pending');
+      } else {
+        strictEqual(next.state, 'rejected');
+        strictEqual(next.reason.message, invalid.message);
+      }
+      const outcome = await outcomeOf(pipeP);
+      strictEqual(outcome.state, 'rejected');
+      strictEqual(outcome.reason.name, invalid.name);
+      strictEqual(outcome.reason.message, invalid.message);
+      strictEqual(rs.locked, false);
+      strictEqual(writable.locked, false);
+    }
   },
 };

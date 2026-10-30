@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+using BodyModules = import "body-modules.capnp";
+
+# Runs the body benchmarks against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate),
+# with byte-for-byte the same modules as body-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-body-ts",
+      worker = (
+        modules = BodyModules.modules,
+        compatibilityFlags = ["typescript_implemented_streams"],
+        bindings = [
+          ( name = "SELF", service = "streams-body-ts" ),
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

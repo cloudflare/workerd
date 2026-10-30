@@ -50,6 +50,7 @@ include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
 include("//build/deps:pyodide.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
+include("//build/deps:llvm.MODULE.bazel")
 include("//build/deps:oci.MODULE.bazel")
 include("//build/deps/formatters:rustfmt.MODULE.bazel")
 

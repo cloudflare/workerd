@@ -15,26 +15,176 @@ namespace workerd::server {
 // =======================================================================================
 // ActorStorage
 
+namespace {
+
+// The directory a clustered namespace's SQLite opens its files through. Opening fails once this
+// instance's cluster lease has lapsed, and writes to a WAL are reported to the cluster, which cuts
+// commits from them. It has no fd, so SQLite uses the KJ VFS, on every platform.
+class ClusterDirectory final: public kj::Directory {
+ public:
+  ClusterDirectory(kj::Own<const kj::Directory> inner, const ActorNamespaceHandle& actors)
+      : inner(kj::mv(inner)),
+        actors(actors) {}
+
+  Metadata stat() const override {
+    return inner->stat();
+  }
+  void sync() const override {
+    inner->sync();
+  }
+  void datasync() const override {
+    inner->datasync();
+  }
+  kj::Own<const FsNode> cloneFsNode() const override {
+    return kj::heap<ClusterDirectory>(inner->clone(), actors);
+  }
+  kj::Array<kj::String> listNames() const override {
+    return inner->listNames();
+  }
+  kj::Array<Entry> listEntries() const override {
+    return inner->listEntries();
+  }
+  bool exists(kj::PathPtr path) const override {
+    return inner->exists(path);
+  }
+  kj::Maybe<Metadata> tryLstat(kj::PathPtr path) const override {
+    return inner->tryLstat(path);
+  }
+  kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
+    actors.check_open();
+    return inner->tryOpenFile(path);
+  }
+  kj::Maybe<kj::Own<const kj::ReadableDirectory>> tryOpenSubdir(kj::PathPtr path) const override {
+    return inner->tryOpenSubdir(path);
+  }
+  kj::Maybe<kj::String> tryReadlink(kj::PathPtr path) const override {
+    return inner->tryReadlink(path);
+  }
+  kj::Maybe<kj::Own<const kj::File>> tryOpenFile(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    actors.check_open();
+    auto name = path.toString();
+    return inner->tryOpenFile(path, mode)
+        .map([&](kj::Own<const kj::File>&& file) -> kj::Own<const kj::File> {
+      if (!name.endsWith(".sqlite-wal")) return kj::mv(file);
+      return kj::heap<WalFile>(kj::mv(file), kj::mv(name), actors);
+    });
+  }
+  kj::Own<Replacer<kj::File>> replaceFile(kj::PathPtr path, kj::WriteMode mode) const override {
+    return inner->replaceFile(path, mode);
+  }
+  kj::Own<const kj::File> createTemporary() const override {
+    actors.check_open();
+    return inner->createTemporary();
+  }
+  kj::Maybe<kj::Own<kj::AppendableFile>> tryAppendFile(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    return inner->tryAppendFile(path, mode);
+  }
+  kj::Maybe<kj::Own<const kj::Directory>> tryOpenSubdir(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    return inner->tryOpenSubdir(path, mode);
+  }
+  kj::Own<Replacer<kj::Directory>> replaceSubdir(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    return inner->replaceSubdir(path, mode);
+  }
+  bool trySymlink(kj::PathPtr linkpath, kj::StringPtr content, kj::WriteMode mode) const override {
+    return inner->trySymlink(linkpath, content, mode);
+  }
+  bool tryTransfer(kj::PathPtr toPath,
+      kj::WriteMode toMode,
+      const kj::Directory& fromDirectory,
+      kj::PathPtr fromPath,
+      kj::TransferMode mode) const override {
+    return inner->tryTransfer(toPath, toMode, fromDirectory, fromPath, mode);
+  }
+  bool tryRemove(kj::PathPtr path) const override {
+    return inner->tryRemove(path);
+  }
+
+ private:
+  // A WAL file: each write, once it succeeds, goes to the cluster.
+  class WalFile final: public kj::File {
+   public:
+    WalFile(kj::Own<const kj::File> inner, kj::String name, const ActorNamespaceHandle& actors)
+        : inner(kj::mv(inner)),
+          name(kj::mv(name)),
+          actors(actors) {}
+
+    Metadata stat() const override {
+      return inner->stat();
+    }
+    void sync() const override {
+      inner->sync();
+    }
+    void datasync() const override {
+      inner->datasync();
+    }
+    kj::Own<const FsNode> cloneFsNode() const override {
+      return kj::heap<WalFile>(inner->clone(), kj::str(name), actors);
+    }
+    size_t read(uint64_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+      return inner->read(offset, buffer);
+    }
+    kj::Array<const kj::byte> mmap(uint64_t offset, uint64_t size) const override {
+      return inner->mmap(offset, size);
+    }
+    kj::Array<kj::byte> mmapPrivate(uint64_t offset, uint64_t size) const override {
+      return inner->mmapPrivate(offset, size);
+    }
+    void write(uint64_t offset, kj::ArrayPtr<const kj::byte> data) const override {
+      inner->write(offset, data);
+      actors.wal_write(
+          toRust(name), offset, ::rust::Slice<const uint8_t>(data.begin(), data.size()));
+    }
+    void zero(uint64_t offset, uint64_t size) const override {
+      inner->zero(offset, size);
+    }
+    void truncate(uint64_t size) const override {
+      inner->truncate(size);
+    }
+    kj::Own<const kj::WritableFileMapping> mmapWritable(
+        uint64_t offset, uint64_t size) const override {
+      return inner->mmapWritable(offset, size);
+    }
+
+   private:
+    kj::Own<const kj::File> inner;
+    kj::String name;
+    const ActorNamespaceHandle& actors;
+  };
+
+  kj::Own<const kj::Directory> inner;
+  const ActorNamespaceHandle& actors;
+};
+
+}  // namespace
+
 ActorStorage::Impl::Impl(const WorkerFactory& factory,
     kj::Maybe<kj::Own<const kj::Directory>> directoryParam,
     kj::String uniqueKey,
-    ::rust::Box<ActorNamespaceHandle> actors)
-    : directory(kj::mv(directoryParam)),
+    ::rust::Box<ActorNamespaceHandle> actorsParam)
+    : actors(kj::mv(actorsParam)),
+      directory(kj::mv(directoryParam)),
       vfsDirectory(directory.map([](kj::Own<const kj::Directory>& d) { return d->clone(); })
                        .orDefault([&]() {
                          return kj::newInMemoryDirectory(kj::systemPreciseCalendarClock());
                        })),
-      vfs(*vfsDirectory),
+      sqliteDirectory(actors->replicated()
+              ? kj::heap<ClusterDirectory>(vfsDirectory->clone(), *actors)
+              : vfsDirectory->clone()),
+      vfs(*sqliteDirectory),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
           vfs,
           kj::Path({"metadata.sqlite"}),
-          [uniqueKey = this->uniqueKey.asPtr(), actors = kj::mv(actors)](
-              const ActorKey& actor) mutable -> kj::Own<WorkerInterface> {
+          [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
             // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
-            auto id = ActorIdFactoryImpl(uniqueKey).idFromStringNamed(
-                kj::str(actor.actorId), actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
+            auto id = ActorIdFactoryImpl(this->uniqueKey)
+                          .idFromStringNamed(kj::str(actor.actorId),
+                              actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
             return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
           })) {}
 
@@ -234,6 +384,9 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
   kj::Promise<void> scheduleRun(
       kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
     KJ_IF_SOME(scheduledTime, newAlarmTime) {
+      // TODO(cluster): an alarm must follow its object between instances.
+      JSG_REQUIRE(
+          !storage->actors->replicated(), Error, "Alarms are not yet supported in cluster mode.");
       storage->alarmScheduler->setAlarm(actor, scheduledTime);
     } else {
       storage->alarmScheduler->deleteAlarm(actor);
@@ -261,10 +414,11 @@ class FacetAlarmHooks final: public ActorSqlite::Hooks {
 Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl> storage,
     const ActorStorageSpec& spec,
     kj::String rootKey,
-    kj::Maybe<kj::String> actorName) {
+    kj::Maybe<kj::String> actorName,
+    kj::Maybe<::rust::Box<Committer>> committer) {
   return [storage = kj::mv(storage), durable = spec.durable, facetId = spec.facet_id,
-             rootKey = kj::mv(rootKey),
-             actorName = kj::mv(actorName)](const ActorCache::SharedLru& sharedLru,
+             rootKey = kj::mv(rootKey), actorName = kj::mv(actorName),
+             committer = kj::mv(committer)](const ActorCache::SharedLru& sharedLru,
              OutputGate& outputGate, ActorCache::Hooks& hooks,
              SqliteObserver& sqliteObserver) mutable -> kj::Maybe<kj::Own<ActorCacheInterface>> {
     if (!durable) return kj::none;
@@ -290,24 +444,39 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
     db->run("PRAGMA journal_mode=WAL;");
     db->afterReset([storage = kj::addRef(*storage), rootKey = kj::str(rootKey), selfId](
                        SqliteDatabase& db) mutable {
+      storage->actors->database_reset(toRust(rootKey));
       db.run("PRAGMA journal_mode=WAL;");
       storage->deleteDescendantStorage(*KJ_ASSERT_NONNULL(storage->directory), rootKey, selfId);
     });
-    return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-        [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
-        .attach(kj::mv(sqliteHooks));
+    kj::Function<kj::Promise<void>(SpanParent)> commit = [](SpanParent) -> kj::Promise<void> {
+      return kj::READY_NOW;
+    };
+    KJ_IF_SOME(c, committer) {
+      commit = [c = kj::mv(c)](
+                   SpanParent) -> kj::Promise<void> { return result_task_run(c->commit()); };
+      committer = kj::none;
+    }
+    auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks);
+    return sqlite.attach(kj::mv(sqliteHooks));
   };
 }
 
-// The Docker client of the container `id`: the live one, if an earlier incarnation of the actor
-// left it running (a `setInactivityTimeout()` timer holds it), else a new one for the class's
-// `container` options on its worker's `containerEngine`.
+// The Docker client of the container for the actor `actorKey` (`<uniqueKey>-<actorId>`): the live
+// one, if an earlier incarnation of the actor left it running (a `setInactivityTimeout()` timer
+// holds it), else a new one for the class's `container` options on its worker's `containerEngine`.
 kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
-    kj::String id,
+    kj::StringPtr actorKey,
     config::Worker::ContainerEngine::Reader engine,
     config::Worker::DurableObjectNamespace::ContainerOptions::Reader options) {
   KJ_REQUIRE(!factory.containerShutdownStarted,
       "cannot acquire a container client after graceful shutdown has begun");
+  KJ_REQUIRE(engine.isLocalDocker(),
+      "dockerPath must be defined to enable containers on this Durable Object.");
+  auto docker = engine.getLocalDocker();
+  // Unique per namespace and actor across the machine, and per session if there is one.
+  auto session = docker.getSessionId();
+  auto id = session.size() > 0 ? kj::str("workerd-", session, "-", actorKey)
+                               : kj::str("workerd-", actorKey);
   auto& state = *factory.containers.findOrCreate(id, [&]() {
     return decltype(factory.containers)::Entry{
       kj::str(id), kj::heap<WorkerFactory::Impl::Container>()};
@@ -316,13 +485,12 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
     return client.addRef();
   }
 
-  KJ_REQUIRE(engine.isLocalDocker(),
-      "dockerPath must be defined to enable containers on this Durable Object.");
-  auto docker = engine.getLocalDocker();
   KJ_REQUIRE(docker.hasContainerEgressInterceptorImage(),
       "containerEgressInterceptorImage must be configured for containers.");
   kj::Maybe<kj::String> imageName;
   if (options.getImageName().size() > 0) imageName = kj::str(options.getImageName());
+  kj::Maybe<kj::String> sessionId;
+  if (session.size() > 0) sessionId = kj::str(session);
   auto privilegeConf = options.getPrivileges();
   ContainerPrivileges privileges{
     .capabilities = KJ_MAP(c, privilegeConf.getCapabilities()) { return kj::str(c); },
@@ -343,8 +511,8 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
   state.canceler.cancel("a new container client took the container over"_kj);
   auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
       factory.network, kj::str(docker.getSocketPath()), kj::mv(id), kj::mv(imageName),
-      kj::str(docker.getContainerEgressInterceptorImage()), factory.tasks, kj::mv(previousCleanup),
-      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
+      kj::str(docker.getContainerEgressInterceptorImage()), kj::mv(sessionId), factory.tasks,
+      kj::mv(previousCleanup), [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
     // The client's shutdown began: the next incarnation of the actor gets a new client.
     state.client = kj::none;
     state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();
@@ -390,8 +558,10 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   KJ_IF_SOME(doId, actorId.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
     actorName = doId->getName().map([](kj::StringPtr n) { return kj::str(n); });
   }
-  auto makeActorCache = makeActorCacheFunc(
-      kj::addRef(storage.getImpl()), spec, kj::str(spec.root_key), kj::mv(actorName));
+  kj::Maybe<::rust::Box<Committer>> committer;
+  if (spec.replicated) committer = hooks->committer();
+  auto makeActorCache = makeActorCacheFunc(kj::addRef(storage.getImpl()), spec,
+      kj::str(spec.root_key), kj::mv(actorName), kj::mv(committer));
 
   auto makeStorage = [enableSql = spec.enable_sql](jsg::Lock& js, const Worker::Api& api,
                          ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
@@ -412,10 +582,9 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
       return jsg::Dict<kj::String>::Field{
         .name = kj::str(image.getName()), .value = kj::str(image.getImage())};
     };
-    // Unique per namespace and actor across the machine.
-    containerClient = rpc::Container::Client(getContainerClient(factory,
-        kj::str("workerd-", storage.getImpl().uniqueKey, "-", actor_id_key(*id)),
-        workerConf.getContainerEngine(), options));
+    auto actorKey = kj::str(storage.getImpl().uniqueKey, "-", actor_id_key(*id));
+    containerClient = rpc::Container::Client(
+        getContainerClient(factory, actorKey, workerConf.getContainerEngine(), options));
   }
 
   auto actorHooks = kj::refcounted<ActorHooksImpl>(kj::mv(hooks));
@@ -471,6 +640,14 @@ void actor_reset_storage(const ActorHandle& actor) {
   KJ_IF_SOME(cache, actor.getActor().getPersistent()) {
     KJ_IF_SOME(db, cache.getSqliteDatabase()) {
       kj::runCatchingExceptions([&]() { db.reset(); });
+    }
+  }
+}
+
+void actor_close_storage(const ActorHandle& actor) {
+  KJ_IF_SOME(cache, actor.getActor().getPersistent()) {
+    KJ_IF_SOME(db, cache.getSqliteDatabase()) {
+      db.close();
     }
   }
 }

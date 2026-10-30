@@ -42,6 +42,18 @@ GENERATED_SOURCES = []
 # We have not set SQLITE_SMALL_STACK, so this Bazel-build file does
 # not bother with tool/vdbe-compress.tcl.
 
+# The JimTcl bundled with SQLite runs its code generators, as in SQLite's own build (main.mk), so the
+# host needs no Tcl. The generators rely on [file normalize], which needs realpath() or, on Windows,
+# _fullpath().
+cc_binary(
+    name = "jimsh",
+    srcs = ["autosetup/jimsh0.c"],
+    copts = ["-w"] + select({
+        "@platforms//os:windows": ["-DHAVE__FULLPATH"],
+        "//conditions:default": ["-DHAVE_REALPATH"],
+    }),
+)
+
 cc_binary(
     name = "lemon",
     srcs = ["tool/lemon.c"],
@@ -138,32 +150,34 @@ genrule(
         "fts5.c",
     ],
     cmd = (
-        "mkdir -p $(RULEDIR)/build/ext/fts5/tool " +
+        "mkdir -p $(RULEDIR)/fts5_ch.build/ext/fts5/tool " +
 
         # Copy all the inputs over so the directory structure is to
         # mkfts5c.tcl's liking. This ends up putting everything not in
-        # :fts5_sources in there twice, once in build/ and once in
-        # build/ext/fts5/, but it doesn't hurt anything. :shrug:
-        "&& cp $(SRCS) $(RULEDIR)/build/ext/fts5 " +
-        "&& cp $(location manifest) $(RULEDIR)/build " +
-        "&& cp $(location manifest.uuid) $(RULEDIR)/build " +
-        "&& cp $(location fts5parse.h) $(RULEDIR)/build " +
-        "&& cp $(location fts5parse.c) $(RULEDIR)/build " +
-        "&& cp $(location ext/fts5/tool/mkfts5c.tcl) $(RULEDIR)/build/ext/fts5/tool " +
+        # :fts5_sources in there twice, once in fts5_ch.build/ and once in
+        # fts5_ch.build/ext/fts5/, but it doesn't hurt anything. :shrug:
+        "&& cp $(SRCS) $(RULEDIR)/fts5_ch.build/ext/fts5 " +
+        "&& cp $(location manifest) $(RULEDIR)/fts5_ch.build " +
+        "&& cp $(location manifest.uuid) $(RULEDIR)/fts5_ch.build " +
+        "&& cp $(location fts5parse.h) $(RULEDIR)/fts5_ch.build " +
+        "&& cp $(location fts5parse.c) $(RULEDIR)/fts5_ch.build " +
+        "&& cp $(location ext/fts5/tool/mkfts5c.tcl) $(RULEDIR)/fts5_ch.build/ext/fts5/tool " +
 
         # Okay, go.
-        "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh ext/fts5/tool/mkfts5c.tcl " +
+        "&& cp $(execpath :jimsh) $(RULEDIR)/fts5_ch.build/jimsh " +
+        "&& pushd $(RULEDIR)/fts5_ch.build >/dev/null " +
+        "&& ./jimsh ext/fts5/tool/mkfts5c.tcl " +
         "&& popd >/dev/null " +
 
         # Put the outputs where Bazel will see them.
-        "&& mv $(RULEDIR)/build/fts5.c $(RULEDIR)/build/ext/fts5/fts5.h $(RULEDIR) " +
+        "&& mv $(RULEDIR)/fts5_ch.build/fts5.c $(RULEDIR)/fts5_ch.build/ext/fts5/fts5.h $(RULEDIR) " +
 
         # Done. Clean up after ourselves.
-        "&& rm -r $(RULEDIR)/build"
+        "&& rm -r $(RULEDIR)/fts5_ch.build"
     ),
     tools = [
         "ext/fts5/tool/mkfts5c.tcl",
+        ":jimsh",
     ],
 )
 
@@ -179,8 +193,11 @@ genrule(
         "src/vdbe.c",
     ],
     outs = ["opcodes.h"],
-    cmd = "cat $(location parse.h) $(location src/vdbe.c) | tclsh $(location tool/mkopcodeh.tcl) > $(RULEDIR)/opcodes.h",
-    tools = ["tool/mkopcodeh.tcl"],
+    cmd = "cat $(location parse.h) $(location src/vdbe.c) | $(execpath :jimsh) $(location tool/mkopcodeh.tcl) > $(RULEDIR)/opcodes.h",
+    tools = [
+        "tool/mkopcodeh.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["opcodes.h"]
@@ -189,8 +206,11 @@ genrule(
     name = "opcodes_c",
     srcs = ["opcodes.h"],
     outs = ["opcodes.c"],
-    cmd = "tclsh $(location tool/mkopcodec.tcl) $(location opcodes.h) > $(RULEDIR)/opcodes.c",
-    tools = ["tool/mkopcodec.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkopcodec.tcl) $(location opcodes.h) > $(RULEDIR)/opcodes.c",
+    tools = [
+        "tool/mkopcodec.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["opcodes.c"]
@@ -217,8 +237,11 @@ genrule(
     name = "ctime_c",
     srcs = [],
     outs = ["ctime.c"],
-    cmd = "tclsh $(location tool/mkctimec.tcl) $(RULEDIR)/ctime.c",
-    tools = ["tool/mkctimec.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkctimec.tcl) $(RULEDIR)/ctime.c",
+    tools = [
+        "tool/mkctimec.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["ctime.c"]
@@ -230,8 +253,11 @@ genrule(
     name = "pragma_h",
     srcs = [],
     outs = ["pragma.h"],
-    cmd = "tclsh $(location tool/mkpragmatab.tcl) $(RULEDIR)/pragma.h",
-    tools = ["tool/mkpragmatab.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkpragmatab.tcl) $(RULEDIR)/pragma.h",
+    tools = [
+        "tool/mkpragmatab.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["pragma.h"]
@@ -266,33 +292,37 @@ genrule(
     # mksqlite3h.tcl expects to run in a directory with a very
     # particular structure, so we have to set that up for it.
     #
-    # We use $(RULEDIR)/build since RULEDIR is guaranteed to be
-    # writable.
+    # We use $(RULEDIR)/sqlite3_h.build since RULEDIR is guaranteed to
+    # be writable. Each genrule here has a scratch directory of its own,
+    # since on Windows genrules run unsandboxed, in the same tree.
     cmd = (
-        "mkdir -p $(RULEDIR)/build/src $(RULEDIR)/build/ext/rtree $(RULEDIR)/build/ext/session $(RULEDIR)/build/ext/fts5 " +
+        "mkdir -p $(RULEDIR)/sqlite3_h.build/src $(RULEDIR)/sqlite3_h.build/ext/rtree $(RULEDIR)/sqlite3_h.build/ext/session $(RULEDIR)/sqlite3_h.build/ext/fts5 " +
 
         # TODO(cleanup): come up with a less-repetitive way to do this.
-        "&& cp $(location tool/mksqlite3h.tcl) $(RULEDIR)/build " +
-        "&& cp $(location src/sqlite.h.in) $(RULEDIR)/build/src/sqlite.h.in " +
-        "&& cp $(location manifest) $(RULEDIR)/build/manifest " +
-        "&& cp $(location VERSION) $(RULEDIR)/build/VERSION " +
-        "&& cp $(location ext/rtree/sqlite3rtree.h) $(RULEDIR)/build/ext/rtree/sqlite3rtree.h " +
-        "&& cp $(location ext/session/sqlite3session.h) $(RULEDIR)/build/ext/session/sqlite3session.h " +
-        "&& cp $(location ext/fts5/fts5.h) $(RULEDIR)/build/ext/fts5/fts5.h " +
+        "&& cp $(location tool/mksqlite3h.tcl) $(RULEDIR)/sqlite3_h.build " +
+        "&& cp $(location src/sqlite.h.in) $(RULEDIR)/sqlite3_h.build/src/sqlite.h.in " +
+        "&& cp $(location manifest) $(RULEDIR)/sqlite3_h.build/manifest " +
+        "&& cp $(location VERSION) $(RULEDIR)/sqlite3_h.build/VERSION " +
+        "&& cp $(location ext/rtree/sqlite3rtree.h) $(RULEDIR)/sqlite3_h.build/ext/rtree/sqlite3rtree.h " +
+        "&& cp $(location ext/session/sqlite3session.h) $(RULEDIR)/sqlite3_h.build/ext/session/sqlite3session.h " +
+        "&& cp $(location ext/fts5/fts5.h) $(RULEDIR)/sqlite3_h.build/ext/fts5/fts5.h " +
 
-        # It also expects to invoke mksourceid.
-        "&& cp $(execpath :mksourceid) $(RULEDIR)/build/mksourceid " +
+        # It also expects to invoke mksourceid, or mksourceid.exe, so
+        # the copy keeps the executable's name.
+        "&& cp $(execpath :mksourceid) $(RULEDIR)/sqlite3_h.build/ " +
 
         # Okay, go.
-        "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh mksqlite3h.tcl . > ../sqlite3.h " +
+        "&& cp $(execpath :jimsh) $(RULEDIR)/sqlite3_h.build/jimsh " +
+        "&& pushd $(RULEDIR)/sqlite3_h.build >/dev/null " +
+        "&& ./jimsh mksqlite3h.tcl . > ../sqlite3.h " +
         "&& popd >/dev/null " +
 
         # Done. Clean up after ourselves.
-        "&& rm -r $(RULEDIR)/build"
+        "&& rm -r $(RULEDIR)/sqlite3_h.build"
     ),
     tools = [
         "tool/mksqlite3h.tcl",
+        ":jimsh",
         ":mksourceid",
     ],
 )
@@ -314,34 +344,36 @@ genrule(
     # mksqlite3c.tcl expects to run in a directory with a very
     # particular structure, so we have to set that up for it.
     #
-    # We use $(RULEDIR)/build/tsrc since RULEDIR is guaranteed to be
-    # writable. ("tsrc" matches the directory name in the SQLite
-    # Makefile.)
+    # We use $(RULEDIR)/amalgamation.build/tsrc since RULEDIR is
+    # guaranteed to be writable. ("tsrc" matches the directory name in
+    # the SQLite Makefile.)
     cmd = (
-        "mkdir -p $(RULEDIR)/build/tsrc $(RULEDIR)/build/tool " +
+        "mkdir -p $(RULEDIR)/amalgamation.build/tsrc $(RULEDIR)/amalgamation.build/tool " +
 
         # Copy everything in. There's no subdirectories; everything
         # but mksqlite3c.tcl just goes in tsrc.
-        "&& cp $(SRCS) $(RULEDIR)/build/tsrc " +
-        "&& cp $(location tool/mksqlite3c.tcl) $(RULEDIR)/build/tool " +
+        "&& cp $(SRCS) $(RULEDIR)/amalgamation.build/tsrc " +
+        "&& cp $(location tool/mksqlite3c.tcl) $(RULEDIR)/amalgamation.build/tool " +
 
         # Build the thing.
         #
         # This step ("make sqlite3c") is where the SQLite Makefile
         # would also construct tclsqlite3.c, but we don't use that
         # file, so we don't bother building it.
-        "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh tool/mksqlite3c.tcl " +
+        "&& cp $(execpath :jimsh) $(RULEDIR)/amalgamation.build/jimsh " +
+        "&& pushd $(RULEDIR)/amalgamation.build >/dev/null " +
+        "&& ./jimsh tool/mksqlite3c.tcl " +
         "&& popd >/dev/null " +
 
         # Copy the outputs somewhere that Bazel will find them.
-        "&& cp $(RULEDIR)/build/sqlite3.c $(RULEDIR)/build/tsrc/sqlite3ext.h $(RULEDIR)/ " +
+        "&& cp $(RULEDIR)/amalgamation.build/sqlite3.c $(RULEDIR)/amalgamation.build/tsrc/sqlite3ext.h $(RULEDIR)/ " +
 
         # Done. Clean up after ourselves.
-        "&& rm -r $(RULEDIR)/build"
+        "&& rm -r $(RULEDIR)/amalgamation.build"
     ),
     tools = [
         "tool/mksqlite3c.tcl",
+        ":jimsh",
     ],
 )
 # ========================================================================

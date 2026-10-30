@@ -56,7 +56,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  JSONParse,
   MathMax,
   MathMin,
   Number,
@@ -79,8 +78,6 @@ const {
   SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
-  TextDecoder,
-  TextDecoderDecode,
   TypeError,
   TypedArrayCtorByName,
   TypedArrayPrototypeGetBuffer,
@@ -245,10 +242,6 @@ let detachReadableStream: <R>(
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
 let readableStreamReaderGenericRelease: (reader: object) => void;
-let readableStreamDefaultReaderRead: <R>(
-  reader: ReadableStreamDefaultReaderType<R>,
-  readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-) => void;
 
 // Closes a stream whose data has moved to another stream (extraction, and
 // the tee or detach of a native stream, or of a queued one other than its
@@ -401,12 +394,12 @@ let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 // ReadableStream's static block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
-// The non-standard expectedLength pass-through for the DrainingReader
-// (and the C++ bridge). Chained like the other controller helpers:
-// default → the value installed by the TransformStream expectedLength
-// extension (undefined otherwise); queued byte → cached construction
-// value; native → cached construction value (joined in ReadableStream's
-// static block).
+// The non-standard expectedLength pass-through behind
+// getReadableStreamExpectedLength. Chained like the other controller
+// helpers, each reporting the value its underlying source declared,
+// cached at construction: default and queued byte (a TransformStream's
+// readable declares its transformer's), and native (joined in
+// ReadableStream's static block).
 let getControllerExpectedLength: (
   controller: AnyReadableController
 ) => bigint | undefined;
@@ -417,10 +410,6 @@ let byteControllerEnqueueBatch: (
 let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
   hook: (() => void) | undefined
-) => void;
-let setDefaultControllerExpectedLength: <R>(
-  controller: ReadableStreamDefaultController<R>,
-  length: bigint | undefined
 ) => void;
 let defaultControllerCanCloseOrEnqueue: <R>(
   controller: ReadableStreamDefaultController<R>
@@ -460,45 +449,6 @@ let setReadableStreamReader: <R>(
 let getGenericReaderClosedPromise: (reader: object) => Promise<void>;
 let resolveGenericReaderPromise: (reader: object) => void;
 let rejectGenericReaderPromise: (reader: object, reason?: unknown) => void;
-interface ReadableStreamIteratorState<R> {
-  done: boolean;
-  // The ongoing promise: a next() result, or a return()'s steps.
-  current?: Promise<IteratorResult<R> | undefined> | undefined;
-}
-
-class ReadableStreamAsyncIteratorReadRequest<R> {
-  #reader: ReadableStreamDefaultReaderType;
-  #state: ReadableStreamIteratorState<R>;
-  #promise: PromiseWithResolversType<IteratorResult<R>>;
-  constructor(
-    reader: ReadableStreamDefaultReaderType,
-    state: ReadableStreamIteratorState<R>,
-    promise: PromiseWithResolversType<IteratorResult<R>>
-  ) {
-    this.#reader = reader;
-    this.#state = state;
-    this.#promise = promise;
-  }
-
-  chunk(chunk: R) {
-    this.#state.current = undefined;
-    this.#promise.resolve(userReadResult(chunk, false));
-  }
-
-  close() {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.resolve(userReadResult(undefined, true));
-  }
-
-  error(error: unknown) {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.reject(error);
-  }
-}
 
 // --- ReadableStream async iterator prototype (spec §4.2.4) -----------------
 // Shared prototype with next/return methods; per-instance state stored in a
@@ -507,7 +457,9 @@ class ReadableStreamAsyncIteratorReadRequest<R> {
 interface IteratorInternalState {
   reader: ReadableStreamDefaultReaderType;
   preventCancel: boolean;
-  state: ReadableStreamIteratorState<unknown>;
+  done: boolean;
+  // The ongoing promise: a next() result, or a return()'s steps.
+  current: Promise<IteratorResult<unknown> | undefined> | undefined;
 }
 
 const iteratorStateMap = new SafeWeakMap() as WeakMap<
@@ -515,19 +467,38 @@ const iteratorStateMap = new SafeWeakMap() as WeakMap<
   IteratorInternalState
 >;
 
+// WebIDL's next steps over the streams spec's read request: its chunk,
+// close and error steps settle the promise next() returns, clearing the
+// ongoing promise as WebIDL's fulfill and reject steps do.
 function iteratorNextSteps(s: IteratorInternalState) {
-  if (s.state.done) {
+  if (s.done) {
     return PromiseResolve(userReadResult(undefined, true));
   }
-  if (!isReaderBoundToStream(s.reader)) {
+  const stream = getReaderStream(s.reader);
+  if (stream === undefined) {
     return PromiseReject(
       new TypeError('The reader is not bound to a ReadableStream')
     );
   }
   const promise = PromiseWithResolvers();
-  readableStreamDefaultReaderRead(
-    s.reader,
-    new ReadableStreamAsyncIteratorReadRequest(s.reader, s.state, promise)
+  PromisePrototypeThen(
+    defaultReaderReadInternal(s.reader, stream),
+    (result: ReadableStreamReadResult<unknown>) => {
+      s.current = undefined;
+      if (result.done) {
+        s.done = true;
+        readableStreamReaderGenericRelease(s.reader);
+        promise.resolve(userReadResult(undefined, true));
+      } else {
+        promise.resolve(userReadResult(result.value, false));
+      }
+    },
+    (e: unknown) => {
+      s.current = undefined;
+      s.done = true;
+      readableStreamReaderGenericRelease(s.reader);
+      promise.reject(e);
+    }
   );
   return promise.promise;
 }
@@ -539,10 +510,10 @@ function iteratorReturnSteps(
   s: IteratorInternalState,
   value: unknown
 ): Promise<IteratorResult<unknown> | undefined> {
-  if (s.state.done) {
+  if (s.done) {
     return PromiseResolve(userReadResult(value, true));
   }
-  s.state.done = true;
+  s.done = true;
 
   if (!isReaderBoundToStream(s.reader)) {
     return PromiseReject(
@@ -560,10 +531,37 @@ function iteratorReturnSteps(
   return PromiseResolve(undefined);
 }
 
+// WebIDL's ongoing promise: a next() or return() made while one is set
+// runs its steps once that promise settles, either way, and its own
+// promise becomes the ongoing one at once. One made with none set runs
+// its steps at once, so the first next() reads (and pulls) synchronously,
+// and its promise becomes the ongoing one only once they return: a next()
+// made inside them (from the pull() they run) runs at once too, reading
+// right behind them. Only a next() clears the ongoing promise, when its
+// read settles, so a settled one (a return()'s, or a finished next()'s)
+// can stay set, and later calls still chain on it.
+function runAfterOngoing(
+  s: IteratorInternalState,
+  steps: (
+    s: IteratorInternalState,
+    arg: unknown
+  ) => Promise<IteratorResult<unknown> | undefined>,
+  arg?: unknown
+): Promise<IteratorResult<unknown> | undefined> {
+  const ongoing = s.current;
+  let current: Promise<IteratorResult<unknown> | undefined>;
+  if (ongoing === undefined) {
+    current = steps(s, arg);
+  } else {
+    const run = () => steps(s, arg);
+    current = PromisePrototypeThen(ongoing, run, run);
+  }
+  s.current = current;
+  return current;
+}
+
 // WebIDL: next() and return() called on anything but one of these
-// iterators return a rejected promise rather than throwing, and a call with
-// no ongoing promise runs its steps at once, so the first next() reads (and
-// pulls) synchronously.
+// iterators return a rejected promise rather than throwing.
 const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   {
     next(this: object) {
@@ -571,15 +569,7 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.state.current =
-        s.state.current !== undefined
-          ? PromisePrototypeThen(
-              s.state.current,
-              () => iteratorNextSteps(s),
-              () => iteratorNextSteps(s)
-            )
-          : iteratorNextSteps(s);
-      return s.state.current;
+      return runAfterOngoing(s, iteratorNextSteps);
     },
 
     return(this: object, error: unknown) {
@@ -587,18 +577,11 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.state.current =
-        s.state.current !== undefined
-          ? PromisePrototypeThen(
-              s.state.current,
-              () => iteratorReturnSteps(s, error),
-              () => iteratorReturnSteps(s, error)
-            )
-          : iteratorReturnSteps(s, error);
       // Unlike next(), the caller gets a separate promise chained on the
       // ongoing one.
-      return PromisePrototypeThen(s.state.current, () =>
-        userReadResult(error, true)
+      return PromisePrototypeThen(
+        runAfterOngoing(s, iteratorReturnSteps, error),
+        () => userReadResult(error, true)
       );
     },
 
@@ -970,30 +953,6 @@ class ReadableStreamDefaultReader<
       return (reader as ReadableStreamDefaultReader<R>).#base;
     };
     getReaderBase = defaultGetBase;
-
-    readableStreamDefaultReaderRead = <R>(
-      reader: ReadableStreamDefaultReaderType<R>,
-      readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-    ) => {
-      const stream = getReaderStream<R>(reader);
-      if (stream === undefined) {
-        readRequest.error(new TypeError('This reader has been released'));
-        return;
-      }
-      PromisePrototypeThen(
-        defaultReaderReadInternal<R>(reader, stream),
-        (result: ReadableStreamReadResult<R>) => {
-          if (result.done) {
-            readRequest.close();
-          } else {
-            readRequest.chunk(result.value as R);
-          }
-        },
-        (e: unknown) => {
-          readRequest.error(e);
-        }
-      );
-    };
   }
 
   constructor(stream: ReadableStream<R>) {
@@ -1730,12 +1689,11 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #core: QueuedControllerCore<R, R>;
-  // The non-standard expectedLength pass-through (undefined = unknown).
-  // Default controllers never read it from an underlying source — it is
-  // set ONLY through the internal setter, by the TransformStream
-  // constructor's workerd `expectedLength` extension, so the C++ bridge
-  // can derive Content-Length for bodies built from such transforms.
-  #expectedLength: bigint | undefined = undefined;
+  // The non-standard expectedLength the source declared (undefined =
+  // unknown): the TOTAL bytes the stream will deliver, from which the C++
+  // bridge derives a body's Content-Length. Chunks need not be bytes, so
+  // the controller does not enforce it; body consumption does.
+  #expectedLength: bigint | undefined;
 
   static {
     assertIsReadableStreamDefaultController = function <R>(
@@ -1763,17 +1721,10 @@ class ReadableStreamDefaultController<
       queuedCoreOf(controller)?.callPullIfNeeded();
     };
 
-    // Default controllers never read expectedLength from an underlying
-    // source (silently ignored if declared); it is populated only via the
-    // internal setter (the TransformStream `expectedLength` extension).
     // The byte and native arms of this chain report their own cached
     // values.
     getControllerExpectedLength = (controller) =>
       (controller as ReadableStreamDefaultController).#expectedLength;
-
-    setDefaultControllerExpectedLength = (controller, length) => {
-      controller.#expectedLength = length;
-    };
 
     defaultControllerCanCloseOrEnqueue = (controller) =>
       controller.#core.canCloseOrEnqueue();
@@ -1821,7 +1772,13 @@ class ReadableStreamDefaultController<
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
+    const {
+      cancel: cancelFn,
+      expectedLength,
+      pull: pullFn,
+      start: startFn,
+    } = sourceDict;
+    this.#expectedLength = expectedLength;
     // Strategy already extracted by caller (WebIDL conversion order).
     const core = new QueuedControllerCore<R, R>(
       stream,
@@ -2170,10 +2127,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       throw new TypeError('autoAllocateChunkSize cannot be zero');
     }
     this.#autoAllocateChunkSize = autoAllocateChunkSize;
-    // Non-standard extension, used by byte streams only: the TOTAL bytes
-    // this source promises to produce. This controller enforces the
-    // contract at enqueue/respond (overflow) and close() (underflow).
-    // Exposed to the C++ bridge via the DrainingReader.
+    // Non-standard extension: the TOTAL bytes this source promises to
+    // produce, from which the C++ bridge derives a body's Content-Length.
+    // This controller enforces the contract at enqueue/respond (overflow)
+    // and close() (underflow).
     this.#expectedLength = expectedLength;
 
     // Strategy already extracted by caller (WebIDL conversion order).
@@ -2746,20 +2703,14 @@ class ReadableStreamDrainingReader<R> {
     }
   }
 
-  // The non-standard expectedLength pass-through for the C++ bridge: the
-  // TOTAL bytes the underlying source declared it will produce
-  // (undefined = unknown → chunked encoding). A construction-time value,
-  // cached on the controller; backend-blind via the chained helper
-  // (byte/native report their cached value; a default controller the
-  // value the TransformStream expectedLength extension installed, if
-  // any). Returns undefined after release.
+  // The non-standard expectedLength: the bytes the stream still has to
+  // deliver, if known (undefined = unknown), as the C++ bridge sees it
+  // (getReadableStreamExpectedLength). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
-    const controller = getReadableStreamController(stream);
-    if (controller === undefined) return undefined;
-    return getControllerExpectedLength(controller);
+    return getReadableStreamExpectedLength(stream);
   }
 
   cancel(reason?: unknown): Promise<void> {
@@ -2806,10 +2757,8 @@ interface ConvertedPipeOptions {
   readonly signal: AbortSignal | undefined;
 }
 
-// WebIDL conversion of StreamPipeOptions. The pipe methods run it before
-// their locked checks, so a getter cannot change a lock after it is checked.
-// Members are read once each in spec order (WPT
-// piping/throwing-options.any.js).
+// WebIDL conversion of StreamPipeOptions. Members are read once each in spec
+// order (WPT piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
   const dict = toDictionary(
     options,
@@ -2843,6 +2792,72 @@ function convertPipeOptions(options: unknown): ConvertedPipeOptions {
     preventClose,
     signal,
   } as ConvertedPipeOptions;
+}
+
+// The pipe methods' steps after their brand checks. The options convert
+// before the locked checks, so a getter cannot change a lock after it is
+// checked, and no user code runs between the checks and the pipe taking
+// both endpoints. pipeThrough() throws what this throws; pipeTo() rejects
+// with it.
+function convertAndCheckPipe<R>(
+  source: ReadableStream<R>,
+  destination: WritableStreamType<R>,
+  options: unknown
+): ConvertedPipeOptions {
+  const converted = convertPipeOptions(options);
+  if (isReadableStreamLocked(source)) {
+    throw new TypeError('Cannot pipe a stream that is locked');
+  }
+  if (writableInternals.isWritableStreamLocked(destination)) {
+    throw new TypeError('Cannot pipe to a locked writable stream');
+  }
+  return converted;
+}
+
+// Finishes a native+native pipe once the sink's pipeFrom hook, which ran it
+// at the C++ layer, has settled. Both endpoints were extracted, so neither
+// stream's own algorithms took part in the pipe. As pipeToInternal's
+// shutdown and finalize would, the destination is closed (the pipe
+// succeeded) or aborted with the pipe's error, through the writer
+// extraction locked it with; then both endpoints are unlocked. The
+// extracted sink's hooks no longer reach the C++ sink, which the pipe has
+// already ended or aborted. The source has been closed since its
+// extraction (see HANDED-OFF STREAMS in webstreams/AGENTS.md) and stays
+// closed, whatever the outcome.
+function finishNativePipe<R>(
+  piped: Promise<void>,
+  reader: object,
+  destination: WritableStreamType<R>,
+  writer: WritableStreamDefaultWriterType<R>
+): Promise<void> {
+  const finalize = (): void => {
+    writableInternals.writerRelease(writer);
+    readableStreamReaderGenericRelease(reader);
+  };
+  return PromisePrototypeThen(
+    piped,
+    () =>
+      PromisePrototypeThen(
+        writableInternals.writerCloseWithErrorPropagation(writer),
+        finalize,
+        (error: unknown) => {
+          finalize();
+          throw error;
+        }
+      ),
+    (error: unknown) =>
+      PromisePrototypeThen(
+        writableInternals.writableStreamAbort(destination, error),
+        () => {
+          finalize();
+          throw error;
+        },
+        (abortError: unknown) => {
+          finalize();
+          throw abortError;
+        }
+      )
+  ) as Promise<void>;
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
@@ -2937,27 +2952,18 @@ function pipeToInternal<R>(
       // (the C++ pipe, which awaits each write, can never reach its
       // close step past a failed write). Shutdowns that already carry
       // an error keep it — first cause wins.
-      if (error === undefined && pendingNonFatalWriteFailure !== undefined) {
-        const reason = pendingNonFatalWriteFailure.reason;
-        const failureActions = nonFatalWriteFailureActions(reason);
-        if (failureActions.length === 0) {
-          finalize({ reason });
-          return;
-        }
-        PromisePrototypeThen(
-          combineShutdownActions(failureActions),
-          () => finalize({ reason }),
-          (actionError: unknown) => finalize({ reason: actionError })
-        );
-        return;
-      }
-      if (action === undefined) {
-        finalize(error);
+      const upgrade =
+        error === undefined ? pendingNonFatalWriteFailure : undefined;
+      const finalError = upgrade ?? error;
+      const finalAction =
+        upgrade === undefined ? action : failureAction(upgrade.reason);
+      if (finalAction === undefined) {
+        finalize(finalError);
         return;
       }
       PromisePrototypeThen(
-        action(),
-        () => finalize(error),
+        finalAction(),
+        () => finalize(finalError),
         (actionError: unknown) => finalize({ reason: actionError })
       );
     };
@@ -2995,10 +3001,8 @@ function pipeToInternal<R>(
   };
 
   const onDestClosedEarly = (): void => {
-    const e = new TypeError('Destination closed before the pipe completed');
-    shutdownWithAction(
-      preventCancel ? undefined : () => readableStreamCancel(source, e),
-      { reason: e }
+    onDestErrored(
+      new TypeError('Destination closed before the pipe completed')
     );
   };
 
@@ -3012,8 +3016,7 @@ function pipeToInternal<R>(
 
   // Runs `actions` in parallel and settles when all have settled,
   // rejecting with the first failure (spec: shutdown actions run in
-  // parallel). Shared by the abort-signal algorithm and the non-fatal
-  // write-rejection path.
+  // parallel).
   const combineShutdownActions = (
     actions: (() => Promise<unknown>)[]
   ): Promise<void> => {
@@ -3042,29 +3045,34 @@ function pipeToInternal<R>(
     return all.promise;
   };
 
-  // The failure actions for a non-fatal write rejection: abort the
-  // destination (unless preventAbort) and cancel the source (unless
-  // preventCancel), both with the write's reason — the C++ pipe outcome
-  // for a rejected write.
-  const nonFatalWriteFailureActions = (
-    e: unknown
-  ): (() => Promise<unknown>)[] => {
+  // The shutdown action of an abort signal's abort algorithm (spec step
+  // 14.1), which a non-fatal write rejection shares, as the C++ pipe
+  // treats a rejected write: abort the destination (unless preventAbort)
+  // and cancel the source (unless preventCancel) with `reason`, in
+  // parallel. Undefined when both are prevented.
+  const failureAction = (
+    reason: unknown
+  ): (() => Promise<unknown>) | undefined => {
     const actions: (() => Promise<unknown>)[] = [];
     if (!preventAbort) {
       ArrayPrototypePush(actions, () =>
+        // Spec step 14.1.3: only abort if dest is still writable.
         writableInternals.getState(destination) === 'writable'
-          ? writableInternals.writableStreamAbort(destination, e)
+          ? writableInternals.writableStreamAbort(destination, reason)
           : PromiseResolve(undefined)
       );
     }
     if (!preventCancel) {
       ArrayPrototypePush(actions, () =>
+        // Spec step 14.1.4: only cancel if source is still readable.
         getReadableStreamGetState(source) === 'readable'
-          ? readableStreamCancel(source, e)
+          ? readableStreamCancel(source, reason)
           : PromiseResolve(undefined)
       );
     }
-    return actions;
+    return actions.length === 0
+      ? undefined
+      : () => combineShutdownActions(actions);
   };
 
   // Workerd extension: the internal transforms (identity, compression)
@@ -3075,11 +3083,7 @@ function pipeToInternal<R>(
   // silently dropped and the pipe would complete. Match the C++ pipe
   // outcome instead: treat the rejection as a pipe failure.
   const onWriteRejectedNonFatally = (e: unknown): void => {
-    const actions = nonFatalWriteFailureActions(e);
-    shutdownWithAction(
-      actions.length === 0 ? undefined : () => combineShutdownActions(actions),
-      { reason: e }
-    );
+    shutdownWithAction(failureAction(e), { reason: e });
   };
 
   // Spec: an abort algorithm, not an 'abort' listener, so a synthetic event
@@ -3087,29 +3091,7 @@ function pipeToInternal<R>(
   if (signal !== undefined) {
     const abortAlgorithm = (): void => {
       const abortReason = AbortSignalReasonGet(signal);
-      const actions: (() => Promise<unknown>)[] = [];
-      if (!preventAbort) {
-        ArrayPrototypePush(actions, () =>
-          // Spec step 14.1.3: only abort if dest is still writable.
-          writableInternals.getState(destination) === 'writable'
-            ? writableInternals.writableStreamAbort(destination, abortReason)
-            : PromiseResolve(undefined)
-        );
-      }
-      if (!preventCancel) {
-        ArrayPrototypePush(actions, () =>
-          // Spec step 14.1.4: only cancel if source is still readable.
-          getReadableStreamGetState(source) === 'readable'
-            ? readableStreamCancel(source, abortReason)
-            : PromiseResolve(undefined)
-        );
-      }
-      shutdownWithAction(
-        actions.length === 0
-          ? undefined
-          : () => combineShutdownActions(actions),
-        { reason: abortReason }
-      );
+      shutdownWithAction(failureAction(abortReason), { reason: abortReason });
     };
     if (AbortSignalAbortedGet(signal)) {
       abortAlgorithm();
@@ -3404,8 +3386,15 @@ function asyncFromSyncContinuation(
   ) as Promise<void>;
 }
 
-// WebIDL "close an async iterator" on the user's async iterator.
-function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+// The steps of WebIDL "close an async iterator" up to calling the
+// iterator's return() with the reason: without a return() the close
+// resolves at once, and a throw from looking it up or calling it rejects
+// the close. `settle` continues from what return() returned.
+function closeIterator(
+  iterator: object,
+  reason: unknown,
+  settle: (returnResult: unknown) => Promise<void>
+): Promise<void> {
   let returnResult: unknown;
   try {
     const returnMethod = getIteratorMethod(
@@ -3420,14 +3409,24 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
   } catch (e) {
     return PromiseReject(e);
   }
-  return PromisePrototypeThen(
-    promiseResolvedWith(returnResult),
-    (iterResult: unknown) => {
-      if (!isObjectLike(iterResult)) {
-        throw new TypeError('The return method must return an object');
-      }
-    }
-  ) as Promise<void>;
+  return settle(returnResult);
+}
+
+// WebIDL "close an async iterator" on the user's async iterator.
+function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+  return closeIterator(
+    iterator,
+    reason,
+    (returnResult) =>
+      PromisePrototypeThen(
+        promiseResolvedWith(returnResult),
+        (iterResult: unknown) => {
+          if (!isObjectLike(iterResult)) {
+            throw new TypeError('The return method must return an object');
+          }
+        }
+      ) as Promise<void>
+  );
 }
 
 // WebIDL "close an async iterator" on the async-from-sync wrapper of the
@@ -3436,24 +3435,11 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
 // `done`); the wrapper's own result is always an object. As for next(), the
 // continuation is reacted to directly (ledger #29).
 function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
-  let result: unknown;
-  try {
-    const returnMethod = getIteratorMethod(
-      iterator,
-      'return',
-      'Iterator return() is not a function'
-    );
-    if (returnMethod === undefined) {
-      return PromiseResolve(undefined);
-    }
-    result = uncurryThis(returnMethod)(iterator, reason);
-    if (!isObjectLike(result)) {
-      throw new TypeError('The return method must return an object');
-    }
-  } catch (e) {
-    return PromiseReject(e);
-  }
-  return asyncFromSyncContinuation(iterator, result as object, false, () => {});
+  return closeIterator(iterator, reason, (result) =>
+    isObjectLike(result)
+      ? asyncFromSyncContinuation(iterator, result as object, false, () => {})
+      : PromiseReject(new TypeError('The return method must return an object'))
+  );
 }
 
 function readableStreamFromIterable<R>(
@@ -3609,8 +3595,10 @@ function forkQueuedCursors<R>(
 // Marks a stream whose data has moved to another stream (tee, detach,
 // extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md). It is
 // disturbed, as the legacy C++ streams leave it, so a body that was teed
-// reports bodyUsed and cannot become another body. It stays locked for good,
-// by an internal reader that is never exposed and so never released.
+// reports bodyUsed and cannot become another body. It is locked by an
+// internal reader that is never exposed: for good, except after a
+// native+native pipe, which releases it once the pipe settles
+// (finishNativePipe), as a pipe releases its reader.
 function markHandedOff<R>(stream: ReadableStream<R>): void {
   setReadableStreamDisturbed(stream);
   acquireReadableStreamDefaultReader(stream);
@@ -3636,6 +3624,10 @@ class ReadableStream<R> {
   // teed again is closed at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
+  // Whether this stream is a tee branch or detached copy (makeShell) of a
+  // stream that had been read from, or was itself such a copy, before the
+  // fork (see getReadableStreamExpectedLength).
+  #forkedAfterRead: boolean = false;
   #state: ReadableStreamState = 'readable';
   #storedError?: unknown;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
@@ -3705,9 +3697,23 @@ class ReadableStream<R> {
       return promise;
     };
 
+    // The total the stream still has to deliver, if known: the C++ bridge's
+    // length query (a body's Content-Length). A queued source's declaration
+    // is its stream's total, and the controller, shared by every tee branch,
+    // does not count what a stream has already passed. So a queued stream
+    // reports it only while nothing has been read from it, nor, for a tee
+    // branch or detached copy, before the fork. A native stream's forks are
+    // fresh streams over sources that count what is left, and a disturbed
+    // native stream cannot be pumped (extraction rejects it).
     getReadableStreamExpectedLength = <R>(stream: ReadableStream<R>) => {
       const controller = stream.#controller;
       if (controller === undefined) return undefined;
+      if (
+        !isNativeController(controller) &&
+        (stream.#disturbed || stream.#forkedAfterRead)
+      ) {
+        return undefined;
+      }
       return getControllerExpectedLength(controller);
     };
 
@@ -3829,14 +3835,8 @@ class ReadableStream<R> {
             "Failed to execute 'pipeTo': destination is not a WritableStream"
           );
         }
-        const converted = convertPipeOptions(options);
+        const converted = convertAndCheckPipe(source, destination, options);
         const { preventAbort, preventCancel, preventClose } = converted;
-        if (isReadableStreamLocked(source)) {
-          throw new TypeError('Cannot pipe a stream that is locked');
-        }
-        if (writableInternals.isWritableStreamLocked(destination)) {
-          throw new TypeError('Cannot pipe to a locked writable stream');
-        }
         if (source.#pendingClosure) {
           throw pendingClosureError();
         }
@@ -3910,7 +3910,17 @@ class ReadableStream<R> {
               'Native sink is missing the required pipeFrom hook'
             );
           }
-          return uncurryThis(pipeFrom)(nativeSink, nativeSource, converted);
+          // Extraction locked both endpoints with internal handles.
+          const reader = source.#reader as object;
+          const writer = writableInternals.getWriter(
+            destination
+          ) as WritableStreamDefaultWriterType<R>;
+          return finishNativePipe(
+            uncurryThis(pipeFrom)(nativeSink, nativeSource, converted),
+            reader,
+            destination,
+            writer
+          );
         }
         return readableStreamPipeThroughTo(source, destination, converted);
       } catch (e) {
@@ -3955,8 +3965,10 @@ class ReadableStream<R> {
 
     // A shell carries another stream's state forward: a tee branch, or the
     // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, and shares `controller`, if any; the caller gives it a
-    // consumer when it has data to read.
+    // pending closure, records whether anything was read before the fork,
+    // and shares `controller`, if any; the caller gives it a consumer when
+    // it has data to read. Callers make shells before handing `from` off,
+    // which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -3965,6 +3977,7 @@ class ReadableStream<R> {
       shell.#state = from.#state;
       shell.#storedError = from.#storedError;
       shell.#pendingClosure = from.#pendingClosure;
+      shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
       return shell;
     };
@@ -4474,8 +4487,6 @@ class ReadableStream<R> {
     options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
-    // WebIDL argument conversion precedes the locked checks, so no user
-    // code runs between those checks and pipeToInternal taking the locks.
     // Dictionary members are read in alphabetical order: "readable" is read
     // and brand-checked before "writable" (WPT pipe-through.any.js).
     const readable = transform.readable;
@@ -4490,13 +4501,7 @@ class ReadableStream<R> {
         "Failed to execute 'pipeThrough': writable is not a WritableStream"
       );
     }
-    const converted = convertPipeOptions(options);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot pipe a stream that is locked');
-    }
-    if (writableInternals.isWritableStreamLocked(writable)) {
-      throw new TypeError('Cannot pipe to a locked writable stream');
-    }
+    const converted = convertAndCheckPipe(this, writable, options);
     const promise = readableStreamPipeThroughTo(this, writable, converted);
     markPromiseHandled(promise);
     return readable;
@@ -4568,7 +4573,8 @@ class ReadableStream<R> {
     iteratorStateMap.set(iter, {
       reader,
       preventCancel: !!preventCancel,
-      state: { done: false, current: undefined },
+      done: false,
+      current: undefined,
     });
     return iter;
   }
@@ -4632,9 +4638,10 @@ class ReadableStream<R> {
 
 // Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
 // byte bounds apply: the caller's memory limit, capped at 128 MB, and the
-// stream's declared expectedLength. A breach names its cause and cancels
-// the stream with it, as the C++ AllReader does; a declaration the limit
-// cannot hold is refused before a byte is read.
+// stream's declared expectedLength, an exact total that a stream closing
+// short of also breaches. A breach names its cause and cancels the stream
+// with it, as the C++ AllReader does; a declaration the limit cannot hold
+// is refused before a byte is read.
 const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
@@ -4649,7 +4656,6 @@ function acquireReadableStreamDrainingReader<R>(
 // is allocated whole up front, so a body that meets it fills exactly one
 // block and is handed over without a further copy.
 const kCollectBlockSize = 1024 * 1024;
-const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
 
 class CollectedBytes {
   #blocks: Uint8Array[] = []; // full
@@ -4738,18 +4744,6 @@ class CollectedBytes {
     }
     return result;
   }
-
-  toText(): string {
-    if (this.#length === 0) return '';
-    const decoder = new TextDecoder();
-    const views = this.#views();
-    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
-    let result = '';
-    for (let i = 0; i < views.length; i++) {
-      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
-    }
-    return result + TextDecoderDecode(decoder);
-  }
 }
 // collectChunks() is async, so its result is resolved through a thenable
 // check; off the Object.prototype chain, a patched Object.prototype.then
@@ -4827,38 +4821,31 @@ async function collectChunks<R>(
       }
       collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) return collected;
+    if (result.done) {
+      if (declaredBinds && collected.length < bound) {
+        return failCollect(
+          reader,
+          new RangeError(
+            'stream delivered fewer bytes than its declared expectedLength'
+          )
+        );
+      }
+      return collected;
+    }
   }
 }
 
-async function consumeReadableStreamAsArrayBuffer<R>(
+// The bytes behind every body consumption of the C++ bridge (arrayBuffer(),
+// bytes(), blob(), text(), json()), which builds each result from them
+// itself. They resolve in a null-prototype record: resolving with the
+// ArrayBuffer itself would look up its then, which a patched
+// Object.prototype.then supplies.
+async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<ArrayBuffer> {
-  return (await collectChunks(stream, limit)).toArrayBuffer();
-}
-
-async function consumeReadableStreamAsUint8Array<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<Uint8Array> {
-  return new Uint8Array(
-    await consumeReadableStreamAsArrayBuffer(stream, limit)
-  );
-}
-
-async function consumeReadableStreamAsText<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<string> {
-  return (await collectChunks(stream, limit)).toText();
-}
-
-async function consumeReadableStreamAsJSON<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<unknown> {
-  return JSONParse(await consumeReadableStreamAsText(stream, limit));
+): Promise<{ buffer: ArrayBuffer }> {
+  const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
+  return { __proto__: null, buffer } as { buffer: ArrayBuffer };
 }
 
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
@@ -4970,10 +4957,7 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
-  consumeReadableStreamAsArrayBuffer,
-  consumeReadableStreamAsJSON,
-  consumeReadableStreamAsText,
-  consumeReadableStreamAsUint8Array,
+  consumeReadableStreamAsArrayBufferRecord,
   detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamNativeSource,
@@ -5000,8 +4984,8 @@ module.exports = {
   ReadableStreamDrainingReader,
   // Internal operations consumed by the transform pairs (transform.ts,
   // identity.ts, compression.ts): the TransformStream cancel/flush
-  // coordination (finishPromise guard), the workerd expectedLength
-  // extension, and the interop error hook. Unreachable from user code.
+  // coordination (finishPromise guard) and the interop error hook.
+  // Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
@@ -5024,14 +5008,6 @@ module.exports = {
       byteControllerSetConsumptionHook(
         controller as ReadableByteStreamController,
         hook
-      ),
-    setControllerExpectedLength: <R>(
-      controller: object,
-      length: bigint | undefined
-    ) =>
-      setDefaultControllerExpectedLength(
-        controller as ReadableStreamDefaultController<R>,
-        length
       ),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the

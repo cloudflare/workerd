@@ -83,7 +83,7 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
       kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) override;
   kj::Maybe<kj::Date> getAutoResponseTimestamp() override;
   kj::Promise<void> sendAutoResponse(
-      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) override;
+      kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) override;
 
   void setPeer(jsg::WeakRef<WebSocket> peer) override;
   bool peerIsAwaitingCoupling(jsg::Lock& js) override;

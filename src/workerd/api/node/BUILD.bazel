@@ -38,7 +38,6 @@ wd_cc_library(
         "crypto.c++",
         "crypto-keys.c++",
         "diagnostics-channel.c++",
-        "inspector.c++",
         "module.c++",
         "process.c++",
         "timers.c++",
@@ -49,7 +48,6 @@ wd_cc_library(
         "async-hooks.h",
         "crypto.h",
         "diagnostics-channel.h",
-        "inspector.h",
         "module.h",
         "module-source.h",
         "node.h",
@@ -81,14 +79,12 @@ wd_cc_library(
     srcs = [
         "buffer.c++",
         "i18n.c++",
-        "sqlite.c++",
     ],
     hdrs = [
         "buffer.h",
         "buffer-string-search.h",
         "i18n.h",
         "node-version.h",
-        "sqlite.h",
     ],
     implementation_deps = [
         "//src/rust/i18n",

@@ -766,27 +766,27 @@ class DurableObjectState: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimaryStub);
 
-      // Types for the `onEvict` export of "cloudflare:durable-objects", which is experimental
+      // Types for the `onHibernate` export of "cloudflare:durable-objects", which is experimental
       // (see EntrypointsModule). JSG_TS_DEFINE_LITERAL because Clang rejects the `module`
       // keyword inside macro arguments.
       JSG_TS_DEFINE_LITERAL(R"(
-        /** Passed to a Durable Object's `[onEvict]` handler. */
-        interface DurableObjectEvictionInfo {
-          /** Why the object is being evicted. More reasons may be added later. */
+        /** Passed to a Durable Object's `[onHibernate]` handler. */
+        interface DurableObjectHibernationInfo {
+          /** Why the object is hibernating. More reasons may be added later. */
           readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
         }
         declare module "cloudflare:durable-objects" {
           /**
-           * Key of a Durable Object's eviction handler, a best-effort hook that runs before the
-           * runtime evicts the object:
+           * Key of a Durable Object's hibernation handler, a best-effort hook that runs before
+           * the object hibernates:
            *
            * ```ts
            * class MyObject extends DurableObject {
-           *   async [onEvict](info: DurableObjectEvictionInfo) {}
+           *   async [onHibernate](info: DurableObjectHibernationInfo) {}
            * }
            * ```
            */
-          export const onEvict: unique symbol;
+          export const onHibernate: unique symbol;
         }
       )");
     }

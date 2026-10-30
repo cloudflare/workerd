@@ -174,6 +174,18 @@ class LimitEnforcer {
   // Like limitDrain() and limitScheduled() but applies a time limit to alarm event processing.
   virtual kj::Duration getAlarmLimit() = 0;
 
+  // Wall-clock budget for a Durable Object's onHibernate handler. The budget is enforced by a
+  // timer, which only fires when the isolate yields, so it doesn't bound a handler that spins the
+  // CPU; see limitOnHibernateCpu().
+  virtual kj::Duration getOnHibernateLimit() {
+    return 10 * kj::SECONDS;
+  }
+
+  // Called after the onHibernate handler's request is delivered, before the handler runs. Embedders
+  // that enforce CPU time can cap the handler's CPU time here; otherwise it gets the CPU
+  // allowance of any other actor event. workerd's local server doesn't enforce CPU time.
+  virtual void limitOnHibernateCpu() {}
+
   // Gets a byte size limit to apply to operations that will buffer a possibly large amount of
   // data in C++ memory, such as reading an entire HTTP response into an `ArrayBuffer`.
   virtual size_t getBufferingLimit() = 0;

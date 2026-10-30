@@ -705,11 +705,11 @@ interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
-interface DurableObjectEvictionInfo {
+interface DurableObjectHibernationInfo {
   readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 declare module "cloudflare:durable-objects" {
-  export const onEvict: unique symbol;
+  export const onHibernate: unique symbol;
 }
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
@@ -936,6 +936,13 @@ declare class Event {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
   get returnValue(): boolean;
+  /**
+   * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
+   */
+  set returnValue(value: boolean);
   /**
    * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
@@ -4046,6 +4053,7 @@ interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
 }
 interface SocketOptions {
   secureTransport?: string;
@@ -4204,7 +4212,7 @@ interface ContainerSnapshotOptions {
 }
 type ContainerStartupOptions = {
   entrypoint?: string[];
-  enableInternet: boolean;
+  enableInternet?: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   instance?:
@@ -17952,7 +17960,7 @@ declare namespace TailStream {
     | "exceededWallTime"
     | "aborted";
   interface ScriptVersion {
-    readonly id: string;
+    readonly id?: string;
     readonly tag?: string;
     readonly message?: string;
   }
@@ -17963,7 +17971,7 @@ declare namespace TailStream {
   }
   interface Onset {
     readonly type: "onset";
-    readonly attributes: Attribute[];
+    readonly attributes?: Attribute[];
     // id for the span being opened by this Onset event.
     readonly spanId: string;
     readonly dispatchNamespace?: string;
@@ -18138,6 +18146,7 @@ declare namespace TailStream {
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
+    streamDiagEvent?: TailEventHandler<StreamDiagnostic>;
     return?: TailEventHandler<Return>;
     attributes?: TailEventHandler<Attributes>;
   };

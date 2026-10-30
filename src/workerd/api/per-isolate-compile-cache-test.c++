@@ -44,7 +44,6 @@ KJ_TEST("per-isolate bootstrap consumes its embedded compile caches") {
 
   TestFixture fixture({
     .featureFlags = flags.asReader(),
-    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
     .jsgIsolateObserver = kj::atomicRefcounted<CountingObserver>(counts),
   });
   // The bootstrap runs during context creation; this just ensures the worker is fully set up.

@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+using WritableModules = import "writable-modules.capnp";
+
+# Runs the writable benchmarks against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate),
+# with byte-for-byte the same modules as writable-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-writable-ts",
+      worker = (
+        modules = WritableModules.modules,
+        compatibilityFlags = ["typescript_implemented_streams"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

@@ -12,6 +12,22 @@ Generates `@cloudflare/workers-types` `.d.ts` files from C++ RTTI (via `jsg/rtti
 4. **Defines concatenation**: `defines/*.d.ts` appended after transforms (AI, D1, R2, RPC, Vectorize, etc.)
 5. **Build**: `scripts/build-types.ts` iterates compat-date entrypoints (oldest through experimental), type-checks output against TS libs
 
+### Explicit RTTI metadata
+
+- **`Structure.tsName` / `StructureType.tsName`** supply the emitted declaration
+  and reference name. When empty, the generator derives the name from
+  `fullyQualifiedName`, which remains the identity used to resolve references.
+- **`Method.argNames` / `Constructor.argNames`** supply parameter names aligned
+  with `args`, including slots for internal arguments that are omitted from the
+  declaration. A missing or empty entry falls back to the C++ parameter-name
+  table, then `paramN`. Reserved binding names are escaped.
+- **`MaybeType.allowsNull` / `MaybeType.allowsUndefined`** add the corresponding
+  alternatives to the wrapped type. When both are false, legacy decoding uses
+  `name`: `kj::Maybe` means `null`, and other names mean `undefined`.
+
+Explicit-name conflicts are checked among emitted types. An inactive type with
+the same emitted name cannot supply overrides or defines for the selected type.
+
 ## KEY DIRECTORIES
 
 | Directory             | Purpose                                                                          |

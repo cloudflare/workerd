@@ -200,6 +200,11 @@ class JsReadableStream final {
   // value. Rejects if the stream has already been disturbed or would exceed `limit`; the stream is
   // left locked/consumed. A null stream yields an empty result.
   //
+  // text() does not decode: it returns the stream's bytes less a leading UTF-8 BOM (which the
+  // legacy implementation strips only under the strip_bom_in_read_all_text compatibility flag).
+  // Invalid UTF-8 is replaced only when the result becomes a JavaScript string, so callers such as
+  // Body::formData() can parse binary content out of it.
+  //
   // bytes()/json()/blob() are provided directly (rather than being layered on arrayBuffer()/text()
   // by the caller) to avoid an extra jsg::Promise allocation and microtask hop per call. blob()
   // takes the desired Content-Type (derived by the caller, e.g. from headers) because

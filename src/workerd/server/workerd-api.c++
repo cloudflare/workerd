@@ -27,7 +27,6 @@
 #include <workerd/api/node/node.h>
 #include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
-#include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
@@ -320,13 +319,12 @@ kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
-  bool deferWeakRefDeletion =
-      util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP);
   jsg::NewContextOptions opts{
     .newModuleRegistry = options.newModuleRegistry,
     .schemaLoader = options.schemaLoader,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
-    .deferWeakRefDeletion = deferWeakRefDeletion,
+    .deferWeakRefDeletion = true,
+    .enableTemporal = getFeatureFlags().getTemporal(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(opts));

@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bert Belder <bbelder@cloudflare.com>
+Date: Wed, 21 Oct 2026 14:59:42 -0700
+Subject: Add v8::Data::IsCompatibleWithIsolate
+
+Lets an embedder check in debug builds that a handle it is about to use
+belongs to the isolate it is using it with.
+
+diff --git a/include/v8-data.h b/include/v8-data.h
+index 7be431b31921a7e72674217416c916cf0b7bfab8..291406a39ffaf7a754e32e541172c9e9b36cd357 100644
+--- a/include/v8-data.h
++++ b/include/v8-data.h
+@@ -67,6 +67,15 @@ class V8_EXPORT Data {
+    */
+   bool IsCppHeapExternal() const;
+ 
++  /**
++   * Returns true if this data can be used in |isolate|. Smis can be used in
++   * any isolate, objects in read-only or writable shared space in any isolate
++   * of their isolate group, and all other objects only in the isolate whose
++   * heap holds them. The check reads only the object's page header, so it can
++   * be made without entering the isolate that owns the object.
++   */
++  bool IsCompatibleWithIsolate(const Isolate* isolate) const;
++
+  private:
+   Data() = delete;
+ };
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 982babcaefff0123e4cdf8d4a5102383db799a8b..16da080dc2c388c582b61f5d381100cd7587d79e 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -79,6 +79,7 @@
+ #include "src/heap/heap-inl.h"
+ #include "src/heap/heap-layout-inl.h"
+ #include "src/heap/heap-write-barrier.h"
++#include "src/heap/memory-chunk-inl.h"
+ #include "src/heap/safepoint.h"
+ #include "src/heap/visit-object.h"
+ #include "src/init/bootstrapper.h"
+@@ -906,6 +907,23 @@ bool Data::IsCppHeapExternal() const {
+   return IsCppHeapExternalObject(*Utils::OpenDirectHandle(this));
+ }
+ 
++bool Data::IsCompatibleWithIsolate(const Isolate* isolate) const {
++  i::Address value = i::ValueHelper::ValueAsAddress(this);
++  if (!i::Internals::HasHeapObjectTag(value)) return true;
++  const i::Isolate* i_isolate = reinterpret_cast<const i::Isolate*>(isolate);
++#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
++  // Each isolate group has its own pointer compression cage.
++  constexpr i::Address kCageMask = ~(i::kPtrComprCageBaseAlignment - 1);
++  if ((value & kCageMask) != (i_isolate->cage_base() & kCageMask)) {
++    return false;
++  }
++#endif
++  const i::MemoryChunk* chunk = i::MemoryChunk::FromAddress(value);
++  if (chunk->InReadOnlySpace() || chunk->InWritableSharedSpace()) return true;
++  return i::Isolate::FromHeap(chunk->MetadataNoIsolateCheck()->heap()) ==
++         i_isolate;
++}
++
+ void Context::Enter() {
+   i::DisallowGarbageCollection no_gc;
+   i::Tagged<i::NativeContext> env = *Utils::OpenDirectHandle(this);

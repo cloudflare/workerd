@@ -74,10 +74,17 @@ class ReadOnlyBuffer: public jsg::Object {
  public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
+  // Returns a reader over the bytes of the data module named `name` in a Pyodide bundle. The bytes
+  // stay in the process-wide bundle message, so every isolate shares them.
+  static jsg::Ref<ReadOnlyBuffer> fromBundleDataModule(
+      jsg::Lock& js, jsg::Bundle::Reader bundle, kj::StringPtr name);
+
   uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
+  uint32_t getSize();
 
   JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
+    JSG_METHOD(getSize);
   }
 };
 
@@ -98,7 +105,7 @@ struct PythonPackageFileMetadata {
 };
 
 // Exposes the Python stdlib package files that are extracted and embedded directly in the Pyodide
-// bundle as a PythonPackages capnp message (see python_packages.capnp / pack_python_packages.py).
+// bundle as a PythonPackages capnp message (see python_packages.capnp / tools/pack_python_packages.py).
 // The runtime reads `getFiles()` to learn the file layout; each returned entry carries a `reader`
 // for the (already-decompressed) bytes of that file. This is a single bulk call (rather than a
 // per-file accessor) to avoid a JS<->C++ round-trip per file.
@@ -161,8 +168,6 @@ class PyodideMetadataReader: public jsg::Object {
     kj::String mainModule;
     PythonModuleInfo moduleInfo;
     kj::String pyodideVersion;
-    kj::String packagesVersion;
-    kj::String packagesLock;
     bool isWorkerdFlag;
     bool isTracingFlag;
     bool snapshotToDisk;
@@ -173,8 +178,6 @@ class PyodideMetadataReader: public jsg::Object {
         kj::Array<kj::String> names,
         kj::Array<kj::Array<kj::byte>> contents,
         kj::String pyodideVersion,
-        kj::String packagesVersion,
-        kj::String packagesLock,
         IsWorkerd isWorkerd,
         IsTracing isTracing,
         SnapshotToDisk snapshotToDisk,
@@ -183,8 +186,6 @@ class PyodideMetadataReader: public jsg::Object {
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           pyodideVersion(kj::mv(pyodideVersion)),
-          packagesVersion(kj::mv(packagesVersion)),
-          packagesLock(kj::mv(packagesLock)),
           isWorkerdFlag(isWorkerd),
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
@@ -251,14 +252,6 @@ class PyodideMetadataReader: public jsg::Object {
     return state->pyodideVersion;
   }
 
-  kj::StringPtr getPackagesVersion() {
-    return state->packagesVersion;
-  }
-
-  kj::StringPtr getPackagesLock() {
-    return state->packagesLock;
-  }
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   // We call this during Python setup with the wasm memory and the addresses of the signal clock and
@@ -287,8 +280,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(getPyodideVersion);
-    JSG_METHOD(getPackagesVersion);
-    JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
@@ -517,8 +508,6 @@ class SimplePythonLimiter: public jsg::Object {
     JSG_METHOD(finishStartup);
   }
 };
-
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 // Computes the subresource-integrity-style checksum ("sha256-<base64>") of the given bytes.
 kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes);

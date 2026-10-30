@@ -314,11 +314,12 @@ function replaceInterpolation(code: string): string {
 
 function getCodeAtPath(
   env: Env,
+  wptPath: string,
   base: string,
   rawPath: string,
   replace?: (code: string) => string
 ): string {
-  const bindingPath = getBindingPath(base, rawPath);
+  const bindingPath = getBindingPath(base, rawPath, wptPath);
 
   if (EXCLUDED_PATHS.has(bindingPath)) {
     return '';
@@ -455,10 +456,10 @@ async function runTest(
   const files = [];
 
   for (const script of meta.scripts) {
-    files.push(getCodeAtPath(env, path.dirname(file), script));
+    files.push(getCodeAtPath(env, wptPath, path.dirname(file), script));
   }
 
-  files.push(getCodeAtPath(env, './', file, options.replace));
+  files.push(getCodeAtPath(env, wptPath, './', file, options.replace));
   evalAsBlock(env, options.runInGlobalScope ?? false, files);
 
   if (options.after) {

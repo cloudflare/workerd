@@ -12,6 +12,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
+#include <workerd/util/autogate.h>
 
 #include <v8-container.h>
 #include <v8-date.h>
@@ -20,7 +21,24 @@
 #include <kj/one-of.h>
 #include <kj/time.h>
 
+#include <cmath>
+
 namespace workerd::jsg {
+
+// What the 8-, 16- and 32-bit integer unwraps below range-check for a finite number: with the
+// JSG_INTEGER_ENFORCE_RANGE autogate its integer part, so that a fraction just past a range limit
+// converts as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API arguments convert it
+// (2 ** 31 - 0.5 is the largest int, -0.5 is 0 as an unsigned type); without it the number
+// itself, so that such a fraction is out of range. The truncation is `trunc`'s, toward zero. An
+// integral value is returned as it is without reading the gate.
+inline double integerPartForRangeCheck(double value) {
+  double integerPart = std::trunc(value);
+  if (integerPart != value &&
+      util::Autogate::isEnabled(util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE)) {
+    return integerPart;
+  }
+  return value;
+}
 
 // =======================================================================================
 // Primitives (numbers, booleans)
@@ -84,6 +102,7 @@ class PrimitiveWrapper {
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+    value = integerPartForRangeCheck(value);
 
     JSG_REQUIRE(
         value <= static_cast<int8_t>(kj::maxValue) && value >= static_cast<int8_t>(kj::minValue),
@@ -118,6 +137,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+    value = integerPartForRangeCheck(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "
@@ -155,6 +175,7 @@ class PrimitiveWrapper {
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+    value = integerPartForRangeCheck(value);
 
     JSG_REQUIRE(
         value <= static_cast<int16_t>(kj::maxValue) && value >= static_cast<int16_t>(kj::minValue),
@@ -189,6 +210,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+    value = integerPartForRangeCheck(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "
@@ -230,6 +252,7 @@ class PrimitiveWrapper {
     if (!isFinite(value)) {
       return 0;
     }
+    value = integerPartForRangeCheck(value);
 
     // One would think that RangeError is more appropriate than TypeError,
     // but WebIDL says it should be TypeError.
@@ -269,6 +292,7 @@ class PrimitiveWrapper {
     auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+    value = integerPartForRangeCheck(value);
 
     JSG_REQUIRE(value >= 0, TypeError,
         "The value cannot be converted because it is negative and this "

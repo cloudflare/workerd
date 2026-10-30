@@ -13,27 +13,6 @@ export const PerformanceObserverEntryList =
   perfHooks.PerformanceObserverEntryList;
 export const PerformanceResourceTiming = perfHooks.PerformanceResourceTiming;
 
-export abstract class MIMEType {
-  constructor(input: string);
-  type: string;
-  subtype: string;
-  readonly essence: string;
-  readonly params: MIMEParams;
-  toString(): string;
-  toJSON(): string;
-}
-
-export abstract class MIMEParams {
-  constructor();
-  delete(name: string): void;
-  get(name: string): string | undefined;
-  has(name: string): boolean;
-  set(name: string, value: string): void;
-  entries(): Iterable<string[]>;
-  keys(): Iterable<string>;
-  values(): Iterable<string>;
-}
-
 export const kResourceTypeInspect: unique symbol;
 
 export const ALL_PROPERTIES: 0;

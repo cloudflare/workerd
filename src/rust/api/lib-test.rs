@@ -12,8 +12,8 @@ fn test_wrap_resource_equality() {
     harness.run_in_context(|lock, _ctx| {
         let dns_util = DnsUtil::new();
 
-        let lhs = dns_util.clone().to_js(lock);
-        let rhs = dns_util.to_js(lock);
+        let lhs = dns_util.clone().to_js(lock)?;
+        let rhs = dns_util.to_js(lock)?;
 
         assert_eq!(lhs, rhs);
         Ok(())

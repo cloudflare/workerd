@@ -22,7 +22,4 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-  ],
 );

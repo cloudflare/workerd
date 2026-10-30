@@ -566,6 +566,11 @@ class TransformStream<I = unknown, O = unknown> {
         },
         pull: sourcePull,
         cancel: (reason: unknown) => this.#finish('cancel', reason),
+        // Non-standard workerd extension: the TOTAL bytes the readable
+        // side will produce (undefined = unknown), from which the C++
+        // bridge derives a Content-Length for bodies built from this
+        // transform.
+        expectedLength,
       },
       {
         __proto__: null,
@@ -574,16 +579,6 @@ class TransformStream<I = unknown, O = unknown> {
         size: readableStrategyDict.size,
       }
     );
-    // Non-standard workerd extension: the TOTAL bytes the readable side
-    // will produce (undefined = unknown). Advertised through the
-    // readable's controller so the C++ bridge derives a Content-Length
-    // for bodies built from this transform; not enforced here.
-    if (expectedLength !== undefined) {
-      readableInternals.setControllerExpectedLength(
-        this.#readableController,
-        expectedLength
-      );
-    }
 
     // --- Start the transformer (the elided path has none to start) ---
     if (controller === undefined) {

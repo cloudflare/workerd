@@ -9,6 +9,9 @@ set -euo pipefail
 readonly ROOT="${TEST_SRCDIR}/${TEST_WORKSPACE}"
 readonly CLANG_TIDY="${ROOT}/tools/clang_tidy"
 readonly PLUGIN="${ROOT}/tools/clang-tidy/libworkerd-lint.so"
+# The C++ toolchain's flags, for its standard library headers.
+mapfile -t TOOLCHAIN_FLAGS < "${ROOT}/tools/clang-tidy/toolchain-flags.txt"
+readonly TOOLCHAIN_FLAGS
 readonly POSITIVE="${ROOT}/tools/clang-tidy/coroutine-hostile-raii-positive-test.c++"
 readonly NEGATIVE="${ROOT}/tools/clang-tidy/coroutine-hostile-raii-negative-test.c++"
 readonly CHECKS="-*,workerd-coroutine-hostile-raii"
@@ -16,7 +19,7 @@ readonly CONFIG="{CheckOptions: [{key: workerd-coroutine-hostile-raii.RAIITypesL
 
 set +e
 positive_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" \
-  "--config=${CONFIG}" --warnings-as-errors='*' "${POSITIVE}" -- -std=c++20 2>&1)
+  "--config=${CONFIG}" --warnings-as-errors='*' "${POSITIVE}" -- "${TOOLCHAIN_FLAGS[@]}" -std=c++20 2>&1)
 positive_status=$?
 set -e
 
@@ -40,7 +43,7 @@ fi
 
 set +e
 negative_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" \
-  "--config=${CONFIG}" --warnings-as-errors='*' "${NEGATIVE}" -- -std=c++20 2>&1)
+  "--config=${CONFIG}" --warnings-as-errors='*' "${NEGATIVE}" -- "${TOOLCHAIN_FLAGS[@]}" -std=c++20 2>&1)
 negative_status=$?
 set -e
 

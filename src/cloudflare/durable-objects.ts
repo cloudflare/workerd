@@ -5,7 +5,7 @@
 import entrypoints from 'cloudflare-internal:workers';
 
 // Undefined unless the "experimental" compatibility flag is set.
-export const onEvict = entrypoints.onEvict;
+export const onHibernate = entrypoints.onHibernate;
 
 export function retryable(...methods: ((...args: never[]) => unknown)[]): void {
   entrypoints.retryable(...methods);

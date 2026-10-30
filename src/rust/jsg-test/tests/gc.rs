@@ -99,7 +99,7 @@ fn supports_gc_via_weak_callback() {
         let resource = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
         });
-        let _wrapped = resource.clone().to_js(lock);
+        let _wrapped = resource.clone().to_js(lock)?;
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         std::mem::drop(resource);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -133,7 +133,7 @@ fn resource_with_traced_ref_field() {
             optional_child: Some(optional_child.clone()),
         });
 
-        let _wrapped = parent.clone().to_js(lock);
+        let _wrapped = parent.clone().to_js(lock)?;
 
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -170,7 +170,7 @@ fn child_traced_ref_kept_alive_by_parent() {
 
         // Wrap the parent so it has a JS object, then let the Local go out of scope
         // by not storing it. The wrapper is now only held weakly by cppgc.
-        let _ = parent.clone().to_js(lock);
+        let _ = parent.clone().to_js(lock)?;
 
         // Child not collected because parent still holds an `Rc` (which holds a kj::Own)
         std::mem::drop(child);
@@ -230,7 +230,7 @@ fn wrapped_resource_kept_alive_by_js() {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
         });
-        let _wrapped = strong.clone().to_js(lock);
+        let _wrapped = strong.clone().to_js(lock)?;
         std::mem::drop(strong);
         // CppgcShim still holds kj::Own, keeping it alive
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
@@ -254,7 +254,7 @@ fn weak_ref_with_wrapped_resource() {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
         });
-        let _wrapped = strong.clone().to_js(lock);
+        let _wrapped = strong.clone().to_js(lock)?;
         let weak = strong.downgrade();
 
         assert!(weak.upgrade().is_some());
@@ -282,13 +282,13 @@ fn traced_ref_in_gc() {
         let child = jsg::Rc::new(SimpleResource {
             name: "child".to_owned(),
         });
-        let _child_wrapped = child.clone().to_js(lock);
+        let _child_wrapped = child.clone().to_js(lock)?;
 
         let parent = jsg::Rc::new(ParentResource {
             child: child.clone(),
             optional_child: None,
         });
-        let _parent_wrapped = parent.clone().to_js(lock);
+        let _parent_wrapped = parent.clone().to_js(lock)?;
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -411,7 +411,7 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
         let strong = jsg::Rc::new(SimpleResource {
             name: "persistent".to_owned(),
         });
-        let _wrapped = strong.clone().to_js(lock);
+        let _wrapped = strong.clone().to_js(lock)?;
         let weak = strong.downgrade();
 
         // Drop the original strong ref, but upgrade from weak creates a new one
@@ -461,12 +461,12 @@ fn weak_ref_trace_does_not_prevent_gc() {
         let target = jsg::Rc::new(SimpleResource {
             name: "target".to_owned(),
         });
-        let _target_wrapped = target.clone().to_js(lock);
+        let _target_wrapped = target.clone().to_js(lock)?;
 
         let holder = jsg::Rc::new(WeakRefHolder {
             weak: target.downgrade(),
         });
-        let _holder_wrapped = holder.clone().to_js(lock);
+        let _holder_wrapped = holder.clone().to_js(lock)?;
 
         // WeakRef should be upgradable while the target is alive
         assert!(holder.weak.upgrade().is_some());
@@ -586,7 +586,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
         let resource = jsg::Rc::new(SimpleResource {
             name: "unwrap-me".to_owned(),
         });
-        let wrapped = resource.clone().to_js(lock);
+        let wrapped = resource.clone().to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Get the JS value back and use FromJS to create a new strong Ref
@@ -656,8 +656,8 @@ fn wrap_multiple_instances_of_same_type() {
             name: "second".to_owned(),
         });
 
-        let w1 = r1.to_js(lock);
-        let w2 = r2.to_js(lock);
+        let w1 = r1.to_js(lock)?;
+        let w2 = r2.to_js(lock)?;
         ctx.set_global(lock, "r1", w1);
         ctx.set_global(lock, "r2", w2);
 
@@ -690,9 +690,9 @@ fn wrap_same_resource_twice_returns_same_object() {
             name: "singleton".to_owned(),
         });
 
-        let w1 = resource.clone().to_js(lock);
+        let w1 = resource.clone().to_js(lock)?;
         ctx.set_global(lock, "w1", w1);
-        let w2 = resource.to_js(lock);
+        let w2 = resource.to_js(lock)?;
         ctx.set_global(lock, "w2", w2);
 
         // Both wraps should return the exact same JS object
@@ -714,7 +714,7 @@ fn resource_data_survives_gc_via_js_global() {
         let resource = jsg::Rc::new(SimpleResource {
             name: "survivor".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Force GC — the global reference should keep it alive
@@ -745,7 +745,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
             child: child.clone(),
             optional_child: None,
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
@@ -845,7 +845,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(NullableParent {
             child: jsg::Nullable::Some(child.clone()),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
@@ -878,40 +878,12 @@ fn nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(NullableParent {
             child: jsg::Nullable::Null,
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
         // GC with Nullable::Null should not crash
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
-        Ok(())
-    });
-
-    harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 1);
-        Ok(())
-    });
-}
-
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
-#[test]
-fn nullable_ref_undefined_does_not_crash_during_gc() {
-    NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
-
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Undefined,
-        });
-        let wrapped = parent.clone().to_js(lock);
-        ctx.set_global(lock, "parent", wrapped);
-
-        std::mem::drop(parent);
-
-        // GC with Nullable::Undefined should not crash
         crate::Harness::request_gc(lock);
         assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
@@ -932,7 +904,7 @@ fn nullable_ref_undefined_does_not_crash_during_gc() {
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 struct NativeState {
-    value: u64,
+    value: u32,
 }
 
 impl jsg::Traced for NativeState {}
@@ -951,9 +923,8 @@ struct NativeOwnerResource {
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
-    fn get_value(&self) -> jsg::Number {
-        #[expect(clippy::cast_precision_loss)]
-        jsg::Number::new(self.state.value as f64)
+    fn get_value(&self) -> u32 {
+        self.state.value
     }
 }
 
@@ -994,7 +965,7 @@ fn traced_ref_drop_respects_strong_flag() {
         assert_eq!(child.strong_refcount(), 2);
 
         // Wrap the parent — child is reachable only through the parent's Ref.
-        let _wrapped = parent.clone().to_js(lock);
+        let _wrapped = parent.clone().to_js(lock)?;
 
         // GC traces parent wrapper → visitRef on child → parent's ref
         // transitions strong→weak, removeStrongRef() called once.
@@ -1049,7 +1020,7 @@ fn rc_native_object_dropped_on_minor_gc() {
         let resource = jsg::Rc::new(NativeOwnerResource { state: state_clone });
 
         // Wrap for JS so CppgcShim takes ownership of the Wrappable.
-        let _wrapped = resource.clone().to_js(lock);
+        let _wrapped = resource.clone().to_js(lock)?;
 
         // Drop the Rust Ref. CppgcShim still keeps the resource alive.
         std::mem::drop(resource);
@@ -1073,21 +1044,21 @@ fn rc_native_object_dropped_on_minor_gc() {
 }
 
 // =============================================================================
-// Global<Value> back-reference cycle — collected via visit_global tracing
+// TracedGlobal<Value> back-reference cycle — collected via visit_traced_global tracing
 // =============================================================================
 //
-// `jsg::v8::Global<T>` fields on Rust resources participate in GC tracing via
-// `GcVisitor::visit_global`, which implements the same strong↔traced dual-mode
+// `jsg::v8::TracedGlobal<T>` fields on Rust resources participate in GC tracing via
+// `GcVisitor::visit_traced_global`, which implements the same strong↔traced dual-mode
 // switching as `jsg::Data` / `jsg::V8Ref<T>` in C++.
 //
 // When the parent Wrappable has strong Rust refs the handle stays strong.
 // Once all Rust refs are dropped and only the JS wrapper keeps it alive,
-// `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc
+// `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc
 // can follow — allowing the GC to detect and collect the cycle.
 
 static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// A resource that stores a `Global<Value>` via `Cell` so the back-reference
+/// A resource that stores a `TracedGlobal<Value>` via `Cell` so the back-reference
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
 /// `Cell<Option<…>>` provides interior mutability through `&self`, matching
@@ -1096,7 +1067,7 @@ static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct CyclicResource {
     /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
-    callback: std::cell::Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    callback: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 impl Drop for CyclicResource {
@@ -1108,13 +1079,13 @@ impl Drop for CyclicResource {
 #[jsg_resource]
 impl CyclicResource {}
 
-/// Verifies that a `Global<Value>` back-reference cycle is collected by GC.
+/// Verifies that a `TracedGlobal<Value>` back-reference cycle is collected by GC.
 ///
 /// The cycle:
-///   CyclicResource.callback (Global<Value>) → JS wrapper
+///   CyclicResource.callback (`TracedGlobal<Value>`) → JS wrapper
 ///   JS wrapper → `CppgcShim` → `Wrappable` → `CyclicResource` (same object)
 ///
-/// `visit_global` downgrades the `Global` to a `v8::TracedReference` once all
+/// `visit_traced_global` downgrades the `TracedGlobal` to a `v8::TracedReference` once all
 /// strong Rust refs are dropped, making the cycle visible to cppgc so it can
 /// be collected on the next full GC.
 #[test]
@@ -1128,32 +1099,32 @@ fn global_value_back_ref_is_collected_by_gc() {
         });
 
         // Wrap to produce the JS object, then immediately promote to a
-        // Global so we can store it back into the resource's own field.
+        // TracedGlobal so we can store it back into the resource's own field.
         // `to_js` consumes the Rc clone but the original `resource` still
         // holds a strong ref, so the resource stays alive.
-        let wrapper_local = resource.clone().to_js(lock);
-        let wrapper_global = wrapper_local.to_global(lock);
+        let wrapper_local = resource.clone().to_js(lock)?;
+        let wrapper_global = wrapper_local.to_traced_global(lock);
 
-        // Install the back-reference: resource now holds a Global pointing
+        // Install the back-reference: resource now holds a TracedGlobal pointing
         // to its own JS wrapper, closing the cycle.
         resource.callback.set(Some(wrapper_global));
 
-        // Drop the only Rust Rc. The cycle is now closed but the Global
-        // will be downgraded to a TracedReference by visit_global, making
+        // Drop the only Rust Rc. The cycle is now closed but the TracedGlobal
+        // will be downgraded to a TracedReference by visit_traced_global, making
         // it visible to cppgc.
         std::mem::drop(resource);
         assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
-    // Full GC can now detect and collect the cycle because visit_global
-    // downgrades the Global to a TracedReference during tracing.
+    // Full GC can now detect and collect the cycle because visit_traced_global
+    // downgrades the TracedGlobal to a TracedReference during tracing.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(
             CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst),
             1,
-            "full GC should collect the cyclic resource via visit_global tracing"
+            "full GC should collect the cyclic resource via visit_traced_global tracing"
         );
         Ok(())
     });
@@ -1251,7 +1222,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(CellParent {
             child: Cell::new(child.clone()),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs.
@@ -1285,7 +1256,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(CellOptionParent {
             child: Cell::new(Some(child.clone())),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -1315,7 +1286,7 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(CellOptionParent {
             child: Cell::new(None),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
@@ -1344,7 +1315,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(CellNullableParent {
             child: Cell::new(jsg::Nullable::Some(child.clone())),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -1374,7 +1345,7 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(CellNullableParent {
             child: Cell::new(jsg::Nullable::Null),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
@@ -1403,7 +1374,7 @@ fn std_cell_ref_keeps_child_alive_through_gc() {
         let parent = jsg::Rc::new(StdCellParent {
             child: std::cell::Cell::new(child.clone()),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);

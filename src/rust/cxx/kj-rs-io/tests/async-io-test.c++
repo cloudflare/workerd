@@ -81,7 +81,7 @@ KJ_TEST("tryRead waits for minBytes, then returns what is available up to "
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
 
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
 
   // Exactly-min: 3 bytes written, min 3 -> resolves with 3.
   pair.client->write("abc"_kjb).wait(ws);
@@ -107,7 +107,7 @@ KJ_TEST("EOF before minBytes returns a short count; half-close keeps the other "
   pair.client->shutdownWrite();
 
   // EOF-before-min: only 2 bytes then FIN -> tryRead(min 5) resolves with 2.
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(pair.server->tryRead(buffer, 5, sizeof(buffer)).wait(ws) == 2);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 2) == "ab"_kjb);
   // Subsequent reads keep reporting EOF.
@@ -147,7 +147,7 @@ KJ_TEST("multi-piece write() writes all pieces in order") {
   const kj::ArrayPtr<const kj::byte> pieces[] = {"one,"_kjb, "two,"_kjb, "three"_kjb};
   pair.client->write(kj::arrayPtr(pieces, 3)).wait(ws);
 
-  kj::byte buffer[32];
+  kj::byte buffer[32]{};
   KJ_EXPECT(pair.server->tryRead(buffer, 13, sizeof(buffer)).wait(ws) == 13);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 13) == "one,two,three"_kjb);
 }
@@ -157,7 +157,7 @@ KJ_TEST("canceling a blocked read releases the socket for reuse") {
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
 
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   {
     // A read blocked in tokio (registered with the I/O driver, no data available)...
     auto blocked = pair.server->tryRead(buffer, 1, sizeof(buffer));
@@ -221,7 +221,7 @@ KJ_TEST("whenWriteDisconnected resolves on peer reset, not on half-close") {
 
   // A peer half-close (FIN) must NOT count as write-disconnect: the client can still write.
   pair.server->shutdownWrite();
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(pair.client->tryRead(buffer, 1, sizeof(buffer)).wait(ws) == 0);  // observe EOF
   KJ_EXPECT(!disconnected.poll(ws));
 
@@ -353,7 +353,7 @@ KJ_TEST("wildcard listen binds dual-stack and reports its port; port 0 picks a "
     auto client = parseNow(io, addrText)->connect().wait(ws);
     auto server = acceptPromise.wait(ws);
     client->write("ping"_kjb).wait(ws);
-    kj::byte buffer[4];
+    kj::byte buffer[4]{};
     KJ_EXPECT(server->tryRead(buffer, 4, sizeof(buffer)).wait(ws) == 4);
   }
 }
@@ -423,7 +423,7 @@ KJ_TEST("parseAddress resolves hostnames via DNS") {
   auto client = addr->connect().wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("dns!"_kjb).wait(ws);
-  kj::byte buffer[4];
+  kj::byte buffer[4]{};
   KJ_EXPECT(server->tryRead(buffer, 4, sizeof(buffer)).wait(ws) == 4);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "dns!"_kjb);
 }
@@ -446,7 +446,7 @@ KJ_TEST("connect() tries each resolved address in order, falling through refused
   auto client = addr->connect().wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("2nd"_kjb).wait(ws);
-  kj::byte buffer[3];
+  kj::byte buffer[3]{};
   KJ_EXPECT(server->tryRead(buffer, 3, 3).wait(ws) == 3);
 
   // All refused: the LAST address's exception propagates (KJ parity).
@@ -558,7 +558,7 @@ KJ_TEST("unix domain sockets: parse, listen, connect, toString") {
 
   client->write("via unix"_kjb).wait(ws);
   client->shutdownWrite();
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(server->tryRead(buffer, 16, sizeof(buffer)).wait(ws) == 8);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 8) == "via unix"_kjb);
 
@@ -583,7 +583,7 @@ KJ_TEST("getSockaddr builds a connectable address from a raw struct sockaddr") {
   auto client = addr->connect().wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("hi"_kjb).wait(ws);
-  kj::byte buffer[2];
+  kj::byte buffer[2]{};
   KJ_EXPECT(server->tryRead(buffer, 2, sizeof(buffer)).wait(ws) == 2);
 }
 #endif
@@ -604,7 +604,7 @@ KJ_TEST("provider pipes and timer work under the tokio loop") {
 
   auto pipe = io.getProvider().newTwoWayPipe();
   auto writePromise = pipe.ends[0]->write("pipe data"_kjb).eagerlyEvaluate(nullptr);
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(pipe.ends[1]->tryRead(buffer, 9, sizeof(buffer)).wait(ws) == 9);
   writePromise.wait(ws);
 
@@ -635,7 +635,7 @@ KJ_TEST("wrapListenSocketFd accepts connections on a pre-bound listener (the "
   auto server = acceptPromise.wait(ws);
 
   client->write("fd listen"_kjb).wait(ws);
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(server->tryRead(buffer, 9, sizeof(buffer)).wait(ws) == 9);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 9) == "fd listen"_kjb);
 }
@@ -661,7 +661,7 @@ KJ_TEST("wrapSocketFd wraps both ends of a socketpair") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
 
-  int fds[2];
+  int fds[2]{};
   KJ_SYSCALL(socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
   auto end0 =
       io.getLowLevelProvider().wrapSocketFd(fds[0], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
@@ -669,7 +669,7 @@ KJ_TEST("wrapSocketFd wraps both ends of a socketpair") {
       io.getLowLevelProvider().wrapSocketFd(fds[1], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
 
   end0->write("socketpair"_kjb).wait(ws);
-  kj::byte buffer[16];
+  kj::byte buffer[16]{};
   KJ_EXPECT(end1->tryRead(buffer, 10, sizeof(buffer)).wait(ws) == 10);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 10) == "socketpair"_kjb);
 }
@@ -677,7 +677,7 @@ KJ_TEST("wrapSocketFd wraps both ends of a socketpair") {
 KJ_TEST("wrapSocketFd normalizes a borrowed descriptor without consuming it") {
   auto io = setupTokioAsyncIo();
 
-  int fds[2];
+  int fds[2]{};
   KJ_SYSCALL(socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
   kj::OwnFd borrowed(fds[0]);
   kj::OwnFd peer(fds[1]);
@@ -725,7 +725,7 @@ KJ_TEST("restrictPeers blocks disallowed connect() with KJ's error text") {
                     .wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("ok"_kjb).wait(ws);
-  kj::byte buffer[2];
+  kj::byte buffer[2]{};
   KJ_EXPECT(server->tryRead(buffer, 2, 2).wait(ws) == 2);
 }
 
@@ -747,7 +747,7 @@ KJ_TEST("restrictPeers filters accepted peers (disallowed peers are dropped, "
                     ->connect()
                     .wait(ws);
   KJ_EXPECT(!acceptPromise.poll(ws));
-  kj::byte buffer[1];
+  kj::byte buffer[1]{};
   KJ_EXPECT(client->tryRead(buffer, 1, 1).wait(ws) == 0);
 }
 #endif
@@ -857,7 +857,7 @@ KJ_TEST("zero-length write() is a no-op that succeeds") {
   pair.client->write(kj::ArrayPtr<const kj::byte>()).wait(ws);
   // The stream is still fully usable afterwards.
   pair.client->write("hi"_kjb).wait(ws);
-  kj::byte buf[2];
+  kj::byte buf[2]{};
   KJ_EXPECT(pair.server->tryRead(buf, 2, 2).wait(ws) == 2);
 }
 
@@ -933,7 +933,7 @@ KJ_TEST("getSockaddr builds a connectable IPv6 address from a raw sockaddr_in6")
   auto client = addr->connect().wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("v6"_kjb).wait(ws);
-  kj::byte buf[2];
+  kj::byte buf[2]{};
   KJ_EXPECT(server->tryRead(buf, 2, 2).wait(ws) == 2);
 }
 #endif  // !_WIN32
@@ -975,7 +975,7 @@ KJ_TEST("multi-piece write() of only empty pieces succeeds without touching the 
   kj::ArrayPtr<const kj::byte> pieces[] = {{}, {}};
   pair.client->write(kj::arrayPtr(pieces, 2)).wait(ws);
   // Nothing was written: a short read times out rather than returning bytes.
-  kj::byte buffer[1];
+  kj::byte buffer[1]{};
   auto read = pair.server->tryRead(buffer, 1, 1);
   KJ_EXPECT(!read.poll(ws));
 }
@@ -1023,7 +1023,7 @@ KJ_TEST("acceptAuthenticated() through a restricted listener drops disallowed pe
                     .wait(ws)
                     ->connect()
                     .wait(ws);
-  kj::byte buffer[1];
+  kj::byte buffer[1]{};
   // The listener drops the loopback (non-"public") peer: the client sees EOF, and the accept is
   // still pending afterwards (the EOF proves the drop happened, so this poll is meaningful).
   KJ_EXPECT(client->tryRead(buffer, 1, 1).wait(ws) == 0);
@@ -1047,7 +1047,7 @@ KJ_TEST("multi-piece write(): more empty pieces than IOV_MAX before the data sti
   pieces[2048] = "x"_kjb;
 
   pair.client->write(pieces.asPtr()).wait(ws);
-  kj::byte buffer[1];
+  kj::byte buffer[1]{};
   KJ_EXPECT(pair.server->tryRead(buffer, 1, 1).wait(ws) == 1);
   KJ_EXPECT(buffer[0] == 'x');
 }
@@ -1063,7 +1063,7 @@ KJ_TEST("every stream operation starts inside the call: an unawaited write goes 
   auto pair = makeTcpPair(io);
 
   auto unawaited = pair.client->write("started"_kjb);  // retained, never awaited before reading
-  kj::byte buffer[7];
+  kj::byte buffer[7]{};
   KJ_EXPECT(pair.server->tryRead(buffer, 7, 7).wait(ws) == 7);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 7) == "started"_kjb);
   unawaited.wait(ws);
@@ -1096,7 +1096,7 @@ KJ_TEST("listen() on a hostname binds every resolved address and accepts on each
     auto client = parseNow(io, connectTo)->connect().wait(ws);
     auto server = boundedBy(io, kj::mv(acceptPromise), 10 * kj::SECONDS, connectTo).wait(ws);
     client->write("hi"_kjb).wait(ws);
-    kj::byte buffer[2];
+    kj::byte buffer[2]{};
     KJ_EXPECT(server->tryRead(buffer, 2, 2).wait(ws) == 2);
   };
   if (hasV4) acceptOne(kj::str("127.0.0.1:", port));
@@ -1141,7 +1141,7 @@ kj::String currentExecutablePath() {
   KJ_REQUIRE(_NSGetExecutablePath(buffer.begin(), &size) == 0);
   return kj::heapString(buffer.begin());
 #else
-  char buffer[PATH_MAX];
+  char buffer[PATH_MAX]{};
   ssize_t n;
   KJ_SYSCALL(n = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1));
   buffer[n] = '\0';
@@ -1166,7 +1166,7 @@ KJ_TEST("a context ignores SIGPIPE: writes to a vanished peer fail, the process 
 
     // A stream socket whose peer is closed: the second write (after the RST) raises SIGPIPE
     // unless it is ignored.
-    int sv[2];
+    int sv[2]{};
     KJ_SYSCALL(socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
     auto stream =
         io.getLowLevelProvider().wrapSocketFd(sv[0], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
@@ -1213,7 +1213,7 @@ KJ_TEST("abortRead() ends a pending read with EOF (shutdown(SHUT_RD), like KJ)")
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
 
-  kj::byte buffer[8];
+  kj::byte buffer[8]{};
   auto pendingRead = pair.server->tryRead(buffer, 1, sizeof(buffer));
   KJ_EXPECT(!pendingRead.poll(ws));
   pair.server->abortRead();
@@ -1235,7 +1235,7 @@ KJ_TEST("an unawaited multi-piece write() goes out too (coroutine start)") {
 
   kj::ArrayPtr<const kj::byte> pieces[] = {"multi"_kjb, "-"_kjb, "piece"_kjb};
   auto unawaited = pair.client->write(kj::arrayPtr(pieces, kj::size(pieces)));
-  kj::byte buffer[11];
+  kj::byte buffer[11]{};
   KJ_EXPECT(pair.server->tryRead(buffer, 11, 11).wait(ws) == 11);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 11) == "multi-piece"_kjb);
   unawaited.wait(ws);
@@ -1249,7 +1249,7 @@ KJ_TEST("tryRead with minBytes == 0 still waits for data (KJ parity: EAGAIN alwa
   auto &ws = io.getWaitScope();
   auto pair = makeTcpPair(io);
 
-  kj::byte buffer[8];
+  kj::byte buffer[8]{};
   auto read = pair.server->tryRead(buffer, 0, sizeof(buffer));
   io.getTimer().afterDelay(20 * kj::MILLISECONDS).wait(ws);
   KJ_EXPECT(!read.poll(ws), "minBytes == 0 must not return 0 from an idle socket");
@@ -1301,7 +1301,7 @@ KJ_TEST("getSockaddr keeps a zero-initialized sockaddr_un usable and prints it l
   auto client = addr->connect().wait(ws);
   auto server = acceptPromise.wait(ws);
   client->write("raw"_kjb).wait(ws);
-  kj::byte buffer[3];
+  kj::byte buffer[3]{};
   KJ_EXPECT(server->tryRead(buffer, 3, 3).wait(ws) == 3);
   ::unlink(path.cStr());
 }
@@ -1317,7 +1317,7 @@ KJ_TEST("provider pipes are socket pairs: a write completes before anyone reads"
 
   auto oneWay = io.getProvider().newOneWayPipe();
   oneWay.out->write("one"_kjb).wait(ws);  // completes with no read outstanding
-  kj::byte buffer[3];
+  kj::byte buffer[3]{};
   KJ_EXPECT(oneWay.in->tryRead(buffer, 3, 3).wait(ws) == 3);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 3) == "one"_kjb);
   oneWay.out = nullptr;
@@ -1383,7 +1383,7 @@ KJ_TEST("connectAuthenticated reports the connected address as a NetworkPeerIden
   auto second = identity.getAddress().connect().wait(ws);
   acceptAgain.wait(ws);
   client.stream->write("auth"_kjb).wait(ws);
-  kj::byte buffer[4];
+  kj::byte buffer[4]{};
   KJ_EXPECT(server->tryRead(buffer, 4, sizeof(buffer)).wait(ws) == 4);
 }
 
@@ -1535,7 +1535,7 @@ KJ_TEST("unix-abstract: addresses (workerd.capnp's Socket/ExternalServer grammar
   KJ_EXPECT(kj::tryDowncast<kj::LocalPeerIdentity>(*server.peerIdentity) != kj::none,
       "an abstract-socket peer is a local peer");
   client->write("abs"_kjb).wait(ws);
-  kj::byte buffer[3];
+  kj::byte buffer[3]{};
   KJ_EXPECT(server.stream->tryRead(buffer, 3, 3).wait(ws) == 3);
 
   // The address round-trips through the raw sockaddr KJ's interfaces expose: getpeername() on
@@ -1620,18 +1620,18 @@ KJ_TEST("wrapInputFd/wrapOutputFd take sockets, not pipes (kj's win32 definition
         "platform)") {
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();
-  int sv[2];
+  int sv[2]{};
   KJ_SYSCALL(socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
   auto in =
       io.getLowLevelProvider().wrapInputFd(sv[0], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
   auto out =
       io.getLowLevelProvider().wrapOutputFd(sv[1], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
   out->write("sock"_kjb).wait(ws);
-  kj::byte buffer[4];
+  kj::byte buffer[4]{};
   KJ_EXPECT(in->tryRead(buffer, 4, 4).wait(ws) == 4);
   KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "sock"_kjb);
 
-  int fds[2];
+  int fds[2]{};
   KJ_SYSCALL(pipe(fds));
   KJ_EXPECT_THROW_MESSAGE("getsockname",
       io.getLowLevelProvider().wrapInputFd(fds[0], kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP));

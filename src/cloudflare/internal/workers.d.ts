@@ -71,4 +71,4 @@ export function abortIsolate(reason?: string): never;
 export function retryable(...methods: ((...args: never[]) => unknown)[]): void;
 
 export const restore: symbol;
-export const onEvict: symbol | undefined;
+export const onHibernate: symbol | undefined;

@@ -89,13 +89,23 @@ export async function sendDnsRequest(
     throw new DnsError(name, errorCodes.BADRESP, syscall);
   }
 
-  if (!json.Question.at(0)) {
+  const question = json.Question.at(0);
+  if (!question) {
     // Some APIs depend on Question being existent.
     throw new DnsError(name, errorCodes.BADRESP, syscall);
   }
 
   if (json.Answer?.at(0)?.name === '') {
     throw new DnsError(name, errorCodes.NOTFOUND, syscall);
+  }
+
+  // The answer section also carries the CNAME chain the resolver followed to reach the requested
+  // records, so keep only records of the queried type.
+  const answers = json.Answer?.filter((a) => a.type === question.type);
+  if (answers?.length) {
+    json.Answer = answers;
+  } else {
+    delete json.Answer;
   }
 
   return json;

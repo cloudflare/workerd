@@ -297,6 +297,10 @@ void IsolateBase::applyDeferredActions() {
     auto drop = queue.lockExclusive()->pop();
   }
 
+  if (deferredActionHook != nullptr) {
+    deferredActionHook(ptr);
+  }
+
   externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 
@@ -622,6 +626,9 @@ IsolateBase::~IsolateBase() noexcept(false) {
     snapshotCreator = kj::none;
     ptr->Dispose();
     ptr = nullptr;
+    if (disposeHook != nullptr) {
+      disposeHook(disposeHookData);
+    }
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });

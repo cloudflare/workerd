@@ -261,8 +261,8 @@ kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
 }
 
 kj::Promise<void> WebSocket::sendAutoResponse(
-    kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) {
-  return impl->sendAutoResponse(kj::mv(message), ws, kj::mv(writeBarrier));
+    kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) {
+  return impl->sendAutoResponse(kj::mv(message), kj::mv(ws), kj::mv(writeBarrier));
 }
 
 void WebSocket::setPeer(jsg::WeakRef<WebSocket> peer) {
@@ -1252,7 +1252,7 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
 }
 
 kj::Promise<void> LegacyWebSocketAdapter::sendAutoResponse(
-    kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) {
+    kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) {
   if (autoResponseStatus.isClosed) {
     return kj::READY_NOW;
   } else if (autoResponseStatus.isPumping) {
@@ -1261,8 +1261,10 @@ kj::Promise<void> LegacyWebSocketAdapter::sendAutoResponse(
         AutoResponse::Pending{kj::mv(message), kj::mv(completion.fulfiller)});
     return kj::mv(completion.promise);
   } else {
-    return writeBarrier.then([message = kj::mv(message), &ws]() mutable {
-      return ws.send(message).attach(kj::mv(message));
+    return writeBarrier.then([message = kj::mv(message), ws = kj::mv(ws)]() mutable {
+      return KJ_REQUIRE_NONNULL(ws.tryGet(), "WebSocket destroyed before auto-response")
+          .send(message)
+          .attach(kj::mv(message));
     });
   }
 }

@@ -53,8 +53,18 @@ pub mod repr {
         ///
         /// Panics if the C++ function threw an exception, or with a `CanceledException`
         /// payload if it threw `kj::CanceledException`.
+        #[inline]
         #[track_caller]
         pub fn panic_on_exception(self) {
+            if !self.exception.is_null() {
+                self.panic_on_exception_slow();
+            }
+        }
+
+        #[cold]
+        #[inline(never)]
+        #[track_caller]
+        fn panic_on_exception_slow(self) {
             if let Err(exception) = self.into_result() {
                 // Exceptions which did not originate from a KJ macro have no throw site.
                 let thrown_at = if exception.line() > 0 {
@@ -80,6 +90,7 @@ pub mod repr {
         /// # Panics
         ///
         /// Panics if the result is a `CanceledException`.
+        #[inline]
         pub fn into_result(self) -> core::result::Result<(), crate::KjException> {
             let ptr = self.exception as usize;
             if ptr == 0 {

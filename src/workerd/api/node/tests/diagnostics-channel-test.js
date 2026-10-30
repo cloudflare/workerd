@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { ok, strictEqual } from 'node:assert';
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 
 import {
   hasSubscribers,
@@ -227,5 +227,115 @@ export const test_tracingChannel_hasSubscribers_is_a_method = {
       tc[sub].unsubscribe(listener);
       strictEqual(tc.hasSubscribers(), false, `after unsubscribing ${sub}`);
     }
+  },
+};
+
+export const test_subscriber_order_after_unsubscribe = {
+  test() {
+    // Removing a subscriber moves the last one into its place.
+    const order = [];
+    const ch = channel('order');
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((n) => () => order.push(n));
+    ch.subscribe(a);
+    ch.subscribe(b);
+    ch.subscribe(c);
+    ch.subscribe(a);
+    ch.unsubscribe(a);
+    ch.subscribe(d);
+    ch.publish(0);
+    strictEqual(order.join(''), 'cbd');
+  },
+};
+
+export const test_subscriber_arguments = {
+  test() {
+    const sym = Symbol('sym');
+    let seen;
+    subscribe(sym, function (message, name) {
+      seen = [this, message, name, arguments.length];
+    });
+    channel(sym).publish('m');
+    deepStrictEqual(seen, [globalThis, 'm', sym, 2]);
+  },
+};
+
+export const test_channel_names = {
+  test() {
+    // Channels are keyed by the name's string form.
+    strictEqual(channel(Symbol('s')), channel(Symbol('s')));
+    strictEqual(channel(Symbol('s')), channel('Symbol(s)'));
+    strictEqual(channel(1), channel('1'));
+  },
+};
+
+export const test_argument_errors = {
+  test() {
+    const ch = channel('errors');
+    throws(() => ch.publish(), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'publish' on 'Channel': parameter 1 is not of type 'Value'.",
+    });
+    throws(() => ch.subscribe({}), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'subscribe' on 'Channel': parameter 1 is not of type 'function'.",
+    });
+    throws(() => ch.bindStore({}), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'bindStore' on 'Channel': parameter 1 is not of type 'AsyncLocalStorage'.",
+    });
+    throws(() => subscribe('x', 1), {
+      name: 'TypeError',
+      message:
+        "Failed to execute 'subscribe' on 'DiagnosticsChannelModule': parameter 2 is not of type 'function'.",
+    });
+    throws(() => Channel.prototype.publish.call({}, 0), {
+      name: 'TypeError',
+      message: /^Illegal invocation/,
+    });
+    throws(() => new Channel('x'), {
+      name: 'TypeError',
+      message: 'Illegal constructor',
+    });
+  },
+};
+
+export const test_to_string_tag = {
+  test() {
+    const expected = Cloudflare.compatibilityFlags['set_tostring_tag']
+      ? '[object Channel]'
+      : '[object Object]';
+    strictEqual(Object.prototype.toString.call(channel('tag')), expected);
+  },
+};
+
+export const test_run_stores_order = {
+  test() {
+    // Each transform runs with the stores bound before it already entered. Unbinding a store
+    // moves the last one into its place.
+    const stores = [1, 2, 3].map(() => new AsyncLocalStorage());
+    const sc = channel('stores');
+    const log = [];
+    stores.forEach((als, i) =>
+      sc.bindStore(als, (message) => {
+        log.push(`${i}:${stores[0].getStore()}`);
+        return `${message}${i}`;
+      })
+    );
+    sc.unbindStore(stores[1]);
+    const result = sc.runStores(
+      'm',
+      function (x) {
+        log.push(`cb:${this === globalThis}:${x}`);
+        return stores.map((als) => als.getStore()).join(',');
+      },
+      undefined,
+      'x'
+    );
+    strictEqual(log.join(' '), '0:undefined 2:m0 cb:true:x');
+    strictEqual(result, 'm0,,m2');
+    strictEqual(stores[0].getStore(), undefined);
   },
 };

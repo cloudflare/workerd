@@ -9,7 +9,10 @@ copy_file(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
+# Server-side renders a Next.js app, which under a sanitizer can outlast a medium test's timeout on
+# one vCPU.
 wd_test(
+    size = "large",
     src = "opennext-ssr-test.wd-test",
     args = ["--experimental"],
     data = [

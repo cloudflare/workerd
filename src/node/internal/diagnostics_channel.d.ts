@@ -6,3 +6,6 @@
 export * from 'node:diagnostics_channel';
 export type TransformCallback = (value: unknown) => unknown;
 export type MessageCallback = (message: unknown, name: string | symbol) => void;
+
+// Implemented in C++: records a published message for tail workers.
+export function publishToTracer(name: string | symbol, message: unknown): void;

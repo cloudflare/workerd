@@ -15,8 +15,15 @@
 // '5' is 5, null is 0. Every failure is a TypeError. C++ lets the number
 // 2 ** 64 through its range check to a cast whose result is undefined, so
 // that one value is asserted for TypeScript only.
+//
+// DIVERGENCE (ledger #28): the forks of the readable side (a tee branch, a
+// branch teed again, the copy new Request() makes) carry the declared
+// length in TypeScript when made before any read; C++ gives tee branches
+// no length, so they go out chunked. The declaration is the readable's
+// total, so once anything has been read before a fork, the forks go out
+// chunked in both (PARITY).
 
-import { ok, strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 function transformWithLength(expectedLength) {
@@ -106,5 +113,70 @@ export const transformExpectedLengthRange = {
       throws(() => transformWithLength(value), TypeError);
     }
     if (usingTsImpl) throws(() => transformWithLength(2 ** 64), TypeError);
+  },
+};
+
+// The readable side of a transform that declares 10 bytes and is written
+// them in two chunks, with the writes and the close still pending.
+function tenByteReadable() {
+  const enc = new TextEncoder();
+  const { readable, writable } = transformWithLength(10);
+  const writer = writable.getWriter();
+  const written = Promise.all([
+    writer.write(enc.encode('01234')),
+    writer.write(enc.encode('56789')),
+    writer.close(),
+  ]);
+  return { readable, written };
+}
+
+async function readChunk(stream) {
+  const reader = stream.getReader();
+  const { value } = await reader.read();
+  reader.releaseLock();
+  return new TextDecoder().decode(value);
+}
+
+// Posts each fork in turn through SELF, and returns the Content-Length each
+// carried and the body echoed back.
+async function postForks(env, readable) {
+  const [a, b] = readable.tee();
+  const [c, d] = a.tee();
+  const requestWith = (body) =>
+    new Request('http://example.org', { method: 'POST', body });
+  const observed = [];
+  for (const request of [
+    requestWith(b),
+    requestWith(c),
+    new Request(requestWith(d)),
+  ]) {
+    const resp = await env.SELF.fetch(request);
+    const text = await resp.text();
+    observed.push([resp.headers.get('observed-content-length'), text]);
+  }
+  return observed;
+}
+
+// DIVERGENCE (ledger #28) before a read; PARITY after one.
+export const transformForkContentLength = {
+  async test(ctrl, env) {
+    {
+      const { readable, written } = tenByteReadable();
+      const length = usingTsImpl ? '10' : 'null';
+      deepStrictEqual(
+        await postForks(env, readable),
+        Array(3).fill([length, '0123456789'])
+      );
+      await written;
+    }
+    {
+      const { readable, written } = tenByteReadable();
+      strictEqual(await readChunk(readable), '01234');
+      deepStrictEqual(
+        await postForks(env, readable),
+        Array(3).fill(['null', '56789'])
+      );
+      await written;
+    }
   },
 };

@@ -32,7 +32,7 @@ work** — do not report style nits or perf opinions, and trust that the others 
 
 1. Load the checklist for each language present in the change:
    - `.c++`, `.h` — `docs/reference/cpp-safety-review-checklist.md`, in full.
-   - `.rs` — the safety-bearing parts of `docs/reference/rust-review-checklist.md`: **CXX Bridge Safety**, **Unsafe Code**, the rule that panics across FFI are undefined behavior under **Error Handling**, and the GC-tracing rule under **JSG Resource Conventions**. The rest of that document is the style reviewer's.
+   - `.rs` — the safety-bearing parts of `docs/reference/rust-review-checklist.md`: **CXX Bridge Safety**, **Unsafe Code**, the rule that panics across FFI are undefined behavior under **Error Handling**, the GC-tracing rule under **JSG Resource Conventions**, and **Rust JSG Safety Rules**. The rest of that document is the style reviewer's.
 
    A CXX bridge change spans `.rs` and its companion `ffi.c++`/`ffi.h` and needs both checklists; the bug is usually in the disagreement between the two sides, not in either one alone.
 

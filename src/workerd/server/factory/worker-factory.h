@@ -54,6 +54,8 @@ struct SpawnedTask;
 struct ActorClassChannel;
 struct ActorNamespaceHandle;
 struct ActorHooks;
+struct Committer;
+struct ResultTask;
 struct AbortReason;
 struct KeepAlive;
 struct WorkerInterfaceList;
@@ -384,11 +386,17 @@ class RpcClient final {
   mutable kj::Own<Impl> impl;
 };
 
+void actor_close_storage(const ActorHandle& actor);
+
 kj::Own<RpcClient> new_rpc_client(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> stream);
+kj::Own<RpcClient> rpc_client_debug_actor(
+    const RpcClient& session, ::rust::Str service, ::rust::Str className, ::rust::Str actorId);
 kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcClient& client,
     kj::Own<WorkerInterface::CustomEvent> event,
     kj::Maybe<::rust::Str> cfBlobJson);
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
+kj::Own<WorkerInterface> rpc_client_start_request(
+    const RpcClient& client, kj::Own<RequestMetadata> metadata);
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 

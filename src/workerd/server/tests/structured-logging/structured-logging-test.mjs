@@ -27,13 +27,15 @@ test('structured logging produces valid JSON with required fields', async () => 
     child.on('close', () => resolve(output));
   });
 
-  // Parse as JSON - extract the first JSON line
+  // Parse as JSON - extract the JSON line reporting the syntax error. Other
+  // log lines, such as warnings logged during startup, may precede it.
   let logEntry;
   assert.doesNotThrow(() => {
-    // Split by lines and find the first valid JSON line
     const lines = result.split('\n');
-    const jsonLine = lines.find((line) => line.trim().startsWith('{'));
-    assert(jsonLine, 'No JSON line found in output');
+    const jsonLine = lines.find(
+      (line) => line.trim().startsWith('{') && line.includes('SyntaxError')
+    );
+    assert(jsonLine, 'No JSON line reporting the SyntaxError found in output');
     logEntry = JSON.parse(jsonLine);
   }, `Output is not valid JSON: ${result}`);
 

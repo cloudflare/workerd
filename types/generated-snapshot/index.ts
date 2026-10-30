@@ -502,6 +502,7 @@ export interface ExecutionContext<Props = unknown> {
   readonly props: Props;
   cache?: CacheContext;
   readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
 }
@@ -4035,7 +4036,7 @@ export interface ContainerSnapshotOptions {
 }
 export type ContainerStartupOptions = {
   entrypoint?: string[];
-  enableInternet: boolean;
+  enableInternet?: boolean;
   env?: Record<string, string>;
   instance?:
     | "lite"
@@ -17496,7 +17497,7 @@ export declare namespace TailStream {
     | "exceededWallTime"
     | "aborted";
   interface ScriptVersion {
-    readonly id: string;
+    readonly id?: string;
     readonly tag?: string;
     readonly message?: string;
   }
@@ -17507,7 +17508,7 @@ export declare namespace TailStream {
   }
   interface Onset {
     readonly type: "onset";
-    readonly attributes: Attribute[];
+    readonly attributes?: Attribute[];
     // id for the span being opened by this Onset event.
     readonly spanId: string;
     readonly dispatchNamespace?: string;
@@ -17682,6 +17683,7 @@ export declare namespace TailStream {
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
+    streamDiagEvent?: TailEventHandler<StreamDiagnostic>;
     return?: TailEventHandler<Return>;
     attributes?: TailEventHandler<Attributes>;
   };

@@ -86,12 +86,15 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["config-compiler.h"],
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
+    test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
         "@crates_vendor//:socket2",
         "@crates_vendor//:tokio",
     ] + select({
@@ -310,6 +313,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",

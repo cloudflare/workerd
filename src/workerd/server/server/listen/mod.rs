@@ -35,6 +35,7 @@ use kj_hyper::server::Handler;
 use kj_hyper::server::ServerSettings;
 use kj_hyper::server::Shutdown;
 use kj_rs::KjMaybe;
+use kj_rs::KjOwn;
 use kj_rs_io::Socket;
 use kj_rs_io::TokioAddress;
 use tokio::net::UdpSocket;
@@ -584,13 +585,25 @@ impl Handler for HttpConnection {
 // =====================================================================================
 // TCP
 
+/// How a TCP socket applies its TLS options to the connections it accepts.
+#[derive(Clone)]
+pub enum TcpTls {
+    /// The TLS handshake is performed as soon as a connection is accepted; the `connect()`
+    /// handler sees only the decrypted stream.
+    Implicit(Arc<rustls::ServerConfig>),
+    /// The connection is served in plaintext, and the `connect()` handler may upgrade it with
+    /// `startTls()`, performing the handshake as the server at the point in its protocol where
+    /// the upgrade belongs.
+    StartTls(Arc<rustls::ServerConfig>),
+}
+
 /// Serves raw TCP on `listener`: each connection is a `connect()` event on the socket's service,
 /// addressed to `authority` (the socket as bound), until the server drains.
 pub async fn listen_tcp(
     context: Rc<ListenContext>,
     listener: StreamListener,
     channel: Rc<dyn Channel>,
-    tls: Option<Arc<rustls::ServerConfig>>,
+    tls: Option<TcpTls>,
     authority: String,
 ) -> Result<()> {
     let authority = Rc::new(authority);
@@ -606,9 +619,22 @@ pub async fn listen_tcp(
             };
             let metadata = ffi::new_request_metadata(KjMaybe::None, peer.as_deref().into());
             let mut worker = CxxWorkerInterface::new(channel.start_request(metadata)?);
-            let hangup = hangup(&accepted);
-            let io = transport(accepted, tls.as_ref(), &context).await?;
-            let mut stream = kj_hyper::into_kj_stream_with(io, Some(hangup.shared()));
+            let hangup = Some(hangup(&accepted).shared());
+            let implicit = match &tls {
+                Some(TcpTls::Implicit(config)) => Some(config),
+                _ => None,
+            };
+            let io = transport(accepted, implicit, &context).await?;
+            // Without a STARTTLS config the settings carry no starter slot at all: an empty slot
+            // would tell the service that its peer is waiting to be told about an upgrade, which
+            // a raw TCP client is not.
+            let (mut stream, mut starter) = match &tls {
+                Some(TcpTls::StartTls(config)) => {
+                    let (io, starter) = kj_hyper::StartTlsIo::server(io, Arc::clone(config));
+                    (kj_hyper::into_kj_stream_with(io, hangup), Some(starter))
+                }
+                _ => (kj_hyper::into_kj_stream_with(io, hangup), None),
+            };
             let mut response = ffi::new_null_connect_response();
             let headers = Headers::new(header_table(&context.factory));
             worker
@@ -619,7 +645,7 @@ pub async fn listen_tcp(
                     ConnectResponse::from(response.as_mut()),
                     ConnectSettings {
                         use_tls: false,
-                        tls_starter: KjMaybe::None,
+                        tls_starter: starter.as_mut().map(KjOwn::as_mut).into(),
                     },
                 )
                 .await

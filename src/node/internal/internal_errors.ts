@@ -723,6 +723,53 @@ export class EPIPE extends NodeError {
   }
 }
 
+// libuv's errno values on Linux, which Node.js reports there.
+const UV_ERRNO: Record<string, number> = {
+  ECONNREFUSED: -111,
+  ETIMEDOUT: -110,
+  EHOSTUNREACH: -113,
+  ENETUNREACH: -101,
+};
+
+// A failed connect(2), as Node reports it (its exceptionWithHostPort). Node's
+// errno errors are plain Errors, so unlike NodeError these keep Error's
+// formatting: `Error: connect ECONNREFUSED 127.0.0.1:1`.
+export class ConnectException extends Error {
+  code: string;
+  errno: number | undefined;
+  syscall = 'connect';
+  address: string;
+  port: number;
+
+  constructor(code: string, address: string, port: number) {
+    super(`connect ${code} ${address}:${port}`);
+    this.code = code;
+    this.errno = UV_ERRNO[code];
+    this.address = address;
+    this.port = port;
+  }
+}
+
+const GETADDRINFO_ERRNO: Record<string, number> = {
+  ENOTFOUND: -3008,
+  EAI_AGAIN: -3001,
+};
+
+// A failed name lookup, as Node reports it from connect()'s getaddrinfo.
+export class GetAddrInfoException extends Error {
+  code: string;
+  errno: number | undefined;
+  syscall = 'getaddrinfo';
+  hostname: string;
+
+  constructor(code: string, hostname: string) {
+    super(`getaddrinfo ${code} ${hostname}`);
+    this.code = code;
+    this.errno = GETADDRINFO_ERRNO[code];
+    this.hostname = hostname;
+  }
+}
+
 // A read into an empty buffer, as Node reports it (the errno exception of
 // a read that libuv refuses with UV_ENOBUFS).
 export class ENOBUFS extends NodeError {

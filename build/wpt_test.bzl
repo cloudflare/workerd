@@ -8,12 +8,16 @@ load("//:build/wd_test.bzl", "wd_test")
 PORT_BINDINGS = [
     "HTTP_PORT",
     "HTTPS_PORT",
-    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway
+    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway.
+    # Every server wptserve starts needs one: for a server left out of its config it picks an
+    # "auto" port itself, by binding port 0 and closing the socket, which can hand it a port that
+    # the supervisor has already allocated and closed but wptserve has not bound yet.
     "HTTP_PORT_2",
     "HTTPS_PORT_2",
     "HTTP_PUBLIC_PORT",
     "HTTPS_PUBLIC_PORT",
     "HTTP_LOCAL_PORT",
+    "HTTPS_LOCAL_PORT",
     "WSS_PORT",
     "WS_PORT",
 ]
@@ -22,7 +26,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], served_wpt_files = [], exclude_test_dirs = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -31,6 +35,16 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     2. Generates a wd-test file for this test suite. This contains all of the
        paths to modules needed to run the test: generated test suite, test config
        file, WPT test scripts, associated JSON resources.
+
+    extra_wpt_directories lists further WPT modules whose JS files the tests load by absolute path
+    (e.g. `// META: script=/wasm/jsapi/assertions.js`). They are bound under that absolute path.
+
+    extra_wpt_files lists individual WPT .wasm resources that tests fetch by absolute path (e.g.
+    `fetch('/wasm/incrementer.wasm')`). They are bound under that absolute path as data, which the
+    harness's fetch() serves when no wptserve sidecar runs.
+
+    served_wpt_files lists files outside the test's directories that tests fetch from the wptserve
+    sidecar (start_server), which serves the WPT files in the test's runfiles.
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
@@ -52,6 +66,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         test_config = test_config_as_js,
         wpt_tsproject = wpt_tsproject,
         include_tentative = include_tentative,
+        exclude_test_dirs = exclude_test_dirs,
     )
 
     wd_test_gen_rule = "{}@_wpt_wd_test_gen".format(name)
@@ -67,6 +82,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common = wpt_common,
         wpt_resources = wpt_resources,
         wpt_interfaces = wpt_interfaces,
+        extra_wpt_directories = extra_wpt_directories,
+        extra_wpt_files = extra_wpt_files,
+        exclude_test_dirs = exclude_test_dirs,
         compat_flags = compat_flags + ["immutable_api_prototypes", "spec_compliant_property_attributes", "pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
@@ -79,7 +97,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common,  # i.e. "wpt/common/**"
         wpt_resources,  # i.e. "wpt/resources/**"
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
-    ]
+    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files + served_wpt_files
+
+    # Every run prints the report and stats that tools/cross/wpt_logs.py collects.
+    env = {"GEN_TEST_REPORT": "1", "GEN_TEST_STATS": "1"} | kwargs.pop("env", {})
 
     wd_test(
         name = "{}".format(name),
@@ -98,9 +119,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # that produce INFO log lines on stdout. Those lines land after the JSON report/stats
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
+        env = env,
         data = data,
-        # WPT tests are not supported in RBE so far
-        tags = tags + ["no-remote-exec"],
+        # The "wptserve" resource (see .bazelrc) runs at most one wptserve sidecar at a time.
+        tags = tags + (["resources:wptserve:1"] if start_server else []),
         **kwargs
     )
 
@@ -161,7 +183,12 @@ def _wpt_js_test_gen_impl(ctx):
     src = ctx.actions.declare_file("{}-test.generated.js".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
-    test_files = [file for file in ctx.files.wpt_directory if is_test_file(file, ctx.attr.include_tentative)]
+    test_files = [
+        file
+        for file in ctx.files.wpt_directory
+        if is_test_file(file, ctx.attr.include_tentative) and
+           not in_excluded_dir(base, file, ctx.attr.exclude_test_dirs)
+    ]
 
     ctx.actions.write(
         output = src,
@@ -191,6 +218,8 @@ _wpt_js_test_gen = rule(
         "wpt_tsproject": attr.label(),
         # Whether to include tentative test files
         "include_tentative": attr.bool(default = False),
+        # Subdirectories of wpt_directory whose tests are not run
+        "exclude_test_dirs": attr.string_list(default = []),
     },
 )
 
@@ -206,6 +235,11 @@ const {{ run, printResults }} = createRunner(config, '{test_name}', '{wpt_path}'
 
 export const zzz_results = printResults();
 """
+
+def in_excluded_dir(base, file, excluded_dirs):
+    """Whether file is under one of excluded_dirs, given relative to the module base."""
+    path = module_relative_path(base, file)
+    return any([path.startswith(d + "/") for d in excluded_dirs])
 
 def is_test_file(file, include_tentative = False):
     if not file.path.endswith(".js"):
@@ -263,14 +297,23 @@ def _wpt_wd_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     # Generate bindings for test directory files plus common/**/*.js, resources/**/*.js, and interfaces/**/*.idl
-    bindings = generate_external_bindings(src, base, ctx.files.wpt_directory)
+    bindings = generate_external_bindings(src, base, [
+        file
+        for file in ctx.files.wpt_directory
+        if not in_excluded_dir(base, file, ctx.attr.exclude_test_dirs)
+    ])
     common_base = ctx.attr.wpt_common[WPTModuleInfo].base
     common_bindings = generate_common_bindings(src, common_base, ctx.files.wpt_common)
     resources_base = ctx.attr.wpt_resources[WPTModuleInfo].base
     resources_bindings = generate_resources_bindings(src, resources_base, ctx.files.wpt_resources)
     interfaces_base = ctx.attr.wpt_interfaces[WPTModuleInfo].base
     interfaces_bindings = generate_interfaces_bindings(src, interfaces_base, ctx.files.wpt_interfaces)
-    all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] if b])
+    extra_bindings = [
+        generate_absolute_bindings(src, extra[WPTModuleInfo], extra.files.to_list())
+        for extra in ctx.attr.extra_wpt_directories
+    ]
+    extra_bindings.append(generate_extra_file_bindings(src, ctx.files.extra_wpt_files))
+    all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] + extra_bindings if b])
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -292,6 +335,8 @@ def _wpt_wd_test_gen_impl(ctx):
 _wpt_wd_test_gen = rule(
     implementation = _wpt_wd_test_gen_impl,
     attrs = {
+        # Subdirectories of wpt_directory whose tests and resources are not bound
+        "exclude_test_dirs": attr.string_list(default = []),
         # A string to use as the test name. Used in the wd-test filename and the worker's name
         "test_name": attr.string(),
         # A file group representing a directory of wpt tests. All files in the group will be embedded.
@@ -310,6 +355,10 @@ _wpt_wd_test_gen = rule(
         "wpt_resources": attr.label(),
         # Target specifying the WPT interfaces directory module
         "wpt_interfaces": attr.label(),
+        # Further WPT directory modules whose JS files are bound by absolute path
+        "extra_wpt_directories": attr.label_list(),
+        # Individual WPT .wasm resources bound as data by absolute path
+        "extra_wpt_files": attr.label_list(allow_files = [".wasm"]),
         # A list of autogates to specify in the generated wd-test file
         "autogates": attr.string_list(),
         # A list of compatibility flags to specify in the generated wd-test file
@@ -431,6 +480,36 @@ def generate_common_bindings(wd_test_file, base, files):
 
     return ",\n".join(result)
 
+def generate_absolute_bindings(wd_test_file, module_info, files):
+    """
+    Generates a text binding for each JS file in a WPT module, named by its absolute path within
+    the WPT tree (e.g. /wasm/jsapi/assertions.js), as tests refer to them in META scripts.
+    """
+
+    result = []
+
+    for file in files:
+        if file.extension != "js":
+            continue
+
+        relative_path = module_relative_path(module_info.base, file)
+        result.append('(name = "/{}/{}", text = embed "{}")'.format(module_info.path, relative_path, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
+def generate_extra_file_bindings(wd_test_file, files):
+    """
+    Generates a data binding for each individual WPT file, named by its absolute path within the
+    WPT tree (e.g. /wasm/incrementer.wasm), as tests fetch them by that path.
+    """
+
+    result = []
+
+    for file in files:
+        result.append('(name = "/{}", data = embed "{}")'.format(file.owner.name, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
 def generate_resources_bindings(wd_test_file, base, files):
     """
     Generates appropriate bindings for each file in the WPT resources module.
@@ -516,6 +595,7 @@ cd $(dirname $0)
     "http-public": [$HTTP_PUBLIC_PORT],
     "https-public": [$HTTPS_PUBLIC_PORT],
     "http-local": [$HTTP_LOCAL_PORT],
+    "https-local": [$HTTPS_LOCAL_PORT],
     "wss": [$WSS_PORT],
     "ws": [$WS_PORT]
   }}
@@ -531,19 +611,20 @@ def _wpt_server_entrypoint_impl(ctx):
     We generate a script because Bazel doesn't want arguments in this context, and we use a custom
     rule to do so because we want more control over paths and dependencies than with a genrule.
     """
+    python = ctx.toolchains["@rules_python//python:toolchain_type"].py3_runtime
     start_src = ctx.actions.declare_file("start.sh")
     ctx.actions.write(
         output = start_src,
         is_executable = True,
         content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
-            python = ctx.file.python.short_path,
+            python = python.interpreter.short_path,
         ),
     )
 
     return DefaultInfo(
         runfiles = ctx.runfiles(
             files = [start_src],
-            transitive_files = depset(ctx.files.srcs + [ctx.file.python]),
+            transitive_files = depset(ctx.files.srcs, transitive = [python.files]),
         ),
         executable = start_src,
     )
@@ -551,11 +632,10 @@ def _wpt_server_entrypoint_impl(ctx):
 wpt_server_entrypoint = rule(
     implementation = _wpt_server_entrypoint_impl,
     attrs = {
-        # Python interpreter to use to run the WPT server
-        "python": attr.label(allow_single_file = True),
         # All the Python code that should be visible
         "srcs": attr.label_list(allow_files = True),
     },
+    toolchains = ["@rules_python//python:toolchain_type"],
 )
 
 ### Path manipulation
