@@ -657,10 +657,16 @@ class IsolateBase {
   // and both are checked afterwards.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
+  //
+  // `listenerRecords` carries the zygote global's event-listener records collected by the
+  // caller (which pinned each identity object via pinIntoSnapshot() while the global
+  // was still alive); they are stored in the SnapshotArtifact for the LOAD side to
+  // replay. Collected at the io layer because jsg cannot see api::EventTarget.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
       kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
       const uint32_t* badTagFieldsCount,
-      WrappablesSerializeMetadata* wrappablesMetadata);
+      WrappablesSerializeMetadata* wrappablesMetadata,
+      kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords = {});
 
   // Start from snapshot, before Context::New(): builds the instance each serialized wrapper slot
   // is restored to (a stateless type's recreate function or a stored clone's snapshotClone()) and
