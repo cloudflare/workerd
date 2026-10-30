@@ -116,8 +116,20 @@ is an error.
 
 A Worker that needs no configuration at all can be served from its file:
 `workerd run worker.ts` bundles it with esbuild and serves it on
-`localhost:8787` with the newest compatibility date the build supports. See
-`workerd run --help` for its options.
+`localhost:8787` (or the next free port) with the newest compatibility date
+the build supports. The
+code can also come from the command line, which suits scripts and agents:
+
+```sh
+workerd run --test - <<'EOF'
+export default { test() { if (1 + 1 !== 2) throw new Error('math is broken!'); } }
+EOF
+```
+
+`--eval <source>` takes the source as an argument, `--test` runs the Worker's
+tests and exits with their result, `--port 0` picks a free port (printed on
+the `Listening on` line), and `--config <template>` gives the Worker bindings
+from a Cap'n Proto config. See `workerd run --help` for all its options.
 
 A simple "Hello World!" config file might look like:
 

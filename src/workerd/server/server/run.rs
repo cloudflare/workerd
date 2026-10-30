@@ -54,6 +54,9 @@ pub struct RunOptions {
     pub overrides: Overrides,
     /// `--socket-addr`, by socket name.
     pub socket_addresses: HashMap<String, String>,
+    /// Sockets, by name, that may listen on the next free port if theirs is unavailable, and how
+    /// many consecutive ports, from the config's, they may try. `workerd run`'s default socket.
+    pub port_attempts: HashMap<String, u16>,
     /// `--socket-fd`, by socket name: the listening sockets, as the descriptors duplicated for
     /// the server to own.
     pub socket_fds: HashMap<String, socket2::Socket>,
@@ -61,6 +64,9 @@ pub struct RunOptions {
     pub inspector: Option<String>,
     /// `--control-fd`: where the `listen` events go, one JSON object per line.
     pub control: Option<std::fs::File>,
+    /// Print `Listening on <url>` to stdout for each HTTP(S) socket once it is listening, for
+    /// people and scripts that start `workerd run` without a control descriptor.
+    pub announce: bool,
     /// `--debug-port`.
     pub debug_port: Option<String>,
     /// `--cluster-addr` and `--cluster-advertise`.
@@ -70,23 +76,40 @@ pub struct RunOptions {
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
 /// events are formatted by hand to keep their fields in a fixed order, `port` last: consumers
-/// include shell scripts that cut the port off the end of the line.
-struct Control(Option<std::fs::File>);
+/// include shell scripts that cut the port off the end of the line. Also the `Listening on`
+/// lines of `RunOptions::announce`.
+struct Control {
+    file: Option<std::fs::File>,
+    announce: bool,
+}
 
 impl Control {
+    fn new(options: &mut RunOptions) -> Self {
+        Self {
+            file: options.control.take(),
+            announce: options.announce,
+        }
+    }
+
     fn write(&mut self, line: &str) {
-        if let Some(file) = &mut self.0
+        if let Some(file) = &mut self.file
             && let Err(e) = file.write_all(line.as_bytes())
         {
             tracing::error!("--control-fd: {e}");
         }
     }
 
-    fn listen(&mut self, socket: &str, port: u16) {
+    /// A socket is listening on `port`; `origin` is the scheme and host of an HTTP(S) socket.
+    fn listen(&mut self, socket: &str, port: u16, origin: Option<String>) {
         let socket = serde_json::Value::from(socket);
         self.write(&format!(
             "{{\"event\":\"listen\",\"socket\":{socket},\"port\":{port}}}\n"
         ));
+        if self.announce
+            && let Some(origin) = origin
+        {
+            println!("Listening on {origin}:{port}");
+        }
     }
 
     fn listen_inspector(&mut self, port: u16) {
@@ -117,12 +140,13 @@ async fn start(
 ) -> Result<Option<Running>> {
     let message = factory.config()?;
     let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
-    let mut control = Control(options.control.take());
+    let mut control = Control::new(&mut options);
 
     let bound = listen::bind_sockets(
         config,
         &mut options.socket_addresses,
         &mut options.socket_fds,
+        &options.port_attempts,
         factory.loopback(),
         &report,
     )
@@ -188,7 +212,7 @@ async fn start(
             server.report().error(error);
         }
         let channel = server.lookup(&designator);
-        ports.push((name, listen::bound_port(&bound)?));
+        ports.push((name, listen::bound_port(&bound)?, origin(sock, &address)));
         if let Some(listener) =
             listener(Rc::clone(&context), sock, bound, &address, channel, &server)?
         {
@@ -199,8 +223,8 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
-    for (name, port) in ports {
-        control.listen(&name, port);
+    for (name, port, origin) in ports {
+        control.listen(&name, port, origin);
     }
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener);
@@ -208,7 +232,7 @@ async fn start(
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
-        control.listen("debug-port", listener.port()?);
+        control.listen("debug-port", listener.port()?, None);
         listeners.push(Box::pin(listen::listen_debug_port(
             Rc::clone(&context),
             listener,
@@ -220,6 +244,23 @@ async fn start(
         listeners,
         drain,
     }))
+}
+
+/// The scheme and host of the URLs an HTTP(S) socket bound to `address` serves.
+fn origin(sock: socket::Reader, address: &str) -> Option<String> {
+    let scheme = match sock.which() {
+        Ok(socket::Which::Http(_)) => "http",
+        Ok(socket::Which::Https(_)) => "https",
+        _ => return None,
+    };
+    if address.starts_with("unix") {
+        return None;
+    }
+    let host = match listen::host_of_address(address).as_str() {
+        "*" | "" => "localhost".to_owned(),
+        host => host.to_owned(),
+    };
+    Some(format!("{scheme}://{host}"))
 }
 
 /// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for

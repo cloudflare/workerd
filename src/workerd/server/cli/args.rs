@@ -81,11 +81,17 @@ pub enum Command {
     #[command(
         long_about = "Serves one JavaScript or TypeScript file as a Worker, with no config file.",
         after_long_help = RUN_HELP,
+        // `-e` is `--eval` here, as in `node -e`.
+        mut_arg("external_overrides", |arg| arg.short(None)),
     )]
     Run {
-        /// The Worker's entry module.
-        #[arg(value_name = "file")]
-        file: String,
+        /// The Worker's entry module, or `-` to read its source from stdin.
+        #[arg(
+            value_name = "file",
+            required_unless_present = "eval",
+            conflicts_with = "eval"
+        )]
+        file: Option<String>,
 
         #[command(flatten)]
         run: RunArgs,
@@ -178,7 +184,8 @@ pub enum Command {
 
 const RUN_HELP: &str = "\
 Serves <file> on http://localhost:8787 (see --port) as a Worker that has no bindings and the \
-newest compatibility date this build supports (see --compat-date). Example:
+newest compatibility date this build supports (see --compat-date), and prints \
+`Listening on <url>` for each HTTP socket once it listens. Example:
     export default {
       async fetch(request, env, ctx) {
         return new Response('Hello World');
@@ -189,8 +196,35 @@ else the nearest node_modules/.bin/esbuild, else `esbuild` on PATH. So TypeScrip
 packages <file> imports, work. With --watch, the server reloads when any file in the bundle \
 changes.
 
-For bindings, Durable Objects and other configuration, serve a wrangler.jsonc or a Cap'n Proto \
-config with `serve` instead.
+Instead of a file, the code can be given as JavaScript or TypeScript source, with --eval \
+<source> or on stdin as `-`, so a here-document passes it:
+    workerd run - <<'EOF'
+    export default { fetch: () => new Response('Hello World') }
+    EOF
+It is bundled the same way, its imports resolved from the working directory. Under --watch, \
+the source must come from --eval: stdin cannot be read again on reload.
+
+If port 8787 is taken, the server listens on the next free port, trying up to 10, and the \
+`Listening on` line gives it. A port given with --port is used as it is, and --port 0 listens on \
+a free port the OS picks.
+
+--test runs the Worker's tests instead of serving it, as `workerd test` does, and exits with \
+their result: 0 if all passed. See `workerd test --help` for how tests are defined.
+
+--config <template> gives the Worker bindings, Durable Objects and other services. <template> \
+is a Cap'n Proto config, as for `serve`, with exactly one Worker that has no modules; the code \
+becomes its modules:
+    using Workerd = import \"/workerd/workerd.capnp\";
+    const config :Workerd.Config = (
+      services = [(name = \"main\", worker = (
+        compatibilityFlags = [\"nodejs_compat\"],
+        bindings = [(name = \"GREETING\", text = \"hi\")],
+      ))],
+    );
+--compat-date replaces the template's compatibility date; without either, the Worker gets the \
+newest, as above. --compat-flag and --autogate add to the template's lists. A template without \
+sockets gets one on localhost:<port> as above; one with sockets keeps them, and --socket-addr \
+overrides them.
 ";
 
 const TEST_HELP: &str = "\
@@ -267,9 +301,23 @@ pub struct ConfigFileArgs {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Listen on localhost:<port>.
-    #[arg(long, value_name = "port", default_value_t = crate::wrangler::DEFAULT_PORT)]
-    pub port: u16,
+    /// Run <source>, JavaScript or TypeScript, instead of a file.
+    #[arg(short, long, value_name = "source")]
+    pub eval: Option<String>,
+
+    /// Run the Worker's tests, as `workerd test` does, instead of serving it.
+    #[arg(long)]
+    pub test: bool,
+
+    /// A Cap'n Proto config with the Worker's bindings and other services: its one Worker with no
+    /// modules gets the code.
+    #[arg(long, value_name = "template")]
+    pub config: Option<String>,
+
+    /// Listen on localhost:<port>, failing if it is taken; 0 picks a free one. The default is
+    /// 8787, or the next free port after it.
+    #[arg(long, value_name = "port", conflicts_with = "test")]
+    pub port: Option<u16>,
 
     /// The Worker's compatibility date. The default is the newest this build supports.
     #[arg(long, value_name = "date")]
@@ -278,6 +326,11 @@ pub struct RunArgs {
     /// A compatibility flag for the Worker. May be repeated.
     #[arg(long = "compat-flag", value_name = "flag")]
     pub compat_flags: Vec<String>,
+
+    /// Enable the autogate <name>, as a config's `autogates` lists `workerd-autogate-<name>`.
+    /// May be repeated.
+    #[arg(long = "autogate", value_name = "name")]
+    pub autogates: Vec<String>,
 }
 
 #[derive(Args, Debug)]

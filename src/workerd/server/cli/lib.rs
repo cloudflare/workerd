@@ -14,6 +14,7 @@ mod args;
 mod bridge;
 mod config;
 mod process;
+mod run;
 mod socket_fd;
 mod watch;
 mod wrangler;
@@ -134,7 +135,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             run,
             serve_or_test,
             serve,
-        } => run_file(verbose, &file, run, &serve_or_test, serve, executable),
+        } => run_file(verbose, file, run, &serve_or_test, serve, executable),
         args::Command::Compile {
             config,
             const_name,
@@ -383,10 +384,10 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// `workerd run <file>`: serves one file as a Worker (`wrangler::load_file`).
+/// `workerd run`: serves or tests one file, or source, as a Worker (`run.rs`).
 fn run_file(
     verbose: bool,
-    file: &str,
+    file: Option<String>,
     run: args::RunArgs,
     serve_or_test: &args::ServeOrTestArgs,
     serve: args::ServeArgs,
@@ -395,10 +396,41 @@ fn run_file(
     type T = args::Main;
 
     check_serve_or_test::<T>(serve_or_test);
+    let test = run.test;
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
-    let (options, inherited_sockets) = serve_options::<T>(serve, serve_or_test);
+    let (mut options, inherited_sockets) = serve_options::<T>(serve, serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    let config = load_file::<T>(file, run, &process)?;
+    let run::Run {
+        config,
+        worker,
+        default_port,
+    } = load_run::<T>(file, run, &process)?;
+    if test {
+        // The tests of the Worker the code went into, not of the template's other Workers.
+        let patterns = patterns(args::TestFilter {
+            service_pattern: Some(worker),
+            ..args::TestFilter::default()
+        });
+        return entry::test(
+            verbose,
+            config.into_words(),
+            serve_or_test.into(),
+            (&args::TestArgs::default()).into(),
+            options,
+            patterns,
+            watching(process),
+        );
+    }
+    options.announce = true;
+    // A socket `--socket-addr` or `--socket-fd` places is where it is told.
+    if default_port
+        && !options.socket_addresses.contains_key(run::SOCKET)
+        && !options.socket_fds.contains_key(run::SOCKET)
+    {
+        options
+            .port_attempts
+            .insert(run::SOCKET.to_owned(), run::PORT_ATTEMPTS);
+    }
     entry::serve(
         verbose,
         config.into_words(),
@@ -408,32 +440,83 @@ fn run_file(
     )
 }
 
-/// The config of `workerd run <file>`. A file that does not exist or is not JavaScript or
-/// TypeScript is a usage error; a failed bundle is a config error, which `--watch` waits out.
-fn load_file<T: CommandFactory>(
-    file: &str,
+/// The config of `workerd run`. A file that does
+/// not exist or is not JavaScript or TypeScript, stdin under `--watch`, an unknown autogate, or a
+/// template that is not a Cap'n Proto config is a usage error; a failed bundle or a template that
+/// does not fit is a config error, which `--watch` waits out.
+fn load_run<T: CommandFactory>(
+    file: Option<String>,
     run: args::RunArgs,
     process: &Process,
-) -> workerd_server::Result<Config> {
-    if !wrangler::is_runnable(file) {
-        usage_error::<T>(format!(
-            "{file}: Expected a JavaScript or TypeScript file (.{}).",
-            wrangler::RUN_EXTENSIONS.join(", .")
-        ));
-    }
-    if !std::path::Path::new(file).is_file() {
-        usage_error::<T>(format!("{file}: No such file."));
-    }
-    let options = wrangler::RunOptions {
-        port: run.port,
-        compatibility_date: match run.compat_date {
-            Some(date) => date,
-            None => server::newest_compat_date()?,
+) -> workerd_server::Result<run::Run> {
+    let entry = match (file, run.eval) {
+        (Some(file), None) if file == "-" => {
+            if process.is_watching() {
+                usage_error::<T>(
+                    "-: Source from stdin cannot be read again on reload; use --eval with --watch.",
+                );
+            }
+            let mut source = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut source)
+                .unwrap_or_else(|error| usage_error::<T>(format!("-: {error}")));
+            run::Entry::Source { name: "-", source }
+        }
+        (Some(file), None) => {
+            if !run::is_runnable(&file) {
+                usage_error::<T>(format!(
+                    "{file}: Expected a JavaScript or TypeScript file (.{}).",
+                    run::EXTENSIONS.join(", .")
+                ));
+            }
+            if !std::path::Path::new(&file).is_file() {
+                usage_error::<T>(format!("{file}: No such file."));
+            }
+            run::Entry::File(file)
+        }
+        (None, Some(source)) => run::Entry::Source {
+            name: "--eval",
+            source,
         },
-        compatibility_flags: run.compat_flags,
+        // clap requires exactly one.
+        _ => unreachable!("<file> and --eval conflict"),
     };
-    Ok(wrangler::load_file(file, options, process)
-        .unwrap_or_else(|error| config_errors(&[format!("{file}: {error}")], process)))
+    let known = ffi::autogate_names();
+    for name in &run.autogates {
+        let bare = name.strip_prefix("workerd-autogate-").unwrap_or(name);
+        if !known.iter().any(|k| k == bare) {
+            usage_error::<T>(format!(
+                "--autogate={name}: No such autogate. This build has: {}.",
+                known.join(", ")
+            ));
+        }
+    }
+    let template = run.config.map(|path| {
+        if path == "-" || wrangler::is_wrangler_config(&path) {
+            usage_error::<T>(format!(
+                "--config={path}: The template must be a Cap'n Proto config file."
+            ));
+        }
+        let config = load_config::<T>(
+            args::ConfigFileArgs {
+                import_paths: Vec::new(),
+                binary: false,
+                config_file: path.clone(),
+            },
+            None,
+            process,
+        );
+        run::Template { path, config }
+    });
+    let options = run::Options {
+        listen: !run.test,
+        port: run.port,
+        compatibility_date: run.compat_date,
+        default_compatibility_date: server::newest_compat_date()?,
+        compatibility_flags: run.compat_flags,
+        autogates: run.autogates,
+    };
+    Ok(run::config(&entry, template.as_ref(), &options, process)
+        .unwrap_or_else(|error| config_errors(&[error], process)))
 }
 
 /// Prints errors in the config. Without `--watch` they end the process; with it the process waits

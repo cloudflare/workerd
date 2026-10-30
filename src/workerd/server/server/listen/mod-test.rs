@@ -63,3 +63,86 @@ fn a_loopback_socket_listens_in_process_with_no_peer_identity() {
         assert_eq!(peer_cf_blob(&accepted), None);
     });
 }
+
+/// Listens on a loopback queue for any address but those in `taken`, recording what it tried.
+fn listen_unless_taken<'a>(
+    loopback: &'a Loopback,
+    taken: &'a [&'a str],
+    tried: &'a std::cell::RefCell<Vec<String>>,
+) -> impl AsyncFnMut(&str) -> Result<StreamListener> + 'a {
+    async move |address: &str| {
+        tried.borrow_mut().push(address.to_owned());
+        if taken.contains(&address) {
+            return Err(kj::failed!("bind(): Address already in use"));
+        }
+        loopback.listen(address).map(StreamListener::Loopback)
+    }
+}
+
+#[test]
+fn a_taken_port_moves_to_the_next_free_one() {
+    let loopback = Loopback::default();
+    loopback.enable();
+    runtime().block_on(async {
+        let tried = std::cell::RefCell::new(Vec::new());
+        let taken = ["localhost:8787", "localhost:8788"];
+        let listen = listen_unless_taken(&loopback, &taken, &tried);
+        let (_, bound) = listen_on_free_port("localhost:8787", 100, listen)
+            .await
+            .unwrap();
+        assert_eq!(bound, "localhost:8789");
+        assert_eq!(
+            *tried.borrow(),
+            ["localhost:8787", "localhost:8788", "localhost:8789"]
+        );
+
+        // A free port is used as it is.
+        let listen = listen_unless_taken(&loopback, &taken, &tried);
+        let (_, bound) = listen_on_free_port("localhost:9000", 100, listen)
+            .await
+            .unwrap();
+        assert_eq!(bound, "localhost:9000");
+    });
+}
+
+#[test]
+fn no_free_port_is_the_first_ports_error() {
+    let loopback = Loopback::default();
+    loopback.enable();
+    runtime().block_on(async {
+        let tried = std::cell::RefCell::new(Vec::new());
+        let taken = ["localhost:8787", "localhost:8788", "localhost:8789"];
+        let listen = listen_unless_taken(&loopback, &taken, &tried);
+        let Err(error) = listen_on_free_port("localhost:8787", 3, listen).await else {
+            panic!("listened on a taken port");
+        };
+        assert_eq!(tried.borrow().len(), 3);
+        let description = error.description();
+        assert!(
+            description.contains("no free port in 8787-8789"),
+            "{description}"
+        );
+        assert!(
+            description.contains("Address already in use"),
+            "{description}"
+        );
+
+        // One attempt: the port's own error.
+        let listen = listen_unless_taken(&loopback, &taken, &tried);
+        let Err(error) = listen_on_free_port("localhost:8787", 1, listen).await else {
+            panic!("listened on a taken port");
+        };
+        assert!(!error.description().contains("no free port"));
+
+        // The search stops at the last port there is.
+        tried.borrow_mut().clear();
+        let taken = ["localhost:65535"];
+        let listen = listen_unless_taken(&loopback, &taken, &tried);
+        assert!(
+            listen_on_free_port("localhost:65535", 100, listen)
+                .await
+                .is_err()
+        );
+        assert_eq!(*tried.borrow(), ["localhost:65535"]);
+    });
+}

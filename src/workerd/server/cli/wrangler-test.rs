@@ -8,7 +8,7 @@ use workerd_capnp::worker;
 use super::*;
 
 /// A fresh directory in the test's temp directory holding `files`.
-fn project(files: &[(&str, &str)]) -> PathBuf {
+pub fn project(files: &[(&str, &str)]) -> PathBuf {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -35,7 +35,7 @@ fn load_project(files: &[(&str, &str)]) -> Result<Config, String> {
     )
 }
 
-fn read(config: Config) -> capnp::message::Reader<capnp::serialize::OwnedSegments> {
+pub fn read(config: Config) -> capnp::message::Reader<capnp::serialize::OwnedSegments> {
     let bytes: Vec<u8> = config
         .into_words()
         .iter()
@@ -262,7 +262,7 @@ fn unbundled_typescript_main_is_an_error() {
 
 /// Held by every test that spawns a process. Writing the stub esbuild while another thread
 /// forks would leave the fork holding it open for writing, and running it would fail (ETXTBSY).
-static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn missing_esbuild_is_explained() {
@@ -270,9 +270,12 @@ fn missing_esbuild_is_explained() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = project(&[("index.ts", "export default {}")]);
-    let error = bundle(Path::new("/nonexistent/esbuild"), &dir, "index.ts", &|_| {
-        Ok(())
-    })
+    let error = bundle(
+        Path::new("/nonexistent/esbuild"),
+        &dir,
+        Input::File("index.ts"),
+        &|_| Ok(()),
+    )
     .err()
     .unwrap();
     assert!(error.contains("esbuild not found"), "{error}");
@@ -280,16 +283,19 @@ fn missing_esbuild_is_explained() {
 }
 
 /// A stand-in for esbuild: a shell script running `body` with `$out` and `$meta` set from
-/// `--outdir=` and `--metafile=`, and its arguments in `args.txt`.
+/// `--outdir=` (or the directory of `--outfile=`) and `--metafile=`, its arguments in `args.txt`
+/// and its stdin in `stdin.txt`.
 #[cfg(unix)]
-fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
+pub fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let path = dir.join("esbuild.sh");
     let script = format!(
         "#!/bin/sh\nprintf '%s\\n' \"$@\" > {args}\nfor a; do case $a in \
-         --outdir=*) out=${{a#*=}};; --metafile=*) meta=${{a#*=}};; esac; done\n{body}\n",
-        args = dir.join("args.txt").display()
+         --outdir=*) out=${{a#*=}};; --outfile=*) out=$(dirname \"${{a#*=}}\");; \
+         --metafile=*) meta=${{a#*=}};; esac; done\ncat > {stdin}\n{body}\n",
+        args = dir.join("args.txt").display(),
+        stdin = dir.join("stdin.txt").display()
     );
     fs::write(&path, script).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -313,7 +319,7 @@ fn bundle_reads_esbuild_output_and_watches_inputs() {
 echo '{"inputs":{"index.ts":{},"lib.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
     );
     let watched = std::cell::RefCell::new(Vec::new());
-    let sources = bundle(&esbuild, &dir, "index.ts", &|p| {
+    let sources = bundle(&esbuild, &dir, Input::File("index.ts"), &|p| {
         watched.borrow_mut().push(p.to_owned());
         Ok(())
     })
@@ -342,70 +348,6 @@ echo '{"inputs":{"index.ts":{},"lib.ts":{},"node_modules/x/index.js":{}}}' > "$m
     assert!(!dir.join(".wrangler/tmp").read_dir().unwrap().any(|_| true));
 }
 
-#[test]
-fn runnable_files_are_javascript_or_typescript() {
-    for file in ["app.js", "app.mjs", "src/app.ts", "APP.TSX"] {
-        assert!(is_runnable(file), "{file}");
-    }
-    for file in ["app.py", "wrangler.jsonc", "app", "README.md"] {
-        assert!(!is_runnable(file), "{file}");
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn run_serves_the_bundle_of_one_file() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let _spawn = SPAWN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let dir = project(&[("app.ts", "export default {}")]);
-    // Found as the project's own esbuild, as `npm i -D esbuild` installs it.
-    let esbuild = stub_esbuild(
-        &dir,
-        r#"echo 'export default {}' > "$out/index.js"
-echo '{"inputs":{"app.ts":{}}}' > "$meta""#,
-    );
-    let bin = dir.join("node_modules/.bin");
-    fs::create_dir_all(&bin).unwrap();
-    fs::rename(&esbuild, bin.join("esbuild")).unwrap();
-    fs::set_permissions(bin.join("esbuild"), fs::Permissions::from_mode(0o755)).unwrap();
-
-    let options = RunOptions {
-        port: 9000,
-        compatibility_date: "2026-01-01".to_owned(),
-        compatibility_flags: vec!["nodejs_compat".to_owned()],
-    };
-    let process = Process::new(None, None, Vec::new());
-    let message = read(load_file(dir.join("app.ts").to_str().unwrap(), options, &process).unwrap());
-
-    let config = message.get_root::<config::Reader>().unwrap();
-    let services = config.get_services().unwrap();
-    assert_eq!(services.len(), 1);
-    assert_eq!(services.get(0).get_name().unwrap(), "main");
-    let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
-        panic!("expected a worker service")
-    };
-    let worker = worker.unwrap();
-    assert_eq!(worker.get_compatibility_date().unwrap(), "2026-01-01");
-    let flags = worker.get_compatibility_flags().unwrap();
-    assert_eq!(flags.len(), 1);
-    assert_eq!(flags.get(0).unwrap(), "nodejs_compat");
-    let worker::Which::Modules(modules) = worker.which().unwrap() else {
-        panic!("expected a modules worker")
-    };
-    let modules = modules.unwrap();
-    assert_eq!(modules.len(), 1);
-    assert_eq!(modules.get(0).get_name().unwrap(), "index.js");
-    assert_eq!(worker.get_bindings().unwrap().len(), 0);
-    let socket = config.get_sockets().unwrap().get(0);
-    assert_eq!(socket.get_address().unwrap(), "localhost:9000");
-    assert_eq!(socket.get_service().unwrap().get_name().unwrap(), "main");
-    let args = fs::read_to_string(dir.join("args.txt")).unwrap();
-    assert!(args.lines().any(|l| l == "app.ts"), "{args}");
-}
-
 #[cfg(unix)]
 #[test]
 fn failed_bundle_watches_sources_and_missing_main() {
@@ -415,7 +357,7 @@ fn failed_bundle_watches_sources_and_missing_main() {
     let dir = project(&[("lib.ts", ""), ("README.md", "")]);
     let esbuild = stub_esbuild(&dir, "echo 'syntax error' >&2; exit 1");
     let watched = std::cell::RefCell::new(Vec::new());
-    let error = bundle(&esbuild, &dir, "index.ts", &|p| {
+    let error = bundle(&esbuild, &dir, Input::File("index.ts"), &|p| {
         watched.borrow_mut().push(p.to_owned());
         Ok(())
     })
