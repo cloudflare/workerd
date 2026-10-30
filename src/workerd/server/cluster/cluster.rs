@@ -250,6 +250,20 @@ impl Cluster {
             .await
     }
 
+    /// Index the alarm an owned object came with as it opened here
+    /// (`alarms::Index::opened`).
+    pub async fn opened_alarm(
+        &self,
+        ns: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: u64,
+    ) -> Result<()> {
+        self.alarms
+            .opened(&namespace_hash(ns), actor, name, at_ms)
+            .await
+    }
+
     /// An indexed alarm fired here for an object `owner` owns:
     /// whether to fire it again later (`alarms::Index::elsewhere`).
     pub async fn alarm_elsewhere(

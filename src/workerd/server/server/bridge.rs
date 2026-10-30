@@ -865,6 +865,14 @@ pub mod ffi {
             name: &str,
             at_ms: u64,
         ) -> Box<ResultTask>;
+        /// Indexes the alarm at `at_ms` that root actor `actor` came with as it opened here,
+        /// unless one is indexed no later.
+        fn alarm_opened(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.

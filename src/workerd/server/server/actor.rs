@@ -516,22 +516,38 @@ impl ActorNamespaceHandle {
     }
 
     pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            let at_ms = (at_ms != 0).then_some(at_ms);
+            cluster.arm_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    pub fn alarm_opened(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            cluster.opened_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    /// A task running `index` with the cluster and the namespace's unique key; nothing outside
+    /// a cluster.
+    fn index_alarm<F: Future<Output = cluster::Result<()>> + 'static>(
+        &self,
+        index: impl FnOnce(Rc<cluster::Cluster>, String) -> F + 'static,
+    ) -> ResultTask {
         let target = self.namespace().and_then(|ns| {
             let unique_key = ns.unique_key()?.to_owned();
             Some((Rc::clone(&ns.cluster()?.cluster), unique_key))
         });
-        let (actor, name) = (actor.to_owned(), name.to_owned());
-        Box::new(ResultTask(Box::pin(async move {
+        ResultTask(Box::pin(async move {
             let Some((cluster, unique_key)) = target else {
                 return Ok(());
             };
-            let name = (!name.is_empty()).then_some(name.as_str());
-            let at_ms = (at_ms != 0).then_some(at_ms);
-            cluster
-                .arm_alarm(&unique_key, &actor, name, at_ms)
-                .await
-                .map_err(|e| kj::failed!("indexing an alarm: {e}"))
-        })))
+            (index(cluster, unique_key).await).map_err(|e| kj::failed!("indexing an alarm: {e}"))
+        }))
     }
 
     fn namespace(&self) -> Option<Rc<ActorNamespace>> {

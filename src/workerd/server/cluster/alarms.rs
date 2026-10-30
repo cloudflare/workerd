@@ -232,14 +232,39 @@ impl Index {
         name: Option<&str>,
         at_ms: Option<u64>,
     ) -> Result<()> {
+        self.arm_with(namespace, actor, name, |_| at_ms).await
+    }
+
+    /// Index the alarm an object came with as it opened here: only ever
+    /// earlier, as adopting does, since an alarm the object set since is
+    /// newer, whichever write lands first.
+    pub async fn opened(
+        &self,
+        namespace: &str,
+        actor: &str,
+        name: Option<&str>,
+        at_ms: u64,
+    ) -> Result<()> {
+        let earlier = |want: Option<u64>| Some(want.map_or(at_ms, |w| w.min(at_ms)));
+        self.arm_with(namespace, actor, name, earlier).await
+    }
+
+    /// `arm`, the alarm wanted being `want` of the one wanted so far.
+    async fn arm_with(
+        &self,
+        namespace: &str,
+        actor: &str,
+        name: Option<&str>,
+        want: impl FnOnce(Option<u64>) -> Option<u64>,
+    ) -> Result<()> {
         let key = (namespace.to_owned(), actor.to_owned());
         self.elsewhere.borrow_mut().remove(&key);
-        let indexed = {
+        let (at_ms, indexed) = {
             let mut armed = self.armed.borrow_mut();
             let armed = armed.entry(key.clone()).or_default();
-            armed.want = at_ms;
+            armed.want = want(armed.want);
             armed.name = name.map(str::to_owned);
-            armed.indexed.as_ref().map(|i| i.at_ms)
+            (armed.want, armed.indexed.as_ref().map(|i| i.at_ms))
         };
         let Some(at_ms) = at_ms.filter(|&at| indexed.is_none_or(|i| at < i)) else {
             return Ok(());
@@ -397,22 +422,25 @@ impl Index {
     async fn adopt_one(&self, node: &str, entry: Entry) -> Result<Adopted> {
         let name = self.alarms.name(node, &entry).await?;
         let key = (entry.namespace.clone(), entry.actor.clone());
-        let (known, indexed) = {
+        let indexed = {
             let armed = self.armed.borrow();
-            let armed = armed.get(&key);
-            (
-                armed.is_some(),
-                armed.and_then(|a| a.indexed.as_ref().map(|i| i.at_ms)),
-            )
+            armed
+                .get(&key)
+                .and_then(|a| a.indexed.as_ref().map(|i| i.at_ms))
         };
         if indexed.is_none_or(|i| entry.at_ms < i) {
             self.put(key.clone(), entry.at_ms, name.as_deref()).await?;
         }
-        if !known {
+        // Only ever earlier, as the scheduler takes it, so that `tidy` never
+        // moves the entry past the alarm; read after the put, which an arm
+        // may have raced.
+        {
             let mut armed = self.armed.borrow_mut();
             let armed = armed.entry(key).or_default();
-            armed.want = Some(entry.at_ms);
-            armed.name.clone_from(&name);
+            armed.want = Some(armed.want.map_or(entry.at_ms, |w| w.min(entry.at_ms)));
+            if armed.name.is_none() {
+                armed.name.clone_from(&name);
+            }
         }
         if let Err(e) = self.alarms.delete(node, &entry).await {
             tracing::warn!("deleting {node}'s adopted alarm: {e}");

@@ -273,6 +273,27 @@ fn a_failed_adoption_still_schedules_and_retries() {
     });
 }
 
+#[test]
+fn adopting_an_earlier_alarm_of_a_known_object_keeps_it_earlier() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        let alarms = Alarms::new(bucket.clone());
+        let (d, c) = (
+            Index::new(bucket.clone(), "d", 0, 0),
+            Index::new(bucket.clone(), "c", 0, 0),
+        );
+        let a = Index::new(bucket, "a", 0, 0);
+        let live = ["a".to_owned()];
+        d.arm("ns", "x", None, Some(100)).await.unwrap();
+        adopt(&a, &live, &["d".to_owned()]).await;
+        // c claimed x and moved its alarm earlier, then died.
+        c.arm("ns", "x", None, Some(50)).await.unwrap();
+        adopt(&a, &live, &["c".to_owned()]).await;
+        a.tidy().await;
+        assert_eq!(listed(&alarms, "a").await, [at(50, "x")]);
+    });
+}
+
 /// Deterministic simulation (`crate::dst`): the real `Index` and `Registry`
 /// on several nodes, among crashes, lapsed leases, lost records, takeovers,
 /// arming, firing and alarms rounds. The server's part (ownership, the local
@@ -512,7 +533,7 @@ mod dst {
             let index = Rc::clone(index);
             let o = o.to_owned();
             let task = async move {
-                let _ = index.arm(NS, &o, None, Some(at)).await;
+                let _ = index.opened(NS, &o, None, at).await;
             };
             OPENS.with(|opens| opens.borrow_mut().push((n, Box::pin(task))));
         }

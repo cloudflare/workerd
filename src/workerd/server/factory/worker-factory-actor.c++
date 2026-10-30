@@ -428,8 +428,9 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
   ::rust::Box<ActorHooks> hooks;
 };
 
-// Schedules a root actor's alarms with the namespace's scheduler; the prior task is ignored since
-// everything runs synchronously here.
+// Schedules a root actor's alarms with the namespace's scheduler, at once, and in a cluster indexes
+// them after `priorTask`, as production's alarm manager orders its requests: the index takes them
+// in the order they were made.
 class ActorSqliteHooks final: public ActorSqlite::Hooks {
  public:
   ActorSqliteHooks(kj::Own<ActorStorage::Impl> storage, ActorKey actor)
@@ -448,8 +449,23 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
     if (!storage->actors->replicated()) return kj::READY_NOW;
     // A new or earlier alarm is in the cluster's index before the commit setting it starts, so
     // that a peer wakes the object if this instance dies once it is durable, acknowledged or not.
+    auto name = kj::str(actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj));
+    return priorTask.then(
+        [storage = kj::addRef(*storage), id = kj::str(actor.actorId), name = kj::mv(name), atMs]() {
+      return result_task_run(storage->actors->alarm_set(toRust(id), toRust(name), atMs));
+    });
+  }
+
+  // The object came here with an alarm at `time`, which this instance has not scheduled. A failed
+  // index write is written again by the index's next tidy.
+  void opened(kj::Date time) {
+    storage->alarmScheduler->setAlarm(actor, time);
     auto name = actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj);
-    return result_task_run(storage->actors->alarm_set(toRust(actor.actorId), toRust(name), atMs));
+    auto atMs = (time - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    result_task_run(storage->actors->alarm_opened(toRust(actor.actorId), toRust(name), atMs))
+        .detach([](kj::Exception&& e) {
+      KJ_LOG(WARNING, "indexing an alarm that came with its object failed", e);
+    });
   }
 
  private:
@@ -486,10 +502,13 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
     }
 
     kj::Own<ActorSqlite::Hooks> sqliteHooks;
+    kj::Maybe<ActorSqliteHooks&> rootHooks;
     uint selfId = facetId.orDefault(0);
     if (facetId == kj::none) {
-      sqliteHooks =
+      auto root =
           kj::heap<ActorSqliteHooks>(kj::addRef(*storage), ActorKey(rootKey.asPtr(), actorName));
+      rootHooks = *root;
+      sqliteHooks = kj::mv(root);
     } else {
       sqliteHooks = kj::heap<FacetAlarmHooks>();
     }
@@ -515,14 +534,12 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
       committer = kj::none;
     }
     auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks);
-    if (storage->actors->replicated() && facetId == kj::none) {
-      // The object may have come here with an alarm, which this instance has not scheduled. A
-      // failed index write is written again by the index's next tidy.
-      KJ_IF_SOME(alarm, sqlite->getAlarm({}).tryGet<kj::Maybe<kj::Date>>()) {
-        KJ_IF_SOME(time, alarm) {
-          sqliteHooks->scheduleRun(time, kj::READY_NOW).detach([](kj::Exception&& e) {
-            KJ_LOG(WARNING, "scheduling an alarm that came with its object failed", e);
-          });
+    KJ_IF_SOME(root, rootHooks) {
+      if (storage->actors->replicated()) {
+        KJ_IF_SOME(alarm, sqlite->getAlarm({}).tryGet<kj::Maybe<kj::Date>>()) {
+          KJ_IF_SOME(time, alarm) {
+            root.opened(time);
+          }
         }
       }
     }
