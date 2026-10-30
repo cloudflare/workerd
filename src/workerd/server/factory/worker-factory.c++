@@ -1716,7 +1716,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
             jsg::SnapshotConfig(
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
     // Anything the zygote throws while compiling, evaluating or serializing only means this
-    // Worker starts without a snapshot.
+    // Worker starts without a snapshot and evaluates its top level itself, printing what the
+    // zygote's run only deferred.
     kj::Maybe<kj::Own<Worker>> zygote;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
@@ -1741,6 +1742,9 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         artifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
       });
       snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = artifact->addRef()});
+      // The zygote's run is the one that counts: what its top level wrote to the console is
+      // printed now.
+      zygoteIsolate->flushDeferredConsoleOutput();
     } else {
       auto errors = kj::strArray(zygoteErrors.errors, "\n");
       KJ_LOG(

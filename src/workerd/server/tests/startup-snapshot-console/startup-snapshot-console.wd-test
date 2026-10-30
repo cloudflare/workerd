@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Two Workers whose top-level code writes to the console. `used` goes through the zygote and
+# starts from the snapshot; `fallback` creates an AbortController at module scope, which no
+# snapshot can carry, so it starts without one and evaluates its top level again. See
+# startup-snapshot-console-test.mjs for what the output must look like.
+
+# Later dates enable the Node.js process module whose module scope reaches UrlUtil, a type without
+# snapshotClone(): every Worker would fall back and the `used` case would test nothing.
+const compatibilityDate :Text = "2025-09-01";
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "used",
+      worker = (
+        modules = [(name = "worker", esModule = embed "used.js")],
+        compatibilityDate = .compatibilityDate,
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+    ( name = "fallback",
+      worker = (
+        modules = [(name = "worker", esModule = embed "fallback.js")],
+        compatibilityDate = .compatibilityDate,
+        compatibilityFlags = .compatibilityFlags,
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap.
+  autogates = [
+    "workerd-autogate-startup-snapshot",
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);
