@@ -8,7 +8,7 @@
 //! index lets survivors find the alarms of an owner that died with its
 //! objects idle. An entry `alarms/<node>/<time>/<namespace>/<actor>/<seq>`
 //! says `node` wakes `actor` no later than `time`: it may be early or stale,
-//! but never late, since waking an object whose alarm next or went is a
+//! but never late, since waking an object whose alarm moved or went is a
 //! no-op. Its body is the actor's name, if it has one, for `ctx.id.name`.
 //! `seq` numbers a node's entries, so that deleting a stale one never
 //! deletes a later one for the same object and time.
@@ -21,6 +21,7 @@ use futures::StreamExt;
 use futures::stream;
 
 use crate::Bucket;
+use crate::Registry;
 use crate::Result;
 use crate::log::ascending;
 use crate::log::parse;
@@ -141,10 +142,16 @@ pub struct Index {
     /// How long an owner must outlive that before this node's entry goes:
     /// past its lease, had it died before indexing the alarm itself.
     grace_ms: u64,
+    /// How often a round looks for orphaned alarms, and when it next does.
+    orphans_every_ms: u64,
+    orphans_at: Cell<u64>,
+    /// What the last look found, adopted from as dead nodes are until the
+    /// next: the live node a share is assigned to may be about to lapse.
+    orphans: RefCell<Vec<String>>,
 }
 
 impl Index {
-    pub fn new(bucket: Bucket, node: &str, grace_ms: u64) -> Self {
+    pub fn new(bucket: Bucket, node: &str, grace_ms: u64, orphans_every_ms: u64) -> Self {
         Self {
             alarms: Alarms::new(bucket),
             node: node.to_owned(),
@@ -153,7 +160,55 @@ impl Index {
             seq: Cell::default(),
             elsewhere: RefCell::default(),
             grace_ms,
+            orphans_every_ms,
+            orphans_at: Cell::new(0),
+            orphans: RefCell::default(),
         }
+    }
+
+    /// One round of the alarms loop: take this node's share of dead nodes'
+    /// alarms as of `registry`'s last listing, handing `adopted` each to
+    /// schedule here, then bring this node's entries in line with its alarms
+    /// (`tidy`). The first round, and one every `orphans_every_ms`, also
+    /// looks for orphans.
+    pub async fn round(&self, registry: &Registry, now_ms: u64, adopted: impl FnMut(Adopted)) {
+        let live = registry.listed_nodes(now_ms);
+        // A listing taken while this node's own lease had lapsed names it
+        // dead, and adopting from itself would delete what it relies on.
+        let mut dead = registry.dead();
+        dead.retain(|d| *d != self.node);
+        if !live.is_empty() && now_ms >= self.orphans_at.get() {
+            self.orphans_at.set(now_ms + self.orphans_every_ms);
+            match self.orphans(registry, &live, &dead).await {
+                Ok(orphans) => drop(self.orphans.replace(orphans)),
+                Err(e) => tracing::warn!("looking for orphaned alarms: {e}"),
+            }
+        }
+        dead.extend(self.orphans.borrow().iter().cloned());
+        self.adopt(&live, &dead, adopted).await;
+        self.tidy().await;
+    }
+
+    /// Nodes with alarms in the bucket but no record, which survivors find
+    /// through no listing of `nodes/`. A node publishes its record before
+    /// it indexes an alarm, and the registry keeps a dead node's record
+    /// while it has alarms; this is the backstop for one gone regardless.
+    async fn orphans(
+        &self,
+        registry: &Registry,
+        live: &[String],
+        dead: &[String],
+    ) -> Result<Vec<String>> {
+        let mut known: Vec<_> = live.iter().chain(dead).cloned().collect();
+        known.push(self.node.clone());
+        let mut orphans = Vec::new();
+        for node in self.unknown(&known).await? {
+            if !registry.recorded(&node).await? {
+                tracing::warn!("adopting the alarms of {node}, which has no record");
+                orphans.push(node);
+            }
+        }
+        Ok(orphans)
     }
 
     fn entry(&self, key: &Key, at_ms: u64) -> Entry {

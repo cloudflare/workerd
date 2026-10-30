@@ -80,6 +80,11 @@ impl Store {
         got.unwrap().map(|(body, _)| body)
     }
 
+    /// Delete `key` past the verdicts, as a fault outside the test's nodes.
+    pub fn forget(&self, key: &str) {
+        self.inner.delete(key).now_or_never().unwrap().unwrap();
+    }
+
     /// The keys under `prefix`, read past the verdicts.
     pub fn keys(&self, prefix: &str) -> Vec<String> {
         let listed = self.inner.list(prefix).now_or_never().unwrap();

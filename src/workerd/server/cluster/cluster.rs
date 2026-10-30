@@ -5,7 +5,6 @@
 //! One instance's view of the cluster: what the server calls. Runs on the
 //! server's loop thread, inside its tokio `current_thread` runtime.
 
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -41,8 +40,7 @@ const FORMAT: &str = "v1";
 /// Claims a new object retries when another node opened it first.
 const FRESH_ATTEMPTS: usize = 3;
 
-/// How often each node looks for alarms whose node has no record
-/// (`Cluster::orphans`): one delimited LIST of `alarms/`.
+/// How often each node looks for orphaned alarms (`alarms::Index::round`).
 const ORPHANS_EVERY_MS: u64 = 60 * 60 * 1000;
 
 pub struct Setup {
@@ -82,11 +80,6 @@ pub struct Cluster {
     key: Vec<u8>,
     lease: RefCell<Lease>,
     alarms: Index,
-    /// When the next round looks for orphaned alarms.
-    orphans_at: Cell<u64>,
-    /// What the last look found, adopted from as dead nodes are until the
-    /// next: the live node a share is assigned to may be about to lapse.
-    orphans: RefCell<Vec<String>>,
 }
 
 impl Cluster {
@@ -106,9 +99,12 @@ impl Cluster {
             setup.ttl_ms,
         ));
         Ok(Rc::new(Self {
-            alarms: Index::new(bucket.clone(), &setup.node, 2 * setup.ttl_ms),
-            orphans_at: Cell::new(0),
-            orphans: RefCell::default(),
+            alarms: Index::new(
+                bucket.clone(),
+                &setup.node,
+                2 * setup.ttl_ms,
+                ORPHANS_EVERY_MS,
+            ),
             owners: Owners::new(bucket.clone()),
             ownership: Ownership::new(bucket.clone(), registry.clone()),
             bucket,
@@ -268,38 +264,9 @@ impl Cluster {
             .await
     }
 
-    /// Take this node's share of dead nodes' alarms, handing `adopted` each
-    /// to schedule here, then bring this node's entries in line with its
-    /// alarms (`alarms::Index::tidy`).
+    /// One round of the alarms loop (`alarms::Index::round`).
     pub async fn alarms_round(&self, now_ms: u64, adopted: impl FnMut(Adopted)) {
-        let live = self.registry.listed_nodes(now_ms);
-        let mut dead = self.registry.dead();
-        if !live.is_empty() && now_ms >= self.orphans_at.get() {
-            self.orphans_at.set(now_ms + ORPHANS_EVERY_MS);
-            match self.orphans(&live, &dead).await {
-                Ok(orphans) => drop(self.orphans.replace(orphans)),
-                Err(e) => tracing::warn!("looking for orphaned alarms: {e}"),
-            }
-        }
-        dead.extend(self.orphans.borrow().iter().cloned());
-        self.alarms.adopt(&live, &dead, adopted).await;
-        self.alarms.tidy().await;
-    }
-
-    /// Nodes with alarms in the bucket but no record, which survivors find
-    /// through no listing of `nodes/`. A node publishes its record before
-    /// it indexes an alarm, and the registry keeps a dead node's record
-    /// while it has alarms; this is the backstop for one gone regardless.
-    async fn orphans(&self, live: &[String], dead: &[String]) -> Result<Vec<String>> {
-        let known: Vec<_> = live.iter().chain(dead).cloned().collect();
-        let mut orphans = Vec::new();
-        for node in self.alarms.unknown(&known).await? {
-            if !self.registry.recorded(&node).await? {
-                tracing::warn!("adopting the alarms of {node}, which has no record");
-                orphans.push(node);
-            }
-        }
-        Ok(orphans)
+        self.alarms.round(&self.registry, now_ms, adopted).await;
     }
 
     pub async fn refresh_route(&self, ns: &str, actor: &str, now_ms: u64) -> Result<()> {

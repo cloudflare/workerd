@@ -52,7 +52,7 @@ fn a_node_lists_its_entries_earliest_first() {
 fn the_nodes_with_entries_are_found_without_a_record() {
     block_on(async {
         let bucket = Bucket::memory("p");
-        let index = Index::new(bucket.clone(), "n1", 0);
+        let index = Index::new(bucket.clone(), "n1", 0, 0);
         for node in ["n1", "n3", "n2"] {
             index.alarms.put(node, &entry(1, "a"), None).await.unwrap();
         }
@@ -104,7 +104,7 @@ fn arming_waits_only_for_new_or_earlier_alarms() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let index = Index::new(bucket, "n1", 0);
+        let index = Index::new(bucket, "n1", 0, 0);
         index.arm("ns", "a", Some("room"), Some(20)).await.unwrap();
         assert_eq!(listed(&alarms, "n1").await, [at(20, "a")]);
         // Earlier: indexed before arm resolves, the old entry gone on tidy.
@@ -133,7 +133,7 @@ fn moving_back_to_a_stale_entrys_time_keeps_an_entry() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let index = Index::new(bucket, "n1", 0);
+        let index = Index::new(bucket, "n1", 0, 0);
         index.arm("ns", "a", None, Some(59)).await.unwrap();
         index.arm("ns", "a", None, Some(50)).await.unwrap();
         // Back to 59: tidy writes 59 again and deletes the first 59 entry,
@@ -151,7 +151,7 @@ fn tidy_writes_again_what_failed() {
         let fail = std::rc::Rc::clone(&store.fail_puts);
         let bucket = Bucket::new(store, "");
         let alarms = Alarms::new(bucket.clone());
-        let index = Index::new(bucket, "n1", 0);
+        let index = Index::new(bucket, "n1", 0, 0);
         fail.set(true);
         assert!(index.arm("ns", "a", None, Some(20)).await.is_err());
         fail.set(false);
@@ -165,7 +165,7 @@ fn survivors_split_a_dead_nodes_alarms() {
     block_on(async {
         let bucket = Bucket::memory("");
         let alarms = Alarms::new(bucket.clone());
-        let dead = Index::new(bucket.clone(), "d", 0);
+        let dead = Index::new(bucket.clone(), "d", 0, 0);
         for i in 0..40 {
             let name = (i % 2 == 0).then(|| format!("name{i}"));
             dead.arm("ns", &format!("{i:x}"), name.as_deref(), Some(100 + i))
@@ -174,8 +174,8 @@ fn survivors_split_a_dead_nodes_alarms() {
         }
         let live: Vec<String> = ["a", "b"].map(String::from).into();
         let (a, b) = (
-            Index::new(bucket.clone(), "a", 0),
-            Index::new(bucket, "b", 0),
+            Index::new(bucket.clone(), "a", 0, 0),
+            Index::new(bucket, "b", 0, 0),
         );
         // `a` already owns object 0 with a later alarm: its index keeps
         // that, and the adopted one only wakes the object early.
@@ -251,14 +251,14 @@ fn a_failed_adoption_still_schedules_and_retries() {
         let store = Flaky::default();
         let fail = std::rc::Rc::clone(&store.fail);
         let bucket = Bucket::new(store, "");
-        let dead = Index::new(bucket.clone(), "d", 0);
+        let dead = Index::new(bucket.clone(), "d", 0, 0);
         for i in 0..8 {
             dead.arm("ns", &format!("{i:x}"), None, Some(100 + i))
                 .await
                 .unwrap();
         }
         let (live, dead_nodes) = (["a".to_owned()], ["d".to_owned()]);
-        let a = Index::new(bucket.clone(), "a", 0);
+        let a = Index::new(bucket.clone(), "a", 0, 0);
         fail.set(true);
         // Indexed here but still there: every one is scheduled once.
         assert_eq!(adopt(&a, &live, &dead_nodes).await, 8);
@@ -273,11 +273,11 @@ fn a_failed_adoption_still_schedules_and_retries() {
     });
 }
 
-/// Deterministic simulation (`crate::dst`): the real `Index` on several
-/// nodes, among crashes, takeovers, arming, firing and adoption rounds. The
-/// server's part (ownership, the local scheduler, commits, opening an
-/// object) is modelled here. Once the faults stop, every alarm an object's
-/// database holds must run.
+/// Deterministic simulation (`crate::dst`): the real `Index` and `Registry`
+/// on several nodes, among crashes, lapsed leases, lost records, takeovers,
+/// arming, firing and alarms rounds. The server's part (ownership, the local
+/// scheduler, commits, opening an object) is modelled here. Once the faults
+/// stop, every alarm an object's database holds must run.
 mod dst {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -285,20 +285,29 @@ mod dst {
     use std::rc::Rc;
 
     use super::*;
+    use crate::Registry;
     use crate::dst::Harness;
     use crate::dst::Store;
 
     const NS: &str = "ns";
     const OBJECTS: usize = 8;
-    /// How long a crashed node's lease outlives it.
-    const LEASE: u64 = 3;
+    /// A lease's lifetime from its renewal.
+    const LEASE: u64 = 10;
     /// As the cluster sets it: twice the lease.
     const GRACE: u64 = 2 * LEASE;
+    const ORPHANS_EVERY: u64 = 15;
 
+    #[expect(clippy::struct_excessive_bools)]
     struct Node {
         id: String,
-        alive: bool,
+        /// The process runs.
+        up: bool,
+        /// It has held a lease, and serves while that lasts.
+        joined: bool,
+        /// Until when its last renewal holds, after it crashes too.
         lease_until: u64,
+        /// Whether a renewal is running: the lease loop runs one at a time.
+        leasing: bool,
         /// The local scheduler.
         local: BTreeMap<String, u64>,
         /// Objects with a call in flight here, as an actor's input gate
@@ -318,8 +327,7 @@ mod dst {
 
     impl World {
         fn routable(&self, n: usize) -> bool {
-            let node = &self.nodes[n];
-            node.alive || self.now < node.lease_until
+            self.now < self.nodes[n].lease_until
         }
     }
 
@@ -346,6 +354,7 @@ mod dst {
         dst: Harness,
         world: Rc<RefCell<World>>,
         indexes: Vec<Option<Rc<Index>>>,
+        registries: Vec<Option<Rc<Registry>>>,
         faults: bool,
     }
 
@@ -355,6 +364,7 @@ mod dst {
                 dst: Harness::new(seed),
                 world: Rc::default(),
                 indexes: Vec::new(),
+                registries: Vec::new(),
                 faults: true,
             };
             for _ in 0..3 {
@@ -372,12 +382,17 @@ mod dst {
         fn start(&mut self) {
             let n = self.dst.node();
             let id = format!("n{n}");
-            let index = Index::new(self.dst.bucket.clone(), &id, GRACE);
+            let bucket = self.dst.bucket.clone();
+            let index = Index::new(bucket.clone(), &id, GRACE, ORPHANS_EVERY);
             self.indexes.push(Some(Rc::new(index)));
+            let registry = Registry::new(bucket, &id, "", LEASE);
+            self.registries.push(Some(Rc::new(registry)));
             self.world.borrow_mut().nodes.push(Node {
                 id,
-                alive: true,
+                up: true,
+                joined: false,
                 lease_until: 0,
+                leasing: false,
                 local: BTreeMap::new(),
                 busy: BTreeSet::new(),
                 round: false,
@@ -388,22 +403,100 @@ mod dst {
         fn crash(&mut self, n: usize) {
             self.dst.crash(n);
             self.indexes[n] = None;
+            self.registries[n] = None;
             let mut world = self.world.borrow_mut();
-            let until = world.now + LEASE;
             let node = &mut world.nodes[n];
-            node.alive = false;
-            node.lease_until = until;
+            node.up = false;
             node.local.clear();
             node.busy.clear();
             drop(world);
             self.log(&format!("crash n{n}"));
         }
 
-        fn alive(&self) -> Vec<usize> {
+        /// The nodes whose process runs.
+        fn up(&self) -> Vec<usize> {
             let world = self.world.borrow();
             (0..world.nodes.len())
-                .filter(|&n| world.nodes[n].alive)
+                .filter(|&n| world.nodes[n].up)
                 .collect()
+        }
+
+        /// The nodes that serve: up, with a lease.
+        fn alive(&self) -> Vec<usize> {
+            let world = self.world.borrow();
+            let now = world.now;
+            let serves = |n: &Node| n.up && n.joined && n.lease_until > now;
+            (0..world.nodes.len())
+                .filter(|&n| serves(&world.nodes[n]))
+                .collect()
+        }
+
+        /// A node whose lease lapsed stops serving, and starts again.
+        fn lapse(&mut self) {
+            for n in self.up() {
+                let lapsed = {
+                    let world = self.world.borrow();
+                    let node = &world.nodes[n];
+                    node.joined && world.now >= node.lease_until
+                };
+                if lapsed {
+                    self.log(&format!("lapse n{n}"));
+                    self.crash(n);
+                    self.start();
+                }
+            }
+        }
+
+        /// Renew `n`'s lease, then list its peers, as the lease loop does.
+        fn lease(&mut self, n: usize) {
+            let registry = Rc::clone(self.registries[n].as_ref().unwrap());
+            let world = Rc::clone(&self.world);
+            let now = {
+                let mut world = world.borrow_mut();
+                if std::mem::replace(&mut world.nodes[n].leasing, true) {
+                    return;
+                }
+                world.now
+            };
+            self.dst.spawn(n, async move {
+                let renewed = registry.renew(now).await;
+                {
+                    let node = &mut world.borrow_mut().nodes[n];
+                    // A node that fails to join exits, as the server does:
+                    // `joined` with no lease, so it lapses.
+                    if let Ok(until) = renewed {
+                        node.lease_until = until;
+                    }
+                    node.joined = true;
+                }
+                let listed = registry.peers(now).await.is_ok();
+                let (live, dead) = (registry.listed_nodes(now), registry.dead());
+                let trace = format!(
+                    "lease n{n} at t{now}: {:?}, listed {listed}: live {live:?} dead {dead:?}",
+                    renewed.ok()
+                );
+                world.borrow_mut().log.push(trace);
+                world.borrow_mut().nodes[n].leasing = false;
+            });
+        }
+
+        /// A crashed node's record goes, by hand or a store's fault: only
+        /// the look for orphans finds its alarms then.
+        fn lose_record(&mut self) {
+            let down: Vec<_> = {
+                let world = self.world.borrow();
+                let down = world.nodes.iter().filter(|x| !x.up);
+                down.map(|x| format!("nodes/{}.json", x.id)).collect()
+            };
+            let recorded: Vec<_> = down
+                .into_iter()
+                .filter(|k| self.dst.store.peek(k).is_some())
+                .collect();
+            if !recorded.is_empty() {
+                let key = &recorded[self.dst.rng.below(recorded.len())];
+                self.dst.store.forget(key);
+                self.log(&format!("lose {key}"));
+            }
         }
 
         /// Opening `o` on `n`, its owner now: the alarm its database holds
@@ -436,16 +529,19 @@ mod dst {
         /// One step: run, then do one thing.
         fn step(&mut self) {
             self.run();
-            let alive = self.alive();
+            self.lapse();
+            let (up, alive) = (self.up(), self.alive());
             let pending = self.dst.pending();
+            let some = !alive.is_empty();
             match self.dst.rng.below(100) {
-                0..45 if pending > 0 => self.decide(),
-                45..50 if self.faults && alive.len() > 1 => {
-                    let n = alive[self.dst.rng.below(alive.len())];
+                0..40 if pending > 0 => self.decide(),
+                40..44 if self.faults && up.len() > 1 => {
+                    let n = up[self.dst.rng.below(up.len())];
                     self.crash(n);
                     self.start();
                 }
-                50..62 if self.faults => {
+                44..45 if self.faults => self.lose_record(),
+                45..57 if self.faults && some => {
                     let n = alive[self.dst.rng.below(alive.len())];
                     let o = format!("o{}", self.dst.rng.below(OBJECTS));
                     let at = self.world.borrow().now + self.dst.rng.below(30) as u64;
@@ -455,16 +551,20 @@ mod dst {
                         self.set(n, &o, Some(at));
                     }
                 }
-                62..67 if self.faults => {
+                57..61 if self.faults && some => {
                     let n = alive[self.dst.rng.below(alive.len())];
                     let o = format!("o{}", self.dst.rng.below(OBJECTS));
                     self.request(n, &o);
                 }
-                67..80 => {
+                61..73 => {
+                    let n = up[self.dst.rng.below(up.len())];
+                    self.lease(n);
+                }
+                73..83 if some => {
                     let n = alive[self.dst.rng.below(alive.len())];
                     self.round(n);
                 }
-                80..92 => {
+                83..94 if some => {
                     let n = alive[self.dst.rng.below(alive.len())];
                     self.fire(n);
                 }
@@ -539,24 +639,16 @@ mod dst {
             });
         }
 
-        /// The alarms loop: adopt dead nodes' alarms, then tidy.
+        /// The alarms loop: `Index::round` over the registry's last listing.
         fn round(&mut self, n: usize) {
             let index = Rc::clone(self.indexes[n].as_ref().unwrap());
-            let (live, dead) = {
+            let registry = Rc::clone(self.registries[n].as_ref().unwrap());
+            let now = {
                 let mut world = self.world.borrow_mut();
                 if std::mem::replace(&mut world.nodes[n].round, true) {
                     return;
                 }
-                let world = &*world;
-                let live = world.nodes.iter().filter(|x| x.alive);
-                let dead = world
-                    .nodes
-                    .iter()
-                    .filter(|x| !x.alive && world.now >= x.lease_until);
-                (
-                    live.map(|x| x.id.clone()).collect::<Vec<_>>(),
-                    dead.map(|x| x.id.clone()).collect::<Vec<_>>(),
-                )
+                world.now
             };
             let world = Rc::clone(&self.world);
             self.dst.spawn(n, async move {
@@ -568,8 +660,7 @@ mod dst {
                     let at = local.get(&a.actor).map_or(a.at_ms, |&l| l.min(a.at_ms));
                     local.insert(a.actor, at);
                 };
-                index.adopt(&live, &dead, schedule).await;
-                index.tidy().await;
+                index.round(&registry, now, schedule).await;
                 world.borrow_mut().nodes[n].round = false;
             });
         }
@@ -647,11 +738,11 @@ mod dst {
         fn settle(&mut self) -> Vec<String> {
             self.faults = false;
             self.log("faults stop");
-            for i in 0..40 {
+            for i in 0..80 {
                 if i == 1 {
                     // Quiet now: crash every node at once, which leaves
                     // only the index to find each alarm by.
-                    for n in self.alive() {
+                    for n in self.up() {
                         self.crash(n);
                         self.start();
                     }
@@ -664,11 +755,15 @@ mod dst {
                     }
                     self.decide();
                 }
+                self.lapse();
+                for n in self.up() {
+                    self.lease(n);
+                }
                 for n in self.alive() {
                     self.round(n);
                     self.fire(n);
                 }
-                self.world.borrow_mut().now += 10;
+                self.world.borrow_mut().now += 5;
             }
             self.dst
                 .store
