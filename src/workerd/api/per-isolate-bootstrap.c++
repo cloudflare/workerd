@@ -5,10 +5,12 @@
 #include "per-isolate-bootstrap.h"
 
 #include <workerd/api/abort-bootstrap.h>
+#include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/request-io.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -254,8 +256,9 @@ static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>&
     auto& js = jsg::Lock::from(args.GetIsolate());
     js.withinHandleScope([&] {
       args.GetReturnValue().Set(
-          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(
-              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]))));
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(js,
+              jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]),
+              jsg::JsValue(args[3]), jsg::JsValue(args[4]))));
     });
   });
 }
@@ -265,6 +268,59 @@ static void CreateTrustedEvent(const v8::FunctionCallbackInfo<v8::Value>& args) 
     auto& js = jsg::Lock::from(args.GetIsolate());
     return v8::Local<v8::Value>(
         api::EventTargetBootstrap::createTrustedEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void CreateTrustedOpenEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedOpenEvent(js));
+  });
+}
+
+static void CreateTrustedErrorEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedErrorEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+// The request-bound I/O handle (see request-io.h) and the helpers of bootstrap-utils.h. Plain
+// methods: they allocate and can throw.
+static void CreateRequestIo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::RequestIo::createForBootstrap(js));
+  });
+}
+
+static void IsFetcher(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.boolean(api::BootstrapUtils::isFetcher(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ParseUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::parseUrl(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::readableStreamState(js, jsg::JsValue(args[0])));
   });
 }
 
@@ -403,6 +459,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createTrustedEvent",
     "cloneMessageData",
     "queueReaction",
+    "createTrustedOpenEvent",
+    "createTrustedErrorEvent",
+    "createRequestIo",
+    "isFetcher",
+    "parseUrl",
+    "mimeTypeEssence",
+    "readableStreamState",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -427,6 +490,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
     getMethod(js, QueueReaction),
+    getMethod(js, CreateTrustedOpenEvent),
+    getMethod(js, CreateTrustedErrorEvent),
+    getMethod(js, CreateRequestIo),
+    getMethod(js, IsFetcher),
+    getMethod(js, ParseUrl),
+    getMethod(js, MimeTypeEssence),
+    getMethod(js, ReadableStreamState),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
