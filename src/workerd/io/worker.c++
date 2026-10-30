@@ -1582,6 +1582,36 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         recordedLock.setupContext(context);
 
         maybePerIsolateBootstrap(isolate->getApi(), lock, context);
+
+        if (lock.isStartingFromSnapshot()) {
+          auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+          const auto& artifact = isolateBase.finalizedSnapshotArtifact();
+
+          // Re-register the zygote's top-level event listeners on the fresh global scope.
+          // Calling the baked addEventListener re-derives the callback (plain fn vs
+          // handleEvent, receiver binding, once) exactly as the zygote's registration did;
+          // the identity objects live in the snapshot heap, so their closures and module
+          // state stay shared with the baked module graph.
+          if (artifact.listenerRecords.size() > 0) {
+            JSG_WITHIN_CONTEXT_SCOPE(lock, context, ([&](jsg::Lock& js) {
+              auto global = context->Global();
+              auto addListenerVal = jsg::check(
+                  global->Get(context, jsg::v8StrIntern(js.v8Isolate, "addEventListener"_kj)));
+              KJ_REQUIRE(addListenerVal->IsFunction(),
+                  "START_FROM_SNAPSHOT: global addEventListener is not a function; it was "
+                  "replaced during zygote top-level execution");
+              auto addListener = addListenerVal.As<v8::Function>();
+              for (auto& rec: artifact.listenerRecords) {
+                auto identity = isolateBase.extractOnceFromSnapshot(context, rec.identityIndex);
+                auto opts = v8::Object::New(js.v8Isolate);
+                jsg::check(opts->Set(context, jsg::v8StrIntern(js.v8Isolate, "once"_kj),
+                    v8::Boolean::New(js.v8Isolate, rec.once)));
+                v8::Local<v8::Value> args[] = {jsg::v8Str(js.v8Isolate, rec.type), identity, opts};
+                jsg::check(addListener->Call(context, global, kj::size(args), args));
+              }
+            }));
+          }
+        }
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -2345,6 +2375,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     // * The API-wrapper serializer's metadata.
     jsg::WrappablesSerializeMetadata wrappablesMetadata;
 
+    // Zygote only: the context global's JS event listeners, recorded inside the handle scope
+    // below and stored in the SnapshotArtifact by createSnapshotBlob().
+    kj::Vector<jsg::SnapshotArtifact::ListenerRecord> listenerRecords;
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       bool freshContext = false;
@@ -2599,8 +2632,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (lock.isPreparingSnapshot() && impl->permanentException == kj::none) {
         // The zygote's top level has run: record what it left of the properties V8 adds when the
         // snapshot is restored, and remove them so that V8 can add them.
-        jsg::IsolateBase::from(lock.v8Isolate)
-            .removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
+        auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+        isolateBase.removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
+
+        // Record the context global's JS event listeners. newContext() on load attaches a
+        // *fresh* ServiceWorkerGlobalScope to the deserialized global proxy, discarding the
+        // zygote's listener map, and clear() below drops the zygote global's listener map along
+        // with its identity handles. Pin each identity and record enough to re-register it on
+        // load (see the replay in the Script constructor).
+        (*jsContext)
+            ->forEachSnapshotListener(
+                lock, [&](kj::StringPtr type, v8::Local<v8::Object> identity, bool once) {
+          listenerRecords.add(jsg::SnapshotArtifact::ListenerRecord{
+            .type = kj::str(type),
+            .identityIndex = isolateBase.pinIntoSnapshot(context, identity),
+            .once = once,
+          });
+        });
       }
     });
 
@@ -2625,7 +2673,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
       isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
-          &snapshotBadTagFieldsCount, &wrappablesMetadata);
+          &snapshotBadTagFieldsCount, &wrappablesMetadata, kj::mv(listenerRecords));
     }
   });
 }
