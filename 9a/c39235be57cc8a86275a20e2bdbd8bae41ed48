@@ -1,0 +1,21 @@
+src/workerd/api/actor-state.c++
+  s_322adea864e0a2::t_7afe26562890fc 955
+src/workerd/api/actor-state.h
+  s_322adea864e0a2::t_04c61eefb597e8 286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9ac39235be57cc8a86275a20e2bdbd8bae41ed48",
+  "prompts": {},
+  "sessions": {
+    "s_322adea864e0a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21148e11-ff14-4929-b25a-bbd43ac3cb9f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Max McDonnell <mmcdonnell@cloudflare.com>"
+    }
+  }
+}
