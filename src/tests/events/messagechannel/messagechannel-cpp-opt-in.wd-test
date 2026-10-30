@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+using MessageChannelModules = import "messagechannel-modules.capnp";
+
+# The main C++ cell plus the dateless opt-in flags that change this suite's
+# surface: spec_compliant_property_attributes (accessor names and lengths,
+# globals as own properties) and immutable_api_prototypes (non-writable
+# constructor prototypes).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-messagechannel-cpp-opt-in",
+      worker = (
+        modules = MessageChannelModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_worker_threads_module",
+          "expose_global_message_channel",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);

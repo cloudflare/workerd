@@ -24,3 +24,6 @@ EventTarget plumbing for the bootstrap. Parent directory conventions
   `dispatchEvent()`, with the policy from `effectiveExceptionPolicy()`, as
   C++ subclasses use `dispatchEventImpl()`. The public `dispatchEvent()` is
   for user-constructed events.
+- A subclass that replaces a C++ class gets a parity suite under
+  `src/tests/events/<api>/`, run against both implementations; see
+  `src/tests/events/AGENTS.md`.

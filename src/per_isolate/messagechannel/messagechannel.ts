@@ -5,7 +5,9 @@
 // both depart from the HTML standard (no transfer lists, no serialization of
 // ports, the extra messageerror event, a queue that follows every 'message'
 // listener). This implementation keeps every one of those behaviors; only
-// the differences below are its own.
+// the differences below are its own. src/tests/events/messagechannel/
+// runs one suite against both implementations, and its AGENTS.md records
+// where each difference is pinned.
 //
 // DIFFERENCES FROM THE C++ IMPLEMENTATION
 //
