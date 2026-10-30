@@ -1,9 +1,9 @@
 src/workerd/api/actor-fetch-retry-test.c++
-  s_f332e176eb9835::t_8798accbe3c59b 321-342,587-615
+  s_f332e176eb9835::t_2bdf333afb49bb 321-342,587-615
 src/workerd/api/actor.c++
-  s_f332e176eb9835::t_bac12e01dc7a37 26-38,135,165
+  s_f332e176eb9835::t_510550763dc0d7 26-38,135,165
 src/workerd/api/http.h
-  s_f332e176eb9835::t_1fb05a0b023c1b 30-32
+  s_f332e176eb9835::t_25e83a7ea95cd1 30-32
 ---
 {
   "schema_version": "authorship/3.0.0",
