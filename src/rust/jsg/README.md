@@ -166,8 +166,9 @@ and `.h` file in `src/rust/jsg`. To check a shim file in another package, export
   resource field. Both can be dropped without the lock, and after the isolate is gone.
 
 Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
-`await-io-*`, `global-*`, `traced-global-*`) and the drop tests in
-`src/rust/jsg-test/tests/global.rs` and `traced_global_lifetime.rs`.
+`global-*`, `traced-global-*`) and `src/workerd/io/io-context/compile-tests`
+(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs` and
+`traced_global_lifetime.rs`.
 
 ## Resources
 
