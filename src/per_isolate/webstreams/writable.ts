@@ -30,7 +30,6 @@ const {
   ArrayBufferPrototypeByteLengthGet,
   NumberIsNaN,
   ObjectDefineProperties,
-  ObjectDefineProperty,
   ObjectFreeze,
   PromiseResolve,
   PromiseReject,
@@ -200,14 +199,14 @@ let getWritableStreamController: <W>(
 // (assertIsWritableStream) throws; this one answers.
 let isWritableStream: (value: unknown) => boolean;
 
-// C++-recognition brand (JsWritableStream::tryUnwrapTs): an own,
-// non-enumerable marker stamped on every instance by the constructor, so
-// the C++ bridge can recognize TypeScript streams via an own-property
-// probe, without executing JavaScript. That constraint is load-bearing:
+// C++-recognition brand (JsWritableStream::tryUnwrapTs): a V8-private
+// marker stamped on every instance by the constructor, so the C++ bridge
+// can recognize TypeScript streams without executing JavaScript.
+// That constraint is load-bearing:
 // unwrap runs during RPC deserialization, inside V8's no-JS-execution
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
-const kWritableStreamBrand: symbol = utils.getApiSymbol('kWritableStreamBrand');
+const kWritableStreamBrand = 'kWritableStreamBrand';
 
 // The Node.js stream-interop hooks (see readable.ts for the full note):
 // node:stream observes completion through `stream[kIsClosedPromise].promise`
@@ -288,9 +287,9 @@ let getWriterClosedPromiseInternal: WriterOp<[], Promise<void>>;
 // ---------------------------------------------------------------------------
 // WritableStream
 
-// The shared extractor function installed as kExtractNativeSink on
+// The shared extractor function installed in the kExtractNativeSink private slot on
 // native-backed WritableStream instances. Assigned in the static block.
-// THIS-BOUND (called as stream[kExtractNativeSink]()), mirroring the
+// THIS-BOUND, mirroring the
 // readable side's kExtractNativeSource calling convention so the C++
 // TypeWrapper uses one uniform protocol for both directions.
 let extractNativeSink: <W>(this: WritableStream<W>) => object;
@@ -785,10 +784,7 @@ class WritableStream<W = unknown> {
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
-    ObjectDefineProperty(this, kWritableStreamBrand, {
-      __proto__: null,
-      value: true,
-    } as PropertyDescriptor);
+    utils.setPrivate(this, kWritableStreamBrand, true);
 
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the sink is typed `object` (null and every other primitive
@@ -810,13 +806,7 @@ class WritableStream<W = unknown> {
     // exists for pipe dispatch and extraction only.
     if (isNativeUnderlyingSink(underlyingSink)) {
       this.#nativeSink = underlyingSink;
-      // Install the extraction marker (same descriptor shape as the
-      // readable side: own, non-enumerable, non-writable,
-      // non-configurable).
-      ObjectDefineProperty(this, kExtractNativeSink, {
-        __proto__: null,
-        value: extractNativeSink,
-      } as PropertyDescriptor);
+      utils.setPrivate(this, kExtractNativeSink, extractNativeSink);
     }
 
     this.#controller = new WritableStreamDefaultController<W>(
@@ -1788,7 +1778,7 @@ module.exports = {
   // Internal operations consumed by the pipe implementation in readable.ts.
   // Unreachable from user code: the bootstrap require() is not exposed, and
   // streams.ts deliberately does not re-export this.
-  // Sink-side symbols for the pipe dispatch in readable.ts.
+  // Private-slot label for the pipe dispatch in readable.ts.
   kExtractNativeSink,
   internalsForPipe: {
     isWritableStream,

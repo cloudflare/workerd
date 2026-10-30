@@ -751,6 +751,7 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
