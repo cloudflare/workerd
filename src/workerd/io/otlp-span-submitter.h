@@ -111,6 +111,8 @@ class OtlpSpanSubmitter final: public SpanSubmitter {
   ~OtlpSpanSubmitter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(OtlpSpanSubmitter);
 
+  kj::Date getTime() override;
+
   bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
