@@ -1,0 +1,31 @@
+.github/bonk/specialists/rust-first.md
+  s_f1110a86c4688e::t_a76780382582d0 46-47
+AGENTS.md
+  s_f1110a86c4688e::t_e77d299f9425ec 55
+build/wd_rust_binary.bzl
+  s_f1110a86c4688e::t_71273c06961722 4,79,159
+build/wd_rust_crate.bzl
+  s_f1110a86c4688e::t_ff89d8d5e4c60d 4,86-87,109,183
+build/wd_rust_proc_macro.bzl
+  s_f1110a86c4688e::t_60ae8ba3b934f4 2,23,41
+build/wd_rust_test.bzl
+  s_f1110a86c4688e::t_02eeedf7fb6bd0 3-13
+src/rust/AGENTS.md
+  s_f1110a86c4688e::t_a81faaf28f4fa6 41,49-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15c04748c6701d4297e9469e654b786d0b42edd3",
+  "prompts": {},
+  "sessions": {
+    "s_f1110a86c4688e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f6d638-d1d1-4068-a7a6-e5f600722252",
+        "model": "claude-odango-eap"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

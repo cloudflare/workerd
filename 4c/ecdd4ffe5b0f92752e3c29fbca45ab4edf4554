@@ -1,0 +1,36 @@
+src/workerd/api/worker-rpc.c++
+  s_b716b0d48442fc::t_fdc1a003802992 942
+  s_b716b0d48442fc::t_2d8827f38ec630 946
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4cecdd4ffe5b0f92752e3c29fbca45ab4edf4554",
+  "prompts": {},
+  "sessions": {
+    "s_6aa689848a6f25": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2861135affeN8CpyDm2tLcoX2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c952f63eb693d5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2ced5c2cffeXNdpgkcIZh5tRc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

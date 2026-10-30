@@ -1,0 +1,25 @@
+.github/workflows/deps-updater.yml
+  s_1b9ab9fb100cf8::t_ede414c693951f 38-40
+build/deps/rust.MODULE.bazel
+  s_1b9ab9fb100cf8::t_59e8480583c306 113-115
+deps/rust/cargo-bazel-lock.json
+  s_1b9ab9fb100cf8::t_f4ffde86a17e88 1-15621
+justfile
+  s_1b9ab9fb100cf8::t_f5d72c2d5d1357 143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0c93fd83cb84a5f8df8251840c9edc792fdab072",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

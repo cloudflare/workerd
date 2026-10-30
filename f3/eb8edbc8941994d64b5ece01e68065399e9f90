@@ -1,0 +1,25 @@
+src/cloudflare/internal/test/workflows/workflows-api-test.js
+  s_b554ffcd7ba695::t_f9b19140fcfa7f 64-65,68-75
+src/cloudflare/internal/test/workflows/workflows-api-rpc-test.js
+  s_b554ffcd7ba695::t_563c127e29c488 38-39,42-49
+src/cloudflare/internal/test/workflows/workflows-mock.js
+  s_b554ffcd7ba695::t_e0296546fa630e 10,29-38
+src/cloudflare/internal/workflows-api.ts
+  s_b554ffcd7ba695::t_bb48e288c4758a 124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f3eb8edbc8941994d64b5ece01e68065399e9f90",
+  "prompts": {},
+  "sessions": {
+    "s_b554ffcd7ba695": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f74df-f5c8-71b4-88d3-30b0c9e17ab0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    }
+  }
+}

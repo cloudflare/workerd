@@ -1,0 +1,27 @@
+src/workerd/api/fetch-retry-claim-hook-test.c++
+  s_bf1ef2329fbd5a::t_3c9bb62973b545 29,32-34,41-215,218-234,236-264
+src/workerd/api/global-scope.c++
+  s_bf1ef2329fbd5a::t_241403e6260331 201,382-386
+src/workerd/api/workers-module.c++
+  s_bf1ef2329fbd5a::t_16f90e443c610f 9,80-95
+types/defines/rpc.d.ts
+  s_bf1ef2329fbd5a::t_a73d397bbb38ec 496-508
+types/test/types/retryable.ts
+  s_bf1ef2329fbd5a::t_f8b360d097a27c 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9439032eae585d320a89cdbc5063edef68a46860",
+  "prompts": {},
+  "sessions": {
+    "s_bf1ef2329fbd5a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f853bc28bffe5fdudebM6gGEQz",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

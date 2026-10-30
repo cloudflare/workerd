@@ -1,0 +1,21 @@
+src/cloudflare/internal/test/hyperdrive/hyperdrive-test.js
+  s_c95635740bd55d::t_a388db0745ba8d 1-193
+src/cloudflare/internal/test/hyperdrive/hyperdrive-test.wd-test
+  s_c95635740bd55d::t_3250bea5f84b13 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f4e9f824635f7b89346f42a0905cdb2b84a1bc9",
+  "prompts": {},
+  "sessions": {
+    "s_c95635740bd55d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f124be853ffe8iI310HpFFBupi",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "adriangracia <adrian.gracia@icloud.com>"
+    }
+  }
+}

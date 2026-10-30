@@ -1,0 +1,19 @@
+build/wd_rust_binary.bzl
+  s_23da8514368f71::t_3896b75b64adf7 71-72,135,155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "439d95000e46bfc5c34f234f406797da6585bf6e",
+  "prompts": {},
+  "sessions": {
+    "s_23da8514368f71": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3d57667-efd9-4a7d-963e-36478d5dc9cc",
+        "model": "claude-haiku-5-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}

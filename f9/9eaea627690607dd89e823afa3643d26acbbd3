@@ -1,0 +1,297 @@
+src/workerd/api/http.c++
+  s_ab4e43acd62623::t_8f9e20d587b116 2826
+  s_6ba2030b43c23b::t_a9d8f9b928267b 1490
+src/workerd/api/http.h
+  s_ab4e43acd62623::t_8f9e20d587b116 352
+  s_68959d5fe8e08d::t_060ed0782bd6d4 274-275
+src/workerd/api/worker-rpc.c++
+  s_ab4e43acd62623::t_8f9e20d587b116 757-762,764-765,767-769,2358
+  s_ab4e43acd62623::t_59120a5bb21f8e 1217,2358
+src/workerd/api/tests/tail-worker-test.js
+  s_ab4e43acd62623::t_4ed7ddc8c3e040 469
+src/workerd/api/actor.c++
+  s_bf1ef2329fbd5a::t_d7e30e190dc36d 118-119,128,165
+src/workerd/io/hibernation-manager-test.c++
+  s_d3698f92a97eab::t_f0a03d7b76126f 1793,2013
+  s_ea3b91cafb67a9::t_0c01a7ec0a2cfc 1835
+src/workerd/io/legacy-hibernation-manager.c++
+  s_ea3b91cafb67a9::t_a7f545c86a22be 92,94-95
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_ebf47686d728a3::t_fd4027c5b492bc 77
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_2427bf394889ab::t_7e4b84c2343c07 112,123,130-131,139-142,145-146
+src/rust/cxx/kj-rs/waker.rs
+  s_2427bf394889ab::t_425e4adc9b4b57 11,62-63,71-72,77-78,83-84
+src/rust/cxx/kj-rs/waker.c++
+  s_2427bf394889ab::t_0aaed3da051da0 102,104
+src/rust/cxx/kj-rs/waker.h
+  s_2427bf394889ab::t_a8dab964ff20ce 24,64,69,121-122
+src/workerd/api/tracing.c++
+  s_ebf47686d728a3::t_9f9f8e18034b90 666,667-668
+types/defines/trace.d.ts
+  s_ebf47686d728a3::t_5b2ee5f32a46df 122-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f99eaea627690607dd89e823afa3643d26acbbd3",
+  "prompts": {},
+  "sessions": {
+    "s_0128c8fe1f4cf7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb02c0a4ffe92iHqw5OE3E6PL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_06bf04b8ac0a33": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f997416c7ffeRiz2aKxiXe26mm",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_0d3499d6e9689a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff8840b2ffeODxe4Hp6pv34Ke",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_1bb40d255e21f5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f84d4c495ffeWFyRK6SytvWErg",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_1e024e77d05daf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb02ef23ffeK04umsMAByNDsE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_2427bf394889ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_313a31aedf23dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcbe3c50fffe2n0SS9S2tgJDBh",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_3725c7a238f252": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd31e-cf47-7423-90ec-e5aaf3f09f91",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Nafeez Nazer <nafeez@cloudflare.com>"
+    },
+    "s_4cbeffab6dcecf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f8d46a17effeT7EnvmYqOMFDdE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_7d609c0c90c406": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa2196cefffeVkJ5vJOz86BSa6",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_8d3ff6b9908116": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc63bb043ffeWOJMRbxvOXrGJK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9496b046a1a364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0046a268affe2zLQ3xwXN6au9J",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_95709577c5eb5b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9e39108bffe60G3EyBOjPMtGh",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9723e246fdbb73": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcc287630ffellbbLmjaACAVsy",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_9aacb5d2b3f842": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe58e4b20ffehuwmysAirk7QdL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_b0ec58b9f961bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa6ae2039ffeT6jAWgdvM1tYhn",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_be8633d2f74409": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9a902bffeKLYznplfm4do2p",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Dario Piotrowicz <dario@cloudflare.com>"
+    },
+    "s_bf1ef2329fbd5a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f853bc28bffe5fdudebM6gGEQz",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c15923d860de4c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9906efa8ffeOgt63wgJV3AEP3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c2b7022a36b491": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb75d8b4ffe6d47Rh924GzmjZ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_d3698f92a97eab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff13c571bffeW4Fir1apASoaT5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ea3b91cafb67a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe6b74983ffe3TTRPQnP5WRUxK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ebf47686d728a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe81e04f4ffegtcU3p2joqak5h",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    },
+    "s_f9467207d3fab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd12f606dffeQhnbJzly2YeGuA",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_f9ba2db30519dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe697c02effe8tbwVKTCrl3s9X",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_fbb6ee2a7d5176": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa9f28f1-9c53-4455-9369-8022c4c73d94",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

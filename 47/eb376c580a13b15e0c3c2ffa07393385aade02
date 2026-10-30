@@ -1,0 +1,23 @@
+src/workerd/io/access-info.h
+  s_0e56c3301e5173::t_fc6cb3a0247595 21-24
+  s_0e56c3301e5173::t_535fccb90a063f 13
+src/workerd/api/global-scope.c++
+  s_0e56c3301e5173::t_0e8d7d0df5cfdb 115-117
+  s_0e56c3301e5173::t_ac560784445db8 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "47eb376c580a13b15e0c3c2ffa07393385aade02",
+  "prompts": {},
+  "sessions": {
+    "s_0e56c3301e5173": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09dbefc92ffel4Y7irj65GOs7y",
+        "model": "unknown"
+      },
+      "human_author": "Matt Provost <mprovost@cloudflare.com>"
+    }
+  }
+}

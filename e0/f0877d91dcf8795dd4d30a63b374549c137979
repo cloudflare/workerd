@@ -1,0 +1,22 @@
+src/workerd/io/io-channels.h
+  s_c1a7662859f799::t_8e15185986d576 136-137,175
+  s_c1a7662859f799::t_a01a170689afb3 138-140
+  s_c1a7662859f799::t_891c83ba21dc06 172-174
+  s_c1a7662859f799::t_fa2ad77e2e1064 176-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e0f0877d91dcf8795dd4d30a63b374549c137979",
+  "prompts": {},
+  "sessions": {
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

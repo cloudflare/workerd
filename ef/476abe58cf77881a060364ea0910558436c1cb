@@ -1,0 +1,29 @@
+src/rust/memory-cache/ffi/BUILD.bazel
+  s_fbb6ee2a7d5176::t_ec22bd911c1671 6
+src/workerd/api/BUILD.bazel
+  s_fbb6ee2a7d5176::t_fa6a6d72f1e1df 461,539
+src/workerd/io/BUILD.bazel
+  s_fbb6ee2a7d5176::t_87ba20042b3394 129,162,254,319,331,638
+src/workerd/server/BUILD.bazel
+  s_fbb6ee2a7d5176::t_bc14a7b9cac89f 80,97,135,152,248-249,295
+src/workerd/tests/BUILD.bazel
+  s_fbb6ee2a7d5176::t_4e63e4bc5a5a84 43
+src/workerd/util/BUILD.bazel
+  s_fbb6ee2a7d5176::t_ba6f3f1018666b 105,153,239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ef476abe58cf77881a060364ea0910558436c1cb",
+  "prompts": {},
+  "sessions": {
+    "s_fbb6ee2a7d5176": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa9f28f1-9c53-4455-9369-8022c4c73d94",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

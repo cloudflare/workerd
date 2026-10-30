@@ -1,0 +1,89 @@
+patches/rust/crates/http-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_575df52a7332d6 1-17
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_8892d599d8d796 44-48,113-118,134-151,182,198-200,203-204,206-209,216-218
+src/rust/cxx/kj-hyper/io.rs
+  s_dadaf0660bfcbe::t_aade71740f2e9f 1-17,20-42,44-45,52-56,64-65,68-78,83-84,86-167,180-181,185,187-300,304-313,315-317,319-536
+patches/rust/crates/hyper-client-lazy-response-body.patch
+  s_dadaf0660bfcbe::t_6ca0b43c880d36 1-16
+src/rust/cxx/kj-hyper/starttls.rs
+  s_dadaf0660bfcbe::t_0c4507e725e4fc 1-23,24-25,27-28,30-33,35,37-42,44-64,66-67,69-158,160-245
+patches/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_bb0968a8a78c0d 1-3
+patches/rust/crates/hyper-public-header-case-map.patch
+  s_dadaf0660bfcbe::t_2a60c9d4f80935 1-43
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_25699a4c9c63e1 31-39,47-50,151,161-165
+deps/rust/Cargo.lock
+  s_b63afcce9fec5b::t_9a8565bf145b22 89-94,117-122,327-336,364-385,459-481,520,535-538,547,550-552,557,565-566,569,670-675,845-856,865,924-997,1165-1213,1447-1452,1522,1633-1638,1658-1669,1679-1689,1701-1709,1739-1752,1830-1902,1924-1932,1951-1973,2090-2099,2140-2149,2173-2178,2608-2623,2665-2670,2723,2726-2731,2782-2790,2797-2805,2851-2859,2875-2883,2890,2902-2917,2925-2932,2935-2940,2947-2952,2959-2964,2971-2976,2983-2988,2995-3000,3007-3012,3019-3024,3031-3036,3052-3062,3127-3132
+src/rust/cxx/kj-hyper/handshake.rs
+  s_dadaf0660bfcbe::t_32bb1eed7ea55b 1-56
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_645fc589db95bd 1-6,8,12-14,16-41,42-45,47,50-51
+patches/rust/crates/httparse-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_f7ad2ebddd7b54 1-29
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_dadaf0660bfcbe::t_5bf37ca092e08d 1-39,43-58,60-207,210-212,214-411
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_142701010609b3 61-86,90-96,98-99
+src/rust/cxx/kj-hyper/ffi.rs
+  s_dadaf0660bfcbe::t_7aed1ec728e6a6 1-34,35-80,81-124,125-193,195-397
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_dadaf0660bfcbe::t_ac50a041e7dfa1 1-10,11-49,50-72
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_269c7a3f288758 1-28,30-60
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_dadaf0660bfcbe::t_263cc9644c2b34 1-91,94-99,101-120
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_49f0776a2277fd 99,134-135,145-149,212,220-227,383-391
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_68e43ab0269de9 35-37,50-55,63-66,69-74,79,84-85
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_054ce6e9a2511b 23
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_da760c7d7e4c55 14-21
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_9f5b452dcd159b 1-20,23,25-44,46,48-50,52-54,56-102,120-124,178-186,188-196,198-200,202-204,206-210,213,216-220,222-225,228-233,236-238,240,242,244-248,277,291-303,305,311-332,334-364,374-376,378-380,382,384-385,390-392,403,405-415,417-421,429-513,517,519-521,523-525,528-529,532,539-547,549-565,567-660,662-665,667-668,678-745,747,749-750,752,754,756-761,763-769,774-793,795-804,806-809,842-867,869-884,886,888-890,892-919,923-929,932,942,962-967
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_dadaf0660bfcbe::t_1b1a4fd2e3b169 1-63,64-83,84-87
+src/rust/cxx/kj-hyper/tls.rs
+  s_dadaf0660bfcbe::t_90560f00ac452a 1-880
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_dadaf0660bfcbe::t_8bb42226154d93 1-15,20-33,36-82,88-168,182-228,232-306,309-592,594-596,601-614,618-633,650-728,730,732-735,737-747,751-931,933-937,940-951,1000-1061,1102-1321
+patches/rust/crates/hyper-graceful-shutdown-partial-request.patch
+  s_dadaf0660bfcbe::t_9b65790d535853 1-13
+src/rust/cxx/kj-hyper/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_2b5ac3f51b595b 1-17
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_4a62ae6562625a 1-11,14-22,24-26,29-156,162-166,168-217,222-256,258-299,302-336,343-354,356-360,362-364,367,375-427
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_53919e0914013f 25-32,45-61
+src/rust/cxx/kj-hyper/body.rs
+  s_dadaf0660bfcbe::t_404cce0bb9ef8f 1-252,255,257-270,329,339-340,343-347,349-357,359-365,375-379,383-384,387-389,392-393,402,403-405,420-512
+src/rust/cxx/kj-hyper/server.rs
+  s_dadaf0660bfcbe::t_4914b7b4af3198 1-9,17-51,53-55,57-61,63-105,108-154,159-167,172-180,182-194,197-220,222-309,311-312,315-322,324-337,339-347,349-382,385-390,399,400-411,413-415,420-427,429-431,440-474,482,498,502,504-505,507,524-532,533,535-536,538-540,554-556,558,559-580,584-606,608,610-612,614-618,620-622,624-630,632-641,643-660,664-681,685-690,692-706,708-717,719,722-809,811-845,847,852-863,891-935,937-976,978-993
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f40bc447183773b723145ef9da46ca33a5bf62a1",
+  "prompts": {},
+  "sessions": {
+    "s_b63afcce9fec5b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a711f949f06b95420",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

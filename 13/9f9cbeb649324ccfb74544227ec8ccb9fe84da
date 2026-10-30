@@ -1,0 +1,21 @@
+src/workerd/io/hibernation-manager-test.c++
+  s_402912a14deedf::t_8c1ee71434f0e2 46,60-63,291-311
+src/workerd/io/legacy-hibernation-manager.c++
+  s_402912a14deedf::t_6586e757f22b17 260-268,272,298,384,386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "139f9cbeb649324ccfb74544227ec8ccb9fe84da",
+  "prompts": {},
+  "sessions": {
+    "s_402912a14deedf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f31044768ffeN0h04gFIIo6ilR",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
