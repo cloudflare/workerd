@@ -614,7 +614,7 @@ void local_promise_mark_as_handled(const Local& promise) {
 
 namespace {
 // Whether an exception or a termination is pending, in which case the promise shims call nothing
-// in V8 and fail, leaving it pending. Promise::Resolver::New(), Then() and Catch() would clear
+// in V8 and fail, leaving it pending. Promise::Resolver::New() and Then() would clear
 // it: they open a PrepareForExecutionScope, which clears the pending exception, a termination
 // included, so that a terminated script would run on. V8 also requires that embedders don't
 // enter it at all while execution is terminating.
@@ -622,18 +622,6 @@ bool exceptionPending(Isolate* isolate) {
   return isolate->IsExecutionTerminating() || isolate->HasPendingException();
 }
 }  // namespace
-
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled)));
-}
-
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Catch(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_rejected)));
-}
 
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
