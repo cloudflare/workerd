@@ -223,25 +223,19 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   // functions claim them (JS-free) via the claimPrebuilt*() methods below as the graph read
   // reaches them.
   //
-  // Must be called before the value is deserialized, at most once. Gated on the
-  // rpc-externals-hydration autogate: when the gate is off, the claims all return kj::none
-  // and deserialization constructs legacy streams in place exactly as it did before the gate
-  // existed. The typescript_implemented_streams flag REQUIRES the gate (TypeScript stream
-  // construction cannot happen during the graph read), so with the gate off, stream-bearing
-  // values arriving at a TypeScript-streams isolate are rejected here with a configuration
-  // error rather than half-supported.
+  // Must be called before the value is deserialized, at most once, whenever the value has any
+  // externals.
   void prepare(jsg::Lock& js, IoContext& ioctx);
 
   // Claim the prebuilt object for the next external, advancing past it (and, for sockets, past
-  // the stream externals the socket subsumes). Returns kj::none if prepare() did not run (the
-  // autogate is off); the caller then falls back to constructing in place. If prepare() ran but
-  // the next external is not of the claimed type, the message is malformed (the V8 tag stream
-  // disagrees with the external table) and this throws. The socket slot holds the WRAPPED
-  // socket (Socket is incomplete here); Socket::deserialize() unwraps it through its
-  // TypeHandler, which reads internal fields only -- no JS.
-  kj::Maybe<JsReadableStream> claimPrebuiltReadable();
-  kj::Maybe<JsWritableStream> claimPrebuiltWritable();
-  kj::Maybe<jsg::JsRef<jsg::JsObject>> claimPrebuiltSocket();
+  // the stream externals the socket subsumes). If prepare() did not run or the next external is
+  // not of the claimed type, the message is malformed (the V8 tag stream disagrees with the
+  // external table) and this throws. The socket slot holds the WRAPPED socket (Socket is
+  // incomplete here); Socket::deserialize() unwraps it through its TypeHandler, which reads
+  // internal fields only -- no JS.
+  JsReadableStream claimPrebuiltReadable();
+  JsWritableStream claimPrebuiltWritable();
+  jsg::JsRef<jsg::JsObject> claimPrebuiltSocket();
 
   // All stubs deserialized as part of a particular parameter or result set are placed in a
   // common disposal group so that they can be disposed together.
@@ -269,7 +263,7 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   bool prepared = false;
 
   template <typename T>
-  kj::Maybe<T> claimPrebuilt();
+  T claimPrebuilt();
 
   RpcStubDisposalGroup& disposalGroup;
   kj::Maybe<TraceContextParent> originatingCall;

@@ -790,7 +790,7 @@ impl ConvertingResource {
     ) -> Result<(), jsg::Error> {
         let callback = v8::Local::<v8::Function>::try_from(callback)
             .map_err(|_| jsg::Error::new_type_error("not a function"))?;
-        let called = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let called = callback.call(lock, None, &[]);
         let conversion = self.conversion.get().unwrap();
         let converted = conversion.run(lock, value);
         self.saw_pending

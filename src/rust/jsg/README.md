@@ -428,7 +428,8 @@ yet. Other V8 classes that Rust JSG wraps, such as `v8::BackingStore`, are also 
 A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
 isolate; methods that need the isolate take the lock. A handle that may be empty is an
 `Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
-constructors return `None` when V8 cannot create the string.
+constructors that take runtime input return `None` for a string longer than
+`String::MAX_LENGTH`, which V8 refuses with no exception pending.
 
 A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Value>`, is a
 `From` and costs nothing, whichever supertype it targets. A cast to a subtype is a
@@ -442,6 +443,13 @@ let global = str_value.to_global(lock);
 let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
 assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 ```
+
+A method parameter can be a handle of the types that C++ JSG's `v8::Local<T>` parameters
+take: `Local<Value>` takes any value, and `Local<String>`, `Local<Object>`,
+`Local<Function>`, `Local<BigInt>`, `Local<TypedArray>`, `Local<ArrayBuffer>`,
+`Local<ArrayBufferView>` and the typed arrays take a value of exactly that type, with no
+coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any value, as a
+promise resolved with it.
 
 ### `Global<T>`
 
@@ -555,18 +563,53 @@ or a JavaScript exception is pending, `Function::new` creates nothing and return
 propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
 0, and it can be called with `new`.
 
+### Conventions of the `v8` module
+
+The `v8` module takes handles and returns handles. Converting between a Rust value and a
+JavaScript value is the job of `FromJS` and `ToJS`, not of a `v8` method.
+
+- A method returns a Rust value only where V8 itself returns a C scalar, or copies memory out
+  (`to_vec`, `to_string`). The scalar comes from a typed handle (`value`, `length`, `value_of`,
+  `int64_value`, `is_*`, `byte_length`), or from one of V8's own coercions of any value
+  (`int32_value`, `uint32_value`, `integer_value`). `Function::call` and `Object::get` return a
+  `Local<Value>`; convert it where a Rust value is wanted:
+
+  ```rust
+  let result = func.call(lock, None, &[x, y])?;
+  let sum = f64::from_js(lock, result)?;
+  ```
+
+- A method takes raw Rust data only where V8 takes C data: a constructor's input
+  (`String::new_from_str`, `Number::new`, `Integer::new`), an index, a time, and a `&str`
+  property key as a convenience (`obj.get(lock, "name")`).
+- A method that can run JavaScript, or that needs a context, returns a `Result`, as the
+  coercions do; its error is usually pending (see
+  [Errors from JavaScript](#errors-from-javascript)). It returns an `Option` only for "absent",
+  as `int64_value` does for a `BigInt` that does not fit, or for "V8 refused, with nothing
+  pending", as the `String` constructors do for input longer than `String::MAX_LENGTH`. The
+  exception is `String::new_from_utf8_literal`, which panics for an overlong literal, as V8's
+  `NewFromUtf8Literal` fails a `static_assert`. A method never has an infallible signature over
+  a C++ shim that can throw: the shim is declared `Result` in the bridge, or Rust decides before
+  calling it, as `String::new_from_utf8` checks the length.
+- Naming: `as_*` is free and borrows (`as_slice`, `as_local`); `to_*` costs a copy or an
+  allocation (`to_vec`, `to_string`, `to_global`); `value` and `*_value` read a scalar under
+  the name V8 gives it (`Local<Number>::value`, `int64_value`, `int32_value`).
+
 ## Errors from JavaScript
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
-Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element. These conversions fail only with pending errors. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
+Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element, whichever kind it is. A `&str` or `String` longer than `v8::String::MAX_LENGTH` fails with a `RangeError` ("Invalid string length", as V8 reports it), which is not pending; every other conversion of a single value in this crate fails only with a pending error. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
 Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without preparing V8 to run JavaScript, which would clear the termination, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
-match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
+match lock.try_catch(|lock| {
+    let result = callback.call(lock, None, &[])?;
+    f64::from_js(lock, result)
+})? {
     Ok(result) => { /* ... */ }
     Err(exception) => { /* handle what the callback threw */ }
 }
@@ -699,7 +742,70 @@ pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
 }
 ```
 
-This is similar to `kj::OneOf<>` in C++ JSG.
+A union converts a value as the equivalent `kj::OneOf<>` does in C++ JSG, following
+Web IDL's union conversion. It tries its variants in passes, in declaration order
+within each pass, and takes the first that converts:
+
+1. resource types (`jsg::Rc<R>`);
+2. every type that is not a string, numeric or boolean type, such as resources, arrays,
+   typed arrays and structs;
+3. boolean types, if the value is a boolean;
+4. numeric types, if the value is a number or a `BigInt`;
+5. string types;
+6. numeric types;
+7. boolean types.
+
+So a value is coerced only when no variant takes it as it is, and coerced to a string
+in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
+`null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
+cannot become a string, or an exception thrown by `toString()`, is thrown rather than
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
+`f64` or an integer type, takes part in `T`'s passes but converts only a value of
+exactly that type. A variant that is itself a union takes part
+in each pass with its own variants, as a nested `kj::OneOf` does.
+
+Variants can be any type that converts from JavaScript and that a `kj::OneOf` can hold:
+strings, numbers, the integer types, booleans, `SystemTime`, resources, structs,
+`Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
+handles (`v8::Local<'s, T>`). Each is tried in the passes of its C++ counterpart, so a few
+behave as they do in C++ rather than as their position suggests:
+
+- `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
+  also takes a number of milliseconds, before any numeric variant does.
+- `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
+  and `undefined`, and converts any other value as `T` would, coercion included. A value
+  that `T` does not take is not taken as `null`, as in C++ JSG with the
+  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+- A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
+  `v8::Local<'s, v8::String>` is a string type, but never coerces, and
+  `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
+  `v8::Local<'s, v8::Value>` takes any value, in pass 2.
+
+A union that holds handles takes their scope as its one lifetime parameter, and can't
+outlive it:
+
+```rust
+#[jsg_oneof]
+enum ObjectOrString<'s> {
+    Object(jsg::v8::Local<'s, jsg::v8::Object>),
+    String(String),
+}
+```
+
+Like C++ JSG's `webidl::UnionTypeValidator` (`src/workerd/jsg/web-idl.h`), `#[jsg_oneof]`
+rejects at compile time a union that breaks Web IDL's rules for unions, counting the
+variants of nested unions and the inner types of nullable types: at most one boolean,
+numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
+nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
+without resources, dictionary-like or sequence-like types; no `Option<T>` or
+`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`Nullable<T>` as `T` and the variants of a nested union as the union's own. A union may
+have several resource types, as Web IDL allows, but not the same one in both a union and
+a union nested in it.
+
+The union traces the variant it holds, so a union with a `jsg::Rc<R>` variant can be a
+resource field; one that holds handles can't. A union implements `jsg::ToJS` when every
+variant does.
 
 ## Feature Flags (Compatibility Flags)
 

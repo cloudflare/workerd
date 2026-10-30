@@ -18,6 +18,7 @@ pub mod macros;
 pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
+mod oneof;
 mod promise;
 pub mod resource;
 mod scope;
@@ -33,6 +34,18 @@ use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
+#[doc(hidden)]
+pub use oneof::UnionMember;
+#[doc(hidden)]
+pub use oneof::UnionTypes;
+#[doc(hidden)]
+pub use oneof::UnionVariant;
+#[doc(hidden)]
+pub use oneof::concat_union_names;
+#[doc(hidden)]
+pub use oneof::try_union_from_js;
+#[doc(hidden)]
+pub use oneof::validate_union_names;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -294,6 +307,13 @@ impl Error {
         }
     }
 
+    /// The error for a string longer than [`v8::String::MAX_LENGTH`]: a `RangeError` with the
+    /// message V8 gives such a string, "Invalid string length". It is not pending.
+    #[must_use]
+    pub fn invalid_string_length() -> Self {
+        Self::new_range_error("Invalid string length")
+    }
+
     /// Returns whether this error stands for an exception or termination that is pending in V8,
     /// as after a call into JavaScript that threw.
     ///
@@ -314,27 +334,11 @@ impl Error {
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
-    /// which does perform that check before falling back to this method.
-    #[expect(
-        unsafe_code,
-        reason = "creates the V8 exception object through the FFI"
-    )]
+    /// which does perform that check before falling back to this method. A message longer
+    /// than V8's string limit is cut to fit; see [`Lock::error`].
     pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        let isolate = lock.isolate();
-        let message = self.message.as_bytes();
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: isolate is valid and locked (guaranteed by caller); message
-        // pointer and len describe a valid byte slice.
-        unsafe {
-            v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
-                isolate.as_ffi(),
-                self.name,
-                message.as_ptr(),
-                len,
-            ))
-        }
+        lock.create_error_from_bytes(self.name, self.message.as_bytes())
+            .into()
     }
 }
 
@@ -481,8 +485,8 @@ impl Error {
 ///
 /// # Supported Types
 ///
-/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
-/// implementations include:
+/// `T` is one of the types a value is otherwise coerced to, those that implement
+/// [`Coercible`]:
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
@@ -548,6 +552,33 @@ impl<T> Deref for NonCoercible<T> {
     }
 }
 
+/// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
+///
+/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
+/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
+///
+/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
+/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
+/// a coarse test. The trait is sealed.
+#[diagnostic::on_unimplemented(
+    message = "`NonCoercible<{Self}>` is not supported",
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+)]
+pub trait Coercible: Type + coercible::Sealed {}
+
+mod coercible {
+    pub trait Sealed {}
+}
+
+macro_rules! impl_coercible {
+    ($($t:ty),* $(,)?) => {
+        $(impl coercible::Sealed for $t {}
+        impl Coercible for $t {})*
+    };
+}
+
+impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
+
 #[expect(
     unsafe_code,
     reason = "`Lock` holds the raw isolate pointer and calls V8 through the FFI"
@@ -574,6 +605,11 @@ impl<'s> Lock<'s> {
     ///
     /// Mirrors C++ `jsg::Lock::error()`. The returned object can have additional
     /// properties attached before being thrown or returned.
+    ///
+    /// A message longer than [`v8::String::MAX_LENGTH`] bytes is cut to fit, at a character
+    /// boundary, rather than refused. A message that long is a bug or embeds user data, and
+    /// the cut keeps its start. So the length of the message never makes this,
+    /// [`Lock::throw_exception`] or the other error constructors fail.
     pub fn error(&mut self, message: &str) -> v8::Local<'s, v8::Object> {
         self.create_error(ExceptionType::Error, message)
     }
@@ -629,27 +665,32 @@ impl<'s> Lock<'s> {
         exception_type: ExceptionType,
         message: &[u8],
     ) -> v8::Local<'s, v8::Object> {
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice. V8's error constructors always return an
-        // object.
+        let message = error_message_for_v8(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked. V8's error constructors
+        // always return an object.
         let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
-                message.as_ptr(),
-                len,
+                message,
             ))
         };
         debug_assert!(error.is_object());
         error
     }
 
+    /// Throws a JavaScript `Error` with the given message, as [`Lock::error`] creates it.
+    ///
+    /// Throws nothing while execution is terminating; see [`Lock::throw_exception`].
     pub fn throw_error(&mut self, message: &str) {
-        // SAFETY: Lock guarantees the isolate is valid and locked
-        unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, so create nothing.
+            return;
+        }
+        let error = self.error(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked; `error` is a handle of its
+        // scope.
+        unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
     }
 
     /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
@@ -752,7 +793,10 @@ impl<'s> Lock<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
+    /// match lock.try_catch(|lock| {
+    ///     let result = callback.call(lock, None, &[])?;
+    ///     f64::from_js(lock, result)
+    /// })? {
     ///     Ok(result) => { /* ... */ }
     ///     Err(exception) => { /* handle what the callback threw */ }
     /// }
@@ -913,7 +957,28 @@ pub trait Type: Sized {
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    ///
+    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
+    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
+    /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+
+    /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
+    /// at compile time; see [`UnionTypes`].
+    #[doc(hidden)]
+    const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
+
+    /// Names that identify the type in a `#[jsg_oneof]` union, flattened as
+    /// [`Self::UNION_TYPES`] is: a union's are those of its variants, and a `Nullable<T>`'s are
+    /// `T`'s. A union may not contain a name twice, as C++ JSG's `webidl::FlattenedTypeTraits`
+    /// rejects a type that appears twice in a flattened `kj::OneOf`.
+    ///
+    /// Resources, handles and `SystemTime` have a name, since most of them are in no category, or
+    /// in one with no limit, so [`UnionTypes::validate`] can't tell that one appears twice. The
+    /// other types that `jsg` implements `Type` for need none: each is in a category that a union
+    /// may hold at most one type of.
+    #[doc(hidden)]
+    const UNION_NAMES: &'static [&'static str] = &[];
 }
 
 /// Represents a constant value that can be exposed to JavaScript.
@@ -995,6 +1060,8 @@ pub enum Member {
     },
     Method {
         name: String,
+        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
+        /// receiver; don't use one in any other member.
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
         length: u32,
@@ -1267,6 +1334,27 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
     } else {
         "<non-string panic payload>"
     }
+}
+
+/// The part of an error message that V8 can hold as a string: all of `message` if it is at most
+/// [`v8::String::MAX_LENGTH`] bytes, otherwise a prefix of that many bytes or fewer, cut before
+/// a UTF-8 sequence rather than inside one. See [`Lock::error`].
+pub(crate) fn error_message_for_v8(message: &[u8]) -> &[u8] {
+    utf8_prefix(message, v8::String::MAX_LENGTH as usize)
+}
+
+/// The longest prefix of `bytes` of at most `max_len` bytes that does not end inside a UTF-8
+/// sequence. A continuation byte is one of the form `10xxxxxx`, and a sequence has at most
+/// three of them, so the cut moves back at most three bytes; `bytes` need not be valid UTF-8.
+fn utf8_prefix(bytes: &[u8], max_len: usize) -> &[u8] {
+    if bytes.len() <= max_len {
+        return bytes;
+    }
+    let mut end = max_len;
+    while end > max_len.saturating_sub(3) && bytes[end] & 0b1100_0000 == 0b1000_0000 {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 #[cfg(test)]

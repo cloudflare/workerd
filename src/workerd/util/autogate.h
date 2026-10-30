@@ -90,15 +90,6 @@ namespace workerd::util {
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
-  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
-     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
-     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
-     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
-     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
-     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
-     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
-     streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)                                                                       \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \

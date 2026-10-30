@@ -558,7 +558,7 @@ impl ReentrantResource {
         let callback: v8::Local<v8::Function> = callback
             .try_into()
             .map_err(|_| jsg::Error::new_type_error("not a function"))?;
-        callback.call::<v8::Local<v8::Value>>(lock, None, &[])?;
+        callback.call(lock, None, &[])?;
         self.depth.set(self.depth.get() - 1);
         Ok(())
     }
@@ -615,7 +615,7 @@ impl CallingResource {
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
         Self::function(callback)?
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .call(lock, None, &[])
             .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
         Ok(())
     }
@@ -628,8 +628,8 @@ impl CallingResource {
         first: v8::Local<'s, v8::Value>,
         second: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let first = Self::function(first)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
-        let second = Self::function(second)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let first = Self::function(first)?.call(lock, None, &[]);
+        let second = Self::function(second)?.call(lock, None, &[]);
         self.saw_pending
             .set(second.is_err_and(|err| err.is_pending()));
         first.map(|_| ())
@@ -644,7 +644,7 @@ impl CallingResource {
     ) -> Result<bool, jsg::Error> {
         let callback = Self::function(callback)?;
         let caught = lock
-            .try_catch(|lock| callback.call::<v8::Local<v8::Value>>(lock, None, &[]))
+            .try_catch(|lock| callback.call(lock, None, &[]))
             .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
         Ok(caught.is_err())
     }
@@ -656,7 +656,7 @@ impl CallingResource {
         lock: &mut jsg::Lock<'s>,
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let _ = Self::function(callback)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let _ = Self::function(callback)?.call(lock, None, &[]);
         Err(jsg::Error::new_type_error("replaced"))
     }
 
@@ -670,7 +670,7 @@ impl CallingResource {
     ) -> Result<(), jsg::Error> {
         let callback = Self::function(callback)?;
         let _ = lock.try_catch(|lock| {
-            let result = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+            let result = callback.call(lock, None, &[]);
             if let Err(err) = &result {
                 self.saved.set(Some(err.clone()));
             }
@@ -963,6 +963,100 @@ fn instance_method_works_on_correct_receiver() {
         // `Function.prototype.call` with the correct `this` must succeed.
         let result: String = ctx.eval(lock, "obj.echo.call(obj, 'world')").unwrap();
         assert_eq!(result, "Hi, world");
+        Ok(())
+    });
+}
+
+/// Validates that a method called on a resource of another Rust type throws
+/// `TypeError: Illegal invocation`: all Rust resources share one `CppHeap` tag,
+/// so the signature is what rejects it.
+#[test]
+fn instance_method_throws_on_other_resource_receiver() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let echo = jsg::Rc::new(EchoResource {
+            prefix: "Hi, ".to_owned(),
+        })
+        .to_js(lock)?;
+        ctx.set_global(lock, "obj", echo);
+        let greeting = jsg::Rc::new(Greeting {
+            message: "hello".to_owned(),
+        })
+        .to_js(lock)?;
+        ctx.set_global(lock, "other", greeting);
+
+        let err = ctx
+            .eval::<String>(lock, "Reflect.apply(obj.echo, other, ['world'])")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert!(
+            err.message.contains("Illegal invocation"),
+            "unexpected error message: {}",
+            err.message
+        );
+        Ok(())
+    });
+}
+
+/// Validates that a method called on an object inheriting from a resource
+/// throws `TypeError: Illegal invocation`: the signature accepts only the
+/// wrapper itself, so the callback never sees an object without a wrapper.
+#[test]
+fn instance_method_throws_on_object_inheriting_from_resource() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let echo = jsg::Rc::new(EchoResource {
+            prefix: "Hi, ".to_owned(),
+        })
+        .to_js(lock)?;
+        ctx.set_global(lock, "obj", echo);
+
+        let err = ctx
+            .eval::<String>(lock, "Object.create(obj).echo('world')")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert!(
+            err.message.contains("Illegal invocation"),
+            "unexpected error message: {}",
+            err.message
+        );
+        Ok(())
+    });
+}
+
+/// Validates that `resolve_receiver`, used by callbacks without a signature,
+/// finds only a wrapper of the requested resource type.
+#[test]
+fn resolve_receiver_rejects_everything_but_the_resource_type() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let echo = jsg::Rc::new(EchoResource {
+            prefix: "Hi, ".to_owned(),
+        })
+        .to_js(lock)?;
+        ctx.set_global(lock, "obj", echo);
+        let greeting = jsg::Rc::new(Greeting {
+            message: "hello".to_owned(),
+        })
+        .to_js(lock)?;
+        ctx.set_global(lock, "other", greeting);
+
+        for source in ["42", "'obj'", "({})", "Object.create(obj)", "other"] {
+            let value = ctx.eval_raw(lock, source).unwrap();
+            assert!(
+                v8::WrappableRc::resolve_receiver::<EchoResource>(lock, value).is_none(),
+                "resolved {source}"
+            );
+        }
+        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+        assert!(v8::WrappableRc::resolve_receiver::<EchoResource>(lock, cpp_obj).is_none());
+
+        let value = ctx.eval_raw(lock, "obj").unwrap();
+        let resource = v8::WrappableRc::resolve_receiver::<EchoResource>(lock, value).unwrap();
+        // SAFETY: `obj` is a global, so its wrapper keeps the resource alive.
+        assert_eq!(unsafe { resource.as_ref() }.prefix, "Hi, ");
         Ok(())
     });
 }

@@ -134,6 +134,10 @@ class AesKeyBase: public CryptoKey::Impl {
     return keyAlgorithm;
   }
 
+  size_t getSymmetricKeySize() const override final {
+    return keyData.size();
+  }
+
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
     JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,
         getAlgorithmName(),
@@ -211,7 +215,7 @@ class AesGcmKey final: public AesKeyBase {
         "AES-GCM can only encrypt up to 2^39 - 256 bytes of plaintext at a time, but requested ",
         plainText.size(), " bytes.");
 
-    int tagLength = algorithm.tagLength.orDefault(128);
+    int tagLength = normalizeAesGcmTagLength(algorithm.tagLength.orDefault(128));
     validateAesGcmTagLength(tagLength);
 
     auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
@@ -270,7 +274,7 @@ class AesGcmKey final: public AesKeyBase {
                   .getHandle(js);
     JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
 
-    int tagLength = algorithm.tagLength.orDefault(128);
+    int tagLength = normalizeAesGcmTagLength(algorithm.tagLength.orDefault(128));
     validateAesGcmTagLength(tagLength);
 
     JSG_REQUIRE(cipherText.size() >= tagLength / 8, DOMOperationError, "Ciphertext length of ",

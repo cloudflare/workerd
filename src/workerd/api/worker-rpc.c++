@@ -158,29 +158,6 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
 }
 
 void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::RPC_EXTERNALS_HYDRATION)) {
-    // The TypeScript streams implementation cannot construct received streams during the
-    // graph read (JS execution is forbidden there), so the typescript_implemented_streams
-    // compat flag REQUIRES this autogate to receive streams. Reject only configurations
-    // that actually receive stream-bearing values: stream-free RPC (and the send side,
-    // which has no such scope) works without the gate.
-    if (FeatureFlags::get(js).getTypeScriptImplementedStreams()) {
-      for (auto external: externals) {
-        switch (external.which()) {
-          case rpc::JsValue::External::READABLE_STREAM:
-          case rpc::JsValue::External::WRITABLE_STREAM:
-          case rpc::JsValue::External::SOCKET:
-            JSG_FAIL_REQUIRE(Error,
-                "The typescript_implemented_streams compatibility flag requires the "
-                "workerd-autogate-rpc-externals-hydration autogate in order to receive "
-                "streams over RPC.");
-          default:
-            break;
-        }
-      }
-    }
-    return;
-  }
   KJ_ASSERT(!prepared, "prepare() may only be called once");
 
   slots.resize(externals.size());
@@ -219,8 +196,10 @@ void RpcDeserializerExternalHandler::prepare(jsg::Lock& js, IoContext& ioctx) {
 }
 
 template <typename T>
-kj::Maybe<T> RpcDeserializerExternalHandler::claimPrebuilt() {
-  if (!prepared) return kj::none;
+T RpcDeserializerExternalHandler::claimPrebuilt() {
+  // prepare() runs whenever the value has externals, so it can only have been skipped if the
+  // message carries a stream or socket tag with an empty external table.
+  KJ_REQUIRE(prepared, "external table slot type doesn't match serialization tag");
   KJ_ASSERT(i < slots.size());
   auto& slot = slots[i];
   auto& value =
@@ -232,15 +211,15 @@ kj::Maybe<T> RpcDeserializerExternalHandler::claimPrebuilt() {
   return kj::mv(result);
 }
 
-kj::Maybe<JsReadableStream> RpcDeserializerExternalHandler::claimPrebuiltReadable() {
+JsReadableStream RpcDeserializerExternalHandler::claimPrebuiltReadable() {
   return claimPrebuilt<JsReadableStream>();
 }
 
-kj::Maybe<JsWritableStream> RpcDeserializerExternalHandler::claimPrebuiltWritable() {
+JsWritableStream RpcDeserializerExternalHandler::claimPrebuiltWritable() {
   return claimPrebuilt<JsWritableStream>();
 }
 
-kj::Maybe<jsg::JsRef<jsg::JsObject>> RpcDeserializerExternalHandler::claimPrebuiltSocket() {
+jsg::JsRef<jsg::JsObject> RpcDeserializerExternalHandler::claimPrebuiltSocket() {
   return claimPrebuilt<jsg::JsRef<jsg::JsObject>>();
 }
 
