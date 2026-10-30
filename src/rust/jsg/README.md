@@ -295,6 +295,8 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
 | `jsg::v8::Global<T>` | Compile error — no `Traced` impl | Use `TracedGlobal<T>` in resource fields |
+| `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
+| `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
 | `std::rc::Rc<T>` | Depends on `T` | Only for plain data; never around a `TracedGlobal` or `jsg::Rc` (Safety rules, rule 2) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
@@ -597,6 +599,45 @@ JavaScript value is the job of `FromJS` and `ToJS`, not of a `v8` method.
 - Naming: `as_*` is free and borrows (`as_slice`, `as_local`); `to_*` costs a copy or an
   allocation (`to_vec`, `to_string`, `to_global`); `value` and `*_value` read a scalar under
   the name V8 gives it (`Local<Number>::value`, `int64_value`, `int32_value`).
+
+### Async context
+
+`jsg::AsyncContextFrame::current(lock)` captures the async context frame that is current now,
+which carries the values of `AsyncLocalStorage`, and `frame.enter(lock, |lock| ...)` runs a
+closure with it current, as C++ JSG's `AsyncContextFrame::currentRef()` and
+`AsyncContextFrame::Scope` do. `enter` makes the previous frame current again however the closure
+ends, including with an error, while execution is terminating, or by panicking. It opens no handle
+scope, so handles created in the closure stay valid after it. A microtask checkpoint run inside the
+closure leaves the root frame current after it, as under C++ JSG's `AsyncContextFrame::Scope`.
+
+V8 carries the current frame into promise reactions, those that `Local<Promise>::then` registers
+included, so they need nothing more. Code that resumes JavaScript from outside a JavaScript
+continuation does: the continuation of async I/O, or a callback that runs later, captures the frame
+when the work starts and enters it when it resumes.
+
+The current frame is the isolate's continuation-preserved embedder data: `undefined` for the root
+frame (`AsyncContextFrame::root()`, `is_root()`), otherwise the opaque wrapper of a C++
+`jsg::AsyncContextFrame`. A captured frame holds that wrapper, which owns the C++ frame, so the
+frame and its values live as long as an `AsyncContextFrame` holding it, or as long as the resource
+that traces a `TracedAsyncContextFrame` holding it.
+
+As with `Global` and `TracedGlobal`, there are two types:
+
+- `AsyncContextFrame` holds a `Global`, for a frame that Rust holds outside a resource, such as in
+  a future passed to async I/O. It is `Send` and `Sync`, and has no `Traced` impl.
+- `TracedAsyncContextFrame` holds a `TracedGlobal`, for a resource field or `Function::new` data,
+  so that GC collects a cycle through the frame's values. It is `Send`, not `Sync`, and must have
+  exactly one owner that GC traces. `TracedAsyncContextFrame::from` converts an
+  `AsyncContextFrame`, and `to_async_context_frame(lock)` goes the other way, for example to pass
+  a resource's frame to async I/O. Like a `TracedGlobal` taken out of its resource, a
+  `TracedAsyncContextFrame` taken out of its field is traced by nothing: enter, clone or convert
+  it before anything can run JavaScript or allocate on the V8 heap, and put it back.
+
+```rust
+let frame = jsg::AsyncContextFrame::current(lock);
+// ... later, under another lock:
+frame.enter(lock, |lock| callback.call(lock, None, &[]))?;
+```
 
 ## Errors from JavaScript
 

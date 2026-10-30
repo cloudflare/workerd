@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod async_context;
 mod buffer;
 mod dict;
 pub mod fast_api;
@@ -25,6 +26,8 @@ pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use async_context::AsyncContextFrame;
+pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
 pub use dict::Dict;

@@ -4,6 +4,7 @@
 
 mod argument_errors;
 mod arrays;
+mod async_context;
 mod boolean;
 mod buffer_types;
 mod builtin_module;
