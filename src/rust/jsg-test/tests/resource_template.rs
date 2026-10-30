@@ -359,11 +359,8 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
     for harness in [&old, &new, &old, &new] {
         harness.run_in_context(|lock, ctx| {
             // Wrap a Rust-created resource before exposing its constructor.
-            ctx.set_global(
-                lock,
-                "wrapped",
-                jsg::Rc::new(Sample::constructor("x".to_owned(), None)),
-            );
+            let wrapped = jsg::Rc::new(lock, Sample::constructor("x".to_owned(), None));
+            ctx.set_global(lock, "wrapped", wrapped);
             let constructor = jsg::resource::function_template_of::<Sample>(lock);
             ctx.set_global(lock, "Sample", constructor);
             let prototype = lock

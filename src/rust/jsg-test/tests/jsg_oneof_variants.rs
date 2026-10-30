@@ -346,7 +346,7 @@ fn describe_string_handle_or_bool<'s>(
 fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let cx = jsg::Rc::new(VariantContext).to_js(lock)?;
+        let cx = jsg::Rc::new(lock, VariantContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
         f(lock, ctx);
         Ok(())

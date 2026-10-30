@@ -443,10 +443,13 @@ fn properties_and_methods_return_dates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let at = UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
-        let event = jsg::Rc::new(Event {
-            received_at: at,
-            expires_at: None,
-        });
+        let event = jsg::Rc::new(
+            lock,
+            Event {
+                received_at: at,
+                expires_at: None,
+            },
+        );
         ctx.set_global(lock, "event", event);
         let result: String = ctx
             .eval(
@@ -461,10 +464,13 @@ fn properties_and_methods_return_dates() {
             "true 2023-11-14T22:13:20.123Z false  2023-11-14T22:13:21.123Z"
         );
 
-        let event = jsg::Rc::new(Event {
-            received_at: at,
-            expires_at: Some(at + Duration::from_mins(1)),
-        });
+        let event = jsg::Rc::new(
+            lock,
+            Event {
+                received_at: at,
+                expires_at: Some(at + Duration::from_mins(1)),
+            },
+        );
         ctx.set_global(lock, "event", event);
         let result: String = ctx.eval(lock, "event.expiresAt.toISOString()").unwrap();
         assert_eq!(result, "2023-11-14T22:14:20.123Z");

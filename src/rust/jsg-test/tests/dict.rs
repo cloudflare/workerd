@@ -83,12 +83,15 @@ impl Records {
 
 fn with_records(f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'_>)) {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let records = jsg::Rc::new(Records {
-            headers: Dict::from(vec![
-                ("content-type".to_owned(), "text/plain".to_owned()),
-                ("x-id".to_owned(), "42".to_owned()),
-            ]),
-        });
+        let records = jsg::Rc::new(
+            lock,
+            Records {
+                headers: Dict::from(vec![
+                    ("content-type".to_owned(), "text/plain".to_owned()),
+                    ("x-id".to_owned(), "42".to_owned()),
+                ]),
+            },
+        );
         ctx.set_global(lock, "records", records);
         f(lock, ctx);
         Ok(())

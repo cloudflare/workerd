@@ -49,13 +49,13 @@ struct Outer {}
 #[jsg_resource(nested_types(Inner, Alias = Renamed, Renamed, Constructible))]
 impl Outer {
     #[jsg_method]
-    fn make_inner(&self) -> jsg::Rc<Inner> {
-        jsg::Rc::new(Inner {})
+    fn make_inner(&self, lock: &mut jsg::Lock<'_>) -> jsg::Rc<Inner> {
+        jsg::Rc::new(lock, Inner {})
     }
 }
 
 fn set_outer(lock: &mut jsg::Lock, ctx: &EvalContext) {
-    let outer = jsg::Rc::new(Outer {}).to_js(lock).unwrap();
+    let outer = jsg::Rc::new(lock, Outer {}).to_js(lock).unwrap();
     ctx.set_global(lock, "outer", outer);
     let constructor = jsg::resource::function_template_of::<Outer>(lock);
     ctx.set_global(lock, "Outer", constructor);

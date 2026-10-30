@@ -336,7 +336,7 @@ fn lenient_array_nested_conversion_error_propagates() {
 fn lenient_resource_some() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         let result: f64 = ctx.eval(lock, "box.takeLenient(box)").unwrap();
         assert!((result - 42.0).abs() < f64::EPSILON);
@@ -348,7 +348,7 @@ fn lenient_resource_some() {
 fn lenient_resource_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         let result: f64 = ctx.eval(lock, "box.takeLenient()").unwrap();
         assert!((result - -12.6).abs() < f64::EPSILON);
@@ -360,7 +360,7 @@ fn lenient_resource_undefined() {
 fn lenient_resource_undefined_explicit() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         let result: f64 = ctx.eval(lock, "box.takeLenient(undefined)").unwrap();
         assert!((result - -12.6).abs() < f64::EPSILON);
@@ -372,7 +372,7 @@ fn lenient_resource_undefined_explicit() {
 fn lenient_resource_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         let result: f64 = ctx.eval(lock, "box.takeLenient(null)").unwrap();
         assert!((result - 42.97).abs() < f64::EPSILON);
@@ -384,7 +384,7 @@ fn lenient_resource_null() {
 fn lenient_resource_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
+        let boxed = jsg::Rc::new(lock, NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         // Passing a function instead of a NumberBox — should be silently treated as absent.
         let result: f64 = ctx.eval(lock, "box.takeLenient(() => {})").unwrap();

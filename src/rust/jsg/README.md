@@ -10,11 +10,11 @@ Provides access to V8 operations within an isolate lock. Passed to resource meth
 
 ### `Rc<R>`
 
-Strong reference to a Rust resource managed by GC. Derefs to `&R`. Cloning and dropping a `Rc` tracks strong references for the garbage collector.
+Strong reference to a Rust resource managed by GC. Derefs to `&R`. Cloning and dropping a `Rc` tracks strong references for the garbage collector. `Rc::new` takes a `Lock`: the resource belongs to that lock's isolate, and wrapping it in another panics. See [Dropping references](#dropping-references) for drops without the isolate lock.
 
 ### `Weak<R>`
 
-Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<R>` if the resource is still alive.
+Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<R>` if the resource is still alive. It is dropped like an `Rc`.
 
 ### `Realm`
 
@@ -167,8 +167,8 @@ and `.h` file in `src/rust/jsg`. To check a shim file in another package, export
 
 Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
 `global-*`, `traced-global-*`) and `src/workerd/io/io-context/compile-tests`
-(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs` and
-`traced_global_lifetime.rs`.
+(`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
+`traced_global_lifetime.rs` and `gc.rs`.
 
 ## Resources
 
@@ -210,8 +210,8 @@ impl MyResource {
 ### Lifecycle
 
 ```rust
-// Create a resource
-let resource = jsg::Rc::new(MyResource { ... });
+// Create a resource of the lock's isolate
+let resource = jsg::Rc::new(&mut lock, MyResource { ... });
 
 // Convert to a JS object (uses cached FunctionTemplate)
 let js_obj = resource.to_js(&mut lock)?;
@@ -264,7 +264,7 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 
 ### GC Behavior
 
-- **No JS wrapper**: Dropping the last `Rc` immediately destroys the resource (no GC needed).
+- **No JS wrapper**: Dropping the last `Rc` under the isolate lock immediately destroys the resource (no GC needed).
 - **With JS wrapper**: Dropping all `Rc`s makes the wrapper eligible for V8 GC. When collected, the resource is destroyed.
 - **Tracing**: The `#[jsg_resource]` macro auto-generates `Traced::trace` and calls it on every field:
 
@@ -308,6 +308,29 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
+### Dropping references
+
+An `Rc` holds the resource in an `std::rc::Rc` and its C++ `Wrappable` in a `kj::Rc`, and a `Weak`
+holds an `std::rc::Weak`. None of their reference counts is atomic: the isolate lock is what keeps
+two threads from updating them at once. Releasing a strong reference may also touch the resource's
+wrapper. Yet an `Rc` or a `Weak` can be dropped without the lock, for example by C++ code that
+owns the Rust object holding it. So each one keeps the state of the isolate its resource was
+created in, which the `Realm` shares with every persistent handle of it, and a drop:
+
+- under the isolate lock, releases the reference at once;
+- without the lock, on any thread, moves its parts into a queue without touching any count, and
+  the next `IsolateBase::Lock` releases them, before it resets the queued handles of `Global`s and
+  `TracedGlobal`s. Until then the reference keeps the resource alive, as a C++ `jsg::Ref` in the
+  deferred destruction queue does;
+- once the `Realm` is dropped, on any thread, keeps the reference until the isolate is disposed.
+  Until then the isolate still detaches wrappers and destroys the `CppgcShim`s that own
+  `Wrappable`s, and no thread can ask whether it holds the lock of an isolate that may already be
+  gone. Once the isolate is disposed, the kept references are released, and so are later drops.
+  Those releases only give back the counts, with no wrapper left to update, since a `Wrappable`
+  that teardown never wrapped may still point to the disposed isolate. No lock serializes them,
+  so they go through the queue, which one thread at a time drains; a clone is not serialized,
+  so a resource that outlives its isolate must be used by one thread at a time.
+
 ### Creating resources from C++
 
 C++ code that creates a Rust resource, for example to pass it to JavaScript as a handler argument,
@@ -342,7 +365,7 @@ unsafe fn my_resource_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::Maybe
     // SAFETY: forwarded from the caller.
     unsafe {
         jsg::v8::run_ffi_callback(isolate, |lock| {
-            let resource = jsg::Rc::new(MyResource { label: label.to_owned() });
+            let resource = jsg::Rc::new(lock, MyResource { label: label.to_owned() });
             resource.to_js(lock)
         })
     }
@@ -491,8 +514,9 @@ relocking after a `v8::Unlocker`, does not empty it; the handles wait for the ne
 A persistent handle for a field of a `#[jsg_resource]`, which GC traces so that a cycle through it
 can be collected. Opening or cloning it in an isolate other than the one it was created in panics,
 and it is dropped like a `Global`. A `TracedGlobal` is `Send`, and not `Sync`: every use takes a
-`Lock` except dropping it and putting it in a new resource (`jsg::Rc::new` takes no `Lock`), and
-both leave its handles alone on a thread that does not hold the isolate lock.
+`Lock` of its isolate except dropping it and putting it in a new resource (`jsg::Rc::new` takes the
+lock of the resource's isolate, which may be another one), and both leave its handles alone on a
+thread that does not hold its isolate lock.
 
 A `TracedGlobal` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A
 `TracedGlobal` taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so

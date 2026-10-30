@@ -56,7 +56,7 @@ fn boolean_handles() {
 fn boolean_handle_parameter_does_not_coerce() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(Booleans).to_js(lock)?;
+        let resource = jsg::Rc::new(lock, Booleans).to_js(lock)?;
         ctx.set_global(lock, "r", resource);
 
         assert!(!ctx.eval::<bool>(lock, "r.negate(true)").unwrap());

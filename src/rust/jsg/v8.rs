@@ -28,8 +28,9 @@
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
-//! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! drop, under the isolate lock, `wrappable_remove_strong_ref()` releases its strong reference,
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount; without the lock, its isolate's
+//! [`IsolateState`] queues both until the next lock. A function created by
 //! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
 //! function's V8 data.
 
@@ -560,7 +561,7 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
-        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>, is_strong: bool);
+        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
             ref_parent: *mut usize,
@@ -1911,7 +1912,7 @@ impl Function {
         let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
-        wrappable.remove_strong_ref(true);
+        wrappable.remove_strong_ref();
         functions
     }
 
@@ -4602,8 +4603,9 @@ impl GcVisitor {
     /// resources of its own isolate. A visit has no isolate when its resource has neither been
     /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
     /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
-    /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
-    /// The visit then touches the handles only if this thread holds the lock, and otherwise
+    /// makes that reference under the lock of the isolate the resource is created in, which
+    /// need not be the `TracedGlobal`'s isolate. The visit then touches the handles only if
+    /// this thread holds the `TracedGlobal`'s isolate lock, and otherwise
     /// leaves them as they are: a weak handle stays weak until a later visit under the lock,
     /// so its value can die meanwhile, after which `TracedGlobal::as_local` panics.
     ///
@@ -4628,7 +4630,7 @@ impl GcVisitor {
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
         if visiting.is_null() {
             // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes without a `Lock`.
+            // `jsg::Rc::new` makes under the lock of the resource's isolate.
             if !global.state.this_thread_holds_lock() {
                 return;
             }
@@ -4939,17 +4941,14 @@ impl WrappableRc {
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }
 
-    /// Decrements the strong reference count and potentially defers destruction.
+    /// Decrements the strong reference count on the underlying Wrappable, which releases its
+    /// strong wrapper handle, or weakens the references it holds, when the count reaches zero.
     ///
-    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
-    /// the C++ side with the ref's current `strong` flag. If `is_strong` is
-    /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
-    /// was already weakened by GC tracing), it skips the decrement.
-    // The bool maps directly to the C++ FFI parameter; an enum would just
-    // convert back to bool immediately before crossing the boundary.
-    pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
+    /// Called when an `Rc<R>` that counts as strong is released. The caller must hold the
+    /// Wrappable's isolate lock, which [`IsolateState::release`] ensures for an `Rc`.
+    pub(crate) fn remove_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
-        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };
+        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut()) };
     }
 
     /// Returns the current strong reference count from the C++ Wrappable.

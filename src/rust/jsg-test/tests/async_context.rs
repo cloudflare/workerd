@@ -108,11 +108,14 @@ impl Probe {
 }
 
 fn install_probe(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Probe> {
-    let probe = jsg::Rc::new(Probe {
-        frame: Cell::new(None),
-        restored: Cell::new(false),
-        saw_pending: Cell::new(false),
-    });
+    let probe = jsg::Rc::new(
+        lock,
+        Probe {
+            frame: Cell::new(None),
+            restored: Cell::new(false),
+            saw_pending: Cell::new(false),
+        },
+    );
     ctx.set_global(lock, "probe", probe.clone());
     probe
 }
@@ -369,17 +372,23 @@ fn frame_in_resource_is_traced() {
     let harness = Harness::new();
     let mut kept = None;
     harness.run_in_context(|lock, _ctx| {
-        let probe = jsg::Rc::new(Probe {
-            frame: Cell::new(None),
-            restored: Cell::new(false),
-            saw_pending: Cell::new(false),
-        });
+        let probe = jsg::Rc::new(
+            lock,
+            Probe {
+                frame: Cell::new(None),
+                restored: Cell::new(false),
+                saw_pending: Cell::new(false),
+            },
+        );
         // The probe's wrapper is reachable, but the probe has no strong reference from Rust, so
         // GC traces its frame through the wrapper.
         let wrapper = probe.clone().to_js(lock)?;
-        let stored = jsg::Rc::new(Stored {
-            owner: Cell::new(Some(probe.clone())),
-        })
+        let stored = jsg::Rc::new(
+            lock,
+            Stored {
+                owner: Cell::new(Some(probe.clone())),
+            },
+        )
         .to_js(lock)?;
         probe.capture_in(lock, stored);
         kept = Some((wrapper.to_global(lock), probe.downgrade()));
@@ -443,7 +452,7 @@ fn frame_in_function_data_lives_as_long_as_function() {
     let harness = Harness::new();
     let mut kept = None;
     harness.run_in_context(|lock, _ctx| {
-        let marker = jsg::Rc::new(Marker).to_js(lock)?;
+        let marker = jsg::Rc::new(lock, Marker).to_js(lock)?;
         let frame = Harness::run_in_async_context(lock, marker, TracedAsyncContextFrame::current);
         let run_in_frame = v8::Function::new(lock, frame, |lock, frame, args| {
             let callback = v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();

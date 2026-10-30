@@ -209,11 +209,11 @@ impl OneOfContext {
     }
 
     #[jsg_method]
-    pub fn return_one_of(&self, kind: String) -> NumberStringOrBox {
+    pub fn return_one_of(&self, lock: &mut jsg::Lock<'_>, kind: String) -> NumberStringOrBox {
         match kind.as_str() {
             "number" => NumberStringOrBox::Number(123.0),
             "string" => NumberStringOrBox::String("foo".to_owned()),
-            _ => NumberStringOrBox::Box(jsg::Rc::new(OneOfBox { value: 321.0 })),
+            _ => NumberStringOrBox::Box(jsg::Rc::new(lock, OneOfBox { value: 321.0 })),
         }
     }
 
@@ -352,9 +352,9 @@ fn describe_string_or_bool(value: &StringOrBool) -> String {
 fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let cx = jsg::Rc::new(OneOfContext).to_js(lock)?;
+        let cx = jsg::Rc::new(lock, OneOfContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
-        let boxed = jsg::Rc::new(OneOfBox { value: 321.0 }).to_js(lock)?;
+        let boxed = jsg::Rc::new(lock, OneOfBox { value: 321.0 }).to_js(lock)?;
         ctx.set_global(lock, "box321", boxed);
         f(lock, ctx);
         Ok(())
@@ -670,10 +670,13 @@ fn union_field_traces_its_resource_variant() {
     TRACED_BOX_DROPS.store(0, Ordering::SeqCst);
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let held = jsg::Rc::new(TracedBox);
-        let parent = jsg::Rc::new(HoldsUnion {
-            held: TracedBoxOrNumber::Box(held.clone()),
-        });
+        let held = jsg::Rc::new(lock, TracedBox);
+        let parent = jsg::Rc::new(
+            lock,
+            HoldsUnion {
+                held: TracedBoxOrNumber::Box(held.clone()),
+            },
+        );
         // Give the inner box a wrapper too, so that only tracing keeps it alive.
         let _wrapper = held.clone().to_js(lock)?;
         let wrapped = parent.clone().to_js(lock)?;
