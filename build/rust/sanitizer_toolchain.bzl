@@ -4,6 +4,7 @@
 
 """Per-host sanitizer-instrumented Rust toolchains (see //build/rust:BUILD.bazel)."""
 
+load("@rules_rust//cargo:cargo_toolchain.bzl", "cargo_toolchain")
 load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 load("//build/deps:gen/build_deps.bzl", "RUST_NIGHTLY_DATE", "RUST_NIGHTLY_VERSION")
 load(":build_std.bzl", "compiler_runtime_files", "instrumented_rust_std")
@@ -109,7 +110,6 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
         name = name + "_impl",
         allocator_library = "@rules_rust//ffi/rs:empty",
         binary_ext = "",
-        cargo = h.rust_tools + "//:cargo",
         cargo_clippy = h.rust_tools + "//:cargo_clippy_bin",
         channel = "nightly",
         clippy_driver = h.rust_tools + "//:clippy_driver_bin",
@@ -146,4 +146,23 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
         target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
         toolchain = ":" + name + "_impl",
         toolchain_type = "@rules_rust//rust:toolchain",
+    )
+
+    cargo_toolchain(
+        name = name + "_cargo_impl",
+        cargo = h.rust_tools + "//:cargo",
+        channel = "nightly",
+        iso_date = RUST_NIGHTLY_DATE,
+        tags = ["manual"],
+        version = RUST_NIGHTLY_VERSION,
+    )
+
+    native.toolchain(
+        name = name + "_cargo",
+        exec_compatible_with = host_constraints,
+        tags = ["manual"],
+        target_compatible_with = host_constraints + [constraint],
+        target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+        toolchain = ":" + name + "_cargo_impl",
+        toolchain_type = "@rules_rust//cargo:toolchain_type",
     )

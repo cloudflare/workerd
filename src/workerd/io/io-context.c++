@@ -1840,18 +1840,11 @@ void IoContext::runImpl(Runnable& runnable,
   });
 }
 
-static constexpr auto kAsyncIoErrorMessage =
-    "Disallowed operation called within global scope. Asynchronous I/O "
-    "(ex: fetch() or connect()), setting a timeout, and generating random "
-    "values are not allowed within global scope. To fix this error, perform this "
-    "operation within a handler. "
-    "https://developers.cloudflare.com/workers/runtime-apis/handlers/";
-
 IoContext& IoContext::current() {
   if (!hasCurrent()) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
     KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
-    isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
+    isolate->ThrowError(jsg::v8StrIntern(isolate, NO_REQUEST_MESSAGE));
     throw jsg::JsExceptionThrown();
   } else {
     return *threadLocalRequest;

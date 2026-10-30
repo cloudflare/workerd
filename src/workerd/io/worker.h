@@ -357,6 +357,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
+  // Get the Worker::Isolate of a V8 isolate that a Worker::Isolate created.
+  static const Isolate& from(v8::Isolate* isolate);
 
   // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
   // safe since we call it in a signal handler.

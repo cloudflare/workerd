@@ -4,6 +4,7 @@
 
 mod argument_errors;
 mod arrays;
+mod async_context;
 mod boolean;
 mod buffer_types;
 mod builtin_module;
@@ -21,10 +22,12 @@ mod harness;
 mod integer;
 mod isolates;
 mod jsg_oneof;
+mod jsg_oneof_variants;
 mod jsg_struct;
 mod local_cast;
 mod local_handle;
 mod local_value;
+mod lock_errors;
 mod name;
 mod nested_type;
 mod non_coercible;

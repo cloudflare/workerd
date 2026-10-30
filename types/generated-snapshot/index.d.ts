@@ -17780,6 +17780,7 @@ declare namespace TailStream {
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
+    streamDiagEvent?: TailEventHandler<StreamDiagnostic>;
     return?: TailEventHandler<Return>;
     attributes?: TailEventHandler<Attributes>;
   };
