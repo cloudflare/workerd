@@ -275,7 +275,8 @@ When `pumpTo()` is called on the adapter:
 
 1. Acquires isolate lock
 2. Runs read->write promise loop
-3. Ends when data exhausted or stream errors
+3. Ends the destination when data is exhausted; aborts it if the source errors,
+   including a source that was already errored when the pump began
 4. If the pump promise is dropped first (e.g. client disconnect), cancels the stream
    (undefined reason) from a waitUntil task, so the source's cancel algorithm runs
 

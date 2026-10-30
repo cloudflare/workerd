@@ -671,21 +671,36 @@ fn is_websocket(headers: HeadersRef<'_>) -> bool {
         .is_some_and(|u| u.eq_ignore_ascii_case(b"websocket"))
 }
 
+/// Aborts an upload unless its source reached EOF, including when the pump is canceled.
+struct UploadAbortGuard(Option<BodyAbort>);
+
+impl Drop for UploadAbortGuard {
+    fn drop(&mut self) {
+        if let Some(abort) = self.0.take() {
+            abort.abort();
+        }
+    }
+}
+
 /// Pumps a kj request body into a hyper body until it ends; a failed read fails the request.
-async fn pump_body(mut body: Pin<&mut AsyncInputStream>, sink: BodySink, abort: BodyAbort) {
+async fn pump_body(
+    mut body: Pin<&mut AsyncInputStream>,
+    sink: BodySink,
+    mut abort: UploadAbortGuard,
+) {
     let mut buf = vec![0; 8192];
     loop {
         match body.as_mut().try_read(&mut buf, 1).await {
-            Ok(0) => return,
+            Ok(0) => {
+                abort.0 = None;
+                return;
+            }
             Ok(n) => {
                 if sink.write(&buf[..n]).await.is_err() {
                     return;
                 }
             }
-            Err(_) => {
-                abort.abort();
-                return;
-            }
+            Err(_) => return,
         }
     }
 }
@@ -726,7 +741,7 @@ impl Service for Client<'_> {
             let received = self.send(request).await?;
             self.relay(received, response).await
         });
-        let pump = std::pin::pin!(pump_body(request_body, sink, abort));
+        let pump = std::pin::pin!(pump_body(request_body, sink, UploadAbortGuard(Some(abort))));
         match select(exchange, pump).await {
             Either::Left((result, _)) => result,
             Either::Right(((), exchange)) => exchange.await,

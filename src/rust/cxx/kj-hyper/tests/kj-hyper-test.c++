@@ -1093,6 +1093,28 @@ KJ_TEST("client: request framing follows the declared body size") {
       "content-length=none transfer-encoding=none size=0");
 }
 
+KJ_TEST("client: canceling an upload after response headers does not complete its chunked body") {
+  Fixture f;
+  auto [client, peer] = f.pipeClient();
+  kj::HttpHeaders headers(*f.table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  auto request = client->request(kj::HttpMethod::POST, "/", headers, kj::none);
+  KJ_EXPECT(readHead(*peer).wait(f.ws).contains("Transfer-Encoding: chunked\r\n"));
+
+  auto write = request.body->write("partial"_kjb);
+  KJ_EXPECT(readBytes(f.ws, *peer, 12) == "7\r\npartial\r\n");
+  write.wait(f.ws);
+
+  peer->write("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"_kjb).wait(f.ws);
+  auto response = request.response.wait(f.ws);
+  KJ_EXPECT(response.statusCode == 200);
+  // The response is still streaming, and the upload source has not reached EOF.
+  response.body = nullptr;
+
+  auto remaining = f.timer.timeoutAfter(1 * kj::SECONDS, peer->readAllText()).wait(f.ws);
+  KJ_EXPECT(remaining == "", remaining);
+}
+
 KJ_TEST("client: headers are written in kj's order and spelling, the framing first") {
   Fixture f;
   kj::HttpHeaders headers(*f.table);
