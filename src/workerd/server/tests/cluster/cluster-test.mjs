@@ -982,12 +982,14 @@ test("cluster: deleteAll() takes a DO's facets across a takeover", async () => {
     }
     const wipe = await fetchJson(port, `/delete-all?name=${name}`);
     assert.strictEqual(wipe.status, 200, JSON.stringify(wipe.body));
+    // The facets were running: they start over, here and after a takeover.
+    assert.strictEqual(await facetAdd(port, name, 'a,b'), 1);
     const survivor = await killOwnerAndTakeOver(nodes, wipe.body.nodeId, name);
     const p = survivor.httpPort;
     const got = await fetchJson(p, `/get?name=${name}`);
     assert.strictEqual(got.body.count, 0, JSON.stringify(got.body));
     assert.strictEqual(await facetAdd(p, name, 'a'), 1);
-    assert.strictEqual(await facetAdd(p, name, 'a,b'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
   });
 });
 

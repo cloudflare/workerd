@@ -185,6 +185,20 @@ impl ActorNamespace {
         })
     }
 
+    /// The container running the database `file`, `<key>.sqlite` or a facet's
+    /// `<key>.<n>.sqlite`.
+    fn database_container(&self, file: &str) -> Option<Rc<ActorContainer>> {
+        fn find(c: &Rc<ActorContainer>, id: Option<u32>) -> Option<Rc<ActorContainer>> {
+            if c.facet_id.get() == id {
+                return Some(Rc::clone(c));
+            }
+            c.facets.borrow().values().find_map(|f| find(f, id))
+        }
+        let mut parts = file.split('.');
+        let root = self.actors.borrow().get(parts.next()?).cloned()?;
+        find(&root, parts.next().and_then(|n| n.parse().ok()))
+    }
+
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
     /// with the instance that owns it.
     async fn resolve(&self, id: KjOwn<ActorIdHandle>) -> Result<Resolved> {
@@ -576,9 +590,18 @@ impl ActorNamespaceHandle {
     }
 
     pub(crate) fn database_reset(&self, file: &str) {
-        if let Some(ns) = self.namespace()
-            && let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key())
-        {
+        let Some(ns) = self.namespace() else {
+            return;
+        };
+        // The facets beneath the database go with it: their connections close before their
+        // files are removed.
+        if let Some(container) = ns.database_container(file) {
+            let names: Vec<String> = container.facets.borrow().keys().cloned().collect();
+            for name in names {
+                container.abort_facet(&name, kj::failed!("jsg.Error: Facet was deleted."));
+            }
+        }
+        if let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key()) {
             node.cluster.database_reset(unique_key, file);
         }
     }
