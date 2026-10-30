@@ -89,4 +89,7 @@ void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal v
 // TraceContext::detachAsync().
 void trace_context_detach_async(TraceContext& context);
 
+// Logs `message` as an error, as KJ_LOG(ERROR) does.
+void io_context_log_error(::rust::Str message);
+
 }  // namespace workerd::io_context
