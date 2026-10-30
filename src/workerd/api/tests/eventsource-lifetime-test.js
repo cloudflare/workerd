@@ -33,10 +33,14 @@ async function checkLifetime(readable, write, end) {
   await end();
   await ended.promise;
 
-  // Settled pump callbacks must not leave a strong ownership cycle behind.
-  const collected = gc({ type: 'major', execution: 'async' });
-  await scheduler.wait(0);
-  await collected;
+  // Settled pump callbacks must not leave a strong ownership cycle behind. An
+  // event that had a JavaScript wrapper before it was dispatched keeps its
+  // target alive until the event itself is swept, so allow a few collections.
+  for (let i = 0; i < 3 && weakSource.deref() !== undefined; i++) {
+    const collected = gc({ type: 'major', execution: 'async' });
+    await scheduler.wait(0);
+    await collected;
+  }
   strictEqual(weakSource.deref(), undefined);
 }
 

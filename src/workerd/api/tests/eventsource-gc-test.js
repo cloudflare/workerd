@@ -19,10 +19,14 @@ export class EventSourceGcDo extends DurableObject {
 
       const sourceRef = new WeakRef(source);
       source = null;
-      // Queue stackless GC before yielding so its task runs before this request resumes.
-      const gcPromise = gc({ type: 'major', execution: 'async' });
-      await scheduler.wait(0);
-      await gcPromise;
+      // An event that had a JavaScript wrapper before it was dispatched keeps its target alive
+      // until the event itself is swept, so allow a few collections.
+      for (let i = 0; i < 3 && sourceRef.deref() !== undefined; i++) {
+        // Queue stackless GC before yielding so its task runs before this request resumes.
+        const gcPromise = gc({ type: 'major', execution: 'async' });
+        await scheduler.wait(0);
+        await gcPromise;
+      }
       assert.strictEqual(sourceRef.deref(), undefined);
     });
 
