@@ -8397,6 +8397,97 @@ KJ_TEST("Server: Durable Object facets cannot set alarms") {
   conn.httpGet200("/facet", "Error: Facets currently cannot set alarms.");
 }
 
+KJ_TEST("Server: Durable Object facets cannot snapshot or restore") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let actor = ctx.exports.MyActorClass.getByName("snapshots");
+                `    return new Response(await actor.callStorage(request.url.endsWith("/facet")));
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async callStorage(inFacet) {
+                `    if (inFacet) {
+                `      let facet = this.ctx.facets.get("child",
+                `          () => ({class: this.ctx.exports.MyActorClass}));
+                `      return facet.callStorage(false);
+                `    }
+                `    let results = [];
+                `    for (let call of [
+                `      () => this.ctx.storage.snapshot(),
+                `      () => this.ctx.storage.onNextSessionRestore("bookmark"),
+                `      () => this.ctx.storage.onNextSessionRestoreBookmark("bookmark"),
+                `    ]) {
+                `      try {
+                `        await call();
+                `        results.push("no error, unexpected");
+                `      } catch (e) {
+                `        results.push(e.message);
+                `      }
+                `    }
+                `    return results.join("\n");
+                `  }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+              enableSql = true,
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // workerd's storage back-end implements neither snapshots nor point-in-time recovery, so the root
+  // object reaches the back-end and gets its errors...
+  conn.httpGet200("/root",
+      "This Durable Object's storage back-end does not implement snapshots.\n"
+      "This Durable Object's storage back-end does not implement point-in-time recovery.\n"
+      "This Durable Object's storage back-end does not implement point-in-time recovery.");
+
+  // ... but a facet is rejected before reaching the back-end, since snapshots and restores apply to
+  // the whole object. onNextSessionRestoreBookmark() predates snapshots and stays available to
+  // facets.
+  auto facetError = [](kj::StringPtr method) {
+    return kj::str("storage.", method,
+        "() is not available in a facet. Snapshots and restores apply to the whole Durable "
+        "Object, so only the root Durable Object can use them.");
+  };
+  conn.httpGet200("/facet",
+      kj::str(facetError("snapshot"), "\n", facetError("onNextSessionRestore"), "\n",
+          "This Durable Object's storage back-end does not implement point-in-time recovery."));
+}
+
 KJ_TEST("Server: Pass service stubs in ctx.props.") {
   TestServer test(R"((
     services = [

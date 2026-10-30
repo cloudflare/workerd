@@ -4526,6 +4526,13 @@ kj::Maybe<jsg::Ref<api::DurableObjectStorage>> Worker::Actor::makeStorageForSwSy
   });
 }
 
+bool Worker::Actor::isFacet() {
+  KJ_IF_SOME(fm, impl->facetManager) {
+    return fm.getDepth() > 0;
+  }
+  return false;
+}
+
 void Worker::Actor::assertCanSetAlarm() {
   KJ_SWITCH_ONEOF(impl->classInstance) {
     KJ_CASE_ONEOF(_, Impl::NoClass) {

@@ -1206,6 +1206,9 @@ class Worker::Actor final: public kj::Refcounted {
     return *worker;
   }
 
+  // True if this actor is a facet rather than a root Durable Object.
+  bool isFacet();
+
   void assertCanSetAlarm();
 
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
