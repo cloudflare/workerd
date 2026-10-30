@@ -4587,6 +4587,11 @@ export interface Tracing {
   ): T;
   startSpan(name: string): Span;
   getActiveSpan(): Span | undefined;
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 export declare abstract class Span {
