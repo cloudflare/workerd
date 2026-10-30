@@ -26,6 +26,7 @@
 import { Buffer } from 'node-internal:internal_buffer';
 import {
   Readable,
+  from as readableFrom,
   newReadableStreamFromStreamReadable,
 } from 'node-internal:streams_readable';
 import {
@@ -311,7 +312,7 @@ function duplexify(body, name) {
   if (typeof body === 'function') {
     const { value, write, final, destroy } = fromAsyncGen(body);
     if (isIterable(value)) {
-      return Readable.from(Duplexify, value, {
+      return readableFrom(Duplexify, value, {
         // TODO (ronag): highWaterMark?
         objectMode: true,
         write,
@@ -361,7 +362,7 @@ function duplexify(body, name) {
     return duplexify(body.arrayBuffer(), name);
   }
   if (isIterable(body)) {
-    return Readable.from(Duplexify, body, {
+    return readableFrom(Duplexify, body, {
       // TODO (ronag): highWaterMark?
       objectMode: true,
       writable: false,
