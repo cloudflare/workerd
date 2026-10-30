@@ -1637,10 +1637,22 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
+  // With the inspector enabled it is always fully trusted.
+  auto& registrar = factory.inspectorRegistrar;
+  auto inspectorPolicy = registrar == kj::none
+      ? Worker::Isolate::InspectorPolicy::DISALLOW
+      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code
   // to produce a V8 startup snapshot of it.
+  // Not when an inspector is configured, by the server (--inspector-addr) or
+  // by the Worker's flags (node:inspector): the inspector attaches to the
+  // Worker's isolate, and top-level code must run there for DevTools to see its console output
+  // and stop at its breakpoints.
+  bool inspectorConfigured = inspectorPolicy != Worker::Isolate::InspectorPolicy::DISALLOW ||
+      featureFlags.getEnableNodeJsInspectorLocalDev();
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
-  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) && !inspectorConfigured &&
       supportsStartupSnapshot(featureFlags, workerSource)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
@@ -1682,11 +1694,6 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     }
   }
 
-  // With the inspector enabled it is always fully trusted.
-  auto& registrar = factory.inspectorRegistrar;
-  auto inspectorPolicy = registrar == kj::none
-      ? Worker::Isolate::InspectorPolicy::DISALLOW
-      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   KJ_IF_SOME(r, registrar) {
     r->registerIsolate(impl->name, *isolate);
