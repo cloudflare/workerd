@@ -131,27 +131,6 @@ export const hierarchy = {
           event.event.info.status.message === 'foreign failure'
       )
     );
-    // Verify all components of every span, including built-in descendants, use its trace ID.
-    const identities = new Map(
-      events
-        .filter((event) => event.event.type === 'spanOpen')
-        .map((event) => [
-          `${event.invocationId}#${event.event.spanId}`,
-          event.spanContext.traceId,
-        ])
-    );
-    for (const event of events) {
-      const traceId = identities.get(
-        `${event.invocationId}#${event.spanContext.spanId}`
-      );
-      if (traceId !== undefined)
-        assert.strictEqual(event.spanContext.traceId, traceId);
-      if (event.event.type === 'spanOpen') {
-        if (event.event.root === true)
-          assert.strictEqual(event.spanContext.spanId, undefined);
-        else assert.ok(event.spanContext.spanId);
-      }
-    }
     for (const name of ['a', 'b']) {
       const owner = events.find(
         (event) =>
@@ -175,6 +154,33 @@ export const hierarchy = {
         childLog.spanContext.traceId,
         '11111111111111111111111111111111'
       );
+    }
+  },
+};
+
+export const spanIdentities = {
+  async test() {
+    await collector.waitForCompletion();
+    // Verify all components of every span, including built-in descendants, use its trace ID.
+    const identities = new Map(
+      events
+        .filter((event) => event.event.type === 'spanOpen')
+        .map((event) => [
+          `${event.invocationId}#${event.event.spanId}`,
+          event.spanContext.traceId,
+        ])
+    );
+    for (const event of events) {
+      const traceId = identities.get(
+        `${event.invocationId}#${event.spanContext.spanId}`
+      );
+      if (traceId !== undefined)
+        assert.strictEqual(event.spanContext.traceId, traceId);
+      if (event.event.type === 'spanOpen') {
+        if (event.event.root === true)
+          assert.strictEqual(event.spanContext.spanId, undefined);
+        else assert.ok(event.spanContext.spanId);
+      }
     }
   },
 };

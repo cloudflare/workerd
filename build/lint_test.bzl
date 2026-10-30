@@ -6,8 +6,7 @@ def lint_test(
         tsconfig_json,
         srcs,
         data = [],
-        no_copy_to_bin = [],
-        tags = []):
+        no_copy_to_bin = []):
     js_srcs = [src for src in srcs if src.endswith(".ts") or src.endswith(".mts") or src.endswith(".js") or src.endswith(".mjs")]
 
     eslint_bin.eslint_test(
@@ -23,10 +22,8 @@ def lint_test(
             "@workerd//tools:base-tsconfig",
             "@workerd//tools:base-eslint",
         ],
-        # Lint reads sources from runfiles. Copying them again can conflict with build rules
-        # whose tags give otherwise identical copy actions different execution requirements.
-        no_copy_to_bin = no_copy_to_bin + js_srcs,
-        tags = ["lint"] + tags,
+        no_copy_to_bin = no_copy_to_bin,
+        tags = ["lint"],
         target_compatible_with = select({
             "@platforms//os:windows": ["@platforms//:incompatible"],
             "//conditions:default": [],
