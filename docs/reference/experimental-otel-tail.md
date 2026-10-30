@@ -83,13 +83,19 @@ including links with attributes: retaining invalid identities requires a separat
 The runtime registers its API implementation as version **1.10.0** under
 `Symbol.for('opentelemetry.js.api.1')`. Older compatible 1.x API copies can use that registration
 but cannot replace it with their own tracer provider. A 1.x copy at **1.11 or later** cannot
-use the runtime's older registration and gets a no-op tracer instead. A 2.x copy uses the
+use the runtime's older registration. With the flag on it also cannot register its own tracer
+provider: registration is rejected, its proxy provider never gets a delegate, and tracing
+becomes a no-op even if its SDK worked with the flag off. A 2.x copy uses the
 different `Symbol.for('opentelemetry.js.api.2')` global key and does not find this registration.
 Applications bundling their own API must stay within the supported version range; merely
 enabling the compatibility flag does not make incompatible copies share the runtime's tracer.
 Integration tests build independent 1.9.0 and 1.10.0 packages, plus a simulated 1.11.0 copy whose
-version constant is patched at bundle time. These test-only dependencies are isolated from the
-shared pnpm graph so they do not change unrelated packages' optional peers.
+compatibility and registration version checks are both patched at bundle time. These test-only
+tarballs are pinned in `build/deps/shared_deps.jsonc`, outside the shared pnpm graph so they do
+not change unrelated packages' optional peers. The generated shared-dependencies fragment also
+declares them for embedders; bundles and tests do not fetch dependencies at test time.
+Before rollout, the runtime API maintainer must own tracking upstream releases, bumping the
+claimed registration version together with compatibility tests, and verifying new API surfaces.
 
 ## Embedder integration
 
@@ -97,6 +103,9 @@ shared pnpm graph so they do not change unrelated packages' optional peers.
 or `this` (or no observer where allowed), never an observer shared across different parents.
 Child creation inherits detached provenance by marking the returned observer; sharing one across
 parents would contaminate unrelated traces.
+The `setMakeUserSpanParentFunc` and `setMakeUserRequestSpanContextFunc` factories must return a
+new carrier on every call, never a cached/shared one. Rewrapped minted identities can mark a
+factory's returned observer directly; reusing that carrier would contaminate unrelated parents.
 
 Override `SpanObserver::setOpenMetadata`, `setEndTimestamp`, `onEvent`, `onLinks` and
 `onExceptionWithTimestamp`. `UserSpanObserver` gates all marks on acceptance, forwarding them
@@ -124,14 +133,15 @@ A root retained in Durable Object memory is not a cross-request recording sessio
 creator's tracer expires, later children, marks and closure can be dropped; no later stream
 receives that root's close. A hibernatable WebSocket captures a real active accept-time identity,
 unless the active native observer belongs to a detached root (including native descendants
-and roots retained across requests), or its rewrapped ID matches the current tracer's key.
+and roots retained across requests), or its rewrapped ID matches the frame owner's tracer key.
 In that case, or without a real active identity, it uses the invocation identity when one exists. Later
 message/close/error invocations inherit neither sampling flags nor vendor state. Accepting
 inside a native detached root or child does not pull later events into that root's trace.
 Serialized identities and JS non-recording roots carry no native provenance across requests.
-Membership uses the current request's tracer key: a serialized ID from another request is a
-foreign parent even while the minting tracer is still alive. Rewrapping a minted identity in
-its own request marks the resulting native carrier and its descendants for later native reuse.
+Membership uses the frame owner's tracer key, not the newest request's tracer: a serialized ID
+from a different owner is a foreign parent even while the minting tracer is still alive.
+Rewrapping a minted identity in its owning frame marks the resulting native carrier and its
+descendants for later native reuse.
 There is no dedicated per-invocation root-count quota. Recording spans share the existing export
 budgets; self-identifying minted IDs use constant per-tracer memory regardless of root count.
 

@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+
+# The unmodified package payload, including its license and both module formats. No install
+# scripts run. The consuming test package supplies a local alias and the pinned version.
+npm_package(
+    name = "pkg",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+    include_external_repositories = ["**"],
+    publishable = False,
+    visibility = ["//visibility:public"],
+)

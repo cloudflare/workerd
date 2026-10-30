@@ -76,6 +76,26 @@ http.file(
 )
 use_repo(http, "clang-format-linux-arm64")
 
+# otel_api_1_10
+http.archive(
+    name = "otel_api_1_10",
+    build_file = "@workerd//:build/BUILD.opentelemetry-api",
+    integrity = "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==",
+    strip_prefix = "package",
+    url = "https://registry.npmjs.org/@opentelemetry/api/-/api-1.10.0.tgz",
+)
+use_repo(http, "otel_api_1_10")
+
+# otel_api_1_9
+http.archive(
+    name = "otel_api_1_9",
+    build_file = "@workerd//:build/BUILD.opentelemetry-api",
+    integrity = "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==",
+    strip_prefix = "package",
+    url = "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz",
+)
+use_repo(http, "otel_api_1_9")
+
 # ruff-darwin-arm64
 http.archive(
     name = "ruff-darwin-arm64",

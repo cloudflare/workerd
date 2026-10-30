@@ -403,7 +403,7 @@
     "//:build/exts/http.bzl%http": {
       "general": {
         "bzlTransitiveDigest": "lksDakQ95oEFORvJNz9h3HIeEU0Yq5LQHwzwcBqToDg=",
-        "usagesDigest": "7O9Wss45Ts2cJDCLprAfCAMy8vRxTvkccAKpJRbEbEU=",
+        "usagesDigest": "+st0p39YjWJY+gbquVZ2jTKGMtCcxvqbUsOMx/jQ718=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools",
           "REPO_MAPPING:,workerd "
@@ -770,6 +770,68 @@
               "strip_prefix": "wasm-tools-1.262.0-x86_64-windows/",
               "type": "zip",
               "url": "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.262.0/wasm-tools-1.262.0-x86_64-windows.zip",
+              "urls": [],
+              "workspace_file_content": ""
+            }
+          },
+          "otel_api_1_10": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "add_prefix": "",
+              "auth_patterns": {},
+              "build_file": "@@//:build/BUILD.opentelemetry-api",
+              "build_file_content": "",
+              "canonical_id": "",
+              "files": {},
+              "integrity": "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==",
+              "netrc": "",
+              "patch_args": [],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_strip": 0,
+              "patch_tool": "",
+              "patches": [],
+              "remote_file_integrity": {},
+              "remote_file_urls": {},
+              "remote_module_file_integrity": "",
+              "remote_module_file_urls": [],
+              "remote_patch_strip": 0,
+              "remote_patches": {},
+              "sha256": "",
+              "strip_prefix": "package",
+              "type": "",
+              "url": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.10.0.tgz",
+              "urls": [],
+              "workspace_file_content": ""
+            }
+          },
+          "otel_api_1_9": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "add_prefix": "",
+              "auth_patterns": {},
+              "build_file": "@@//:build/BUILD.opentelemetry-api",
+              "build_file_content": "",
+              "canonical_id": "",
+              "files": {},
+              "integrity": "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==",
+              "netrc": "",
+              "patch_args": [],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_strip": 0,
+              "patch_tool": "",
+              "patches": [],
+              "remote_file_integrity": {},
+              "remote_file_urls": {},
+              "remote_module_file_integrity": "",
+              "remote_module_file_urls": [],
+              "remote_patch_strip": 0,
+              "remote_patches": {},
+              "sha256": "",
+              "strip_prefix": "package",
+              "type": "",
+              "url": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz",
               "urls": [],
               "workspace_file_content": ""
             }

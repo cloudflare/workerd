@@ -4,13 +4,14 @@
 
 import { readFile } from 'node:fs/promises';
 
-// Exercise the real package's compatibility handshake, changing only its consumer version.
+// Exercise both version gates in the real package, changing only its consumer version.
 export default {
   plugins: [
     {
       name: 'simulate-api-1.11',
       setup(build) {
-        let patched = false;
+        let patchedCompatibility = false;
+        let patchedRegistration = false;
         build.onLoad({ filter: /[/\\]version\.mjs$/ }, async ({ path }) => {
           const source = await readFile(path, 'utf8');
           const contents = source.replace(
@@ -19,13 +20,29 @@ export default {
           );
           if (contents === source)
             throw new Error('API version fixture no longer matches');
-          patched = true;
+          patchedCompatibility = true;
           return { contents, loader: 'js' };
         });
+        build.onLoad(
+          { filter: /[/\\]internal[/\\]global-utils\.mjs$/ },
+          async ({ path }) => {
+            const source = await readFile(path, 'utf8');
+            const contents = source.replace(
+              'api.version !== "1.10.0"',
+              'api.version !== "1.11.0"'
+            );
+            if (contents === source)
+              throw new Error(
+                'API registration version fixture no longer matches'
+              );
+            patchedRegistration = true;
+            return { contents, loader: 'js' };
+          }
+        );
         build.onEnd(() => {
-          if (!patched)
+          if (!patchedCompatibility || !patchedRegistration)
             return {
-              errors: [{ text: 'API version fixture was not patched' }],
+              errors: [{ text: 'Both API version gates must be patched' }],
             };
         });
       },

@@ -1,6 +1,24 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    // Independent test-only API copies, outside pnpm's optional-peer resolution. These must be
+    // shared so embedders that include the generated fragment also get the test repositories.
+    {
+      "name": "otel_api_1_9",
+      "type": "http_archive",
+      "url": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz",
+      "integrity": "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==",
+      "strip_prefix": "package",
+      "build_file": "@workerd//:build/BUILD.opentelemetry-api"
+    },
+    {
+      "name": "otel_api_1_10",
+      "type": "http_archive",
+      "url": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.10.0.tgz",
+      "integrity": "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==",
+      "strip_prefix": "package",
+      "build_file": "@workerd//:build/BUILD.opentelemetry-api"
+    },
     //buildifier
     // Version is frozen to avoid to keep formatting consistent.
     {

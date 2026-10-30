@@ -1,13 +1,22 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
-load("@otel_api_1_10__links//:defs.bzl", link_api_1_10 = "npm_link_imported_package")
-load("@otel_api_1_9__links//:defs.bzl", link_api_1_9 = "npm_link_imported_package")
+load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("//:build/wd_test.bzl", "wd_test")
 
 # Bundle independent real API copies to exercise their global/version handshake with the runtime.
+# Tarballs come from shared_deps, including in embedders that do not include our root npm setup.
 # Links are local to this test package and cannot change another fixture's optional peers.
-link_api_1_9()
-
-link_api_1_10()
+[
+    npm_link_package(
+        name = "node_modules/@opentelemetry/api-" + version,
+        src = "@otel_api_" + version.replace(".", "_") + "//:pkg",
+        package = "@opentelemetry/api-" + version,
+        version = version + ".0",
+    )
+    for version in [
+        "1.9",
+        "1.10",
+    ]
+]
 
 [
     esbuild(

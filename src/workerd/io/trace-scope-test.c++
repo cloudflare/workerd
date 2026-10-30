@@ -403,9 +403,9 @@ KJ_TEST("sampled and unsampled root loops use constant identity memory and retai
     fixture.enterContext(*request, [&](const TestFixture::Environment&) {
       bool recording = flags < 0 || (flags & 1);
       KJ_EXPECT(lifetime.created == (recording ? 4099 : 0));
-      // Only the invocation, retained live root and at most one cached/rewrapped carrier may
-      // remain. In particular, none of the 4096 ended loop-root carriers may accumulate.
-      KJ_EXPECT(lifetime.live <= (recording ? 3 : 0));
+      // Only the invocation and retained live root remain. The rewrapped carrier and all
+      // 4096 ended loop-root carriers must have been reclaimed.
+      KJ_EXPECT(lifetime.live == (recording ? 2 : 0));
       if (recording) KJ_EXPECT(lifetime.created - lifetime.live >= 4096);
       stageOneLive = lifetime.live;
     });
