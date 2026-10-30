@@ -1,0 +1,19 @@
+src/workerd/server/server-test.c++
+  s_322adea864e0a2::t_94da4282ad001e 8401,8405,8413-8414,8418-8422,8424-8435,8437-8438,8445,8464,8472-8476,8481,8485-8487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5f3bb9cfb5940a3852fb2ec1b729e9ebe39f692b",
+  "prompts": {},
+  "sessions": {
+    "s_322adea864e0a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21148e11-ff14-4929-b25a-bbd43ac3cb9f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Max McDonnell <mmcdonnell@cloudflare.com>"
+    }
+  }
+}
