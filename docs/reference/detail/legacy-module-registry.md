@@ -395,7 +395,6 @@ void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
   registerUnsafeModules(registry, featureFlags);
   registerSocketsModule(registry, featureFlags);
-  registerBase64Module(registry, featureFlags);
   registerMessageChannelModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);

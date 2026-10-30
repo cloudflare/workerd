@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/base64.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/node/node.h>
@@ -62,7 +61,6 @@ void registerModules(
     registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
-  registerBase64Module(registry, featureFlags);
   registerMessageChannelModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);
@@ -82,7 +80,6 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder,
       node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags, nodeModuleSource));
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags, nodeModuleSource));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
-  builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 

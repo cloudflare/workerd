@@ -4,7 +4,6 @@
 
 import { AiInternalError } from 'cloudflare-internal:ai-api';
 import type { GatewayOptions } from 'cloudflare-internal:aig-api';
-import base64 from 'cloudflare-internal:base64';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -75,8 +74,15 @@ export type SupportedFileFormat = {
   extension: string;
 };
 
+// Captured when the module loads, before user code runs, so user code that replaces
+// Uint8Array.prototype.toBase64 does not change the request body.
+const uint8ArrayToBase64 = Function.prototype.call.bind(
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  Uint8Array.prototype.toBase64
+) as (bytes: Uint8Array) => string;
+
 async function blobToBase64(blob: Blob): Promise<string> {
-  return base64.encodeArrayToString(await blob.arrayBuffer());
+  return uint8ArrayToBase64(new Uint8Array(await blob.arrayBuffer()));
 }
 
 export class ToMarkdownService {

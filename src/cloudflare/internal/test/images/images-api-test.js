@@ -524,6 +524,54 @@ export const test_images_base64_small_chunks = {
     );
   },
 };
+
+export const test_images_base64_ignores_patched_builtins = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const patched = [
+      [Uint8Array.prototype, 'toBase64'],
+      [Uint8Array, 'fromBase64'],
+      [TextEncoder.prototype, 'encode'],
+      [TextDecoder.prototype, 'decode'],
+    ].map(([target, name]) => ({ target, name, original: target[name] }));
+
+    // Built before patching: the stream's start() uses TextEncoder.
+    const decodeInput = inputStream(['QUJD']);
+    const encodeInput = inputStream(['ABC']);
+
+    let decoded;
+    let encoded;
+    for (const { target, name } of patched) {
+      target[name] = () => {
+        throw new Error(`patched ${name} called`);
+      };
+    }
+    try {
+      const decodeResult = await env.images
+        .input(decodeInput, { encoding: 'base64' })
+        .output({ format: 'image/avif' });
+      decoded = (await decodeResult.response().json()).image;
+
+      const encodeResult = await env.images
+        .input(encodeInput)
+        .output({ format: 'image/avif' });
+      encoded = await new Response(
+        await encodeResult.image({ encoding: 'base64' })
+      ).text();
+    } finally {
+      for (const { target, name, original } of patched) {
+        target[name] = original;
+      }
+    }
+
+    assert.strictEqual(decoded, 'ABC');
+    assert.strictEqual(JSON.parse(atob(encoded)).image, 'ABC');
+  },
+};
+
 // GET metadata
 export const test_images_get_success = {
   /**
