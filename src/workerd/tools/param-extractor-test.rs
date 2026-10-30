@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::*;
 
-fn node(kind: &str, name: &str, inner: Vec<String>) -> String {
+fn node(kind: &str, name: &str, inner: &[String]) -> String {
     // clang-ast expects kind before inner, as in Clang's JSON output.
     format!(
         r#"{{"id":"0x0","kind":{},"name":{},"inner":[{}]}}"#,
@@ -20,21 +20,21 @@ fn node(kind: &str, name: &str, inner: Vec<String>) -> String {
 fn parameters(names: &[&str]) -> Vec<String> {
     names
         .iter()
-        .map(|name| node("ParmVarDecl", name, vec![]))
+        .map(|name| node("ParmVarDecl", name, &[]))
         .collect()
 }
 
-fn extract(members: Vec<String>) -> Vec<Value> {
+fn extract(members: &[String]) -> Vec<Value> {
     let ast = node(
         "TranslationUnitDecl",
         "",
-        vec![node(
+        &[node(
             "NamespaceDecl",
             "workerd",
-            vec![node(
+            &[node(
                 "NamespaceDecl",
                 "api",
-                vec![node("CXXRecordDecl", "TextDecoder", members)],
+                &[node("CXXRecordDecl", "TextDecoder", members)],
             )],
         )],
     );
@@ -51,18 +51,18 @@ fn native_constructors_do_not_overwrite_javascript_constructor_names() {
     let factory = node(
         "CXXMethodDecl",
         "constructor",
-        parameters(&["js", "label", "options"]),
+        &parameters(&["js", "label", "options"]),
     );
     let native = vec![
         node(
             "CXXConstructorDecl",
             "TextDecoder",
-            parameters(&["decoder"]),
+            &parameters(&["decoder"]),
         ),
         node(
             "CXXConstructorDecl",
             "TextDecoder",
-            parameters(&["decoder", "options"]),
+            &parameters(&["decoder", "options"]),
         ),
     ];
     let expected: Vec<Value> = ["js", "label", "options"]
@@ -83,31 +83,31 @@ fn native_constructors_do_not_overwrite_javascript_constructor_names() {
             if factory_first { 0 } else { members.len() },
             factory.clone(),
         );
-        assert_eq!(extract(members), expected);
+        assert_eq!(extract(&members), expected);
     }
 }
 
 #[test]
 fn native_constructors_without_a_javascript_factory_are_ignored() {
-    assert!(
-        extract(vec![node(
+    assert_eq!(
+        extract(&[node(
             "CXXConstructorDecl",
             "TextDecoder",
-            parameters(&["decoder", "options"]),
-        )])
-        .is_empty()
+            &parameters(&["decoder", "options"]),
+        )]),
+        Vec::<Value>::new()
     );
 }
 
 #[test]
 fn method_and_function_parameter_names_are_preserved() {
-    let result = extract(vec![
+    let result = extract(&[
         node(
             "CXXMethodDecl",
             "decode",
-            parameters(&["js", "input", "options"]),
+            &parameters(&["js", "input", "options"]),
         ),
-        node("FunctionDecl", "helper", parameters(&["value"])),
+        node("FunctionDecl", "helper", &parameters(&["value"])),
     ]);
     let names: Vec<(&str, u64, &str)> = result
         .iter()
