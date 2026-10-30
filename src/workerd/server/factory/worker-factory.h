@@ -98,6 +98,7 @@ struct FacetStartInfo;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
+enum class AlarmElsewhere : uint8_t;
 
 // How the config message is read: configs can legitimately be very large and are not malicious.
 constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {.traversalLimitInWords = kj::maxValue};
@@ -287,7 +288,7 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Box<ActorNamespaceHandle> actors);
 void actor_storage_set_alarm(
     const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
-kj::Own<WorkerInterface> alarm_owned_elsewhere(bool again);
+kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.

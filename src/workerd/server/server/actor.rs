@@ -508,7 +508,12 @@ impl ActorNamespaceHandle {
                         .alarm_elsewhere(unique_key, &key, &owner, cluster::now_ms())
                         .await
                         .unwrap_or(true);
-                    Ok(ffi::alarm_owned_elsewhere(again))
+                    let then = if again {
+                        ffi::AlarmElsewhere::Retry
+                    } else {
+                        ffi::AlarmElsewhere::Done
+                    };
+                    Ok(ffi::alarm_owned_elsewhere(then))
                 }
             }
         })

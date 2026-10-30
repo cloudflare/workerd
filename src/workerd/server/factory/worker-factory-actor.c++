@@ -290,7 +290,7 @@ namespace {
 // An alarm whose object another instance owns now: that instance runs it. Retried if `again`.
 class AlarmOwnedElsewhere final: public WorkerInterface {
  public:
-  explicit AlarmOwnedElsewhere(bool again): again(again) {}
+  explicit AlarmOwnedElsewhere(AlarmElsewhere then): again(then == AlarmElsewhere::Retry) {}
   kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
     return AlarmResult{.retry = again,
       .retryCountsAgainstLimit = false,
@@ -325,8 +325,8 @@ class AlarmOwnedElsewhere final: public WorkerInterface {
 };
 }  // namespace
 
-kj::Own<WorkerInterface> alarm_owned_elsewhere(bool again) {
-  return kj::heap<AlarmOwnedElsewhere>(again);
+kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then) {
+  return kj::heap<AlarmOwnedElsewhere>(then);
 }
 
 void actor_storage_delete_all(const ActorStorage& storage) {

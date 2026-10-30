@@ -171,6 +171,14 @@ pub mod ffi {
         replicated: bool,
     }
 
+    /// What an alarm does when another instance owns its object: runs again later, a retry
+    /// that counts against no limit, or is done.
+    #[repr(u8)]
+    enum AlarmElsewhere {
+        Retry,
+        Done,
+    }
+
     /// What a channel token is for (`IoChannelFactory::ChannelTokenUsage`): restoring a stub over
     /// RPC, or from Durable Object storage. The values are the C++ enum's.
     #[repr(u32)]
@@ -470,9 +478,9 @@ pub mod ffi {
             name: &str,
             at_ms: u64,
         ) -> Result<()>;
-        /// What an alarm runs on when another instance owns its object: nothing, and then the
-        /// alarm again later (a retry that counts against no limit) if `again`.
-        fn alarm_owned_elsewhere(again: bool) -> KjOwn<WorkerInterface>;
+        /// What an alarm runs on when another instance owns its object: nothing, and then
+        /// `then`.
+        fn alarm_owned_elsewhere(then: AlarmElsewhere) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
