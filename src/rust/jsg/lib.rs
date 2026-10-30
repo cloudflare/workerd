@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -459,15 +458,14 @@ impl Error {
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// `name` is `Error`, the type JavaScript gets (`Lock::throw_internal_error()` -> C++
+    /// `makeInternalError()`).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::TypeError,
+            name: ExceptionType::Error,
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -694,20 +692,6 @@ impl<'s> Lock<'s> {
         // SAFETY: Lock guarantees the isolate is valid and locked; `error` is a handle of its
         // scope.
         unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
-    }
-
-    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
-    /// after the current callback has returned, so they must be `'static`.
-    #[expect(
-        clippy::unimplemented,
-        reason = "`await_io` is not implemented for Rust resources yet"
-    )]
-    pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
-    where
-        F: Future<Output = I> + 'static,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
-    {
-        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
