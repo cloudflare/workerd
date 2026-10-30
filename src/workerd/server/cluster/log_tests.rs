@@ -7,6 +7,7 @@
 //! the capture cut must restore to what the application sees.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::ffi::c_char;
 use std::ffi::c_int;
@@ -20,9 +21,11 @@ use crate::Bucket;
 use crate::Error;
 use crate::Sequence;
 use crate::capture::Capture;
+use crate::log::DB;
 use crate::log::File as LogFile;
 use crate::log::Log;
 use crate::log::restore;
+use crate::owner::Layout;
 use crate::owner::Owners;
 use crate::ownership::Claim;
 use crate::ownership::Ownership;
@@ -54,12 +57,13 @@ struct Methods {
 }
 
 /// A file's own method table, followed by the method it replaces and
-/// whether the file is a WAL. It sits past the wrapped file's state.
+/// the file's name if it is a WAL, which `SQLite` keeps until the file
+/// closes. It sits past the wrapped file's state.
 #[repr(C)]
 struct Patched {
     methods: Methods,
     wrapped_write: unsafe extern "C" fn(*mut File, *const c_void, c_int, i64) -> c_int,
-    is_wal: bool,
+    wal: *const c_char,
 }
 
 #[repr(C)]
@@ -208,7 +212,11 @@ unsafe extern "C" fn open(
             patched.write(Patched {
                 methods: Methods { write, ..methods },
                 wrapped_write: methods.write,
-                is_wal: flags & SQLITE_OPEN_WAL != 0,
+                wal: if flags & SQLITE_OPEN_WAL != 0 {
+                    name
+                } else {
+                    std::ptr::null()
+                },
             });
             (*file).methods = patched.cast_const().cast();
         }
@@ -221,10 +229,13 @@ unsafe extern "C" fn write(file: *mut File, data: *const c_void, n: c_int, offse
     unsafe {
         let patched = &*(*file).methods.cast::<Patched>();
         let rc = (patched.wrapped_write)(file, data, n, offset);
-        if rc == 0 && patched.is_wal {
+        if rc == 0 && !patched.wal.is_null() {
             let data = std::slice::from_raw_parts(data.cast::<u8>(), usize::try_from(n).unwrap());
             let offset = u64::try_from(offset).unwrap();
-            CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().write(offset, data));
+            let wal = std::ffi::CStr::from_ptr(patched.wal).to_str().unwrap();
+            let db = Path::new(wal.strip_suffix("-wal").unwrap());
+            let db = db.file_name().unwrap().to_str().unwrap();
+            CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().write(db, offset, data));
         }
         rc
     }
@@ -323,8 +334,20 @@ fn upload_snapshot(store: &Bucket, to: Sequence) {
         .unwrap();
 }
 
+/// Restores the log's lanes into a spool, moving the root's to `out`.
+fn restore_db(store: &Bucket, out: &Path) -> crate::Result<Sequence> {
+    let spool = crate::log::with_suffix(out, ".spool");
+    let (end, lanes) = runtime().block_on(restore(&log(store), 0, &spool))?;
+    for (lane, path) in lanes {
+        if lane == DB {
+            std::fs::rename(path, out)?;
+        }
+    }
+    Ok(end)
+}
+
 fn restored_rows(store: &Bucket, out: &Path) -> (i64, i64, i64) {
-    runtime().block_on(restore(&log(store), 0, out)).unwrap();
+    restore_db(store, out).unwrap();
     rows(&Connection::open(out.to_str().unwrap()))
 }
 
@@ -445,7 +468,7 @@ fn a_corrupt_file_fails_to_restore() {
     bytes[mid] ^= 1;
     std::fs::write(&path, bytes).unwrap();
     runtime().block_on(log(&store).put(&file, &path)).unwrap();
-    let restored = runtime().block_on(restore(&log(&store), 0, &dir.join("restored.db")));
+    let restored = restore_db(&store, &dir.join("restored.db"));
     assert!(restored.is_err(), "{restored:?}");
 }
 
@@ -465,7 +488,7 @@ fn a_truncated_file_fails_to_restore() {
         runtime().block_on(log(&store).put(&file, &path)).unwrap();
         let out = dir.join("restored.db");
         let _ = std::fs::remove_file(&out);
-        let restored = runtime().block_on(restore(&log(&store), 0, &out));
+        let restored = restore_db(&store, &out);
         assert!(restored.is_err(), "{restored:?}");
     }
 }
@@ -578,8 +601,7 @@ fn a_missing_batch_fails_to_restore_or_compact() {
     }
     upload(&store, 0, ends[0]);
     upload(&store, ends[1], ends[2]);
-    let out = dir.join("restored.db");
-    let restored = runtime().block_on(restore(&log(&store), 0, &out));
+    let restored = restore_db(&store, &dir.join("restored.db"));
     assert!(restored.is_err(), "{restored:?}");
     // Nor does compaction snapshot it, then delete the batches.
     let files = [batch(&dir, 0, ends[0]), batch(&dir, ends[1], ends[2])];
@@ -597,13 +619,13 @@ fn a_deleted_database_restores_empty_then_as_recreated() {
     insert(&app, 0, 50);
     drop(app);
     std::fs::remove_file(&path).unwrap();
-    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().reset());
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().reset("app.db"));
     let deleted = last();
     let store = Bucket::memory("");
     upload(&store, 0, deleted);
     let out = dir.join("empty.db");
-    runtime().block_on(restore(&log(&store), 0, &out)).unwrap();
-    assert_eq!(std::fs::metadata(&out).unwrap().len(), 0);
+    restore_db(&store, &out).unwrap();
+    assert!(!out.exists());
 
     let app = Connection::open(&format!("file:{}?vfs=capture-test", path.display()));
     app.execute("PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
@@ -642,21 +664,22 @@ fn a_superseded_owners_commit_is_not_acknowledged() {
         rt.block_on(a_owners.open_fresh(&a_own, "ns", "x", &owned))
             .unwrap()
     );
-    rt.block_on(a_owners.take_over(&a_own, "ns", "x", &owned, &path))
+    rt.block_on(a_owners.take_over(&a_own, "ns", "x", &owned, &Root(path.clone())))
         .unwrap();
 
     let app = Connection::open(path.to_str().unwrap());
     app.execute("PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
     insert(&app, 0, 10);
     let wal = std::fs::read(dir.join("x.db-wal")).unwrap();
-    a_owners.wal_write("ns", "x", 0, &wal[..32]);
-    a_owners.wal_write("ns", "x", 32, &wal[32..]);
+    a_owners.wal_write("ns", "x", "x.db", 0, &wal[..32]);
+    a_owners.wal_write("ns", "x", "x.db", 32, &wal[32..]);
 
     // a stops renewing; b takes x over at epoch 2.
     rt.block_on(b.renew(9_000)).unwrap();
     let owned = claim(&b_own, 11_000);
     assert_eq!(owned.epoch, 2);
-    rt.block_on(b_owners.take_over(&b_own, "ns", "x", &owned, &dir.join("b.db")))
+    let b_path = Root(dir.join("b.db"));
+    rt.block_on(b_owners.take_over(&b_own, "ns", "x", &owned, &b_path))
         .unwrap();
 
     let commit = rt.block_on(a_owners.commit(&a_own, "ns", "x"));
@@ -672,4 +695,199 @@ fn a_superseded_owners_commit_is_not_acknowledged() {
     assert!(!rt.block_on(x.older(2)).unwrap().is_empty());
     rt.block_on(b_owners.tier());
     assert!(rt.block_on(x.older(2)).unwrap().is_empty());
+}
+
+/// Where `Owners` places an object with only a root database.
+struct Root(PathBuf);
+
+impl Layout for Root {
+    fn place(&self, lane: &str) -> crate::Result<PathBuf> {
+        assert_eq!(lane, DB);
+        Ok(self.0.clone())
+    }
+
+    fn clear(&self) -> crate::Result<()> {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(crate::log::with_suffix(&self.0, suffix));
+        }
+        Ok(())
+    }
+}
+
+/// A facet's connection, its database captured as lane `lane`.
+fn open_facet(path: &Path, lane: &str) -> Connection {
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().open_lane(path, lane));
+    let db = Connection::open(&format!("file:{}?vfs=capture-test", path.display()));
+    db.execute(
+        "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, v TEXT)",
+    );
+    db
+}
+
+/// Removes a closed database's files, as deleting a facet does.
+fn remove(path: &Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(crate::log::with_suffix(path, suffix));
+    }
+}
+
+/// Every lane the log restores, with its rows.
+fn restored_lanes(store: &Bucket, name: &str) -> BTreeMap<String, (i64, i64, i64)> {
+    let (_, lanes) = runtime()
+        .block_on(restore(&log(store), 0, &scratch(name)))
+        .unwrap();
+    let open = |path: PathBuf| rows(&Connection::open(path.to_str().unwrap()));
+    lanes.into_iter().map(|(l, path)| (l, open(path))).collect()
+}
+
+fn lanes() -> Vec<Option<String>> {
+    CAPTURE.with_borrow(|c| c.as_ref().unwrap().cursor().lanes)
+}
+
+fn want<const N: usize>(lanes: [(&str, &Connection); N]) -> BTreeMap<String, (i64, i64, i64)> {
+    lanes
+        .into_iter()
+        .map(|(l, c)| (l.to_owned(), rows(c)))
+        .collect()
+}
+
+#[test]
+fn facets_restore_from_their_roots_log() {
+    let dir = scratch("facets");
+    let root = open_app(&dir.join("app.db"));
+    let a = open_facet(&dir.join("app.1.db"), "a/db");
+    let b = open_facet(&dir.join("app.2.db"), "a/b%2Fc/db");
+    let store = Bucket::memory("");
+    let mut shipped = 0;
+    for i in 0..30 {
+        insert(&root, i * 10, i * 10 + 10);
+        insert(&a, i, i + 1);
+        if i % 3 == 0 {
+            insert(&b, i, i + 1);
+        }
+        if i % 7 == 6 {
+            upload(&store, shipped, last());
+            shipped = last();
+        }
+    }
+    upload(&store, shipped, last());
+    let want = want([(DB, &root), ("a/db", &a), ("a/b%2Fc/db", &b)]);
+    assert_eq!(restored_lanes(&store, "facets-batches"), want);
+    let store = Bucket::memory("");
+    upload_snapshot(&store, last());
+    assert_eq!(restored_lanes(&store, "facets-snapshot"), want);
+}
+
+#[test]
+fn a_batch_keeps_one_copy_of_each_lanes_rewritten_pages() {
+    let dir = scratch("dedup-lanes");
+    let root = open_app(&dir.join("app.db"));
+    let a = open_facet(&dir.join("app.1.db"), "a/db");
+    insert(&root, 0, 10);
+    insert(&a, 0, 10);
+    let mut ends = vec![last()];
+    for i in 0..100 {
+        // Each value's length is its version, which `rows` compares.
+        let v = "v".repeat(i + 1);
+        root.execute(&format!("UPDATE t SET v = '{v}' WHERE id = 1"));
+        a.execute(&format!("UPDATE t SET v = '{v}' WHERE id = 2"));
+        if i % 10 == 9 {
+            ends.push(last());
+        }
+    }
+    let raw = CAPTURE.with_borrow(|c| c.as_ref().unwrap().batch(ends[0], last()).unwrap());
+    let merged = merged(ends[0], last());
+    assert!(
+        merged.len() * 20 < raw.len(),
+        "{} of {}",
+        merged.len(),
+        raw.len()
+    );
+    let want = want([(DB, &root), ("a/db", &a)]);
+    // A covered batch and one overlapping what came before, as tiering and
+    // a commit racing leave them.
+    let store = Bucket::memory("");
+    upload(&store, 0, ends[3]);
+    upload(&store, ends[1], ends[10]);
+    upload(&store, ends[2], ends[6]);
+    assert_eq!(restored_lanes(&store, "dedup-lanes-out"), want);
+}
+
+#[test]
+fn a_deleted_facet_stays_deleted_and_frees_its_lane() {
+    let dir = scratch("delete-lanes");
+    let root = open_app(&dir.join("app.db"));
+    let (a_path, ab_path) = (dir.join("app.1.db"), dir.join("app.2.db"));
+    let a = open_facet(&a_path, "a/db");
+    let ab = open_facet(&ab_path, "a/b/db");
+    let x = open_facet(&dir.join("app.3.db"), "x/db");
+    for db in [&root, &a, &ab, &x] {
+        insert(db, 0, 20);
+    }
+    let store = Bucket::memory("");
+    upload(&store, 0, last());
+    let before = last();
+    drop((a, ab));
+    remove(&a_path);
+    remove(&ab_path);
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().delete_lanes("a/"));
+    assert_eq!(lanes(), [Some(DB.into()), None, None, Some("x/db".into())]);
+    insert(&root, 20, 30);
+    upload(&store, before, last());
+    let want_ = want([(DB, &root), ("x/db", &x)]);
+    assert_eq!(restored_lanes(&store, "delete-lanes-out"), want_);
+    // A snapshot with numbers freed between lanes.
+    let snapshot = Bucket::memory("");
+    upload_snapshot(&snapshot, last());
+    assert_eq!(restored_lanes(&snapshot, "delete-lanes-snapshot"), want_);
+    // The next facet takes the lowest free number.
+    let c = open_facet(&dir.join("app.4.db"), "c/db");
+    insert(&c, 0, 5);
+    assert_eq!(lanes()[1].as_deref(), Some("c/db"));
+    let store = Bucket::memory("");
+    upload(&store, 0, last());
+    let want = want([(DB, &root), ("x/db", &x), ("c/db", &c)]);
+    assert_eq!(restored_lanes(&store, "delete-lanes-reused"), want);
+}
+
+#[test]
+fn a_reset_deletes_its_facets_descendants() {
+    // A facet's deleteAll(): its database and its descendants' go, the
+    // database starts over, and the root and other facets stay.
+    let dir = scratch("reset-lanes");
+    let root = open_app(&dir.join("app.db"));
+    let (a_path, ab_path) = (dir.join("app.1.db"), dir.join("app.2.db"));
+    let a = open_facet(&a_path, "a/db");
+    let ab = open_facet(&ab_path, "a/b/db");
+    let ax = open_facet(&dir.join("app.3.db"), "ax/db");
+    for db in [&root, &a, &ab, &ax] {
+        insert(db, 0, 20);
+    }
+    drop((a, ab));
+    remove(&a_path);
+    remove(&ab_path);
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().reset("app.1.db"));
+    let a = open_facet(&a_path, "a/db");
+    insert(&a, 100, 103);
+    let store = Bucket::memory("");
+    upload(&store, 0, last());
+    let want = want([(DB, &root), ("a/db", &a), ("ax/db", &ax)]);
+    assert_eq!(restored_lanes(&store, "reset-lanes-out"), want);
+    // The root's reset takes every facet.
+    drop((root, a, ax));
+    remove(&dir.join("app.db"));
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().reset("app.db"));
+    assert_eq!(lanes(), []);
+}
+
+#[test]
+fn facet_paths_round_trip_through_lane_names() {
+    use crate::log::facet_path;
+    use crate::log::facet_prefix;
+    for path in [vec![], vec!["a"], vec!["a/b", "%", "", "db", "\u{e9}"]] {
+        let lane = facet_prefix(path.iter().copied()) + DB;
+        assert_eq!(facet_path(&lane).unwrap(), path, "{lane}");
+    }
+    assert_eq!(facet_prefix(["a/b", "c"]) + DB, "a%2Fb/c/db");
+    assert_eq!(facet_path("xdb"), None);
 }
