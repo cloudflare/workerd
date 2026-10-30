@@ -136,6 +136,11 @@ declare const utils: {
     event: Event,
     report: boolean
   ): { readonly exception: unknown } | undefined;
+  createTrustedMessageEvent(
+    type: string,
+    data: unknown,
+    source: object | null
+  ): MessageEvent;
 };
 
 // An abort algorithm registration. Obtained only from

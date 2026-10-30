@@ -8,7 +8,7 @@ EventTarget plumbing for the bootstrap. Parent directory conventions
 
 | File | Role |
 | ---- | ---- |
-| `event-target-internals.ts` | The seam every bootstrap EventTarget subclass goes through to reach the EventTarget it extends: the base class, listener-count hooks, `on<type>` handler attributes, and dispatch with an explicit exception policy. The contract is in the file header. |
+| `event-target-internals.ts` | The seam every bootstrap EventTarget subclass goes through to reach the EventTarget it extends: the base class, listener-count hooks, `on<type>` handler attributes, dispatch with an explicit exception policy, and trusted event creation. The contract is in the file header. |
 
 ## KEY RULES
 

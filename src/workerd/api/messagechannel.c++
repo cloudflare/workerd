@@ -46,19 +46,22 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     // If that second dispatch throws, the exception propagates: the delivery microtask
     // fails.
     JSG_TRY(js) {
-      dispatchEventImpl(
-          js, js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES));
+      dispatchEventImpl(js,
+          js.alloc<MessageEvent>(js, value, kj::String(), messageevent::MessagePort(JSG_THIS),
+              kj::none, Trusted::YES));
     }
     JSG_CATCH(exception) {
       dispatchEventImpl(js,
-          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS,
-              kj::none, Trusted::YES));
+          js.alloc<MessageEvent>(js, jsg::JsValue(exception.getHandle(js)), kj::String(),
+              messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES));
     }
     return;
   }
 
   auto result = dispatchEventImpl(js,
-      js.alloc<MessageEvent>(js, value, kj::String(), JSG_THIS, kj::none, Trusted::YES), policy);
+      js.alloc<MessageEvent>(
+          js, value, kj::String(), messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES),
+      policy);
   KJ_IF_SOME(exception, result.firstException) {
     // A 'message' listener threw. Its exception was reported (and the remaining 'message'
     // listeners still ran); additionally surface it as a 'messageerror' event on this port,
@@ -66,7 +69,7 @@ void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
     // report-only: a throwing 'messageerror' listener triggers no further reaction.
     dispatchEventImpl(js,
         js.alloc<MessageEvent>(js, kj::str("messageerror"), exception.addRef(js), kj::String(),
-            JSG_THIS, kj::none, Trusted::YES),
+            messageevent::MessagePort(JSG_THIS), kj::none, Trusted::YES),
         DispatchExceptionPolicy::REPORT);
   }
 }
