@@ -325,6 +325,38 @@ struct OtlpTracing {
     exporter: KjOwn<ffi::OtlpExporter>,
 }
 
+impl OtlpTracing {
+    fn from_config(
+        factory: &Factory,
+        config: config::Reader<'_>,
+        services: &Services,
+        report: &Reporter,
+    ) -> Result<Option<Self>> {
+        let tracing = config.get_tracing().map_err(capnp_error)?;
+        if !tracing.has_otlp() {
+            return Ok(None);
+        }
+        let mut errors = Vec::new();
+        let designator = Designator::from_reader(
+            tracing.get_otlp().map_err(capnp_error)?,
+            "tracing.otlp".to_owned(),
+            &mut errors,
+        )
+        .map_err(capnp_error)?;
+        for error in errors {
+            report.error(error);
+        }
+        let collector = lookup_service(&services.0, report, &designator);
+        Ok(Some(Self {
+            collector: designator.service,
+            exporter: ffi::factory_new_otlp_exporter(
+                factory.raw(),
+                SubrequestChannel::new(collector),
+            )?,
+        }))
+    }
+}
+
 impl Server {
     /// The collector's own worker is excluded across all of its entrypoints. Dynamic workers
     /// have no configured service name and are eligible too.
@@ -1114,29 +1146,7 @@ impl Server {
             }
         }
 
-        let tracing = config.get_tracing().map_err(capnp_error)?;
-        let otlp = if tracing.has_otlp() {
-            let mut errors = Vec::new();
-            let designator = Designator::from_reader(
-                tracing.get_otlp().map_err(capnp_error)?,
-                "tracing.otlp".to_owned(),
-                &mut errors,
-            )
-            .map_err(capnp_error)?;
-            for error in errors {
-                report.error(error);
-            }
-            let collector = lookup_service(&services.0, &report, &designator);
-            Some(OtlpTracing {
-                collector: designator.service,
-                exporter: ffi::factory_new_otlp_exporter(
-                    factory.raw(),
-                    SubrequestChannel::new(collector),
-                )?,
-            })
-        } else {
-            None
-        };
+        let otlp = OtlpTracing::from_config(&factory, config, &services, &report)?;
 
         let server = Rc::new(Self {
             report,
