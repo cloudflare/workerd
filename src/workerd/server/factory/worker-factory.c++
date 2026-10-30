@@ -1719,12 +1719,23 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
         isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
+  // With the inspector enabled it is always fully trusted.
+  auto inspectorPolicy = registrar == kj::none
+      ? Worker::Isolate::InspectorPolicy::DISALLOW
+      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code
   // to produce a V8 startup snapshot of it.
+  // Not when an inspector is configured, by the server (--inspector-addr) or
+  // by the Worker's flags (node:inspector): the inspector attaches to the
+  // Worker's isolate, and top-level code must run there for DevTools to see its console output
+  // and stop at its breakpoints.
+  bool inspectorConfigured = inspectorPolicy != Worker::Isolate::InspectorPolicy::DISALLOW ||
+      featureFlags.getEnableNodeJsInspectorLocalDev();
   kj::Maybe<kj::ArrayPtr<const uint64_t>> envGlobals;
   if (!impl->isDynamic) envGlobals = kj::from<Rust>(spec.globals);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
-  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
+  if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) && !inspectorConfigured &&
       supportsStartupSnapshot(impl->name, featureFlags, workerSource, envGlobals)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
@@ -1766,10 +1777,6 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     }
   }
 
-  // With the inspector enabled it is always fully trusted.
-  auto inspectorPolicy = registrar == kj::none
-      ? Worker::Isolate::InspectorPolicy::DISALLOW
-      : Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   auto isolateStart = api::BenchTiming::now();
   auto isolate = makeIsolate(impl->name, inspectorPolicy, kj::mv(snapshotConfig));
   timing.isolate = api::BenchTiming::now() - isolateStart;
