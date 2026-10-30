@@ -1,0 +1,57 @@
+src/cloudflare/internal/tracing.d.ts
+  s_ce3a68f51a41f7::t_9fa5ec9e1a6583 11,13-18,20-25
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 8-10,12,19,26-28,39-40
+  s_ce3a68f51a41f7::t_c98ea6065cd660 41
+src/workerd/api/tracing.c++
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 109-124,176-184,186-190,194-195,199-201,207-229
+  s_ce3a68f51a41f7::t_9fa5ec9e1a6583 191-193,196-198,202-206
+  s_ce3a68f51a41f7::t_1aa897f64933b6 185
+  s_ce3a68f51a41f7::t_50eb7b49d5064e 108,174-175
+  s_ce3a68f51a41f7::t_9f03c8c42262bb 230
+src/workerd/io/trace.c++
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 1911-1920
+src/workerd/io/tracer.h
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 65-71,175-179,250-255,297-300
+src/workerd/server/server.c++
+  s_ce3a68f51a41f7::t_50eb7b49d5064e 3211
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 3202-3210,3212-3214
+src/workerd/api/tracing.h
+  s_ce3a68f51a41f7::t_9fa5ec9e1a6583 116-119
+  s_ce3a68f51a41f7::t_6356c37696ef62 227
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 31-39,70-71,104,112,114-115,120
+  s_ce3a68f51a41f7::t_50eb7b49d5064e 102-103
+  s_ce3a68f51a41f7::t_6375d8314fe0e4 228
+src/workerd/io/tracer.c++
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 302-315,317,319,321-322,661-662
+  s_ce3a68f51a41f7::t_4f6629338aa081 40-52,55-57,60-61,280,282,284,316,318,320
+  s_ce3a68f51a41f7::t_2fb301b382b762 659
+  s_ce3a68f51a41f7::t_50eb7b49d5064e 657-658,660
+  s_ce3a68f51a41f7::t_6356c37696ef62 53-54,58-59
+  s_ce3a68f51a41f7::t_1951e7b6043803 663
+src/cloudflare/internal/test/tracing/tracing-log-attribution-test.js
+  s_ce3a68f51a41f7::t_2833c818b78f44 84-92,100-111
+  s_ce3a68f51a41f7::t_be74f97d595705 93-99
+src/cloudflare/internal/test/tracing/tracing-log-attribution-instrumentation-test.js
+  s_ce3a68f51a41f7::t_be74f97d595705 316-327
+  s_ce3a68f51a41f7::t_2833c818b78f44 169-178,298-315,328-334
+  s_ce3a68f51a41f7::t_2c374bfc94c859 335
+src/workerd/io/trace.h
+  s_ce3a68f51a41f7::t_5b2ca051c48ec2 1251-1253,1292-1293
+  s_ce3a68f51a41f7::t_29664cd7023dcb 1294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f9d42ce9fe59ff538181c37a812e1cb828c59839",
+  "prompts": {},
+  "sessions": {
+    "s_ce3a68f51a41f7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04a6cb5c5ffecOo3BnrCwoKl1p",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

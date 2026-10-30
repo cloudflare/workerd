@@ -1,0 +1,29 @@
+src/workerd/jsg/async-context.c++
+  s_f45b1e1284761f::t_687595eab4d2ff 276-292
+build/deps/v8.MODULE.bazel
+  s_f45b1e1284761f::t_8a3af16c75c863 71
+patches/v8/0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch
+  s_f45b1e1284761f::t_dcb26d55eb8b41 1-40
+src/workerd/api/node/tests/als-gc-test.wd-test
+  s_f45b1e1284761f::t_f37cc8629fb2a3 4,11
+src/workerd/api/node/tests/als-gc-test.js
+  s_f45b1e1284761f::t_5ef5e01897f8d9 27-57
+src/workerd/jsg/async-context-test.c++
+  s_f45b1e1284761f::t_a9c43af613bbe1 235-308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "546736a3740d73a15bbd7813779e0cc87a6840ac",
+  "prompts": {},
+  "sessions": {
+    "s_f45b1e1284761f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "582c3f8f-8b99-468e-81b4-3b06386332bb",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

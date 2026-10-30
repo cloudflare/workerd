@@ -1,0 +1,31 @@
+types/generated-snapshot/experimental/index.d.ts
+  a18a63ea9d884b00 12838-12863,12884-12887
+types/defines/cf.d.ts
+  a18a63ea9d884b00 766-791,813-816
+types/generated-snapshot/latest/index.d.ts
+  a18a63ea9d884b00 12170-12195,12216-12219
+types/generated-snapshot/latest/index.ts
+  a18a63ea9d884b00 12187-12212,12233-12236
+types/generated-snapshot/experimental/index.ts
+  a18a63ea9d884b00 12855-12880,12901-12904
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "f52e94b12c6775b5be3982f11f1285499182022e",
+  "prompts": {
+    "a18a63ea9d884b00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1f65c7247ffeCP2OSQ5PL7pzwI",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Zak Cutner",
+      "messages": [],
+      "total_additions": 150,
+      "total_deletions": 0,
+      "accepted_lines": 150,
+      "overriden_lines": 0
+    }
+  }
+}

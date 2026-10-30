@@ -1,0 +1,25 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_93fd63c4dbed61::t_6855394b78ec56 12138-12149,12153
+types/generated-snapshot/experimental/index.ts
+  s_93fd63c4dbed61::t_0c90ca9b57aa5a 12150-12161,12167
+types/generated-snapshot/index.d.ts
+  s_93fd63c4dbed61::t_eec7cd5609f460 11855-11866,11870
+types/generated-snapshot/index.ts
+  s_93fd63c4dbed61::t_6350e0bbe904c2 11867-11878,11884
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea61fc41e324a03b8d5403e318074e5ed3019ffc",
+  "prompts": {},
+  "sessions": {
+    "s_93fd63c4dbed61": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f36e40b84ffe86E8Ax9Th4tbOZ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Phani Raj <phani@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/server/AGENTS.md
+  s_ad98b07a2ebbe9::t_3575409c703581 42-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1c7f90bd6423ec8255f42af5b82bc181ddc34aca",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

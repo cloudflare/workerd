@@ -1,0 +1,37 @@
+src/rust/transpiler/lib.rs
+  s_b5100e8818a1d4::t_2175cf35952dee 1-4
+src/rust/cxx-integration/lib.rs
+  s_b5100e8818a1d4::t_18da75bc2c3c49 1-3
+  s_b5100e8818a1d4::t_3bfb83aed41e38 12-15
+src/rust/encoding/lib.rs
+  s_b5100e8818a1d4::t_9e6e34bae6ac95 5-8
+  s_b5100e8818a1d4::t_d39213abb728ca 60,91-99,109-115,118-120,125,221-242
+src/rust/clippy.toml
+  s_b5100e8818a1d4::t_2aa308c22ed16b 2-4
+src/rust/jsg-macros/lib.rs
+  s_b5100e8818a1d4::t_c8aea9b778245a 22-23,245-263,265-269
+src/rust/worker/cxx_worker.rs
+  s_b5100e8818a1d4::t_31f281f46b861b 187-193,196-197
+src/rust/python-parser/lib.rs
+  s_b5100e8818a1d4::t_fec638b39d7f44 1-4
+src/rust/api/lib.rs
+  s_b5100e8818a1d4::t_f896cdc31db4c9 5-8
+src/rust/net/lib.rs
+  s_b5100e8818a1d4::t_7e2c2b580feaa4 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ec9f1732fb5bc20369f681321aa9136289d11cb",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

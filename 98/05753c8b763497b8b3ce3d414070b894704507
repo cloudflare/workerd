@@ -1,0 +1,21 @@
+src/workerd/io/compatibility-date-test.c++
+  s_2646b46da15bfc::t_c3f8cc5e946d41 363-399
+src/workerd/io/validation.h
+  s_2646b46da15bfc::t_3f7e03e5d74a5f 19-20,22-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9805753c8b763497b8b3ce3d414070b894704507",
+  "prompts": {},
+  "sessions": {
+    "s_2646b46da15bfc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fefe2c754ffenbU7rsJXvSl7la",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pete Bacon Darwin <pbacondarwin@cloudflare.com>"
+    }
+  }
+}

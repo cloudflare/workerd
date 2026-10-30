@@ -1,0 +1,31 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_6addd9240a8b45 539-541,642-645
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_39a0313b353913 113-115
+build/fixtures/BUILD.bazel
+  s_1b9ab9fb100cf8::t_454592ce06e0a2 6
+build/fixtures/flags-probe.sh
+  s_1b9ab9fb100cf8::t_9063ccc5fda762 2
+build/kj_test.bzl
+  s_1b9ab9fb100cf8::t_1ee9ed4de2bfcc 4,36,38-39,46,48-49,57-94
+build/wd_test.bzl
+  s_1b9ab9fb100cf8::t_c2e137709a2d43 3,191-194,314,330
+build/tools/llvm/coverage.bzl
+  s_1b9ab9fb100cf8::t_f625d6fd39f8a0 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3ea5d8e9a8f2519c3bb21b0aff7d5c9728a6d8ec",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7ebc04f158db44aa734961baa8c583d1d9e0dc9d",
+  "prompts": {},
+  "sessions": {
+    "s_f9467207d3fab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd12f606dffeQhnbJzly2YeGuA",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

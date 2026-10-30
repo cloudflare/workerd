@@ -1,0 +1,397 @@
+.bazelversion
+  s_1b9ab9fb100cf8::t_a3628e5133aca9 1
+.github/workflows/release.yml
+  s_1b9ab9fb100cf8::t_43e1a9374f8c1e 87,90,92,97,273,278,283
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_cb1ef242122618 34-35,39-45,71,74
+AGENTS.md
+  s_1b9ab9fb100cf8::t_fd2ac959916fd8 203
+README.md
+  s_1b9ab9fb100cf8::t_4fb2056fe105c8 65
+build/BUILD.wpt
+  s_1b9ab9fb100cf8::t_50b8fb6936a50f 20
+build/deps/nodejs.MODULE.bazel
+  s_1b9ab9fb100cf8::t_ed1882c4e944bb 1
+build/deps/v8.MODULE.bazel
+  s_1b9ab9fb100cf8::t_39fc3cc41f4f5d 72
+build/wpt_test.bzl
+  s_1b9ab9fb100cf8::t_045a48c23d3393 25,34-40,77-78,91,282-287,327-330,452-481
+docs/reference/detail/abort-signal.md
+  s_1b9ab9fb100cf8::t_489cd266f896c6 126-129
+docs/reference/detail/async-patterns.md
+  s_1b9ab9fb100cf8::t_bc43249b57a3fa 121-123
+docs/reference/rust-review-checklist.md
+  s_1b9ab9fb100cf8::t_33075f4f0d97a8 43-50,82-86,99-102
+patches/v8/0047-Add-v8-Data-IsCompatibleWithIsolate.patch
+  s_1b9ab9fb100cf8::t_a62159d067ec0d 1-64
+src/node/internal/internal_errors.ts
+  s_1b9ab9fb100cf8::t_e8d4e021ca9619 726-772
+src/node/internal/internal_net.ts
+  s_1b9ab9fb100cf8::t_54b89329f3c3e8 57-58,1710-1728,1803,1812-1823,1887-1913,1924-1927
+src/node/internal/sockets.d.ts
+  s_1b9ab9fb100cf8::t_c60f69db83ac07 46-47
+src/per_isolate/webstreams/queue.ts
+  s_1b9ab9fb100cf8::t_9e96223ed643fc 1359-1362,1364,1389-1391,1414-1415,1424-1425,1430-1431,1502,1507-1508,1528-1533,1537-1538
+src/rust/AGENTS.md
+  s_1b9ab9fb100cf8::t_eddcba01754c92 18,37-41,62
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_1b9ab9fb100cf8::t_b254e8c7873ff3 85
+src/rust/cxx/kj-hyper/ffi.rs
+  s_1b9ab9fb100cf8::t_bf7dad62cc774f 36,200-201
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_1b9ab9fb100cf8::t_6c98ea2c0e80d0 7-8,365-368,375-384
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_1b9ab9fb100cf8::t_aa0a9ff207b7d1 74
+src/rust/cxx/kj-hyper/lib.rs
+  s_1b9ab9fb100cf8::t_6ec844cfd43272 31-33,85
+src/rust/cxx/kj-hyper/starttls.rs
+  s_1b9ab9fb100cf8::t_d5687d8d104c18 1-3,7,26,33-35,39,44,46,53,64-98,105,136,153,172,176,178-179,185-203,212,224,273-274,286
+src/rust/jsg-compile-tests/BUILD.bazel
+  s_1b9ab9fb100cf8::t_55b7e40008c42c 8
+src/rust/jsg-compile-tests/global-is-not-traced.rs
+  s_1b9ab9fb100cf8::t_5ea275107b6e94 1-19
+src/rust/jsg-compile-tests/global-open-is-scoped.rs
+  s_1b9ab9fb100cf8::t_6e04a947aa62c1 5-6,18-28
+src/rust/jsg-compile-tests/method-receiver-is-shared.rs
+  s_1b9ab9fb100cf8::t_4717d21c47adb2 1-71
+src/rust/jsg-compile-tests/ok-global-is-send-and-sync.rs
+  s_1b9ab9fb100cf8::t_0d90ff402cf740 1-13
+src/rust/jsg-compile-tests/ok-traced-global-is-send.rs
+  s_1b9ab9fb100cf8::t_107e952763b901 5-6,11
+src/rust/jsg-compile-tests/traced-global-is-not-sync.rs
+  s_1b9ab9fb100cf8::t_2af1afd06a2b42 1-21
+src/rust/jsg-macros/README.md
+  s_1b9ab9fb100cf8::t_7f098fb08ed238 43-46,87-90,109-175,381,383,410-411,440,442,452,454,457
+src/rust/jsg-macros/lib.rs
+  s_1b9ab9fb100cf8::t_5fda26b0d2f776 195-196,221-229,239,241-245,269,323-326,342-355,359,364-380,483-517,530,532-534,541,612-613,615,620-623,625-627,636
+src/rust/jsg-macros/resource-test.rs
+  s_1b9ab9fb100cf8::t_2b7ea86d726c30 5,72-383
+src/rust/jsg-macros/resource.rs
+  s_1b9ab9fb100cf8::t_b89329a1e8e135 9-12,140-178,193,209,213-214,219-220,238,242-253,258-328,330-354,358,361-362,365-391,393,395-396,398-400,486-487,491,504,509-514,516,518-523,525-537,539-548,555,561,564,569,576-581,588-629,635,638,641-643,645,656-658,664-666,763,766,783,787,803,808,845,850,858-865
+src/rust/jsg-macros/utils.rs
+  s_1b9ab9fb100cf8::t_a3b81981d84da4 74,79
+src/rust/jsg-test/ffi.c++
+  s_1b9ab9fb100cf8::t_21cbaf0275e000 139-146,170-180,203-206
+src/rust/jsg-test/ffi.h
+  s_1b9ab9fb100cf8::t_caf3e961ff2ef1 53-57,62,75-80,91-93
+src/rust/jsg-test/lib.rs
+  s_1b9ab9fb100cf8::t_ea65186849a5be 61-69,84-98,115-116,319-357,368-428,441-447
+src/rust/jsg-test/tests/gc.rs
+  s_1b9ab9fb100cf8::t_13a926de53b144 1076,1079-1080,1085,1090,1099,1111,1114,1117,1131,1135,1137,1141-1142,1149-1150,1156
+src/rust/jsg-test/tests/global.rs
+  s_1b9ab9fb100cf8::t_b88bc04e07b014 1-286
+src/rust/jsg-test/tests/isolates.rs
+  s_1b9ab9fb100cf8::t_72e47983ffd1bc 7-8,125,128,139,142,151,153,208,212,236-424
+src/rust/jsg-test/tests/jsg_struct.rs
+  s_1b9ab9fb100cf8::t_e586dfb53b94e0 142
+src/rust/jsg-test/tests/mod.rs
+  s_1b9ab9fb100cf8::t_7194314ed75b8d 14,32
+src/rust/jsg-test/tests/resource_callback.rs
+  s_1b9ab9fb100cf8::t_a7e71726502260 18,534-587
+src/rust/jsg-test/tests/resource_template.rs
+  s_1b9ab9fb100cf8::t_bab9c76c2c00ad 7-9,11-13,15-17,25,28,35-105,208-337
+src/rust/jsg-test/tests/traced_global_lifetime.rs
+  s_1b9ab9fb100cf8::t_e0c23e5d61683c 1-636
+src/rust/jsg/README.md
+  s_1b9ab9fb100cf8::t_d4b3868149e018 43,47,94-99,101,108,140,162-217,224,231,236,303-309
+src/rust/jsg/ffi-inl.h
+  s_1b9ab9fb100cf8::t_5bf03c864eb774 71-73
+src/rust/jsg/ffi.c++
+  s_1b9ab9fb100cf8::t_e69c08a5a67b1f 153-156,896-904,1257-1286
+src/rust/jsg/ffi.h
+  s_1b9ab9fb100cf8::t_b7df58428bcd2b 32,98,102-107,118,365-367
+src/rust/jsg/isolate_state.rs
+  s_1b9ab9fb100cf8::t_ca1221c76b9dc6 1-258
+src/rust/jsg/lenient.rs
+  s_1b9ab9fb100cf8::t_f40fd5e8a6fc97 6,23,62
+src/rust/jsg/lib.rs
+  s_1b9ab9fb100cf8::t_516ceb70520187 9,13,24,67,84-96,108-117,775-782,907-915,984-990,993-996,1006,1016-1024,1028-1031,1039-1049,1060-1104
+src/rust/jsg/macros.rs
+  s_1b9ab9fb100cf8::t_d6fa6a89b5b551 8
+src/rust/jsg/resource-test.rs
+  s_1b9ab9fb100cf8::t_1452b46fb7f54a 30,43-44
+src/rust/jsg/resource.rs
+  s_1b9ab9fb100cf8::t_944cbe22a7dc72 16,29-30,367,403-406,409,412-414,424,500,506-507,511-512,516,522-523,527-530,532,554-560
+src/rust/jsg/scope.rs
+  s_1b9ab9fb100cf8::t_90a61c9f5152fd 35-36,41,43,74-76,183-194
+src/rust/jsg/v8.rs
+  s_1b9ab9fb100cf8::t_a7c41466a29bc0 15-17,42,47,56,261-267,468-475,1196-1210,1252-1256,1534-1538,1682,1685,1689,1692,2923-2924,2955-2970,2973-2975,2979-3015,3018,3021,3027,3030,3032-3033,3038-3045,3048,3051-3081,3083,3085-3090,3092-3104,3106,3108-3142,3145,3148-3158,3160-3167,3170-3200,3210-3212,3216-3217,3220-3221,3225-3229,3233-3270,3274-3283,3723,3732-3785,3787-3789,3791-3805,3919-3921,3923
+src/rust/jsg/wrappable.rs
+  s_1b9ab9fb100cf8::t_b8126491fbc2c3 102,771
+src/rust/kj/http.rs
+  s_1b9ab9fb100cf8::t_242ab450b8a0b7 221
+src/tests/streams/readable-byte/AGENTS.md
+  s_1b9ab9fb100cf8::t_e1a6e9499a1f00 22,150
+src/tests/streams/readable-byte/controller.js
+  s_1b9ab9fb100cf8::t_75a77faf6f20f0 17,35
+src/tests/streams/readable-byte/main.js
+  s_1b9ab9fb100cf8::t_afb15c98f23350 306
+src/tests/streams/readable-byte/pollution.js
+  s_1b9ab9fb100cf8::t_ae9c2970d88ad2 12-13,414-478
+src/workerd/api/BUILD.bazel
+  s_1b9ab9fb100cf8::t_a8fc8a04e5cc71 430
+src/workerd/api/actor-call-retry-test.c++
+  s_1b9ab9fb100cf8::t_6b772c62a6ae01 62,258,474-475
+src/workerd/api/actor-call-retry.c++
+  s_1b9ab9fb100cf8::t_0d5aeb6b4bf7c4 89,96,119,123,130,170-171,173
+src/workerd/api/actor-call-retry.h
+  s_1b9ab9fb100cf8::t_ea065ac808c49f 126,180
+src/workerd/api/actor-fetch-retry-test.c++
+  s_1b9ab9fb100cf8::t_6bc2d1d9ed5a32 218-220,250-251,311-315,874-893
+src/workerd/api/actor-state.c++
+  s_1b9ab9fb100cf8::t_21bff7fd9b38d5 670,672-674,704-709
+src/workerd/api/basics.c++
+  s_1b9ab9fb100cf8::t_f958c704476fbb 540,1213
+src/workerd/api/basics.h
+  s_1b9ab9fb100cf8::t_49e92a0e997937 691,694,799-803,925-926
+src/workerd/api/cache.c++
+  s_1b9ab9fb100cf8::t_66692c0df844d5 362-363,369-371
+src/workerd/api/capnp.c++
+  s_1b9ab9fb100cf8::t_accb276837cbe4 571-574,576,585,592,594-599
+src/workerd/api/capnp.h
+  s_1b9ab9fb100cf8::t_f8a635e4dd150c 24
+src/workerd/api/container.c++
+  s_1b9ab9fb100cf8::t_2c9bf99b5a261d 793,797-800
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_1b9ab9fb100cf8::t_83814b4dc99b2f 26-27
+src/workerd/api/global-scope.c++
+  s_1b9ab9fb100cf8::t_91141bcfa41037 241,263-284,291-293,295-297,614-616,965-967,999-1001,1033-1035
+src/workerd/api/global-scope.h
+  s_1b9ab9fb100cf8::t_cb52a6784e7850 412,740
+src/workerd/api/hibernatable-adapter.c++
+  s_1b9ab9fb100cf8::t_63e85b74b98d6a 151
+src/workerd/api/hibernatable-adapter.h
+  s_1b9ab9fb100cf8::t_6ac67d9351ca94 86
+src/workerd/api/html-rewriter.c++
+  s_1b9ab9fb100cf8::t_d55dd406ba01a0 301,311,454-458,460-461,463,466,473-477,481-482,484,490,497-501,503-504,506,509-512,565,603-629,631-632,634,707-708,728,730-742,744,755
+src/workerd/api/http.c++
+  s_1b9ab9fb100cf8::t_643681d938e5fc 1878
+src/workerd/api/hyperdrive.c++
+  s_1b9ab9fb100cf8::t_446a7f77a37fd1 12
+src/workerd/api/js-readable-stream-test.c++
+  s_1b9ab9fb100cf8::t_70250429b85083 1383,1387,1389-1392,1408-1409,1438-1441,1448-1449,1458-1459,1483-1486,1493-1494
+src/workerd/api/js-writable-stream-test.c++
+  s_1b9ab9fb100cf8::t_30ffc4680e0c32 1027,1042-1044,1052,1059,1456,1467,1477-1480,1526-1531,1933,1940,1945,1949-1950,1960-1962
+src/workerd/api/js-writable-stream.c++
+  s_1b9ab9fb100cf8::t_360c4561164e09 175,178-180,193,204-206,215,217-218,747-750,827-829
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_1b9ab9fb100cf8::t_9acbf5b4db4fb8 88-90,106-107,110,152,160,170,180-181
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_1b9ab9fb100cf8::t_808ae472c0a118 492,514-515,517,532
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_1b9ab9fb100cf8::t_f7e1221ff2ca74 314
+src/workerd/api/kv.c++
+  s_1b9ab9fb100cf8::t_cd9a281dc59623 672-674,687-688
+src/workerd/api/node/tests/net-nodejs-test.js
+  s_1b9ab9fb100cf8::t_82e27cb6f4c470 1558-1672
+src/workerd/api/queue.c++
+  s_1b9ab9fb100cf8::t_beb285791ce8f4 638-641,643-644
+src/workerd/api/r2-bucket.c++
+  s_1b9ab9fb100cf8::t_aebd8a5149fea6 1005-1006,1018-1020
+src/workerd/api/restore.c++
+  s_1b9ab9fb100cf8::t_f5b85b64756f7f 332,335-336
+src/workerd/api/sockets-test.c++
+  s_1b9ab9fb100cf8::t_04424c1b6d496c 12-13,102,109-113,117,121,127,155,159,166,172,292-374
+src/workerd/api/sockets.c++
+  s_1b9ab9fb100cf8::t_98ef2a3e391090 21,27-28,509-619,811-824,914-919,988-1006,1012-1014,1140-1283,1287-1294,1302-1305,1328-1331,1345,1361,1364-1365,1722-1726
+src/workerd/api/sockets.h
+  s_1b9ab9fb100cf8::t_4ae89f69e85078 32-33,189-194,231-238,303-305,333-334,362,499-516,545-548,561,570-577
+src/workerd/api/streams/common.h
+  s_1b9ab9fb100cf8::t_3c5e181d196fcc 234-239
+src/workerd/api/streams/identity-transform-stream.c++
+  s_1b9ab9fb100cf8::t_100e777293d19c 116-122,126,131
+src/workerd/api/streams/internal-test.c++
+  s_1b9ab9fb100cf8::t_941b870a9e7da4 1434
+src/workerd/api/streams/queue.c++
+  s_1b9ab9fb100cf8::t_c953888344a2a6 314-317,339-343,822-827,849-853
+src/workerd/api/streams/queue.h
+  s_1b9ab9fb100cf8::t_c990691963332b 772,1043
+src/workerd/api/streams/writable.c++
+  s_1b9ab9fb100cf8::t_14e09433365610 432-435,437,450-453,467,498-500
+src/workerd/api/tests/BUILD.bazel
+  s_1b9ab9fb100cf8::t_3f82cb335aa769 215,228-230,258-269
+src/workerd/api/tests/abortsignal-test.js
+  s_1b9ab9fb100cf8::t_8d24c73d6e00f5 26-29,1062,1067,1069-1072,1074-1076,1078-1079,1083-1085
+src/workerd/api/tests/connect-handler-server.key
+  s_1b9ab9fb100cf8::t_e56843a818103d 1-28
+src/workerd/api/tests/connect-handler-server.pem
+  s_1b9ab9fb100cf8::t_c1b8e1250e7240 1-19
+src/workerd/api/tests/connect-handler-starttls-test.js
+  s_1b9ab9fb100cf8::t_ce2feca0276375 1-97
+src/workerd/api/tests/connect-handler-test-proxy.js
+  s_1b9ab9fb100cf8::t_757379ee0089dd 6,11-13,26-71
+src/workerd/api/tests/connect-handler-test.js
+  s_1b9ab9fb100cf8::t_1cfe20e094edcf 83
+src/workerd/api/tests/connect-handler-test.wd-test
+  s_1b9ab9fb100cf8::t_1ed90db515821a 26-46,52,63-70,75-87
+src/workerd/api/tests/socket-proxy-to-test.js
+  s_1b9ab9fb100cf8::t_fd963391fb3606 1-72
+src/workerd/api/tests/socket-proxy-to-test.wd-test
+  s_1b9ab9fb100cf8::t_46d92872fc58f6 1-19
+src/workerd/api/tests/sockets-connect-error-test.js
+  s_1b9ab9fb100cf8::t_d083d685592be7 1-28
+src/workerd/api/tests/sockets-connect-error-test.wd-test
+  s_1b9ab9fb100cf8::t_feeb9657356e35 1-15
+src/workerd/api/tests/tail-worker-test.wd-test
+  s_1b9ab9fb100cf8::t_84935527457888 74
+src/workerd/api/web-socket.c++
+  s_1b9ab9fb100cf8::t_0f9c16d2b39d5c 264-265,1255,1264-1267
+src/workerd/api/web-socket.h
+  s_1b9ab9fb100cf8::t_b0322e0a7a2ba0 337,562,654
+src/workerd/api/worker-rpc.c++
+  s_1b9ab9fb100cf8::t_da2b62d59454bc 562,897,910,922,925,1017,1097,1156,1218,1301-1302,1425,2010,2033-2036,2295-2301,3267-3270,3272-3275
+src/workerd/io/actor-cache.c++
+  s_1b9ab9fb100cf8::t_c85da88243ca9d 238-241,473-474,476-479,672-675,707-710,720-732,789-790,792-795,1158-1161,1176-1177,1179-1182,1493-1496,1869-1870,1873-1875,2296-2299,2301-2302,2308-2310,2645,2647-2650,2653-2654,2688-2790,3116-3117,3119-3120,3122,3125-3126,3153-3200
+src/workerd/io/actor-cache.h
+  s_1b9ab9fb100cf8::t_8ca18c534c195d 32,189,191-194,928-931
+src/workerd/io/actor-sqlite-test.c++
+  s_1b9ab9fb100cf8::t_7840595c725721 58-62,1296-1298,1305-1311,1316-1320,1373
+src/workerd/io/actor-sqlite.c++
+  s_1b9ab9fb100cf8::t_6e41c8b5744f74 255,260-261,444,446-447,911-914,916,918-919,930-931
+src/workerd/io/compatibility-date.capnp
+  s_1b9ab9fb100cf8::t_d7be040e6960f6 1728-1736
+src/workerd/io/external-pusher.c++
+  s_1b9ab9fb100cf8::t_a45c85b4ddfb04 192-193
+src/workerd/io/incoming-request-test.c++
+  s_1b9ab9fb100cf8::t_7653bac4ffa084 207-208,212-217,226,281-282,288-293,311
+src/workerd/io/io-context.c++
+  s_1b9ab9fb100cf8::t_cedc14437e06a4 44,799-800,845-848,859,861-862,913-919,927-933,1050-1052,1057-1060,1067-1068,1113-1114,1124-1125
+src/workerd/io/io-context.h
+  s_1b9ab9fb100cf8::t_2b0c0273f05773 113,123-126
+src/workerd/io/io-gate.h
+  s_1b9ab9fb100cf8::t_fa6cedab381ec9 27,257,290-293
+src/workerd/io/legacy-hibernation-manager.c++
+  s_1b9ab9fb100cf8::t_033f8829214a7d 590-594,606-611
+src/workerd/io/maximum-compatibility-date.txt
+  s_1b9ab9fb100cf8::t_29016559dad4fc 1
+src/workerd/io/observer.h
+  s_1b9ab9fb100cf8::t_9ccf8c63a7dfdc 193-194,200,202
+src/workerd/io/release-version.txt
+  s_1b9ab9fb100cf8::t_d4dd9b7c592444 1
+src/workerd/io/stored-value.c++
+  s_1b9ab9fb100cf8::t_db21eb3c8b364c 232-233,235-236,259-261
+src/workerd/io/stored-value.h
+  s_1b9ab9fb100cf8::t_7b27349a214e5d 37,43-46
+src/workerd/io/worker-entrypoint.c++
+  s_1b9ab9fb100cf8::t_8a7a4568d28ad2 41,204-205,210-213,793-794,796-797,800-801,803-805,807,809-811,814-815,817-821,824,839-840,847-848,858,884-886,892
+src/workerd/io/worker-interface.c++
+  s_1b9ab9fb100cf8::t_fb9bb2587e59ec 283-287
+src/workerd/io/worker.c++
+  s_1b9ab9fb100cf8::t_edc4a642227e84 5018,5180-5181,5183-5184,5188-5190,5205-5206
+src/workerd/jsg/AGENTS.md
+  s_1b9ab9fb100cf8::t_83cba36f1d7fdb 91
+src/workerd/jsg/BUILD.bazel
+  s_1b9ab9fb100cf8::t_b215394c5d8af4 4,283
+src/workerd/jsg/iterator-test.c++
+  s_1b9ab9fb100cf8::t_c82f248d83cfb6 68-69,76,79-80,83,94,96,100-101,108,113,115,126,128
+src/workerd/jsg/jsg.h
+  s_1b9ab9fb100cf8::t_d1d907ae6bd28f 2259-2265
+src/workerd/jsg/promise-test.c++
+  s_1b9ab9fb100cf8::t_64044a1c04272b 72-73,75-77,82,86
+src/workerd/jsg/rtti-test.c++
+  s_1b9ab9fb100cf8::t_9e78db1ee999ee 126,128,130,239,293-313
+src/workerd/jsg/rtti.capnp
+  s_1b9ab9fb100cf8::t_2130edd446e1f0 17,89-91,113,117-125,160-186,283-285,320-321,339-342,347-348
+src/workerd/jsg/rtti.h
+  s_1b9ab9fb100cf8::t_466a81815bce87 376,383,388-390,819-823
+src/workerd/jsg/setup.c++
+  s_1b9ab9fb100cf8::t_15d264919d787e 300-303,629-631
+src/workerd/jsg/setup.h
+  s_1b9ab9fb100cf8::t_d169cd8721ca73 354-375,685-689
+src/workerd/server/BUILD.bazel
+  s_1b9ab9fb100cf8::t_d4fd4a56bc25b9 313
+src/workerd/server/channel-token-test.c++
+  s_1b9ab9fb100cf8::t_adde6d4c7c883d 84-85,87,129-130,132,188-189,191
+src/workerd/server/channel-token.c++
+  s_1b9ab9fb100cf8::t_ae5a95ef0a6abc 89-91,278-280,319-322,330-332,552-555
+src/workerd/server/channel-token.h
+  s_1b9ab9fb100cf8::t_b1bfde58915a03 22,24-27
+src/workerd/server/container-client.h
+  s_1b9ab9fb100cf8::t_ba7a751f9dea9d 11
+src/workerd/server/server-test.c++
+  s_1b9ab9fb100cf8::t_37bcaa37b11061 386,423-428
+src/workerd/server/server/listen/mod.rs
+  s_1b9ab9fb100cf8::t_730f0cc86eecdc 38,588-599,606,622-637,648
+src/workerd/server/server/run.rs
+  s_1b9ab9fb100cf8::t_d5123d7fdf3ecb 43,258-268
+src/workerd/server/workerd.capnp
+  s_1b9ab9fb100cf8::t_1a51c22b8f46fa 151-153,184-194
+src/workerd/util/AGENTS.md
+  s_1b9ab9fb100cf8::t_3c1fab3bb98a13 15
+src/workerd/util/BUILD.bazel
+  s_1b9ab9fb100cf8::t_f55bffa664fe36 422-428
+src/workerd/util/weak-refs-test.c++
+  s_1b9ab9fb100cf8::t_2e6c97fbaea7b9 1-41
+src/workerd/util/weak-refs.h
+  s_1b9ab9fb100cf8::t_2967a0cb708518 3,120-146
+src/wpt/BUILD.bazel
+  s_1b9ab9fb100cf8::t_8cf1ecaa406599 228-238
+src/wpt/harness/common.ts
+  s_1b9ab9fb100cf8::t_c4d50be46f1489 173-181,186-190
+src/wpt/harness/globals.ts
+  s_1b9ab9fb100cf8::t_8bc3e1975f243c 80-89,95-106
+src/wpt/harness/harness.ts
+  s_1b9ab9fb100cf8::t_20d017056ddf28 317,322,459,462
+src/wpt/harness/utils.ts
+  s_1b9ab9fb100cf8::t_56a9c72a5b5187 148-219
+src/wpt/wasm/jsapi-test.ts
+  s_1b9ab9fb100cf8::t_69ad4277959674 1-140
+tools/clang-tidy/BUILD.bazel
+  s_1b9ab9fb100cf8::t_3154f5ac247fc8 37,199-214
+tools/clang-tidy/tests/unsafe-continuation-capture-test.c++
+  s_1b9ab9fb100cf8::t_071ba400565562 3-4,6-10,19-20,31-33,57,72-80,84-89,91-97,99-118,121-130,157-159,168-170,173-175,177-179,186-187,198-200,204-205,221-229,235-236,245-246,255-256,265-266,305-317,326-334,368,377-378,519-521,523-525,601-603,606-607,615-616,639-641,647-648,731-1473
+tools/clang-tidy/unsafe-continuation-capture-test.py
+  s_1b9ab9fb100cf8::t_350ce1803e762a 1-132
+tools/clang-tidy/unsafe-continuation-capture.c++
+  s_1b9ab9fb100cf8::t_8460b873f67c1a 165,167-173,175-224,228-231,235-321,325,327-332,343,346-349,353,355,368-371,656,664-665,812-815,975-995,1009-1013,1017,1024,1083,1110,1112,1117-1162,1164,1171,1215,1319-1372,1418,1488-1489,1524,1588,1633,1677-1879,1906-1907,1918,1925,1960-1963,1972-1975,1979-1996,2031-2036,2040-2052,2064-2067
+tools/clang-tidy/unsafe-continuation-capture.h
+  s_1b9ab9fb100cf8::t_4c6a4949ea6888 21-22,28-41,52,65,72-73
+types/AGENTS.md
+  s_1b9ab9fb100cf8::t_f62e35b89b966d 15-30
+types/generated-snapshot/experimental/index.d.ts
+  s_1b9ab9fb100cf8::t_d8a11b0e60daa8 4056
+types/generated-snapshot/experimental/index.ts
+  s_1b9ab9fb100cf8::t_68ab3afb32c309 4062
+types/generated-snapshot/index.d.ts
+  s_1b9ab9fb100cf8::t_ff1f704ef6b9b1 503
+types/generated-snapshot/index.ts
+  s_1b9ab9fb100cf8::t_ca540dfefb210b 505
+types/src/generator/index.ts
+  s_1b9ab9fb100cf8::t_e824a775a25cc6 18,182,186-198,215
+types/src/generator/parameter-names.ts
+  s_1b9ab9fb100cf8::t_ac8d18596f916c 15-66,71-72,75-77,79
+types/src/generator/structure.ts
+  s_1b9ab9fb100cf8::t_47ee17f40a83c8 43-44,314-315
+types/src/generator/type.ts
+  s_1b9ab9fb100cf8::t_f3920d2b98e184 35-36,40-50,55-67,144,156-157,163,217,320-328,352-392
+types/src/index.ts
+  s_1b9ab9fb100cf8::t_f37309319bf1f7 66,69
+types/src/transforms/overrides/compiler.ts
+  s_1b9ab9fb100cf8::t_db805c0aa3459a 68-69,74-81,86-93
+types/test/generator/index.spec.ts
+  s_1b9ab9fb100cf8::t_22544b44bc53b2 16,179-234
+types/test/generator/parameter-names.spec.ts
+  s_1b9ab9fb100cf8::t_552834e76c4c41 1-47
+types/test/generator/structure.spec.ts
+  s_1b9ab9fb100cf8::t_7d79925b0d56a5 147-224,264,269-271,277-284
+types/test/generator/type.spec.ts
+  s_1b9ab9fb100cf8::t_145e0f4087b141 9-10,13-48,99-108,157-181
+types/test/transforms/overrides/index.spec.ts
+  s_1b9ab9fb100cf8::t_77a97da9581423 20,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3ce4a7dba0186927604329813da5d4769da33aea",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

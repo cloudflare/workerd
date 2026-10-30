@@ -1,0 +1,31 @@
+src/workerd/api/tests/BUILD.bazel
+  s_144e1c38c83f9e::t_f64763b44cb98f 25-29
+src/workerd/api/tests/streams-pending-gc-test.wd-test
+  s_01568b1e6c17c5::t_8b91ddd6c4050e 1-14
+src/workerd/api/tests/streams-pending-gc-test.js
+  s_144e1c38c83f9e::t_17b97cfd48a708 1-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0295848d1c53f956027f830189e3dbd2c807e9e4",
+  "prompts": {},
+  "sessions": {
+    "s_01568b1e6c17c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad42f7aa4238eb685",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

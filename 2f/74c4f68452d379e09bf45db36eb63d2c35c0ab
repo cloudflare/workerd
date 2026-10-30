@@ -1,0 +1,41 @@
+src/workerd/api/BUILD.bazel
+  s_8a31beec700f7c::t_5de84ebb9cd6b6 35,95,704-711
+src/workerd/api/actor-state.h
+  s_8a31beec700f7c::t_fa9bea9bcb38c8 12,625-628,766-768
+src/workerd/api/global-scope.h
+  s_8a31beec700f7c::t_b88d3fcac72a51 12,390-393,417-419,1295
+src/workerd/api/oidc.h
+  s_8a31beec700f7c::t_631a6d453cbbef 1-35
+src/workerd/api/tests/BUILD.bazel
+  s_8a31beec700f7c::t_9d0c3e8b0e0311 20-25
+src/workerd/api/tests/oidc-test.wd-test
+  s_8a31beec700f7c::t_76ce0d57d2f03d 1-28
+src/workerd/io/compatibility-date.capnp
+  s_8a31beec700f7c::t_e93ee31c0181ee 1728-1733
+src/workerd/io/io-channels.c++
+  s_8a31beec700f7c::t_fefe3c93995201 11-16
+src/workerd/io/io-channels.h
+  s_8a31beec700f7c::t_70422bb2e60f30 134-151
+types/generated-snapshot/experimental/index.d.ts
+  s_8a31beec700f7c::t_60a3fd71b847f4 503,616-622,730
+types/generated-snapshot/experimental/index.ts
+  s_8a31beec700f7c::t_9b4feb20e829e7 505,618-624,730
+types/test/types/oidc.ts
+  s_8a31beec700f7c::t_c6d46d89777e07 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2f74c4f68452d379e09bf45db36eb63d2c35c0ab",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

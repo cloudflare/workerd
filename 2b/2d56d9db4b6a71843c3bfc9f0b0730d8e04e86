@@ -1,0 +1,35 @@
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_bf84275e1eab9d 4,131-168
+build/kj_test.bzl
+  s_ad98b07a2ebbe9::t_15ac4e6105b65b 12,24
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_2f2afa6b03b093 1-14
+src/workerd/io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_2e58acf1fc1506 638-639
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_37fae06ac158ea 5,81,83-84,263,266-267,329,331,441,453-454
+src/workerd/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_6fe63fcfa1bf70 43-45
+src/workerd/util/BUILD.bazel
+  s_ad98b07a2ebbe9::t_7e1714d358e580 4,516-558
+src/workerd/util/setup-async-io-test.c++
+  s_ad98b07a2ebbe9::t_9d4510b0e83550 1-54
+src/workerd/util/setup-async-io-tokio.c++
+  s_ad98b07a2ebbe9::t_7b56ab0ed492c8 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2b2d56d9db4b6a71843c3bfc9f0b0730d8e04e86",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

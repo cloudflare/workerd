@@ -1,0 +1,67 @@
+src/workerd/server/AGENTS.md
+  s_ad98b07a2ebbe9::t_cd18eb2e354bba 31-47
+src/workerd/io/BUILD.bazel
+  s_fbb6ee2a7d5176::t_87ba20042b3394 639
+  s_ad98b07a2ebbe9::t_d146b939b3c034 638
+build/fixtures/rust_io_link_check.sh
+  s_ad98b07a2ebbe9::t_8e93a4c43d7958 1-68
+.github/workflows/test.yml
+  s_ad98b07a2ebbe9::t_ce4a25c6a6f8c4 121-136
+src/workerd/server/cli-io-backend.c++
+  s_ad98b07a2ebbe9::t_a0242417e88643 1-338
+build/kj_test.bzl
+  s_ad98b07a2ebbe9::t_57329c9398466b 12,24
+src/rust/worker/BUILD
+  s_ad98b07a2ebbe9::t_ef6d255b3ef93f 58-59
+src/workerd/util/BUILD.bazel
+  s_ad98b07a2ebbe9::t_7a9fa9969d9797 4,516-558
+src/workerd/server/cli-io-backend.h
+  s_ad98b07a2ebbe9::t_1cd0b488485d14 1-69
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_5550e115336ecd 1-165
+build/fixtures/BUILD.bazel
+  s_ad98b07a2ebbe9::t_152c70707b3f60 1-4
+src/workerd/server/BUILD.bazel
+  s_fbb6ee2a7d5176::t_bc14a7b9cac89f 85,323,510
+  s_ad98b07a2ebbe9::t_aecdb07c025223 4,6,72,82,84,89-155,319,322,385,387,454-455,497,509
+src/rust/cxx-integration-test/BUILD.bazel
+  s_ad98b07a2ebbe9::t_b5d6556b0ec10a 25-26
+src/workerd/server/workerd.c++
+  s_ad98b07a2ebbe9::t_e74e5b822da7cf 12,946,1001-1002,1195,1224,1252-1253,1348,1542
+src/workerd/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_6ea62ca7dd0dc3 44,84
+  s_fbb6ee2a7d5176::t_4e63e4bc5a5a84 45,85
+  s_ad98b07a2ebbe9::t_1f34522c8a9023 43
+src/workerd/util/setup-async-io-test.c++
+  s_ad98b07a2ebbe9::t_48d62ef71388ce 1-54
+src/workerd/util/setup-async-io-tokio.c++
+  s_ad98b07a2ebbe9::t_c389fed92eb627 1-177
+src/workerd/util/AGENTS.md
+  s_ad98b07a2ebbe9::t_fab0329d7f9905 44-52
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_17eaba47b5fa33 4,131-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "35716321eb73d46da9667f39662a5d62b859d890",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_fbb6ee2a7d5176": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa9f28f1-9c53-4455-9369-8022c4c73d94",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
