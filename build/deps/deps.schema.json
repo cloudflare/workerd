@@ -14,34 +14,6 @@
             "type": "object",
             "properties": {
               "type": {
-                "const": "http_archive"
-              },
-              "name": {
-                "type": "string"
-              },
-              "url": {
-                "type": "string"
-              },
-              "integrity": {
-                "type": "string"
-              },
-              "strip_prefix": {
-                "type": "string"
-              },
-              "build_file": {
-                "type": "string"
-              },
-              "build_file_content": {
-                "type": "string"
-              }
-            },
-            "required": ["type", "name", "url", "integrity"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
                 "const": "github_tarball"
               },
               "name": {

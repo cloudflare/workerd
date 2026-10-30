@@ -620,26 +620,8 @@ def gen_bazel_dep(repo):
     )
 
 
-def gen_http_archive(repo):
-    # Fixed URLs have no release discovery; integrity is pinned in the manifest and verified
-    # by Bazel's repository downloader, not by a build or test action.
-    print(repo["url"], end="")
-    return format_ext_dep(
-        repo,
-        ext_name="http",
-        rule_name="archive",
-        attrs={
-            key: repo[key]
-            for key in ("url", "integrity", "strip_prefix")
-            if key in repo
-        },
-    )
-
-
 def gen_repo_str(repo):
-    if repo["type"] == "http_archive":
-        return gen_http_archive(repo)
-    elif repo["type"] == "github_tarball":
+    if repo["type"] == "github_tarball":
         return gen_github_tarball(repo)
     elif repo["type"] == "github_release":
         return gen_github_release(repo)

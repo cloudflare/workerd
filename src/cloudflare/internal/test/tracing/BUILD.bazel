@@ -3,13 +3,14 @@ load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("//:build/wd_test.bzl", "wd_test")
 
 # Bundle independent real API copies to exercise their global/version handshake with the runtime.
-# Tarballs come from shared_deps, including in embedders that do not include our root npm setup.
+# Tarballs are declared only in the standalone module; downstream builds exclude their consumers.
 # Links are local to this test package and cannot change another fixture's optional peers.
 [
     npm_link_package(
         name = "node_modules/@opentelemetry/api-" + version,
         src = "@otel_api_" + version.replace(".", "_") + "//:pkg",
         package = "@opentelemetry/api-" + version,
+        tags = ["no-downstream"],
         version = version + ".0",
     )
     for version in [
@@ -25,6 +26,7 @@ load("//:build/wd_test.bzl", "wd_test")
         format = "esm",
         output = "opentelemetry-api-" + version + ".0.js",
         sourcemap = False,
+        tags = ["no-downstream"],
         target = "esnext",
         deps = [":node_modules/@opentelemetry/api-" + version],
     )
@@ -41,6 +43,7 @@ esbuild(
     format = "esm",
     output = "opentelemetry-api-1.11.0.js",
     sourcemap = False,
+    tags = ["no-downstream"],
     target = "esnext",
     deps = [":node_modules/@opentelemetry/api-1.10"],
 )
@@ -55,36 +58,42 @@ wd_test(
     src = "opentelemetry-roots-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES,
+    tags = ["no-downstream"],
 )
 
 wd_test(
     src = "opentelemetry-http-policy-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    tags = ["no-downstream"],
 )
 
 wd_test(
     src = "opentelemetry-http-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    tags = ["no-downstream"],
 )
 
 wd_test(
     src = "opentelemetry-metadata-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    tags = ["no-downstream"],
 )
 
 wd_test(
     src = "opentelemetry-sampling-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    tags = ["no-downstream"],
 )
 
 wd_test(
     src = "opentelemetry-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + OTEL_API_BUNDLES + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    tags = ["no-downstream"],
 )
 
 wd_test(

@@ -91,9 +91,12 @@ Applications bundling their own API must stay within the supported version range
 enabling the compatibility flag does not make incompatible copies share the runtime's tracer.
 Integration tests build independent 1.9.0 and 1.10.0 packages, plus a simulated 1.11.0 copy whose
 compatibility and registration version checks are both patched at bundle time. These test-only
-tarballs are pinned in `build/deps/shared_deps.jsonc`, outside the shared pnpm graph so they do
-not change unrelated packages' optional peers. The generated shared-dependencies fragment also
-declares them for embedders; bundles and tests do not fetch dependencies at test time.
+tarballs are pinned in the standalone-only `build/deps/otel_api_test.MODULE.bazel`, outside the
+shared pnpm graph so they do not change unrelated packages' optional peers. The package links,
+bundles and tests that need these archives are tagged `no-downstream`: an embedder's download
+proxy may not support the npm registry. Downstream builds can load the test package without
+declaring or fetching these repositories. Standalone builds fetch them at repository time;
+bundles and tests do not fetch dependencies at test time.
 Before rollout, the runtime API maintainer must own tracking upstream releases, bumping the
 claimed registration version together with compatibility tests, and verifying new API surfaces.
 

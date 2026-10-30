@@ -62,6 +62,7 @@ def wd_test(
                 eslintrc_json = "@workerd//tools:base.eslint.config.mjs",
                 tsconfig_json = "@workerd//tools:base.tsconfig.json",
                 srcs = lint_srcs,
+                tags = [tag for tag in kwargs.get("tags", []) if tag == "no-downstream"],
                 data = ["tsconfig.json"] if len(ts_srcs) > 0 else [],
                 no_copy_to_bin = [
                     "@workerd//tools:base.eslint.config.mjs",
