@@ -545,10 +545,21 @@ impl Owners {
 
     /// An owned object's facet with lane prefix `dst` was replaced with
     /// its descendants by copies of the facet with prefix `src`'s: the next
-    /// commit makes it durable.
-    pub fn clone_lanes(&self, ns: &str, actor: &str, src: &str, dst: &str) -> Result<()> {
+    /// commit makes it durable. The copies are captured from now, started
+    /// or not, so a dormant takeover's snapshot holds them.
+    pub fn clone_lanes(
+        &self,
+        ns: &str,
+        actor: &str,
+        src: &str,
+        dst: &str,
+        layout: &dyn Layout,
+    ) -> Result<()> {
         let slot = self.slot(ns, actor)?;
-        slot.capture.borrow_mut().clone_lanes(src, dst);
+        let mut capture = slot.capture.borrow_mut();
+        for lane in capture.clone_lanes(src, dst) {
+            capture.open_lane(&layout.place(&lane)?, &lane);
+        }
         Ok(())
     }
 

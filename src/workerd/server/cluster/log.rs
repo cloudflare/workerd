@@ -421,9 +421,12 @@ impl Replay {
             }
             frame::CloneLane(lane) => {
                 self.lane(lane.get_from())?;
-                let from = std::fs::read(self.dir.join(lane.get_from().to_string()))?;
+                let from = self.dir.join(lane.get_from().to_string());
+                // Through `dyn Read`: a copy between files takes
+                // `copy_file_range`, which the server's link lacks.
+                let from: &mut dyn std::io::Read = &mut std::fs::File::open(from)?;
                 let name = text(lane.get_name()?)?;
-                self.create(n as usize, name)?.write_all(&from)?;
+                std::io::copy(from, self.create(n as usize, name)?)?;
             }
             frame::DeleteLane(()) => {
                 self.lane(n)?;

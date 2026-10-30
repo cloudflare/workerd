@@ -232,8 +232,15 @@ impl Cluster {
 
     /// An owned object's facet with lane prefix `dst` and its descendants
     /// were replaced by copies of the facet with prefix `src`'s.
-    pub fn clone_lanes(&self, ns: &str, actor: &str, src: &str, dst: &str) -> Result<()> {
-        self.owners.clone_lanes(ns, actor, src, dst)
+    pub fn clone_lanes(
+        &self,
+        ns: &str,
+        actor: &str,
+        src: &str,
+        dst: &str,
+        layout: &dyn Layout,
+    ) -> Result<()> {
+        self.owners.clone_lanes(ns, actor, src, dst, layout)
     }
 
     /// One of namespace `ns`'s databases was deleted, before anything

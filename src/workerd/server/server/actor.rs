@@ -1492,8 +1492,12 @@ impl ActorContainer {
             let prefix = self.lane_prefix()?;
             let [src, dst] = [src, dst].map(|n| prefix.clone() + &cluster::facet_prefix([n]));
             let unique_key = ns.unique_key().unwrap_or_default();
+            let layout = Databases {
+                ns: Rc::clone(&ns),
+                root_key: self.root_key.clone(),
+            };
             node.cluster
-                .clone_lanes(unique_key, &self.root_key, &src, &dst)
+                .clone_lanes(unique_key, &self.root_key, &src, &dst, &layout)
                 .map_err(|e| kj::failed!("{e}"))?;
         }
         Ok(())

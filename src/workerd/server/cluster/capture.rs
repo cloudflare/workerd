@@ -152,10 +152,10 @@ impl Capture {
         wal.frames.clear();
         let lane = wal.lane.clone();
         let prefix = lane.strip_suffix(crate::log::DB).unwrap_or_default();
+        let below = |l: &str| l.starts_with(prefix) && l[prefix.len()..].contains('/');
+        self.wals.retain(|_, w| !below(&w.lane));
         let mut entry = Vec::new();
-        self.delete(&mut entry, |l| {
-            l == lane || l.starts_with(prefix) && l[prefix.len()..].contains('/')
-        });
+        self.delete(&mut entry, |l| l == lane || below(l));
         self.add(entry);
     }
 
@@ -170,8 +170,9 @@ impl Capture {
 
     /// The facet with lane prefix `dst` and its descendants were replaced
     /// by copies of the facet with prefix `src`'s, closed, and each copy's
-    /// WAL folded into its database.
-    pub fn clone_lanes(&mut self, src: &str, dst: &str) {
+    /// WAL folded into its database. Returns the copies' lanes, which the
+    /// caller opens.
+    pub fn clone_lanes(&mut self, src: &str, dst: &str) -> Vec<String> {
         self.wals.retain(|_, w| !w.lane.starts_with(dst));
         let mut entry = Vec::new();
         self.delete(&mut entry, |l| l.starts_with(dst));
@@ -179,10 +180,11 @@ impl Capture {
             .filter_map(|(n, l)| Some((n as u32, l.as_deref()?.strip_prefix(src)?)))
             .map(|(n, rest)| (n, format!("{dst}{rest}")))
             .collect();
-        for (n, name) in from {
-            push(&mut entry, &mut self.cursor, 0, Body::CloneLane(&name, n));
+        for (n, name) in &from {
+            push(&mut entry, &mut self.cursor, 0, Body::CloneLane(name, *n));
         }
         self.add(entry);
+        from.into_iter().map(|(_, name)| name).collect()
     }
 
     /// Delete the live lanes `doomed` picks, into `entry`.

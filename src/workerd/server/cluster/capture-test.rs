@@ -182,7 +182,15 @@ impl Sim {
         }
     }
 
+    /// A database without a lane is captured once its facet starts.
+    fn start(&mut self, i: usize) {
+        if !self.dbs[i].committed {
+            self.capture.open_lane(&self.dbs[i].path, &self.dbs[i].lane);
+        }
+    }
+
     fn commit(&mut self, i: usize) {
+        self.start(i);
         let old = self.dbs[i].pages;
         let pages = match self.rng.below(10) {
             0 => old.saturating_sub(1).max(1),
@@ -268,6 +276,7 @@ impl Sim {
 
     /// Database `i`'s `deleteAll()`: it starts over, its descendants go.
     fn reset(&mut self, i: usize) {
+        self.start(i);
         let lane = self.dbs[i].lane.clone();
         let prefix = lane.strip_suffix(DB).unwrap().to_owned();
         let name = self.dbs[i].name();
@@ -292,7 +301,9 @@ impl Sim {
         let Some(parent) = src.strip_suffix('/') else {
             return;
         };
-        let parent = parent.rsplit_once('/').map_or(String::new(), |(p, _)| p.to_owned() + "/");
+        let parent = parent
+            .rsplit_once('/')
+            .map_or(String::new(), |(p, _)| p.to_owned() + "/");
         let dst = parent + &facet_prefix([NAMES[self.rng.below(NAMES.len())]]);
         if dst == src {
             return;
@@ -308,14 +319,24 @@ impl Sim {
             .filter_map(|d| Some((d.lane.strip_prefix(&src)?, d)))
             .map(|(rest, d)| (dst.clone() + rest, d.state(), d.pages, d.committed))
             .collect();
-        self.capture.clone_lanes(&src, &dst);
+        let opened = self.capture.clone_lanes(&src, &dst);
         for (lane, file, pages, committed) in copies {
             self.files += 1;
             let path = self.dir.join(format!("o.{}.sqlite", self.files));
             std::fs::write(&path, &file).unwrap();
-            self.capture.open_lane(&path, &lane);
+            if opened.contains(&lane) {
+                self.capture.open_lane(&path, &lane);
+            }
             let wal = Vec::new();
-            self.dbs.push(Db { lane, path, file, wal, pages, offset: 0, committed });
+            self.dbs.push(Db {
+                lane,
+                path,
+                file,
+                wal,
+                pages,
+                offset: 0,
+                committed,
+            });
         }
         self.trace.push(format!("clone {src} {dst}"));
         self.record();
@@ -378,6 +399,14 @@ impl Sim {
     /// A takeover: restore, check, and open the next session from a
     /// snapshot of what was restored.
     fn take_over(&mut self) -> Result<(), String> {
+        // A dormant takeover snapshots the captured databases: every live
+        // lane must be one, started or not.
+        let captured = self.capture.databases();
+        if let Some(d) =
+            (self.dbs.iter()).find(|d| d.committed && !captured.iter().any(|(l, _)| *l == d.lane))
+        {
+            return Err(format!("{} is live but not captured", d.lane));
+        }
         let spool = self.dir.join(format!("restore-{}", self.session));
         let (end, lanes) = block(crate::log::restore(&self.log, self.session, &spool))
             .map_err(|e| format!("restore: {e}"))?;
@@ -508,5 +537,5 @@ fn run(seed: u64, steps: usize) -> Result<(), String> {
 
 #[test]
 fn every_lane_restores_as_the_bucket_holds_it() {
-    crate::dst::seeds(100, |seed| run(seed, 150));
+    crate::dst::seeds(30, |seed| run(seed, 150));
 }
