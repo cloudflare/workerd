@@ -102,6 +102,32 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
 }
 
+void EventTarget::forEachSnapshotListener(jsg::Lock& js,
+    kj::FunctionParam<void(kj::StringPtr type, v8::Local<v8::Object> identity, bool once)> cb) {
+  for (auto& entry: typeMap) {
+    // The on<type> attribute trampoline (if activated for this type) occupies a regular
+    // listener slot under a synthesized identity. It is owned by the C++ attribute state and
+    // cannot be replayed through addEventListener(), so it is not transferred.
+    kj::Maybe<v8::Local<v8::Object>> trampolineIdentity;
+    KJ_IF_SOME(attribute, eventHandlerAttributes.find(entry.key)) {
+      KJ_IF_SOME(identity, attribute.listenerIdentity) {
+        trampolineIdentity = identity.getHandle(js);
+      }
+    }
+
+    for (auto& handler: entry.value.handlers.ordered<kj::InsertionOrderIndex>()) {
+      auto identity = handler->identity.getHandle(js);
+      KJ_IF_SOME(trampoline, trampolineIdentity) {
+        if (identity == trampoline) continue;
+      }
+      KJ_REQUIRE(handler->abortHandler == kj::none,
+          "snapshot PoC: top-level addEventListener with a `signal` option is not supported",
+          entry.key);
+      cb(entry.key, identity, handler->once);
+    }
+  }
+}
+
 void EventTarget::addEventListener(jsg::Lock& js,
     kj::String type,
     kj::Maybe<jsg::Identified<Handler>> maybeHandler,
