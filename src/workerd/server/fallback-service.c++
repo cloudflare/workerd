@@ -102,9 +102,9 @@ ModuleOrRedirect FallbackServiceClient::tryResolve(Version version,
     KJ_ASSERT(!lock->hasRequest, "FallbackServiceClient does not support concurrent requests");
     lock->version = version;
     lock->type = type;
-    lock->specifier = specifier;
-    lock->rawSpecifier = rawSpecifier;
-    lock->referrer = referrer;
+    lock->specifier = kj::mv(specifier);
+    lock->rawSpecifier = kj::mv(rawSpecifier);
+    lock->referrer = kj::mv(referrer);
     lock->attributes = &attributes;
     lock->hasRequest = true;
   }
