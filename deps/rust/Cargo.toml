@@ -106,7 +106,7 @@ tower-service = "0.3"
 # kj-rs-io: net (sockets), io-util (`try_read_buf` into uninitialized buffers is gated on it),
 # signal, sync (Notify), time; rt/rt-multi-thread are kj-rs-tokio's.
 tokio = { version = "1", default-features = false, features = ["io-util", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
-x509-cert = { version = "0.2", default-features = false }
+x509-cert = { version = "0.3", default-features = false }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 # socket2 provides sockaddr handling for the tokio-backed kj-rs-io networking layer.
 socket2 = "0.6"
@@ -122,5 +122,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Network
 # changes by re-stamping the watched files, so it needs nothing backend-specific.
 notify = "8"
 tracing = { version = "0", default-features = false, features = ["std"] }
-swc_common = "25"
-swc_ts_fast_strip = "57"
+swc_common = "26"
+swc_ts_fast_strip = "59"

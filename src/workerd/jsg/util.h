@@ -96,6 +96,12 @@ void throwInternalError(
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 
+// Marker detail present when the TUNNELED_EXCEPTION_DETAIL_ID payload was written with enhanced
+// error serialization. Only that format lets the reader drop the stacks of the errors it contains,
+// so untrusted readers ignore a payload without this marker. Its value is a single byte, not
+// empty, so that runtimes whose Rust bridge cannot copy an empty detail can still read it.
+constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID = 0xbdc917cdea1f7681ull;
+
 // Detail type for JavaScript exception metadata (error type and stack trace)
 constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
 

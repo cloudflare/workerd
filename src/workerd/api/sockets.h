@@ -271,8 +271,7 @@ class Socket: public jsg::Object {
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
 
   // Claims the socket prebuilt by RpcDeserializerExternalHandler::prepare() (see
-  // hydrateRpcSocket below), or, when the rpc-externals-hydration autogate is off, constructs
-  // it in place. The TypeHandler unwraps the prebuilt slot's wrapped socket -- an
+  // hydrateRpcSocket below). The TypeHandler unwraps the prebuilt slot's wrapped socket -- an
   // internal-field read, safe under the deserializer's no-JS scope.
   static jsg::Ref<Socket> deserialize(jsg::Lock& js,
       rpc::SerializationTag tag,
@@ -519,9 +518,7 @@ kj::Rc<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback
 // validating the entry types. Runs during RpcDeserializerExternalHandler::prepare() -- before
 // the V8 graph read -- because stream construction executes JavaScript under the TypeScript
 // streams implementation, which the graph read forbids; Socket::deserialize() then claims the
-// result. Also serves as Socket::deserialize()'s in-place fallback when the
-// rpc-externals-hydration autogate is off (that path predates the gate and remains scope-safe
-// only for legacy streams).
+// result.
 jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
     IoContext& ioContext,
     rpc::JsValue::External::Reader socketExternal,
