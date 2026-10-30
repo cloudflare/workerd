@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "restore-kvdata", worker = .restoreKvDataWorker),
+  ],
+);
+
+const restoreKvDataWorker :Workerd.Worker = (
+  compatibilityFlags = ["durable_object_snapshots", "nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-restore-kvdata-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "RestoreKvDataObject", uniqueKey = "810bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "RestoreKvDataObject"),
+  ],
+);
