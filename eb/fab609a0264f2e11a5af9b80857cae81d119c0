@@ -1,0 +1,27 @@
+src/workerd/api/hibernatable-adapter.c++
+  s_ea3b91cafb67a9::t_3a427eeeba7153 152-153
+src/workerd/api/hibernatable-adapter.h
+  s_ea3b91cafb67a9::t_57b2bcd7c29e74 85-86
+src/workerd/api/web-socket.c++
+  s_ea3b91cafb67a9::t_fa4969a4029d68 260-262,1106-1111,1174-1175,1184-1186,1222-1223,1254-1256,1611
+src/workerd/api/web-socket.h
+  s_ea3b91cafb67a9::t_b1089968acfc12 222-224,336-337,550-551,642-643,784-785,793-795,840-841,854
+src/workerd/io/hibernation-manager-test.c++
+  s_ea3b91cafb67a9::t_0c01a7ec0a2cfc 683-738,798-801,815-819,821-843
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ebfab609a0264f2e11a5af9b80857cae81d119c0",
+  "prompts": {},
+  "sessions": {
+    "s_ea3b91cafb67a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe6b74983ffe3TTRPQnP5WRUxK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

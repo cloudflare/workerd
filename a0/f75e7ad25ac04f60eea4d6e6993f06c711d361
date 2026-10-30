@@ -1,0 +1,69 @@
+src/workerd/api/tests/do-pre-shutdown-test.wd-test
+  s_0f868da28cf400::t_2dc7da48d57f5c 1-49
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_b7082638bfda10 65
+  s_0f868da28cf400::t_537f947a7fedfa 1084,1091
+  s_0f868da28cf400::t_9d337ab3b018e2 1069-1073,1075,1080-1083,1086,1089-1090,1092
+  s_0f868da28cf400::t_0393c55a7ae113 1074,1076-1079,1085,1087-1088,1094-1098
+  s_0f868da28cf400::t_9bb7a824743da8 51-52
+src/workerd/api/tests/BUILD.bazel
+  s_0f868da28cf400::t_5f176d5c231fbe 578-585
+  s_0f868da28cf400::t_5c150a8922dbac 577
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_8ac0c417572457 490-494,496-503,505-518,523,527,529,544
+  s_0f868da28cf400::t_f36742d6b636e9 495,504
+  s_0f868da28cf400::t_668beb1ff72b07 783-796
+src/workerd/io/worker.c++
+  s_0f868da28cf400::t_5103dd4211e5fd 4413
+  s_0f868da28cf400::t_7d05caa6be712b 4411-4412,4418,4420-4422,4424-4428,4430-4431,4441-4442,4444-4447,4451-4479,4489-4492
+  s_0f868da28cf400::t_f3ce2a2875b5f7 4409-4410,4414-4417,4419,4423,4429,4432-4440
+  s_0f868da28cf400::t_f36742d6b636e9 4443,4448-4450
+  s_0f868da28cf400::t_60c2d0cc7d8797 4480-4488
+src/workerd/io/io-context.h
+  s_0f868da28cf400::t_8cee6602aab1c8 137-149
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_f36742d6b636e9 794-795,821
+  s_0f868da28cf400::t_57055d601987e3 776-793,796-820,822-830
+src/workerd/api/tests/do-pre-shutdown-test.js
+  s_0f868da28cf400::t_cef6d64bcfae2e 1-156
+src/workerd/util/uncaught-exception-source.h
+  s_0f868da28cf400::t_402ead3569f49e 17
+  s_0f868da28cf400::t_fffe46564219dd 34-35
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_7d511f7231b811 5512-5515
+  s_0f868da28cf400::t_b709edfc5a527a 1065-1075,1080-1081
+  s_0f868da28cf400::t_a2fc6b5effd5cf 14
+  s_0f868da28cf400::t_9fb5f8e72d08bd 3977
+  s_0f868da28cf400::t_7a425cd7bcfe54 5511
+  s_0f868da28cf400::t_29806540f589b4 1076-1079
+  s_0f868da28cf400::t_a2730906de7358 2057
+  s_0f868da28cf400::t_3fb2e56ead4b47 3971
+  s_0f868da28cf400::t_113663c0a8f1df 3968-3970,3972-3976,3978-3979
+  s_0f868da28cf400::t_e164b526d0a1af 326-327,332-333
+  s_0f868da28cf400::t_748fd5d62792ef 4171
+  s_0f868da28cf400::t_2dcc3ae7673c76 1124-1127,1132-1133
+  s_0f868da28cf400::t_a5547fa6f19d26 328-331
+  s_0f868da28cf400::t_dd9a9224051717 1128-1131
+  s_0f868da28cf400::t_7356a6f8299543 4172-4175
+  s_0f868da28cf400::t_f74375bfa6bd31 2056,2058-2061
+src/workerd/io/limit-enforcer.h
+  s_0f868da28cf400::t_389de9b5bb0afb 177-183
+src/workerd/api/tests/do-pre-shutdown-flag-off.js
+  s_0f868da28cf400::t_1e88bda3bc6351 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a0f75e7ad25ac04f60eea4d6e6993f06c711d361",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

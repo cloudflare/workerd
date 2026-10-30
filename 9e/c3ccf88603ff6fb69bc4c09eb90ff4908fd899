@@ -1,0 +1,114 @@
+src/workerd/io/io-context.h
+  s_e3ebb908223b15::t_bf06ee3b989f2a 175
+  s_3fcc8dcb9d4036::t_94ac214c3aa475 1233-1237,1935
+src/workerd/io/io-gate-test.c++
+  s_3fcc8dcb9d4036::t_ee7571363141cf 316-334
+src/workerd/io/io-context-timer-test.c++
+  s_6d10161a223e34::t_6b869d96dccf01 1-852
+src/workerd/io/AGENTS.md
+  s_2616d399615469::t_8c5aa231ab4f50 36
+  s_1115a467b2d388::t_69850e31d91aae 51
+  s_3fcc8dcb9d4036::t_5206928d7e0ac0 50
+src/workerd/io/io-gate.h
+  s_15400cf4f5128e::t_4fce19a6c982c8 218-221
+src/workerd/io/BUILD.bazel
+  s_6d10161a223e34::t_e967ee529a737a 695-703
+src/workerd/io/io-gate.c++
+  s_15400cf4f5128e::t_b9ebc007c5b29e 342-348
+src/workerd/api/tests/BUILD.bazel
+  s_6d10161a223e34::t_c86a4e3a275cad 500-505
+src/workerd/io/io-channels.h
+  s_4e7004b45e7ea0::t_845052f61c1c9a 74-77
+  s_e3ebb908223b15::t_248c8b4d72f98f 78
+src/workerd/api/tests/actor-block-concurrency-timer-test.js
+  s_6d10161a223e34::t_077ca23cf508a6 1-29
+src/workerd/io/io-context.c++
+  s_6d10161a223e34::t_5697bf65241f9e 82,85-86,89-90,102-103,107,112,117-200,367,369,977,1044-1046,1053-1056,1060-1062,1076-1111
+  s_96059d2c98914f::t_bfc5b4aa562553 80
+  s_4e7004b45e7ea0::t_44c6b895f255a1 1171-1183
+  s_96059d2c98914f::t_76610cbde488d5 78
+  s_3fcc8dcb9d4036::t_dac81a1a31aca9 79,1113,1115-1127
+  s_e33c2388469783::t_fc746af14a5559 76-77
+src/workerd/api/tests/actor-block-concurrency-timer-test.wd-test
+  s_6d10161a223e34::t_1870787c608805 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9ec3ccf88603ff6fb69bc4c09eb90ff4908fd899",
+  "prompts": {},
+  "sessions": {
+    "s_1115a467b2d388": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d645892-23fd-42fc-af92-7095c8a3666c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_15400cf4f5128e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12d36-f269-7383-9fb0-77c817571b9c",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_2616d399615469": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12caf-17c2-7240-80c9-e66605f034b9",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_3fcc8dcb9d4036": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12cc9-541a-7b11-876f-005fdca6b228",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_4e7004b45e7ea0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c46-7a30-7553-9548-cf1f086f206c",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_6d10161a223e34": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12bfd-d44a-7910-9649-a38d9f58d679",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_96059d2c98914f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c33-a06d-7290-aa2e-3b86edde77c1",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_e33c2388469783": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12d78-cd10-7102-942a-1e1fe2af5d3a",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_e3ebb908223b15": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12c59-4fd8-75b3-84c1-6ff659a39b94",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

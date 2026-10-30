@@ -1,0 +1,32 @@
+src/workerd/util/autogate.h
+  s_c1a7662859f799::t_9b735cc8a5595b 92-93
+  s_1a073904f7492d::t_dde30e7952406b 89-90,94
+src/workerd/jsg/util.h
+  s_c1a7662859f799::t_c9a3fef061a6ce 112-113
+  s_c1a7662859f799::t_7a5f3db9e131ee 111
+  s_c1a7662859f799::t_d4c616aa0f2d6d 114-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "53eb80001541cc4ca47befa69ca443e45f6840f5",
+  "prompts": {},
+  "sessions": {
+    "s_1a073904f7492d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_038be3684ffeoezvimaGO5mtDm",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

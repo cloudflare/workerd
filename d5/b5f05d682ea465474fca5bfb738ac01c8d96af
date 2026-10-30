@@ -1,0 +1,33 @@
+src/workerd/io/worker-entrypoint.c++
+  s_b716b0d48442fc::t_65491e69db2638 566-573
+src/workerd/tests/BUILD.bazel
+  s_402912a14deedf::t_7cff9984cc27d1 39
+src/workerd/tests/test-fixture.c++
+  s_b716b0d48442fc::t_8529202db08bef 16,508-539
+src/workerd/tests/test-fixture.h
+  s_b716b0d48442fc::t_b6bbaaa79b68f0 115-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d5b5f05d682ea465474fca5bfb738ac01c8d96af",
+  "prompts": {},
+  "sessions": {
+    "s_402912a14deedf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f31044768ffeN0h04gFIIo6ilR",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

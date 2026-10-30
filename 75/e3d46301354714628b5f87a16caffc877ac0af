@@ -1,0 +1,19 @@
+patches/sqlite/0006-call-authorizer-in-default-column-expressions.patch
+  s_7d609c0c90c406::t_abcc5323dffe82 1-3,97-99,140-142,157-159,209-211,228-230,254-256,270-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "75e3d46301354714628b5f87a16caffc877ac0af",
+  "prompts": {},
+  "sessions": {
+    "s_7d609c0c90c406": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa2196cefffeVkJ5vJOz86BSa6",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

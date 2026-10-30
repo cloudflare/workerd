@@ -1,0 +1,58 @@
+src/workerd/api/tracing.c++
+  s_ebf47686d728a3::t_9f9f8e18034b90 569,570-571
+  s_ebf47686d728a3::t_d6b594a011ad5e 128-131,267-268,374-406
+src/cloudflare/internal/test/instrumentation-test-helper.js
+  s_ebf47686d728a3::t_59c0126dda3d7e 85,155
+src/cloudflare/internal/test/tracing/tracing-helpers-instrumentation-test.js
+  s_ebf47686d728a3::t_8cf82305fc6140 42,70-80
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_ebf47686d728a3::t_1618592923a586 227-248
+src/cloudflare/internal/tracing.d.ts
+  s_ebf47686d728a3::t_4703ead76e66ba 36-42,58-61
+src/workerd/api/tracing.h
+  s_ebf47686d728a3::t_0d44fe21349404 42-53,71-72,123-126,136,148,264
+src/workerd/io/trace-stream.c++
+  s_ebf47686d728a3::t_66b97dfbbd470b 90,102,443-464,506-508
+src/workerd/io/trace-test.c++
+  s_ebf47686d728a3::t_f0f2c6e004a894 567-568,575-576,580-604
+src/workerd/io/trace.c++
+  s_ebf47686d728a3::t_972a05231de62b 64-108,1411-1413,1415-1417,1421,1425,1875-1876,1888,1947-1952
+src/workerd/io/trace.capnp
+  s_ebf47686d728a3::t_8024aa5a2c7a82 31-44,80
+src/workerd/io/trace.h
+  s_ebf47686d728a3::t_73ec00f546cc95 41-61,804,813-814,817,867,874,1119,1262-1263,1329-1332,1377
+src/workerd/io/tracer.c++
+  s_ebf47686d728a3::t_389275d86131cf 275-277,695-698,702
+src/workerd/io/tracer.h
+  s_ebf47686d728a3::t_290ce5f7f24c2b 259-263,312-315
+src/workerd/io/worker-interface.capnp
+  s_ebf47686d728a3::t_8e4177c377affc 19,314
+src/workerd/server/server.c++
+  s_ebf47686d728a3::t_acb36d27459707 3215-3219,3221
+types/defines/trace.d.ts
+  s_ebf47686d728a3::t_5b2ee5f32a46df 122-128,142
+types/generated-snapshot/experimental/index.d.ts
+  s_ebf47686d728a3::t_d81f05cd7c38f7 4883,4886-4890,17120-17125,17137
+types/generated-snapshot/experimental/index.ts
+  s_ebf47686d728a3::t_42fea45f6a18c2 4892,4895-4899,17078-17083,17095
+types/generated-snapshot/index.d.ts
+  s_ebf47686d728a3::t_fde6e82dba333a 4606,4609-4613,16843-16848,16860
+types/generated-snapshot/index.ts
+  s_ebf47686d728a3::t_1958506949ec65 4615,4618-4622,16801-16806,16818
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4d2711b0771671b52c933a888baa326489a9b47e",
+  "prompts": {},
+  "sessions": {
+    "s_ebf47686d728a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe81e04f4ffegtcU3p2joqak5h",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

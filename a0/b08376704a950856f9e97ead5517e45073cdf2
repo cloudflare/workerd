@@ -1,0 +1,25 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_b397d1dc8b40ae::t_aa2bc0e27a28de 17125
+types/generated-snapshot/experimental/index.ts
+  s_b397d1dc8b40ae::t_175829655b5e1b 17083
+types/generated-snapshot/index.d.ts
+  s_b397d1dc8b40ae::t_b4233ed30ee5b9 16848
+types/generated-snapshot/index.ts
+  s_b397d1dc8b40ae::t_68c87f602175d3 16806
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a0b08376704a950856f9e97ead5517e45073cdf2",
+  "prompts": {},
+  "sessions": {
+    "s_b397d1dc8b40ae": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f53f143d4ffeP7P720HPDwqZDU",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

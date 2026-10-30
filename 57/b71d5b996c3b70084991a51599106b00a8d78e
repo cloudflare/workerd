@@ -1,0 +1,21 @@
+src/workerd/io/worker-entrypoint-test.c++
+  s_b44f25982d1498::t_b8cf07638c1bec 420-437,568-580
+src/workerd/io/worker-entrypoint.c++
+  s_b44f25982d1498::t_5d71ae97b26fdc 669-677,838-846
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "57b71d5b996c3b70084991a51599106b00a8d78e",
+  "prompts": {},
+  "sessions": {
+    "s_b44f25982d1498": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee3c6a1a3ffezbllFirrEZWzH4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

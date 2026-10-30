@@ -1,0 +1,19 @@
+AGENTS.md
+  s_f1110a86c4688e::t_f3dc6400e5288a 55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e30cd43845b3da23977ccb4d123c2d29be231265",
+  "prompts": {},
+  "sessions": {
+    "s_f1110a86c4688e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f6d638-d1d1-4068-a7a6-e5f600722252",
+        "model": "claude-odango-eap"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

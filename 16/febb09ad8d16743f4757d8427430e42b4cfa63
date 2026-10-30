@@ -1,0 +1,19 @@
+src/workerd/server/server-test.c++
+  s_48f2b862a9a91a::t_9691d83ec1f960 3726-3776
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16febb09ad8d16743f4757d8427430e42b4cfa63",
+  "prompts": {},
+  "sessions": {
+    "s_48f2b862a9a91a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a132ff-ea0c-7dd0-9191-f6e47ca9d30f",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

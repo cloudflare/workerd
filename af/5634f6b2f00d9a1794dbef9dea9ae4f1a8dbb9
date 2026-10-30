@@ -1,0 +1,19 @@
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_2427bf394889ab::t_ca89d9e7516f75 301-304,308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "af5634f6b2f00d9a1794dbef9dea9ae4f1a8dbb9",
+  "prompts": {},
+  "sessions": {
+    "s_2427bf394889ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+src/workerd/jsg/modules.c++
+  s_b27eb293e3a79c::t_b41dc4ac9819e0 72-77,83,95-100,102,122-123
+src/workerd/jsg/modules.h
+  s_b27eb293e3a79c::t_750c45cacff450 520
+  s_b27eb293e3a79c::t_4ab62c7f3d8e1c 437-438
+  s_b27eb293e3a79c::t_b41dc4ac9819e0 69-70,411-418,436,511-513,519
+src/workerd/api/tracing.h
+  s_b27eb293e3a79c::t_f908d274c9d95c 133-135,138,157,173,277-279
+  s_b27eb293e3a79c::t_2d890efe5e75c6 162
+src/cloudflare/opentelemetry.ts
+  s_b27eb293e3a79c::t_2d890efe5e75c6 214
+  s_b27eb293e3a79c::t_68f01ddba8b8f7 5,27,173-183,185-187,189-191,219-224
+  s_b27eb293e3a79c::t_a7104c96baa063 184
+src/cloudflare/internal/test/tracing/opentelemetry-context-backend.js
+  s_b27eb293e3a79c::t_750c45cacff450 6-11,15,22-28,38-40
+docs/reference/detail/legacy-module-registry.md
+  s_b27eb293e3a79c::t_750c45cacff450 212-213,432-437,464-465
+  s_b27eb293e3a79c::t_d79127affc4462 269-270,444-445
+src/cloudflare/tracing.ts
+  s_b27eb293e3a79c::t_f908d274c9d95c 1-12
+src/cloudflare/internal/test/tracing/opentelemetry-context-test.js
+  s_b27eb293e3a79c::t_2d890efe5e75c6 20-23
+  s_b27eb293e3a79c::t_68f01ddba8b8f7 7,16-19,24-27,35-36
+  s_b27eb293e3a79c::t_fb2e7b9aaf6925 28-31
+  s_b27eb293e3a79c::t_3f6fe22fda7750 32-34
+  s_b27eb293e3a79c::t_750c45cacff450 130,136-138
+  s_b27eb293e3a79c::t_cedda84665e3df 37
+src/workerd/jsg/setup.h
+  s_b27eb293e3a79c::t_f908d274c9d95c 470
+src/workerd/api/tracing.c++
+  s_b27eb293e3a79c::t_2d890efe5e75c6 240-242
+  s_b27eb293e3a79c::t_f908d274c9d95c 207-214,218-228,236-239,434,489,518,539
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e5ac257e03854db64903d113d5005c388740340a",
+  "prompts": {},
+  "sessions": {
+    "s_b27eb293e3a79c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_077f20387ffed8e7iIyvCiLbfx",
+        "model": "gpt-5.6"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_b716b0d48442fc::t_1a3cf186c0da0f 80-84,115-118,122-124,129-133,150,307,384-386,1453-1723
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e46b7b57f0f84d31db3dc3b3d7a87f4ff089c0c3",
+  "prompts": {},
+  "sessions": {
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

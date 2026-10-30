@@ -1,0 +1,23 @@
+src/workerd/api/global-scope.c++
+  s_8b080d960d1bef::t_807b0301403cb9 363-367
+src/workerd/util/stream-utils-test.c++
+  s_8b080d960d1bef::t_0c01c394ff3c9d 46,48,50-68
+src/workerd/util/stream-utils.h
+  s_8b080d960d1bef::t_4e2336aadcf453 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "92c063fc1e7585ccfee7911d846e79d6a94c10b6",
+  "prompts": {},
+  "sessions": {
+    "s_8b080d960d1bef": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "faeda7e2-f267-4ea7-b4b5-74cef3e03f77",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

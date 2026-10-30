@@ -1,0 +1,46 @@
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_7a1faf1f28bdc7 116,119-121,272,275-280,299-312,1139-1211,1451-1477
+  s_e6ef9db3485b14::t_a3c1c72183cf31 115,203-207,230,268-271,273-274,281-283,295-298,332,373-375,389-392,414,427-436,441-445,460-463,465,467-470,474-475,504-513,1096,1102-1104,1112-1138,1212-1450,1478-1492,1583-1587,1589-1591
+src/workerd/api/actor-call-retry-test.c++
+  s_e6ef9db3485b14::t_e073241e59eb49 69-70,179,200-230,275-276
+src/workerd/api/http.c++
+  s_e6ef9db3485b14::t_a4e1d874cca964 1481-1542,1573-1574,1580-1581,1589-1590,1595-1596,1609-1611,1627-1628,1641,1667-1669,1686,1698-1700,1822-1824,1833-1840,1849,1852,1922-1924,1933-1940,1949-1950,1953,1963-1964,1968,1970-1973,1976,1984-1985,2001,2003,2006-2011,2013-2016,2024-2026,2039-2040,2162-2166,2168,2222-2223,2289-2290,2294-2320,2328-2329,2333-2335,2338-2340,2343-2344,2927-2935
+  s_e6ef9db3485b14::t_9898a12cb485f2 2002,2167,2169
+src/workerd/api/actor-call-retry.h
+  s_e6ef9db3485b14::t_1755cd9f661a71 23-65,106-113,120-121,134-151,158-170,179
+  s_6ba2030b43c23b::t_5fbbaeae0e566e 131
+  s_e6ef9db3485b14::t_acbf2d30ffa85e 22
+  s_e6ef9db3485b14::t_78e3b46108cff2 117-119
+  s_e6ef9db3485b14::t_d4c6c3f70298f2 122
+  s_6ba2030b43c23b::t_b2e6b5fab83670 129-130
+  s_e6ef9db3485b14::t_64861f076e3fb9 180-181
+src/workerd/io/io-channels.h
+  s_e6ef9db3485b14::t_dfae14935325e7 91-98
+src/workerd/api/actor-call-retry.c++
+  s_e6ef9db3485b14::t_1eafa656a2610f 46,49-68
+  s_e6ef9db3485b14::t_6d35bf72e79dc9 14-18,21-22,26-28,40,69-73,76-78,86-133,170,175-178,180,182,187,210
+  s_bf1ef2329fbd5a::t_85d9b2ca147df3 25
+  s_e6ef9db3485b14::t_ed1c5b972b9638 23-24,38-39,41-45,47-48
+src/workerd/api/actor.c++
+  s_e6ef9db3485b14::t_08246fb2c59ece 278,283,302-303,308
+src/workerd/server/workerd.capnp
+  s_e6ef9db3485b14::t_bfd31f4ebe1812 516-523
+src/workerd/util/autogate.h
+  s_e6ef9db3485b14::t_ac6bd9f70e075f 96-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b85b7bd7c2a9dedddc162128439f229dd8e3b54d",
+  "prompts": {},
+  "sessions": {
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

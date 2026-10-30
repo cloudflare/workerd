@@ -1,0 +1,23 @@
+build/deps/llvm.MODULE.bazel
+  s_1b9ab9fb100cf8::t_90d38785f4d5f6 38-63
+build/sysroot.bzl
+  s_1b9ab9fb100cf8::t_aa7a01f2dab337 60,65-75,81-83
+tools/clang-tidy/BUILD.bazel
+  s_1b9ab9fb100cf8::t_4ece9b2866d097 73-88,94,97,105,110,117-120,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "93eeaa01711c2d9080e459cf73be69ae4eabd4c1",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

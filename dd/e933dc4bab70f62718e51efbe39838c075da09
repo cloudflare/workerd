@@ -1,0 +1,35 @@
+src/workerd/api/worker-rpc.c++
+  s_32b17a769cc550::t_8a27aa5c5e3422 2707,3320-3321,3334
+src/workerd/io/observer.h
+  s_32b17a769cc550::t_9e79380db99d5d 33
+src/workerd/util/autogate.h
+  s_ba99c3d31db716::t_ae9c47e2f34948 92
+types/defines/durable-objects.d.ts
+  s_ba99c3d31db716::t_5054c1e826a5d3 3-4,7-20,24,26-28
+types/test/types/durable-objects.ts
+  s_ba99c3d31db716::t_504fd9368df72f 10-13,23,27-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dde933dc4bab70f62718e51efbe39838c075da09",
+  "prompts": {},
+  "sessions": {
+    "s_32b17a769cc550": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef49fe257ffe5FcrLx8m4M06rm",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ba99c3d31db716": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef430b2c9ffexQnmJf281UfNnX",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+src/rust/cxx/tests/ffi/tests.cc
+  s_144e1c38c83f9e::t_d75b469665f9a5 1271-1284
+src/rust/cxx/src/symbols/rust_string.rs
+  s_144e1c38c83f9e::t_41239bd1a9bfff 34-42,47-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "529e8e281d70de79eaa9e9d683b4b234b736a747",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

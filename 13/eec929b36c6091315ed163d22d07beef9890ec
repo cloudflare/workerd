@@ -1,0 +1,39 @@
+docs/reference/oidc.md
+  s_8a31beec700f7c::t_38f56fd51a7148 5-6,38,45,54-55,57-83
+src/workerd/api/oidc.c++
+  s_8a31beec700f7c::t_968fc15e2430fb 17,33,51
+src/workerd/api/tests/BUILD.bazel
+  s_8a31beec700f7c::t_03f5bb9e142f46 1522-1527
+src/workerd/api/tests/oidc-local-test.js
+  s_8a31beec700f7c::t_be6aa46755408c 1-84
+src/workerd/api/tests/oidc-local-test.wd-test
+  s_8a31beec700f7c::t_3cad7636accf5e 1-18
+src/workerd/io/io-channels.h
+  s_8a31beec700f7c::t_8c1bb8bff02348 140,146-148
+src/workerd/server/factory/worker-factory.c++
+  s_8a31beec700f7c::t_57fc9c83c213fc 29,780-830
+src/workerd/server/server/bridge.rs
+  s_8a31beec700f7c::t_03eefeae770ca6 705-706
+src/workerd/server/server/config.rs
+  s_8a31beec700f7c::t_b935d14a0dae00 1141,1163
+src/workerd/server/server/worker.rs
+  s_8a31beec700f7c::t_b68d1a71a325d0 78,99,349,421-429,442,1049-1056
+src/workerd/server/workerd.capnp
+  s_8a31beec700f7c::t_ad8e2ad96ae0ad 877-881
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "13eec929b36c6091315ed163d22d07beef9890ec",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+src/workerd/api/actor-call-retry.c++
+  s_e6ef9db3485b14::t_8181556824a409 14-18,23,25-29,41-44,52-56,64-71,119
+  s_e6ef9db3485b14::t_5036b09e7d8d2f 120
+  s_e6ef9db3485b14::t_6d35bf72e79dc9 72-73
+src/workerd/server/server.c++
+  s_e6ef9db3485b14::t_1082d8e583e001 4864,4866-4868
+  s_e6ef9db3485b14::t_9685da644b59bc 4874-4875
+src/workerd/api/http.c++
+  s_e6ef9db3485b14::t_2f7446d4aeb71d 1509,1519,1552-1553,1559-1560,1568-1569,1574-1575,1588-1590,1606-1607,1620,1662,1671-1672,1676-1680,1803-1804,1813-1820,1829,1832,1903-1904,1913-1920,1929-1930,1933,1960-1961,1977-1979,1982-1990,1992-1995,2003-2005,2018-2019,2141-2145
+src/workerd/server/server-test.c++
+  s_e6ef9db3485b14::t_45fd24e8cbc603 2629-2634,2640,2644-2706
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_be6b2699070fca 115-116,119-121,203-207,230,268-283,295-302,310-312,332,433-437,445-446,462-464,512,1223-1435,1527-1530,1532-1534
+src/workerd/api/actor-call-retry.h
+  s_e6ef9db3485b14::t_f23e9609dd42c0 29,38,42-80,88,91,98-107,112-114,117,160-166,175-190,200-201,211,213-214
+  s_e6ef9db3485b14::t_9f79811046754e 31-37
+  s_e6ef9db3485b14::t_5321fc80911bb2 30
+src/workerd/api/actor-call-retry-test.c++
+  s_e6ef9db3485b14::t_4d037b06b21f12 70,284-326,355
+src/workerd/io/io-channels.h
+  s_e6ef9db3485b14::t_50f26851b5f973 91-98
+src/workerd/server/workerd.capnp
+  s_e6ef9db3485b14::t_bb0700a1ccedf5 549-553
+  s_e6ef9db3485b14::t_9fbaa1c6710e2b 555
+  s_756328791ab730::t_78fd8167ee07ee 554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b0bf226de275f5c05d1eb617bccf5e5a05d00739",
+  "prompts": {},
+  "sessions": {
+    "s_756328791ab730": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f516141b5ffeNlCjrhcr3GDBl3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

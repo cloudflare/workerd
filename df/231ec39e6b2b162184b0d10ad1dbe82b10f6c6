@@ -1,0 +1,23 @@
+docs/jsg.md
+  s_f45b1e1284761f::t_9d6e95bb3f109f 1344-1352
+src/workerd/jsg/AGENTS.md
+  s_f45b1e1284761f::t_e7b31a22ba9ce3 79-84,100-101
+src/workerd/jsg/jsg.h
+  s_f45b1e1284761f::t_26dc5253325fbc 2215-2226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "df231ec39e6b2b162184b0d10ad1dbe82b10f6c6",
+  "prompts": {},
+  "sessions": {
+    "s_f45b1e1284761f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "582c3f8f-8b99-468e-81b4-3b06386332bb",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
