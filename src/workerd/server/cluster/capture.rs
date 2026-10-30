@@ -282,3 +282,7 @@ impl Capture {
         self.entries.retain(|&end, _| end > to);
     }
 }
+
+#[cfg(test)]
+#[path = "capture-test.rs"]
+mod tests;
