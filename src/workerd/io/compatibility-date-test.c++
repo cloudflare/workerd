@@ -590,7 +590,8 @@ KJ_TEST("encode to full flag list") {
 }
 
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
-  // Specific flags with compatibility dates outside the normal release weekdays.
+  // List of specific flags that are allowed to use non-conformant dates
+  // (already deployed and can't be changed for compatibility reasons)
   kj::HashSet<kj::StringPtr> allowedFlagExceptions;
   allowedFlagExceptions.insertAll(std::initializer_list<kj::StringPtr>{
     // Existing non-conformant dates that are already deployed
@@ -630,9 +631,6 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     "enableWorkflowScriptValidation"_kj,           // 2025-09-20 (Saturday)
     "stripAuthorizationOnCrossOriginRedirect"_kj,  // 2025-09-01 (Monday)
     "enableCtxExports"_kj,                         // 2025-11-17 (Monday)
-
-    // Scheduled default enablement on November 8, 2026 (Sunday).
-    "enableRequestSignal"_kj,
 
     // Non-conformant dates via impliedByAfterDate
     "pythonWorkers"_kj,                  // 2000-01-01 (Saturday) via impliedByAfterDate
