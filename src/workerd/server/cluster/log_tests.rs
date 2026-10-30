@@ -880,6 +880,62 @@ fn a_reset_deletes_its_facets_descendants() {
     assert_eq!(lanes(), []);
 }
 
+/// Copies a running facet's database to `to` with its WAL folded in, out of
+/// the capture's sight, as cloning a facet does.
+fn copy_folded(from: &Path, to: &Path) {
+    for suffix in ["", "-wal"] {
+        let with = |p| crate::log::with_suffix(p, suffix);
+        std::fs::copy(with(from), with(to)).unwrap();
+    }
+    Connection::open(to.to_str().unwrap()).execute("PRAGMA wal_checkpoint(TRUNCATE)");
+    for suffix in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(crate::log::with_suffix(to, suffix));
+    }
+}
+
+#[test]
+fn a_clone_restores_as_its_source_was() {
+    // Facet a cloned over facet c: c's subtree goes, a's is copied, and
+    // both go on independently.
+    let dir = scratch("clone-lanes");
+    let root = open_app(&dir.join("app.db"));
+    let p = |n: u32| dir.join(format!("app.{n}.db"));
+    let a = open_facet(&p(1), "a/db");
+    let ab = open_facet(&p(2), "a/b/db");
+    let c = open_facet(&p(3), "c/db");
+    let cd = open_facet(&p(4), "c/d/db");
+    for db in [&root, &a, &ab, &c, &cd] {
+        insert(db, 0, 20);
+    }
+    let store = Bucket::memory("");
+    upload(&store, 0, last());
+    let before = last();
+    insert(&ab, 20, 25);
+    drop((c, cd));
+    remove(&p(3));
+    remove(&p(4));
+    copy_folded(&p(1), &p(5));
+    copy_folded(&p(2), &p(6));
+    CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().clone_lanes("a/", "c/"));
+    insert(&a, 20, 30);
+    let c = open_facet(&p(5), "c/db");
+    let cb = open_facet(&p(6), "c/b/db");
+    insert(&c, 100, 105);
+    upload(&store, before, last());
+    let want = want([
+        (DB, &root),
+        ("a/db", &a),
+        ("a/b/db", &ab),
+        ("c/db", &c),
+        ("c/b/db", &cb),
+    ]);
+    assert_eq!(rows(&cb), rows(&ab));
+    assert_eq!(restored_lanes(&store, "clone-lanes-out"), want);
+    let snapshot = Bucket::memory("");
+    upload_snapshot(&snapshot, last());
+    assert_eq!(restored_lanes(&snapshot, "clone-lanes-snapshot"), want);
+}
+
 #[test]
 fn facet_paths_round_trip_through_lane_names() {
     use crate::log::facet_path;

@@ -242,13 +242,20 @@ void ActorStorage::Impl::cloneFacet(const kj::Directory& dir,
   }
 
   // A source without a database has no data, which is what the destination already has. The WAL
-  // is copied with the database since a crashed process may have left one uncheckpointed; the
-  // SHM only speeds up the first open.
-  for (const auto& suffix: {""_kj, "-wal"_kj, "-shm"_kj}) {
+  // holds commits not yet checkpointed, so it is copied with the database.
+  for (const auto& suffix: {""_kj, "-wal"_kj}) {
     auto src = getSqlitePath(rootKey, srcId, suffix);
     if (!dir.exists(src)) return;
     dir.transfer(
         getSqlitePath(rootKey, dstId, suffix), kj::WriteMode::CREATE, src, kj::TransferMode::COPY);
+  }
+  // A cluster captures a database's commits from its WAL's start, so the copy's WAL is folded
+  // into it, out of the cluster's sight.
+  if (actors->replicated()) {
+    SqliteDatabase::Vfs vfs(dir);
+    SqliteDatabase(vfs, getSqlitePath(rootKey, dstId), kj::WriteMode::MODIFY)
+        .run("PRAGMA wal_checkpoint(TRUNCATE);");
+    dir.tryRemove(getSqlitePath(rootKey, dstId, "-wal"));
   }
 }
 
@@ -423,17 +430,11 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
   }
   void deleteFacet(kj::StringPtr name) override {
     hooks->delete_facet(toRust(name));
-    // In a cluster the deletion is acknowledged once it is durable, as a commit is.
-    if (hooks->replicated()) {
-      auto& context = IoContext::current();
-      auto commit = result_task_run(hooks->committer()->commit());
-      context.addTask(context.lockOutputWhile(kj::mv(commit)).catch_([](kj::Exception&&) {
-        // A failed commit broke the output gate, which breaks the actor.
-      }));
-    }
+    lockOutputWhileCommitting();
   }
   void cloneFacet(kj::StringPtr src, kj::StringPtr dst) override {
     hooks->clone_facet(toRust(src), toRust(dst));
+    lockOutputWhileCommitting();
   }
 
   void active() override {
@@ -445,6 +446,16 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
 
  private:
   ::rust::Box<ActorHooks> hooks;
+
+  // In a cluster a change to the facet tree is acknowledged once it is durable, as a commit is.
+  void lockOutputWhileCommitting() {
+    if (!hooks->replicated()) return;
+    auto& context = IoContext::current();
+    auto commit = result_task_run(hooks->committer()->commit());
+    context.addTask(context.lockOutputWhile(kj::mv(commit)).catch_([](kj::Exception&&) {
+      // A failed commit broke the output gate, which breaks the actor.
+    }));
+  }
 };
 
 // Schedules a root actor's alarms with the namespace's scheduler, at once, and in a cluster indexes

@@ -937,9 +937,6 @@ test('cluster: facets and their deletions survive their owner', async () => {
     for (const path of ['a', 'a', 'a,b%2Fc', 'x', 'x,y']) {
       await facetAdd(port, name, path);
     }
-    const clone = await fetchJson(port, `/facet-clone?name=${name}`);
-    assert.strictEqual(clone.status, 500);
-    assert.match(clone.body.error, /not supported in cluster mode/);
     // Nothing commits after the delete: it is durable once it returns.
     const del = await fetchJson(port, `/facet-delete?name=${name}&path=x`);
     assert.strictEqual(del.status, 200, JSON.stringify(del.body));
@@ -949,6 +946,32 @@ test('cluster: facets and their deletions survive their owner', async () => {
     assert.strictEqual(await facetAdd(p, name, 'a,b%2Fc'), 2);
     assert.strictEqual(await facetAdd(p, name, 'x'), 1);
     assert.strictEqual(await facetAdd(p, name, 'x,y'), 1);
+  });
+});
+
+test('cluster: facet clones survive their owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const port = nodes[0].httpPort;
+    const name = 'cloned';
+    for (const path of ['a', 'a', 'a,b', 'c', 'c,d']) {
+      await facetAdd(port, name, path);
+    }
+    // Over a facet: c's subtree goes, a's is copied, running.
+    let clone = await fetchJson(port, `/facet-clone?name=${name}&path=a,c`);
+    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
+    assert.strictEqual(await facetAdd(port, name, 'c'), 3);
+    // Nothing commits after the clone: it is durable once it returns.
+    clone = await fetchJson(port, `/facet-clone?name=${name}&path=c,e`);
+    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
+    const survivor = await killOwnerAndTakeOver(nodes, clone.body.nodeId, name);
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, name, 'a'), 3);
+    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'c'), 4);
+    assert.strictEqual(await facetAdd(p, name, 'c,b'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'c,d'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'e'), 4);
+    assert.strictEqual(await facetAdd(p, name, 'e,b'), 2);
   });
 });
 

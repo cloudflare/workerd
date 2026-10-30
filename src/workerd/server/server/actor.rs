@@ -1474,12 +1474,6 @@ impl ActorContainer {
 
     fn clone_facet(&self, src: &str, dst: &str) -> Result<()> {
         let ns = self.namespace()?;
-        if ns.cluster().is_some() {
-            // TODO(cluster): clone in the bucket's terms.
-            return Err(kj::failed!(
-                "jsg.Error: Cloning facets is not supported in cluster mode."
-            ));
-        }
         // Replacing a facet implies aborting it.
         self.abort_facet(dst, kj::failed!("jsg.Error: Facet was cloned-over."));
         if src == dst {
@@ -1493,8 +1487,16 @@ impl ActorContainer {
             self.facet_id()?.into(),
             src,
             dst,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some(node) = ns.cluster() {
+            let prefix = self.lane_prefix()?;
+            let [src, dst] = [src, dst].map(|n| prefix.clone() + &cluster::facet_prefix([n]));
+            let unique_key = ns.unique_key().unwrap_or_default();
+            node.cluster
+                .clone_lanes(unique_key, &self.root_key, &src, &dst)
+                .map_err(|e| kj::failed!("{e}"))?;
+        }
+        Ok(())
     }
 }
 

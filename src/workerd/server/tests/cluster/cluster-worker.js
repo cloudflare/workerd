@@ -41,7 +41,7 @@
 //                    separated by commas, creating the facets on the way.
 //   /facet-delete?path=P
 //                    Deletes the facet at P with its descendants.
-//   /facet-clone     Tries to clone facet "a" onto "b".
+//   /facet-clone     Clones the facet named first in `path` onto the second.
 //   /delete-all      Deletes all of this DO's storage, its facets' too.
 //   /arm-constructor-failure
 //                    Sets a storage flag that makes the *next* instantiation of
@@ -334,7 +334,8 @@ export class Counter extends DurableObject {
       }
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/facet-clone') {
-      this.ctx.facets.clone('a', 'b');
+      const [src, dst] = url.searchParams.get('path').split(',');
+      this.ctx.facets.clone(src, dst);
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/delete-all') {
       await this.state.storage.deleteAll();

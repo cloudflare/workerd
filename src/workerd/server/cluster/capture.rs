@@ -137,9 +137,7 @@ impl Capture {
                 push(&mut entry, &mut self.cursor, n, Body::Initialize(&image));
             }
         }
-        if !entry.is_empty() {
-            self.entries.insert(self.cursor.sequence, entry);
-        }
+        self.add(entry);
         Ok(())
     }
 
@@ -154,24 +152,50 @@ impl Capture {
         wal.frames.clear();
         let lane = wal.lane.clone();
         let prefix = lane.strip_suffix(crate::log::DB).unwrap_or_default();
-        self.delete(|l| l == lane || l.starts_with(prefix) && l[prefix.len()..].contains('/'));
+        let mut entry = Vec::new();
+        self.delete(&mut entry, |l| {
+            l == lane || l.starts_with(prefix) && l[prefix.len()..].contains('/')
+        });
+        self.add(entry);
     }
 
     /// The facet with lane prefix `prefix` was deleted with its
     /// descendants, their databases closed and their files removed.
     pub fn delete_lanes(&mut self, prefix: &str) {
         self.wals.retain(|_, w| !w.lane.starts_with(prefix));
-        self.delete(|l| l.starts_with(prefix));
+        let mut entry = Vec::new();
+        self.delete(&mut entry, |l| l.starts_with(prefix));
+        self.add(entry);
     }
 
-    /// Delete the live lanes `doomed` picks, in one entry.
-    fn delete(&mut self, doomed: impl Fn(&str) -> bool) {
+    /// The facet with lane prefix `dst` and its descendants were replaced
+    /// by copies of the facet with prefix `src`'s, closed, and each copy's
+    /// WAL folded into its database.
+    pub fn clone_lanes(&mut self, src: &str, dst: &str) {
+        self.wals.retain(|_, w| !w.lane.starts_with(dst));
         let mut entry = Vec::new();
+        self.delete(&mut entry, |l| l.starts_with(dst));
+        let from: Vec<_> = (self.cursor.lanes.iter().enumerate())
+            .filter_map(|(n, l)| Some((n as u32, l.as_deref()?.strip_prefix(src)?)))
+            .map(|(n, rest)| (n, format!("{dst}{rest}")))
+            .collect();
+        for (n, name) in from {
+            push(&mut entry, &mut self.cursor, 0, Body::CloneLane(&name, n));
+        }
+        self.add(entry);
+    }
+
+    /// Delete the live lanes `doomed` picks, into `entry`.
+    fn delete(&mut self, entry: &mut Vec<u8>, doomed: impl Fn(&str) -> bool) {
         for n in 0..self.cursor.lanes.len() {
             if self.cursor.lanes[n].as_deref().is_some_and(&doomed) {
-                push(&mut entry, &mut self.cursor, n as u32, Body::DeleteLane);
+                push(entry, &mut self.cursor, n as u32, Body::DeleteLane);
             }
         }
+    }
+
+    /// Adds `entry`, one commit's frames, unless empty.
+    fn add(&mut self, entry: Vec<u8>) {
         if !entry.is_empty() {
             self.entries.insert(self.cursor.sequence, entry);
         }

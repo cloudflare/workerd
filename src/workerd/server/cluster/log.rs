@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! An object's log in the bucket (`frames.capnp`), laid out as the storage
-//! relay's: a `sqlitePages` lane per database, the root's and each
-//! facet's, whose frames are the pages each commit wrote. Every lane shares
+//! An object's log in the bucket (`frames.capnp`): a `sqlitePages` lane per
+//! database, the root's and each facet's, whose frames are the pages each
+//! commit wrote. Every lane shares
 //! the object's sessions and sequence, so a restore is a prefix of the
 //! commits of all its databases.
 //!
@@ -119,6 +119,8 @@ pub type Pages<'a> = BTreeMap<u32, &'a [u8]>;
 pub enum Body<'a> {
     /// The lane named, at the lowest free number.
     NewLane(&'a str),
+    /// The lane named, at the lowest free number, a copy of lane `from`.
+    CloneLane(&'a str, u32),
     DeleteLane,
     Initialize(&'a [u8]),
     /// A commit's pages, and the database's size after, in pages.
@@ -126,10 +128,10 @@ pub enum Body<'a> {
 }
 
 /// Appends a frame on `lane` to `out` at `cursor`, and moves it past; the
-/// lane of a `NewLane` is its number. Returns the lane.
+/// lane of a new lane is its number. Returns the lane.
 pub fn push(out: &mut Vec<u8>, cursor: &mut Cursor, lane: u32, body: Body) -> u32 {
     let lane = match body {
-        Body::NewLane(name) => {
+        Body::NewLane(name) | Body::CloneLane(name, _) => {
             let n = cursor.free();
             if n as usize == cursor.lanes.len() {
                 cursor.lanes.push(None);
@@ -170,6 +172,11 @@ fn frame_at(
             let mut lane = f.init_new_lane();
             lane.set_name(name);
             lane.set_sqlite_pages(());
+        }
+        Body::CloneLane(name, from) => {
+            let mut lane = f.init_clone_lane();
+            lane.set_name(name);
+            lane.set_from(from);
         }
         Body::DeleteLane => f.set_delete_lane(()),
         Body::Initialize(image) => f.set_initialize(image),
@@ -411,6 +418,12 @@ impl Replay {
             frame::NewLane(lane) => {
                 let name = text(lane?.get_name()?)?;
                 self.create(n as usize, name)?;
+            }
+            frame::CloneLane(lane) => {
+                self.lane(lane.get_from())?;
+                let from = std::fs::read(self.dir.join(lane.get_from().to_string()))?;
+                let name = text(lane.get_name()?)?;
+                self.create(n as usize, name)?.write_all(&from)?;
             }
             frame::DeleteLane(()) => {
                 self.lane(n)?;

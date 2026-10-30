@@ -230,6 +230,12 @@ impl Cluster {
         self.owners.delete_lanes(ns, actor, prefix)
     }
 
+    /// An owned object's facet with lane prefix `dst` and its descendants
+    /// were replaced by copies of the facet with prefix `src`'s.
+    pub fn clone_lanes(&self, ns: &str, actor: &str, src: &str, dst: &str) -> Result<()> {
+        self.owners.clone_lanes(ns, actor, src, dst)
+    }
+
     /// One of namespace `ns`'s databases was deleted, before anything
     /// writes a new one.
     pub fn database_reset(&self, ns: &str, file: &str) {

@@ -543,6 +543,15 @@ impl Owners {
         Ok(())
     }
 
+    /// An owned object's facet with lane prefix `dst` was replaced with
+    /// its descendants by copies of the facet with prefix `src`'s: the next
+    /// commit makes it durable.
+    pub fn clone_lanes(&self, ns: &str, actor: &str, src: &str, dst: &str) -> Result<()> {
+        let slot = self.slot(ns, actor)?;
+        slot.capture.borrow_mut().clone_lanes(src, dst);
+        Ok(())
+    }
+
     /// An owned object's database `file` was deleted, with its facet's
     /// descendants: its session continues with an empty database, which
     /// the next commit makes durable.

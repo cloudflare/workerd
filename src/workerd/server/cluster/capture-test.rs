@@ -4,7 +4,7 @@
 
 //! A simulation of one object's databases, a root and facets, writing their
 //! WALs as `SQLite` does: transactions, rolled-back ones, checkpoints,
-//! facets created, deleted and reset. Batches upload as the owner's commits
+//! facets created, deleted, reset and cloned. Batches upload as the owner's commits
 //! and tiering race to, with stale starts and ends; compaction snapshots
 //! what the bucket holds; each takeover restores and starts the next
 //! session from a snapshot of the restored databases. Whatever a seed
@@ -285,6 +285,42 @@ impl Sim {
         self.record();
     }
 
+    /// Facet `i` cloned over a sibling, with its descendants, each copy's
+    /// WAL folded into its file.
+    fn clone_facet(&mut self, i: usize) {
+        let src = self.dbs[i].lane.strip_suffix(DB).unwrap().to_owned();
+        let Some(parent) = src.strip_suffix('/') else {
+            return;
+        };
+        let parent = parent.rsplit_once('/').map_or(String::new(), |(p, _)| p.to_owned() + "/");
+        let dst = parent + &facet_prefix([NAMES[self.rng.below(NAMES.len())]]);
+        if dst == src {
+            return;
+        }
+        self.dbs.retain(|d| {
+            let doomed = d.lane.starts_with(&dst);
+            if doomed {
+                remove(&d.path);
+            }
+            !doomed
+        });
+        let copies: Vec<_> = (self.dbs.iter())
+            .filter_map(|d| Some((d.lane.strip_prefix(&src)?, d)))
+            .map(|(rest, d)| (dst.clone() + rest, d.state(), d.pages, d.committed))
+            .collect();
+        self.capture.clone_lanes(&src, &dst);
+        for (lane, file, pages, committed) in copies {
+            self.files += 1;
+            let path = self.dir.join(format!("o.{}.sqlite", self.files));
+            std::fs::write(&path, &file).unwrap();
+            self.capture.open_lane(&path, &lane);
+            let wal = Vec::new();
+            self.dbs.push(Db { lane, path, file, wal, pages, offset: 0, committed });
+        }
+        self.trace.push(format!("clone {src} {dst}"));
+        self.record();
+    }
+
     /// What the capture holds from an earlier start to a commit uploads, as
     /// a commit and tiering racing leave it.
     fn upload(&mut self) {
@@ -435,7 +471,8 @@ impl Sim {
             55..63 => self.new_facet(),
             63..66 => self.delete(i),
             66..68 => self.reset(i),
-            68..92 => self.upload(),
+            68..71 => self.clone_facet(i),
+            71..92 => self.upload(),
             _ => self.compact(),
         }
     }
