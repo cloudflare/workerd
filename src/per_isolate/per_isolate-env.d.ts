@@ -118,6 +118,24 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
+  // these only through events/event-target-internals, which documents them.
+  setListenerCountHook(
+    target: EventTarget,
+    type: string,
+    hook: (type: string, count: number) => void
+  ): void;
+  getEventHandlerAttribute(target: EventTarget, type: string): unknown;
+  setEventHandlerAttribute(
+    target: EventTarget,
+    type: string,
+    value: unknown
+  ): void;
+  dispatchEvent(
+    target: EventTarget,
+    event: Event,
+    report: boolean
+  ): { readonly exception: unknown } | undefined;
 };
 
 // An abort algorithm registration. Obtained only from

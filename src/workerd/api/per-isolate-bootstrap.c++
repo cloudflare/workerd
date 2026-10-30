@@ -7,6 +7,7 @@
 #include <workerd/api/abort-bootstrap.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
@@ -201,6 +202,52 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The EventTarget seam (see event-target-bootstrap.h). Plain methods: they allocate, can throw,
+// and some call back into JavaScript.
+static void SetListenerCountHook(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setListenerCountHook(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void GetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::getEventHandlerAttribute(
+              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
+    });
+  });
+}
+
+static void SetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setEventHandlerAttribute(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller passes an actual boolean, so this is ToBoolean on a boolean and cannot run
+      // user code.
+      auto report = api::ReportListenerExceptions(args[2]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(api::EventTargetBootstrap::dispatchEvent(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), report)));
+    });
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -294,6 +341,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "utf8Length",
     "setPrivate",
     "getPrivate",
+    "setListenerCountHook",
+    "getEventHandlerAttribute",
+    "setEventHandlerAttribute",
+    "dispatchEvent",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -310,6 +361,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, Utf8Length),
     getMethod(js, SetPrivate),
     getMethod(js, GetPrivate),
+    getMethod(js, SetListenerCountHook),
+    getMethod(js, GetEventHandlerAttribute),
+    getMethod(js, SetEventHandlerAttribute),
+    getMethod(js, DispatchEvent),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
