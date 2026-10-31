@@ -16384,7 +16384,10 @@ export interface MediaError extends Error {
   readonly stack?: string;
 }
 /** RPC-safe fetch options. Normalize URL, FormData and URLSearchParams with new Request(). */
-export type IdentityFetchOptions = Omit<RequestInit, "body" | "cf"> & {
+export type IdentityFetchOptions = Omit<
+  RequestInit,
+  "body" | "cf" | "signal"
+> & {
   body?:
     string | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array> | Blob;
 };
@@ -16413,8 +16416,6 @@ export interface IdentityBinding {
   }): Promise<string>;
   /** Returns a fixed identity RPC stub; use normal dup() and disposal rules. */
   getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
-  /** Signs and sends as the default workload identity using native service fetch. */
-  fetch(input: Request | string | URL, init?: RequestInit): Promise<Response>;
 }
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {

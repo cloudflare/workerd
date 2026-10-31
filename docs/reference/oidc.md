@@ -6,7 +6,8 @@ const grant = await env.API_TOKEN.getAuthorizationGrant({
   authorizationServer: 'https://auth.example.com',
   scope: ['issues:read'],
 });
-const response = await env.API_TOKEN.fetch('https://api.example.com/issues');
+const identity = await env.API_TOKEN.getIdentity();
+const response = await identity.fetch('https://api.example.com/issues');
 ```
 
 EWC compiles each binding into a private service capability with protected origin
@@ -27,7 +28,8 @@ flowchart LR
 | Preview   | `worker:W:preview:P`         |
 | Namespace | `durable-object-namespace:N` |
 
-Each getter returns a fresh five-minute JWT. Configure one audience per binding;
+Each token or grant call returns a fresh five-minute JWT. Configure one audience
+per binding;
 `getToken()` takes no arguments. WAG and HTTP signing require their own limits
 and disjoint signing keys.
 
@@ -59,9 +61,11 @@ Identity metadata getters are remote: await `id`, `signatureAgent` and
 rules. Handles retain their original parent and fixed selection. They expose
 no nested minting, JWT or authorization-grant methods.
 
-Root `fetch()` uses native service fetch normalization. A returned handle's
-`fetch()` is an ordinary RPC method: pass a string or `Request` and RPC-safe
-options. Normalize URL objects, FormData and URLSearchParams at the call site
+The root binding exposes `getIdentity()`, `getToken()` and
+`getAuthorizationGrant()`. Use `getIdentity().fetch()` for the default identity
+and `getIdentity(label).fetch()` for a labeled identity. Every signed fetch is
+an ordinary RPC method: pass a string or `Request` and RPC-safe options. Normalize
+URL objects, FormData and URLSearchParams at the call site
 with `new Request(url, init)` before passing them to the handle. The service
 validates limits before consuming the body and strips all caller identity
 selector headers. There is no label-selection header transport or RPC preflight.
@@ -69,3 +73,14 @@ selector headers. There is no label-selection header transport or RPC preflight.
 A runtime wrapper requires a documented requirement standard JSRPC cannot meet,
 a reproducer, an API/transport alternatives analysis and explicit design review.
 Do not add one solely for API convenience or to expose a first-class binding.
+
+The service entrypoint's native HTTP handler rejects use. Native service Fetcher
+special cases such as local `data:` URL handling are outside the public binding
+API. Identity-target fetch validates every destination before reading its body.
+
+Identity-target fetch options exclude `signal`. Cross-RPC AbortSignal transport
+and cancellation are outside this contract. A Request without an explicit signal
+can be passed normally; an explicitly signaled Request can fail standard RPC
+serialization. Disposing a stub, dropping an await or timing out the caller does
+not promise to stop remote work or undo a dispatched write. No experimental
+AbortSignal compatibility flag is required by the identity binding.

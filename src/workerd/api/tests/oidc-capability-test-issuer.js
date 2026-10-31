@@ -5,6 +5,9 @@ import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 function responseFor(props, input, init, label) {
   const request = new Request(input, init);
+  if (new URL(request.url).origin !== 'https://api.example') {
+    throw new TypeError('Destination must be an allowed HTTPS origin');
+  }
   return new Response(
     JSON.stringify({
       ...props,
@@ -62,7 +65,7 @@ export class Issuer extends WorkerEntrypoint {
     }
     return new Identity(this.ctx.props, label);
   }
-  fetch(request) {
-    return responseFor(this.ctx.props, request);
+  fetch() {
+    throw new TypeError('Use getIdentity().fetch() for signed requests');
   }
 }

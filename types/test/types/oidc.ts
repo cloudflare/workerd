@@ -5,7 +5,9 @@ const grant: Promise<string> = binding.getAuthorizationGrant({
   authorizationServer: 'https://auth.example.com',
   scope: ['read'],
 });
-const response: Promise<Response> = binding.fetch('https://api.example.com');
+const response: Promise<Response> = (await binding.getIdentity()).fetch(
+  'https://api.example.com'
+);
 void [token, grant, response];
 // @ts-expect-error Audience selection belongs in configuration.
 binding.getToken({ audience: 'other' });
@@ -67,3 +69,10 @@ selected.fetch('https://api.example.com', {
   cf: { resolveOverride: 'forged' },
 });
 void [selectedId, selectedResponse, synchronousId];
+
+// @ts-expect-error Signed requests use the selected identity's RPC fetch method.
+binding.fetch('https://api.example.com');
+selected.fetch('https://api.example.com', {
+  // @ts-expect-error AbortSignal transport is outside the identity fetch contract.
+  signal: new AbortController().signal,
+});

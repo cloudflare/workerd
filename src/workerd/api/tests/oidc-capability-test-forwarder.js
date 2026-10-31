@@ -8,10 +8,11 @@ export class Forwarder extends WorkerEntrypoint {
     const grant = await binding.getAuthorizationGrant({
       authorizationServer: 'https://auth.example/',
     });
-    const response = await binding.fetch('https://api.example/');
+    const workload = await binding.getIdentity();
+    const response = await workload.fetch('https://api.example/');
     const customer = await binding.getIdentity('customer_x');
     const customerResponse = await customer.fetch('https://api.example/');
-    const sanitized = await binding.fetch('https://api.example/', {
+    const sanitized = await workload.fetch('https://api.example/', {
       headers: {
         'cf-workers-identity-label': 'forged',
         'cf-workers-identity-customer': 'forged',

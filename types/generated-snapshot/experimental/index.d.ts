@@ -16436,7 +16436,7 @@ declare module "cloudflare:node" {
   ): Promise<void>;
 }
 /** RPC-safe fetch options. Normalize URL, FormData and URLSearchParams with new Request(). */
-type IdentityFetchOptions = Omit<RequestInit, "body" | "cf"> & {
+type IdentityFetchOptions = Omit<RequestInit, "body" | "cf" | "signal"> & {
   body?:
     string | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array> | Blob;
 };
@@ -16465,8 +16465,6 @@ interface IdentityBinding {
   }): Promise<string>;
   /** Returns a fixed identity RPC stub; use normal dup() and disposal rules. */
   getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
-  /** Signs and sends as the default workload identity using native service fetch. */
-  fetch(input: Request | string | URL, init?: RequestInit): Promise<Response>;
 }
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {

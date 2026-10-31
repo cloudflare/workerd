@@ -5,6 +5,15 @@ import assert from 'node:assert';
 export const forwarding = {
   async test(_controller, env) {
     const direct = await env.IDENTITY.getToken();
+    await assert.rejects(
+      env.IDENTITY.fetch('https://api.example/'),
+      /getIdentity/
+    );
+    const workload = await env.IDENTITY.getIdentity();
+    await assert.rejects(
+      workload.fetch('data:text/plain,unsigned'),
+      /HTTPS|Invalid URL/
+    );
     const forwarded = await env.FORWARDER.exercise(env.IDENTITY);
     for (const value of [
       forwarded.token,
