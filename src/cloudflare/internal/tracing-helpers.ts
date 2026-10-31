@@ -13,6 +13,9 @@ export type { Span };
  * the async context so that any spans (or async continuations) created inside
  * `fn` nest correctly beneath it.
  *
+ * If `fn` throws or its returned promise rejects, `enterSpan` records the error
+ * on the span, and it then propagates unchanged.
+ *
  * @param name - The operation name for the span
  * @param fn - The function to execute within the span context
  * @returns The result of the function
@@ -37,7 +40,8 @@ export type { Span };
  */
 export function withSpan<T>(name: string, fn: (span: Span) => T): T {
   // `enterSpan` already handles sync vs. promise return (and sync-throw /
-  // promise-reject) auto-ending, so this is a pure passthrough.
+  // promise-reject) auto-ending and error recording, so this is a pure
+  // passthrough.
   return tracing.enterSpan(name, fn);
 }
 

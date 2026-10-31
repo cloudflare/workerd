@@ -16,6 +16,14 @@ export default {
   tailStream: createTailStreamHandler(state),
 };
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     await runInstrumentationTest(state, expectedSpans, {
@@ -69,6 +77,11 @@ const allExpectedSpans = [
     'error.type': d1BindingJsrpc
       ? 'near "INVALID": syntax error at offset 0: SQLITE_ERROR'
       : 'Error in line 1',
+    ...failed(
+      d1BindingJsrpc
+        ? 'D1_EXEC_ERROR: near "INVALID": syntax error at offset 0: SQLITE_ERROR'
+        : 'D1_EXEC_ERROR: Error in line 1: INVALID SQL: near "INVALID": syntax error at offset 0: SQLITE_ERROR'
+    ),
     closed: true,
   },
   {
