@@ -500,6 +500,7 @@ interface ExecutionContext<Props = unknown> {
     readonly override?: string;
   };
   readonly access?: CloudflareAccessContext;
+  readonly identity: CloudflareIdentityContext;
   mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
@@ -611,6 +612,9 @@ interface CacheContext {
 interface CloudflareAccessContext {
   readonly aud: string;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
+}
+interface CloudflareIdentityContext {
+  caller(): Promise<CloudflareWorkloadIdentity | null>;
 }
 declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
@@ -16466,6 +16470,21 @@ interface IdentityBinding {
   /** Returns a fixed identity RPC stub; use normal dup() and disposal rules. */
   getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
 }
+/** Verified credential facts. Your code must still authorize the caller and JWT audience. */
+type CloudflareWorkloadIdentity =
+  | Readonly<{
+      kind: "signed-request";
+      id: string;
+    }>
+  | Readonly<{
+      kind: "jwt";
+      issuer: string;
+      subject: string;
+      audience: string;
+      issuedAt: number;
+      expiresAt: number;
+      tokenId: string;
+    }>;
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;

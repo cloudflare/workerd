@@ -771,6 +771,10 @@ class RustIoChannelFactory final: public IoChannelFactory {
     worker->factory.getImpl().tasks.add(kj::evalLater([worker = kj::mv(worker)]() {}));
   }
 
+  kj::Maybe<uint> getWorkloadIdentityChannel() override {
+    return channels->workload_identity_channel();
+  }
+
   kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
     KJ_IF_SOME(env, envSubrequestChannel(channel)) return env.startRequest(kj::mv(metadata));
     // The access binding gets the request's identity as props, as the production embedder does

@@ -1137,6 +1137,21 @@ impl Server {
             subrequest.push(worker.loopback_entrypoint(entrypoint.as_deref())?);
         }
         // The access binding's entrypoint is a template: its props are each request's identity.
+        let mut workload_identity_channel = None;
+        if let Some(designator) = &pending.workload_identity {
+            let target = &designator.service;
+            match services.get(target) {
+                Some(Service::Worker(target_worker)) => {
+                    workload_identity_channel = Some(len_u32(&subrequest));
+                    subrequest
+                        .push(target_worker.loopback_entrypoint(designator.entrypoint.as_deref())?);
+                }
+                _ => report.error(format!(
+                    "Worker workloadIdentityService requires a Worker service: {target}"
+                )),
+            }
+        }
+
         let mut access_binding_channel = None;
         if let Some(designator) = &pending.access_binding {
             let target = &designator.service;
@@ -1208,6 +1223,7 @@ impl Server {
                 streaming_tails,
                 worker_loaders,
                 access_binding_channel,
+                workload_identity_channel,
                 has_debug_port: pending.bindings.has_debug_port,
                 server: Rc::downgrade(self),
                 abort_isolate: None,

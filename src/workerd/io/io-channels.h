@@ -229,6 +229,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // Get a CacheClient, used to implement the Cache API.
   virtual kj::Own<CacheClient> getCache() = 0;
 
+  // Private platform verifier. Absence is an availability failure for credential-bearing HTTP.
+  virtual kj::Maybe<uint> getWorkloadIdentityChannel() {
+    return kj::none;
+  }
+
   // Get the singleton timer instance, used to back Date.now(), setTimeout(), etc. This object
   // may implement Spectre mitigations.
   virtual TimerChannel& getTimer() = 0;

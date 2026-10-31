@@ -76,6 +76,7 @@ pub struct PendingLink {
     pub storage: Option<String>,
     /// `accessBindingService`: the worker whose entrypoint receives the request's Access identity.
     pub access_binding: Option<Designator>,
+    pub workload_identity: Option<Designator>,
 }
 
 /// The I/O channel table of a linked worker: what each channel number its bindings hold reaches.
@@ -101,6 +102,7 @@ pub struct LinkedChannels {
     pub worker_loaders: Vec<Rc<WorkerLoaderNamespace>>,
     /// The subrequest channel whose props come from the request's Access blob.
     pub access_binding_channel: Option<u32>,
+    pub workload_identity_channel: Option<u32>,
     pub has_debug_port: bool,
     pub server: Weak<Server>,
     /// How a dynamic worker unloads itself; a static worker aborting its isolate ends the
@@ -349,6 +351,7 @@ impl WorkerService {
                 streaming_tails: Vec::new(),
                 worker_loaders: Vec::new(),
                 access_binding_channel: None,
+                workload_identity_channel: None,
                 has_debug_port: false,
                 server,
                 abort_isolate: Some(abort_isolate),
@@ -416,6 +419,15 @@ fn pending_link(
     } else {
         None
     };
+    let workload_identity = if conf.has_workload_identity_service() {
+        Some(Designator::from_reader(
+            conf.get_workload_identity_service()?,
+            "Worker workloadIdentityService".to_owned(),
+            &mut errors,
+        )?)
+    } else {
+        None
+    };
     for error in errors {
         report.service_error(name, error);
     }
@@ -428,6 +440,7 @@ fn pending_link(
         streaming_tails,
         storage,
         access_binding,
+        workload_identity,
     })
 }
 
@@ -1039,6 +1052,10 @@ impl ChannelFactory {
         Ok(SubrequestChannel::new(cache.ok_or_else(|| {
             kj::failed!("jsg.Error: No Cache was configured")
         })?))
+    }
+
+    pub(crate) fn workload_identity_channel(&self) -> KjMaybe<u32> {
+        self.0.workload_identity_channel.into()
     }
 
     pub(crate) fn access_binding_channel(&self) -> KjMaybe<u32> {

@@ -847,6 +847,8 @@ class Request final: public Body {
       jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init);
 
   jsg::Ref<Request> clone(jsg::Lock& js);
+  // Private RPC copy: no abort signal, cf overrides, or fetcher capability crosses this boundary.
+  jsg::Ref<Request> cloneForWorkloadIdentity(jsg::Lock& js, bool includeBody);
 
   kj::StringPtr getMethod();
   kj::StringPtr getUrl();

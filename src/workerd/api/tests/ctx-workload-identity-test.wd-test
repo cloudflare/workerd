@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+const unitTests :Workerd.Config = (
+ services = [
+  (name = "test", worker = (
+    modules = [(name = "test.js", esModule = embed "ctx-workload-identity-test.js")],
+    compatibilityFlags = ["nodejs_compat", "enable_workload_identity_context"],
+    bindings = [(name = "RECEIVER", service = "receiver"), (name = "UNAVAILABLE", service = "unavailable")]
+  )),
+  (name = "receiver", worker = (
+    modules = [(name = "receiver.js", esModule = embed "ctx-workload-identity-receiver.js")],
+    compatibilityFlags = ["nodejs_compat", "enable_workload_identity_context"],
+    workloadIdentityService = (name = "verifier", entrypoint = "Verifier")
+  )),
+  (name = "unavailable", worker = (
+    modules = [(name = "receiver.js", esModule = embed "ctx-workload-identity-receiver.js")],
+    compatibilityFlags = ["nodejs_compat", "enable_workload_identity_context"]
+  )),
+  (name = "verifier", worker = (
+    modules = [(name = "verifier.js", esModule = embed "ctx-workload-identity-verifier.js")],
+    compatibilityFlags = ["enable_workload_identity_context"]
+  ))
+ ]
+);

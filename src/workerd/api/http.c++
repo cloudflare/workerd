@@ -554,6 +554,21 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
+jsg::Ref<Request> Request::cloneForWorkloadIdentity(jsg::Lock& js, bool includeBody) {
+  kj::Maybe<Body::ExtractedBody> bodyCopy;
+  if (includeBody) {
+    JSG_REQUIRE(!getBodyUsed(js), DOMInvalidStateError,
+        "The signed request body has been consumed. Call caller() before reading it.");
+    KJ_IF_SOME(stream, getBody(js)) {
+      JSG_REQUIRE(!stream.isLocked(js), DOMInvalidStateError,
+          "The signed request body is locked. Call caller() before acquiring a reader.");
+    }
+    bodyCopy = Body::clone(js);
+  }
+  return js.alloc<Request>(js, method, url, Redirect::MANUAL, headers->clone(js), kj::none,
+      kj::none, CfProperty(), kj::mv(bodyCopy), kj::none);
+}
+
 kj::StringPtr Request::getMethod() {
   return kj::toCharSequence(method);
 }

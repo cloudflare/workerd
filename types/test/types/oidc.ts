@@ -76,3 +76,23 @@ selected.fetch('https://api.example.com', {
   // @ts-expect-error AbortSignal transport is outside the identity fetch contract.
   signal: new AbortController().signal,
 });
+
+// Receiver facts need no outbound binding or configuration.
+declare const receiverContext: ExecutionContext;
+const caller: CloudflareWorkloadIdentity | null = await receiverContext.identity.caller();
+if (caller?.kind === 'signed-request') {
+  const id: string = caller.id;
+  // @ts-expect-error Signed URLs do not assert JWT workload metadata.
+  caller.subject;
+  // @ts-expect-error Validated facts are immutable.
+  caller.id = 'forged';
+  void id;
+} else if (caller?.kind === 'jwt') {
+  const audience: string = caller.audience;
+  const expiry: number = caller.expiresAt;
+  // @ts-expect-error JWT identities do not assert a Signature-Agent URL.
+  caller.id;
+  void [audience, expiry];
+}
+// @ts-expect-error Receiver trust is platform-owned; no issuer/configuration argument.
+receiverContext.identity.caller({ issuer: 'https://attacker.example' });

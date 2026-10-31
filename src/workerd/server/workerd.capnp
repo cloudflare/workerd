@@ -935,6 +935,10 @@ struct Worker {
   # Requests that carry the header get `ctx.access` populated; requests without it get
   # `ctx.access === undefined`.
 
+  workloadIdentityService @21 :ServiceDesignator;
+  # Private workload verifier for development/tests. Receives verify(originalRequest) over RPC.
+  # Hosted Workers supplies this channel automatically, with protected receiver scope.
+
   accessBindingService @19 :ServiceDesignator;
   # Names a service that acts as the Cloudflare Access identity binding worker for local dev.
   # When `ctx.access.getIdentity()` is called, workerd dispatches a `getIdentity` JS-RPC method

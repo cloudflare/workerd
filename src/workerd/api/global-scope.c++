@@ -114,6 +114,107 @@ jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   return js.alloc<Tracing>();
 }
 
+namespace {
+kj::Arc<jsg::AsyncContextFrame::StorageKey> workloadIdentityKey() {
+  static const auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
+  return key.addRef();
+}
+
+struct WorkloadIdentityInvocation {
+  jsg::Ref<Request> request;
+  kj::Maybe<uint> channel;
+  kj::Maybe<jsg::V8Ref<v8::Promise>> result;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(request, result);
+  }
+};
+
+[[noreturn]] void workloadIdentityFailure(kj::StringPtr name, kj::StringPtr message) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::str("jsg.DOMException(", name, "): ", message)));
+}
+}  // namespace
+
+jsg::Value IdentityContext::caller(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Ref<Request>)>>& callHandler) {
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_SOME(value, frame.get(*workloadIdentityKey())) {
+      auto& invocation =
+          jsg::unwrapOpaqueRef<WorkloadIdentityInvocation>(js.v8Isolate, value.getHandle(js));
+      KJ_IF_SOME(result, invocation.result) {
+        return jsg::Value(js.v8Isolate, result.getHandle(js));
+      }
+      auto promise = js.evalNow([&]() -> jsg::Promise<jsg::Value> {
+        auto headers = invocation.request->getHeaders(js);
+        bool signedRequest = headers->has(kj::str("signature")) ||
+            headers->has(kj::str("signature-input")) || headers->has(kj::str("signature-agent"));
+        auto authorization = headers->get(js, kj::str("authorization"));
+        bool bearer = false;
+        KJ_IF_SOME(auth, authorization) {
+          if (auth.size() >= 6) {
+            auto prefix = kj::str(auth.slice(0, 6));
+            for (auto& c: prefix)
+              if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            bearer = prefix == "bearer" &&
+                (auth.size() == 6 || auth[6] == ' ' || auth[6] == '\t' || auth[6] == '\r' ||
+                    auth[6] == '\n');
+          }
+        }
+        if (!signedRequest && !bearer)
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
+        auto channel = invocation.channel;
+        if (channel == kj::none)
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Workload verification is unavailable. Retry later or use a supported deployed runtime.");
+        auto request = invocation.request->cloneForWorkloadIdentity(js, signedRequest);
+        auto fetcher = js.alloc<Fetcher>(
+            KJ_ASSERT_NONNULL(channel), Fetcher::RequiresHostAndProtocol::NO, true);
+        auto property = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("verify")),
+            Error, "The workload verifier has no verify method.");
+        auto call =
+            JSG_REQUIRE_NONNULL(callHandler.tryUnwrap(js, rpcHandler.wrap(js, kj::mv(property))),
+                Error, "The workload verifier is not callable.");
+        auto paf = js.newPromiseAndResolver<jsg::Value>();
+        paf.resolver.resolve(js, call(js, kj::mv(request)));
+        return paf.promise.then(js, [](jsg::Lock& js, jsg::Value result) -> jsg::Value {
+          auto handle = result.getHandle(js);
+          if (!handle->IsObject())
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The verifier returned no result. Retry later.");
+          jsg::JsObject object(handle.As<v8::Object>());
+          auto status = object.get(js, "status").toString(js);
+          if (status == "missing") return jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate));
+          if (status == "invalid")
+            workloadIdentityFailure("WorkloadIdentityError",
+                "The workload credential is invalid, expired, unsupported, or replayed. Send a fresh supported credential.");
+          if (status != "verified")
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "Workload verification could not complete. Retry later.");
+          auto identity = object.get(js, "identity");
+          if (!identity.isObject())
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The verifier returned no identity. Retry later.");
+          static_cast<v8::Local<v8::Value>>(identity)
+              .As<v8::Object>()
+              ->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen)
+              .Check();
+          return jsg::Value(js.v8Isolate, identity);
+        }, [](jsg::Lock& js, jsg::Value error) -> jsg::Value {
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "The workload verification service could not complete. Retry later.");
+        });
+      });
+      auto handle = promise.consumeHandle(js);
+      invocation.result = js.v8Ref(handle);
+      return jsg::Value(js.v8Isolate, handle);
+    }
+  }
+  return jsg::Value(js.v8Isolate,
+      js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate))).consumeHandle(js));
+}
+
 kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
@@ -448,6 +549,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
+
+  kj::Maybe<jsg::AsyncContextFrame::StorageScope> identityScope;
+  if (FeatureFlags::get(js).getEnableWorkloadIdentityContext()) {
+    auto state = jsg::wrapOpaque(js.v8Context(),
+        WorkloadIdentityInvocation{jsRequest.addRef(),
+          ioContext.getIoChannelFactory().getWorkloadIdentityChannel(), kj::none});
+    identityScope.emplace(js, workloadIdentityKey(), js.v8Ref(state));
+  }
 
   auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
 

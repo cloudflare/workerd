@@ -1775,4 +1775,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+  enableWorkloadIdentityContext @202 :Bool
+      $compatEnableFlag("enable_workload_identity_context")
+      $compatDisableFlag("disable_workload_identity_context")
+      $compatEnableDate("2026-10-31");
+  # Adds ctx.identity.caller(). Verification requires an embedder-supplied private service.
+
 }
