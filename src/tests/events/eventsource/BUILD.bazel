@@ -1,0 +1,61 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The EventSource suite runs the same test modules under a C++ and a
+# TypeScript cell of each kind: main (reading the C++ streams), main reading
+# the TypeScript streams, opt-in (the dateless flags that change the
+# surface) and legacy (the semantic flags turned off).
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# enables TS_EVENT_SOURCE, which swaps in the TypeScript implementation
+# under a cell whose USING_TS_IMPL binding says C++. The TypeScript cells
+# keep it.
+
+eventsource_suite_srcs = glob(["*.js"]) + ["eventsource-modules.capnp"]
+
+wd_test(
+    src = "eventsource-cpp.wd-test",
+    data = eventsource_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "eventsource-ts.wd-test",
+    data = eventsource_suite_srcs,
+)
+
+wd_test(
+    src = "eventsource-cpp-ts-streams.wd-test",
+    args = ["--experimental"],
+    data = eventsource_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "eventsource-ts-ts-streams.wd-test",
+    args = ["--experimental"],
+    data = eventsource_suite_srcs,
+)
+
+wd_test(
+    src = "eventsource-cpp-opt-in.wd-test",
+    args = ["--experimental"],
+    data = eventsource_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "eventsource-ts-opt-in.wd-test",
+    args = ["--experimental"],
+    data = eventsource_suite_srcs,
+)
+
+wd_test(
+    src = "eventsource-cpp-legacy.wd-test",
+    data = eventsource_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "eventsource-ts-legacy.wd-test",
+    data = eventsource_suite_srcs,
+)

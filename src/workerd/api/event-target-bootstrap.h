@@ -50,11 +50,25 @@ class EventTargetBootstrap {
   // is cancelable. Throws a TypeError if `type` is not a string.
   static jsg::JsValue createTrustedEvent(jsg::Lock& js, jsg::JsValue type);
 
-  // Creates a trusted MessageEvent of the given type, as the runtime fires one: `data` as is, an
-  // empty lastEventId, a null origin, no ports, and `source` (a MessagePort, or null or
-  // undefined for none). Throws a TypeError if `type` is not a string or `source` is neither.
-  static jsg::JsValue createTrustedMessageEvent(
-      jsg::Lock& js, jsg::JsValue type, jsg::JsValue data, jsg::JsValue source);
+  // Creates a trusted MessageEvent of the given type, as the runtime fires one: `data` as is, no
+  // ports, `source` (a MessagePort, or null or undefined for none), `lastEventId` (a string, or
+  // undefined for the empty string) and `origin` (a serialized origin, or null or undefined for a
+  // null origin). Throws a TypeError if `type` is not a string or another argument is none of
+  // the above.
+  static jsg::JsValue createTrustedMessageEvent(jsg::Lock& js,
+      jsg::JsValue type,
+      jsg::JsValue data,
+      jsg::JsValue source,
+      jsg::JsValue lastEventId,
+      jsg::JsValue origin);
+
+  // Creates the trusted 'open' event an EventSource fires: an OpenEvent, which neither bubbles
+  // nor is cancelable.
+  static jsg::JsValue createTrustedOpenEvent(jsg::Lock& js);
+
+  // Creates a trusted 'error' ErrorEvent carrying `error`, as the runtime fires one: an empty
+  // message and filename, line and column 0, neither bubbling nor cancelable.
+  static jsg::JsValue createTrustedErrorEvent(jsg::Lock& js, jsg::JsValue error);
 };
 
 }  // namespace workerd::api

@@ -329,3 +329,32 @@ if (autogates['ts-message-channel']) {
     }
   }
 }
+
+// The TypeScript EventSource replaces the C++ one, which global-scope.h then
+// leaves out. Loaded after the streams globals above, whose reader it
+// captures.
+if (autogates['ts-event-source']) {
+  const { EventSource } = require('eventsource/eventsource');
+  // Installed as the MessageChannel classes above are, matching
+  // JSG_NESTED_TYPE.
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    EventSource: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: EventSource,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      EventSource: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: EventSource,
+      },
+    });
+  }
+}

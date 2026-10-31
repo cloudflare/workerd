@@ -20,6 +20,7 @@ filegroup(
         "event-target-bootstrap.c++",
         "events.c++",
         "eventsource.c++",
+        "eventsource-bootstrap.c++",
         "export-loopback.c++",
         "filesystem.c++",
         "filesystem-bootstrap.c++",
@@ -80,6 +81,7 @@ filegroup(
         "event-target-bootstrap.h",
         "events.h",
         "eventsource.h",
+        "eventsource-bootstrap.h",
         "export-loopback.h",
         "filesystem.h",
         "filesystem-bootstrap.h",
@@ -702,6 +704,14 @@ kj_test(
 
 kj_test(
     src = "event-target-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "eventsource-bootstrap-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

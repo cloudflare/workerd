@@ -131,8 +131,12 @@ jsg::JsValue EventTargetBootstrap::createTrustedEvent(jsg::Lock& js, jsg::JsValu
       eventHandler(js).wrap(js, js.alloc<Event>(kj::mv(typeStr), Event::Init{}, Trusted::YES)));
 }
 
-jsg::JsValue EventTargetBootstrap::createTrustedMessageEvent(
-    jsg::Lock& js, jsg::JsValue type, jsg::JsValue data, jsg::JsValue source) {
+jsg::JsValue EventTargetBootstrap::createTrustedMessageEvent(jsg::Lock& js,
+    jsg::JsValue type,
+    jsg::JsValue data,
+    jsg::JsValue source,
+    jsg::JsValue lastEventId,
+    jsg::JsValue origin) {
   static constexpr auto kName = "createTrustedMessageEvent"_kjc;
   auto typeStr = requireType(js, type, kName);
   kj::Maybe<messageevent::MessagePort> maybeSource;
@@ -140,13 +144,39 @@ jsg::JsValue EventTargetBootstrap::createTrustedMessageEvent(
     maybeSource = JSG_REQUIRE_NONNULL(messageevent::MessagePort::tryFrom(js, source), TypeError,
         kName, "() expects a MessagePort source");
   }
+  kj::String lastEventIdStr;
+  if (!lastEventId.isUndefined()) {
+    lastEventIdStr = JSG_REQUIRE_NONNULL(
+        lastEventId.tryCast<jsg::JsString>(), TypeError, kName, "() expects a string lastEventId")
+                         .toString(js);
+  }
+  kj::Maybe<kj::String> maybeOrigin;
+  if (!origin.isNullOrUndefined()) {
+    maybeOrigin = JSG_REQUIRE_NONNULL(
+        origin.tryCast<jsg::JsString>(), TypeError, kName, "() expects a string origin")
+                      .toString(js);
+  }
 
   // MessageEvent is registered in EW_EVENTS_ISOLATE_TYPES alongside EventTarget.
   auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<MessageEvent>>(),
       "MessageEvent is missing from the isolate type list");
   return jsg::JsValue(handler.wrap(js,
-      js.alloc<MessageEvent>(
-          js, kj::mv(typeStr), data, kj::String(), kj::mv(maybeSource), kj::none, Trusted::YES)));
+      js.alloc<MessageEvent>(js, kj::mv(typeStr), data, kj::mv(lastEventIdStr), kj::mv(maybeSource),
+          MessageEvent::SerializedOrigin{kj::mv(maybeOrigin)})));
+}
+
+jsg::JsValue EventTargetBootstrap::createTrustedOpenEvent(jsg::Lock& js) {
+  // OpenEvent is registered in EW_EVENTS_ISOLATE_TYPES alongside EventTarget.
+  auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<OpenEvent>>(),
+      "OpenEvent is missing from the isolate type list");
+  return jsg::JsValue(handler.wrap(js, js.alloc<OpenEvent>()));
+}
+
+jsg::JsValue EventTargetBootstrap::createTrustedErrorEvent(jsg::Lock& js, jsg::JsValue error) {
+  // ErrorEvent is registered in EW_EVENTS_ISOLATE_TYPES alongside EventTarget.
+  auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ErrorEvent>>(),
+      "ErrorEvent is missing from the isolate type list");
+  return jsg::JsValue(handler.wrap(js, js.alloc<ErrorEvent>(js, error)));
 }
 
 }  // namespace workerd::api
