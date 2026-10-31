@@ -501,6 +501,29 @@ KJ_TEST("awaitIo adopts the span's operation") {
   expectComplete(events);
 }
 
+KJ_TEST("array span tags annotate the span's operation as text") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
+    traceContext.setTag("strings"_kjc,
+        kj::arr<kj::Maybe<kj::ConstString>>(
+            kj::ConstString("a"_kjc), kj::none, kj::ConstString("b"_kjc)));
+    traceContext.setTag("booleans"_kjc, kj::arr<kj::Maybe<bool>>(kj::Maybe<bool>(true), kj::none));
+    traceContext.setTag("numbers"_kjc, kj::arr<kj::Maybe<double>>(kj::Maybe<double>(1.5)));
+    traceContext.setTag("empty"_kjc, tracing::AttributeStringArray());
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+  });
+  expectInOrder(events,
+      {
+        "init kv_get#1 trigger=request exec=request"_kj,
+        "annotate kv_get#1 strings=[a, null, b]"_kj,
+        "annotate kv_get#1 booleans=[true, null]"_kj,
+        "annotate kv_get#1 numbers=[1.5]"_kj,
+        "annotate kv_get#1 empty=[]"_kj,
+        "settle kv_get#1"_kj,
+      });
+  expectComplete(events);
+}
+
 KJ_TEST("a detached span is not adopted") {
   auto events = traceInContext([](const TestFixture::Environment& env) {
     auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
