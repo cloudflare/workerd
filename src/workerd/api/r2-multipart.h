@@ -47,13 +47,38 @@ class R2MultipartUpload: public jsg::Object {
   jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(jsg::Lock& js,
       kj::Array<UploadedPart> uploadedParts,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<UploadedPart> uploadPartRpc(jsg::Lock& js,
+      int partNumber,
+      R2PutValue value,
+      jsg::Optional<UploadPartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::String, int, R2PutValue, jsg::Optional<UploadPartOptions>)>>&
+          uploadPartFnHandler,
+      const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler);
+  jsg::Promise<void> abortRpc(jsg::Lock& js,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, kj::String)>>& abortFnHandler,
+      const jsg::TypeHandler<jsg::Promise<void>>& abortResultHandler);
+  jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> completeRpc(jsg::Lock& js,
+      kj::Array<UploadedPart> uploadedParts,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::String, kj::Array<UploadedPart>)>>& completeFnHandler,
+      const jsg::TypeHandler<jsg::Promise<R2Bucket::HeadBackendResult>>& completeResultHandler);
 
-  JSG_RESOURCE_TYPE(R2MultipartUpload) {
+  JSG_RESOURCE_TYPE(R2MultipartUpload, CompatibilityFlags::Reader flags) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(uploadId, getUploadId);
-    JSG_METHOD(uploadPart);
-    JSG_METHOD(abort);
-    JSG_METHOD(complete);
+    if (flags.getR2BindingsJsrpc()) {
+      JSG_METHOD_NAMED(uploadPart, uploadPartRpc);
+      JSG_METHOD_NAMED(abort, abortRpc);
+      JSG_METHOD_NAMED(complete, completeRpc);
+    } else {
+      JSG_METHOD(uploadPart);
+      JSG_METHOD(abort);
+      JSG_METHOD(complete);
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

@@ -136,4 +136,4 @@
 -Wunused-lambda-capture
 -Wunused-variable
 -no-canonical-prefixes
--fbracket-depth=512
+-fbracket-depth=1024
