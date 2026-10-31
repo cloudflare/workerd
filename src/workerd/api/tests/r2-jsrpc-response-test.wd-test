@@ -1,0 +1,63 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Response decoding reports malformed native R2 resources as internal contract errors with either
+# JSG struct implementation. Each platform Worker also serves the native R2 HTTP mock used to
+# construct the resources returned by InvalidR2ResponseEntrypoint.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fast-structs", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "fast-platform", entrypoint = "InvalidR2ResponseEntrypoint")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                            "streams_enable_constructors", "r2_list_honor_include", "r2_binding_jsrpc",
+                            "rpc", "fetcher_no_get_put_delete", "enable_fast_jsg_struct"],
+    )),
+    (name = "fast-platform", worker = (
+      modules = .platformModules,
+      bindings = [
+        (name = "REAL_BUCKET", r2Bucket = "fast-platform"),
+        (name = "R2_LIST_HONOR_INCLUDE", text = "true"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "enable_fast_jsg_struct"],
+    )),
+    (name = "slow-structs", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET",
+         r2Bucket = (name = "slow-platform", entrypoint = "InvalidR2ResponseEntrypoint")),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                            "streams_enable_constructors", "r2_list_honor_include", "r2_binding_jsrpc",
+                            "rpc", "fetcher_no_get_put_delete", "disable_fast_jsg_struct"],
+    )),
+    (name = "slow-platform", worker = (
+      modules = .platformModules,
+      bindings = [
+        (name = "REAL_BUCKET", r2Bucket = "slow-platform"),
+        (name = "R2_LIST_HONOR_INCLUDE", text = "true"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors",
+                            "r2_list_honor_include", "disable_fast_jsg_struct"],
+    )),
+  ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "r2-jsrpc-response-test.js"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+  (name = "r2-observed-binding.js",
+   esModule = embed "r2-binding-service/r2-observed-binding.js"),
+];
+
+const platformModules :List(Workerd.Worker.Module) = [
+  (name = "worker",
+   esModule = "import mock from './r2-test.js'; export { InvalidR2ResponseEntrypoint } from './test.js'; export default { fetch: mock.fetch };"),
+  (name = "test.js", esModule = embed "r2-jsrpc-response-test.js"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+  (name = "r2-observed-binding.js",
+   esModule = embed "r2-binding-service/r2-observed-binding.js"),
+];

@@ -1775,4 +1775,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  r2BindingsJsrpc @202 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The binding must specify a named entrypoint implementing the R2 backend
+  # methods: head, get, put, delete, list, createMultipartUpload, uploadPart,
+  # abortMultipartUpload, and completeMultipartUpload. Object results use the
+  # corresponding native R2 API types; createMultipartUpload returns an object
+  # containing uploadId. The expected TypeScript interface is type-checked in
+  # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
 }

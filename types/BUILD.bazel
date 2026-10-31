@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_run_binary")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wd_ts_test.bzl", "wd_ts_test")
 load("//:build/wd_ts_type_test.bzl", "wd_ts_type_test")
@@ -97,3 +97,16 @@ js_run_binary(
     wd_ts_type_test(src = src)
     for src in glob(["test/types/**/*.ts"])
 ]
+
+# The checked-in experimental snapshot, for test code that type-checks against Workers types
+# without the cost of regenerating them. CI keeps the snapshot equal to the generated output.
+js_library(
+    name = "generated_snapshot_experimental",
+    srcs = ["generated-snapshot/experimental/index.d.ts"],
+    visibility = ["//src/workerd/api/tests:__pkg__"],
+)
+
+exports_files(
+    ["generated-snapshot/experimental/index.d.ts"],
+    visibility = ["//src/workerd/api/tests:__pkg__"],
+)
