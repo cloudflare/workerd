@@ -161,6 +161,28 @@ impl Terminator {
         let _ = lock.terminate_execution_now();
         lock.throw_error("thrown while terminating");
     }
+
+    /// Terminates execution itself twice, as Rust can after catching a termination. The second
+    /// call finds the termination pending and does not enter V8 again.
+    #[jsg_method]
+    fn terminate_now_twice(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        let _ = lock.terminate_execution_now();
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        Err(err)
+    }
+
+    /// Throws an ordinary exception, leaving it pending, then terminates execution itself. The
+    /// termination replaces the exception, so JavaScript cannot catch it.
+    #[jsg_method]
+    fn throw_error_then_terminate_now(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        lock.throw_error("thrown before terminating");
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        Err(err)
+    }
 }
 
 thread_local! {
@@ -309,6 +331,16 @@ fn terminate_execution_now_stops_javascript_at_once() {
 #[test]
 fn throw_error_after_terminate_execution_now_keeps_the_termination() {
     termination_survives("terminateNowThenThrowError");
+}
+
+#[test]
+fn terminate_execution_now_while_terminating_keeps_the_termination() {
+    termination_survives("terminateNowTwice");
+}
+
+#[test]
+fn terminate_execution_now_replaces_a_pending_exception() {
+    termination_survives("throwErrorThenTerminateNow");
 }
 
 /// A resource type that nothing uses before `terminateThenGetConstructor`, so that getting its

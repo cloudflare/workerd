@@ -1726,10 +1726,19 @@ void isolate_terminate_execution(Isolate* isolate) {
 }
 
 bool isolate_terminate_execution_now(Isolate* isolate) {
+  // Already terminating: the termination is pending, and entering V8 again would run code with it
+  // pending, which V8 forbids.
+  if (isolate->IsExecutionTerminating()) return true;
   isolate_terminate_execution(isolate);
   // TerminateExecution() only requests the termination; V8 delivers it at its next interrupt
   // check. Running V8 code makes it check at once, as in jsg::Lock::terminateExecutionNow(). The
   // result is empty once the termination is pending; no TryCatch here, so it stays pending.
+  //
+  // This skips the exceptionPending() check of the shim rules (ffi.h) for an ordinary exception:
+  // JSON::Stringify enters through PrepareForExecutionScope, which clears a pending exception, and
+  // the termination then takes its place. Replacing the exception is the point here, as it is in
+  // jsg::Lock::terminateExecutionNow(), and not entering V8 would leave the termination
+  // undelivered, so that JavaScript could catch the exception and run on.
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty(), "terminating execution now requires an entered context");
   (void)v8::JSON::Stringify(context, v8::String::Empty(isolate));
