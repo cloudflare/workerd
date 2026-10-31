@@ -9,21 +9,35 @@ export class Forwarder extends WorkerEntrypoint {
       authorizationServer: 'https://auth.example/',
     });
     const response = await binding.fetch('https://api.example/');
-    const customer = await binding.getCustomerIdentity('customer_x');
-    const customerResponse = await binding.fetchForCustomer(
-      'customer_x',
-      'https://api.example/'
-    );
+    const customer = await binding.getIdentity('customer_x');
+    const customerResponse = await customer.fetch('https://api.example/');
     const sanitized = await binding.fetch('https://api.example/', {
-      headers: { 'cf-workers-identity-customer': 'forged' },
+      headers: {
+        'cf-workers-identity-label': 'forged',
+        'cf-workers-identity-customer': 'forged',
+      },
     });
     return {
       token,
       grant,
       fetch: await response.json(),
-      customer,
+      customer: { id: await customer.id },
       customerFetch: await customerResponse.json(),
       sanitized: await sanitized.json(),
     };
+  }
+  async exerciseIdentity(identity) {
+    return {
+      id: await identity.id,
+      directoryURL: await identity.directoryURL,
+      fetch: await (
+        await identity.fetch('https://api.example/', {
+          headers: { 'cf-workers-identity-label': 'forged' },
+        })
+      ).json(),
+    };
+  }
+  async select(binding) {
+    return binding.getIdentity('returned');
   }
 }

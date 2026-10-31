@@ -10,20 +10,39 @@ export const forwarding = {
       forwarded.token,
       forwarded.grant,
       forwarded.fetch,
-      forwarded.customer,
       forwarded.customerFetch,
     ]) {
       assert.equal(value.workerId, 'origin-a');
       assert.equal(value.versionId, 'leaf-a');
       assert.equal(value.namespaceId, 'namespace-a');
     }
-    assert.equal(forwarded.customer.customerId, 'customer_x');
-    assert.equal(forwarded.customerFetch.customerId, 'customer_x');
-    assert.equal(forwarded.sanitized.customerId, null);
-    await assert.rejects(
-      env.IDENTITY.fetchForCustomer('', 'https://api.example/'),
-      /customerId/
+    assert.equal(forwarded.customer.id, 'origin-a:namespace-a:customer_x');
+    assert.equal(forwarded.customerFetch.label, 'customer_x');
+    assert.equal(forwarded.sanitized.label, null);
+    await assert.rejects(env.IDENTITY.getIdentity(''), /label/);
+    assert.equal(forwarded.sanitized.legacySelector, null);
+    const identity = await env.IDENTITY.getIdentity('fixed');
+    const relayed = await env.FORWARDER.exerciseIdentity(identity);
+    assert.equal(relayed.id, identity.id);
+    assert.equal(relayed.fetch.label, 'fixed');
+    assert.equal(relayed.fetch.workerId, 'origin-a');
+    assert.equal(relayed.fetch.versionId, 'leaf-a');
+    assert.equal(relayed.fetch.namespaceId, 'namespace-a');
+    assert.equal(typeof identity.getIdentity, 'undefined');
+    assert.equal(typeof identity.getToken, 'undefined');
+    assert.throws(() => {
+      identity.id = 'forged';
+    }, TypeError);
+    const returned = await env.FORWARDER.select(env.IDENTITY);
+    assert.equal(
+      (await (await returned.fetch('https://api.example/')).json()).label,
+      'returned'
     );
+    assert.equal(
+      (await env.IDENTITY.getIdentity()).id,
+      'origin-a:namespace-a:workload'
+    );
+    await assert.rejects(env.IDENTITY.getIdentity('x', {}), /optional label/);
     assert.equal(forwarded.token.audience, 'urn:fixed');
     assert.equal(forwarded.fetch.audience, 'urn:fixed');
     assert.equal(forwarded.grant.audience, 'https://auth.example/');

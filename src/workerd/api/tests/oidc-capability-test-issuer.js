@@ -14,15 +14,21 @@ export class Issuer extends WorkerEntrypoint {
       jti: crypto.randomUUID(),
     };
   }
-  getCustomerIdentity(customerId) {
-    return { ...this.ctx.props, customerId };
+  getIdentity(label) {
+    const id = `${this.ctx.props.workerId}:${this.ctx.props.namespaceId}:${label ?? 'workload'}`;
+    return {
+      id,
+      signatureAgent: `https://${id}.example`,
+      directoryURL: `https://${id}.example/directory`,
+    };
   }
   checkSignedFetch() {}
   fetch(request) {
     return new Response(
       JSON.stringify({
         ...this.ctx.props,
-        customerId: request.headers.get('cf-workers-identity-customer'),
+        label: request.headers.get('cf-workers-identity-label'),
+        legacySelector: request.headers.get('cf-workers-identity-customer'),
       })
     );
   }
