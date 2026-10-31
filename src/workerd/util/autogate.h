@@ -122,6 +122,11 @@ namespace workerd::util {
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
   V(NODEJS_I18N_RUST)                                                                              \
+  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
+     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
+     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
+     cloudflare-internal:messagechannel. */                                                        \
+  V(TS_MESSAGE_CHANNEL)                                                                            \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \

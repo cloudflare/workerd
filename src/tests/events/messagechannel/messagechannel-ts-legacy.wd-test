@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+using MessageChannelModules = import "messagechannel-modules.capnp";
+
+# Unflagged legacy cell, TypeScript implementation, with the same modules
+# and flags as messagechannel-cpp-legacy.wd-test: the TypeScript
+# implementation honors every flag that cell turns off.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-messagechannel-ts-legacy",
+      worker = (
+        modules = MessageChannelModules.legacyModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_worker_threads_module",
+          "no_expose_global_message_channel",
+          "do_not_set_tostring_tag",
+          "no_spec_compliant_dispatch_exceptions",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-message-channel"],
+);
