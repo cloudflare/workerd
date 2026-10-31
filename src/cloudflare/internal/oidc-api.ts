@@ -108,7 +108,7 @@ async function signedFetch(
     'content-encoding',
     'idempotency-key',
   ]) {
-    if (/[^\x00-\x7f]/.test(headers.get(name) ?? '')) {
+    if (/[\u0080-\uffff]/.test(headers.get(name) ?? '')) {
       throw new TypeError(
         `Signed header ${name} must contain only ASCII characters.`
       );
