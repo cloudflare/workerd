@@ -221,6 +221,34 @@ fn js_exception_from_cpp_passes_through() {
 }
 
 #[test]
+fn cpp_is_not_called_while_an_exception_is_pending() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_globals(lock, ctx, new_host());
+        let greeter = ctx.eval_raw(lock, "greeter").unwrap();
+        let greeter = <jsg_cpp::Ref<ffi::TestCppGreeter> as jsg::FromJS>::from_js(lock, greeter)?;
+        let caught = lock
+            .try_catch(|lock| {
+                lock.throw_error("already pending");
+                // Run, `greet()` would succeed and return "Hello, x". Not run, the call fails and
+                // the exception stays pending.
+                let err = greeter
+                    .greet(lock, "x")
+                    .expect_err("should not run the C++");
+                assert!(err.is_pending(), "not pending: {err}");
+                Err::<(), _>(err)
+            })
+            .expect("execution should not be terminating")
+            .expect_err("should have caught an exception");
+        ctx.set_global(lock, "caught", caught);
+        assert_eq!(
+            ctx.eval::<String>(lock, "caught.message").unwrap(),
+            "already pending"
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn cross_heap_cycle_is_collected() {
     HOST_DROPS.with(|drops| drops.set(0));
     let destroyed = ffi::test_cpp_holders_destroyed();
