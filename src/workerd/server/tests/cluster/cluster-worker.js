@@ -33,6 +33,9 @@
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /break           Aborts the DO via ctx.abort(). The request fails.
+//   /set-alarm       Sets the DO's alarm `ms` (default 60000) from now.
+//   /alarms          Returns `fired`, the NODE_ID of each instance that ran the
+//                    DO's alarm, in order.
 //   /arm-constructor-failure
 //                    Sets a storage flag that makes the *next* instantiation of
 //                    this DO throw from its constructor (the flag is cleared and
@@ -279,12 +282,12 @@ export class Counter extends DurableObject {
       await scheduler.wait(1000);
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/set-alarm') {
-      try {
-        await this.state.storage.setAlarm(Date.now() + 60_000);
-        return Response.json({ set: true });
-      } catch (e) {
-        return Response.json({ error: String(e) });
-      }
+      const ms = Number(url.searchParams.get('ms') ?? '60000');
+      await this.state.storage.setAlarm(Date.now() + ms);
+      return Response.json({ nodeId, id: idHex });
+    } else if (url.pathname === '/alarms') {
+      const fired = (await this.state.storage.get('fired')) ?? [];
+      return Response.json({ nodeId, id: idHex, fired });
     } else if (url.pathname === '/break') {
       this.state.abort('broken on purpose');
     } else if (url.pathname === '/arm-constructor-failure') {
@@ -296,8 +299,12 @@ export class Counter extends DurableObject {
     return new Response('Not found', { status: 404 });
   }
 
-  // Present so `setAlarm` reaches the cluster's refusal.
-  async alarm() {}
+  // Records which node ran each alarm.
+  async alarm() {
+    const fired = (await this.state.storage.get('fired')) ?? [];
+    fired.push(this.env.NODE_ID);
+    await this.state.storage.put('fired', fired);
+  }
 
   // RPC method used by /vend-stub on the *target* DO.
   vend(kind) {

@@ -133,6 +133,14 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
 The rules, with reasons and examples, are in `src/rust/jsg/README.md` §Safety rules. Tests catch
 some violations, and the README says which. Reviewers flag these:
 
+- A C++ shim that passes a context to V8 without first checking
+  `if (exceptionPending(isolate)) return ...;`, and without a comment saying why it needn't.
+  Such an API takes a `v8::Local<v8::Context>` or uses the current one: a call, a property read
+  or write, a coercion, `Array::Iterate`, `ObjectTemplate::NewInstance`, `Function::New`,
+  `FunctionTemplate::GetFunction`, `Date::New`, `ArrayBuffer::Detach`, the promise APIs. While an
+  exception or a termination is pending, V8 either clears it on entry, so it is lost and
+  JavaScript runs on, or fails a debug check and in a release build runs on with it pending. Creating strings, numbers, objects, arrays, error objects and
+  templates takes no context and needs no check, also while execution is terminating.
 - A shim, other than the `isolate_throw_*` shims, that calls `isolate->ThrowException` with no
   `IsExecutionTerminating()` check first. `isolate_throw_*` already check, and so do
   `Lock::throw_*` and `fast_api_throw_*`, which call them.

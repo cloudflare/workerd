@@ -441,7 +441,7 @@ impl File {
 
 /// Hex, prefixed with its length so names sort as numbers: `a0`, `a1`, ..,
 /// `bff`.
-fn ascending(v: u64) -> String {
+pub fn ascending(v: u64) -> String {
     let hex = format!("{v:x}");
     format!("{}{hex}", char::from(b'a' + hex.len() as u8 - 1))
 }
@@ -463,7 +463,7 @@ fn flip(digit: u8) -> u8 {
     b"fedcba9876543210"[usize::from(value)]
 }
 
-fn parse(name: &str, ascending: bool) -> Option<u64> {
+pub fn parse(name: &str, ascending: bool) -> Option<u64> {
     let (&prefix, digits) = name.as_bytes().split_first()?;
     let len = if ascending {
         prefix.checked_sub(b'a')? + 1

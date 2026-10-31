@@ -4,6 +4,7 @@
 
 mod argument_errors;
 mod arrays;
+mod async_context;
 mod boolean;
 mod buffer_types;
 mod builtin_module;
@@ -19,6 +20,7 @@ mod gc;
 mod global;
 mod harness;
 mod integer;
+mod internal_error;
 mod isolates;
 mod jsg_oneof;
 mod jsg_oneof_variants;
@@ -34,6 +36,7 @@ mod null_or_undefined;
 mod nullable;
 mod number;
 mod option;
+mod pending_exception;
 mod promise;
 mod resource_callback;
 mod resource_conversion;

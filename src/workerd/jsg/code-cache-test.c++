@@ -177,6 +177,7 @@ v8::Local<v8::Module> compileLegacyModule(jsg::Lock& js,
 kj::String evalLegacyModule(
     jsg::Lock& js, kj::StringPtr code, const CompilationObserver& observer) {
   auto module = compileLegacyModule(js, code, observer);
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only stringifies what the module threw.
   v8::TryCatch catcher(js.v8Isolate);
   try {
     instantiateModule(js, module);

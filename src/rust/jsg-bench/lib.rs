@@ -298,7 +298,7 @@ unsafe fn node_constructor(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLoca
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            Ok::<_, jsg::Error>(jsg::resource::function_template_of::<Node>(lock))
+            jsg::resource::function_template_of::<Node>(lock)
         })
     }
 }
