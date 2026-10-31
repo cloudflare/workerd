@@ -103,6 +103,8 @@ pub struct LinkedChannels {
     /// The subrequest channel whose props come from the request's Access blob.
     pub access_binding_channel: Option<u32>,
     pub workload_identity_channel: Option<u32>,
+    pub direct_service_channels: Vec<u32>,
+    pub suppress_native_caller_channels: Vec<u32>,
     pub has_debug_port: bool,
     pub server: Weak<Server>,
     /// How a dynamic worker unloads itself; a static worker aborting its isolate ends the
@@ -352,6 +354,8 @@ impl WorkerService {
                 worker_loaders: Vec::new(),
                 access_binding_channel: None,
                 workload_identity_channel: None,
+                direct_service_channels: Vec::new(),
+                suppress_native_caller_channels: Vec::new(),
                 has_debug_port: false,
                 server,
                 abort_isolate: Some(abort_isolate),
@@ -1052,6 +1056,14 @@ impl ChannelFactory {
         Ok(SubrequestChannel::new(cache.ok_or_else(|| {
             kj::failed!("jsg.Error: No Cache was configured")
         })?))
+    }
+
+    pub(crate) fn suppress_native_caller(&self, channel: u32) -> bool {
+        self.0.suppress_native_caller_channels.contains(&channel)
+    }
+
+    pub(crate) fn direct_service_channel(&self, channel: u32) -> bool {
+        self.0.direct_service_channels.contains(&channel)
     }
 
     pub(crate) fn workload_identity_channel(&self) -> KjMaybe<u32> {

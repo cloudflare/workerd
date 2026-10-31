@@ -905,6 +905,7 @@ pub fn lookup_service(
         entrypoint,
         props_json,
         error_context: context,
+        ..
     } = designator;
     let Some(service) = services.get(target) else {
         report.error(format!(
@@ -964,6 +965,7 @@ pub fn lookup_actor_class(
         entrypoint,
         props_json,
         error_context: context,
+        ..
     } = designator;
     let Some(service) = services.get(target) else {
         report.error(format!(
@@ -1131,6 +1133,23 @@ impl Server {
         for _ in 0..SPECIAL_SUBREQUEST_CHANNEL_COUNT {
             subrequest.push(Rc::clone(&global));
         }
+        let suppress_native_caller_channels = pending
+            .bindings
+            .subrequest
+            .iter()
+            .enumerate()
+            .filter_map(|(index, d)| d.suppress_native_caller.then_some(index as u32 + 2))
+            .collect();
+        let direct_service_channels = pending
+            .bindings
+            .subrequest
+            .iter()
+            .enumerate()
+            .filter_map(|(index, d)| match self.services.0.get(&d.service) {
+                Some(Service::Worker(_)) => Some(index as u32 + 2),
+                _ => None,
+            })
+            .collect();
         subrequest.extend(pending.bindings.subrequest.iter().map(lookup));
         // The loopback channels, in the order `ctx.exports` was numbered with.
         for entrypoint in &pending.loopback.subrequest_entrypoints {
@@ -1141,10 +1160,11 @@ impl Server {
         if let Some(designator) = &pending.workload_identity {
             let target = &designator.service;
             match services.get(target) {
-                Some(Service::Worker(target_worker)) => {
+                Some(Service::Worker(_)) => {
                     workload_identity_channel = Some(len_u32(&subrequest));
-                    subrequest
-                        .push(target_worker.loopback_entrypoint(designator.entrypoint.as_deref())?);
+                    // Unlike Access's dynamic identity template, receiver scope is
+                    // immutable service props. Preserve it through the normal lookup.
+                    subrequest.push(lookup(designator));
                 }
                 _ => report.error(format!(
                     "Worker workloadIdentityService requires a Worker service: {target}"
@@ -1224,6 +1244,8 @@ impl Server {
                 worker_loaders,
                 access_binding_channel,
                 workload_identity_channel,
+                direct_service_channels,
+                suppress_native_caller_channels,
                 has_debug_port: pending.bindings.has_debug_port,
                 server: Rc::downgrade(self),
                 abort_isolate: None,

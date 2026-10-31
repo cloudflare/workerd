@@ -121,8 +121,9 @@ kj::Arc<jsg::AsyncContextFrame::StorageKey> workloadIdentityKey() {
 }
 
 struct WorkloadIdentityInvocation {
-  jsg::Ref<Request> request;
+  kj::Maybe<jsg::Ref<Request>> request;
   kj::Maybe<uint> channel;
+  IoChannelFactory::NativeCaller nativeCaller;
   kj::Maybe<jsg::V8Ref<v8::Promise>> result;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -136,6 +137,17 @@ struct WorkloadIdentityInvocation {
 }
 }  // namespace
 
+kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> IdentityContext::makeRpcScope(
+    jsg::Lock& js, bool isEntrypoint) {
+  if (!FeatureFlags::get(js).getEnableWorkloadIdentityContext()) return kj::none;
+  auto native = IoContext::current().getIoChannelFactory().getNativeCaller();
+  // A callback/returned target has no direct configured-binding provenance.
+  if (!isEntrypoint) native = {IoChannelFactory::NativeCaller::State::UNSUPPORTED, {}, {}};
+  auto state = jsg::wrapOpaque(
+      js.v8Context(), WorkloadIdentityInvocation{kj::none, kj::none, kj::mv(native), kj::none});
+  return kj::heap<jsg::AsyncContextFrame::StorageScope>(js, workloadIdentityKey(), js.v8Ref(state));
+}
+
 jsg::Value IdentityContext::caller(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Ref<Request>)>>& callHandler) {
@@ -147,7 +159,27 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         return jsg::Value(js.v8Isolate, result.getHandle(js));
       }
       auto promise = js.evalNow([&]() -> jsg::Promise<jsg::Value> {
-        auto headers = invocation.request->getHeaders(js);
+        auto& native = invocation.nativeCaller;
+        if (native.state == IoChannelFactory::NativeCaller::State::DIRECT) {
+          if (native.accountId.size() == 0 || native.workerId.size() == 0)
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The platform could not establish the service-binding caller. Retry on a supported runtime.");
+          auto object = js.obj();
+          object.set(js, "kind", js.str("service-binding"_kj));
+          object.set(js, "accountId", js.str(native.accountId));
+          object.set(js, "workerId", js.str(native.workerId));
+          v8::Local<v8::Object> handle = object;
+          handle->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen).Check();
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, handle));
+        }
+        if (native.state != IoChannelFactory::NativeCaller::State::ABSENT)
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Caller identity supports direct configured service-binding calls between deployed static Workers in one account. Use a supported direct binding path.");
+        if (invocation.request == kj::none)
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
+        auto& originalRequest = KJ_ASSERT_NONNULL(invocation.request);
+
+        auto headers = originalRequest->getHeaders(js);
         bool signedRequest = headers->has(kj::str("signature")) ||
             headers->has(kj::str("signature-input")) || headers->has(kj::str("signature-agent"));
         auto authorization = headers->get(js, kj::str("authorization"));
@@ -168,7 +200,7 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         if (channel == kj::none)
           workloadIdentityFailure("WorkloadIdentityUnavailableError",
               "Workload verification is unavailable. Retry later or use a supported deployed runtime.");
-        auto request = invocation.request->cloneForWorkloadIdentity(js, signedRequest);
+        auto request = originalRequest->cloneForWorkloadIdentity(js, signedRequest);
         auto fetcher = js.alloc<Fetcher>(
             KJ_ASSERT_NONNULL(channel), Fetcher::RequiresHostAndProtocol::NO, true);
         auto property = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("verify")),
@@ -178,7 +210,8 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
                 Error, "The workload verifier is not callable.");
         auto paf = js.newPromiseAndResolver<jsg::Value>();
         paf.resolver.resolve(js, call(js, kj::mv(request)));
-        return paf.promise.then(js, [](jsg::Lock& js, jsg::Value result) -> jsg::Value {
+        auto verification =
+            paf.promise.then(js, [](jsg::Lock& js, jsg::Value result) -> jsg::Value {
           auto handle = result.getHandle(js);
           if (!handle->IsObject())
             workloadIdentityFailure("WorkloadIdentityUnavailableError",
@@ -204,6 +237,20 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         }, [](jsg::Lock& js, jsg::Value error) -> jsg::Value {
           workloadIdentityFailure("WorkloadIdentityUnavailableError",
               "The workload verification service could not complete. Retry later.");
+        });
+        // Bound transport failure as well as the managed service's own deadline.
+        auto& context = IoContext::current();
+        auto persistent = verification.then(
+            js, [](jsg::Lock& js, jsg::Value value) { return js.v8Ref(value.getHandle(js)); });
+        auto timeout =
+            context.afterLimitTimeout(10 * kj::SECONDS).then([]() -> jsg::V8Ref<v8::Value> {
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Workload verification exceeded its deadline. Retry later.");
+        });
+        return context.awaitIo(js,
+            context.awaitJs(js, kj::mv(persistent)).exclusiveJoin(kj::mv(timeout)),
+            [](jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
+          return jsg::Value(js.v8Isolate, value.getHandle(js));
         });
       });
       auto handle = promise.consumeHandle(js);
@@ -554,7 +601,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   if (FeatureFlags::get(js).getEnableWorkloadIdentityContext()) {
     auto state = jsg::wrapOpaque(js.v8Context(),
         WorkloadIdentityInvocation{jsRequest.addRef(),
-          ioContext.getIoChannelFactory().getWorkloadIdentityChannel(), kj::none});
+          ioContext.getIoChannelFactory().getWorkloadIdentityChannel(),
+          ioContext.getIoChannelFactory().getNativeCaller(), kj::none});
     identityScope.emplace(js, workloadIdentityKey(), js.v8Ref(state));
   }
 

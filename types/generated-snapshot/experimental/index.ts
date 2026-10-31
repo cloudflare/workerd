@@ -16423,7 +16423,13 @@ export interface IdentityBinding {
   getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
 }
 /** Verified credential facts. Your code must still authorize the caller and JWT audience. */
+export type CloudflareServiceBindingCaller = Readonly<{
+  kind: "service-binding";
+  accountId: string;
+  workerId: string;
+}>;
 export type CloudflareWorkloadIdentity =
+  | CloudflareServiceBindingCaller
   | Readonly<{
       kind: "signed-request";
       id: string;

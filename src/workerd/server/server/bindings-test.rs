@@ -64,6 +64,7 @@ const EPHEMERAL: ActorConfig = ActorConfig::Ephemeral {
 
 fn designator(service: &str) -> Designator {
     Designator {
+        suppress_native_caller: false,
         service: service.to_owned(),
         entrypoint: None,
         props_json: None,

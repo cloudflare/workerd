@@ -1380,12 +1380,15 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    TraceContext& traceContext,
+    IoChannelFactory::NativeCallerMode nativeCallerMode) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory,
+        kj::none, nativeCallerMode);
   },
       SubrequestOptions{
         .inHouse = isInHouse,
@@ -1398,11 +1401,12 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& traceContext,
-    SpanParent userSpanParent) {
+    SpanParent userSpanParent,
+    IoChannelFactory::NativeCallerMode nativeCallerMode) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory, kj::mv(userSpanParent));
+    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory,
+        kj::mv(userSpanParent), nativeCallerMode);
   },
       SubrequestOptions{
         .inHouse = isInHouse,
@@ -1433,12 +1437,14 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
     IoChannelFactory& channelFactory,
-    kj::Maybe<SpanParent> userSpanParent) {
+    kj::Maybe<SpanParent> userSpanParent,
+    IoChannelFactory::NativeCallerMode nativeCallerMode) {
   auto propagatedUserSpanParent = tracing.getUserSpanParent();
   KJ_IF_SOME(parent, userSpanParent) {
     propagatedUserSpanParent = kj::mv(parent);
   }
   IoChannelFactory::SubrequestMetadata metadata{
+    .nativeCallerMode = nativeCallerMode,
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
     .userSpanParent = kj::mv(propagatedUserSpanParent),

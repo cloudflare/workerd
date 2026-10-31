@@ -759,8 +759,13 @@ kj::Own<AccessInfo> parseAccessBlob(
 // C++ (a dynamic worker's env tables, channel tokens, the debug port).
 class RustIoChannelFactory final: public IoChannelFactory {
  public:
-  RustIoChannelFactory(kj::Own<CompiledWorker::Impl> worker, ::rust::Box<ChannelFactory> channels)
+  RustIoChannelFactory(kj::Own<CompiledWorker::Impl> worker,
+      ::rust::Box<ChannelFactory> channels,
+      NativeCaller nativeCaller,
+      bool eligibleSource)
       : worker(kj::mv(worker)),
+        eligibleSource(eligibleSource),
+        nativeCaller(kj::mv(nativeCaller)),
         channels(kj::mv(channels)) {}
 
   ~RustIoChannelFactory() noexcept(false) {
@@ -771,11 +776,28 @@ class RustIoChannelFactory final: public IoChannelFactory {
     worker->factory.getImpl().tasks.add(kj::evalLater([worker = kj::mv(worker)]() {}));
   }
 
+  NativeCaller getNativeCaller() override {
+    return nativeCaller.clone();
+  }
+
   kj::Maybe<uint> getWorkloadIdentityChannel() override {
     return channels->workload_identity_channel();
   }
 
   kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
+    if (channels->suppress_native_caller(channel) &&
+        metadata.nativeCallerMode != NativeCallerMode::UNSUPPORTED) {
+      metadata.nativeCallerMode = NativeCallerMode::NONE;
+      metadata.nativeCaller = {};
+    } else if (metadata.nativeCallerMode != NativeCallerMode::NONE) {
+      metadata.nativeCaller = {NativeCaller::State::UNSUPPORTED, {}, {}};
+      // Standalone IDs explicitly identify a local service graph, never production.
+      if (metadata.nativeCallerMode == NativeCallerMode::DIRECT && eligibleSource &&
+          channels->direct_service_channel(channel))
+        metadata.nativeCaller = {
+          NativeCaller::State::DIRECT, kj::str("local"), kj::str("local:", worker->name)};
+    }
+
     KJ_IF_SOME(env, envSubrequestChannel(channel)) return env.startRequest(kj::mv(metadata));
     // The access binding gets the request's identity as props, as the production embedder does
     // through channel tokens.
@@ -946,6 +968,8 @@ class RustIoChannelFactory final: public IoChannelFactory {
 
  private:
   kj::Own<CompiledWorker::Impl> worker;
+  bool eligibleSource;
+  NativeCaller nativeCaller;
   ::rust::Box<ChannelFactory> channels;
 
   ChannelTokenHandler& tokens() {
@@ -1137,7 +1161,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     }
   }
 
-  auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(worker), kj::mv(channels));
+  auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(worker), kj::mv(channels),
+      kj::mv(metadata.nativeCaller), !worker.isDynamic && actor == kj::none);
   return newWorkerEntrypoint(threadContext, kj::atomicAddRef(worker.getWorker()),
       entrypointName.clone(), kj::mv(props), kj::mv(actor), kj::refcounted<NullLimitEnforcer>(), {},
       kj::mv(ioChannelFactory), kj::mv(observer), worker.waitUntilTasks, true, kj::mv(workerTracer),
@@ -1161,6 +1186,17 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   Frankenvalue propsValue;
   KJ_IF_SOME(p, props) propsValue = kj::mv(*p);
   auto meta = kj::mv(*metadata);
+  if (meta.nativeCallerMode == IoChannelFactory::NativeCallerMode::UNSUPPORTED)
+    meta.nativeCaller = {IoChannelFactory::NativeCaller::State::UNSUPPORTED, {}, {}};
+  else if (meta.nativeCallerMode == IoChannelFactory::NativeCallerMode::DIRECT &&
+      meta.nativeCaller.state == IoChannelFactory::NativeCaller::State::ABSENT)
+    meta.nativeCaller = {IoChannelFactory::NativeCaller::State::UNAVAILABLE, {}, {}};
+
+  if (meta.nativeCaller.state != IoChannelFactory::NativeCaller::State::ABSENT &&
+      (impl.isDynamic || actor != kj::none || meta.fromPersistentStub.toBool())) {
+    meta.nativeCaller = {IoChannelFactory::NativeCaller::State::UNSUPPORTED, {}, {}};
+  }
+
   // A static worker's entrypoint mints its own self-token: a caller-supplied one could read and
   // manipulate the parameters of the entrypoint's own `[restore]()` method. An actor's requests
   // get theirs from the server instead (the token names the actor, not the class), and nothing

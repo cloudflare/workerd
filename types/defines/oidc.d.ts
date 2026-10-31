@@ -31,7 +31,14 @@ interface IdentityBinding {
 }
 
 /** Verified credential facts. Your code must still authorize the caller and JWT audience. */
+type CloudflareServiceBindingCaller = Readonly<{
+  kind: "service-binding";
+  accountId: string;
+  workerId: string;
+}>;
+
 type CloudflareWorkloadIdentity =
+  | CloudflareServiceBindingCaller
   | Readonly<{ kind: 'signed-request'; id: string }>
   | Readonly<{
       kind: 'jwt'; issuer: string; subject: string; audience: string;

@@ -96,7 +96,8 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
     }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
-        .startRequest({.cfBlobJson = kj::mv(cfStr),
+        .startRequest({.nativeCallerMode = IoChannelFactory::NativeCallerMode::UNSUPPORTED,
+          .cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent)});
   };
@@ -167,7 +168,8 @@ Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newActorCallAttempt
     }
 
     return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
-        .startRequest({.cfBlobJson = kj::mv(cfStr),
+        .startRequest({.nativeCallerMode = IoChannelFactory::NativeCallerMode::UNSUPPORTED,
+          .cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = kj::mv(userSpanParent),
           .actorRetryRequestMetadata = attempt.takeMetadata()});
@@ -205,10 +207,12 @@ Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newActorCallAttemp
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
     // already open prior to this DO starting up.
-    return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr),
-      .parentSpan = tracing.getInternalSpanParent(),
-      .userSpanParent = kj::mv(userSpanParent),
-      .actorRetryRequestMetadata = attempt.takeMetadata()});
+    return actorChannel->startRequest(
+        {.nativeCallerMode = IoChannelFactory::NativeCallerMode::UNSUPPORTED,
+          .cfBlobJson = kj::mv(cfStr),
+          .parentSpan = tracing.getInternalSpanParent(),
+          .userSpanParent = kj::mv(userSpanParent),
+          .actorRetryRequestMetadata = attempt.takeMetadata()});
   };
   auto client = startActorSubrequest(context, startRequest, attempt.getCountSubrequest());
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};

@@ -321,6 +321,8 @@ class AccessContext: public jsg::Object {
 // Stateless namespace; the HTTP invocation's async frame owns request state and memoization.
 class IdentityContext: public jsg::Object {
  public:
+  static kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> makeRpcScope(
+      jsg::Lock& js, bool isEntrypoint);
   jsg::Value caller(jsg::Lock& js,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Ref<Request>)>>& callHandler);

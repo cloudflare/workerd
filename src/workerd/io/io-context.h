@@ -1178,14 +1178,20 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // - In preview, in-house requests do not show up in the network tab.
   //
   // `traceContext` is the trace context to use for the subrequest, if tracing is turned on.
-  kj::Own<WorkerInterface> getSubrequestChannel(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      TraceContext& traceContext,
+      IoChannelFactory::NativeCallerMode nativeCallerMode =
+          IoChannelFactory::NativeCallerMode::NONE);
 
   kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& traceContext,
-      SpanParent userSpanParent);
+      SpanParent userSpanParent,
+      IoChannelFactory::NativeCallerMode nativeCallerMode =
+          IoChannelFactory::NativeCallerMode::NONE);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
@@ -1425,7 +1431,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
       IoChannelFactory& channelFactory,
-      kj::Maybe<SpanParent> userSpanParent = kj::none);
+      kj::Maybe<SpanParent> userSpanParent = kj::none,
+      IoChannelFactory::NativeCallerMode nativeCallerMode =
+          IoChannelFactory::NativeCallerMode::NONE);
 
   friend class IoContext_IncomingRequest;
   template <typename T>

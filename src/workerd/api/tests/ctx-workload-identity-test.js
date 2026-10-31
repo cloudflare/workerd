@@ -2,7 +2,11 @@ import { strictEqual, deepStrictEqual } from 'node:assert';
 export const workload = {
   async test(controller, env, ctx) {
     strictEqual(await ctx.identity.caller(), null); // Non-HTTP event.
-    const run = async (path, headers, target = env.RECEIVER) =>
+    const run = async (
+      path,
+      headers,
+      target = { fetch: globalThis.fetch.bind(globalThis) }
+    ) =>
       (
         await target.fetch('https://receiver.example' + path, {
           method: 'POST',
@@ -27,14 +31,9 @@ export const workload = {
       'WorkloadIdentityUnavailableError'
     );
     strictEqual(
-      (await run('/', { authorization: 'Bearer caller' }, env.UNAVAILABLE))
-        .name,
+      (await run('/', { authorization: 'Bearer stalled' })).name,
       'WorkloadIdentityUnavailableError'
     );
-    deepStrictEqual(await run('/', {}, env.UNAVAILABLE), {
-      identity: null,
-      body: 'original',
-    });
     strictEqual((await run('/rpc', signed)).identity.id, 'Bearer caller');
     const actor = env.DO.get(env.DO.idFromName('one'));
     const actorResults = await Promise.all(
@@ -43,12 +42,8 @@ export const workload = {
       )
     );
     deepStrictEqual(
-      actorResults.map((r) => r.identity.id),
-      ['Bearer a', 'Bearer b']
-    );
-    deepStrictEqual(
-      actorResults.map((r) => r.body),
-      ['original', 'original']
+      actorResults.map((r) => r.name),
+      ['WorkloadIdentityUnavailableError', 'WorkloadIdentityUnavailableError']
     );
     const concurrent = await Promise.all(
       ['a', 'b'].map((id) => run('/', { authorization: 'Bearer ' + id }))

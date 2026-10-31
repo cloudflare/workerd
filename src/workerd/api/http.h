@@ -447,6 +447,10 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   // Internal method for use from bindings code. It skips compatibility flags checks.
+  void markNativeCallerUnsupported() {
+    nativeCallerUnsupported = true;
+  }
+
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodInternal(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
     return getRpcMethod(js, kj::mv(name));
@@ -590,6 +594,7 @@ class Fetcher: public JsRpcClientProvider {
       IoOwn<OutgoingFactory>>
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
+  bool nativeCallerUnsupported = false;
   bool isInHouse;
 
   // Generic stubs use the receiving isolate's compat flags. Wrapped bindings explicitly bypass

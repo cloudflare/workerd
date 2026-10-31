@@ -87,6 +87,14 @@ if (caller?.kind === 'signed-request') {
   // @ts-expect-error Validated facts are immutable.
   caller.id = 'forged';
   void id;
+ } else if (caller?.kind === 'service-binding') {
+  const native: CloudflareServiceBindingCaller = caller;
+  const ids: [string, string] = [native.accountId, native.workerId];
+  // @ts-expect-error Native callers expose no delegated credential subject.
+  native.subject;
+  // @ts-expect-error Native caller facts are immutable.
+  native.workerId = 'forged';
+  void ids;
 } else if (caller?.kind === 'jwt') {
   const audience: string = caller.audience;
   const expiry: number = caller.expiresAt;

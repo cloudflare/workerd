@@ -11,7 +11,7 @@ const handler = {
       if (identity) strictEqual(Object.isFrozen(identity), true);
       strictEqual(identity, await ctx.identity.caller());
       if (new URL(request.url).pathname === '/rpc')
-        strictEqual(await env.PROBE.getCaller(), null);
+        strictEqual((await env.PROBE.getCaller()).workerId, 'local:receiver');
       return Response.json({
         identity,
         body: request.bodyUsed ? null : await request.text(),

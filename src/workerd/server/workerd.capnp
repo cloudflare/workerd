@@ -329,6 +329,10 @@ struct ServiceDesignator {
     # A JSON-encoded value.
   }
 
+  suppressNativeCaller @4 :Bool;
+  # Standalone internal ingress routing only. Preserve ordinary HTTP credential semantics.
+  # Local service graph configuration establishes no production authentication.
+
   # TODO(someday): Options to specify which event types are allowed.
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
 }
