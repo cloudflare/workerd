@@ -604,6 +604,12 @@ export class MIMEType {
   #params: MIMEParams;
 
   constructor(...args: unknown[]) {
+    if (args[0] === kCreate) {
+      // Already parsed by parse(); adopt the record without reparsing.
+      this.#mime = args[1] as ParsedMimeType;
+      this.#params = new MIMEParams(kCreate, this.#mime);
+      return;
+    }
     const input = stringArg(args, 0, 'MIMEType', 'constructor');
     const mime = parseMimeType(input);
     if (mime === null) {
@@ -611,6 +617,16 @@ export class MIMEType {
     }
     this.#mime = mime;
     this.#params = new MIMEParams(kCreate, mime);
+  }
+
+  // Like the constructor, but returns null instead of throwing when the input
+  // is not a valid MIME type. As in Node.js, the argument goes through ToString
+  // even when it is missing, so a missing argument yields null (the constructor
+  // throws instead), while a Symbol or a throwing toString() still throws.
+  static parse(input: unknown): MIMEType | null {
+    const mime = parseMimeType(toRuntimeString(input));
+    if (mime === null) return null;
+    return new MIMEType(kCreate, mime);
   }
 
   static #check(mime: unknown): asserts mime is MIMEType {
