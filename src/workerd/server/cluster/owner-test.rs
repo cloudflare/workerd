@@ -757,5 +757,5 @@ fn run(seed: u64, steps: usize) -> Result<(), String> {
 
 #[test]
 fn every_takeover_inherits_what_was_acknowledged() {
-    crate::dst::seeds(20, |seed| run(seed, 1500));
+    crate::dst::seeds(50, |seed| run(seed, 1500));
 }

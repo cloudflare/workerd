@@ -210,6 +210,10 @@ impl Owners {
             let dormant = self.dormant.borrow().get(&key).map(|o| o.databases.clone());
             databases = dormant.unwrap_or(databases);
         } else {
+            // An eviction still running must not leave the files it no
+            // longer describes dormant.
+            self.retiring.borrow_mut().remove(&key);
+            self.dormant.borrow_mut().remove(&key);
             layout.clear()?;
             remove_dir(&cache_root(path))?;
             if let Some(recover) = recover {
@@ -492,10 +496,16 @@ impl Owners {
     pub async fn evict(&self, ns: &str, actor: &str, epoch: Epoch) {
         let _permit = self.evictions.acquire().await;
         let key = object_key(ns, actor);
-        let Some(slot) = self.retiring.borrow_mut().remove(&key) else {
+        let Some(slot) = self.retiring.borrow().get(&key).cloned() else {
             return;
         };
         self.tier_one(&slot).await;
+        // Still retiring: no takeover here cleared its files meanwhile.
+        let current = self.retiring.borrow().get(&key).cloned();
+        if !current.is_some_and(|r| Rc::ptr_eq(&r, &slot)) {
+            return;
+        }
+        self.retiring.borrow_mut().remove(&key);
         let mut guard = slot.object.lock().await;
         let last = slot.capture.borrow().last();
         guard.cursor = slot.capture.borrow().cursor();
