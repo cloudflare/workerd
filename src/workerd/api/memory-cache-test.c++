@@ -6,6 +6,7 @@
 
 #include <workerd/io/trace.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <kj/test.h>
 #include <kj/thread.h>
@@ -207,6 +208,55 @@ KJ_TEST("fallback callback stores the value and survives binding destruction") {
       });
     });
   });
+}
+
+KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
+  // In predictable mode, overwriting a span's tag logs an error, which fails this test. It logs
+  // only the first overwrite in the process, so no other test here may overwrite one.
+  setPredictableModeForTest();
+  MemoryCacheProvider provider;
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture({
+    .mainModuleSource = R"SCRIPT(
+      export default {
+        async fetch() {
+          const settle = (promise) => promise.then(() => {}, () => {});
+          await settle(globalThis.CACHE.read("nan", () => ({ value: 1, expiration: NaN })));
+          await settle(globalThis.CACHE.read("function", () => ({ value: () => {} })));
+          return new Response("ok");
+        }
+      };
+    )SCRIPT"_kj,
+    .requestObserverFactory = records->requestObserverFactory(),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
+    auto cache =
+        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
+    jsg::check(
+        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
+  });
+  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
+  KJ_EXPECT(response.statusCode == 200, response.body);
+
+  // Each as "name <- parent: key=type:value ...".
+  kj::Vector<kj::String> spans;
+  kj::Vector<kj::StringPtr> fallbacks;
+  for (auto& span: records->spans) {
+    auto& line = spans.add(kj::str(span.name, " <- ", records->parentName(span), ": ", span.tags));
+    if (span.name == "memory_cache_fallback") fallbacks.add(line);
+  }
+  KJ_ASSERT(fallbacks.size() == 2, kj::strArray(spans, "\n"));
+  KJ_EXPECT(fallbacks[0] ==
+          "memory_cache_fallback <- memory_cache_read: "
+          "fallback_error=str:TypeError: Expiration time must not be NaN. "
+          "fallback_result_size=float:4 fallback_success=bool:false key=str:nan",
+      fallbacks[0]);
+  // The error's text is not checked: it is that of the DOMException serialization throws, which
+  // kj::str() renders as empty.
+  KJ_EXPECT(fallbacks[1].startsWith("memory_cache_fallback <- memory_cache_read: fallback_error="),
+      fallbacks[1]);
+  KJ_EXPECT(fallbacks[1].endsWith(" fallback_success=bool:false key=str:function"), fallbacks[1]);
 }
 
 }  // namespace
