@@ -96,3 +96,7 @@ if (caller?.kind === 'signed-request') {
 }
 // @ts-expect-error Receiver trust is platform-owned; no issuer/configuration argument.
 receiverContext.identity.caller({ issuer: 'https://attacker.example' });
+
+declare const actorContext: DurableObjectState;
+const actorCaller: Promise<CloudflareWorkloadIdentity | null> = actorContext.identity.caller();
+void actorCaller;

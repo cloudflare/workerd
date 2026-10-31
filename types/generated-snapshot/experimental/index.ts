@@ -717,6 +717,7 @@ export interface DurableObjectHibernationInfo {
 }
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  readonly identity: CloudflareIdentityContext;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   restore(params: any): Promise<any>;

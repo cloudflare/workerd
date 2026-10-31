@@ -6,6 +6,7 @@
 
 #include "actor.h"
 #include "export-loopback.h"
+#include "global-scope.h"
 #include "restore.h"
 #include "snapshot.h"
 #include "sql.h"
@@ -26,6 +27,10 @@
 #include <v8.h>
 
 namespace workerd::api {
+
+jsg::Ref<IdentityContext> DurableObjectState::getIdentity(jsg::Lock& js) {
+  return js.alloc<IdentityContext>();
+}
 
 jsg::Promise<jsg::Value> DurableObjectState::restore(jsg::Lock& js,
     jsg::JsObject params,

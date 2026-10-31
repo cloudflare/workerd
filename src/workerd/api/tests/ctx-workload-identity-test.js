@@ -35,6 +35,21 @@ export const workload = {
       identity: null,
       body: 'original',
     });
+    strictEqual((await run('/rpc', signed)).identity.id, 'Bearer caller');
+    const actor = env.DO.get(env.DO.idFromName('one'));
+    const actorResults = await Promise.all(
+      ['a', 'b'].map((id) =>
+        run('/', { authorization: 'Bearer ' + id, signature: 'test' }, actor)
+      )
+    );
+    deepStrictEqual(
+      actorResults.map((r) => r.identity.id),
+      ['Bearer a', 'Bearer b']
+    );
+    deepStrictEqual(
+      actorResults.map((r) => r.body),
+      ['original', 'original']
+    );
     const concurrent = await Promise.all(
       ['a', 'b'].map((id) => run('/', { authorization: 'Bearer ' + id }))
     );

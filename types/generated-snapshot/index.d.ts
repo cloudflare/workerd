@@ -700,6 +700,7 @@ interface DurableObjectClass<
 > {}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  readonly identity: CloudflareIdentityContext;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;

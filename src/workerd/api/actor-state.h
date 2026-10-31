@@ -21,6 +21,7 @@
 
 namespace workerd::api {
 class SqlStorage;
+class IdentityContext;
 class SyncKvStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
@@ -635,6 +636,8 @@ class DurableObjectState: public jsg::Object {
     return props.getHandle(js);
   }
 
+  jsg::Ref<IdentityContext> getIdentity(jsg::Lock& js);
+
   // Same as ExecutionContext::restore() but calls `[restore]()` on the actor instance.
   jsg::Promise<jsg::Value> restore(jsg::Lock& js,
       jsg::JsObject params,
@@ -752,6 +755,9 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
+    if (flags.getEnableWorkloadIdentityContext()) {
+      JSG_LAZY_INSTANCE_PROPERTY(identity, getIdentity);
+    }
     if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
@@ -821,6 +827,7 @@ class DurableObjectState: public jsg::Object {
     if (flags.getEnableCtxExports()) {
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
+        readonly identity: CloudflareIdentityContext;
         readonly exports: Cloudflare.Exports;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
@@ -830,6 +837,7 @@ class DurableObjectState: public jsg::Object {
       // No ctx.exports yet.
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
+        readonly identity: CloudflareIdentityContext;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
         blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
