@@ -228,6 +228,37 @@ fn lookup_of_a_missing_service_is_reported() {
 }
 
 #[test]
+fn lookup_of_a_misspelled_service_suggests_the_closest_name() {
+    let services = leaf_services();
+    let (report, errors) = collecting_reporter();
+    lookup_service(&services, &report, &designator("nett", None));
+    lookup_actor_class(&services, &report, &designator("NET", None));
+    assert_eq!(
+        *errors.borrow(),
+        [
+            "Worker \"w\"'s binding \"b\" refers to a service \"nett\", but no such service \
+                 is defined. Did you mean \"net\"?",
+            "Worker \"w\"'s binding \"b\" refers to a service \"NET\", but no such service \
+                 is defined. Did you mean \"net\"?",
+        ]
+    );
+}
+
+#[test]
+fn did_you_mean_suggests_only_close_names() {
+    let names = ["main", "internet", "storage"];
+    assert_eq!(did_you_mean("mian", names), " Did you mean \"main\"?");
+    assert_eq!(did_you_mean("MAIN", names), " Did you mean \"main\"?");
+    assert_eq!(
+        did_you_mean("interet", names),
+        " Did you mean \"internet\"?"
+    );
+    assert_eq!(did_you_mean("database", names), "");
+    assert_eq!(did_you_mean("main", names), "");
+    assert_eq!(did_you_mean("x", []), "");
+}
+
+#[test]
 fn lookup_of_a_leaf_with_an_entrypoint_is_reported() {
     let services = leaf_services();
     let (report, errors) = collecting_reporter();

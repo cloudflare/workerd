@@ -893,6 +893,49 @@ impl<'a> WorkflowEngine<'a> {
     }
 }
 
+/// The Levenshtein distance between `a` and `b`, ignoring ASCII case.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<u8> = a.bytes().map(|c| c.to_ascii_lowercase()).collect();
+    let b: Vec<u8> = b.bytes().map(|c| c.to_ascii_lowercase()).collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// A hint for an error about a name that is not defined: ` Did you mean "x"?`, naming the closest
+/// of `candidates`, or empty when none is close enough to be worth suggesting.
+pub fn did_you_mean<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) -> String {
+    let threshold = (name.len() / 3).max(2);
+    let best = candidates
+        .into_iter()
+        .filter(|candidate| *candidate != name)
+        .map(|candidate| (edit_distance(name, candidate), candidate))
+        .filter(|(distance, _)| *distance <= threshold)
+        .min_by_key(|(distance, _)| *distance);
+    best.map_or_else(String::new, |(_, candidate)| {
+        format!(" Did you mean \"{candidate}\"?")
+    })
+}
+
+/// The error for a designator whose service is not defined, with a hint naming the closest
+/// service that is.
+fn no_such_service(
+    context: &str,
+    target: &str,
+    services: &LinkedHashMap<String, Service>,
+) -> String {
+    let hint = did_you_mean(target, services.keys().map(String::as_str));
+    format!("{context} refers to a service \"{target}\", but no such service is defined.{hint}")
+}
+
 /// What a `ServiceDesignator` resolves to, or the invalid-config stand-in after the error was
 /// reported.
 pub fn lookup_service(
@@ -907,9 +950,7 @@ pub fn lookup_service(
         error_context: context,
     } = designator;
     let Some(service) = services.get(target) else {
-        report.error(format!(
-            "{context} refers to a service \"{target}\", but no such service is defined."
-        ));
+        report.error(no_such_service(context, target, services));
         return Rc::new(InvalidConfigChannel);
     };
     let props = configured_props(props_json.as_deref());
@@ -966,9 +1007,7 @@ pub fn lookup_actor_class(
         error_context: context,
     } = designator;
     let Some(service) = services.get(target) else {
-        report.error(format!(
-            "{context} refers to a service \"{target}\", but no such service is defined."
-        ));
+        report.error(no_such_service(context, target, services));
         return Rc::new(InvalidConfigActorClass);
     };
     let props = configured_props(props_json.as_deref());

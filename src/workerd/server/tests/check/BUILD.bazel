@@ -1,0 +1,18 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+sh_test(
+    name = "check-test",
+    size = "small",
+    srcs = ["check-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location ok.capnp)",
+    ],
+    data = glob([
+        "*.capnp",
+        "*.js",
+        "wrangler/*",
+    ]) + [
+        "//src/workerd/server:workerd",
+    ],
+)

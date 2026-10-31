@@ -43,6 +43,33 @@ fn wd_test_invocation() {
 }
 
 #[test]
+fn check_invocation() {
+    let Command::Check {
+        config,
+        const_name,
+        serve_or_test,
+    } = parse(&[
+        "check",
+        "config.capnp",
+        "myConfig",
+        "--experimental",
+        "-dstorage=/tmp/x",
+    ])
+    .command
+    else {
+        panic!("expected check")
+    };
+    assert_eq!(config.config_file, "config.capnp");
+    assert_eq!(const_name.const_name.as_deref(), Some("myConfig"));
+    assert!(serve_or_test.experimental);
+    assert_eq!(serve_or_test.directory_overrides.len(), 1);
+    // `check` serves nothing, so it takes none of `serve`'s socket options.
+    assert!(
+        Main::try_parse_from(["workerd", "check", "c.capnp", "--socket-addr=http=*:0"]).is_err()
+    );
+}
+
+#[test]
 fn serve_options() {
     let Command::Serve {
         config,
