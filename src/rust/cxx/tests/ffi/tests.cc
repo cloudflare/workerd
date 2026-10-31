@@ -825,6 +825,13 @@ size_t c_fail_kj_exception_with_details_return_primitive() {
   kj::throwException(kj::mv(ex));
 }
 
+size_t c_fail_kj_exception_with_empty_detail_return_primitive() {
+  auto ex = KJ_EXCEPTION(FAILED, "test exception with empty detail");
+  // An empty kj::Array has a null data pointer.
+  ex.setDetail(7, nullptr);
+  kj::throwException(kj::mv(ex));
+}
+
 size_t c_cancel_return_primitive() { throw kj::CanceledException{}; }
 
 // Call Rust function that panics with CanceledException
@@ -1268,6 +1275,16 @@ extern "C" const char *cxx_run_test() noexcept {
   char expected[] = {static_cast<char>(195), static_cast<char>(191)};
   KJ_ASSERT(kj::arrayPtr(latin1.c_str(), latin1.length()) ==
             kj::arrayPtr(expected));
+  KJ_ASSERT(rust::String::latin1("", 0).empty());
+
+  // ASCII prefixes around the 32-byte scan chunk.
+  for (size_t prefix : {0, 1, 31, 32, 33, 64, 100}) {
+    std::string head(prefix, 'a'), tail(40, 'b');
+    std::string input = head + "\xe9z\xff" + tail;
+    std::string want = head + "\xc3\xa9z\xc3\xbf" + tail;
+    rust::String converted = rust::String::latin1(input.data(), input.size());
+    KJ_ASSERT(std::string(converted) == want, prefix);
+  }
 
   // Test Slice<T> explicit constructor from container
   {

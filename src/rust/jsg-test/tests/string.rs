@@ -2,12 +2,16 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use jsg::ExceptionType;
+use jsg::FromJS;
+use jsg::ToJS;
 use jsg::v8::Local;
 use jsg::v8::String as JsString;
-use jsg::v8::ToLocalValue;
 use jsg::v8::Utf8Value;
 use jsg::v8::Value;
 use jsg::v8::WriteFlags;
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
 fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
@@ -360,8 +364,8 @@ fn write_flags_combined_variant_equals_bitor() {
 fn utf8_value_length_matches_byte_count() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = "hello".to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = "hello".to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), 5);
         Ok(())
     });
@@ -371,8 +375,8 @@ fn utf8_value_length_matches_byte_count() {
 fn utf8_value_as_str_returns_correct_content() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = "hello world".to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = "hello world".to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_str(), Some("hello world"));
         Ok(())
     });
@@ -383,8 +387,8 @@ fn utf8_value_as_bytes_matches_utf8_encoding() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "Rust 🦀";
-        let val: Local<'_, Value> = input.to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = input.to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_bytes(), input.as_bytes());
         Ok(())
     });
@@ -395,8 +399,8 @@ fn utf8_value_from_unicode_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "こんにちは";
-        let val: Local<'_, Value> = input.to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = input.to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), input.len());
         assert_eq!(utf8.as_str(), Some(input));
         Ok(())
@@ -407,8 +411,8 @@ fn utf8_value_from_unicode_string() {
 fn utf8_value_from_empty_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = "".to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = "".to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.length(), 0);
         assert_eq!(utf8.as_str(), Some(""));
         Ok(())
@@ -419,8 +423,8 @@ fn utf8_value_from_empty_string() {
 fn utf8_value_as_ptr_is_non_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = "test".to_local(lock);
-        let utf8 = Utf8Value::new(lock, &val);
+        let val: Local<'_, Value> = "test".to_js(lock)?;
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert!(!utf8.as_ptr().is_null());
         Ok(())
     });
@@ -433,10 +437,53 @@ fn utf8_value_coerces_number_to_string() {
         let val = ctx
             .eval_raw(lock, "42")
             .map_err(|e| e.unwrap_jsg_err(lock))?;
-        let utf8 = Utf8Value::new(lock, &val);
+        let utf8 = Utf8Value::new(lock, &val)?;
         assert_eq!(utf8.as_str(), Some("42"));
         Ok(())
     });
+}
+
+/// Converts the value of `expression` with `Utf8Value`, and returns what the conversion threw.
+fn utf8_value_throws(expression: &str) -> std::string::String {
+    let harness = crate::Harness::new();
+    let mut thrown = None;
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx
+            .eval_raw(lock, expression)
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
+        let exception = lock
+            .try_catch(|lock| {
+                let result = Utf8Value::new(lock, &val);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result.map(drop)
+            })?
+            .unwrap_err();
+        let exception = jsg::v8::Local::<jsg::v8::Object>::try_from(exception).unwrap();
+        let message = exception.get(lock, "message")?;
+        thrown = Some(<std::string::String as jsg::FromJS>::from_js(
+            lock, message,
+        )?);
+        Ok(())
+    });
+    thrown.unwrap()
+}
+
+/// A `Symbol` doesn't convert: V8's `ToString` throws a `TypeError`, which stays pending.
+#[test]
+fn utf8_value_of_symbol_throws() {
+    assert_eq!(
+        utf8_value_throws("Symbol('s')"),
+        "Cannot convert a Symbol value to a string"
+    );
+}
+
+/// What a `toString` throws stays pending, rather than being discarded.
+#[test]
+fn utf8_value_passes_on_what_to_string_throws() {
+    assert_eq!(
+        utf8_value_throws("({ toString() { throw new RangeError('from toString'); } })"),
+        "from toString"
+    );
 }
 
 // =============================================================================
@@ -444,22 +491,22 @@ fn utf8_value_coerces_number_to_string() {
 // =============================================================================
 
 #[test]
-fn string_try_as_from_value() {
+fn string_try_from_from_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = "cast me".to_local(lock);
-        let s = val.try_as::<JsString>().expect("should cast to String");
+        let val: Local<'_, Value> = "cast me".to_js(lock)?;
+        let s = Local::<JsString>::try_from(val).expect("should cast to String");
         assert_eq!(s.to_string(lock), "cast me");
         Ok(())
     });
 }
 
 #[test]
-fn string_try_as_fails_for_non_string() {
+fn string_try_from_fails_for_non_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let val: Local<'_, Value> = jsg::Number::new(42.0).to_local(lock);
-        assert!(val.try_as::<JsString>().is_none());
+        let val: Local<'_, Value> = 42_u32.to_js(lock)?;
+        assert!(Local::<JsString>::try_from(val).is_err());
         Ok(())
     });
 }
@@ -471,6 +518,99 @@ fn string_upcast_to_value() {
         let s = from_utf8(lock, "upcast");
         let val: Local<'_, Value> = s.into();
         assert!(val.is_string());
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Local<Value>::to_js_string
+// =============================================================================
+
+#[jsg_resource]
+struct Strings;
+
+#[jsg_resource]
+impl Strings {
+    #[jsg_method]
+    pub fn coerce<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: Local<'s, Value>,
+    ) -> Result<Local<'s, JsString>, jsg::Error> {
+        value.to_js_string(lock)
+    }
+}
+
+/// `to_js_string` converts any value as JavaScript's `ToString` does, running `toString` where
+/// there is one, like C++ JSG's `jsg::JsString` parameter.
+#[test]
+fn value_to_js_string_coerces() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for (expr, expected) in [
+            ("'s'", "s"),
+            ("42", "42"),
+            ("-0", "0"),
+            ("1n", "1"),
+            ("null", "null"),
+            ("undefined", "undefined"),
+            ("[1, 2]", "1,2"),
+            ("new String('boxed')", "boxed"),
+            ("({ toString() { return 'obj'; } })", "obj"),
+        ] {
+            let value = ctx.eval_raw(lock, expr).unwrap();
+            let string = value.to_js_string(lock).unwrap();
+            assert_eq!(string.to_string(lock), expected, "{expr}");
+        }
+
+        // A string converts to itself.
+        let value = ctx.eval_raw(lock, "'x'.repeat(3)").unwrap();
+        let string: Local<'_, Value> = value.to_js_string(lock).unwrap().into();
+        assert_eq!(string, value);
+        Ok(())
+    });
+}
+
+/// What `toString` throws, or `ToString` throws for a `Symbol`, stays pending, so that a method
+/// passing the error on throws it to its caller.
+#[test]
+fn value_to_js_string_passes_on_what_to_string_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let thrower = "({ toString() { throw new RangeError('boom'); } })";
+        for (expr, name, message) in [
+            (thrower, ExceptionType::RangeError, "boom"),
+            (
+                "Symbol()",
+                ExceptionType::TypeError,
+                "Cannot convert a Symbol value to a string",
+            ),
+        ] {
+            let value = ctx.eval_raw(lock, expr).unwrap();
+            let caught = lock
+                .try_catch(|lock| {
+                    let err = value.to_js_string(lock).map(drop).unwrap_err();
+                    assert!(err.is_pending(), "{expr}");
+                    Err::<(), _>(err)
+                })
+                .expect("execution should not be terminating");
+            let Err(exception) = caught else {
+                panic!("{expr} should not convert");
+            };
+            let err = jsg::Error::from_js(lock, exception).unwrap();
+            assert_eq!(err.name, name, "{expr}");
+            assert_eq!(err.message, message, "{expr}");
+        }
+
+        let resource = jsg::Rc::new(Strings).to_js(lock)?;
+        ctx.set_global(lock, "r", resource);
+        assert_eq!(ctx.eval::<String>(lock, "r.coerce(7)").unwrap(), "7");
+        let err = ctx
+            .eval::<String>(lock, &format!("r.coerce({thrower})"))
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "boom");
         Ok(())
     });
 }
@@ -509,7 +649,7 @@ fn string_concat_over_max_length_is_none() {
     harness.run_in_context(|lock, ctx| {
         // `repeat` builds a cons string, so this allocates little.
         let value = ctx.eval_raw(lock, "'x'.repeat(2 ** 28 + 1)").unwrap();
-        let half = value.try_as::<JsString>().unwrap();
+        let half = Local::<JsString>::try_from(value).unwrap();
         assert!(i64::from(half.length()) * 2 > i64::from(JsString::MAX_LENGTH));
         assert!(JsString::concat(lock, half, half).is_none());
         Ok(())
@@ -556,4 +696,77 @@ fn string_max_length_matches_v8() {
     assert_eq!(JsString::MAX_LENGTH, (1 << 28) - 16);
     #[cfg(target_pointer_width = "64")]
     assert_eq!(JsString::MAX_LENGTH, (1 << 29) - 24);
+}
+
+// =============================================================================
+// Strings longer than V8 allows
+// =============================================================================
+
+/// A string one byte longer than V8 accepts. Its bytes are zero, so that the allocation costs
+/// no physical memory until something reads it, which refusing it by its length never does.
+fn overlong_string() -> String {
+    let bytes = vec![0u8; usize::try_from(JsString::MAX_LENGTH).unwrap() + 1];
+    // SAFETY: zero bytes are ASCII, so valid UTF-8.
+    unsafe { String::from_utf8_unchecked(bytes) }
+}
+
+#[jsg_resource]
+struct Overlong;
+
+#[jsg_resource]
+impl Overlong {
+    #[jsg_method]
+    fn string(&self) -> String {
+        overlong_string()
+    }
+}
+
+#[test]
+fn string_constructors_refuse_an_overlong_string() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let s = overlong_string();
+        assert!(JsString::new_from_str(lock, &s).is_none());
+        assert!(JsString::new_from_utf8(lock, s.as_bytes()).is_none());
+        assert!(JsString::new_internalized_from_str(lock, &s).is_none());
+        assert!(JsString::new_from_one_byte(lock, s.as_bytes()).is_none());
+        // V8 refused with nothing pending, so JavaScript still runs.
+        assert!(ctx.eval::<bool>(lock, "1 + 1 === 2").unwrap());
+        Ok(())
+    });
+}
+
+#[test]
+fn to_js_of_an_overlong_string_is_a_range_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let s = overlong_string();
+        for err in [
+            s.as_str().to_js(lock).unwrap_err(),
+            s.to_js(lock).unwrap_err(),
+        ] {
+            assert_eq!(err.name, jsg::ExceptionType::RangeError);
+            assert_eq!(err.message, "Invalid string length");
+            assert!(!err.is_pending(), "the error is not a pending exception");
+        }
+        // Nothing is pending, so JavaScript still runs.
+        assert!(ctx.eval::<bool>(lock, "1 + 1 === 2").unwrap());
+        Ok(())
+    });
+}
+
+/// JavaScript catches the `RangeError` that V8 itself throws for such a string.
+#[test]
+fn method_returning_an_overlong_string_throws_a_range_error() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "overlong", jsg::Rc::new(Overlong));
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "let caught;
+                 try { overlong.string(); } catch (e) { caught = e; }
+                 caught instanceof RangeError && caught.message === 'Invalid string length'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
 }

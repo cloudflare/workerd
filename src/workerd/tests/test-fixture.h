@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/function.h>
@@ -38,6 +39,11 @@ struct TestFixture {
     // If set, the named autogates (bare names, without the "workerd-autogate-" prefix)
     // are enabled for the test. Otherwise autogates are initialized empty.
     kj::Maybe<kj::Array<kj::StringPtr>> autogates;
+    // Autogates enabled for the test, like those named in `autogates`.
+    kj::Array<util::AutogateKey> autogateKeys;
+    // If true, only the autogates above are enabled, even under WORKERD_ALL_AUTOGATES (as in the
+    // @all-autogates test variant), e.g. to test the behavior with a gate disabled.
+    bool ignoreAllAutogatesEnv;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -47,6 +53,9 @@ struct TestFixture {
     // If true, use real timers instead of mock timers that never advance.
     // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
     bool useRealTimers;
+    // If true, the actor's storage cache flushes writes to its stage, which is read-only, so a
+    // write fails at flush time. Otherwise writes stay in the cache, as in a preview session.
+    bool flushActorStorage;
     // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
     // The factory receives the TimerChannel reference.
     kj::Maybe<kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
@@ -156,6 +165,10 @@ struct TestFixture {
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
   kj::Own<IoContext> newIoContext();
 
+  // Like newIoContext(), but the IoContext is never bound to the fixture's actor, e.g. to model a
+  // stateless request in the same isolate as an actor.
+  kj::Own<IoContext> newStatelessIoContext();
+
   // Create a new IncomingRequest bound to a fresh IoContext. The returned IncomingRequest is the
   // sole owner of that IoContext (via kj refcounting): destroying the IR destroys the IoContext.
   // If you need the IoContext to outlive the IR (e.g. to model multiple sequential or overlapping
@@ -193,6 +206,13 @@ struct TestFixture {
   void enterWorkerLock(Callback&& callback) {
     auto asyncLock = worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
     worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) { callback(lock); });
+  }
+
+  // Takes this fixture's isolate lock without an IoContext, and returns it held. A thread takes
+  // one isolate lock at a time, so holding it holds up runs in another fixture's isolate on the
+  // same thread (and event loop), e.g. to test what happens while they wait for the lock.
+  Worker::AsyncLock takeAsyncLock() {
+    return worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
   }
 
   // Acquire a Worker::Lock synchronously without an IoContext.
@@ -320,6 +340,8 @@ struct TestFixture {
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
+
+  kj::Own<IoContext> newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor);
 
  public:
   // Default IoChannelFactory used by tests. Exposed so tests can subclass it

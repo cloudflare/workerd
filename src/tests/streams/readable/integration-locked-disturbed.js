@@ -39,9 +39,8 @@ export const disturbedStreamIntoResponse = {
   },
 };
 
-// A merely LOCKED (not disturbed) stream is accepted by the Response
-// constructor on both sides; consumption then fails only when the body
-// is actually used. Pinned as observed: construction succeeds.
+// A LOCKED (not disturbed) stream is rejected by the Response
+// constructor with a TypeError on both sides (spec: extract a body).
 export const lockedStreamIntoResponse = {
   test() {
     const rs = new ReadableStream({
@@ -50,7 +49,10 @@ export const lockedStreamIntoResponse = {
       },
     });
     rs.getReader();
-    new Response(rs);
+    throws(() => new Response(rs), {
+      name: 'TypeError',
+      message: /locked to a reader/,
+    });
   },
 };
 

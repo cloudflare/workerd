@@ -2406,6 +2406,7 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     .referrerNormalizedSpecifier = base,
     .rawSpecifier = specifier,
   };
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows what the module threw.
   v8::TryCatch tryCatch(js.v8Isolate);
   auto option = IsolateModuleRegistry::RequireOption::RETURN_EMPTY;
   // Following the behavior of Node.js' require(esm) implementation, we disallow top-level await
@@ -2632,7 +2633,7 @@ Module::EvaluateCallback Module::newWasmModuleHandler(
         }
       }
 
-      auto module = jsg::compileWasmModule(js, data, observer);
+      auto module = jsg::compileWasmModule(js, data, observer, id.getHref());
       auto lock = cache->mutex.lockExclusive();
       *lock = module->GetCompiledModule();
       auto result = JsValue(module);

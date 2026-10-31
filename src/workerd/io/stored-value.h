@@ -34,11 +34,15 @@ jsg::JsValue deserializeV8Value(jsg::Lock& js, kj::StringPtr key, kj::ArrayPtr<c
 // held closed. If we fail to create any of the tokens, the transaction is rolled back and the
 // output gate broken, just like any hard storage failure. This makes the writes appear synchronous
 // from the application's point of view.
-class StoredExternalHandler {
+class StoredExternalHandler: public kj::PtrTarget {
  public:
   explicit StoredExternalHandler(ActorCacheInterface& actorCache, SqliteKv& sqliteKv)
       : actorCache(actorCache),
         sqliteKv(sqliteKv) {}
+
+  kj::Weak<StoredExternalHandler> addWeak() {
+    return addWeakToThis();
+  }
 
   // Cancel any outstanding task that might call `putExternals()` on the given key in the future.
   // This must be called whenever the key has been invalidated by a new put or delete.

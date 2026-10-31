@@ -803,7 +803,9 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   void delete_(Lock& js, const JsValue& name);
   void delete_(Lock& js, kj::StringPtr name);
 
+  void setPrivate(Lock& js, const jsg::JsString& name, const JsValue& value);
   void setPrivate(Lock& js, kj::StringPtr name, const JsValue& value);
+  JsValue getPrivate(Lock& js, const jsg::JsString& name) KJ_WARN_UNUSED_RESULT;
   JsValue getPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
   bool hasPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 

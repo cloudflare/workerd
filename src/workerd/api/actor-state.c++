@@ -667,9 +667,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   return context.attachSpans(js,
       context
           .blockConcurrencyWhile(js,
-              [callback = kj::mv(callback), &cache = *cache](
+              [callback = kj::mv(callback), weakCache = cache->addWeak()](
                   jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
-    return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+    return asyncTransactionImpl(js, context,
+        KJ_REQUIRE_NONNULL(weakCache.tryGet(), "actor cache destroyed before transaction began"),
+        kj::mv(callback));
   })
           .then(js,
               [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
@@ -699,8 +701,12 @@ jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTr
     KJ_CASE_ONEOF(promise, kj::Promise<void>) {
       // Whoops, we can't start the transaction yet. Wait and try again.
       return context.awaitIoWithInputLock(js, kj::mv(promise),
-          [&context, &cache, callback = kj::mv(callback)](jsg::Lock& js) mutable {
-        return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+          [&context, weakCache = cache.addWeak(), callback = kj::mv(callback)](
+              jsg::Lock& js) mutable {
+        return asyncTransactionImpl(js, context,
+            KJ_REQUIRE_NONNULL(
+                weakCache.tryGet(), "actor cache destroyed before transaction began"),
+            kj::mv(callback));
       });
     }
   }
@@ -906,6 +912,7 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
 
 jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
     jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
+  requireNotFacet("snapshot"_kj);
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_snapshot"_kjc);
   kj::Maybe<kj::String> bookmark;
@@ -921,6 +928,7 @@ jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
 }
 
 kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+  requireNotFacet("onNextSessionRestore"_kj);
   KJ_SWITCH_ONEOF(target) {
     KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
       return cache->onNextSessionRestore(snapshot->getClient());
@@ -930,6 +938,12 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget
     }
   }
   KJ_UNREACHABLE;
+}
+
+void DurableObjectStorage::requireNotFacet(kj::StringPtr method) {
+  JSG_REQUIRE(!IoContext::current().getActorOrThrow().isFacet(), Error, "storage.", method,
+      "() is not available in a facet. Snapshots and restores apply to the whole Durable Object, "
+      "so only the root Durable Object can use them.");
 }
 
 void DurableObjectStorage::ensureReplicas() {

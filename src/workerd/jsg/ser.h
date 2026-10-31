@@ -194,6 +194,16 @@ class Serializer final: v8::ValueSerializer::Delegate {
   }
 
  private:
+  // A Serializer that writes to `ser`, which another delegate drives; see writeApiObject().
+  struct Borrowed {};
+  Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed);
+  friend v8::Maybe<bool> writeApiObject(
+      v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
+
+  // Writes `object`, which is not a native error, through its type's serializer if it is a
+  // serializable workerd API object, or else throws a DataCloneError.
+  void writeApiObject(Lock& js, v8::Local<v8::Object> object);
+
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
   // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
@@ -231,8 +241,10 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   // The actual ValueSerializer. Note that it's important to define this last because its
   // constructor will call back to the Delegate, which is this object, so we hope that this object
-  // is fully initialized before that point!
-  v8::ValueSerializer ser;
+  // is fully initialized before that point! Empty for a Serializer that writes to another
+  // delegate's serializer.
+  kj::Maybe<v8::ValueSerializer> ownedSer;
+  v8::ValueSerializer& ser;
 };
 
 // Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.
@@ -306,6 +318,15 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   }
 
  private:
+  // A Deserializer that reads from `deser`, which another delegate drives; see readApiObject().
+  struct Borrowed {};
+  Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed);
+  friend v8::MaybeLocal<v8::Object> readApiObject(
+      v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+
+  // Reads the workerd API object that `tag` names through its type's deserializer.
+  v8::Local<v8::Object> readApiObject(Lock& js, uint32_t tag);
+
   void init(Lock& js,
       kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
@@ -318,10 +339,33 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   kj::Maybe<ExternalHandler&> externalHandler;
 
   size_t totalInputSize;
-  v8::ValueDeserializer deser;
+  // Empty for a Deserializer that reads from another delegate's deserializer.
+  kj::Maybe<v8::ValueDeserializer> ownedDeser;
+  v8::ValueDeserializer& deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
   bool preserveStackInErrors = true;
 };
+
+// For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or
+// v8::ValueDeserializer with a delegate of their own but write workerd API objects in the same
+// format as Serializer and Deserializer. Each returns an empty result, leaving the exception
+// pending, if what it runs throws.
+
+// Writes `object` as Serializer's WriteHostObject() writes an object that is not a native error:
+// through its type's serializer if it is a serializable workerd API object, or else throws a
+// DataCloneError. Values the type's serializer writes go through `ser`, and so through its
+// delegate.
+v8::Maybe<bool> writeApiObject(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object);
+
+// Reads the workerd API object that `tag` names, as Deserializer's ReadHostObject() does once it
+// has read a tag other than a native error's. JavaScript execution is disallowed meanwhile.
+v8::MaybeLocal<v8::Object> readApiObject(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag);
+
+// Creates the DOMException named DataCloneError with `message` that Serializer's
+// ThrowDataCloneError() throws.
+v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message);
 
 // Intended for use with v8::ValueSerializer data released into a kj::Array.
 class SerializedBufferDisposer: public kj::ArrayDisposer {

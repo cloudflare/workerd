@@ -264,7 +264,7 @@ class Container: public jsg::Object {
 
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
-    bool enableInternet = false;
+    jsg::Optional<bool> enableInternet;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
     jsg::Optional<kj::String> image;
@@ -288,7 +288,7 @@ class Container: public jsg::Object {
       if (flags.getWorkerdExperimental()) {
         JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
-          enableInternet: boolean;
+          enableInternet?: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
           instance?: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
@@ -309,7 +309,7 @@ class Container: public jsg::Object {
       } else {
         JSG_TS_OVERRIDE(type ContainerStartupOptions = {
           entrypoint?: string[];
-          enableInternet: boolean;
+          enableInternet?: boolean;
           env?: Record<string, string>;
           instance?: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;

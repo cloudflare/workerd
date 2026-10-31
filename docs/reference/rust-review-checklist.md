@@ -40,7 +40,14 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
 #### Common unsafe patterns in this codebase:
 
 - **V8 handle operations**: `Local::from_ffi()`/`into_ffi()`, isolate pointer dereference. These are
-  safe only when the isolate is locked and the handle scope is active.
+  safe only when the isolate is locked and the handle scope is active. Dropping a `jsg::v8::Global`
+  or `jsg::v8::TracedGlobal` is the exception: it defers the reset to the next lock when the
+  isolate is not locked, and does nothing once the `Realm` is gone
+  (`src/rust/jsg/isolate_state.rs`). That makes a `Global`, which GC never visits, `Send` and
+  `Sync`. It also makes a `TracedGlobal` `Send` (it is not `Sync`), together with visits outside a
+  GC leaving a `TracedGlobal` alone on a thread without the lock
+  (`GcVisitor::visit_traced_global`). A shim that resets a handle itself must only run under the
+  lock.
 - **Resource wrap/unwrap**: `Ref::into_raw()` leaks a ref-counted pointer as `usize`;
   `Ref::from_raw()` reconstructs it. These must be balanced — every `into_raw` needs exactly one
   `from_raw` to avoid leaks or double-frees.
@@ -72,24 +79,90 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   pointers used by the C++ JSG layer to wrap/unwrap the Rust object.
 - **`#[jsg_resource]`** on the impl block registers the type as a JS-visible resource.
 - **`#[jsg_method]`** auto-converts Rust `snake_case` method names to JavaScript `camelCase`.
-  Methods with a receiver (`&self`/`&mut self`) are registered as instance methods on the prototype;
-  methods without a receiver are registered as static methods on the constructor.
+  Methods with a `&self` receiver are registered as instance methods on the prototype; methods
+  without a receiver are registered as static methods on the constructor. Any other receiver is a
+  compile error, since JavaScript can call back into the resource while a method runs; state that
+  methods change belongs in `Cell` or `RefCell` fields. A method or accessor can take
+  `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its resource, for example to
+  hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
+  the callback should hold `this` (or `this.downgrade()`) instead. Flag a
+  `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
+  Also flag a `borrow_mut()` of a `RefCell` holding GC references (`TracedGlobal`, `jsg::Rc`)
+  held across a call that can allocate on the V8 heap, wrap the resource or create or drop a
+  `jsg::Rc` to it: tracing skips the cell, so those references can lose their values.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of
   `JSG_STATIC_CONSTANT`). The name is used as-is (no camelCase conversion).
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
-- **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<u8>` maps to
-  `Uint8Array`, not a regular JS `Array`. `Option<T>` maps to `T | undefined`; like
-  `jsg::Optional<T>`, `null` converts as `T`. `Nullable<T>` maps to `T | null | undefined`.
+- **Type mappings**: a JS number is an `f64`, converted with `ToNumber` like C++ JSG's `double`; a
+  handle to one is `jsg::v8::Local<jsg::v8::Number>`. `Vec<T>` converts to a JS `Array`, numbers
+  included. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
+  `to_js_array_buffer` on a byte slice (what C++ JSG returns for `kj::Array<kj::byte>`). From
+  JS, `Vec<T>` reads an `Array`, and a typed array or `ArrayBuffer` is a handle such as
+  `v8::Local<v8::Uint8Array>`.
+  `Option<T>` maps to `T | undefined`; like `jsg::Optional<T>`, `null` converts as `T`.
+  `Nullable<T>` maps to `T | null` and, like `kj::Maybe<T>`, coerces `undefined` to `null` on
+  input, but a method argument is still required. Prefer `NullOrUndefined<T>` to
+  `Option<Nullable<T>>` for an optional `T | null | undefined`, with distinct `Some(T)`,
+  `Null`, and `Undefined` states. Omitted method arguments become `Undefined`. Use
+  `Lenient<T>` only when shallow type mismatches should also be accepted; converting it to
+  `NullOrUndefined<T>` maps `Unconvertable` to `Undefined`, while nested conversion errors
+  still propagate.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
-- **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
-  structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
-  that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly
-  traced — missing traces cause use-after-free when the child is collected prematurely.
+- **Numeric `Vec`s**: a `Vec<u8>`, or a `Vec` of another Rust numeric type, converted through
+  `ToJS` (a `.to_js(lock)` call, a `#[jsg_method]` return value, or a `#[jsg_struct]` field)
+  becomes a JS `Array` of numbers. Check that an `Array` is intended: a port of C++ that returned
+  `kj::Array<kj::byte>` (an `ArrayBuffer`) or a typed array should use `to_js_array_buffer` or
+  `to_js_typed_array` instead. Ask the author; don't block on it.
+- **Persistent handles**: a handle that Rust code owns outside resources is a `jsg::v8::Global`,
+  which GC never visits and which keeps its handle inline. A handle that a resource owns is a
+  `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
+  keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
+- **GC tracing**: `jsg::Rc<T>` fields on `#[jsg_resource]` structs are automatically traced
+  during GC, including through `Option`, `Nullable`, and `NullOrUndefined` wrappers when
+  `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
+  traced (no-op). Verify that every resource reference is properly traced — missing traces
+  cause use-after-free when the child is collected prematurely.
+
+### Rust JSG Safety Rules
+
+The rules, with reasons and examples, are in `src/rust/jsg/README.md` §Safety rules. Tests catch
+some violations, and the README says which. Reviewers flag these:
+
+- A C++ shim that passes a context to V8 without first checking
+  `if (exceptionPending(isolate)) return ...;`, and without a comment saying why it needn't.
+  Such an API takes a `v8::Local<v8::Context>` or uses the current one: a call, a property read
+  or write, a coercion, `Array::Iterate`, `ObjectTemplate::NewInstance`, `Function::New`,
+  `FunctionTemplate::GetFunction`, `Date::New`, `ArrayBuffer::Detach`, the promise APIs. While an
+  exception or a termination is pending, V8 either clears it on entry, so it is lost and
+  JavaScript runs on, or fails a debug check and in a release build runs on with it pending. Creating strings, numbers, objects, arrays, error objects and
+  templates takes no context and needs no check, also while execution is terminating.
+- A shim, other than the `isolate_throw_*` shims, that calls `isolate->ThrowException` with no
+  `IsExecutionTerminating()` check first. `isolate_throw_*` already check, and so do
+  `Lock::throw_*` and `fast_api_throw_*`, which call them.
+- A `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`/`has`/`set`,
+  `Array::set`/`iterate`, a coercion) that is discarded with `.ok()`, `.is_ok()` or `unwrap_or*`,
+  or replaced with `map_err` or a custom `Into<jsg::Error>`. It may be the termination or a pending exception;
+  it should be passed on with `?`, or caught with `Lock::try_catch`.
+- An empty result from an FFI shim that is treated as "terminating" without checking.
+- An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if it is
+  not shared yet. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that owns the state,
+  such as a method's `this`.
+- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
+  a traced `Vec`) and used after a call that can run JavaScript or allocate on the V8 heap,
+  without a `.clone()` first
+  ([#7976](https://github.com/cloudflare/workerd/issues/7976)).
+- A `jsg::v8::Global` inside a type with a hand-written `impl Traced`.
+- New C++ JSG (`jsg::Lock`, `JSG_TRY`/`JSG_CATCH`, `jsg::check`, `JsExceptionThrown`,
+  `createTunneledException`, `makeInternalError`, `jsg::Data`/`jsg::Value`) in a `.c++` or `.h`
+  file under `src/rust` that `//src/rust/jsg:cpp-jsg-allowlist-test` doesn't check. The test
+  only checks the files in `CPP_SHIMS` in `src/rust/jsg/BUILD.bazel`.
+- A `Lock<'s>` or `Local<'s>` that is stored or passed into a nested callback, or a future passed
+  to async I/O that isn't `'static`.
 
 ### Linting & Style
 

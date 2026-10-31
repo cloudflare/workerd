@@ -12,6 +12,19 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# Whether the container tests get their images (see //images/container-client-test:images.bzl).
+bool_flag(
+    name = "container_test_images",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "container_test_images_enabled",
+    flag_values = {":container_test_images": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # V8 flags to pass to gen-compile-cache when producing the compile caches
 # embedded in the builtin bundles (//src/node, //src/per_isolate, ...).
 # Must match the flags used by the consumer when compiling, otherwise flag

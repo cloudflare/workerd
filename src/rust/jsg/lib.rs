@@ -2,54 +2,75 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::sync::Arc;
 
+mod async_context;
+mod buffer;
+mod dict;
+pub mod fast_api;
 pub mod feature_flags;
+mod isolate_state;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
+pub mod null_or_undefined;
 pub mod nullable;
+mod oneof;
+mod promise;
 pub mod resource;
 mod scope;
+pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use async_context::AsyncContextFrame;
+pub use async_context::TracedAsyncContextFrame;
+pub use buffer::ToJsArrayBuffer;
+pub use buffer::ToJsTypedArray;
+pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
+use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
+#[doc(hidden)]
+pub use oneof::UnionMember;
+#[doc(hidden)]
+pub use oneof::UnionTypes;
+#[doc(hidden)]
+pub use oneof::UnionVariant;
+#[doc(hidden)]
+pub use oneof::concat_union_names;
+#[doc(hidden)]
+pub use oneof::try_union_from_js;
+#[doc(hidden)]
+pub use oneof::validate_union_names;
+pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
+pub use scope::RawWildcardGetterCallback;
+pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
 pub use scope::setter_callback;
-pub use v8::ArrayBuffer;
-pub use v8::ArrayBufferView;
-pub use v8::BackingStore;
-pub use v8::BigInt64Array;
-pub use v8::BigUint64Array;
-pub use v8::Float32Array;
-pub use v8::Float64Array;
+pub use scope::wildcard_getter_callback;
+pub use scope::wildcard_query_callback;
 pub use v8::GcVisitor;
-pub use v8::Int8Array;
-pub use v8::Int16Array;
-pub use v8::Int32Array;
 pub use v8::IsolatePtr;
-pub use v8::Uint8Array;
-pub use v8::Uint16Array;
-pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
@@ -60,6 +81,7 @@ pub use wrappable::Traced;
 mod ffi {
     extern "Rust" {
         type Realm;
+        type IsolateState;
 
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
@@ -76,6 +98,19 @@ mod ffi {
         /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
         /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
         fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+
+        /// Resets the V8 handles that `Global`s and `TracedGlobal`s dropped without the
+        /// isolate lock left for the next lock. `IsolateBase::applyDeferredActions` calls it
+        /// through the deferred action hook, which `IsolateBase::Lock` does whenever it locks
+        /// the isolate.
+        /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
+        unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut Isolate);
+
+        /// Frees the slots of `TracedGlobal`s dropped after the Realm; see
+        /// `IsolateState::isolate_disposed`. `~IsolateBase` calls it after
+        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
+        /// reference to the state that `realm_detach` was given.
+        unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
     unsafe extern "C++" {
@@ -87,6 +122,21 @@ mod ffi {
 
         // Realm
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
+        /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
+        /// none has been detached, which sets the dispose hook.
+        unsafe fn realm_can_attach(isolate: *mut Isolate) -> bool;
+        /// Stores `realm` in the isolate's data slot and installs the deferred action hook
+        /// that calls `realm_reset_globals_awaiting_lock`.
+        pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
+        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
+        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
+        /// the isolate is disposed.
+        pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
+
+        // Autogates
+        /// Whether the `JSG_INTEGER_ENFORCE_RANGE` autogate is enabled; see
+        /// `wrappable::integer_part_for_range_check`.
+        pub fn integer_enforce_range_autogate_enabled() -> bool;
     }
 }
 
@@ -130,6 +180,9 @@ pub struct Error {
     /// `impl_error_constructors!` macro) always set this to `false`; only
     /// `from_kj_description()` sets it to `true`.
     is_internal: bool,
+    /// Whether this error stands for an exception or termination that is pending in V8; see
+    /// [`Error::is_pending`].
+    pending: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -149,6 +202,7 @@ macro_rules! impl_error_constructors {
                         name: ExceptionType::$variant,
                         message: message.into(),
                         is_internal: false,
+                        pending: false,
                     }
                 }
             )*
@@ -182,30 +236,36 @@ impl<'s> FromJS<'s> for Error {
     ///
     /// If the value is a native error, extracts the name and message properties.
     /// Otherwise, converts the value to a string for the message.
+    ///
+    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
+    /// If it throws, or an exception or a termination is already pending, this fails with an
+    /// error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_native_error() {
-            let obj: v8::Local<v8::Object> = value.into();
+        if value.is_native_error()
+            && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
+        {
+            let name = obj.get(lock, "name")?;
+            let name = if name.is_undefined() {
+                None
+            } else {
+                Some(String::from_js(lock, name)?)
+            };
 
-            let name = obj
-                .get(lock, "name")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok());
-
-            let message = obj
-                .get(lock, "message")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok())
-                .unwrap_or_else(|| "Unknown error".to_owned());
+            let message = obj.get(lock, "message")?;
+            let message = if message.is_undefined() {
+                "Unknown error".to_owned()
+            } else {
+                String::from_js(lock, message)?
+            };
 
             Ok(Self {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
                 message,
                 is_internal: false,
+                pending: false,
             })
         } else {
             Err(Self::new_type_error("Unknown error"))
@@ -219,6 +279,7 @@ impl Error {
             name: ExceptionType::from(name),
             message: message.to_owned(),
             is_internal: false,
+            pending: false,
         }
     }
 
@@ -235,34 +296,55 @@ impl Error {
             name,
             message: message.into(),
             is_internal: false,
+            pending: false,
         }
+    }
+
+    /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
+    /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
+    ///
+    /// Outside this crate, it is for FFI shims that leave an exception pending and return an
+    /// empty result, as C++ code that calls into JavaScript does.
+    #[must_use]
+    pub fn pending() -> Self {
+        Self {
+            pending: true,
+            ..Self::new_internal_error("a JavaScript exception is pending")
+        }
+    }
+
+    /// The error for a string longer than [`v8::String::MAX_LENGTH`]: a `RangeError` with the
+    /// message V8 gives such a string, "Invalid string length". It is not pending.
+    #[must_use]
+    pub fn invalid_string_length() -> Self {
+        Self::new_range_error("Invalid string length")
+    }
+
+    /// Returns whether this error stands for an exception or termination that is pending in V8,
+    /// as after a call into JavaScript that threw.
+    ///
+    /// [`Lock::throw_exception`] throws nothing for such an error, so returning it from a
+    /// callback propagates the pending exception to the callback's JavaScript caller unchanged,
+    /// as C++ JSG's `JsExceptionThrown` does. `name` and `message` don't describe the exception;
+    /// to inspect it, catch it with [`Lock::try_catch`]. Code that gets such an error must not
+    /// call into JavaScript, and should return it; converting it to another error and throwing
+    /// that replaces the exception (but never a termination). The error does not track its
+    /// exception: kept after the exception was caught or propagated, as a clone can be, and
+    /// thrown with no exception pending, it becomes an internal error.
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
+        self.pending
     }
 
     /// Creates a V8 exception from this error.
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
-    /// which does perform that check before falling back to this method.
-    #[expect(
-        unsafe_code,
-        reason = "creates the V8 exception object through the FFI"
-    )]
+    /// which does perform that check before falling back to this method. A message longer
+    /// than V8's string limit is cut to fit; see [`Lock::error`].
     pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        let isolate = lock.isolate();
-        let message = self.message.as_bytes();
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: isolate is valid and locked (guaranteed by caller); message
-        // pointer and len describe a valid byte slice.
-        unsafe {
-            v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
-                isolate.as_ffi(),
-                self.name,
-                message.as_ptr(),
-                len,
-            ))
-        }
+        lock.create_error_from_bytes(self.name, self.message.as_bytes())
+            .into()
     }
 }
 
@@ -367,6 +449,7 @@ impl Error {
                 name: ExceptionType::from(name),
                 message: message.to_owned(),
                 is_internal,
+                pending: false,
             });
         }
 
@@ -375,20 +458,21 @@ impl Error {
             name: ExceptionType::from(ty),
             message: message.to_owned(),
             is_internal,
+            pending: false,
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// `name` is `Error`, the type JavaScript gets (`Lock::throw_internal_error()` -> C++
+    /// `makeInternalError()`).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::TypeError,
+            name: ExceptionType::Error,
             message: message.into(),
             is_internal: true,
+            pending: false,
         }
     }
 }
@@ -406,12 +490,15 @@ impl Error {
 ///
 /// # Supported Types
 ///
-/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
-/// implementations include:
+/// `T` is one of the types a value is otherwise coerced to, those that implement
+/// [`Coercible`]:
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
-/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<f64>` - only accepts JavaScript numbers
+/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
+///   numbers, which must be in range
+/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -470,148 +557,32 @@ impl<T> Deref for NonCoercible<T> {
     }
 }
 
-/// A wrapper type for JavaScript numbers (IEEE 754 double-precision floats).
+/// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
 ///
-/// `Number` represents JavaScript's `number` type, which is always a 64-bit
-/// floating-point value. This wrapper type is used instead of raw `f64` to
-/// distinguish between JavaScript numbers and Rust's `f64` type used for
-/// `Float64Array` elements.
+/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
+/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
 ///
-/// # Usage
-///
-/// Use `Number` when you need to accept or return JavaScript numbers in your API:
-///
-/// ```ignore
-/// use jsg::Number;
-///
-/// #[jsg_method]
-/// pub fn add(&self, a: Number, b: Number) -> Number {
-///     Number::new(a.value() + b.value())
-/// }
-/// ```
-///
-/// # Type Mapping
-///
-/// | Rust Type | JavaScript Type |
-/// |-----------|-----------------|
-/// | `jsg::Number` | `number` |
-/// | `f64` | Used for `Float64Array` elements |
-/// | `Vec<f64>` | `Float64Array` |
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct Number {
-    value: f64,
+/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
+/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
+/// a coarse test. The trait is sealed.
+#[diagnostic::on_unimplemented(
+    message = "`NonCoercible<{Self}>` is not supported",
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+)]
+pub trait Coercible: Type + coercible::Sealed {}
+
+mod coercible {
+    pub trait Sealed {}
 }
 
-impl Number {
-    /// The largest integer that can be represented exactly in JavaScript (2^53 - 1).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER)
-    pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0; // 2^53 - 1
-
-    /// The smallest integer that can be represented exactly in JavaScript (-(2^53 - 1)).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER)
-    pub const MIN_SAFE_INTEGER: f64 = -9_007_199_254_740_991.0; // -(2^53 - 1)
-
-    /// Creates a new `Number` from an `f64` value.
-    #[inline]
-    pub fn new(value: f64) -> Self {
-        Self { value }
-    }
-
-    /// Returns the underlying `f64` value.
-    #[inline]
-    pub fn value(&self) -> f64 {
-        self.value
-    }
-
-    /// Consumes the wrapper and returns the inner `f64` value.
-    #[inline]
-    pub fn into_inner(self) -> f64 {
-        self.value
-    }
-
-    /// Determines whether the value is a finite number.
-    ///
-    /// Returns `true` if the value is finite (not `Infinity`, `-Infinity`, or `NaN`).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite)
-    #[inline]
-    pub fn is_finite(&self) -> bool {
-        self.value.is_finite()
-    }
-
-    /// Determines whether the value is an integer.
-    ///
-    /// Returns `true` if the value is finite and has no fractional part.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
-    #[inline]
-    #[expect(
-        clippy::float_cmp,
-        reason = "exact comparison is intended: an integer equals its own truncation"
-    )]
-    pub fn is_integer(&self) -> bool {
-        self.value.is_finite() && self.value.trunc() == self.value
-    }
-
-    /// Determines whether the value is `NaN`.
-    ///
-    /// This is more robust than the global `isNaN()` because it doesn't coerce
-    /// the value to a number first.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN)
-    #[inline]
-    pub fn is_nan(&self) -> bool {
-        self.value.is_nan()
-    }
-
-    /// Determines whether the value is a safe integer.
-    ///
-    /// A safe integer is an integer that:
-    /// - Can be exactly represented as an IEEE-754 double precision number
-    /// - Has an IEEE-754 representation that cannot be the result of rounding any other integer
-    ///
-    /// Safe integers range from -(2^53 - 1) to 2^53 - 1, inclusive.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger)
-    #[inline]
-    pub fn is_safe_integer(&self) -> bool {
-        self.is_integer()
-            && self.value >= Self::MIN_SAFE_INTEGER
-            && self.value <= Self::MAX_SAFE_INTEGER
-    }
+macro_rules! impl_coercible {
+    ($($t:ty),* $(,)?) => {
+        $(impl coercible::Sealed for $t {}
+        impl Coercible for $t {})*
+    };
 }
 
-impl From<f64> for Number {
-    fn from(value: f64) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<Number> for f64 {
-    fn from(num: Number) -> Self {
-        num.value
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl From<u32> for Number {
-    fn from(value: u32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
+impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
 
 #[expect(
     unsafe_code,
@@ -639,6 +610,11 @@ impl<'s> Lock<'s> {
     ///
     /// Mirrors C++ `jsg::Lock::error()`. The returned object can have additional
     /// properties attached before being thrown or returned.
+    ///
+    /// A message longer than [`v8::String::MAX_LENGTH`] bytes is cut to fit, at a character
+    /// boundary, rather than refused. A message that long is a bug or embeds user data, and
+    /// the cut keeps its start. So the length of the message never makes this,
+    /// [`Lock::throw_exception`] or the other error constructors fail.
     pub fn error(&mut self, message: &str) -> v8::Local<'s, v8::Object> {
         self.create_error(ExceptionType::Error, message)
     }
@@ -694,38 +670,32 @@ impl<'s> Lock<'s> {
         exception_type: ExceptionType,
         message: &[u8],
     ) -> v8::Local<'s, v8::Object> {
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice.
-        let value: v8::Local<'s, v8::Value> = unsafe {
+        let message = error_message_for_v8(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked. V8's error constructors
+        // always return an object.
+        let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
-                message.as_ptr(),
-                len,
+                message,
             ))
         };
-        // Error, TypeError, and RangeError are all JS objects.
-        value.into()
+        debug_assert!(error.is_object());
+        error
     }
 
+    /// Throws a JavaScript `Error` with the given message, as [`Lock::error`] creates it.
+    ///
+    /// Throws nothing while execution is terminating; see [`Lock::throw_exception`].
     pub fn throw_error(&mut self, message: &str) {
-        // SAFETY: Lock guarantees the isolate is valid and locked
-        unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
-    }
-
-    #[expect(
-        clippy::unimplemented,
-        reason = "`await_io` is not implemented for Rust resources yet"
-    )]
-    pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
-    where
-        F: Future<Output = I>,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R>,
-    {
-        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, so create nothing.
+            return;
+        }
+        let error = self.error(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked; `error` is a handle of its
+        // scope.
+        unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
@@ -744,14 +714,49 @@ impl<'s> Lock<'s> {
         self.realm().feature_flags.reader()
     }
 
+    /// The number of `Global`s and `TracedGlobal`s that were dropped without the isolate lock
+    /// and whose handles wait for the next lock to be reset; see [`v8::Global`]. For tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn globals_awaiting_lock(&mut self) -> usize {
+        self.realm().state.awaiting_lock_count()
+    }
+
     /// Throws an error as a V8 exception.
     ///
-    /// If `err.is_internal` is set, the message is redacted (via
+    /// Throws nothing for an error that stands for a pending exception (see
+    /// [`Error::is_pending`]), which then keeps propagating, nor while execution is terminating,
+    /// so that the termination is never replaced by a catchable exception. Such an error can
+    /// outlive its exception, as a clone kept after [`Lock::try_catch`] caught it; with no
+    /// exception pending, it is thrown as an internal error. Otherwise, if
+    /// `err.is_internal` is set, the message is redacted (via
     /// `throw_internal_error()`) rather than thrown verbatim, matching how
     /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions.
     pub fn throw_exception(&mut self, err: &Error) {
+        if err.is_pending() {
+            let isolate = self.isolate().as_ffi();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock).
+            if unsafe {
+                v8::ffi::isolate_is_execution_terminating(isolate)
+                    || v8::ffi::isolate_has_pending_exception(isolate)
+            } {
+                return;
+            }
+            // Throwing nothing would return to JavaScript with neither a result nor an
+            // exception.
+            self.throw_internal_error(
+                "a jsg::Error for a pending JavaScript exception was thrown with no exception \
+                 pending",
+            );
+            return;
+        }
         if err.is_internal {
             self.throw_internal_error(&err.message);
+            return;
+        }
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, so there is no point in creating
+            // the exception.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
@@ -763,12 +768,144 @@ impl<'s> Lock<'s> {
         }
     }
 
+    /// Runs `f`, catching what JavaScript throws while it runs, as C++ `jsg::Lock::tryCatch()`
+    /// does.
+    ///
+    /// Returns `Ok(Ok(_))` with what `f` returns, or `Ok(Err(exception))` with the value thrown
+    /// if `f` fails: what JavaScript threw for an error that stands for a pending exception (see
+    /// [`Error::is_pending`]), or the error `f` returned, thrown as [`Lock::throw_exception`]
+    /// throws it. A termination is not caught: it keeps propagating, and this returns `Err` with
+    /// an error for which [`Error::is_pending`] is true, which the caller should return.
+    ///
+    /// # Errors
+    ///
+    /// Fails if execution is terminating.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// match lock.try_catch(|lock| {
+    ///     let result = callback.call(lock, None, &[])?;
+    ///     f64::from_js(lock, result)
+    /// })? {
+    ///     Ok(result) => { /* ... */ }
+    ///     Err(exception) => { /* handle what the callback threw */ }
+    /// }
+    /// ```
+    #[expect(unsafe_code, reason = "runs `f` in a C++ v8::TryCatch through the FFI")]
+    pub fn try_catch<T, F>(&mut self, f: F) -> Result<Result<T, v8::Local<'s, v8::Value>>>
+    where
+        F: FnOnce(&mut Self) -> Result<T>,
+    {
+        struct Call<'a, 's, F, T> {
+            lock: &'a mut Lock<'s>,
+            f: Option<F>,
+            result: Option<std::thread::Result<Result<T>>>,
+        }
+
+        /// Runs the closure, and returns whether it failed: then the `TryCatch` holds what it
+        /// threw. Only `try_catch` passes it, with the address of its `Call`, to C++, so it
+        /// is not an `unsafe fn` (which the bridge does not accept for callbacks).
+        fn trampoline<'s, F, T>(data: usize) -> bool
+        where
+            F: FnOnce(&mut Lock<'s>) -> Result<T>,
+        {
+            // SAFETY: `data` was cast from `&raw mut Call` in `try_catch`, which outlives the
+            // call.
+            let call = unsafe { &mut *(data as *mut Call<'_, 's, F, T>) };
+            let Some(f) = call.f.take() else {
+                unreachable!()
+            };
+            // A panic must not unwind into C++; it is resumed once the `TryCatch` is gone.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let result = f(call.lock);
+                if let Err(err) = &result {
+                    // Thrown in the `TryCatch`, so that it catches what `f` failed with.
+                    call.lock.throw_exception(err);
+                }
+                result
+            }));
+            let failed = !matches!(result, Ok(Ok(_)));
+            call.result = Some(result);
+            failed
+        }
+
+        let isolate = self.isolate().as_ffi();
+        let mut call = Call {
+            lock: self,
+            f: Some(f),
+            result: None,
+        };
+        let mut exception = v8::ffi::MaybeLocal { ptr: 0 };
+        // SAFETY: the lock keeps the isolate locked, with a scope open, for the call; `call`
+        // outlives it; `trampoline` matches its type.
+        unsafe {
+            v8::ffi::isolate_try_catch(
+                isolate,
+                &raw mut call as usize,
+                trampoline::<F, T>,
+                &mut exception,
+            );
+        }
+        let Some(result) = call.result else {
+            unreachable!()
+        };
+        match result {
+            Ok(Ok(value)) => Ok(Ok(value)),
+            Err(payload) => std::panic::resume_unwind(payload),
+            // SAFETY: the exception belongs to the scope of the lock, which `isolate_try_catch`
+            // opened no scope inside.
+            Ok(Err(_)) => match unsafe { v8::Local::from_ffi_maybe(exception) } {
+                Some(exception) => Ok(Err(exception)),
+                None => Err(Error::pending()),
+            },
+        }
+    }
+
+    /// Returns the exception that [`Lock::throw_exception`] would throw for `err`, without
+    /// throwing it: an internal error is redacted (and its message logged) the same way.
+    ///
+    /// Use it to reject a promise with an `Error`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
+    /// pending in V8, and returning the error propagates it. While execution is terminating,
+    /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
+    /// termination; an internal error's message is still logged.
+    pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
+        if err.is_pending() {
+            return Err(err.clone());
+        }
+        if self.is_execution_terminating() {
+            // Nothing could be rejected with the exception, so it is not created. (Creating it
+            // would be safe: creating an error object takes no context.)
+            if err.is_internal {
+                // Logs the message and throws nothing.
+                self.throw_internal_error(&err.message);
+            }
+            return Err(Error::pending());
+        }
+        if err.is_internal {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
+            // the lock's scope.
+            return Ok(unsafe {
+                v8::Local::from_ffi(v8::ffi::exception_create_internal(
+                    self.isolate().as_ffi(),
+                    &err.message,
+                ))
+            });
+        }
+        Ok(err.to_local(self))
+    }
+
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
     ///
     /// Generates a unique error reference ID, logs `internal_message` with the ID via
     /// `KJ_LOG(ERROR)` (reaching Sentry), and schedules a generic
     /// `"Error: internal error; reference = <id>"` JS exception on the isolate so the
-    /// internal message is never exposed to JavaScript.
+    /// internal message is never exposed to JavaScript. While execution is terminating, it
+    /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
@@ -811,7 +948,28 @@ pub trait Type: Sized {
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    ///
+    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
+    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
+    /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+
+    /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
+    /// at compile time; see [`UnionTypes`].
+    #[doc(hidden)]
+    const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
+
+    /// Names that identify the type in a `#[jsg_oneof]` union, flattened as
+    /// [`Self::UNION_TYPES`] is: a union's are those of its variants, and a `Nullable<T>`'s are
+    /// `T`'s. A union may not contain a name twice, as C++ JSG's `webidl::FlattenedTypeTraits`
+    /// rejects a type that appears twice in a flattened `kj::OneOf`.
+    ///
+    /// Resources, handles and `SystemTime` have a name, since most of them are in no category, or
+    /// in one with no limit, so [`UnionTypes::validate`] can't tell that one appears twice. The
+    /// other types that `jsg` implements `Type` for need none: each is in a category that a union
+    /// may hold at most one type of.
+    #[doc(hidden)]
+    const UNION_NAMES: &'static [&'static str] = &[];
 }
 
 /// Represents a constant value that can be exposed to JavaScript.
@@ -866,15 +1024,38 @@ impl From<u64> for ConstantValue {
 ///   [`Member::InstanceProperty`] registers these.
 /// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
 ///   surfaced by `node:util` `inspect()`.
+/// - `LazyInstance` / `LazyReadonlyInstance` — own data property on every
+///   instance, computed once on first access. Only
+///   [`Member::LazyInstanceProperty`] registers these.
 pub use crate::v8::ffi::PropertyKind;
 
+/// Placement of an ordinary resource property registered by a generated member factory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyPlacement {
+    /// An accessor on the prototype; preferred for new APIs.
+    Prototype,
+    /// An own native data property on each instance, for compatibility with existing APIs.
+    Instance,
+    /// An own data property on each instance whose getter runs on first access, after which
+    /// the result is stored as the property's value.
+    LazyInstance,
+}
+
+/// A member of a resource type. `length` is the function's Web IDL `.length`, the number of
+/// leading required arguments; it is applied when `spec_compliant_property_attributes` is
+/// enabled, as in C++ JSG.
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
+        length: u32,
     },
     Method {
         name: String,
+        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
+        /// receiver; don't use one in any other member.
         callback: RawFunctionCallback,
+        fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
     /// panics). `setter_callback = None` makes the property read-only; `Inspect`
@@ -895,13 +1076,39 @@ pub enum Member {
         /// `None` for read-only properties.
         setter_callback: Option<RawSetterCallback>,
     },
+    /// An own data property on every instance whose getter runs on first access
+    /// (V8's `SetLazyDataProperty`). V8 then replaces it with a data property
+    /// holding the getter's result, so later reads do not call the getter. The
+    /// property is writable unless `read_only`, like C++
+    /// `JSG_LAZY_INSTANCE_PROPERTY` / `JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+    LazyInstanceProperty {
+        name: String,
+        getter_callback: RawGetterCallback,
+        read_only: bool,
+    },
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
+        fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// A property of every instance with any string name that is not a defined property of the
+    /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
+    /// one. `query_callback` tells V8 whether a property exists, for `in`.
+    WildcardProperty {
+        getter_callback: RawWildcardGetterCallback,
+        query_callback: RawWildcardQueryCallback,
+    },
+    /// Another resource type's constructor, as a property of this type's
+    /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
+    /// are installed after every other member, whatever their position.
+    NestedType {
+        name: String,
+        nested_type: NestedType,
     },
 }
 
@@ -934,10 +1141,19 @@ pub trait Struct: Type {}
 /// cached function templates and tracks resource instances. When all Rust `Ref` handles to a
 /// resource are dropped and no JS references remain, V8 GC collects the wrapper and the
 /// `CppgcShim` destruction triggers cleanup of the underlying `Wrappable`.
+///
+/// A Realm attaches itself to its isolate: it is stored in the isolate's data slot, and it
+/// installs the hook through which each `IsolateBase::Lock` resets the persistent handles
+/// dropped without the lock. It must be dropped under the isolate lock, before the isolate is
+/// disposed: dropping it detaches it and closes the isolate's [`IsolateState`], after which the
+/// `Global`s and `TracedGlobal`s of the isolate leave their handles to `v8::Isolate::Dispose`.
+/// The isolate keeps the state alive until it is disposed.
 pub struct Realm {
     isolate: v8::IsolatePtr,
-    id: scope::IsolateId,
-    pub(crate) resources: resource::Resources,
+    /// Shared with every `Global` and `TracedGlobal` of the isolate, which identifies its isolate
+    /// by it.
+    state: Arc<IsolateState>,
+    resources: resource::Resources,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -947,7 +1163,7 @@ impl Realm {
     pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
-            id: scope::IsolateId::next(),
+            state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
             feature_flags,
         }
@@ -957,12 +1173,22 @@ impl Realm {
         self.isolate
     }
 
-    pub(crate) fn id(&self) -> scope::IsolateId {
-        self.id
+    pub(crate) fn state(&self) -> &Arc<IsolateState> {
+        &self.state
+    }
+
+    /// Gets or creates the cached `FunctionTemplate` for a resource type, built against
+    /// this realm's compatibility flags.
+    pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
+        self.resources
+            .get_constructor::<R>(self.isolate, &self.state, self.feature_flags.reader())
     }
 }
 
-#[expect(unsafe_code, reason = "asks V8 whether the isolate is locked")]
+#[expect(
+    unsafe_code,
+    reason = "detaches from the isolate, which must be locked, and closes its state"
+)]
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
@@ -970,6 +1196,17 @@ impl Drop for Realm {
             unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
+        // Dropped before the state is closed, so that their handles are reset rather than
+        // left to `Dispose`.
+        drop(std::mem::take(&mut self.resources));
+        // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
+        // (guaranteed by the embedder; see the type's documentation).
+        let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
+        self.state.close(isolate);
+        // The isolate gives this reference back once it is disposed.
+        let state = Arc::into_raw(Arc::clone(&self.state));
+        // SAFETY: the isolate is valid and locked, and this Realm is the one attached to it.
+        unsafe { ffi::realm_detach(isolate.as_ffi(), state) };
     }
 }
 
@@ -980,8 +1217,51 @@ impl Drop for Realm {
 #[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
-    // SAFETY: isolate pointer is valid (guaranteed by C++ caller).
-    unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
+    // SAFETY: isolate pointer is valid and locked (guaranteed by C++ caller).
+    let mut realm =
+        unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) };
+    debug_assert!(
+        // SAFETY: as above.
+        unsafe { ffi::realm_can_attach(isolate) },
+        "an isolate has at most one Realm"
+    );
+    // SAFETY: as above; the Realm keeps its address for as long as it is attached, as it
+    // lives in the `Box` until `Realm::drop` detaches it.
+    unsafe { ffi::realm_attach(isolate, &mut realm) };
+    realm
+}
+
+/// See the bridge declaration.
+#[expect(
+    unsafe_code,
+    reason = "takes back the reference to the state that C++ held"
+)]
+unsafe fn isolate_disposed(state: *const IsolateState) {
+    // SAFETY: `state` comes from `Arc::into_raw` in `Realm::drop`, and C++ hands it back once.
+    let state = unsafe { Arc::from_raw(state) };
+    state.isolate_disposed();
+}
+
+/// See the bridge declaration.
+#[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
+unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
+    // A Rust scope of the isolate open on this thread means that C++ locked the isolate again
+    // under a `Lock`, which may hold a reference to the Realm. The queue then waits for the
+    // next lock.
+    let nested = scope::scope_owner::current() == isolate;
+    debug_assert!(
+        !nested,
+        "the isolate was locked again while a Rust scope of it is open"
+    );
+    if nested {
+        return;
+    }
+    // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
+    // (guaranteed by the C++ caller, and checked above).
+    let isolate = unsafe { Isolate::from_raw(isolate) };
+    // SAFETY: the Realm is attached while the hook that calls this is installed.
+    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    realm.state.reset_awaiting_lock(isolate);
 }
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for
@@ -1023,13 +1303,7 @@ where
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(scope.open()))) {
         Ok(result) => Some(result),
         Err(payload) => {
-            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                *s
-            } else if let Some(s) = payload.downcast_ref::<String>() {
-                s.as_str()
-            } else {
-                "<non-string panic payload>"
-            };
+            let msg = panic_message(&*payload);
             // The scope may not have opened, so there may be no lock to throw with.
             // SAFETY: the caller of `CallbackScope::new` keeps the isolate locked, with a
             // context entered and a `HandleScope` open, while `scope` lives. The unwind closed
@@ -1041,6 +1315,37 @@ where
             None
         }
     }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "<non-string panic payload>"
+    }
+}
+
+/// The part of an error message that V8 can hold as a string: all of `message` if it is at most
+/// [`v8::String::MAX_LENGTH`] bytes, otherwise a prefix of that many bytes or fewer, cut before
+/// a UTF-8 sequence rather than inside one. See [`Lock::error`].
+pub(crate) fn error_message_for_v8(message: &[u8]) -> &[u8] {
+    utf8_prefix(message, v8::String::MAX_LENGTH as usize)
+}
+
+/// The longest prefix of `bytes` of at most `max_len` bytes that does not end inside a UTF-8
+/// sequence. A continuation byte is one of the form `10xxxxxx`, and a sequence has at most
+/// three of them, so the cut moves back at most three bytes; `bytes` need not be valid UTF-8.
+fn utf8_prefix(bytes: &[u8], max_len: usize) -> &[u8] {
+    if bytes.len() <= max_len {
+        return bytes;
+    }
+    let mut end = max_len;
+    while end > max_len.saturating_sub(3) && bytes[end] & 0b1100_0000 == 0b1000_0000 {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 #[cfg(test)]

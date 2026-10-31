@@ -1555,6 +1555,121 @@ export const testNetBoundSocketLocalAddressConflict = {
   },
 };
 
+// A refused connection is reported as Node's errno error, so code that switches
+// on err.code (such as the Emscripten node sockets backend, which maps it to an
+// errno) sees ECONNREFUSED rather than a generic failure.
+export const testNetConnectRefused = {
+  async test() {
+    const events = [];
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: '127.0.0.1', port: 1 });
+    socket.on('connectionAttemptFailed', (host, port, family, err) =>
+      events.push(['connectionAttemptFailed', host, port, family, err.code])
+    );
+    socket.on('connect', () => events.push(['connect']));
+    socket.on('error', (err) => events.push(['error', err]));
+    socket.on('close', (hadError) => {
+      events.push(['close', hadError]);
+      resolve();
+    });
+    await promise;
+
+    deepStrictEqual(
+      events.map((e) => e[0]),
+      ['connectionAttemptFailed', 'error', 'close']
+    );
+    deepStrictEqual(events[0], [
+      'connectionAttemptFailed',
+      '127.0.0.1',
+      1,
+      4,
+      'ECONNREFUSED',
+    ]);
+    const err = events[1][1];
+    ok(err instanceof Error);
+    strictEqual(err.name, 'Error');
+    strictEqual(String(err), 'Error: connect ECONNREFUSED 127.0.0.1:1');
+    strictEqual(err.message, 'connect ECONNREFUSED 127.0.0.1:1');
+    strictEqual(err.code, 'ECONNREFUSED');
+    strictEqual(err.errno, -111);
+    strictEqual(err.syscall, 'connect');
+    strictEqual(err.address, '127.0.0.1');
+    strictEqual(err.port, 1);
+    deepStrictEqual(events[2], ['close', true]);
+    strictEqual(socket.connecting, false);
+    strictEqual(socket.destroyed, true);
+  },
+};
+
+// A refused connection to a host name, which the platform resolves itself,
+// reports the attempt once its outcome shows one was made.
+export const testNetConnectRefusedHostname = {
+  async test() {
+    const events = [];
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: 'localhost', port: 1 });
+    for (const name of [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'lookup',
+    ]) {
+      socket.on(name, () => events.push(name));
+    }
+    socket.on('error', (err) => {
+      events.push('error');
+      resolve(err);
+    });
+    const err = await promise;
+    deepStrictEqual(events, [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'error',
+    ]);
+    strictEqual(err.code, 'ECONNREFUSED');
+    strictEqual(err.address, 'localhost');
+    strictEqual(err.port, 1);
+  },
+};
+
+// A host that does not resolve is reported as Node's getaddrinfo error:
+// ENOTFOUND from a resolver, EAI_AGAIN where the sandbox has no resolver.
+export const testNetConnectNotFound = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: 'something.invalid', port: 80 });
+    const events = [];
+    for (const name of [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'lookup',
+      'error',
+    ]) {
+      socket.on(name, () => events.push(name));
+    }
+    const lookupFn = mock.fn();
+    socket.on('lookup', lookupFn);
+    socket.on('error', resolve);
+    const err = await promise;
+    deepStrictEqual(events, ['lookup', 'error']);
+    ok(['ENOTFOUND', 'EAI_AGAIN'].includes(err.code), err.message);
+    strictEqual(
+      String(err),
+      `Error: getaddrinfo ${err.code} something.invalid`
+    );
+    strictEqual(err.message, `getaddrinfo ${err.code} something.invalid`);
+    strictEqual(err.errno, err.code === 'ENOTFOUND' ? -3008 : -3001);
+    strictEqual(err.syscall, 'getaddrinfo');
+    strictEqual(err.hostname, 'something.invalid');
+    strictEqual(lookupFn.mock.callCount(), 1);
+    deepStrictEqual(lookupFn.mock.calls[0].arguments, [
+      err,
+      undefined,
+      undefined,
+      'something.invalid',
+    ]);
+  },
+};
+
 export const testNetReconnect = {
   async test(ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();

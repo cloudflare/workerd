@@ -625,16 +625,13 @@ KJ_TEST("JsWritableStream create honors the closure waitable") {
 // =======================================================================================
 // TypeScript-backed streams
 
-// Builds a TestFixture in which the TypeScript streams implementation is active: the
-// typescript_implemented_streams compat flag plus the per-isolate bootstrap autogate.
+// Builds a TestFixture with the typescript_implemented_streams compat flag enabled, so the
+// TypeScript streams implementation is active.
 TestFixture makeTsStreamsFixture() {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({
-    .featureFlags = flags.asReader(),
-    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
-  });
+  return TestFixture({.featureFlags = flags.asReader()});
 }
 
 // Like makeTsStreamsFixture(), but with an actor, so the Durable Object output gate is in
@@ -646,7 +643,6 @@ TestFixture makeTsStreamsActorFixture(kj::StringPtr actorName) {
   Worker::Actor::Id actorId = kj::str(actorName);
   return TestFixture({
     .featureFlags = flags.asReader(),
-    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
     .actorId = kj::mv(actorId),
   });
 }
@@ -803,10 +799,7 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // Wrap an instance via the Lock-acquired TypeHandler -- the same path create()'s
-    // TypeScript arm uses -- then verify the contract's detection shape: an own data
-    // property keyed by the kNativeSink API-registry symbol whose value is the symbol
-    // itself.
+    // Template-created instances carry a private marker, not an ordinary API symbol.
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<WritableStreamNativeSink>>());
     auto handle = handler.wrap(
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none));
@@ -814,8 +807,8 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
 
     auto symbol = jsg::JsValue(
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSink")));
-    KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
-    KJ_EXPECT(obj.get(js, symbol) == symbol);
+    KJ_EXPECT(obj.getPrivate(js, "kNativeSink"_kj).isTrue());
+    KJ_EXPECT(!obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
   });
 }
 
@@ -1024,7 +1017,7 @@ KJ_TEST("JsWritableStream flush TS arm parks behind an in-flight write") {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
   // Observed by continuations that run after the runInIoContext body has returned, so it
   // must live at test scope (the body's stack frame is gone by then).
-  bool flushed = false;
+  kj::Pin<bool> flushed{};  // Value-initialized to false.
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1039,7 +1032,9 @@ KJ_TEST("JsWritableStream flush TS arm parks behind an in-flight write") {
 
     // The flush is positional: its marker is queued behind the (gated) write.
     auto flushPromise =
-        stream.forceFlush(js).then(js, [&flushed](jsg::Lock& js) { flushed = true; });
+        stream.forceFlush(js).then(js, [flushed = flushed.addWeak()](jsg::Lock& js) {
+      KJ_REQUIRE_NONNULL(flushed.tryGet(), "test state destroyed") = true;
+    });
 
     // A KJ roundtrip drains the microtask queue, so by the continuation the write has
     // reached the (gated) sink while the flush is still parked.
@@ -1047,14 +1042,14 @@ KJ_TEST("JsWritableStream flush TS arm parks behind an in-flight write") {
                         .awaitIo(js, kj::Promise<void>(kj::READY_NOW),
                             [&written, &gate, &flushed](jsg::Lock& js) {
       KJ_EXPECT(written.asPtr() == kData.asBytes());
-      KJ_EXPECT(!flushed);
+      KJ_EXPECT(!*flushed);
       KJ_ASSERT_NONNULL(gate)->fulfill();
     })
                         .then(js,
                             [flushPromise = kj::mv(flushPromise), writer = writer.addRef(js),
                                 stream = kj::mv(stream)](
                                 jsg::Lock& js) mutable { return kj::mv(flushPromise); });
-    auto done = sequence.then(js, [&flushed](jsg::Lock& js) { KJ_EXPECT(flushed); });
+    auto done = sequence.then(js, [&flushed](jsg::Lock& js) { KJ_EXPECT(*flushed); });
     return env.context.awaitJs(js, kj::mv(done));
   });
   KJ_EXPECT(written.asPtr() == kData.asBytes());
@@ -1451,7 +1446,7 @@ KJ_TEST("JsReadableStream pipeTo native+native queues behind an in-flight write"
 
 KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") {
   auto fixture = makeTsStreamsActorFixture("test-actor-ts-pipefrom-close");
-  SinkState state;
+  kj::Pin<SinkState> state;
   // Owned at test scope: continuations observe these after the body returns.
   kj::Maybe<kj::Promise<void>> blocker;
   fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
@@ -1462,7 +1457,7 @@ KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") 
     // Park the close's end() on the output gate.
     auto paf = kj::newPromiseAndFulfiller<void>();
     blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
-    auto destination = JsWritableStream::create(js, env.context, state.makeSink(), kj::none);
+    auto destination = JsWritableStream::create(js, env.context, state->makeSink(), kj::none);
     auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
     auto writer = KJ_ASSERT_NONNULL(
         webstreams::invokeMethod(js, handle, "getWriter"_kj).tryCast<jsg::JsObject>());
@@ -1472,7 +1467,10 @@ KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") 
     auto sequence =
         env.context
             .awaitIo(js, settleTurns(10),
-                [&state](jsg::Lock& js) { KJ_EXPECT(!state.ended, "close must be parked"); })
+                [state = state.addWeak()](jsg::Lock& js) {
+      KJ_EXPECT(!KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed").ended,
+          "close must be parked");
+    })
             .then(js,
                 JSG_VISITABLE_LAMBDA((destination = kj::mv(destination),
                                          fulfiller = kj::mv(paf.fulfiller), &context = env.context),
@@ -1486,7 +1484,7 @@ KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") 
                       // use-after-free.
                       auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
                       auto extractor =
-                          KJ_ASSERT_NONNULL(handle.get(js, js.symbolInternal("kExtractNativeSink"))
+                          KJ_ASSERT_NONNULL(handle.getPrivate(js, "kExtractNativeSink"_kj)
                                                 .tryCast<jsg::JsFunction>());
                       auto sinkObj =
                           KJ_ASSERT_NONNULL(extractor.call(js, handle).tryCast<jsg::JsObject>());
@@ -1518,9 +1516,12 @@ KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") 
                       // sink.
                       fulfiller->fulfill();
                     }))
-            .then(js, [&context = env.context](jsg::Lock& js) {
-      return context.awaitIo(js, settleTurns(10), [](jsg::Lock& js) {});
-    }).then(js, [&state](jsg::Lock& js) { KJ_EXPECT(state.ended); });
+            .then(js, [weakContext = env.context.getWeakRef()](jsg::Lock& js) {
+      return KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed")
+          .awaitIo(js, settleTurns(10), [](jsg::Lock& js) {});
+    }).then(js, [state = state.addWeak()](jsg::Lock& js) {
+      KJ_EXPECT(KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed").ended);
+    });
     return env.context.awaitJs(js, kj::mv(sequence));
   }),
       kActorErrorsToIgnore);
@@ -1716,21 +1717,16 @@ KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none)));
     KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, sinkObj) == kj::none);
 
-    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
-    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
-    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
-    // on the adopted impostor throws.
+    // An ordinary API symbol cannot forge the constructor's private brand.
     auto impostorObj = js.obj();
     impostorObj.setNonEnumerable(js, js.symbolInternal("kWritableStreamBrand"), js.boolean(true));
-    auto impostor = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
-    bool threw = false;
-    js.tryCatch(
-        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
-      threw = true;
-      auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
-    });
-    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
+    KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+      KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)) != kj::none);
+      KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    }
   });
 }
 
@@ -1922,24 +1918,24 @@ KJ_TEST("JsReadableStream pipeTo into an errored destination rejects with the st
 KJ_TEST("WritableStreamNativeSink abort during an in-flight write defers the release") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> written;
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  kj::Pin<kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>> gate;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
     // Drive the sink hooks directly: the TS machinery serializes write/abort, so the
     // overlap is only reachable at the hook level (the pendingAbort path is defensive).
     auto sink = js.alloc<WritableStreamNativeSink>(
-        env.context, kj::heap<GatedSink>(written, gate), kj::none, kj::none);
+        env.context, kj::heap<GatedSink>(written, *gate), kj::none, kj::none);
 
     // The sink's write() is invoked synchronously inside the hook, so the gate is armed
     // before the hook returns; the I/O is parked on it.
     auto writePromise = sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
-    KJ_EXPECT(gate != kj::none);
+    KJ_EXPECT(*gate != kj::none);
 
     // Abort with the write in flight: the release is deferred to the write's settlement.
     auto abortPromise = sink->abort(js, jsg::JsValue(js.str("stop"_kj)));
-    KJ_ASSERT_NONNULL(gate)->fulfill();
-    gate = kj::none;
+    KJ_ASSERT_NONNULL(*gate)->fulfill();
+    *gate = kj::none;
 
     auto promise =
         writePromise
@@ -1949,7 +1945,9 @@ KJ_TEST("WritableStreamNativeSink abort during an in-flight write defers the rel
               // The deferred release completed at the write's settlement: a subsequent write
               // resolves as a tolerated no-op without reaching the (released) sink.
               return sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "xx"_kjb)))
-                  .then(js, [&gate](jsg::Lock& js) { KJ_EXPECT(gate == kj::none); });
+                  .then(js, [gate = gate.addWeak()](jsg::Lock& js) {
+                KJ_EXPECT(KJ_REQUIRE_NONNULL(gate.tryGet(), "test state destroyed") == kj::none);
+              });
             }));
     return env.context.awaitJs(js, kj::mv(promise));
   });

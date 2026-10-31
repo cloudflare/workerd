@@ -245,6 +245,7 @@ static Worker::Script::ModuleContent extractWasmModuleContent(
     .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
     .compiledModule = kj::mv(compiled),
     .compiledWithEsmIntegrationBuiltins = js.isWasmEsmIntegrationBuiltinsEnabled(),
+    .compiledWithWasmSourceUrlSupport = js.isWasmSourceUrlSupportEnabled(),
   };
 }
 

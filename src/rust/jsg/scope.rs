@@ -32,15 +32,15 @@
 //! isolate's scopes inside the `unsafe` [`allow_scopes_of_another_isolate`].
 //!
 //! Handles that outlive scopes remember their isolate and panic when used in another:
-//! [`v8::Global`](crate::v8::Global) and the JavaScript wrapper of an [`Rc`](crate::Rc).
+//! [`v8::Global`](crate::v8::Global), [`v8::TracedGlobal`](crate::v8::TracedGlobal), and the
+//! JavaScript wrapper of an [`Rc`](crate::Rc).
 //!
 use std::marker::PhantomData;
 use std::marker::PhantomPinned;
-use std::num::NonZeroU64;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
+use crate::isolate_state::IsolateState;
 use crate::v8;
 
 /// Proof that the V8 isolate is locked by the current thread, that a context is entered,
@@ -71,9 +71,9 @@ impl Lock<'_> {
         self.isolate
     }
 
-    /// Returns the identity of this lock's isolate.
-    pub(crate) fn isolate_id(&mut self) -> IsolateId {
-        self.realm().id()
+    /// Returns the state shared by the handles of this lock's isolate.
+    pub(crate) fn isolate_state(&mut self) -> &Arc<IsolateState> {
+        self.realm().state()
     }
 }
 
@@ -112,6 +112,15 @@ impl Isolate {
     pub fn as_ffi(&self) -> *mut v8::ffi::Isolate {
         std::ptr::from_ref(self).cast_mut().cast()
     }
+
+    /// Returns true while V8 is terminating execution on this isolate
+    /// (`v8::Isolate::IsExecutionTerminating`). Don't throw a JavaScript exception then; see
+    /// `README.md` §Safety rules, rule 1.
+    #[expect(unsafe_code, reason = "asks V8 about the locked isolate")]
+    pub fn is_execution_terminating(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_is_execution_terminating(self.as_ffi()) }
+    }
 }
 
 impl std::ops::Deref for Lock<'_> {
@@ -131,17 +140,6 @@ impl std::ops::DerefMut for Lock<'_> {
         // SAFETY: as in `deref`; the isolate is borrowed through the exclusive borrow of the
         // lock.
         unsafe { &mut *self.isolate.as_ffi().cast::<Isolate>() }
-    }
-}
-
-/// Identifies an isolate. Unlike its address, an `IsolateId` is never reused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IsolateId(NonZeroU64);
-
-impl IsolateId {
-    pub fn next() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self(NonZeroU64::MIN.saturating_add(NEXT.fetch_add(1, Ordering::Relaxed)))
     }
 }
 
@@ -189,6 +187,18 @@ pub mod scope_owner {
             s.depth += 1;
             state.set(s);
         });
+    }
+
+    /// Returns the isolate whose scopes are open on this thread, or null if none is.
+    pub fn current() -> *mut v8::ffi::Isolate {
+        STATE.with(|state| {
+            let s = state.get();
+            if s.depth == 0 {
+                ptr::null_mut()
+            } else {
+                s.isolate
+            }
+        })
     }
 
     /// Records that a scope opened with [`enter`] was closed.
@@ -245,6 +255,10 @@ pub trait CallbackScopeParam: callback_scope_param::Sealed {
     #[doc(hidden)]
     #[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
     unsafe fn into_isolate(self) -> v8::IsolatePtr;
+
+    /// Whether the parameter is the callback info of a callback that V8 entered.
+    #[doc(hidden)]
+    const V8_CALLBACK: bool = true;
 }
 
 mod callback_scope_param {
@@ -253,10 +267,13 @@ mod callback_scope_param {
     impl Sealed for *mut crate::v8::ffi::FunctionCallbackInfo {}
     impl Sealed for *mut crate::v8::ffi::PropertyCallbackInfo {}
     impl Sealed for *mut crate::v8::ffi::PropertySetterCallbackInfo {}
+    impl Sealed for *mut crate::v8::ffi::PropertyQueryCallbackInfo {}
 }
 
 #[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
 impl CallbackScopeParam for *mut v8::ffi::Isolate {
+    const V8_CALLBACK: bool = false;
+
     /// # Panics
     /// Panics if the isolate is not locked by this thread or no context is entered: a C++
     /// caller bug that must not reach V8.
@@ -302,6 +319,15 @@ impl CallbackScopeParam for *mut v8::ffi::PropertySetterCallbackInfo {
     }
 }
 
+#[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
+impl CallbackScopeParam for *mut v8::ffi::PropertyQueryCallbackInfo {
+    unsafe fn into_isolate(self) -> v8::IsolatePtr {
+        // SAFETY: V8 passes a valid PropertyCallbackInfo with the isolate locked (guaranteed
+        // by caller).
+        unsafe { v8::IsolatePtr::from_ffi(v8::ffi::pqci_get_isolate(self)) }
+    }
+}
+
 /// Storage of a lock for a `HandleScope` that C++ or V8 opened before calling into Rust.
 /// Use [`callback_scope!`] to open one.
 ///
@@ -309,6 +335,7 @@ impl CallbackScopeParam for *mut v8::ffi::PropertySetterCallbackInfo {
 pub struct CallbackScope {
     lock: Lock<'static>,
     open: bool,
+    v8_callback: bool,
     _pinned: PhantomPinned,
 }
 
@@ -323,11 +350,12 @@ impl CallbackScope {
     /// innermost `v8::HandleScope` must stay open and innermost until the storage is dropped.
     /// No other `Lock` for that `HandleScope` may be used while the storage lives. The
     /// storage must be dropped, not leaked, or its isolate keeps owning the thread.
-    pub unsafe fn new(param: impl CallbackScopeParam) -> Self {
+    pub unsafe fn new<P: CallbackScopeParam>(param: P) -> Self {
         Self {
             // SAFETY: forwarded from the caller.
             lock: Lock::new(unsafe { param.into_isolate() }),
             open: false,
+            v8_callback: P::V8_CALLBACK,
             _pinned: PhantomPinned,
         }
     }
@@ -335,13 +363,31 @@ impl CallbackScope {
     /// Opens the scope and returns its lock.
     ///
     /// # Panics
-    /// Panics if a scope of another isolate is open on this thread.
+    /// Panics if a scope of another isolate is open on this thread. With debug assertions, also
+    /// panics if V8 entered the callback while an exception other than a termination is
+    /// pending.
     pub fn open<'s>(self: Pin<&'s mut Self>) -> &'s mut Lock<'s> {
         // SAFETY: nothing is moved out of the storage.
         let this = unsafe { self.get_unchecked_mut() };
         if !this.open {
             scope_owner::enter(this.lock.isolate);
             this.open = true;
+            // An exception is pending here only if C++ ran JavaScript while one was, typically
+            // while its innermost `v8::TryCatch` still held one it had caught. Every operation
+            // of the callback would then fail with a pending error, and JavaScript would see
+            // `undefined`.
+            debug_assert!(
+                !this.v8_callback || {
+                    let isolate = this.lock.isolate.as_ffi();
+                    // SAFETY: the isolate is valid and locked (guaranteed by `new`'s caller).
+                    unsafe {
+                        v8::ffi::isolate_is_execution_terminating(isolate)
+                            || !v8::ffi::isolate_has_pending_exception(isolate)
+                    }
+                },
+                "V8 entered a Rust JSG callback while a v8::TryCatch held a caught exception; \
+                 reset the TryCatch before running more JavaScript"
+            );
         }
         // SAFETY: `Lock<'s>` differs from `Lock<'static>` only in its brand; `new`'s caller
         // keeps the scope open and innermost while the storage lives.
@@ -484,6 +530,125 @@ where
             let f = unsafe { unit_value::<F>() };
             f(lock, &mut args);
         });
+    }
+
+    let _ = f;
+    callback::<F>
+}
+
+/// Whether an interceptor callback handled a property request, as `v8::Intercepted`.
+///
+/// A callback that throws returns `Yes`, as V8 asks of interceptors that throw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Intercepted {
+    /// The callback handled the request, or threw.
+    Yes,
+    /// The property is looked up as if there were no interceptor.
+    No,
+}
+
+impl Intercepted {
+    /// The value of the matching `v8::Intercepted`, which `ffi.c++` checks.
+    const fn to_ffi(self) -> u32 {
+        match self {
+            Self::Yes => 0,
+            Self::No => 1,
+        }
+    }
+}
+
+/// The getter of a wildcard property (`v8::NamedPropertyGetterCallback`). The `usize` is the
+/// `v8::Local` of the property name.
+pub type RawWildcardGetterCallback =
+    unsafe extern "C" fn(usize, *mut v8::ffi::PropertyCallbackInfo) -> u32;
+
+/// The query of a wildcard property (`v8::NamedPropertyQueryCallback`), which tells V8 whether
+/// the property exists. The `usize` is the `v8::Local` of the property name.
+pub type RawWildcardQueryCallback =
+    unsafe extern "C" fn(usize, *mut v8::ffi::PropertyQueryCallbackInfo) -> u32;
+
+/// Turns `f` into the getter of a wildcard property, as [`function_callback`] does for
+/// functions.
+///
+/// `f` gets the property name. A panic in `f` throws an internal error to JavaScript
+/// and terminates execution, and the callback returns [`Intercepted::Yes`].
+pub fn wildcard_getter_callback<F>(f: F) -> RawWildcardGetterCallback
+where
+    F: UnitType
+        + for<'s> Fn(
+            &mut Lock<'s>,
+            v8::Local<'s, v8::Name>,
+            &mut v8::PropertyCallbackInfo<'s>,
+        ) -> Intercepted,
+{
+    #[expect(unsafe_code, reason = "V8 calls this with a raw PropertyCallbackInfo")]
+    unsafe extern "C" fn callback<F>(name: usize, info: *mut v8::ffi::PropertyCallbackInfo) -> u32
+    where
+        F: UnitType
+            + for<'s> Fn(
+                &mut Lock<'s>,
+                v8::Local<'s, v8::Name>,
+                &mut v8::PropertyCallbackInfo<'s>,
+            ) -> Intercepted,
+    {
+        // SAFETY: V8 calls an interceptor with its `PropertyCallbackInfo`, with the isolate
+        // locked, a context entered and a `HandleScope` open for the duration of the call.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(info) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `info` is the running callback's, and `lock` the lock of its scope.
+            let mut args = unsafe { v8::PropertyCallbackInfo::new(lock, info) };
+            // SAFETY: `name` is the handle of the property name that V8 passed, which lives in
+            // the callback's scope.
+            let name = unsafe { v8::Local::from_ffi(v8::ffi::Local { ptr: name }) };
+            // SAFETY: `wildcard_getter_callback` was handed a value of `F`.
+            let f = unsafe { unit_value::<F>() };
+            f(lock, name, &mut args)
+        })
+        .unwrap_or(Intercepted::Yes)
+        .to_ffi()
+    }
+
+    let _ = f;
+    callback::<F>
+}
+
+/// Turns `f` into the query of a wildcard property, as [`wildcard_getter_callback`] does for
+/// its getter.
+pub fn wildcard_query_callback<F>(f: F) -> RawWildcardQueryCallback
+where
+    F: UnitType
+        + for<'s> Fn(
+            &mut Lock<'s>,
+            v8::Local<'s, v8::Name>,
+            &mut v8::PropertyQueryCallbackInfo<'s>,
+        ) -> Intercepted,
+{
+    #[expect(unsafe_code, reason = "V8 calls this with a raw PropertyCallbackInfo")]
+    unsafe extern "C" fn callback<F>(
+        name: usize,
+        info: *mut v8::ffi::PropertyQueryCallbackInfo,
+    ) -> u32
+    where
+        F: UnitType
+            + for<'s> Fn(
+                &mut Lock<'s>,
+                v8::Local<'s, v8::Name>,
+                &mut v8::PropertyQueryCallbackInfo<'s>,
+            ) -> Intercepted,
+    {
+        // SAFETY: as in `wildcard_getter_callback`.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(info) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `info` is the running callback's, and `lock` the lock of its scope.
+            let mut args = unsafe { v8::PropertyQueryCallbackInfo::new(lock, info) };
+            // SAFETY: as in `wildcard_getter_callback`.
+            let name = unsafe { v8::Local::from_ffi(v8::ffi::Local { ptr: name }) };
+            // SAFETY: `wildcard_query_callback` was handed a value of `F`.
+            let f = unsafe { unit_value::<F>() };
+            f(lock, name, &mut args)
+        })
+        .unwrap_or(Intercepted::Yes)
+        .to_ffi()
     }
 
     let _ = f;

@@ -238,7 +238,7 @@ class TestService final: public kj::HttpService {
     kj::HttpHeaders accepted(table);
     if (host == "framed.example:1") accepted.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0");
     response.accept(200, "OK", accepted);
-    kj::byte buffer[256];
+    kj::byte buffer[256]{};
     for (;;) {
       auto n = co_await connection.tryRead(buffer, 1, sizeof(buffer));
       if (n == 0) co_return;
@@ -1345,7 +1345,7 @@ KJ_TEST("TLS: HTTP keep-alive, a WebSocket and a CONNECT tunnel ride inside TLS"
     auto request = client->connect("tunnel.example:1", headers, {});
     KJ_EXPECT(request.status.wait(f.ws).statusCode == 200);
     request.connection->write("ping"_kjb).wait(f.ws);
-    kj::byte buffer[4];
+    kj::byte buffer[4]{};
     request.connection->read(buffer, sizeof(buffer)).wait(f.ws);
     KJ_EXPECT(kj::arrayPtr(buffer) == "ping"_kjb);
   }

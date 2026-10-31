@@ -55,7 +55,11 @@ struct ActorSqliteTestOptions final {
   bool monitorOutputGate = true;
 };
 
-struct ActorSqliteTest final {
+struct ActorSqliteTest final: public kj::PtrTarget {
+  kj::Weak<ActorSqliteTest> addWeak() {
+    return addWeakToThis();
+  }
+
   kj::EventLoop loop;
   kj::WaitScope ws;
 
@@ -1289,23 +1293,31 @@ KJ_TEST("coalesced move-later followed by move-earlier does not race") {
   // only scheduleRun(2ms) fires because the coalesced 10ms was cleared.
   ActorSqliteTest test;
 
-  uint activeRpcs = 0;
-  uint maxConcurrentRpcs = 0;
+  // Both counters are value-initialized to 0.
+  kj::Pin<uint> activeRpcs;
+  kj::Pin<uint> maxConcurrentRpcs;
 
   // Custom handler that respects priorTask ordering like the real alarm manager.
   // The real alarm manager awaits priorTask before sending its RPC; we replicate
   // that here and track concurrent calls.
   test.scheduleRunWithPriorHandler = [&](kj::Maybe<kj::Date> newAlarmTime,
                                          kj::Promise<void> priorTask) -> kj::Promise<void> {
-    return priorTask.then([&, newAlarmTime]() mutable -> kj::Promise<void> {
-      activeRpcs++;
-      maxConcurrentRpcs = kj::max(maxConcurrentRpcs, activeRpcs);
+    return priorTask.then(
+        [weakTest = test.addWeak(), weakActive = activeRpcs.addWeak(),
+            weakMax = maxConcurrentRpcs.addWeak(), newAlarmTime]() mutable -> kj::Promise<void> {
+      auto& active = KJ_REQUIRE_NONNULL(weakActive.tryGet(), "test ended before scheduleRun");
+      auto& maxConcurrent = KJ_REQUIRE_NONNULL(weakMax.tryGet(), "test ended before scheduleRun");
+      active++;
+      maxConcurrent = kj::max(maxConcurrent, active);
       auto desc = newAlarmTime.map([](auto& t) {
         return kj::str("scheduleRun(", t, ")");
       }).orDefault(kj::str("scheduleRun(none)"));
       auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
-      test.calls.add(ActorSqliteTest::Call{kj::mv(desc), kj::mv(fulfiller)});
-      return promise.then([&]() { activeRpcs--; });
+      KJ_REQUIRE_NONNULL(weakTest.tryGet(), "test ended before scheduleRun")
+          .calls.add(ActorSqliteTest::Call{kj::mv(desc), kj::mv(fulfiller)});
+      return promise.then([weakActive = kj::mv(weakActive)]() {
+        KJ_REQUIRE_NONNULL(weakActive.tryGet(), "test ended before scheduleRun completed")--;
+      });
     });
   };
 
@@ -1358,7 +1370,7 @@ KJ_TEST("coalesced move-later followed by move-earlier does not race") {
       {"scheduleRun(2ms)"}, "expected only scheduleRun(2ms), no concurrent scheduleRun(10ms)")[0]);
 
   // Verify no concurrent RPCs occurred.
-  KJ_ASSERT(maxConcurrentRpcs <= 1,
+  KJ_ASSERT(*maxConcurrentRpcs <= 1,
       "scheduleRun RPCs were sent concurrently -- "
       "the coalesced move-later raced with the move-earlier");
 

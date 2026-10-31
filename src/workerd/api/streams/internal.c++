@@ -637,9 +637,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
     if (errorCase) {
       return jsg::JsUint8Array::tryCreate(js, 0).map(
           [](auto& u8) { return jsg::JsArrayBufferView(u8); });
-    } else if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
-      return jsg::JsUint8Array::tryCreate(js, UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2)
-          .map([](auto& u8) { return jsg::JsArrayBufferView(u8); });
     }
     return jsg::JsUint8Array::tryCreate(js, UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE)
         .map([](auto& u8) { return jsg::JsArrayBufferView(u8); });

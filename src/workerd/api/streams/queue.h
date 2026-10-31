@@ -769,7 +769,7 @@ class ValueQueue final {
     }
   };
 
-  class Consumer final {
+  class Consumer final: public kj::PtrTarget {
    public:
     Consumer(ValueQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(
@@ -1040,7 +1040,7 @@ class ByteQueue final {
     }
   };
 
-  class Consumer {
+  class Consumer: public kj::PtrTarget {
    public:
     Consumer(ByteQueue& queue, kj::Weak<ConsumerImpl::StateListener> stateListener = nullptr);
     Consumer(

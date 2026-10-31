@@ -120,8 +120,13 @@ native-backed tee, a native-backed stream whose source is extracted
 bridge's `detach()`: `new Request(request)`, socket upgrades), and a
 detached queued stream other than the source's own stream (a tee
 branch, or a copy detached again). The legacy C++ streams leave the
-same streams locked, disturbed and closed. The Node.js interop
-closed-promise settles then, and the interop error hook, which acts only
+same streams locked, disturbed and closed. The exception to the lock is
+a native-to-native `pipeTo()`: once the pipe settles, its source is
+unlocked (still closed), and its destination, whose native sink the pipe
+also extracted, is closed or errored with the pipe's error and unlocked
+(`finishNativePipe` in readable.ts), as a pipe releases its endpoints.
+The Node.js interop closed-promise settles then, and the interop error
+hook, which acts only
 on a readable stream, cannot reach the moved source. A queued source's
 own stream, once detached, is the exception: it stays the controller's
 stream, closing and erroring with the source, and the hook on it errors
@@ -163,9 +168,19 @@ connection.
   read's completion steps: one `then` lookup per read, at the spec's
   moment. Suite guard: `then-interceptors.js` (readable), `pollution.js`
   (readable-byte).
+- Every promise the C++ bridge awaits resolves with a primitive,
+  `undefined` or a null-prototype record, never an object on the
+  `Object.prototype` chain, whose `then` a patched
+  `Object.prototype.then` would supply. Body consumption resolves
+  `consumeReadableStreamAsArrayBufferRecord`'s `{ buffer }`, from which
+  C++ builds every result (`arrayBuffer()`, `bytes()`, `blob()`,
+  `text()`, `json()`), as the legacy implementation builds them from
+  its own reads. Suite guard: `thenPatchOnlyInterceptsConsumptionResult`
+  (readable), plus the patched-`then` consumption test in
+  `js-readable-stream-test.c++`.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
-- The native source contract (marker symbol, standard pull/cancel hooks,
+- The native source contract (V8-private marker, standard pull/cancel hooks,
   byobRequest discrimination, once-per-pull delivery of a non-empty
   answer, memory handed over that the conduit neither checks nor
   transfers, per-pull abort signal for cancellation, under-delivery =
@@ -184,18 +199,19 @@ connection.
   ordinary property get (`getCppExport`), is frozen and has a null
   prototype, so a name missing from it cannot resolve through
   `Object.prototype`. Keep both when adding exports.
-- `nativeStreamInternals` (markers, extraction symbols, conduit
+- `nativeStreamInternals` (private-slot labels, conduit
   construction) is module-private, consumed only by readable.ts/writable.ts
-  and the C++ bridge via the API-symbol registry. The C++ mocks in
+  and the C++ bridge via `v8::Private::ForApi`. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
   objects, or, for a source that breaks the contract, mark a plain object
-  with the `kNativeSource` symbol from that registry; no JS-visible marker
-  export exists.
-- Every stream instance carries an own, non-enumerable api-symbol brand
+  with a `kNativeSource` private slot through test-only native accessors;
+  no JS-visible private-access utility or marker export exists.
+- Every stream instance carries a V8-private brand
   (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
   top of the constructor (before any early return). The C++ bridge's
-  `tryUnwrapTs` recognizes streams by probing it — an own-data-property
-  read that executes no JS. That constraint is load-bearing: recognition
+  `tryUnwrapTs` recognizes streams by reading the private slot without JS
+  execution. It is neither reflected nor inherited, and an ordinary symbol
+  cannot forge it. That constraint is load-bearing: recognition
   runs during RPC deserialization, inside V8's no-JS-execution scope. Any
   new construction path MUST go through the constructors (or stamp the
   brand itself).

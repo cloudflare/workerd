@@ -427,6 +427,7 @@ wd_cc_library(
     srcs = ["hyperdrive.c++"],
     hdrs = ["hyperdrive.h"],
     implementation_deps = [
+        "//src/workerd/util",
         "//src/workerd/util:entropy",
     ],
     visibility = ["//visibility:public"],
@@ -439,11 +440,9 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
-        "pyodide/requirements.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
-        "pyodide/requirements.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/pyodide:pyodide_static.capnp.h",
     ],
@@ -708,6 +707,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "js-readable-stream-test.c++",
     deps = [
         "//src/workerd/io",
@@ -716,6 +716,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "js-writable-stream-test.c++",
     deps = [
         "//src/workerd/io",
@@ -844,6 +845,15 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "abort-signal-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(

@@ -15,6 +15,11 @@ wasm_tools_parse(
     src = "js-string-builtins.wat",
 )
 
+wasm_tools_parse(
+    name = "wasm-source-url.wasm",
+    src = "wasm-source-url.wat",
+)
+
 exports_files(["starttls-server.pem"])
 
 wd_test(
@@ -115,11 +120,11 @@ wd_test(
 )
 
 wd_test(
-    src = "do-on-evict-symbol-test.wd-test",
+    src = "do-on-hibernate-symbol-test.wd-test",
     args = ["--experimental"],
     data = [
-        "do-on-evict-symbol-test.js",
-        "do-on-evict-symbol-unflagged-test.js",
+        "do-on-hibernate-symbol-test.js",
+        "do-on-hibernate-symbol-unflagged-test.js",
     ],
 )
 
@@ -207,17 +212,21 @@ wd_test(
 )
 
 wd_test(
+    src = "durable-object-offpeak-hint-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-offpeak-hint-test.js"],
+)
+
+wd_test(
     src = "durable-object-snapshots-flag-test.wd-test",
     args = ["--experimental"],
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
-# them from running concurrently with each other while still allowing other tests to run alongside.
-# Bazel only accounts for local resources on local execution, so also keep these tests off remote
-# executors, where two of them can otherwise share a network namespace and collide on bind().
+# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
+# them from running concurrently with each other while still allowing other tests to run alongside,
+# and gives each its own executor under remote execution (see build/bazelflare/exec_properties.bzl).
 SOCKET_TEST_TAGS = [
-    "no-remote-exec",
     "resources:socket:1",
 ]
 
@@ -225,6 +234,9 @@ wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
     data = [
+        "connect-handler-server.key",
+        "connect-handler-server.pem",
+        "connect-handler-starttls-test.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
@@ -253,6 +265,18 @@ wd_test(
 )
 
 wd_test(
+    src = "sockets-connect-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["sockets-connect-error-test.js"],
+)
+
+wd_test(
+    src = "socket-proxy-to-test.wd-test",
+    args = ["--experimental"],
+    data = ["socket-proxy-to-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
@@ -270,6 +294,11 @@ wd_test(
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],
+)
+
+wd_test(
+    src = "temporal-test.wd-test",
+    data = ["temporal-test.js"],
 )
 
 wd_test(
@@ -673,6 +702,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-sha3-test.wd-test",
+    data = ["crypto-sha3-test.js"],
+)
+
+wd_test(
     src = "resizable-arraybuffer-toctou-test.wd-test",
     args = ["--experimental"],
     data = ["resizable-arraybuffer-toctou-test.js"],
@@ -711,7 +745,10 @@ wd_test(
 wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
-    data = ["events-test.js"],
+    data = [
+        "events-pedantic-test.js",
+        "events-test.js",
+    ],
 )
 
 wd_test(
@@ -722,6 +759,12 @@ wd_test(
 
 wd_test(
     src = "eventsource-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-test.js"],
+)
+
+wd_test(
+    src = "eventsource-ts-test.wd-test",
     args = ["--experimental"],
     data = ["eventsource-test.js"],
 )
@@ -856,6 +899,11 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-cancel-reason-mixed-test.wd-test",
+    data = ["js-rpc-streams-cancel-reason-mixed-test.js"],
+)
+
+wd_test(
     src = "js-rpc-writable-teardown-crossflag-reverse-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-writable-teardown-test.js"],
@@ -953,6 +1001,20 @@ wd_test(
 )
 
 wd_test(
+    src = "response-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-error-test.js"],
+)
+
+wd_test(
+    src = "response-status-text-test.wd-test",
+    data = [
+        "response-status-text-target.js",
+        "response-status-text-test.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
@@ -977,6 +1039,11 @@ wd_test(
     src = "globals-iteration-test.wd-test",
     args = ["--experimental"],
     data = ["globals-iteration-test.js"],
+)
+
+wd_test(
+    src = "temporal-hidden-test.wd-test",
+    data = ["temporal-hidden-test.js"],
 )
 
 wd_test(
@@ -1271,6 +1338,15 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-source-url-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-source-url-test.js",
+        ":wasm-source-url.wasm",
+    ],
+)
+
+wd_test(
     src = "new-module-registry-do-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -1334,6 +1410,11 @@ wd_test(
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],
+)
+
+wd_test(
+    src = "actor-cross-context-promise-test.wd-test",
+    data = ["actor-cross-context-promise-test.js"],
 )
 
 wd_test(
@@ -1432,11 +1513,8 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
-    # Needs to fetch pyodide which is not supported under RBE
-    tags = [
-        "no-remote-exec",
-        "requires-network",
-    ],
+    # Fetches Pyodide.
+    tags = ["requires-network"],
 )
 
 wd_test(
@@ -1535,6 +1613,7 @@ wd_test(
     src = "rpc-error-test.wd-test",
     args = ["--experimental"],
     data = [
+        "rpc-error-mixed-test.js",
         "rpc-error-test.js",
         "rpc-error-test.rpc.js",
     ],
@@ -1578,6 +1657,11 @@ wd_test(
         "response-used-body-test",
     ],
     data = ["response-used-body-test.js"],
+)
+
+wd_test(
+    src = "body-locked-stream-test.wd-test",
+    data = ["body-locked-stream-test.js"],
 )
 
 wd_test(

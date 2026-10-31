@@ -150,7 +150,7 @@ class ZlibContext final {
 
   CompressionError constructError(kj::StringPtr message) const {
     auto streamMsg = core.msg();
-    if (streamMsg != nullptr) message = streamMsg;
+    if (streamMsg != nullptr) message = kj::mv(streamMsg);
 
     return {kj::str(message), kj::str(ZlibStream::errorCodeName(err)), err};
   };

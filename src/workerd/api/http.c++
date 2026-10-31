@@ -93,6 +93,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
   KJ_SWITCH_ONEOF(init) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
+      // ExtractedBody's constructor rejects a disturbed stream, and its message takes precedence
+      // for a stream that is both, such as one tee() has left behind.
+      JSG_REQUIRE(stream.isDisturbed(js) || !stream.isLocked(js), TypeError,
+          "This ReadableStream is locked to a reader, and cannot be used as a body.");
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
@@ -1010,8 +1014,10 @@ Response::Response(jsg::Lock& js,
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
-};
+  auto guard =
+      FeatureFlags::get(js).getPedanticWpt() ? Headers::Guard::IMMUTABLE : Headers::Guard::NONE;
+  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(guard), CfProperty(), kj::none);
+}
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
@@ -1072,10 +1078,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
-      kj::StringPtr otherStatusText = otherResponse->getStatusText();
-      if (otherStatusText != defaultStatusText(statusCode)) {
-        statusText = kj::str(otherStatusText);
-      }
+      statusText = otherResponse->statusText.clone();
       headers = js.alloc<Headers>(js, *otherResponse->headers);
       cf = otherResponse->cf.deepClone(js);
       KJ_IF_SOME(otherWs, otherResponse->webSocket) {
@@ -1202,12 +1205,9 @@ jsg::Ref<Response> Response::json_(
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
-        auto otherStatusText = res->getStatusText();
         auto newInit = InitializerDict{
           .status = res->statusCode,
-          .statusText = otherStatusText == nullptr ||
-                        otherStatusText == defaultStatusText(res->statusCode)
-                        ? jsg::Optional<kj::String>() : kj::str(otherStatusText),
+          .statusText = res->statusText.clone(),
           .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
           .cf = res->cf.getRef(js),
           .encodeBody =
@@ -1227,7 +1227,16 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  auto json = any.toJson(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // JSON.stringify() returns undefined for values that have no JSON representation, such as a
+    // symbol, a function, undefined, or an object whose toJSON() returns one of these. V8's
+    // JSON::Stringify() API converts that result to the string "undefined", which is never valid
+    // JSON text, so it identifies these values unambiguously.
+    JSG_REQUIRE(json != "undefined"_kj, TypeError,
+        "Response.json() requires a value that can be serialized to JSON.");
+  }
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
@@ -1330,14 +1339,14 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     }
     auto maybeLength = jsBody.tryGetLength(js, encoding);
     auto stream = newSystemStream(
-        outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding, context,
+        outer.send(statusCode, getReasonPhrase(), outHeaders, maybeLength), encoding, context,
         flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody.pumpTo(js, kj::mv(stream), EndStream::YES);
   } else {
-    outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
+    outer.send(statusCode, getReasonPhrase(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1346,6 +1355,13 @@ int Response::getStatus() {
   return statusCode;
 }
 kj::StringPtr Response::getStatusText() {
+  KJ_IF_SOME(text, statusText) {
+    return text;
+  }
+  // The Fetch spec leaves the status message empty unless something sets it.
+  return ""_kj;
+}
+kj::StringPtr Response::getReasonPhrase() {
   KJ_IF_SOME(text, statusText) {
     return text;
   }
@@ -1461,7 +1477,9 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 }
 
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
-  preventDefault();
+  // The runtime uses the canceled flag to skip default handling once a response is provided.
+  // A passive listener must still be able to respond, so this bypasses the passive check.
+  forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
     // Once a Response is returned, we need to apply the output lock.
@@ -1614,7 +1632,6 @@ kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
     .callType = ActorRetryCallType::FETCH,
     .enforcementEnabled = ActorRetryGateEnabled::YES,
     .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
-    .probeCandidate = fetcher.getActorRetryProbeCandidate(),
   };
   return kj::rc<ActorCallRetryState>(
       context.getIoChannelFactory().getTimer(), context.getMetrics(), config, policy, callStart);
@@ -1858,13 +1875,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   // next call. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous.
   auto targetRetryable = fetcher->getActorTargetRetryability()
                              .orDefault(ActorCallTargetRetryable::NO);
-  // A redirect hop's probe could not tell how much of the call's retry timeout earlier hops spent.
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
-  if (urlList.size() == 1) {
-    probeCandidate = fetcher->getActorRetryProbeCandidate();
-  }
   ioContext.getMetrics().setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable, probeCandidate);
+      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable);
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
@@ -2251,10 +2263,8 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   }
 
   // TODO(someday): Fill response CF blob from somewhere?
-  kj::Maybe<kj::String> maybeStatusText = statusText == defaultStatusText(statusCode)
-      ? kj::Maybe<kj::String>()
-      : kj::str(statusText);
-  return js.alloc<Response>(js, statusCode, kj::mv(maybeStatusText), kj::mv(responseHeaders),
+  // A network response's status message is the reason phrase the server sent.
+  return js.alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(responseHeaders),
       nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
 }
 
@@ -2324,6 +2334,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
+            .statusText = kj::str("OK"),
             .headers = kj::mv(headers),
           }));
     }
@@ -2669,7 +2680,7 @@ static jsg::Promise<void> throwOnError(
     //   should people really use fetch() if they want to inspect error responses?
     JSG_REQUIRE(status >= 200 && status < 300, Error,
         kj::str("HTTP ", method, " request failed: ", response->getStatus(), " ",
-            response->getStatusText()));
+            response->getReasonPhrase()));
   });
 }
 
@@ -2724,8 +2735,8 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
       // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
       //   should people really use fetch() if they want to inspect error responses?
       JSG_FAIL_REQUIRE(Error,
-          kj::str(
-              "HTTP GET request failed: ", response->getStatus(), " ", response->getStatusText()));
+          kj::str("HTTP GET request failed: ", response->getStatus(), " ",
+              response->getReasonPhrase()));
     } else {
       return parseResponse(js, kj::mv(response), kj::mv(type));
     }
@@ -2964,13 +2975,6 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
 kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
     return outgoingFactory->getActorTargetRetryability();
-  }
-  return kj::none;
-}
-
-kj::Maybe<ActorRetryCandidate> Fetcher::getActorRetryProbeCandidate() {
-  KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->getActorRetryProbeCandidate();
   }
   return kj::none;
 }

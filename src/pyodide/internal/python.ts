@@ -42,7 +42,6 @@ import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
-import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
 import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
 import { createImportProxy } from 'pyodide-internal:serializeJsModule';
@@ -222,7 +221,7 @@ export async function loadPyodide(
 ): Promise<Pyodide> {
   try {
     const Module = await enterJaegerSpan('instantiate_emscripten', () =>
-      instantiateEmscriptenModule(pythonStdlibZip, pyodideAsmWasm)
+      instantiateEmscriptenModule(pyodideAsmWasm)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     if (Module.API.version === PyodideVersion.V0_28_2) {

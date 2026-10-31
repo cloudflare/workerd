@@ -199,6 +199,7 @@ struct TunneledContext: public ContextGlobalObject {
   }
   void throwRetunneledTypeError(jsg::Lock& js) {
     // Not sure what to call this ...
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: only tunnels the TypeError it threw.
     v8::TryCatch tryCatch(js.v8Isolate);
     try {
       jsg::throwTypeError(js.v8Isolate, "Dummy error message.");

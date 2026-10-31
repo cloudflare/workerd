@@ -15,6 +15,7 @@
 // `FastOneByteString` is only used for signatures satisfying `FastApiNoScopeMethod` (#4625, #4628).
 
 #include <v8-fast-api-calls.h>
+#include <v8-isolate.h>
 #include <v8-local-handle.h>
 #include <v8-value.h>
 
@@ -93,7 +94,7 @@ constexpr bool isFastApiCompatible<Ret (Class::*)(Args...)> = FastApiMethod<Ret,
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(Args...) const> = FastApiMethod<Ret, Args...>;
 
-// A leading `jsg::Lock&` does not disqualify a signature; acquiring the lock creates no handle.
+// Ignores a leading `jsg::Lock&`, though such callbacks still open a HandleScope for the method.
 template <typename Method>
 constexpr bool isFastApiNoScope = false;
 
@@ -110,6 +111,13 @@ constexpr bool isFastApiNoScope<Ret (Class::*)(jsg::Lock&, Args...)> =
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiNoScope<Ret (Class::*)(jsg::Lock&, Args...) const> =
     FastApiNoScopeMethod<Ret, Args...>;
+
+// Static methods and properties reach the same callbacks through a plain function pointer.
+template <typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (*)(Args...)> = FastApiNoScopeMethod<Ret, Args...>;
+
+template <typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (*)(jsg::Lock&, Args...)> = FastApiNoScopeMethod<Ret, Args...>;
 
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(jsg::Lock&, Args...)> =
@@ -148,6 +156,37 @@ template <typename T>
   requires StringLike<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiArgType<true, T> {
   using value = const v8::FastOneByteString&;
+};
+
+// The setup a fast callback does before unwrapping arguments. `noScope` skips the context lookup
+// and, unless the method takes a `Lock&` it may create handles through, the HandleScope.
+// `context` stays empty when skipped; `extractInternalPointer` only reads it for context globals.
+template <bool noScope, bool takesLock>
+class FastApiPreamble {
+ public:
+  explicit FastApiPreamble(v8::Isolate* isolate): scope(isolate) {
+    if constexpr (!noScope) context = isolate->GetCurrentContext();
+  }
+
+  v8::Local<v8::Context> context;
+
+ private:
+  struct NoHandleScope {
+    explicit NoHandleScope(v8::Isolate*) {}
+  };
+
+  // The signature heuristic is advisory, not enforced: a callback that declines `Lock&` but
+  // reaches V8 anyway — say through `Lock::current()` — allocates into whatever scope is still
+  // open further out and leaks there quietly. Sealing makes the first such handle a fatal error.
+  // It costs about what a `HandleScope` would, so it is debug-only. The throwing path is
+  // unaffected: `liftKj` opens its own nested scope.
+#ifdef KJ_DEBUG
+  using EmptyScope = v8::SealHandleScope;
+#else
+  using EmptyScope = NoHandleScope;
+#endif
+  [[no_unique_address]] std::conditional_t<noScope && !takesLock, EmptyScope, v8::HandleScope>
+      scope;
 };
 
 }  // namespace workerd::jsg

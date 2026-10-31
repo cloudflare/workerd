@@ -280,7 +280,7 @@ void gzipDecodeBench(benchmark::State& state, bool useSync) {
   auto raw = makeCompressiblePayload(TOTAL);
   auto compressed = gzipCompress(raw);
 
-  kj::byte buf[16384];
+  kj::byte buf[16384]{};
   size_t syncReads = 0;
   size_t asyncReads = 0;
 

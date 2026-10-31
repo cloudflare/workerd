@@ -9,6 +9,9 @@ set -euo pipefail
 readonly ROOT="${TEST_SRCDIR}/${TEST_WORKSPACE}"
 readonly CLANG_TIDY="${ROOT}/tools/clang_tidy"
 readonly PLUGIN="${ROOT}/tools/clang-tidy/libworkerd-lint.so"
+# The C++ toolchain's flags, for its standard library headers.
+mapfile -t TOOLCHAIN_FLAGS < "${ROOT}/tools/clang-tidy/toolchain-flags.txt"
+readonly TOOLCHAIN_FLAGS
 readonly POSITIVE="${ROOT}/tools/clang-tidy/use-after-move-positive-test.c++"
 readonly NEGATIVE="${ROOT}/tools/clang-tidy/use-after-move-negative-test.c++"
 readonly CHECKS="-*,workerd-use-after-move"
@@ -16,7 +19,7 @@ readonly CONFIG='{CheckOptions: [{key: workerd-use-after-move.InvalidationFuncti
 
 set +e
 positive_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" --config="${CONFIG}" \
-  --warnings-as-errors='*' "${POSITIVE}" -- -std=c++23 2>&1)
+  --warnings-as-errors='*' "${POSITIVE}" -- "${TOOLCHAIN_FLAGS[@]}" -std=c++23 2>&1)
 positive_status=$?
 set -e
 
@@ -42,7 +45,7 @@ done
 
 set +e
 negative_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" --config="${CONFIG}" \
-  "${NEGATIVE}" -- -std=c++23 2>&1)
+  "${NEGATIVE}" -- "${TOOLCHAIN_FLAGS[@]}" -std=c++23 2>&1)
 negative_status=$?
 set -e
 
@@ -62,9 +65,8 @@ fi
 readonly ONEOF="${ROOT}/tools/clang-tidy/use-after-move-oneof-test.c++"
 kj_headers=("${TEST_SRCDIR}"/*/src/kj/_virtual_includes/kj/kj/one-of.h)
 [[ ${#kj_headers[@]} -eq 1 && -f "${kj_headers[0]}" ]]
-resource_dir=$(clang -print-resource-dir)
 if ! oneof_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" --config="${CONFIG}" \
-  "${ONEOF}" -- -std=c++23 -resource-dir="${resource_dir}" \
+  "${ONEOF}" -- "${TOOLCHAIN_FLAGS[@]}" -std=c++23 \
   -I"${kj_headers[0]%/kj/one-of.h}" 2>&1); then
   printf '%s\n' "${oneof_output}" >&2
   exit 1

@@ -84,17 +84,12 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
     }
   }
 
-  auto lock = KJ_ASSERT_NONNULL(workerd::api::pyodide::getPyodideLock(pythonRelease),
-      kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
-
   // clang-format off
   return kj::heap<workerd::api::pyodide::PyodideMetadataReader::State>(
       kj::mv(mainModule),
       names.finish(),
       contents.finish(),
       kj::str(pythonRelease.getRealPyodideVersion()),
-      kj::str(pythonRelease.getPackages()),
-      kj::mv(lock),
       isWorkerd,
       isTracing,
       snapshotToDisk,

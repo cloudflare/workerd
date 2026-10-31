@@ -31,8 +31,7 @@ namespace workerd::api {
 // WritableStream or a TypeScript implemented WritableStream (represented as a JS object). Every
 // method that touches the underlying stream switches on the backend. The TypeScript arms
 // dispatch through the webstreams/cpp_exports bootstrap module (see js-writable-stream.c++),
-// which exists only when the typescript_implemented_streams compat flag (plus the per-isolate
-// bootstrap autogate) is enabled.
+// which exists only when the typescript_implemented_streams compat flag is enabled.
 class JsWritableStream final {
  public:
   // The underlying stream: either the legacy C++ WritableStream or the TypeScript
@@ -322,13 +321,13 @@ struct JsReadableWritablePair {
 // TypeScript-implemented WritableStream can be backed directly by a C++ byte sink. Unlike
 // the readable side's pull conduit, no new backend machinery exists on the TS side: the
 // standard WritableStream machinery drives this object through the ordinary UnderlyingSink
-// hooks (write/close/abort), one operation at a time. The marker symbol exists for pipe
+// hooks (write/close/abort), one operation at a time. The private marker exists for pipe
 // dispatch and extraction; the one extension hook is pipeFrom(source, options), which the
 // TS pipeTo calls when BOTH pipe ends are native-backed so the pipe runs entirely at the
 // C++ layer.
 //
 // Instances are created only from C++ (there is no JavaScript constructor) and are handed
-// to the TypeScript WritableStream constructor carrying the native-sink marker symbol.
+// to the TypeScript WritableStream constructor carrying a V8-private native-sink marker.
 // The object is never exposed to user code, and it is suppressed from the generated
 // TypeScript types.
 class WritableStreamNativeSink final: public jsg::Object {

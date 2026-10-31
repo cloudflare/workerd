@@ -1,0 +1,93 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The IoContext of the current request, for APIs implemented in Rust. A package of its own
+# because //src/workerd/io depends on jsg.
+wd_rust_crate(
+    name = "io-context",
+    srcs = [
+        "ffi.rs",
+        "lib.rs",
+        "lib-test.rs",
+    ],
+    cxx_bridge_deps = ["//src/workerd/io"],
+    cxx_bridge_hdrs = ["ffi.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/jsg"],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/workerd/io",
+    ],
+)
+
+# Snippets that must not compile against io-context (each annotates the errors it expects) and
+# snippets that must (no annotations). See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "compile-tests",
+    srcs = glob(["compile-tests/*.rs"]),
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    deps = [
+        ":io-context",
+        "//src/rust/jsg",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
+exports_files([
+    "ffi.c++",
+    "ffi.h",
+])
+
+# The Rust half of io-context-test.
+wd_rust_crate(
+    name = "io-context-test-bridge",
+    testonly = True,
+    srcs = ["test_bridge.rs"],
+    crate_root = "test_bridge.rs",
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_hdrs = ["test-bridge.h"],
+    cxx_bridge_src = "test_bridge.rs",
+    link_deps = [":test-bridge"],
+    deps = [
+        ":io-context",
+        "//src/rust/jsg",
+        "@crates_vendor//:futures",
+    ],
+)
+
+# The C++ functions test_bridge.rs calls, and what they record. Every binary that links the
+# bridge crate needs them, including its generated io-context-test-bridge_test.
+wd_cc_library(
+    name = "test-bridge",
+    testonly = True,
+    srcs = ["test-bridge.c++"],
+    hdrs = ["test-bridge-state.h"],
+    deps = [
+        ":test_bridge.rs@cxx",
+        "//src/workerd/io",
+    ],
+)
+
+# io-context inside a request of a real worker and in a Durable Object, and the IoContext that
+# Rust builtin modules see when a request resolves them.
+kj_test(
+    src = "io-context-test.c++",
+    deps = [
+        ":ffi",
+        ":io-context-test-bridge",
+        ":test-bridge",
+        "//src/rust/jsg:bridge",
+        "//src/workerd/tests:test-fixture",
+    ],
+)

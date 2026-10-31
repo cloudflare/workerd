@@ -1341,8 +1341,15 @@ private:
 ```
 
 JSG automatically detects the `visitForGc()` implementation. If your Resource Type owns no
-ref types, implementing it is not necessary. As a best practice, implement it on all types
-that contain refs, regardless of whether reference cycles are a concern.
+ref types, implementing it is not necessary.
+
+A handle that is never visited stays strong: it keeps its target alive, which can leak memory
+if it forms a cycle through JavaScript but cannot cause use-after-free. A visited handle is
+kept alive only by the GC tracing its holder. Only visit handles held by objects that the GC
+traverses on every cycle, and never move a container of visited handles (for example
+`auto list = kj::mv(pending)`) without moving each element, because the moved elements are no
+longer visited and their targets can be freed. If a field is deliberately left unvisited, mark
+it with `// NOLINT(jsg-visit-for-gc)` and a short reason.
 
 ### Ownership Rules
 

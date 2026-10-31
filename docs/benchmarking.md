@@ -143,4 +143,6 @@ is an ordinary RPC method that `workerd bench` doesn't run. To measure a Durable
 entrypoint, call it through a binding from a plain object's `bench` handler.
 
 See [text-encoder-bench.js](../src/workerd/api/tests/text-encoder-bench.js).
+[src/bench/streams/](../src/bench/streams/AGENTS.md) runs the same benchmarks against the C++ and
+TypeScript streams implementations, to compare them.
 

@@ -2,9 +2,9 @@ using Workerd = import "/workerd/workerd.capnp";
 using StreamModules = import "stream-modules.capnp";
 
 # Runs the node:stream web-interop suite against the TypeScript streams
-# implementation (typescript_implemented_streams + the per-isolate bootstrap
-# autogate). The embedded modules are byte-for-byte the same ones
-# stream-cpp.wd-test runs against the legacy C++ implementation.
+# implementation (typescript_implemented_streams). The embedded modules are
+# byte-for-byte the same ones stream-cpp.wd-test runs against the legacy C++
+# implementation.
 #
 # The streams_enable_constructors and transformstream_enable_standard_constructor
 # flags pinned in stream-cpp.wd-test are deliberately absent here: the
@@ -25,9 +25,6 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-  ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
   ],
   # For the forced-GC tests in gc.js.
   v8Flags = ["--expose-gc"],

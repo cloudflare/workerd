@@ -10,6 +10,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -137,6 +138,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
       })();
 
       bool once = false;
+      bool passive = false;
       kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
       KJ_IF_SOME(value, maybeOptions) {
         KJ_SWITCH_ONEOF(value) {
@@ -146,9 +148,8 @@ void EventTarget::addEventListener(jsg::Lock& js,
           KJ_CASE_ONEOF(opts, AddEventListenerOptions) {
             JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
                 "addEventListener(): options.capture must be false.");
-            JSG_REQUIRE(!opts.passive.orDefault(false), TypeError,
-                "addEventListener(): options.passive must be false.");
             once = opts.once.orDefault(false);
+            passive = opts.passive.orDefault(false);
             maybeSignal = kj::mv(opts.signal);
           }
         }
@@ -187,6 +188,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
         .identity = kj::mv(handler.identity),
         .callback = kj::mv(handlerFn),
         .once = once,
+        .passive = passive,
         .abortHandler = kj::mv(maybeAbortHandler),
       });
 
@@ -378,6 +380,7 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
       kj::Maybe<jsg::HashableV8Ref<v8::Object>> identity;
       HandlerFunction callback;
       bool once = false;
+      bool passive = false;
     };
 
     kj::Vector<Callback> callbacks;
@@ -406,6 +409,7 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
           .identity = handler->identity.addRef(js),
           .callback = handler->callback.addRef(js),
           .once = handler->once,
+          .passive = handler->passive,
         });
       }
     }
@@ -442,6 +446,13 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
       }
 
       const auto invoke = [&]() {
+        // Per spec ("inner invoke" steps 9 and 12), the in passive listener flag is set only
+        // for the duration of a passive listener's invocation.
+        if (callback.passive) {
+          event->setInPassiveListener(true);
+        }
+        KJ_DEFER(event->setInPassiveListener(false));
+
         // Per the standard, the event listener is not supposed to return any value, and
         // if it does, that value is ignored. That can be somewhat problematic if the user
         // passes an async function as the event handler. Doing so counts as undefined
@@ -527,38 +538,17 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
       .result;
 }
 
-// A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
-// the client is destroyed, informing the server that an abort will not be triggered in the future.
+// A wrapper for the AbortTrigger jsrpc client.
 class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
 
-  kj::Promise<void> abort(kj::ArrayPtr<kj::byte> reason) {
+  kj::Promise<void> abort(kj::ArrayPtr<const kj::byte> reason) {
     auto req = client.abortRequest(capnp::MessageSize{reason.size() / sizeof(capnp::word) + 8, 0});
     auto field = req.initReason();
     field.setV8Serialized(reason);
     return req.sendIgnoringResult();
   }
-
-  ~AbortTriggerRpcClient() noexcept(false) {
-    if (skipReleaseForTest) {
-      return;
-    }
-
-    auto req = client.releaseRequest(capnp::MessageSize{4, 0});
-    // We call detach() on the resulting promise so that we can perform RPC in a destructor
-    req.sendIgnoringResult().detach([](kj::Exception exc) {
-      if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
-        // It's possible we can't send the release message because we're already disconnected.
-        return;
-      };
-
-      // Other exceptions could be more interesting
-      LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
-    });
-  }
-
-  bool skipReleaseForTest = false;
 
  private:
   rpc::AbortTrigger::Client client;
@@ -566,17 +556,57 @@ class AbortTriggerRpcClient final {
 
 namespace {
 
+// Data released by a jsg::Serializer. Its buffer's capacity can exceed data.size().
+struct SerializedBytes {
+  kj::Array<kj::byte> data;
+  size_t capacity;
+};
+
+size_t getOwnedBytes(const SerializedBytes& bytes) {
+  return bytes.capacity;
+}
+
+// An exception derived from a JavaScript value carries the value twice, stringified in its
+// description and serialized in a detail.
+size_t getOwnedBytes(const kj::Exception& exception) {
+  size_t size = exception.getDescription().size() + exception.getRemoteTrace().size();
+  for (auto& detail: exception.getDetails()) {
+    size += detail.value.size();
+  }
+  return size;
+}
+
+// One copy of an abort's payload, shared by its deliveries. With the DEFER_CROSS_CONTEXT_ACTIONS
+// autogate, deliveries to an idle actor wait in its queue for its next request (see
+// DeleteQueue::scheduleAction()), so the copy counts as external memory.
+template <typename T>
+class SharedAbortPayload final: public kj::AtomicRefcounted {
+ public:
+  SharedAbortPayload(jsg::Lock& js, T value): value(kj::mv(value)) {
+    if (util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+      externalMemory = js.getExternalMemoryAdjustment(getOwnedBytes(this->value));
+    }
+  }
+
+  const T value;
+
+ private:
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemory;
+};
+
+using SerializedAbortReason = SharedAbortPayload<SerializedBytes>;
+
 kj::Promise<void> abortRpcClientTask(
-    IoContext& ioContext, AbortTriggerRpcClient& client, kj::Array<kj::byte> reason) {
+    IoContext& ioContext, AbortTriggerRpcClient& client, kj::Arc<SerializedAbortReason> reason) {
   KJ_IF_SOME(outputLocks, ioContext.waitForOutputLocksIfNecessary()) {
     co_await outputLocks;
   }
-  co_await client.abort(reason);
+  co_await client.abort(reason->value.data);
 }
 
 // Sends the serialized abort reason to one RPC clone as a task on the current IoContext,
 // which must be the context that owns the client.
-void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Array<kj::byte> reason) {
+void sendAbortToRpc(IoOwn<AbortTriggerRpcClient> client, kj::Arc<SerializedAbortReason> reason) {
   auto& ioContext = IoContext::current();
   // Dereference the IoOwn here, while the owning context is known to be current; the task
   // keeps the client alive by holding the IoOwn as an attachment.
@@ -1064,24 +1094,30 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
 
   // 2. Native cancellations (canceler-wrapped promises and abort actions). Each registration
   //    runs in the IoContext that created it: synchronously if that context is the current
-  //    one, otherwise delivered on that context's next turn — or dropped, if that context is
+  //    one, otherwise deferred as addAbortAction() describes — or dropped, if that context is
   //    already gone (in which case everything it wanted to cancel died with it). Taking the
   //    vector up front makes this safe against re-entrant registration.
   //
   //    A deferred delivery does not take the action with it: it re-takes the cell's slot on
   //    arrival in the owning context, so that a consumer (and the references its action
-  //    captures) that went away in the meantime reliably turns the delivery into a no-op.
+  //    captures) that went away in the meantime reliably turns the delivery into a no-op. The
+  //    deferred deliveries share one copy of the exception.
   auto cells = kj::mv(nativeRegistrations);
+  kj::Maybe<kj::Arc<SharedAbortPayload<kj::Exception>>> deferredException;
   for (auto& cell: cells) {
     if (cell->executor.isCurrent()) {
       KJ_IF_SOME(action, take(cell->action)) {
         action(js, exception);
       }
     } else {
+      if (deferredException == kj::none) {
+        deferredException = kj::arc<SharedAbortPayload<kj::Exception>>(js, exception.clone());
+      }
       cell->executor.tryExecute(
-          [cell = cell.addRef(), ex = exception.clone()](jsg::Lock& js) mutable {
+          [cell = cell.addRef(), ex = KJ_ASSERT_NONNULL(deferredException).addRef()](
+              jsg::Lock& js) mutable {
         KJ_IF_SOME(action, take(cell->action)) {
-          action(js, ex);
+          action(js, ex->value);
         }
       });
     }
@@ -1091,24 +1127,25 @@ void AbortSignal::runAbortSteps(jsg::Lock& js) {
   if (!rpcRegistrations.empty()) {
     auto regs = kj::mv(rpcRegistrations);
 
-    // Serialize the reason once; each clone gets its own copy of the bytes.
+    // Serialize the reason once, for all the clones to share.
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
       ser.write(js, r.getHandle(js));
     }
     auto released = ser.release();
+    auto serialized = kj::arc<SerializedAbortReason>(
+        js, SerializedBytes{.data = kj::mv(released.data), .capacity = released.dataCapacity});
 
     for (auto& reg: regs) {
-      auto bytes = kj::heapArray<kj::byte>(released.data);
       if (reg->executor.isCurrent()) {
         KJ_IF_SOME(client, take(reg->client)) {
-          sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+          sendAbortToRpc(kj::mv(client), serialized.addRef());
         }
       } else {
         reg->executor.tryExecute(
-            [reg = reg.addRef(), bytes = kj::mv(bytes)](jsg::Lock& js) mutable {
+            [reg = reg.addRef(), serialized = serialized.addRef()](jsg::Lock& js) mutable {
           KJ_IF_SOME(client, take(reg->client)) {
-            sendAbortToRpc(kj::mv(client), kj::mv(bytes));
+            sendAbortToRpc(kj::mv(client), kj::mv(serialized));
           }
         });
       }
@@ -1221,13 +1258,7 @@ int AbortSignal::getNativeRegistrationCountForTest() {
   return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
-void AbortSignal::skipReleaseForTest() {
-  for (auto& reg: rpcRegistrations) {
-    KJ_IF_SOME(client, take(reg->client)) {
-      client->skipReleaseForTest = true;
-    }
-  }
-
+void AbortSignal::dropRpcTriggersForTest() {
   rpcRegistrations.clear();
 }
 
@@ -1296,19 +1327,23 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   }
 
   if (!isRpcReceiverContextCurrent()) {
-    // Only the request that deserialized this signal can arm the subscription — it owns the
+    // Only the context that deserialized this signal can arm the subscription — it owns the
     // underlying promise — but a signal retained across requests may see registrations from
     // other contexts. Ask the receiving context to arm on its next turn. The queued action
     // captures only a WeakRef, which is safe to destroy from any thread should that context
     // be torn down without draining its queue. If the context is already gone, the request
     // is dropped: no delivery is possible anymore, though the abort itself stays observable
     // through the pending-reason box (see docs/reference/detail/abort-signal.md).
-    KJ_IF_SOME(executor, rpcReceiverContext) {
-      executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
-        KJ_IF_SOME(self, weakSelf.tryGet()) {
-          self.subscribeToRpcAbort(js);
-        }
-      });
+    if (!rpcSubscriptionRequested) {
+      KJ_IF_SOME(executor, rpcReceiverContext) {
+        bool queued = executor.tryExecute([weakSelf = JSG_THIS_WEAK(js)](jsg::Lock& js) {
+          KJ_IF_SOME(self, weakSelf.tryAddRef(js)) {
+            self->subscribeToRpcAbort(js);
+          }
+        });
+        rpcSubscriptionRequested =
+            queued && util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS);
+      }
     }
     return;
   }

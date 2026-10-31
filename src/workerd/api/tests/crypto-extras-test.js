@@ -1,7 +1,8 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { rejects, strictEqual, ok } from 'node:assert';
+import { deepStrictEqual, rejects, strictEqual, ok } from 'node:assert';
+import { KeyObject } from 'node:crypto';
 
 export const timingSafeEqual = {
   test() {
@@ -484,6 +485,37 @@ export const webCryptoModernAlgorithmsRequireCompatFlag = {
   },
 };
 
+export const chachaDerivedKeyRequiresCompatFlag = {
+  async test() {
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32),
+      'HKDF',
+      false,
+      ['deriveKey']
+    );
+    const algorithm = {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(16),
+    };
+    for (const target of ['ChaCha20-Poly1305', { name: 'chacha20-poly1305' }]) {
+      for (const params of [
+        algorithm,
+        { ...algorithm, info: new Uint8Array() },
+      ]) {
+        await rejects(
+          crypto.subtle.deriveKey(params, baseKey, target, true, ['encrypt']),
+          {
+            name: 'NotSupportedError',
+            message: /Unrecognized derived key type/,
+          }
+        );
+      }
+    }
+  },
+};
+
 export const webCryptoSignAlgorithmIgnoresUnrelatedContext = {
   async test() {
     const keyPair = await crypto.subtle.generateKey(
@@ -509,5 +541,52 @@ export const webCryptoSignAlgorithmIgnoresUnrelatedContext = {
         true
       );
     }
+  },
+};
+
+// CryptoKey's algorithm and usages getters return the same object on every access.
+export const cryptoKeyAttributesCached = {
+  async test() {
+    const key = await crypto.subtle.generateKey(
+      { name: 'HMAC', hash: 'SHA-256', length: 256 },
+      true,
+      ['sign', 'verify']
+    );
+    strictEqual(key.algorithm, key.algorithm);
+    strictEqual(key.usages, key.usages);
+    deepStrictEqual(key.usages, ['sign', 'verify']);
+
+    // Changes to the cached objects persist across reads but never affect the key itself.
+    key.algorithm.hash.name = 'SHA-1';
+    key.usages.length = 0;
+    strictEqual(key.algorithm.hash.name, 'SHA-1');
+    strictEqual(key.usages.length, 0);
+
+    const data = new TextEncoder().encode('data');
+    const signature = await crypto.subtle.sign('HMAC', key, data);
+    strictEqual(signature.byteLength, 32);
+    ok(await crypto.subtle.verify('HMAC', key, signature, data));
+  },
+};
+
+// KeyObject reads a secret key's size from the key itself, not from the cached `algorithm`
+// object, which scripts can modify.
+export const symmetricKeySizeIgnoresModifiedAlgorithm = {
+  async test() {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(16),
+      { name: 'AES-GCM' },
+      true,
+      ['encrypt']
+    );
+    const keyObject = KeyObject.from(key);
+    const size = keyObject.symmetricKeySize;
+    ok(size > 1);
+
+    key.algorithm.length = 1;
+    strictEqual(key.algorithm.length, 1);
+    strictEqual(keyObject.symmetricKeySize, size);
+    strictEqual(KeyObject.from(key).symmetricKeySize, size);
   },
 };

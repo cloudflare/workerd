@@ -12,6 +12,9 @@
 namespace workerd::jsg {
 
 namespace {
+// Sets only a frame's wrapper or undefined. Rust JSG (src/rust/jsg/async_context.rs) relies on
+// this: it treats any embedder data but undefined as a frame, which agrees with current() only
+// while nothing else is ever set.
 inline void maybeSetV8ContinuationContext(
     v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> maybeFrame) {
   v8::Local<v8::Value> value;
@@ -273,7 +276,22 @@ v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(Lock& js) {
 }
 
 void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
-  // tracing will make the members weak and will allow
-  // them to be gc'd, which is not what we want.
+  // Trace stored values instead of holding them strongly. A store can point back to something
+  // that holds this frame, such as a Response created inside als.run(). A strong handle in that
+  // loop would keep everything in it alive forever.
+  KJ_SWITCH_ONEOF(storage) {
+    KJ_CASE_ONEOF(entries, InlineStorage) {
+      for (auto& slot: entries) {
+        KJ_IF_SOME(entry, slot) {
+          visitor.visit(entry.value);
+        }
+      }
+    }
+    KJ_CASE_ONEOF(table, TableStorage) {
+      for (auto& entry: table) {
+        visitor.visit(entry.value);
+      }
+    }
+  }
 }
 }  // namespace workerd::jsg

@@ -1092,6 +1092,31 @@ async function test(state) {
       { a: 3, b: 3 },
     ]);
   }
+
+  // Verify that a cached EXPLAIN keeps working after the table it refers to is replaced, either
+  // dropped and recreated or rebuilt under a new name and renamed back.
+  {
+    const explain = 'EXPLAIN INSERT INTO explainTest VALUES (?, ?)';
+    sql.exec('CREATE TABLE explainTest (id TEXT PRIMARY KEY, name TEXT)');
+    for (let i = 0; i < 3; i++) {
+      assert.ok(sql.exec(explain, null, null).toArray().length > 0);
+      sql.exec('DROP TABLE explainTest');
+      sql.exec('CREATE TABLE explainTest (id TEXT PRIMARY KEY, name TEXT)');
+    }
+    for (let i = 0; i < 3; i++) {
+      assert.ok(sql.exec(explain, null, null).toArray().length > 0);
+      sql.exec('CREATE TABLE explainTest2 (id TEXT PRIMARY KEY, name TEXT)');
+      sql.exec('DROP TABLE explainTest');
+      sql.exec('ALTER TABLE explainTest2 RENAME TO explainTest');
+    }
+    assert.ok(sql.exec(explain, null, null).toArray().length > 0);
+
+    // Once the table is gone, the EXPLAIN fails cleanly rather than describing a stale program.
+    sql.exec('DROP TABLE explainTest');
+    assert.throws(() => sql.exec(explain, null, null), {
+      message: /no such table: explainTest/,
+    });
+  }
 }
 
 async function testIoStats(storage) {

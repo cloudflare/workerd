@@ -494,11 +494,9 @@ namespace workerd::jsg {
     registry.template registerStaticConstant<NAME, decltype(constant)>(constant);                  \
   } while (false)
 
-// Use inside a JSG_RESOURCE_TYPE block to attach a marker property to every instance of
-// the resource type. The property is keyed by a symbol acquired from V8's API symbol
-// registry (v8::Symbol::ForApi) using the stringified `name`, and its value is the symbol
-// itself. The property is created directly on each instance (not the prototype) as
-// read-only, non-enumerable, and non-configurable:
+// Use inside a JSG_RESOURCE_TYPE block to attach a V8-private marker to every instance.
+// The key is v8::Private::ForApi with the stringified `name`, and its value is true.
+// The marker is not inherited or visible to JavaScript property reflection:
 //
 //     class Foo: public jsg::Object {
 //      public:
@@ -507,18 +505,9 @@ namespace workerd::jsg {
 //       }
 //     };
 //
-// Because the symbol lives in the per-isolate API symbol registry, C++ code can re-acquire
-// the exact same symbol at any time via v8::Symbol::ForApi(isolate, "kUniqueSymbol") --
-// there is nothing to store or plumb around. Runtime-provided JavaScript can likewise be
-// handed the symbol (e.g. the per-isolate bootstrap exposes utils.getApiSymbol()), while
-// user code cannot mint it: the API registry is distinct from the Symbol.for() registry.
-// This makes the property a tamper-resistant brand/marker that both C++ and
-// runtime-provided JavaScript can recognize on instances via an own-property check.
-//
-// Note that the symbol registry is keyed process-wide by name (per isolate), so two
-// resource types declaring JSG_PRIVATE_SYMBOL with the same identifier share the same
-// symbol. The property itself remains visible to reflection (Object.getOwnPropertySymbols)
-// on instances, so it is a brand, not a secret.
+// C++ reads it with JsObject::getPrivate(js, "kUniqueSymbol"); bootstrap code uses
+// utils.getPrivate(object, "kUniqueSymbol"). Both resolve the same isolate-local key.
+// Ordinary JavaScript symbols, including API-registry symbols, do not address this slot.
 #define JSG_PRIVATE_SYMBOL(name)                                                                   \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
@@ -2212,10 +2201,18 @@ consteval bool hasPublicVisitForGc() {
 // also give the function a `visitForGc()` method. In this case, `visitForGc()` must be public.
 //
 // GC visitation is optional. If your type owns no `Ref`s, it can skip implementing
-// `visitForGc()`. You can also omit `visitForGc()` if you don't care about the possibility of
-// reference cycles. Any `Ref` which is not explicitly visited will not be eligible for
-// garbage collection at all. Hence, failure to implement proper visitation may lead to memory
-// leaks, but NOT to use-after-free.
+// `visitForGc()`. A handle (`Ref`, `V8Ref`, `JsRef`, etc.) that is never visited stays strong:
+// it keeps its target alive and is not eligible for garbage collection. Missing visitation can
+// therefore cause leaks, for example when the handle is part of a cycle through JavaScript, but
+// not use-after-free.
+//
+// Visiting a handle switches it to traced mode. From then on, the target is kept alive only
+// because the GC reaches the handle by tracing its holder. So only visit handles held by objects
+// that the GC traverses on every cycle, such as a Resource Type with a live wrapper. Moving a
+// single handle is safe, because the destination becomes strong again. Moving a container of
+// visited handles without moving each element (for example `auto list = kj::mv(pending)` on a
+// `kj::Vector`) is not: the elements are still traced, but nothing visits them anymore, so the
+// GC can free their targets while they are still in use.
 //
 // Note that GC visitation technically only collects JavaScript objects, including wrapper
 // objects. C++ objects will not be collected if they contain reference cycles entirely in C++
@@ -2247,6 +2244,13 @@ class GcVisitor {
   /// Used by the Rust JSG FFI to support `v8::Global<T>` fields on Rust
   /// resources without a full `jsg::Data` wrapper.
   void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
+
+  // The isolate of the object being visited: the one its wrapper was attached in, or that of the
+  // object whose trace reached it. Null if neither has happened yet, or the isolate is gone; a
+  // visit made by a garbage collection always has one.
+  v8::Isolate* v8Isolate() const {
+    return parent.getIsolate();
+  }
 
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {
@@ -2885,6 +2889,7 @@ class Lock {
     Value error = nullptr;
 
     {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): the handler runs after its scope ends.
       v8::TryCatch tryCatch(v8Isolate);
       try {
         return func();
@@ -3122,6 +3127,8 @@ class Lock {
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setWasmEsmIntegrationBuiltinsEnabled();
   bool isWasmEsmIntegrationBuiltinsEnabled() const;
+  void setWasmSourceUrlSupportEnabled();
+  bool isWasmSourceUrlSupportEnabled() const;
   void setToStringTag();
   void setImmutablePrototype();
   void setSpecCompliantPropertyAttributes();
@@ -3578,6 +3585,7 @@ class JsgCatchScope {
 
   // Simple wrapper to work around v8::TryCatch's deleted operator new.
   struct Holder {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): catchException() destroys it before the handler.
     v8::TryCatch tryCatch;
     explicit Holder(v8::Isolate* isolate): tryCatch(isolate) {}
   };
@@ -3632,8 +3640,12 @@ class JsgCatchScope {
 // Since we have two macros -- JSG_TRY and JSG_CATCH -- which must both access the same state,
 // we use a hard-coded variable name. This causes benign shadowing in nested JSG_TRY/JSG_CATCHes,
 // so we disable shadowing warnings. The `_jsg` prefix makes name collision unlikely.
+//
+// The `if` that holds the catch scope has an unbraced `try` statement as its body and an `else`
+// supplied by JSG_CATCH, so clang-tidy sees inconsistent braces in every JSG_TRY expansion.
 #define JSG_TRY(js)                                                                                \
   KJ_SILENCE_SHADOWING_BEGIN                                                                       \
+  /* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */                                     \
   if (::workerd::jsg::_::JsgCatchScope _jsgTryCatch(js); true) try KJ_SILENCE_SHADOWING_END
 
 #define JSG_CATCH(exception, ...)                                                                  \

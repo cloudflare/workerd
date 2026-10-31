@@ -118,7 +118,9 @@ Use one of these patterns:
 | IoContext, in JS-lock scope (`Worker::Lock&`/`jsg::Lock&` available) | `auto& context = IoContext::current();` inside the lambda (but see caveat below) |
 | IoContext, outside JS-lock scope | `[weakRef = context.getWeakRef()]` + `KJ_ASSERT_NONNULL(weakRef->tryGet())` (alive by invariant) or `weakRef->runIfAlive(...)` (may be gone) |
 | Chain feeds opaque wrapper (`oomCanceler.wrap`, `gate.lockWhile`, `.fork()`) | IILE coroutine — pass `this`/`&context` as a coroutine parameter, not a lambda capture |
-| Chain is `co_await`ed / `.wait()`ed / joined from a local container | already safe; no change |
+| Chain is `co_await`ed / `.wait()`ed / joined from a local container or a local `kj::TaskSet` awaited via `onEmpty()` | already safe; no change |
+| Chain is the `kj::Promise` the enclosing function returns, and captures that function's reference, pointer or view parameters | already safe: the KJ style guide requires callers to keep them valid until the returned promise settles. Capture pointer and view parameters by value: `[&ptr]` points at the parameter's own slot, which is gone once the function returns |
+| Referent has static storage duration (a reference bound to a static, provable within the translation unit) | already safe; no change |
 
 Do **not** strong-ref an IoContext (`kj::addRef(context)`) to satisfy the check —
 chains owned transitively by the IoContext form a refcount cycle.

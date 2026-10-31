@@ -19,6 +19,7 @@ under the MODERN `fixup-transform-stream-backpressure`.
 | `handlerAcrossChunkBoundaries` | chunks split MID-TAG; the parser reassembles and the handler mutates both elements |
 | `rewrittenBodyIsReadableStream` | output body drained incrementally via a reader |
 | `contentFromReadableStream` | element.replace(ReadableStream) — streamed replacement content |
+| `stringChunksAreUtf8` | string chunks in the transformed body and in streamed replacement content read as UTF-8 beside byte chunks (parity) |
 | `identityStreamBody` | identity body fed by a concurrent writer |
 | `cancelReachesSourceAfterNextChunk` | cancel remains pending at the source until another chunk wakes the pump, then reaches the source |
 | `erroringSourceRejectsConsumption` | source error surfaces from .text() |

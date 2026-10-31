@@ -12,9 +12,11 @@ WebCrypto API + Node.js crypto C++ implementations over BoringSSL. `crypto.h` de
 | `impl.h/c++`                                     | Internal base: `CryptoKey::Impl`, `interpretAlgorithmParam()`, OpenSSL error helpers, `OSSLCALL`      |
 | `keys.h/c++`                                     | `AsymmetricKeyCryptoKeyImpl` base; `KeyEncoding`/`KeyFormat`/`KeyType` enums; generic import/export   |
 | `aes.c++`                                        | AES-CBC, AES-CTR, AES-GCM, AES-KW                                                                     |
+| `chacha20-poly1305.c++`                          | ChaCha20-Poly1305 AEAD                                                                                |
 | `rsa.h/c++`                                      | RSA-OAEP, RSA-PSS, RSASSA-PKCS1-v1_5                                                                  |
 | `ec.h/c++`                                       | ECDSA, ECDH, EdDSA (Ed25519/X25519)                                                                   |
 | `dh.h/c++`                                       | Diffie-Hellman key exchange (Node.js compat)                                                          |
+| `hybridkem.c++`                                  | MLKEM768-X25519 (X-Wing) key encapsulation                                                            |
 | `digest.h/c++`                                   | Hash/digest: SHA-\*, MD5, Blake2b512/2s256                                                            |
 | `kdf.h` + `hkdf.c++`, `pbkdf2.c++`, `scrypt.c++` | KDF declarations in header; each algo in own .c++                                                     |
 | `jwk.h/c++`                                      | JWK import/export helpers                                                                             |

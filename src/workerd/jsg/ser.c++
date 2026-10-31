@@ -138,7 +138,7 @@ Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
       treatErrorsAsHostObjects(js.isUsingEnhancedErrorSerialization()),
-      ser(js.v8Isolate, this) {
+      ser(ownedSer.emplace(js.v8Isolate, static_cast<v8::ValueSerializer::Delegate*>(this))) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
 #endif
@@ -158,6 +158,10 @@ Serializer::Serializer(Lock& js, Options options)
     ser.WriteHeader();
   }
 }
+
+Serializer::Serializer(Lock& js, v8::ValueSerializer& ser, Borrowed)
+    : treatClassInstancesAsPlainObjects(true),
+      ser(ser) {}
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
     v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) {
@@ -195,18 +199,10 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
-  auto& js = jsg::Lock::current();
-  try {
-    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    js.v8Isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
-  } catch (JsExceptionThrown&) {
-    // Apparently an exception was thrown during the construction of the DOMException. Most likely
-    // we were terminated. In any case, we'll let that exception stay scheduled and propagate back
-    // to V8.
-  } catch (...) {
-    // A KJ exception was thrown, we'll have to convert it to JavaScript and propagate that
-    // exception instead.
-    throwInternalError(js.v8Isolate, kj::getCaughtExceptionAsKj());
+  auto* isolate = jsg::Lock::current().v8Isolate;
+  v8::Local<v8::Value> exception;
+  if (newDataCloneError(isolate, message).ToLocal(&exception)) {
+    isolate->ThrowException(exception);
   }
 }
 
@@ -296,59 +292,60 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       return v8::Just(true);
     }
 
-    if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
-        !Wrappable::isWorkerdApiObject(object)) {
-      KJ_IF_SOME(eh, externalHandler) {
-        if (object->IsProxy()) {
-          eh.serializeProxy(js, *this, object.As<v8::Proxy>());
-          return v8::Just(true);
-        } else if (object->IsFunction()) {
-          eh.serializeFunction(js, *this, object.As<v8::Function>());
-          return v8::Just(true);
-        } else if (eh.trySerializeClassInstance(js, *this, object)) {
-          // The handler recognized this class instance (e.g. by brand check) and serialized it.
-          return v8::Just(true);
-        }
-      }
-
-      // v8::ValueSerializer by default will send us anything that has internal fields, but this
-      // object doesn't appear to match the internal fields expected on a JSG object.
-      //
-      // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
-      // application-defined class. We don't currently support serializing class instances.
-      throwDataCloneErrorForObject(js, object);
-    }
-
-    // The InternalFieldCount + isWorkerdApiObject() checks above established that this is one of
-    // our wrapped objects; the serializer is then selected by the object's dynamic type, so we
-    // only need the pointer here.
-    Wrappable* wrappable = Wrappable::unwrapFromShimAnyType(js.v8Isolate, object);
-    if (wrappable == nullptr) {
-      // The object carries our marker (isWorkerdApiObject() passed) yet its CppHeap handle resolves
-      // to no live wrappable. That should be unreachable.
-      KJ_LOG(
-          FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
-      abort();
-    }
-
-    // Only subclasses of `Object` register serializers, so anything else is not serializable.
-    Object* obj = wrappable->jsgTryGetObject();
-    if (obj == nullptr) {
-      throwDataCloneErrorForObject(js, object);
-    }
-
-    if (!IsolateBase::from(isolate).serialize(
-            Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
-      // This type is not serializable.
-      throwDataCloneErrorForObject(js, object);
-    }
-
+    writeApiObject(js, object);
     return v8::Just(true);
   } catch (JsExceptionThrown&) {
     return v8::Nothing<bool>();
   } catch (...) {
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return v8::Nothing<bool>();
+  }
+}
+
+void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
+  if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
+      !Wrappable::isWorkerdApiObject(object)) {
+    KJ_IF_SOME(eh, externalHandler) {
+      if (object->IsProxy()) {
+        eh.serializeProxy(js, *this, object.As<v8::Proxy>());
+        return;
+      } else if (object->IsFunction()) {
+        eh.serializeFunction(js, *this, object.As<v8::Function>());
+        return;
+      } else if (eh.trySerializeClassInstance(js, *this, object)) {
+        // The handler recognized this class instance (e.g. by brand check) and serialized it.
+        return;
+      }
+    }
+
+    // v8::ValueSerializer by default will send us anything that has internal fields, but this
+    // object doesn't appear to match the internal fields expected on a JSG object.
+    //
+    // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
+    // application-defined class. We don't currently support serializing class instances.
+    throwDataCloneErrorForObject(js, object);
+  }
+
+  // The InternalFieldCount + isWorkerdApiObject() checks above established that this is one of
+  // our wrapped objects; the serializer is then selected by the object's dynamic type, so we
+  // only need the pointer here.
+  Wrappable* wrappable = Wrappable::unwrapFromShimAnyType(js.v8Isolate, object);
+  if (wrappable == nullptr) {
+    // The object carries our marker (isWorkerdApiObject() passed) yet its CppHeap handle resolves
+    // to no live wrappable. That should be unreachable.
+    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
+    abort();
+  }
+
+  // Only subclasses of `Object` register serializers, so anything else is not serializable.
+  Object* obj = wrappable->jsgTryGetObject();
+  if (obj == nullptr) {
+    throwDataCloneErrorForObject(js, object);
+  }
+
+  if (!IsolateBase::from(js.v8Isolate).serialize(js, typeid(*wrappable), *obj, *this)) {
+    // This type is not serializable.
+    throwDataCloneErrorForObject(js, object);
   }
 }
 
@@ -454,7 +451,10 @@ Deserializer::Deserializer(Lock& js,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers,
     kj::Maybe<Options> maybeOptions)
     : totalInputSize(data.size()),
-      deser(js.v8Isolate, data.begin(), data.size(), this),
+      deser(ownedDeser.emplace(js.v8Isolate,
+          data.begin(),
+          data.size(),
+          static_cast<v8::ValueDeserializer::Delegate*>(this))),
       sharedBackingStores(kj::mv(sharedArrayBuffers)) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
@@ -469,6 +469,10 @@ Deserializer::Deserializer(
           released.transferredArrayBuffers.asPtr(),
           released.sharedArrayBuffers.asPtr(),
           kj::mv(maybeOptions)) {}
+
+Deserializer::Deserializer(Lock& js, v8::ValueDeserializer& deser, Borrowed)
+    : totalInputSize(0),
+      deser(deser) {}
 
 void Deserializer::init(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
@@ -619,13 +623,63 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
       return ret;
     }
 
-    KJ_IF_SOME(result, IsolateBase::from(isolate).deserialize(Lock::from(isolate), tag, *this)) {
-      return result;
-    } else {
-      // Unknown tag is a platform error, so use KJ assert.
-      KJ_FAIL_ASSERT("encountered unknown tag in deserialization", tag);
-    }
+    return readApiObject(Lock::from(isolate), tag);
   } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
+v8::Local<v8::Object> Deserializer::readApiObject(Lock& js, uint32_t tag) {
+  KJ_IF_SOME(result, IsolateBase::from(js.v8Isolate).deserialize(js, tag, *this)) {
+    return result;
+  } else {
+    // Unknown tag is a platform error, so use KJ assert.
+    KJ_FAIL_ASSERT("encountered unknown tag in deserialization", tag);
+  }
+}
+
+v8::Maybe<bool> writeApiObject(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> object) {
+  try {
+    auto& js = Lock::from(isolate);
+    Serializer serializer(js, ser, Serializer::Borrowed{});
+    serializer.writeApiObject(js, object);
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
+}
+
+v8::MaybeLocal<v8::Object> readApiObject(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, uint32_t tag) {
+  try {
+    auto& js = Lock::from(isolate);
+    js.setDisallowJavascriptExecution(true);
+    KJ_DEFER(js.setDisallowJavascriptExecution(false));
+    Deserializer deserializer(js, deser, Deserializer::Borrowed{});
+    return deserializer.readApiObject(js, tag);
+  } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
+v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
+  auto& js = Lock::from(isolate);
+  try {
+    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
+    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+  } catch (JsExceptionThrown&) {
+    // Creating the DOMException threw, most likely because execution is terminating; that
+    // exception stays pending.
     return {};
   } catch (...) {
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());

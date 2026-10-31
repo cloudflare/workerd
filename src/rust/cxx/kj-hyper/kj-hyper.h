@@ -71,6 +71,7 @@ kj::Own<kj::WebSocket> new_client_websocket(kj::Own<kj::AsyncIoStream> stream,
 kj::Promise<void> pump_websockets(kj::Own<kj::WebSocket> a, kj::Own<kj::WebSocket> b);
 kj::Promise<void> pump_tunnel(kj::AsyncIoStream& connection, kj::Own<kj::AsyncIoStream> tunnel);
 void tls_starter_set(kj::TlsStarterCallback& starter, ::rust::Box<TlsStarter> start);
+kj::Own<kj::TlsStarterCallback> new_tls_starter(::rust::Box<TlsStarter> start);
 WsOffer websocket_offer(const kj::HttpHeaders& headers, WebSocketCompression mode);
 WsCompression websocket_agreement(
     const WsOffer& offer, const kj::HttpHeaders& response, WebSocketCompression mode);

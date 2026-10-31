@@ -13,20 +13,6 @@ namespace workerd::api {
 
 namespace {
 
-ActorRetryStopReason nonDisconnectStopReason(kj::Exception::Type type) {
-  switch (type) {
-    case kj::Exception::Type::FAILED:
-      return ActorRetryStopReason::NON_DISCONNECT_FAILED;
-    case kj::Exception::Type::OVERLOADED:
-      return ActorRetryStopReason::NON_DISCONNECT_OVERLOADED;
-    case kj::Exception::Type::UNIMPLEMENTED:
-      return ActorRetryStopReason::NON_DISCONNECT_UNIMPLEMENTED;
-    case kj::Exception::Type::DISCONNECTED:
-      break;
-  }
-  KJ_UNREACHABLE;
-}
-
 struct RetryBackoff {
   kj::Duration min;
   kj::Duration max;
@@ -85,10 +71,6 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
 }
 
 kj::Exception ActorCallRetryState::retryTimeoutExpired() {
-  if (!recordedOutcome && retryAttemptsStarted == 0) {
-    observer->recordActorRetryCandidate(
-        config.callType, ActorRetryCandidate::FIRST_FAILURE_BUDGET_SPENT);
-  }
   recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
   return KJ_ASSERT_NONNULL(originalFailure).clone();
 }
@@ -101,27 +83,17 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure
   KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
     return kj::mv(claimRejection);
   }
-  KJ_IF_SOME(candidate, config.probeCandidate) {
-    if (jsg::isRetryable(exception) &&
-        exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
-      auto recorded = candidate;
-      config.probeCandidate = kj::none;
-      observer->recordActorRetryCandidate(config.callType, recorded);
-    }
-  }
-
   return checkCanRetry(kj::mv(exception));
 }
 
-kj::Exception ActorCallRetryState::handleCommittedAttemptFailure(
-    kj::Exception exception, ActorRetryStopReason commitPoint) {
+kj::Exception ActorCallRetryState::handleCommittedAttemptFailure(kj::Exception exception) {
   KJ_REQUIRE(retriesEnabled);
 
   maybeStartRetryLatencyTimer(exception);
   KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
     return kj::mv(claimRejection);
   }
-  recordUnableToRetry(commitPoint);
+  recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
   return kj::mv(exception);
 }
 
@@ -144,21 +116,18 @@ kj::Maybe<kj::Exception> ActorCallRetryState::handleClaimRejection(const kj::Exc
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Exception exception) {
   if (!jsg::isRetryable(exception)) {
-    recordUnableToRetry(nonDisconnectStopReason(exception.getType()));
+    recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     return kj::mv(exception);
   }
   if (exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none) {
-    recordUnableToRetry(ActorRetryStopReason::DELIVERED_DISCONNECT);
+    recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY);
     return kj::mv(exception);
   }
   if (originalFailure == kj::none) {
     originalFailure = exception.clone();
   }
   if (attemptCount >= policy.maxAttempts()) {
-    if (recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED)) {
-      observer->recordActorRetryAttemptsExhausted(
-          config.callType, timer.nowForLimitTimeout() - callStart);
-    }
+    recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
     return KJ_ASSERT_NONNULL(originalFailure).clone();
   }
 
@@ -198,20 +167,13 @@ kj::Duration ActorCallRetryState::retryDelay() {
   return distribution(generator) * kj::NANOSECONDS;
 }
 
-bool ActorCallRetryState::recordOutcome(ActorRetryOutcome outcome) {
-  if (recordedOutcome) return false;
+void ActorCallRetryState::recordOutcome(ActorRetryOutcome outcome) {
+  if (recordedOutcome) return;
   recordedOutcome = true;
-  if (retryAttemptsStarted == 0) return false;
+  if (retryAttemptsStarted == 0) return;
   auto startTime = KJ_ASSERT_NONNULL(retryStartTime);
   observer->recordActorRetryOutcome(
       config.callType, outcome, kj::systemPreciseMonotonicClock().now() - startTime);
-  return true;
-}
-
-void ActorCallRetryState::recordUnableToRetry(ActorRetryStopReason reason) {
-  if (recordOutcome(ActorRetryOutcome::UNABLE_TO_RETRY)) {
-    observer->recordActorRetryStopReason(config.callType, reason);
-  }
 }
 
 }  // namespace workerd::api

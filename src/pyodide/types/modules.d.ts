@@ -14,15 +14,9 @@ declare module 'pyodide-internal:setup_python_search_path.py' {
 
 declare module 'pyodideRuntime-internal:emscriptenSetup' {
   function instantiateEmscriptenModule(
-    pythonStdlib: ArrayBuffer,
     pyodideWasmModule: WebAssembly.Module
   ): Promise<Module>;
   export { instantiateEmscriptenModule };
-}
-
-declare module 'pyodideRuntime-internal:python_stdlib.zip' {
-  const value: ArrayBuffer;
-  export default value;
 }
 
 declare module 'pyodideRuntime-internal:pyodide.asm.wasm' {

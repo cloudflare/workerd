@@ -25,6 +25,7 @@
 
 import crypto from 'node:crypto';
 import { type UnknownFunc, type HostInfo, getHostInfo } from './common';
+import { startSingleTest } from './test';
 
 declare global {
   var GLOBAL: {
@@ -54,7 +55,10 @@ declare global {
 
   function get_host_info(): HostInfo;
   function token(): string;
-  function setup(func: UnknownFunc | Record<string, unknown>): void;
+  function setup(
+    funcOrProperties: UnknownFunc | Record<string, unknown>,
+    maybeProperties?: Record<string, unknown>
+  ): void;
   function add_completion_callback(func: UnknownFunc): void;
   // Provided by /common/gc.js
   function garbageCollect(): Promise<void>;
@@ -66,6 +70,7 @@ declare global {
   ): ArrayBuffer | SharedArrayBuffer;
   // Used by idlharness.js to fetch IDL files
   function fetch_spec(spec: string): Promise<{ spec: string; idl: string }>;
+  function fetch_json(resource: string): Promise<unknown>;
 }
 
 globalThis.get_host_info = (): HostInfo => {
@@ -84,7 +89,12 @@ globalThis.GLOBAL = {
   },
 };
 
-globalThis.done = (): undefined => undefined;
+// Completes the test started by setup({single_test: true}). Otherwise, files are complete once all
+// of their subtests are.
+globalThis.done = (): undefined => {
+  globalThis.state.singleTest?.done();
+  return undefined;
+};
 
 globalThis.subsetTestByKey = (
   _key: string,
@@ -133,32 +143,106 @@ globalThis.token = (): string => {
   return crypto.randomUUID();
 };
 
-globalThis.setup = (func): void => {
-  if (typeof func === 'object') {
-    return;
+globalThis.setup = (funcOrProperties, maybeProperties): void => {
+  const properties =
+    typeof funcOrProperties === 'object' ? funcOrProperties : maybeProperties;
+
+  if (properties?.single_test) {
+    startSingleTest();
   }
 
-  func();
+  if (typeof funcOrProperties === 'function') {
+    funcOrProperties();
+  }
 };
 
 globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
 };
 
-globalThis.format_value = (val): string => {
-  return JSON.stringify(val, null, 2);
-};
+// Escapes applied to strings by format_value(), matching testharness.js: backslash, double quote,
+// C0 control characters, U+FFFD, U+FFFE and U+FFFF.
+const FORMAT_ESCAPES = new Map<string, string>([
+  ['\\', '\\\\'],
+  ['"', '\\"'],
+  ['\0', '\\0'],
+  ['\b', '\\b'],
+  ['\t', '\\t'],
+  ['\n', '\\n'],
+  ['\v', '\\v'],
+  ['\f', '\\f'],
+  ['\r', '\\r'],
+]);
+for (let code = 1; code < 0x20; code++) {
+  const char = String.fromCharCode(code);
+  if (!FORMAT_ESCAPES.has(char)) {
+    FORMAT_ESCAPES.set(char, `\\x${code.toString(16).padStart(2, '0')}`);
+  }
+}
+for (const code of [0xfffd, 0xfffe, 0xffff]) {
+  FORMAT_ESCAPES.set(String.fromCharCode(code), `\\u${code.toString(16)}`);
+}
+const FORMAT_ESCAPE_PATTERN = new RegExp(
+  `[${[...FORMAT_ESCAPES.keys()].map((c) => (c === '\\' ? '\\\\' : c)).join('')}]`,
+  'g'
+);
+
+function truncate(s: string, len: number): string {
+  return s.length > len ? s.substring(0, len - 3) + '...' : s;
+}
+
+// Port of format_value() from testharness.js, minus its special case for DOM nodes. Test names
+// are built from its output, so it must match upstream to keep them stable and distinct. Apart
+// from array elements, it reads only what String() reads, so it doesn't run getters such as
+// WebAssembly.Memory.prototype.buffer.
+function formatValue(val: unknown, seen: unknown[]): string {
+  if (typeof val === 'object' && val !== null) {
+    if (seen.includes(val)) {
+      return '[...]';
+    }
+    seen.push(val);
+  }
+
+  if (Array.isArray(val)) {
+    return `[${val.map((x: unknown) => formatValue(x, seen)).join(', ')}]`;
+  }
+
+  switch (typeof val) {
+    case 'string':
+      return `"${val.replace(FORMAT_ESCAPE_PATTERN, (c) => FORMAT_ESCAPES.get(c) ?? c)}"`;
+    case 'boolean':
+    case 'undefined':
+      return String(val);
+    case 'number':
+      return Object.is(val, -0) ? '-0' : String(val);
+    case 'bigint':
+      return `${val}n`;
+    default:
+      if (val === null) {
+        return 'null';
+      }
+      try {
+        // As upstream, functions show their source and objects their Symbol.toStringTag.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        return `${typeof val} "${truncate(String(val), 1000)}"`;
+      } catch (e) {
+        return `[stringifying object threw ${String(e)} with type ${typeof e}]`;
+      }
+  }
+}
+
+globalThis.format_value = (val): string => formatValue(val, []);
 
 globalThis.createBuffer = (
   type,
   length,
-  _opts
+  opts
 ): ArrayBuffer | SharedArrayBuffer => {
   switch (type) {
     case 'ArrayBuffer':
-      return new ArrayBuffer(length);
+      return new ArrayBuffer(length, opts);
     case 'SharedArrayBuffer':
-      return new SharedArrayBuffer(length);
+      return new SharedArrayBuffer(length, opts);
     default:
       throw new TypeError(`Unsupported buffer type: ${type}`);
   }
@@ -179,4 +263,9 @@ globalThis.fetch_spec = (
     );
   }
   return Promise.resolve({ spec, idl });
+};
+
+globalThis.fetch_json = async (resource: string): Promise<unknown> => {
+  const response = await fetch(resource);
+  return response.json();
 };

@@ -4,13 +4,18 @@
 
 #include "ffi.h"
 
+#include "cpp-interop.h"
+
 #include <workerd/io/features.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 
 #include <cppgc/common.h>
 #include <v8-cppgc.h>
@@ -18,6 +23,7 @@
 
 #include <capnp/message.h>
 #include <kj/common.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -32,23 +38,32 @@ namespace workerd {
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
-JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+JSG_DECLARE_ISOLATE_TYPE(TestIsolate,
+    TestContext,
+    cpp_interop_test::TestCppGreeter,
+    cpp_interop_test::TestCppBase,
+    cpp_interop_test::TestCppDerived,
+    cpp_interop_test::TestCppHolder,
+    jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>);
 
 namespace rust::jsg_test {
 
 // Lazy initialization of V8System to avoid static initialization order issues
 static ::workerd::jsg::V8System& getV8System() {
-  static ::workerd::jsg::V8System v8System;
+  // Lets tests optimize functions on demand to reach fast callbacks.
+  static ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
   return v8System;
 }
 
-TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags)
+TestHarness::TestHarness(
+    ::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags, FastApi fastApi)
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
-  auto* v8Isolate = isolate->getIsolate();
-  v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
+  if (fastApi == FastApi::Enabled) {
+    isolate->setFastApiEnabledForTest();
+  }
 
   KJ_REQUIRE(
       flags.size() % sizeof(capnp::word) == 0, "flags size must be a multiple of the word size");
@@ -62,9 +77,9 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint
   });
 }
 
-kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags) {
-  return ::workerd::jsg::runInV8Stack([flags](::workerd::jsg::V8StackScope& stackScope) {
-    return kj::heap<TestHarness>(stackScope, flags);
+kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api) {
+  return ::workerd::jsg::runInV8Stack([flags, fast_api](::workerd::jsg::V8StackScope& stackScope) {
+    return kj::heap<TestHarness>(stackScope, flags, fast_api);
   });
 }
 
@@ -83,6 +98,7 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
 namespace {
 EvalResult runScript(
     v8::Isolate* v8Isolate, v8::Local<v8::Context> ctx, v8::Local<v8::Script> script) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
   v8::TryCatch catcher(v8Isolate);
 
   v8::MaybeLocal<v8::Value> value = script->Run(ctx);
@@ -121,6 +137,66 @@ EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResou
   return runScript(v8Isolate, ctx, script);
 }
 
+EvalResult EvalContext::eval_with_caught_exception(::rust::Str code) const {
+  v8::Isolate::Scope isolateScope(v8Isolate);
+  v8::Local<v8::Context> ctx = v8Context.Get(v8Isolate);
+  v8::Context::Scope contextScope(ctx);
+
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): holds what it caught, for a test.
+  v8::TryCatch catcher(v8Isolate);
+  auto thrower = ::workerd::jsg::check(
+      v8::Script::Compile(ctx, v8::String::NewFromUtf8Literal(v8Isolate, "throw new Error()")));
+  KJ_ASSERT(thrower->Run(ctx).IsEmpty());
+  KJ_ASSERT(catcher.HasCaught());
+
+  v8::Local<v8::String> source = ::workerd::jsg::check(v8::String::NewFromUtf8(
+      v8Isolate, code.data(), v8::NewStringType::kNormal, static_cast<int>(code.size())));
+  auto script = ::workerd::jsg::check(v8::Script::Compile(ctx, source));
+  v8::MaybeLocal<v8::Value> value = script->Run(ctx);
+  return EvalResult{
+    .success = !value.IsEmpty(),
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
+}
+
+namespace {
+// Keeps the callbacks of the builtin modules Rust registers.
+struct RecordingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistry {
+  ~RecordingModuleRegistry() noexcept override = default;
+
+  void addBuiltinModule(::rust::Str specifier,
+      ::workerd::rust::jsg::ModuleCallback callback,
+      ::workerd::rust::jsg::ModuleType) override {
+    modules.insert(kj::str(specifier), callback);
+  }
+
+  kj::HashMap<kj::String, ::workerd::rust::jsg::ModuleCallback> modules;
+};
+}  // namespace
+
+EvalResult EvalContext::call_builtin_module(
+    ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+    ::rust::Str specifier) const {
+  RecordingModuleRegistry registry;
+  registerModules(registry);
+  auto name = kj::str(specifier);
+  auto& callback = KJ_REQUIRE_NONNULL(registry.modules.find(name), "no such builtin module", name);
+
+  v8::Isolate::Scope isolateScope(v8Isolate);
+  v8::Context::Scope contextScope(v8Context.Get(v8Isolate));
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
+  v8::TryCatch catcher(v8Isolate);
+  auto value = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(callback(v8Isolate));
+  bool success = !value.IsEmpty();
+  if (!success && catcher.HasCaught()) {
+    value = catcher.Exception();
+  }
+  return EvalResult{
+    .success = success,
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
+}
+
 void TestHarness::run_in_context(
     size_t data, ::rust::Fn<void(size_t, Isolate*, EvalContext&)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
@@ -131,6 +207,25 @@ void TestHarness::run_in_context(
     EvalContext evalContext(lock.v8Isolate, v8Context);
     callback(data, lock.v8Isolate, evalContext);
   });
+}
+
+void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const {
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    realm = kj::none;
+    callback(data);
+    request_gc(lock.v8Isolate, GcType::Full);
+  });
+}
+
+void terminate_and_deliver(Isolate* isolate) {
+  isolate->TerminateExecution();
+  // The loop's stack check delivers the termination: V8 throws the termination exception and
+  // the script returns empty. No TryCatch here, so the exception stays pending for the caller.
+  auto context = isolate->GetCurrentContext();
+  auto source = v8::String::NewFromUtf8Literal(isolate, "(() => { for (;;) {} })()");
+  auto script = v8::Script::Compile(context, source).ToLocalChecked();
+  KJ_ASSERT(script->Run(context).IsEmpty());
+  KJ_ASSERT(isolate->IsExecutionTerminating());
 }
 
 void request_gc(Isolate* isolate, GcType gc_type) {
@@ -156,6 +251,21 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   }
 }
 
+void run_microtasks(Isolate* isolate) {
+  isolate->PerformMicrotaskCheckpoint();
+}
+
+void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::Unlocker unlocker(isolate);
+  callback(data);
+}
+
+size_t used_global_handles_size(Isolate* isolate) {
+  v8::HeapStatistics stats;
+  isolate->GetHeapStatistics(&stats);
+  return stats.used_global_handles_size();
+}
+
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
   auto tmpl = v8::ObjectTemplate::New(isolate);
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
@@ -170,12 +280,113 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
 }
 
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = isolate->GetCurrentContext();
+  bool found = false;
+  auto function = js.wrapReturningFunction(context,
+      [&found](::workerd::jsg::Lock& js,
+          const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto& args = const_cast<v8::FunctionCallbackInfo<v8::Value>&>(info);
+    found = ::workerd::rust::jsg::fci_get_data_wrappable(&args) != kj::none;
+    return js.v8Undefined();
+  });
+  ::workerd::jsg::check(function->Call(context, v8::Undefined(isolate), 0, nullptr));
+  return found;
+}
+
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local() {
   return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
 }
 
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
+}
+
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Serializer serializer(js);
+  serializer.write(
+      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  ::rust::Vec<uint8_t> result;
+  for (auto byte: serializer.release().data) {
+    result.push_back(byte);
+  }
+  return result;
+}
+
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+  v8::Local<v8::Value> result = deserializer.readValue(js);
+  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
+}
+
+bool isolates_share_group(Isolate* a, Isolate* b) {
+  return a->GetGroup() == b->GetGroup();
+}
+
+void set_autogates_for_test(::rust::Slice<const ::rust::Str> names) {
+  auto owned = KJ_MAP(name, names) { return kj::str(name); };
+  auto ptrs = KJ_MAP(name, owned) -> kj::StringPtr { return name; };
+  util::Autogate::initAutogateNamesForTest(ptrs.asPtr(), util::IgnoreAllAutogatesEnv::YES);
+}
+
+void deinit_autogates_for_test() {
+  util::Autogate::deinitAutogate();
+}
+
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check) {
+  v8::Global<v8::Value> held;
+  {
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Value> value;
+    KJ_ASSERT(
+        ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(create(isolate)).ToLocal(&value));
+    held.Reset(isolate, value);
+  }
+  request_gc(isolate, GcType::Full);
+  {
+    v8::HandleScope scope(isolate);
+    check(isolate, ::workerd::rust::jsg::to_ffi(held.Get(isolate)));
+  }
+  held.Reset();
+  request_gc(isolate, GcType::Full);
+}
+
+namespace {
+// The storage key of the async context frames the tests create, like the key of one
+// AsyncLocalStorage.
+const kj::Arc<::workerd::jsg::AsyncContextFrame::StorageKey>& testStorageKey() {
+  static const auto key = kj::arc<::workerd::jsg::AsyncContextFrame::StorageKey>();
+  return key;
+}
+}  // namespace
+
+void run_in_async_context(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    size_t data,
+    ::rust::Fn<void(size_t)> callback) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::AsyncContextFrame::StorageScope scope(js, testStorageKey().addRef(),
+      js.v8Ref(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  callback(data);
+}
+
+::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate) {
+  KJ_IF_SOME(frame, ::workerd::jsg::AsyncContextFrame::current(isolate)) {
+    KJ_IF_SOME(value, frame.get(*testStorageKey())) {
+      return ::workerd::rust::jsg::maybe_local_to_ffi(
+          v8::MaybeLocal<v8::Value>(value.getHandle(isolate)));
+    }
+  }
+  return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+}
+
+bool cpp_sees_root_frame(Isolate* isolate) {
+  return ::workerd::jsg::AsyncContextFrame::current(isolate) == kj::none;
 }
 
 }  // namespace rust::jsg_test

@@ -51,7 +51,7 @@ struct FdPair {
 };
 
 auto makePipeFds() {
-  int pipeFds[2];
+  int pipeFds[2]{};
   KJ_SYSCALL(pipe2(pipeFds, O_CLOEXEC));
 
   return FdPair{
@@ -76,7 +76,7 @@ class OutputCapture {
   kj::String readOutput() {
     fflush(targetFd == STDOUT_FILENO ? stdout : stderr);
 
-    char buffer[4096];
+    char buffer[4096]{};
     ssize_t n;
     KJ_SYSCALL(n = read(readFd.get(), buffer, sizeof(buffer) - 1));
     buffer[n] = '\0';

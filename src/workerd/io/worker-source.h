@@ -67,6 +67,11 @@ struct WorkerSource {
     // options. Compiled code is only shared with a target whose own setting matches, since the
     // setting is baked into the compiled module; otherwise the target recompiles from `body`.
     bool compiledWithEsmIntegrationBuiltins = false;
+
+    // Whether `compiledModule` came from an isolate with wasm_source_url_support. Such a module
+    // may carry that isolate's module name as its source URL, so it's never shared; see
+    // `sharedCompiledWasmModule()`.
+    bool compiledWithWasmSourceUrlSupport = false;
   };
   struct JsonModule {
     // JSON-encoded content; will be parsed automatically when imported.

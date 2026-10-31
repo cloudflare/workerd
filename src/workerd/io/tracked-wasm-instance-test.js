@@ -263,3 +263,51 @@ export let gcReclaimsModules = {
     // If we get here without OOM, reclamation is working.
   },
 };
+
+// ---------------------------------------------------------------------------
+// Shim shape tests
+//
+// The WebAssembly.Instance shim matches the native constructor: it has the same name, length and
+// read-only `prototype`, and throws when called without `new`.
+// ---------------------------------------------------------------------------
+
+export let instanceShimMatchesNativeShape = {
+  test() {
+    const Instance = WebAssembly.Instance;
+    if (Instance.name !== 'Instance' || Instance.length !== 1) {
+      throw new Error(
+        `Unexpected name/length: ${Instance.name}/${Instance.length}`
+      );
+    }
+
+    const desc = Object.getOwnPropertyDescriptor(Instance, 'prototype');
+    if (desc.writable || desc.enumerable || desc.configurable) {
+      throw new Error(
+        `Unexpected prototype descriptor: ${JSON.stringify(desc)}`
+      );
+    }
+    if (Instance.prototype.constructor !== Instance) {
+      throw new Error('Instance.prototype.constructor is not the shim');
+    }
+
+    class SubInstance extends Instance {}
+    const sub = new SubInstance(preinitModule);
+    if (!(sub instanceof SubInstance) || sub.exports.get_signal() !== 0) {
+      throw new Error('Subclass instance was not constructed and registered');
+    }
+  },
+};
+
+export let instanceShimCalledWithoutNew = {
+  test() {
+    try {
+      WebAssembly.Instance(preinitModule);
+    } catch (e) {
+      if (e instanceof TypeError) return;
+      throw e;
+    }
+    throw new Error(
+      'Expected calling WebAssembly.Instance without new to throw'
+    );
+  },
+};

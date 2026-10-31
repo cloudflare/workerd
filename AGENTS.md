@@ -23,6 +23,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - Main build command: `bazel build //src/workerd/server:workerd`
 - Binary output: `bazel-bin/src/workerd/server/workerd`
+- Remote execution: if `cloudflared access token -app=https://bazelflare-workerd.runtime-playground.workers.dev` prints a token, pass `--config=bazelflare` to Bazel, directly or through a `just` recipe that forwards its arguments to Bazel (`just build`, `just test`, `just stream-test`, `just node-test`); otherwise build locally. See `docs/development.md`
 
 ### Just Commands (recommended for development)
 
@@ -176,7 +177,8 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 
 ### Configuration System
 
-- Uses **Cap'n Proto** for configuration files (`.capnp` format)
+- Uses **Cap'n Proto** for configuration files (`.capnp` format); a `wrangler.json(c)` is also
+  accepted and translated (`src/workerd/server/cli/wrangler.rs`)
 - Main schema: `src/workerd/server/workerd.capnp`
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model
@@ -186,7 +188,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Task                   | Location                                                      | Notes                                                                                                        |
 | ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Add/modify JS API      | `src/workerd/api/`                                            | C++ with JSG macros; see `jsg/jsg.h` for binding system                                                      |
-| Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro                                               |
+| Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro; Rust modules in `src/rust/api/` (`lib.rs`)   |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
@@ -199,8 +201,9 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
 | JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
+| Streams benchmarks     | `src/bench/streams/`                                          | C++ vs TS streams: the same modules under a cell per implementation; see its `AGENTS.md`                     |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
-| V8 patches             | `patches/v8/`                                                 | 33 patches; see `docs/v8-updates.md`                                                                         |
+| V8 patches             | `patches/v8/`                                                 | See `docs/v8-updates.md`                                                                                     |
 
 ## Coding Conventions
 
@@ -297,6 +300,9 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** use generic names for top-level ambient types in `types/defines/` (e.g., `Identity`, `Preview`, `Config`); always prefix with the product/feature name (e.g., `CloudflareAccessIdentity`, `TracePreviewInfo`, `AiSearchConfig`)
 - **NEVER** use bare `object` as a type in `types/defines/`; use a proper interface with known fields (optionally extending `Record<string, unknown>` for forward-compatibility)
 - **NEVER** edit `types/generated-snapshot/` directly; fix the source layer and run `just generate-types`
+- **NEVER** use C++ JSG in Rust JSG's C++ shims (`jsg::Lock::from`, `JSG_TRY`, `jsg::check`, `createTunneledException`, ...); see `src/rust/jsg/README.md` §Safety rules
+- **NEVER** throw a JS exception while execution is terminating; it replaces the termination and lets the script keep running
+- **NEVER** call a V8 API that takes a `v8::Local<v8::Context>` while a termination, or an exception that must keep propagating, is pending; V8 either clears the exception on entry, so the script runs on, or fails a debug check and in a release build runs on with it pending. (Reading an exception that your own `v8::TryCatch` caught is fine; reset it before calling into Rust JSG, whose shims treat a caught exception as pending.) Rust JSG's C++ shims check `exceptionPending()` for this; see `src/rust/jsg/README.md` §Safety rules. Creating strings, numbers, objects, arrays, error objects and templates is fine at any time
 
 ## Backward Compatibility
 

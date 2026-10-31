@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel';
+import { default as asyncHooks } from 'node-internal:async_hooks';
 
 import type {
   Channel as ChannelType,
@@ -34,31 +35,304 @@ import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 
 import { validateObject } from 'node-internal:validators';
 
+type TransformCallback = (value: unknown) => unknown;
+type ChannelName = string | symbol;
+type AsyncLocalStorage = InstanceType<typeof asyncHooks.AsyncLocalStorage>;
+
 const hasSubscribersGetter =
   !!Cloudflare.compatibilityFlags['diagnostics_channel_has_subscribers_getter'];
 
-export const { Channel } = diagnosticsChannel;
+// Called directly, so that a subclass overriding them changes nothing.
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const { getStore: alsGetStore, run: alsRun } =
+  asyncHooks.AsyncLocalStorage.prototype;
+
+function illegalInvocation(): TypeError {
+  return new TypeError(
+    'Illegal invocation: function called with incorrect `this` reference. ' +
+      'See https://developers.cloudflare.com/workers/observability/errors/' +
+      '#illegal-invocation-errors for details.'
+  );
+}
+
+function argumentTypeError(
+  type: string,
+  method: string,
+  index: number,
+  expected: string
+): TypeError {
+  return new TypeError(
+    `Failed to execute '${method}' on '${type}': parameter ${index} is not of type '${expected}'.`
+  );
+}
+
+// Symbols stay symbols; anything else is converted to a string.
+function toName(name: unknown): ChannelName {
+  return typeof name === 'symbol' ? name : String(name);
+}
+
+// Channels are keyed by the name's string form, so a symbol shares a channel with every other
+// symbol of the same description, and with the string 'Symbol(description)'.
+function registryKey(name: ChannelName): string {
+  return typeof name === 'symbol'
+    ? `Symbol(${String(name.description)})`
+    : name;
+}
+
+function isAsyncLocalStorage(value: unknown): value is AsyncLocalStorage {
+  if (typeof value !== 'object' || value === null) return false;
+  try {
+    // getStore() has no side effects, and throws unless `value` is a real AsyncLocalStorage.
+    Reflect.apply(alsGetStore, value, []);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A map where erasing an entry moves the last entry into its place. This decides the order in
+// which subscribers and stores run.
+class Table<K, V> {
+  #keys: K[] = [];
+  #values: V[] = [];
+  #index = new Map<K, number>();
+
+  get size(): number {
+    return this.#keys.length;
+  }
+
+  has(key: K): boolean {
+    return this.#index.has(key);
+  }
+
+  set(key: K, value: V): void {
+    const i = this.#index.get(key);
+    if (i === undefined) {
+      this.#index.set(key, this.#keys.length);
+      this.#keys.push(key);
+      this.#values.push(value);
+    } else {
+      this.#values[i] = value;
+    }
+  }
+
+  delete(key: K): void {
+    const i = this.#index.get(key);
+    if (i === undefined) return;
+    this.#index.delete(key);
+    const lastKey = this.#keys.pop() as K;
+    const lastValue = this.#values.pop() as V;
+    if (i < this.#keys.length) {
+      this.#keys[i] = lastKey;
+      this.#values[i] = lastValue;
+      this.#index.set(lastKey, i);
+    }
+  }
+
+  keys(): K[] {
+    return this.#keys.slice();
+  }
+
+  entries(): [K, V][] {
+    return this.#keys.map((key, i) => [key, this.#values[i] as V]);
+  }
+}
+
+const kCreate = Symbol('kCreate');
+
+// Set in Channel's static block, so that the module functions below can read private state.
+let hasSubscribersOf: (channel: Channel) => boolean;
+
+export class Channel {
+  readonly #name: ChannelName;
+  readonly #subscribers = new Table<MessageCallback, undefined>();
+  readonly #stores = new Table<
+    AsyncLocalStorage,
+    TransformCallback | undefined
+  >();
+
+  constructor(token: unknown, name: ChannelName) {
+    if (token !== kCreate) throw new TypeError('Illegal constructor');
+    this.#name = name;
+  }
+
+  static #check(channel: unknown): asserts channel is Channel {
+    if (
+      typeof channel !== 'object' ||
+      channel === null ||
+      !(#subscribers in channel)
+    ) {
+      throw illegalInvocation();
+    }
+  }
+
+  #publish(message: unknown): void {
+    for (const callback of this.#subscribers.keys()) {
+      Reflect.apply(callback, globalThis, [message, this.#name]);
+    }
+    diagnosticsChannel.publishToTracer(this.#name, message);
+  }
+
+  // A getter instead, when the diagnostics_channel_has_subscribers_getter flag is on. See the
+  // static block below.
+  hasSubscribers(): boolean {
+    Channel.#check(this);
+    return this.#subscribers.size !== 0;
+  }
+
+  publish(...args: unknown[]): void {
+    Channel.#check(this);
+    if (args.length < 1) {
+      throw argumentTypeError('Channel', 'publish', 1, 'Value');
+    }
+    this.#publish(args[0]);
+  }
+
+  subscribe(callback: unknown): void {
+    Channel.#check(this);
+    if (typeof callback !== 'function') {
+      throw argumentTypeError('Channel', 'subscribe', 1, 'function');
+    }
+    if (!this.#subscribers.has(callback as MessageCallback)) {
+      this.#subscribers.set(callback as MessageCallback, undefined);
+    }
+  }
+
+  unsubscribe(callback: unknown): void {
+    Channel.#check(this);
+    if (typeof callback !== 'function') {
+      throw argumentTypeError('Channel', 'unsubscribe', 1, 'function');
+    }
+    this.#subscribers.delete(callback as MessageCallback);
+  }
+
+  bindStore(store: unknown, transform?: unknown): void {
+    Channel.#check(this);
+    if (!isAsyncLocalStorage(store)) {
+      throw argumentTypeError('Channel', 'bindStore', 1, 'AsyncLocalStorage');
+    }
+    if (transform !== undefined && typeof transform !== 'function') {
+      throw argumentTypeError('Channel', 'bindStore', 2, 'function');
+    }
+    this.#stores.set(store, transform as TransformCallback | undefined);
+  }
+
+  unbindStore(store: unknown): void {
+    Channel.#check(this);
+    if (!isAsyncLocalStorage(store)) {
+      throw argumentTypeError('Channel', 'unbindStore', 1, 'AsyncLocalStorage');
+    }
+    this.#stores.delete(store);
+  }
+
+  runStores(...args: unknown[]): unknown {
+    Channel.#check(this);
+    if (args.length < 1) {
+      throw argumentTypeError('Channel', 'runStores', 1, 'Value');
+    }
+    const [message, callback, receiver] = args;
+    if (typeof callback !== 'function') {
+      throw argumentTypeError('Channel', 'runStores', 2, 'function');
+    }
+    const callbackArgs = args.slice(3);
+    const thisArg = receiver === undefined ? globalThis : receiver;
+    const stores = this.#stores.entries();
+
+    // Enter each store in turn, so that a transform runs with the stores before it already set.
+    const enter = (i: number): unknown => {
+      const entry = stores[i];
+      if (entry === undefined) {
+        this.#publish(message);
+        return Reflect.apply(callback, thisArg, callbackArgs);
+      }
+      const [store, transform] = entry;
+      const value =
+        transform === undefined
+          ? message
+          : Reflect.apply(transform, globalThis, [message]);
+      return Reflect.apply(alsRun, store, [value, (): unknown => enter(i + 1)]);
+    };
+    return enter(0);
+  }
+
+  static {
+    hasSubscribersOf = (channel): boolean => channel.#subscribers.size !== 0;
+
+    // Built-in types get a Symbol.toStringTag with this flag, so Channel does too.
+    if (Cloudflare.compatibilityFlags['set_tostring_tag']) {
+      Object.defineProperty(this.prototype, Symbol.toStringTag, {
+        value: 'Channel',
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
+    }
+
+    if (hasSubscribersGetter) {
+      Object.defineProperty(this.prototype, 'hasSubscribers', {
+        get(this: Channel): boolean {
+          Channel.#check(this);
+          return this.#subscribers.size !== 0;
+        },
+        configurable: true,
+        enumerable: false,
+      });
+    }
+  }
+}
+
+// Channels are never removed.
+const channels = new Map<string, Channel>();
+
+function getChannel(name: ChannelName): Channel {
+  const key = registryKey(name);
+  let result = channels.get(key);
+  if (result === undefined) {
+    result = new Channel(kCreate, name);
+    channels.set(key, result);
+  }
+  return result;
+}
 
 export function hasSubscribers(name: string | symbol): boolean {
-  return diagnosticsChannel.hasSubscribers(name);
+  const channel = channels.get(registryKey(toName(name)));
+  return channel !== undefined && hasSubscribersOf(channel);
 }
 
 export function channel(name: string | symbol): ChannelType {
-  return diagnosticsChannel.channel(name);
+  return getChannel(toName(name)) as unknown as ChannelType;
 }
 
 export function subscribe(
   name: string | symbol,
   callback: MessageCallback
 ): void {
-  diagnosticsChannel.subscribe(name, callback);
+  const channelName = toName(name);
+  if (typeof callback !== 'function') {
+    throw argumentTypeError(
+      'DiagnosticsChannelModule',
+      'subscribe',
+      2,
+      'function'
+    );
+  }
+  getChannel(channelName).subscribe(callback);
 }
 
 export function unsubscribe(
   name: string | symbol,
   callback: MessageCallback
 ): void {
-  diagnosticsChannel.unsubscribe(name, callback);
+  const key = registryKey(toName(name));
+  if (typeof callback !== 'function') {
+    throw argumentTypeError(
+      'DiagnosticsChannelModule',
+      'unsubscribe',
+      2,
+      'function'
+    );
+  }
+  channels.get(key)?.unsubscribe(callback);
 }
 
 export interface TracingChannelSubscriptions {
@@ -313,7 +587,7 @@ function validateChannel(channel: unknown, name: string): ChannelType {
   if (!(channel instanceof Channel)) {
     throw new ERR_INVALID_ARG_TYPE(name, 'Channel', channel);
   }
-  return channel;
+  return channel as unknown as ChannelType;
 }
 
 export function tracingChannel(

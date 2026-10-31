@@ -68,9 +68,9 @@ inline v8::MaybeLocal<T> maybe_local_from_ffi(MaybeLocal&& value) {
 // Global<T>
 //
 // ffi::Global stores only the strong v8::Global<v8::Value> in `ptr`.
-// The traced v8::TracedReference<v8::Data> slot lives in Global<T>::traced_ptr
-// on the Rust side (as UnsafeCell<usize>), passed by raw pointer to
-// wrappable_visit_global and wrappable_global_reset.
+// The traced v8::TracedReference<v8::Data> slot lives next to it in the
+// GlobalSlot of a TracedGlobal<T> on the Rust side, passed by reference to
+// wrappable_visit_global.
 static_assert(sizeof(v8::Global<v8::Value>) == sizeof(size_t), "Global must be pointer-sized");
 static_assert(sizeof(v8::TracedReference<v8::Data>) == sizeof(size_t),
     "TracedReference must be pointer-sized");

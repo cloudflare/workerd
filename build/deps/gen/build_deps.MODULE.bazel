@@ -14,7 +14,7 @@ bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.5.1")
+bazel_dep(name = "aspect_rules_js", version = "3.5.2")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
@@ -29,8 +29,8 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 http.file(
     name = "clang_tidy_darwin_arm64",
     executable = True,
-    sha256 = "c499cb9cbcb3af9e7bce2da5d42fe3bfa957928620c73a435f5918e00cf08d6a",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-darwin-arm64-clang-tidy",
+    sha256 = "7fa8f337b64caa833fcfe7fd8a09b847e018ec48a21d2bf185abda5fa59fa64e",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-23.1.4/llvm-23.1.4-darwin-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_darwin_arm64")
 
@@ -38,10 +38,10 @@ use_repo(http, "clang_tidy_darwin_arm64")
 http.archive(
     name = "clang_tidy_dev_headers",
     build_file = "@workerd//tools/clang-tidy:BUILD.headers",
-    sha256 = "8c8f3e5abd3e48d2570bdbba9de6a6aa96f01c489ad4ccddeb0449b3a857d706",
-    strip_prefix = "llvm-22.1.5-linux-amd64-clang-tidy-dev",
+    sha256 = "d8842c90e36861e7396d183b32c02ce00bdff5fa89c683489f722b5b95d5826b",
+    strip_prefix = "llvm-23.1.4-linux-amd64-clang-tidy-dev",
     type = "tar.xz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-amd64-clang-tidy-dev.tar.xz",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-23.1.4/llvm-23.1.4-linux-amd64-clang-tidy-dev.tar.xz",
 )
 use_repo(http, "clang_tidy_dev_headers")
 
@@ -49,8 +49,8 @@ use_repo(http, "clang_tidy_dev_headers")
 http.file(
     name = "clang_tidy_linux_amd64",
     executable = True,
-    sha256 = "ef023eeeafba064d4f182ce130b306202a21f23632ad4253687ed10b7df493da",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-amd64-clang-tidy",
+    sha256 = "15cbe1cafff30d01dc9410a53ba80c0dc078463857b016e9b70b8dae6ee5ac8f",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-23.1.4/llvm-23.1.4-linux-amd64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_amd64")
 
@@ -58,8 +58,8 @@ use_repo(http, "clang_tidy_linux_amd64")
 http.file(
     name = "clang_tidy_linux_arm64",
     executable = True,
-    sha256 = "59a52ec78d370141667022fe33dd12b17568f3c1a466641c5df52790a570556d",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-arm64-clang-tidy",
+    sha256 = "26bbdbdf581ef49d5844c590e6dee372a8660f6ec3421a342938c232b0302a5a",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-23.1.4/llvm-23.1.4-linux-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_arm64")
 
@@ -86,30 +86,32 @@ git_repository(
 bazel_dep(name = "platforms", version = "1.1.0")
 
 # rules_cc
-bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_cc", version = "0.2.27")
 
 # rules_foreign_cc
-bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
+bazel_dep(name = "rules_foreign_cc", version = "0.17.0")
 
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.14.0")
 
 # rules_nodejs
-bazel_dep(name = "rules_nodejs", version = "6.7.6")
+bazel_dep(name = "rules_nodejs", version = "6.7.7")
 
 # rules_oci
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.4.2")
+bazel_dep(name = "rules_python", version = "2.4.5")
 
 # rules_rust
-bazel_dep(name = "rules_rust", version = "0.74.0")
+bazel_dep(name = "rules_rust", version = "0.75.0")
 single_version_override(
     module_name = "rules_rust",
     patch_strip = 1,
     patches = [
         "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+        "//:patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch",
+        "//:patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch",
     ],
 )
 
@@ -129,6 +131,10 @@ filegroup(
 )
 exports_files(["library/Cargo.toml"])
 """,
+    patch_strip = 1,
+    patches = [
+        "//patches/rust:0001-teach-tsan-about-fcntl-file-descriptor-duplication.patch",
+    ],
     sha256 = "b8bb98533e65cb2468548b20b3575518d01b44e7738045a12de2dbb71a0d6cc2",
     strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
     type = "tar.xz",

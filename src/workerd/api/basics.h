@@ -77,8 +77,18 @@ class Event: public jsg::Object {
   inline void stopImmediatePropagation() {
     flags.stopped = true;
   }
+  // Per the spec's "set the canceled flag", this has no effect while a passive listener is
+  // being invoked.
   inline void preventDefault() {
-    flags.preventedDefault = true;
+    if (!flags.inPassiveListener) {
+      flags.preventedDefault = true;
+    }
+  }
+
+  // The spec's "in passive listener flag", set by dispatch while it invokes a listener that
+  // was registered with {passive: true}.
+  inline void setInPassiveListener(bool inPassiveListener) {
+    flags.inPassiveListener = inPassiveListener;
   }
 
   // The only phases we actually use are NONE and AT_TARGET but we provide
@@ -123,6 +133,14 @@ class Event: public jsg::Object {
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
   }
+  // Per the spec, setting returnValue to false sets the canceled flag and setting it to true
+  // does nothing. Unlike preventDefault(), this honors the spec's cancelable check, so it has
+  // no effect on the non-cancelable events the runtime itself dispatches, such as FetchEvent.
+  inline void setReturnValue(bool value) {
+    if (!value && flags.cancelable) {
+      preventDefault();
+    }
+  }
 
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
@@ -165,7 +183,11 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_PROTOTYPE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -192,7 +214,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_INSTANCE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -222,6 +248,13 @@ class Event: public jsg::Object {
     tracker.trackField("target", target);
   }
 
+ protected:
+  // Sets the canceled flag even inside a passive listener, for runtime-defined operations
+  // whose effect does not come from the listener canceling the event.
+  inline void forcePreventDefault() {
+    flags.preventedDefault = true;
+  }
+
  private:
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
@@ -237,6 +270,7 @@ class Event: public jsg::Object {
     uint8_t composed : 1 = 0;
     uint8_t bubbles : 1 = 0;
     uint8_t cancelable : 1 = 0;
+    uint8_t inPassiveListener : 1 = 0;
   };
   Flags flags{};
 
@@ -484,6 +518,11 @@ class EventTarget: public jsg::Object {
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
 
+    // When passive is true, preventDefault() has no effect while the handler is invoked.
+    // Per the spec, passive is not part of the listener's identity: re-adding a listener
+    // with a different passive value is a no-op that keeps the original registration.
+    bool passive = false;
+
     // If the event handler is registered with an AbortSignal (the {signal} option), this
     // holds the RAII registration for the signal's abort algorithm that removes this
     // listener, so that if this entry goes away before the signal aborts, the algorithm is
@@ -648,11 +687,11 @@ class AbortSignal final: public EventTarget {
     JSG_METHOD(throwIfAborted);
 
     if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(skipReleaseForTest);
       JSG_METHOD(getNativeRegistrationCountForTest);
+      JSG_METHOD(dropRpcTriggersForTest);
       JSG_TS_OVERRIDE({
-        skipReleaseForTest: never;
         getNativeRegistrationCountForTest: never;
+        dropRpcTriggersForTest: never;
       });
     }
   }
@@ -715,9 +754,9 @@ class AbortSignal final: public EventTarget {
   // Registers a native callback to be invoked with the abort exception if/when this signal
   // aborts. The callback runs under the isolate lock in the IoContext that is current at
   // registration time: synchronously when the abort is triggered within that context,
-  // otherwise delivered on that context's next turn, and dropped entirely (never invoked)
-  // once that context has been destroyed. If the signal can never abort, the callback is
-  // never invoked and no registration is made.
+  // otherwise as a cross-context action (see DeleteQueue::scheduleAction()), and dropped
+  // entirely (never invoked) once that context has been destroyed. If the signal can never
+  // abort, the callback is never invoked and no registration is made.
   //
   // Dropping the returned handle (safe from any thread) unregisters the callback: once the
   // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
@@ -752,14 +791,15 @@ class AbortSignal final: public EventTarget {
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
 
-  // To test what happens if a capability is dropped before invoking release on the cloned abort
-  // signal, this method will tell every rpcClient to skip this step before destruction.
-  void skipReleaseForTest();
-
   // Test-only introspection: the number of native registration cells (live or empty awaiting
   // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
   // completed registrations are reclaimed rather than accumulating on long-lived signals.
   int getNativeRegistrationCountForTest();
+
+  // Test-only: drops this signal's RPC registrations, releasing the capabilities that let it
+  // abort its clones. Lets tests observe a clone whose trigger is lost without waiting for the
+  // owning IoContext to be torn down.
+  void dropRpcTriggersForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
@@ -791,7 +831,7 @@ class AbortSignal final: public EventTarget {
 
   // One native abort action, shared between this signal and one consumer. The action is
   // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
-  // triggered there; otherwise on that context's next turn), always under the isolate lock,
+  // triggered there; otherwise as addAbortAction() describes), always under the isolate lock,
   // and never again after the consumer's RAII handle clears the slot. Because the handle is
   // held by (or attached to) objects the owning request destroys, an IoContext teardown
   // reclaims the action without ever touching the signal; the signal side retains only this
@@ -882,8 +922,8 @@ class AbortSignal final: public EventTarget {
   // across requests may hold registrations from several — and abort delivery is routed into
   // that context like a native registration, re-taking the slot on arrival. There is no
   // consumer-side RAII handle: the slot is reclaimed when the signal aborts, when a sweep
-  // finds the owning context destroyed, or when the signal itself is destroyed (either way
-  // the client's own destructor tells the peer that no abort is coming).
+  // finds the owning context destroyed, or when the signal itself is destroyed. Dropping the
+  // client without calling abort() leaves the clone unaborted forever.
   struct RpcRegistration final: public kj::AtomicRefcounted {
     RpcRegistration(IoCrossContextExecutor executor, IoOwn<AbortTriggerRpcClient> client)
         : executor(kj::mv(executor)) {
@@ -904,6 +944,13 @@ class AbortSignal final: public EventTarget {
   // receiving context is already gone.
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
+
+  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, whether a request to arm the RPC subscription
+  // has been queued on rpcReceiverContext. Queued only once, so registrations can't pile requests
+  // up on an idle actor; it arms the subscription unless the context is aborted or destroyed, or
+  // its idle actor's onHibernate event drops it, first. Without the autogate, this stays false and
+  // every registration from another context queues a request.
+  bool rpcSubscriptionRequested = false;
 
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;

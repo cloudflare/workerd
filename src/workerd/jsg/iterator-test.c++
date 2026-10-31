@@ -65,20 +65,22 @@ struct GeneratorContext: public Object, public ContextGlobal {
   }
 
   uint asyncGeneratorTest(Lock& js, AsyncGenerator<kj::String> generator) {
-    uint count = 0;
+    // Value-initialized to 0.
+    kj::Pin<uint> count;
     bool finished = false;
 
     // Get first item
     generator.next(js)
         .then(js, [&count, &generator](auto& js, auto value) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
-      ++count;
+      ++*count;
 
       // After getting first item, call return_() to terminate early
-      return generator.return_(js, kj::str("foo")).then(js, [&count](auto& js, auto value) {
+      return generator.return_(js, kj::str("foo"))
+          .then(js, [weakCount = count.addWeak()](auto& js, auto value) {
         // return_() should give us back "foo" and mark as done
         KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "foo");
-        ++count;
+        ++KJ_REQUIRE_NONNULL(weakCount.tryGet(), "test returned before return_() resolved");
         return js.resolvedPromise();
       });
     }).then(js, [&finished](auto& js) {
@@ -89,27 +91,28 @@ struct GeneratorContext: public Object, public ContextGlobal {
     js.runMicrotasks();
 
     KJ_ASSERT(finished);
-    KJ_ASSERT(count == 2);
+    KJ_ASSERT(*count == 2);
 
-    return count;
+    return *count;
   }
 
   uint asyncGeneratorErrorTest(Lock& js, AsyncGenerator<kj::String> generator) {
-    uint count = 0;
+    // Value-initialized to 0.
+    kj::Pin<uint> count;
     bool finished = false;
 
     // First call to next() should succeed and return "a"
     generator.next(js)
         .then(js, [&count, &generator](auto& js, auto value) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
-      ++count;
+      ++*count;
 
       // Second call - throw an error, which should trigger the generator's
       // throw handler (the catch block), which yields "c"
       return generator.throw_(js, js.template v8Ref<v8::Value>(js.str("boom"_kj)))
-          .then(js, [&count](auto& js, auto value) {
+          .then(js, [weakCount = count.addWeak()](auto& js, auto value) {
         KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "c");
-        ++count;
+        ++KJ_REQUIRE_NONNULL(weakCount.tryGet(), "test returned before throw_() resolved");
         return js.resolvedPromise();
       });
     }).then(js, [&finished](auto& js) {
@@ -120,9 +123,9 @@ struct GeneratorContext: public Object, public ContextGlobal {
     js.runMicrotasks();
 
     KJ_ASSERT(finished);
-    KJ_ASSERT(count == 2);
+    KJ_ASSERT(*count == 2);
 
-    return count;
+    return *count;
   }
 
   void manualAsyncGeneratorTest(Lock& js, AsyncGenerator<kj::String> generator) {

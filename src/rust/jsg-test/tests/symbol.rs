@@ -102,27 +102,27 @@ fn symbol_with_same_description_is_still_unique() {
 }
 
 // =============================================================================
-// try_as cast from Local<Value>
+// TryFrom cast from Local<Value>
 // =============================================================================
 
 #[test]
-fn value_try_as_symbol_succeeds() {
+fn value_try_from_symbol_succeeds() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "Symbol('cast-test')").unwrap();
         assert!(val.is_symbol());
-        let sym = val.try_as::<v8::Symbol>().expect("should cast to Symbol");
+        let sym = v8::Local::<v8::Symbol>::try_from(val).expect("should cast to Symbol");
         assert!(sym.is_symbol());
         Ok(())
     });
 }
 
 #[test]
-fn value_try_as_symbol_fails_for_string() {
+fn value_try_from_symbol_fails_for_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "'hello'").unwrap();
-        assert!(val.try_as::<v8::Symbol>().is_none());
+        assert!(v8::Local::<v8::Symbol>::try_from(val).is_err());
         Ok(())
     });
 }

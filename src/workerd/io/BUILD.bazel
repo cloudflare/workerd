@@ -648,9 +648,20 @@ kj_test(
 )
 
 wd_test(
+    src = "caught-exception-reset-test.wd-test",
+    data = ["caught-exception-reset-test.js"],
+)
+
+wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],
+)
+
+wd_test(
+    src = "jitless-test.wd-test",
+    args = ["--experimental"],
+    data = ["jitless-test.js"],
 )
 
 kj_test(
@@ -745,6 +756,7 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

@@ -383,7 +383,7 @@ TempDir newSharedDirectory() {
 
 // The server as the tests drive it, over the Rust server (server/in_process.rs): the worker
 // factory is built here, on what the test supplies, and handed to it.
-class Server {
+class Server: public kj::PtrTarget {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
@@ -420,7 +420,12 @@ class Server {
       config::Config::Reader config,
       kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     auto& server = start(v8System, config);
-    auto drain = drainWhen.then([&server]() { server.drain(); }).eagerlyEvaluate(nullptr);
+    // `get()` returns the server started above: `start()` isn't called again while `drain` is
+    // pending, and TestServer drops `drain` before `close()`.
+    auto drain = drainWhen
+                     .then([weakThis = addWeakToThis()]() {
+      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test server destroyed before drain").get().drain();
+    }).eagerlyEvaluate(nullptr);
     return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
         .attach(kj::mv(drain), reports(server));
   }
@@ -571,7 +576,7 @@ class TestServer final: private kj::EntropySource {
   // don't stop the server, so call this before `start()` or `expectErrors()`, which check that
   // every declared warning was actually reported.
   void expectWarnings(kj::StringPtr expected) {
-    expectedWarnings = expected;
+    expectedWarnings = kj::mv(expected);
   }
 
   // Start the server. Call before connect().
@@ -913,9 +918,12 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
   }
 }
 
-KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
-  TestServer test(singleWorker(R"((
+// `compatibilityFlags` is a config list literal.
+void testClientDisconnectCancelsResponseBody(kj::StringPtr compatibilityFlags) {
+  TestServer test(singleWorker(kj::str(R"((
     compatibilityDate = "2024-10-01",
+    compatibilityFlags = )"_kj,
+      compatibilityFlags, R"(,
     modules = [
       ( name = "worker",
         esModule =
@@ -936,8 +944,9 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
           `}
       )
     ]
-  ))"_kj));
+  ))"_kj)));
 
+  test.server.allowExperimental();
   test.start();
 
   {
@@ -955,6 +964,14 @@ KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response 
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/state", "canceled:undefined");
+}
+
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody("[]");
+}
+
+KJ_TEST("Server: client disconnect cancels a TypeScript-implemented ReadableStream response body") {
+  testClientDisconnectCancelsResponseBody(R"(["typescript_implemented_streams"])");
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
@@ -1056,6 +1073,35 @@ KJ_TEST("Server: wrapped bindings work under the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "wrapped: object");
+}
+
+kj::String clusterConfig(kj::StringPtr key) {
+  return kj::str(R"((
+    services = [(
+      name = "hello",
+      worker = (
+        compatibilityDate = "2024-01-01",
+        modules = [(name = "main.js", esModule = "export default {}")]
+      )
+    )],
+    cluster = (bucket = "s3://bucket", address = "127.0.0.1:0", key = ")",
+      key, R"("),
+  ))");
+}
+
+KJ_TEST("Server: cluster mode requires --experimental") {
+  TestServer test(clusterConfig("0123456789abcdef0123456789abcdef"));
+  test.expectErrors(R"(
+    Cluster mode is experimental; it requires --experimental.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: a short cluster key is refused") {
+  TestServer test(clusterConfig("0123456789abcdef"));
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    cluster.key must be at least 32 bytes.
+  )"_blockquote);
 }
 
 KJ_TEST("Server: duplicate module names are reported as config errors (legacy registry)") {
@@ -1855,6 +1901,81 @@ KJ_TEST("Server: connect() to default outbound") {
   subreq.send("goodbye");
 
   conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive designator resolving to a Worker does not crash the process") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      const socket = env.hyperdrive.connect();
+                `      await socket.opened;
+                `      const writer = socket.writable.getWriter();
+                `      await writer.write(new TextEncoder().encode("ping"));
+                `      const { value } = await socket.readable.getReader().read();
+                `      await socket.close();
+                `      return new Response("echoed: " + new TextDecoder().decode(value));
+                `    } catch (err) {
+                `      return new Response("caught: " + err.message);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "db-worker",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "db-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  },
+                `  async connect(socket, env, ctx) {
+                `    await socket.opened;
+                `    const { value } = await socket.readable.getReader().read();
+                `    await socket.writable.getWriter().write(value);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "echoed: ping");
 }
 
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
@@ -8274,6 +8395,97 @@ KJ_TEST("Server: Durable Object facets cannot set alarms") {
   // ... but facets don't. The attempt breaks the facet's output gate, so the error surfaces to the
   // parent in place of the RPC response.
   conn.httpGet200("/facet", "Error: Facets currently cannot set alarms.");
+}
+
+KJ_TEST("Server: Durable Object facets cannot snapshot or restore") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let actor = ctx.exports.MyActorClass.getByName("snapshots");
+                `    return new Response(await actor.callStorage(request.url.endsWith("/facet")));
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async callStorage(inFacet) {
+                `    if (inFacet) {
+                `      let facet = this.ctx.facets.get("child",
+                `          () => ({class: this.ctx.exports.MyActorClass}));
+                `      return facet.callStorage(false);
+                `    }
+                `    let results = [];
+                `    for (let call of [
+                `      () => this.ctx.storage.snapshot(),
+                `      () => this.ctx.storage.onNextSessionRestore("bookmark"),
+                `      () => this.ctx.storage.onNextSessionRestoreBookmark("bookmark"),
+                `    ]) {
+                `      try {
+                `        await call();
+                `        results.push("no error, unexpected");
+                `      } catch (e) {
+                `        results.push(e.message);
+                `      }
+                `    }
+                `    return results.join("\n");
+                `  }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+              enableSql = true,
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // workerd's storage back-end implements neither snapshots nor point-in-time recovery, so the root
+  // object reaches the back-end and gets its errors...
+  conn.httpGet200("/root",
+      "This Durable Object's storage back-end does not implement snapshots.\n"
+      "This Durable Object's storage back-end does not implement point-in-time recovery.\n"
+      "This Durable Object's storage back-end does not implement point-in-time recovery.");
+
+  // ... but a facet is rejected before reaching the back-end, since snapshots and restores apply to
+  // the whole object. onNextSessionRestoreBookmark() predates snapshots and stays available to
+  // facets.
+  auto facetError = [](kj::StringPtr method) {
+    return kj::str("storage.", method,
+        "() is not available in a facet. Snapshots and restores apply to the whole Durable "
+        "Object, so only the root Durable Object can use them.");
+  };
+  conn.httpGet200("/facet",
+      kj::str(facetError("snapshot"), "\n", facetError("onNextSessionRestore"), "\n",
+          "This Durable Object's storage back-end does not implement point-in-time recovery."));
 }
 
 KJ_TEST("Server: Pass service stubs in ctx.props.") {

@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# The bucket for cluster-test: fake-s3.js on an ephemeral port, in memory.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "s3",
+      worker = (
+        modules = [
+          ( name = "fake-s3.js", esModule = embed "fake-s3.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        bindings = [
+          ( name = "BUCKET", durableObjectNamespace = "Bucket" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Bucket", uniqueKey = "fake-s3-bucket" ),
+        ],
+        durableObjectStorage = ( inMemory = void ),
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "s3" ),
+  ],
+);

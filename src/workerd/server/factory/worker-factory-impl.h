@@ -215,8 +215,13 @@ class ActorStorage::Impl final: public kj::Refcounted {
       kj::String uniqueKey,
       ::rust::Box<ActorNamespaceHandle> actors);
 
+  // Declared first: the VFS's hooks and the alarm scheduler call into it.
+  ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
+  // What SQLite opens files through: `vfsDirectory`, or in a cluster a wrapper that fences opens
+  // on the lease and reports WAL writes, which the cluster ignores for the scheduler's database.
+  kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
@@ -239,14 +244,24 @@ class ActorStorage::Impl final: public kj::Refcounted {
 
 class RpcClient::Impl final {
  public:
-  Impl(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> connection)
+  // A connection and its RPC system, shared by the capabilities obtained over it.
+  struct Session: public kj::Refcounted {
+    explicit Session(kj::Own<kj::AsyncIoStream> connection)
+        : connection(kj::mv(connection)),
+          rpcSystem(*this->connection) {}
+    kj::Own<kj::AsyncIoStream> connection;
+    capnp::TwoPartyClient rpcSystem;
+  };
+
+  Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)
       : factory(factory),
-        connection(kj::mv(connection)),
-        rpcSystem(*this->connection) {}
+        session(kj::mv(session)),
+        target(kj::mv(target)) {}
 
   const WorkerFactory& factory;
-  kj::Own<kj::AsyncIoStream> connection;
-  capnp::TwoPartyClient rpcSystem;
+  kj::Own<Session> session;
+  // Where events go: the session's bootstrap, or an actor obtained over it.
+  rpc::WorkerdBootstrap::Client target;
 };
 
 // The `WorkerdBootstrap` a peer sees over capnp: every event it starts goes to `service`.

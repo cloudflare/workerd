@@ -13,6 +13,7 @@ import {
 } from '@workerd/jsg/rtti';
 import { Message } from 'capnp-es';
 import { generateDefinitions } from '../../src/generator';
+import { printDefinitions } from '../../src';
 import { printNodeList } from '../../src/print';
 
 // Initializes a structure group containing `targets` targets to reference.
@@ -173,6 +174,62 @@ declare class Root2 extends Thing19 {
 }
 `
   );
+});
+
+test('generateDefinitions: rejects conflicting explicit declaration names', () => {
+  for (const nativeName of ['rust::other::Shared', 'workerd::api::Shared']) {
+    for (const reverse of [false, true]) {
+      const root = new Message().initRoot(StructureGroups);
+      const structures = root._initGroups(1).get(0)._initStructures(2);
+      const rust = structures.get(reverse ? 1 : 0);
+      rust.fullyQualifiedName = 'rust::fixture::Shared';
+      rust.tsName = 'Shared';
+      rust.tsRoot = true;
+      const other = structures.get(reverse ? 0 : 1);
+      other.fullyQualifiedName = nativeName;
+      other.tsRoot = true;
+      if (nativeName.startsWith('rust::')) other.tsName = 'Shared';
+      other.tsOverride = '{ different: boolean; }';
+      assert.throws(
+        () => generateDefinitions(root),
+        /Conflicting TypeScript name "Shared"/
+      );
+    }
+  }
+});
+
+test('generateDefinitions: a compatibility-selected implementation may reuse a name', () => {
+  for (const rustEnabled of [false, true]) {
+    for (const reverse of [false, true]) {
+      const root = new Message().initRoot(StructureGroups);
+      const structures = root._initGroups(1).get(0)._initStructures(2);
+      const rust = structures.get(reverse ? 1 : 0);
+      rust.fullyQualifiedName = 'rust::fixture::Shared';
+      rust.tsName = 'Shared';
+      rust.tsRoot = rustEnabled;
+      const property = rust._initMembers(1).get(0)._initProperty();
+      property.name = 'rustOnly';
+      property._initType().boolt = true;
+
+      const cpp = structures.get(reverse ? 0 : 1);
+      cpp.fullyQualifiedName = 'workerd::api::Shared';
+      cpp.tsRoot = !rustEnabled;
+      cpp.tsOverride = 'interface Shared { cppOnly: number; }';
+      cpp.tsDefine = 'interface CppHelper { value: number; }';
+
+      const { nodes } = generateDefinitions(root);
+      assert.strictEqual(nodes.length, 1);
+      const { ambient } = printDefinitions(root, {}, '');
+      if (rustEnabled) {
+        assert.match(ambient, /rustOnly: boolean/);
+        assert.doesNotMatch(ambient, /cppOnly|CppHelper/);
+      } else {
+        assert.match(ambient, /cppOnly: number/);
+        assert.match(ambient, /interface CppHelper/);
+        assert.doesNotMatch(ambient, /rustOnly/);
+      }
+    }
+  }
 });
 
 test('generateDefinitions: only generates classes if required', () => {
