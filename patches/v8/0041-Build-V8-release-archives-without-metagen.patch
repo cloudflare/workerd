@@ -21,7 +21,7 @@ headers.
 Assisted-by: Codex:gpt-5.6-sol
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 893a49dc94102b2b13501566a029da88f25781dc..166c685a0a3cd70ca405d68847f75619b120a615 100644
+index 35b658eb7e8129664e6b8430386f781119f5a9d3..790d2fcc82ee19c428f23d699abd6899d27a43ca 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -190,9 +190,13 @@ v8_flag(name = "v8_enable_experimental_tq_to_tsa")
@@ -39,7 +39,7 @@ index 893a49dc94102b2b13501566a029da88f25781dc..166c685a0a3cd70ca405d68847f75619
  )
  
  # Empty selects the default for the target OS. Set to "gcc" or "cl" when
-@@ -4638,7 +4642,7 @@ filegroup(
+@@ -4649,7 +4653,7 @@ filegroup(
      name = "metagen_clang_builtin_headers",
      srcs = glob([
          "third_party/llvm-build/Release+Asserts/lib/clang/*/include/**",

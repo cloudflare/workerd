@@ -12,10 +12,10 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23caa0ebb65 100644
+index d2ff5969960d5a6dbc5a9bec36fa548f8160e5f5..8eaf2582fe897c96457c4ea7de41145240af4ef8 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4568,7 +4568,6 @@ filegroup(
+@@ -4579,7 +4579,6 @@ filegroup(
          # than a blanket third_party/**, which would also stage the
          # large gclient trees.
          "third_party/utf8-decoder/**/*.h",
@@ -23,7 +23,7 @@ index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23c
          "third_party/rapidhash-v8/**/*.h",
          "third_party/wasm-api/**/*.h",
          "third_party/siphash/**/*.h",
-@@ -4679,7 +4678,7 @@ run_metagen(
+@@ -4690,7 +4689,7 @@ run_metagen(
          ":define_flags",
          ":v8_libbase",
          ":lib_fp16",
@@ -32,7 +32,7 @@ index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23c
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
          "@abseil-cpp//absl/container:flat_hash_set",
-@@ -4919,7 +4918,7 @@ cc_library(
+@@ -4930,7 +4929,7 @@ cc_library(
      }),
      features = ["-use_header_modules"],
      deps = [
@@ -41,7 +41,7 @@ index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23c
          ":torque_base_headers",
          ":v8_libbase",
          "@abseil-cpp//absl/container:node_hash_map",
-@@ -4927,18 +4926,19 @@ cc_library(
+@@ -4938,18 +4937,19 @@ cc_library(
      ],
  )
  
@@ -73,7 +73,7 @@ index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23c
  
  v8_library(
      name = "v8_libshared",
-@@ -4985,15 +4985,15 @@ v8_library(
+@@ -4996,15 +4996,15 @@ v8_library(
      }),
      deps = [
          ":lib_dragonbox",
@@ -91,7 +91,7 @@ index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23c
      ],
  )
  
-@@ -5112,7 +5112,7 @@ v8_binary(
+@@ -5123,7 +5123,7 @@ v8_binary(
          "//conditions:default": [],
      }),
      deps = [

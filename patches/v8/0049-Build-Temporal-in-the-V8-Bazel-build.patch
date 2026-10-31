@@ -14,7 +14,7 @@ ourselves, but this will make it easier to potentially upstream the
 patch to V8.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989aed6dfeb 100644
+index 8540b88c12c124043c9742f41214727c88c30505..0106a2c4fd04183a185ebccdb296beac86258798 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -210,6 +210,20 @@ v8_flag(
@@ -38,15 +38,15 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
  # Default setting for v8_enable_maglev
  selects.config_setting_group(
      name = "maglev_by_default",
-@@ -577,6 +591,7 @@ v8_config(
-         "v8_x64_16byte_stack_alignment": "V8_X64_16BYTE_STACK_ALIGNMENT",
+@@ -596,6 +610,7 @@ v8_config(
          "v8_support_la57": "V8_SUPPORT_LA57",
+         "v8_enable_ecma402_icu4x": "V8_ENABLE_ECMA402_ICU4X",
          "v8_use_perfetto": "V8_USE_PERFETTO",
 +        "v8_enable_temporal_support": "V8_TEMPORAL_SUPPORT",
          "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
-@@ -1336,8 +1351,6 @@ filegroup(
+@@ -1354,8 +1369,6 @@ filegroup(
          "src/objects/js-shadow-realm.tq",
          "src/objects/js-shared-array.tq",
          "src/objects/js-struct.tq",
@@ -55,7 +55,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
          "src/objects/js-weak-refs.tq",
          "src/objects/literal-objects.tq",
          "src/objects/managed.tq",
-@@ -1374,6 +1387,11 @@ filegroup(
+@@ -1392,6 +1405,11 @@ filegroup(
          "test/torque/test-torque.tq",
          "third_party/v8/builtins/array-sort.tq",
      ] + select({
@@ -67,7 +67,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
          ":is_v8_enable_webassembly": [
              "src/builtins/js-to-wasm.tq",
              "src/builtins/wasm.tq",
-@@ -1480,6 +1498,34 @@ filegroup(
+@@ -1498,6 +1516,34 @@ filegroup(
      }),
  )
  
@@ -102,7 +102,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
  filegroup(
      name = "v8_base_without_compiler_files",
      srcs = [
-@@ -1578,8 +1624,6 @@ filegroup(
+@@ -1596,8 +1642,6 @@ filegroup(
          "src/builtins/builtins-string.cc",
          "src/builtins/builtins-struct.cc",
          "src/builtins/builtins-symbol.cc",
@@ -111,7 +111,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
          "src/builtins/builtins-trace.cc",
          "src/builtins/builtins-typed-array.cc",
          "src/builtins/builtins-utils.h",
-@@ -2311,10 +2355,6 @@ filegroup(
+@@ -2326,10 +2370,6 @@ filegroup(
          "src/objects/js-shared-array.h",
          "src/objects/js-struct.cc",
          "src/objects/js-struct.h",
@@ -122,7 +122,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
          "src/objects/js-temporal-helpers.h",
          "src/objects/js-temporal-helpers.cc",
          "src/objects/js-weak-refs.cc",
-@@ -4649,8 +4689,8 @@ filegroup(
+@@ -4660,8 +4700,8 @@ filegroup(
  # includes src/objects/all-objects.h, whose feature-conditional groups
  # are selected by the normal V8 feature defines. Bazel always defines
  # V8_ENABLE_WEBASSEMBLY via :define_flags; V8_INTL_SUPPORT is added only by
@@ -133,7 +133,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
  #
  # The headers themselves reach the action through the
  # `metagen_sandbox_headers` glob below, which already covers src/**.
-@@ -4987,6 +5027,9 @@ v8_library(
+@@ -4998,6 +5038,9 @@ v8_library(
              ":v8_compiler_files",
          ],
          "//conditions:default": [],
@@ -143,7 +143,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
      }),
      copts = ["-Wno-implicit-fallthrough"],
      icu_deps = [
-@@ -5019,6 +5062,9 @@ v8_library(
+@@ -5030,6 +5073,9 @@ v8_library(
      ] + select({
          ":is_v8_use_metagen": [":noicu/run_metagen"],
          "//conditions:default": [],
@@ -153,7 +153,7 @@ index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989
      }),
      deps = [
          ":lib_dragonbox",
-@@ -5036,6 +5082,9 @@ v8_library(
+@@ -5047,6 +5093,9 @@ v8_library(
      ] + select({
          ":is_v8_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
          "//conditions:default": [],

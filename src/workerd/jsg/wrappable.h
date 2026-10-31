@@ -67,8 +67,8 @@ enum class ContextPointerSlot : int {
   MAX_POINTER_SLOT = BOOTSTRAP_STATE,
 };
 
-// V2 (Local<Data>) embedder data slots. Read/written via
-// SetEmbedderDataV2/GetEmbedderDataV2 — distinct API from the slots above.
+// Local<Data> embedder data slots, read and written by getContextDataSlot() and
+// setContextDataSlot() below — a distinct API from the slots above.
 // Indices start past MAX_POINTER_SLOT so the two slot kinds never
 // collide in the underlying embedder-data array.
 // Unlike ContextPointerSlot, these slots hold V8 objects rather than external
@@ -77,11 +77,19 @@ enum class ContextDataSlot : int {
   // One slot per decorated console method, holding that method's original v8 function directly.
   // MUST stay consecutive and ordered to match the kConsoleMethods table in worker.c++.
   CONSOLE_ORIGINAL_DEBUG = static_cast<int>(ContextPointerSlot::MAX_POINTER_SLOT) + 1,
-  CONSOLE_ORIGINAL_ERROR,
-  CONSOLE_ORIGINAL_INFO,
-  CONSOLE_ORIGINAL_LOG,
-  CONSOLE_ORIGINAL_WARN,
+  CONSOLE_ORIGINAL_ERROR = CONSOLE_ORIGINAL_DEBUG + 1,
+  CONSOLE_ORIGINAL_INFO = CONSOLE_ORIGINAL_DEBUG + 2,
+  CONSOLE_ORIGINAL_LOG = CONSOLE_ORIGINAL_DEBUG + 3,
+  CONSOLE_ORIGINAL_WARN = CONSOLE_ORIGINAL_DEBUG + 4,
+  // The highest ContextDataSlot; update it when adding a slot.
+  MAX_DATA_SLOT = CONSOLE_ORIGINAL_WARN,
 };
+
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+// V8 does not grow a context's embedder-data array, so the V8 build must size it
+// (v8_embedder_data_array_size) to hold every slot.
+static_assert(static_cast<int>(ContextDataSlot::MAX_DATA_SLOT) < V8_EMBEDDER_DATA_ARRAY_SIZE);
+#endif
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
 // in kConsoleMethods order from CONSOLE_ORIGINAL_DEBUG.
@@ -92,7 +100,11 @@ constexpr ContextDataSlot consoleOriginalSlot(size_t i) {
 
 inline void setContextDataSlot(
     v8::Local<v8::Context> context, ContextDataSlot slot, v8::Local<v8::Data> value) {
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+  context->SetEmbedderDataV3(static_cast<int>(slot), value);
+#else
   context->SetEmbedderDataV2(static_cast<int>(slot), value);
+#endif
 }
 
 inline v8::Local<v8::Data> getContextDataSlot(
@@ -106,8 +118,13 @@ inline void setAlignedPointerInEmbedderData(
   // type to avoid type confusion attacks.  We just use the slot index for now,
   // since we have a different pointer type for each slot.
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+  context->SetAlignedPointerInEmbedderDataV2(
+      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
+#else
   context->SetAlignedPointerInEmbedderData(
       static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
+#endif
 }
 
 template <typename T>

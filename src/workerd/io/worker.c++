@@ -1891,7 +1891,11 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       if (terminatedRaw >= 0) {
         terminatedOffset = static_cast<uint32_t>(terminatedRaw);
       }
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto backingStore = memory->GetBuffer()->GetBackingStore();
+#else
       auto backingStore = memory->Buffer()->GetBackingStore();
+#endif
       auto wasmMemory =
           kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
               .attach(kj::mv(backingStore));

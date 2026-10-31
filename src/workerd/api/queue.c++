@@ -162,7 +162,11 @@ Serialized serialize(jsg::Lock& js,
       // can detach the ArrayBuffer. Mutations before batch encoding remain visible.
       v8::Local<v8::ArrayBufferView> view = source;
       Serialized result;
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      result.own = view->GetBuffer()->GetBackingStore();
+#else
       result.own = view->Buffer()->GetBackingStore();
+#endif
       result.data = source.asArrayPtr();
       return kj::mv(result);
     } else {
