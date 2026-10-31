@@ -98,6 +98,12 @@ KJ_TEST("CheckedQueue works - MovableNotCopyable") {
     return false;
   }) == 1);
 
+  KJ_ASSERT(queue.forEach([](auto& item) { item.value *= 10; }) == 2);
+  const auto& constQueue = queue;
+  int sum = 0;
+  KJ_ASSERT(constQueue.forEach([&](const auto& item) { sum += item.value; }) == 2);
+  KJ_ASSERT(sum == 60);
+
   queue.emplace(5);
   KJ_ASSERT(queue.size() == 3);
   auto removed = KJ_ASSERT_NONNULL(queue.takeIf([](const auto& item) { return item.value == 5; }));
