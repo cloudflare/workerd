@@ -1,0 +1,650 @@
+{
+  "module": "cf:core/v1",
+  "generator": "src/workerd/wasm-abi/generator/generate.py",
+  "guestExports": {
+    "memory": "memory with a declared maximum",
+    "handle": { "params": ["i32", "i32", "i32"], "results": ["i32"] },
+    "init": { "params": [], "results": [], "optional": true },
+    "cf_callback": {
+      "params": ["i32", "i32"],
+      "results": ["i32"],
+      "optional": "required if any callback token is passed"
+    }
+  },
+  "imports": [
+    {
+      "name": "handle_drop",
+      "binding": "handle_drop",
+      "kind": "defined",
+      "origin": {
+        "conventions": "Releases a handle. Traps on an invalid handle."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "none",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": null,
+      "wasm": { "params": ["i32"], "results": [] }
+    },
+    {
+      "name": "value_undefined",
+      "binding": "value_undefined",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding `undefined`." },
+      "self": false,
+      "params": [],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": [], "results": ["i32"] }
+    },
+    {
+      "name": "value_null",
+      "binding": "value_null",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding `null`." },
+      "self": false,
+      "params": [],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": [], "results": ["i32"] }
+    },
+    {
+      "name": "value_bool",
+      "binding": "value_bool",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding a boolean." },
+      "self": false,
+      "params": [{ "name": "v", "lowered": { "k": "bool" }, "type": "bool" }],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": ["i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_f64",
+      "binding": "value_f64",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding a number." },
+      "self": false,
+      "params": [
+        { "name": "v", "lowered": { "k": "f64", "date": false }, "type": "f64" }
+      ],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": ["f64"], "results": ["i32"] }
+    },
+    {
+      "name": "value_string",
+      "binding": "value_string",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding a string." },
+      "self": false,
+      "params": [
+        {
+          "name": "s",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_bytes",
+      "binding": "value_bytes",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding a Uint8Array copy." },
+      "self": false,
+      "params": [
+        {
+          "name": "b",
+          "lowered": { "k": "bytes", "js": "Uint8Array" },
+          "type": "bytes(Uint8Array)"
+        }
+      ],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_kind",
+      "binding": "value_kind",
+      "kind": "defined",
+      "origin": {
+        "conventions": "Kind code of a handle's value; see the value kinds table."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "i32", "unsigned": true },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "u32",
+      "resultSlot": null,
+      "wasm": { "params": ["i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_to_bool",
+      "binding": "value_to_bool",
+      "kind": "defined",
+      "origin": { "conventions": "ToBoolean of the value." },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "bool" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "bool",
+      "resultSlot": null,
+      "wasm": { "params": ["i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_to_f64",
+      "binding": "value_to_f64",
+      "kind": "defined",
+      "origin": { "conventions": "ToNumber of the value." },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "f64", "date": false },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "f64",
+      "resultSlot": { "size": 8, "align": 8 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_to_string",
+      "binding": "value_to_string",
+      "kind": "defined",
+      "origin": { "conventions": "ToString of the value, as UTF-8." },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "string", "kind": "DOMString" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "string(DOMString)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "value_to_bytes",
+      "binding": "value_to_bytes",
+      "kind": "defined",
+      "origin": { "conventions": "Bytes of an ArrayBuffer or view." },
+      "self": false,
+      "params": [
+        {
+          "name": "h",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "bytes", "js": "Uint8Array" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "bytes(Uint8Array)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "object_new",
+      "binding": "object_new",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding `{}`." },
+      "self": false,
+      "params": [],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": [], "results": ["i32"] }
+    },
+    {
+      "name": "object_set",
+      "binding": "object_set",
+      "kind": "defined",
+      "origin": { "conventions": "obj[key] = value of handle v." },
+      "self": false,
+      "params": [
+        {
+          "name": "obj",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "key",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        },
+        {
+          "name": "v",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "object_set_string",
+      "binding": "object_set_string",
+      "kind": "defined",
+      "origin": { "conventions": "obj[key] = string." },
+      "self": false,
+      "params": [
+        {
+          "name": "obj",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "key",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        },
+        {
+          "name": "v",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      }
+    },
+    {
+      "name": "object_set_f64",
+      "binding": "object_set_f64",
+      "kind": "defined",
+      "origin": { "conventions": "obj[key] = number." },
+      "self": false,
+      "params": [
+        {
+          "name": "obj",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "key",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        },
+        { "name": "v", "lowered": { "k": "f64", "date": false }, "type": "f64" }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32", "i32", "f64"], "results": ["i32"] }
+    },
+    {
+      "name": "object_set_bool",
+      "binding": "object_set_bool",
+      "kind": "defined",
+      "origin": { "conventions": "obj[key] = boolean." },
+      "self": false,
+      "params": [
+        {
+          "name": "obj",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "key",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        },
+        { "name": "v", "lowered": { "k": "bool" }, "type": "bool" }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "env_get",
+      "binding": "env_get",
+      "kind": "defined",
+      "origin": {
+        "conventions": "The binding `name` of the handler's env (a text variable, secret or binding object); handle 0 if there is none."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "env",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": {
+        "k": "maybe",
+        "inner": { "k": "handle", "js": null, "of": "unknown" },
+        "absent": "undefined"
+      },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "maybe<handle(unknown)>",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "array_new",
+      "binding": "array_new",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding `[]`." },
+      "self": false,
+      "params": [],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": [], "results": ["i32"] }
+    },
+    {
+      "name": "array_push",
+      "binding": "array_push",
+      "kind": "defined",
+      "origin": { "conventions": "arr.push(value of handle v)." },
+      "self": false,
+      "params": [
+        {
+          "name": "arr",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "v",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "array_len",
+      "binding": "array_len",
+      "kind": "defined",
+      "origin": { "conventions": "arr.length. Traps if not an array." },
+      "self": false,
+      "params": [
+        {
+          "name": "arr",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "i32", "unsigned": true },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "u32",
+      "resultSlot": null,
+      "wasm": { "params": ["i32"], "results": ["i32"] }
+    },
+    {
+      "name": "array_get",
+      "binding": "array_get",
+      "kind": "defined",
+      "origin": { "conventions": "New handle holding arr[i]." },
+      "self": false,
+      "params": [
+        {
+          "name": "arr",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        },
+        {
+          "name": "i",
+          "lowered": { "k": "i32", "unsigned": true },
+          "type": "u32"
+        }
+      ],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "error_new",
+      "binding": "error_new",
+      "kind": "defined",
+      "origin": { "conventions": "New Error with the given name and message." },
+      "self": false,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        },
+        {
+          "name": "message",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": { "k": "handle", "js": null, "of": "unknown" },
+      "suspending": false,
+      "ret": "direct",
+      "initSafe": false,
+      "resultType": "handle(unknown)",
+      "resultSlot": null,
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "error_name",
+      "binding": "error_name",
+      "kind": "defined",
+      "origin": {
+        "conventions": "The error's name, or empty for a non-Error value."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "err",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "string", "kind": "DOMString" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "string(DOMString)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "error_message",
+      "binding": "error_message",
+      "kind": "defined",
+      "origin": {
+        "conventions": "The error's message, or ToString of a non-Error value."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "err",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "string", "kind": "DOMString" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "string(DOMString)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] }
+    },
+    {
+      "name": "respond",
+      "binding": "respond",
+      "kind": "defined",
+      "origin": {
+        "conventions": "Sends the response now; the handler keeps running."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "response",
+          "lowered": { "k": "handle", "js": null, "of": "unknown" },
+          "type": "handle(unknown)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32"], "results": ["i32"] }
+    },
+    {
+      "name": "console_log",
+      "binding": "console_log",
+      "kind": "defined",
+      "origin": {
+        "conventions": "console.debug/log/warn/error for level 0/1/2/3."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "level",
+          "lowered": { "k": "i32", "unsigned": true },
+          "type": "u32"
+        },
+        {
+          "name": "msg",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "none",
+      "initSafe": false,
+      "resultType": "void",
+      "resultSlot": null,
+      "wasm": { "params": ["i32", "i32", "i32"], "results": [] }
+    },
+    {
+      "name": "panic",
+      "binding": "panic",
+      "kind": "defined",
+      "origin": {
+        "conventions": "Logs the message with console.error and traps."
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "msg",
+          "lowered": { "k": "string", "kind": "DOMString" },
+          "type": "string(DOMString)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "none",
+      "initSafe": true,
+      "resultType": "void",
+      "resultSlot": null,
+      "wasm": { "params": ["i32", "i32"], "results": [] }
+    }
+  ]
+}
