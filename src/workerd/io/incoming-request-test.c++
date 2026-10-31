@@ -9,6 +9,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/async.h>
@@ -529,22 +530,20 @@ KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps 
 }
 
 // Constructs the fixture's actor from `source`, a Durable Object class with an onHibernate
-// handler that appends to `globalThis.events`, then calls `body`.
+// handler that appends to `globalThis.events`, then calls `body`. The fixture is set up with
+// `params`, apart from its feature flags, module and actor, which this sets.
 void withOnHibernateActor(kj::StringPtr source,
     kj::StringPtr actorId,
     kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&)> body,
-    bool flushActorStorage = false) {
+    TestFixture::SetupParams params = {}) {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setWorkerdExperimental(true);
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = source,
-    .actorId = Worker::Actor::Id(kj::str(actorId)),
-    .actorClassName = "default"_kj,
-    .useRealTimers = false,
-    .flushActorStorage = flushActorStorage,
-  });
+  params.featureFlags = flags.asReader();
+  params.mainModuleSource = source;
+  params.actorId = Worker::Actor::Id(kj::str(actorId));
+  params.actorClassName = "default"_kj;
+  TestFixture fixture(kj::mv(params));
   auto& actor = fixture.getActor();
   auto context = fixture.newIoContext();
   actor.setIoContext(kj::addRef(*context));
@@ -708,7 +707,7 @@ KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
     KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
     KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
-  }, /*flushActorStorage=*/true);
+  }, {.flushActorStorage = true});
 }
 
 KJ_TEST("canceling runOnHibernate() cancels pending work but keeps abort watchers armed") {
@@ -766,6 +765,186 @@ KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
     KJ_EXPECT(env.context.isCurrent());
     KJ_EXPECT(env.context.getId().isCurrent());
   });
+}
+
+// Expects `e` to be run()'s failure for lack of a current request: a JavaScript Error, so
+// JavaScript sees its message rather than "internal error", carrying the detail callers check.
+void expectNoCurrentIncomingRequestFailure(const kj::Exception& e) {
+  KJ_EXPECT(e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(jsg::isTunneledException(e.getDescription()), e);
+  KJ_EXPECT(e.getDescription().contains("no request in progress"), e);
+}
+
+// Expects the run() in startRun() to throw for lack of a current request, not return a promise.
+template <typename StartRun>
+void expectThrowsForNoCurrentIncomingRequest(StartRun&& startRun) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { auto promise = startRun(); })) {
+    expectNoCurrentIncomingRequestFailure(e);
+  } else {
+    KJ_FAIL_EXPECT("run() returned a promise without a current IncomingRequest");
+  }
+}
+
+// Expects a run() whose request ended while it waited for a lock to reject.
+void expectRejectsForNoCurrentIncomingRequest(kj::WaitScope& waitScope, kj::Promise<void> run) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { run.wait(waitScope); })) {
+    expectNoCurrentIncomingRequestFailure(e);
+  } else {
+    KJ_FAIL_EXPECT("run() succeeded without a current IncomingRequest");
+  }
+}
+
+KJ_TEST("run() fails without running its callback when there is no current request") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+  auto context = fixture.newIoContext();
+
+  bool ran = false;
+  expectThrowsForNoCurrentIncomingRequest(
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() in a critical section fails when there is no current request") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  auto criticalSection = inputLock.startCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> runIn = criticalSection->clone();
+  bool ran = false;
+  expectThrowsForNoCurrentIncomingRequest(
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(inputLock); }
+  expectRejectsForNoCurrentIncomingRequest(waitScope, kj::mv(run));
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
+  auto io = kj::setupAsyncIo();
+  // Each fixture initializes the process's autogates, so both enable it.
+  TestFixture fixture({.waitScope = io.waitScope,
+    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope,
+    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .useRealTimers = false});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  // Holding another isolate's lock holds up the run, since a thread takes one at a time.
+  auto asyncLock = other.takeAsyncLock();
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(io.waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(asyncLock); }
+  expectRejectsForNoCurrentIncomingRequest(io.waitScope, kj::mv(run));
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() in a critical section fails with the abort reason of an aborted context") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .actorId = Worker::Actor::Id(kj::str("run-critical-section-abort-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+  context->abort(KJ_EXCEPTION(FAILED, "test abort"));
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  auto criticalSection = inputLock.startCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> runIn = criticalSection->clone();
+  bool ran = false;
+  KJ_EXPECT_THROW_MESSAGE("test abort",
+      auto promise = context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)));
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("runOnHibernate() drops the cross-context actions queued while the actor was idle") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        globalThis.events += "onHibernate;";
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-queued-actions-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    auto executor = context.getCrossContextExecutor();
+    uint ran = 0;
+    KJ_ASSERT(executor.tryExecute([&ran](jsg::Lock&) { ++ran; }));
+    fixture.pollEventLoop();
+
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
+
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;", readEvents(fixture));
+    KJ_EXPECT(ran == 0, ran);
+    KJ_EXPECT(executor.getQueuedActionCountForTest() == 0, executor.getQueuedActionCountForTest());
+    KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+}
+
+KJ_TEST("runOnHibernate() runs the cross-context actions queued during the handler, but not those "
+        "queued while the actor was idle") {
+  // The handler waits for the test to call resume() from a cross-context action.
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        globalThis.events += "onHibernate;";
+        await new Promise((resolve) => { globalThis.resume = resolve; });
+        globalThis.events += "resumed;";
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-handler-actions-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    auto& waitScope = fixture.getWaitScope();
+    auto executor = context.getCrossContextExecutor();
+
+    // Queued just before the handler, so the context hasn't woken up for it yet.
+    uint idleRan = 0;
+    KJ_ASSERT(executor.tryExecute([&idleRan](jsg::Lock&) { ++idleRan; }));
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
+    KJ_EXPECT(!promise.poll(waitScope));
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;", readEvents(fixture));
+
+    KJ_ASSERT(executor.tryExecute([](jsg::Lock& js) {
+      auto resume = KJ_ASSERT_NONNULL(js.global().get(js, "resume"_kj).tryCast<jsg::JsFunction>());
+      resume.call(js, js.undefined(), js.undefined());
+    }));
+    promise.wait(waitScope);
+
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;resumed;", readEvents(fixture));
+    KJ_EXPECT(idleRan == 0, idleRan);
+    KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
 }
 
 }  // namespace

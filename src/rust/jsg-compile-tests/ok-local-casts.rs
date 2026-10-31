@@ -22,6 +22,11 @@ macro_rules! supertypes {
 }
 
 pub fn all() {
+    supertypes!(Boolean: Value);
+    supertypes!(Number: Value);
+    supertypes!(Integer: Number, Value);
+    supertypes!(Int32: Integer, Number, Value);
+    supertypes!(Uint32: Integer, Number, Value);
     supertypes!(Name: Value);
     supertypes!(String: Name, Value);
     supertypes!(Symbol: Name, Value);
@@ -30,6 +35,7 @@ pub fn all() {
     supertypes!(Date: Object, Value);
     supertypes!(Function: Object, Value);
     supertypes!(Array: Object, Value);
+    supertypes!(Promise: Object, Value);
     supertypes!(ArrayBuffer: Object, Value);
     supertypes!(ArrayBufferView: Object, Value);
     supertypes!(TypedArray: ArrayBufferView, Object, Value);

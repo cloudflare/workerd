@@ -134,8 +134,8 @@ impl Queue {
     }
 
     #[jsg_method]
-    fn len(&self) -> jsg::Number {
-        jsg::Number::from(u32::try_from(self.tasks.borrow().len()).unwrap())
+    fn len(&self) -> u32 {
+        u32::try_from(self.tasks.borrow().len()).unwrap()
     }
 }
 
@@ -143,9 +143,9 @@ impl Queue {
 /// `Local` in the test's handle scope keeps a wrapper alive; the tests' scripts likewise end in
 /// `undefined` where their completion value would be one.
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let task = jsg::resource::function_template_of::<Task>(lock);
+    let task = jsg::resource::function_template_of::<Task>(lock).unwrap();
     ctx.set_global(lock, "Task", task);
-    let queue = jsg::resource::function_template_of::<Queue>(lock);
+    let queue = jsg::resource::function_template_of::<Queue>(lock).unwrap();
     ctx.set_global(lock, "Queue", queue);
     ctx.eval_raw(
         lock,
@@ -177,6 +177,27 @@ fn this_is_the_resource_the_method_was_called_on() {
         );
         Ok(())
     });
+}
+
+#[test]
+fn function_lengths_exclude_this_and_lock() {
+    for (enabled, expected) in [(false, "0,0,0,0"), (true, "0,1,0,1")] {
+        crate::Harness::with_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        })
+        .run_in_context(|lock, ctx| {
+            install(lock, ctx);
+            let lengths = ctx
+                .eval::<String>(
+                    lock,
+                    "[task.itself.length, task.isSame.length, task.nameValue.length, \
+                     task.schedule.length].join()",
+                )
+                .unwrap();
+            assert_eq!(lengths, expected);
+            Ok(())
+        });
+    }
 }
 
 /// Accessors take `this` too, on the prototype, as own properties and as inspect properties.

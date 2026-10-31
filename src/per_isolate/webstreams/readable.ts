@@ -56,7 +56,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  JSONParse,
   MathMax,
   MathMin,
   Number,
@@ -65,7 +64,6 @@ const {
   ObjectDefineProperty,
   ObjectDefineProperties,
   ObjectFreeze,
-  ObjectGetOwnPropertyDescriptor,
   ObjectSetPrototypeOf,
   PromiseResolve,
   PromiseReject,
@@ -79,8 +77,6 @@ const {
   SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
-  TextDecoder,
-  TextDecoderDecode,
   TypeError,
   TypedArrayCtorByName,
   TypedArrayPrototypeGetBuffer,
@@ -269,14 +265,14 @@ const errorTeeBranchFromCursor: ErrorStreamCallback = (e, owner) => {
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
-// C++-recognition brand (JsReadableStream::tryUnwrapTs): an own,
-// non-enumerable marker stamped on every instance by the constructor, so
-// the C++ bridge can recognize TypeScript streams via an own-property
-// probe, without executing JavaScript. That constraint is load-bearing:
+// C++-recognition brand (JsReadableStream::tryUnwrapTs): a V8-private
+// marker stamped on every instance by the constructor, so the C++ bridge
+// can recognize TypeScript streams without executing JavaScript.
+// That constraint is load-bearing:
 // unwrap runs during RPC deserialization, inside V8's no-JS-execution
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
-const kReadableStreamBrand: symbol = utils.getApiSymbol('kReadableStreamBrand');
+const kReadableStreamBrand = 'kReadableStreamBrand';
 
 // The Node.js stream-interop hooks, keyed by the well-known symbols Node's
 // own web streams carry. node:stream's finished()/eos() observes a web
@@ -393,16 +389,16 @@ let controllerError: (
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
-// on native-backed streams as kExtractNativeSource. Assigned in
+// in native-backed streams' kExtractNativeSource private slots. Assigned in
 // ReadableStream's static block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 
-// The non-standard expectedLength pass-through for the DrainingReader
-// (and the C++ bridge). Chained like the other controller helpers:
-// default → the value installed by the TransformStream expectedLength
-// extension (undefined otherwise); queued byte → cached construction
-// value; native → cached construction value (joined in ReadableStream's
-// static block).
+// The non-standard expectedLength pass-through behind
+// getReadableStreamExpectedLength. Chained like the other controller
+// helpers, each reporting the value its underlying source declared,
+// cached at construction: default and queued byte (a TransformStream's
+// readable declares its transformer's), and native (joined in
+// ReadableStream's static block).
 let getControllerExpectedLength: (
   controller: AnyReadableController
 ) => bigint | undefined;
@@ -413,10 +409,6 @@ let byteControllerEnqueueBatch: (
 let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
   hook: (() => void) | undefined
-) => void;
-let setDefaultControllerExpectedLength: <R>(
-  controller: ReadableStreamDefaultController<R>,
-  length: bigint | undefined
 ) => void;
 let defaultControllerCanCloseOrEnqueue: <R>(
   controller: ReadableStreamDefaultController<R>
@@ -1696,12 +1688,11 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #core: QueuedControllerCore<R, R>;
-  // The non-standard expectedLength pass-through (undefined = unknown).
-  // Default controllers never read it from an underlying source — it is
-  // set ONLY through the internal setter, by the TransformStream
-  // constructor's workerd `expectedLength` extension, so the C++ bridge
-  // can derive Content-Length for bodies built from such transforms.
-  #expectedLength: bigint | undefined = undefined;
+  // The non-standard expectedLength the source declared (undefined =
+  // unknown): the TOTAL bytes the stream will deliver, from which the C++
+  // bridge derives a body's Content-Length. Chunks need not be bytes, so
+  // the controller does not enforce it; body consumption does.
+  #expectedLength: bigint | undefined;
 
   static {
     assertIsReadableStreamDefaultController = function <R>(
@@ -1729,17 +1720,10 @@ class ReadableStreamDefaultController<
       queuedCoreOf(controller)?.callPullIfNeeded();
     };
 
-    // Default controllers never read expectedLength from an underlying
-    // source (silently ignored if declared); it is populated only via the
-    // internal setter (the TransformStream `expectedLength` extension).
     // The byte and native arms of this chain report their own cached
     // values.
     getControllerExpectedLength = (controller) =>
       (controller as ReadableStreamDefaultController).#expectedLength;
-
-    setDefaultControllerExpectedLength = (controller, length) => {
-      controller.#expectedLength = length;
-    };
 
     defaultControllerCanCloseOrEnqueue = (controller) =>
       controller.#core.canCloseOrEnqueue();
@@ -1787,7 +1771,13 @@ class ReadableStreamDefaultController<
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
+    const {
+      cancel: cancelFn,
+      expectedLength,
+      pull: pullFn,
+      start: startFn,
+    } = sourceDict;
+    this.#expectedLength = expectedLength;
     // Strategy already extracted by caller (WebIDL conversion order).
     const core = new QueuedControllerCore<R, R>(
       stream,
@@ -2136,10 +2126,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       throw new TypeError('autoAllocateChunkSize cannot be zero');
     }
     this.#autoAllocateChunkSize = autoAllocateChunkSize;
-    // Non-standard extension, used by byte streams only: the TOTAL bytes
-    // this source promises to produce. This controller enforces the
-    // contract at enqueue/respond (overflow) and close() (underflow).
-    // Exposed to the C++ bridge via the DrainingReader.
+    // Non-standard extension: the TOTAL bytes this source promises to
+    // produce, from which the C++ bridge derives a body's Content-Length.
+    // This controller enforces the contract at enqueue/respond (overflow)
+    // and close() (underflow).
     this.#expectedLength = expectedLength;
 
     // Strategy already extracted by caller (WebIDL conversion order).
@@ -2712,20 +2702,14 @@ class ReadableStreamDrainingReader<R> {
     }
   }
 
-  // The non-standard expectedLength pass-through for the C++ bridge: the
-  // TOTAL bytes the underlying source declared it will produce
-  // (undefined = unknown → chunked encoding). A construction-time value,
-  // cached on the controller; backend-blind via the chained helper
-  // (byte/native report their cached value; a default controller the
-  // value the TransformStream expectedLength extension installed, if
-  // any). Returns undefined after release.
+  // The non-standard expectedLength: the bytes the stream still has to
+  // deliver, if known (undefined = unknown), as the C++ bridge sees it
+  // (getReadableStreamExpectedLength). Returns undefined after release.
   get expectedLength(): bigint | undefined {
     assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
-    const controller = getReadableStreamController(stream);
-    if (controller === undefined) return undefined;
-    return getControllerExpectedLength(controller);
+    return getReadableStreamExpectedLength(stream);
   }
 
   cancel(reason?: unknown): Promise<void> {
@@ -2827,6 +2811,52 @@ function convertAndCheckPipe<R>(
     throw new TypeError('Cannot pipe to a locked writable stream');
   }
   return converted;
+}
+
+// Finishes a native+native pipe once the sink's pipeFrom hook, which ran it
+// at the C++ layer, has settled. Both endpoints were extracted, so neither
+// stream's own algorithms took part in the pipe. As pipeToInternal's
+// shutdown and finalize would, the destination is closed (the pipe
+// succeeded) or aborted with the pipe's error, through the writer
+// extraction locked it with; then both endpoints are unlocked. The
+// extracted sink's hooks no longer reach the C++ sink, which the pipe has
+// already ended or aborted. The source has been closed since its
+// extraction (see HANDED-OFF STREAMS in webstreams/AGENTS.md) and stays
+// closed, whatever the outcome.
+function finishNativePipe<R>(
+  piped: Promise<void>,
+  reader: object,
+  destination: WritableStreamType<R>,
+  writer: WritableStreamDefaultWriterType<R>
+): Promise<void> {
+  const finalize = (): void => {
+    writableInternals.writerRelease(writer);
+    readableStreamReaderGenericRelease(reader);
+  };
+  return PromisePrototypeThen(
+    piped,
+    () =>
+      PromisePrototypeThen(
+        writableInternals.writerCloseWithErrorPropagation(writer),
+        finalize,
+        (error: unknown) => {
+          finalize();
+          throw error;
+        }
+      ),
+    (error: unknown) =>
+      PromisePrototypeThen(
+        writableInternals.writableStreamAbort(destination, error),
+        () => {
+          finalize();
+          throw error;
+        },
+        (abortError: unknown) => {
+          finalize();
+          throw abortError;
+        }
+      )
+  ) as Promise<void>;
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
@@ -3564,8 +3594,10 @@ function forkQueuedCursors<R>(
 // Marks a stream whose data has moved to another stream (tee, detach,
 // extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md). It is
 // disturbed, as the legacy C++ streams leave it, so a body that was teed
-// reports bodyUsed and cannot become another body. It stays locked for good,
-// by an internal reader that is never exposed and so never released.
+// reports bodyUsed and cannot become another body. It is locked by an
+// internal reader that is never exposed: for good, except after a
+// native+native pipe, which releases it once the pipe settles
+// (finishNativePipe), as a pipe releases its reader.
 function markHandedOff<R>(stream: ReadableStream<R>): void {
   setReadableStreamDisturbed(stream);
   acquireReadableStreamDefaultReader(stream);
@@ -3591,6 +3623,10 @@ class ReadableStream<R> {
   // teed again is closed at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
+  // Whether this stream is a tee branch or detached copy (makeShell) of a
+  // stream that had been read from, or was itself such a copy, before the
+  // fork (see getReadableStreamExpectedLength).
+  #forkedAfterRead: boolean = false;
   #state: ReadableStreamState = 'readable';
   #storedError?: unknown;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
@@ -3660,9 +3696,23 @@ class ReadableStream<R> {
       return promise;
     };
 
+    // The total the stream still has to deliver, if known: the C++ bridge's
+    // length query (a body's Content-Length). A queued source's declaration
+    // is its stream's total, and the controller, shared by every tee branch,
+    // does not count what a stream has already passed. So a queued stream
+    // reports it only while nothing has been read from it, nor, for a tee
+    // branch or detached copy, before the fork. A native stream's forks are
+    // fresh streams over sources that count what is left, and a disturbed
+    // native stream cannot be pumped (extraction rejects it).
     getReadableStreamExpectedLength = <R>(stream: ReadableStream<R>) => {
       const controller = stream.#controller;
       if (controller === undefined) return undefined;
+      if (
+        !isNativeController(controller) &&
+        (stream.#disturbed || stream.#forkedAfterRead)
+      ) {
+        return undefined;
+      }
       return getControllerExpectedLength(controller);
     };
 
@@ -3792,8 +3842,8 @@ class ReadableStream<R> {
 
         // PIPE DISPATCH: if both source and dest are native-backed, take
         // the fast path -- extract both and let the sink's pipeFrom hook
-        // arrange the pipe entirely at the C++ layer. Both markers are
-        // own-property reads (non-destructive); extraction happens only
+        // arrange the pipe entirely at the C++ layer. Private-slot reads
+        // are non-destructive; extraction happens only
         // after both are confirmed. If both are native, pipeFrom MUST
         // exist (invariant -- its absence is a contract violation, not a
         // fallback trigger).
@@ -3815,16 +3865,14 @@ class ReadableStream<R> {
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
-        // The destination is brand-checked above, so a Proxy's
-        // getOwnPropertyDescriptor trap cannot observe the symbol.
-        const sourceExtractor = ObjectGetOwnPropertyDescriptor(
+        const sourceExtractor = utils.getPrivate(
           source,
           kExtractNativeSource
-        )?.value as ((this: ReadableStream<R>) => object) | undefined;
-        const sinkExtractor = ObjectGetOwnPropertyDescriptor(
+        ) as ((this: ReadableStream<R>) => object) | undefined;
+        const sinkExtractor = utils.getPrivate(
           destination,
           kExtractNativeSink
-        )?.value as ((this: object) => object) | undefined;
+        ) as ((this: object) => object) | undefined;
         if (
           sourceExtractor !== undefined &&
           sinkExtractor !== undefined &&
@@ -3859,7 +3907,17 @@ class ReadableStream<R> {
               'Native sink is missing the required pipeFrom hook'
             );
           }
-          return uncurryThis(pipeFrom)(nativeSink, nativeSource, converted);
+          // Extraction locked both endpoints with internal handles.
+          const reader = source.#reader as object;
+          const writer = writableInternals.getWriter(
+            destination
+          ) as WritableStreamDefaultWriterType<R>;
+          return finishNativePipe(
+            uncurryThis(pipeFrom)(nativeSink, nativeSource, converted),
+            reader,
+            destination,
+            writer
+          );
         }
         return readableStreamPipeThroughTo(source, destination, converted);
       } catch (e) {
@@ -3904,8 +3962,10 @@ class ReadableStream<R> {
 
     // A shell carries another stream's state forward: a tee branch, or the
     // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, and shares `controller`, if any; the caller gives it a
-    // consumer when it has data to read.
+    // pending closure, records whether anything was read before the fork,
+    // and shares `controller`, if any; the caller gives it a consumer when
+    // it has data to read. Callers make shells before handing `from` off,
+    // which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -3914,6 +3974,7 @@ class ReadableStream<R> {
       shell.#state = from.#state;
       shell.#storedError = from.#storedError;
       shell.#pendingClosure = from.#pendingClosure;
+      shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
       return shell;
     };
@@ -4238,9 +4299,9 @@ class ReadableStream<R> {
 
     // BACKEND-DISPATCH point #4: JS-to-C++ extraction
     // (prepareReadableStreamForCpp in the design doc). A single shared
-    // function installed as the value of kExtractNativeSource on every
-    // native-backed stream. The TypeWrapper detects the property's
-    // presence (own-property get, no JS code execution) and calls it
+    // function installed in the kExtractNativeSource private slot of every
+    // native-backed stream. The C++ bridge detects the private slot
+    // without executing JS and calls the function
     // to extract the native underlying source; absent means "queued,
     // use DrainingReader". One-shot: subsequent calls throw.
     extractNativeSource = function <R>(this: ReadableStream<R>): object {
@@ -4274,10 +4335,7 @@ class ReadableStream<R> {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
     // shells and native-backed streams included.
-    ObjectDefineProperty(this, kReadableStreamBrand, {
-      __proto__: null,
-      value: true,
-    } as PropertyDescriptor);
+    utils.setPrivate(this, kReadableStreamBrand, true);
 
     // Internal shell creation (makeShell: tee branches, detached copies):
     // skip controller setup entirely — the shell takes over another
@@ -4331,15 +4389,9 @@ class ReadableStream<R> {
       // the stream's R is caller-chosen; same shape as the queued cursor
       // attachments in the controller constructors.
       this.#consumer = conduit as unknown as StreamConsumerType<R>;
-      // BACKEND-DISPATCH point #4: install the JS-to-C++ extraction
-      // marker. Own, non-enumerable, non-writable, non-configurable.
-      // The value is the shared extractor function (this-bound at call
-      // time). Bootstrap phase: a regular symbol; final: private API
-      // symbol (invisible to JS entirely).
-      ObjectDefineProperty(this, kExtractNativeSource, {
-        __proto__: null,
-        value: extractNativeSource,
-      } as PropertyDescriptor);
+      // BACKEND-DISPATCH point #4: the shared, this-bound extractor is
+      // accessible only to C++ and bootstrap code, not symbol reflection.
+      utils.setPrivate(this, kExtractNativeSource, extractNativeSource);
       return;
     }
 
@@ -4574,9 +4626,10 @@ class ReadableStream<R> {
 
 // Body consumption for the C++ bridge (arrayBuffer/bytes/text/json). Two
 // byte bounds apply: the caller's memory limit, capped at 128 MB, and the
-// stream's declared expectedLength. A breach names its cause and cancels
-// the stream with it, as the C++ AllReader does; a declaration the limit
-// cannot hold is refused before a byte is read.
+// stream's declared expectedLength, an exact total that a stream closing
+// short of also breaches. A breach names its cause and cancels the stream
+// with it, as the C++ AllReader does; a declaration the limit cannot hold
+// is refused before a byte is read.
 const kMaximumAllowedLimit = 128n * 1024n * 1024n;
 
 function acquireReadableStreamDrainingReader<R>(
@@ -4591,7 +4644,6 @@ function acquireReadableStreamDrainingReader<R>(
 // is allocated whole up front, so a body that meets it fills exactly one
 // block and is handed over without a further copy.
 const kCollectBlockSize = 1024 * 1024;
-const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
 
 class CollectedBytes {
   #blocks: Uint8Array[] = []; // full
@@ -4680,18 +4732,6 @@ class CollectedBytes {
     }
     return result;
   }
-
-  toText(): string {
-    if (this.#length === 0) return '';
-    const decoder = new TextDecoder();
-    const views = this.#views();
-    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
-    let result = '';
-    for (let i = 0; i < views.length; i++) {
-      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
-    }
-    return result + TextDecoderDecode(decoder);
-  }
 }
 // collectChunks() is async, so its result is resolved through a thenable
 // check; off the Object.prototype chain, a patched Object.prototype.then
@@ -4769,38 +4809,31 @@ async function collectChunks<R>(
       }
       collected.append(buffer, byteOffset, byteLength);
     }
-    if (result.done) return collected;
+    if (result.done) {
+      if (declaredBinds && collected.length < bound) {
+        return failCollect(
+          reader,
+          new RangeError(
+            'stream delivered fewer bytes than its declared expectedLength'
+          )
+        );
+      }
+      return collected;
+    }
   }
 }
 
-async function consumeReadableStreamAsArrayBuffer<R>(
+// The bytes behind every body consumption of the C++ bridge (arrayBuffer(),
+// bytes(), blob(), text(), json()), which builds each result from them
+// itself. They resolve in a null-prototype record: resolving with the
+// ArrayBuffer itself would look up its then, which a patched
+// Object.prototype.then supplies.
+async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<ArrayBuffer> {
-  return (await collectChunks(stream, limit)).toArrayBuffer();
-}
-
-async function consumeReadableStreamAsUint8Array<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<Uint8Array> {
-  return new Uint8Array(
-    await consumeReadableStreamAsArrayBuffer(stream, limit)
-  );
-}
-
-async function consumeReadableStreamAsText<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<string> {
-  return (await collectChunks(stream, limit)).toText();
-}
-
-async function consumeReadableStreamAsJSON<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<unknown> {
-  return JSONParse(await consumeReadableStreamAsText(stream, limit));
+): Promise<{ buffer: ArrayBuffer }> {
+  const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
+  return { __proto__: null, buffer } as { buffer: ArrayBuffer };
 }
 
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
@@ -4912,10 +4945,7 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
-  consumeReadableStreamAsArrayBuffer,
-  consumeReadableStreamAsJSON,
-  consumeReadableStreamAsText,
-  consumeReadableStreamAsUint8Array,
+  consumeReadableStreamAsArrayBufferRecord,
   detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamNativeSource,
@@ -4942,8 +4972,8 @@ module.exports = {
   ReadableStreamDrainingReader,
   // Internal operations consumed by the transform pairs (transform.ts,
   // identity.ts, compression.ts): the TransformStream cancel/flush
-  // coordination (finishPromise guard), the workerd expectedLength
-  // extension, and the interop error hook. Unreachable from user code.
+  // coordination (finishPromise guard) and the interop error hook.
+  // Unreachable from user code.
   internalsForTransform: ObjectFreeze({
     getState: <R>(stream: ReadableStream<R>) =>
       getReadableStreamGetState(stream),
@@ -4966,14 +4996,6 @@ module.exports = {
       byteControllerSetConsumptionHook(
         controller as ReadableByteStreamController,
         hook
-      ),
-    setControllerExpectedLength: <R>(
-      controller: object,
-      length: bigint | undefined
-    ) =>
-      setDefaultControllerExpectedLength(
-        controller as ReadableStreamDefaultController<R>,
-        length
       ),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the

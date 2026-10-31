@@ -5,6 +5,7 @@
 //! Tests for `impl_local_cast!` conversions added for Float/BigInt typed arrays,
 //! and upcasts to Object (Function -> Object, Array -> Object, `TypedArray` -> Object).
 
+use jsg::FromJS;
 use jsg::ToJsTypedArray;
 use jsg::v8;
 
@@ -182,8 +183,7 @@ fn array_into_object() {
         let obj: v8::Local<v8::Object> = arr.into();
         assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "length").unwrap();
-        let len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((len.value() - 3.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 3);
         Ok(())
     });
 }
@@ -201,8 +201,7 @@ fn typed_array_into_object() {
         let obj: v8::Local<v8::Object> = ta.into();
         assert!(obj.has(lock, "byteLength").unwrap());
         let prop = obj.get(lock, "byteLength").unwrap();
-        let byte_len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((byte_len.value() - 3.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 3);
         Ok(())
     });
 }
@@ -242,8 +241,7 @@ fn array_as_object_property_access() {
 
         assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "length").unwrap();
-        let val: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((val.value() - 3.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 3);
         Ok(())
     });
 }
@@ -260,11 +258,9 @@ fn typed_array_as_object_property_access() {
         assert!(obj.has(lock, "byteLength").unwrap());
         assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "byteLength").unwrap();
-        let byte_len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((byte_len.value() - 5.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 5);
         let prop = obj.get(lock, "length").unwrap();
-        let len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((len.value() - 5.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 5);
         Ok(())
     });
 }
@@ -363,8 +359,8 @@ fn function_object_roundtrip() {
         assert_eq!(name, "namedFn");
         // Roundtrip back and verify it's still callable
         let back: v8::Local<v8::Function> = obj.try_into().unwrap();
-        let result = back.call::<jsg::Number>(lock, None, &[])?;
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result = back.call(lock, None, &[])?;
+        assert_eq!(u32::from_js(lock, result)?, 42);
         Ok(())
     });
 }
@@ -381,8 +377,7 @@ fn array_object_roundtrip() {
         let obj: v8::Local<v8::Object> = arr.into();
         // Verify length via Object property access
         let prop = obj.get(lock, "length").unwrap();
-        let len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
-        assert!((len.value() - 3.0).abs() < f64::EPSILON);
+        assert_eq!(<u32 as jsg::FromJS>::from_js(lock, prop)?, 3);
         // Roundtrip back and verify Array-specific methods work
         let back: v8::Local<v8::Array> = obj.try_into().unwrap();
         assert_eq!(back.len(), 3);

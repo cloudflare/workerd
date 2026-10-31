@@ -26,6 +26,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "integration-body-failures", esModule = embed "integration-body-failures.js"),
   (name = "integration-body-memory", esModule = embed "integration-body-memory.js"),
   (name = "integration-locked-disturbed", esModule = embed "integration-locked-disturbed.js"),
+  (name = "expected-length", esModule = embed "expected-length.js"),
   (name = "gc", esModule = embed "gc.js"),
   (name = "then-interceptors", esModule = embed "then-interceptors.js"),
   (name = "draining-reader", esModule = embed "draining-reader.js"),
@@ -34,4 +35,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "transfer", esModule = embed "transfer.js"),
   (name = "pollution", esModule = embed "pollution.js"),
   (name = "unhandled-rejection", esModule = embed "unhandled-rejection.js"),
+  (name = "string-chunks", esModule = embed "string-chunks.js"),
 ];

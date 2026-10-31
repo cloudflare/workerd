@@ -201,6 +201,7 @@ v8::MaybeLocal<v8::Promise> evaluateSyntheticModuleCallback(
         }
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects with what it caught.
         v8::TryCatch catcher(js.v8Isolate);
         // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);

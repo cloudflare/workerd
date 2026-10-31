@@ -1682,10 +1682,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   webCryptoModernAlgorithms @191 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
-  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
-  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
-  # explicitly gated because the draft is still changing and workerd does not implement the full
-  # proposal. The API may change as the draft evolves.
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
+  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3 digests, related key encapsulation helpers,
+  # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
+  # the draft is still changing and workerd does not implement the full proposal. The API may
+  # change as the draft evolves.
 
   wasmEsmIntegrationBuiltins @192 :Bool
       $compatEnableFlag("wasm_esm_integration_builtins");
@@ -1761,4 +1762,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
   # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
   # and module name.
+
+  temporal @200 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-12-01");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
 }

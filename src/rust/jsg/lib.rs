@@ -2,20 +2,23 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod async_context;
 mod buffer;
+mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
+pub mod null_or_undefined;
 pub mod nullable;
+mod oneof;
 mod promise;
 pub mod resource;
 mod scope;
@@ -23,12 +26,28 @@ pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use async_context::AsyncContextFrame;
+pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
+pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
+#[doc(hidden)]
+pub use oneof::UnionMember;
+#[doc(hidden)]
+pub use oneof::UnionTypes;
+#[doc(hidden)]
+pub use oneof::UnionVariant;
+#[doc(hidden)]
+pub use oneof::concat_union_names;
+#[doc(hidden)]
+pub use oneof::try_union_from_js;
+#[doc(hidden)]
+pub use oneof::validate_union_names;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -50,21 +69,8 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
-pub use v8::ArrayBuffer;
-pub use v8::ArrayBufferView;
-pub use v8::BackingStore;
-pub use v8::BigInt64Array;
-pub use v8::BigUint64Array;
-pub use v8::Float32Array;
-pub use v8::Float64Array;
 pub use v8::GcVisitor;
-pub use v8::Int8Array;
-pub use v8::Int16Array;
-pub use v8::Int32Array;
 pub use v8::IsolatePtr;
-pub use v8::Uint8Array;
-pub use v8::Uint16Array;
-pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
@@ -126,6 +132,11 @@ mod ffi {
         /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
         /// the isolate is disposed.
         pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
+
+        // Autogates
+        /// Whether the `JSG_INTEGER_ENFORCE_RANGE` autogate is enabled; see
+        /// `wrappable::integer_part_for_range_check`.
+        pub fn integer_enforce_range_autogate_enabled() -> bool;
     }
 }
 
@@ -271,8 +282,8 @@ impl<'s> FromJS<'s> for Error {
     /// with a `TypeError`.
     ///
     /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or execution is terminating, this fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// If it throws, or an exception or a termination is already pending, this fails with an
+    /// error for which [`Error::is_pending`] is true.
     #[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
     fn from_js(
         lock: &mut Lock<'s>,
@@ -306,18 +317,23 @@ impl<'s> FromJS<'s> for Error {
 
         // A DOMException is not a native error, though its prototype chain includes
         // Error.prototype; it is recognized by its brand.
+        let mut is_dom_exception = false;
         let mut dom_name = String::new();
         let mut dom_message = String::new();
         // SAFETY: Lock guarantees the isolate is valid and locked, and `value`
         // belongs to it.
-        let is_dom_exception = unsafe {
+        let checked = unsafe {
             v8::ffi::local_try_unwrap_dom_exception(
                 lock.isolate().as_ffi(),
                 value.into_ffi(),
+                &mut is_dom_exception,
                 &mut dom_name,
                 &mut dom_message,
             )
         }?;
+        if !checked {
+            return Err(Self::pending());
+        }
         if is_dom_exception {
             return Ok(Self::new_dom_exception(&dom_name, dom_message));
         }
@@ -382,11 +398,22 @@ impl Error {
 
     /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
     /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
-    pub(crate) fn pending() -> Self {
+    ///
+    /// Outside this crate, it is for FFI shims that leave an exception pending and return an
+    /// empty result, as C++ code that calls into JavaScript does.
+    #[must_use]
+    pub fn pending() -> Self {
         Self {
             pending: true,
             ..Self::new_internal_error("a JavaScript exception is pending")
         }
+    }
+
+    /// The error for a string longer than [`v8::String::MAX_LENGTH`]: a `RangeError` with the
+    /// message V8 gives such a string, "Invalid string length". It is not pending.
+    #[must_use]
+    pub fn invalid_string_length() -> Self {
+        Self::new_range_error("Invalid string length")
     }
 
     /// Returns whether this error stands for an exception or termination that is pending in V8,
@@ -409,45 +436,34 @@ impl Error {
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
-    /// which does perform that check before falling back to this method.
+    /// which does perform that check before falling back to this method. A message longer
+    /// than V8's string limit is cut to fit; see [`Lock::error`].
     ///
     /// # Errors
     ///
     /// Creating a `DOMException` can fail with an exception pending, such as a stack overflow.
     /// Then this returns an error for which [`Error::is_pending`] is true. It also returns such
-    /// a pending error, and creates nothing, while execution is terminating, because capturing
-    /// the `DOMException`'s stack trace then fails a V8 debug check.
+    /// a pending error, and creates nothing, while an exception or a termination is already
+    /// pending, because defining the `DOMException`'s properties and capturing its stack trace
+    /// take the context (see `exceptionPending()` in `ffi.h`). Creating any other error never
+    /// fails.
     #[expect(
         unsafe_code,
         reason = "creates the V8 exception object through the FFI"
     )]
     pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
-        let isolate = lock.isolate();
         if let Some(name) = self.dom_exception_name() {
-            // SAFETY: isolate is valid and locked (guaranteed by caller).
-            if unsafe { v8::ffi::isolate_is_execution_terminating(isolate.as_ffi()) } {
-                return Err(Self::pending());
-            }
-            // SAFETY: isolate is valid and locked (guaranteed by caller).
+            // Cut at a character boundary, as `Lock::create_error_from_bytes` cuts a message.
+            let message = &self.message[..error_message_for_v8(self.message.as_bytes()).len()];
+            // SAFETY: Lock guarantees the isolate is valid and locked.
             let exception =
-                unsafe { v8::ffi::dom_exception_create(isolate.as_ffi(), name, &self.message) }?;
+                unsafe { v8::ffi::dom_exception_create(lock.isolate().as_ffi(), name, message) }?;
             // SAFETY: the exception was created in the caller's handle scope.
             return unsafe { v8::Local::from_ffi_maybe(exception) }.ok_or_else(Self::pending);
         }
-        let message = self.message.as_bytes();
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: isolate is valid and locked (guaranteed by caller); message
-        // pointer and len describe a valid byte slice.
-        Ok(unsafe {
-            v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
-                isolate.as_ffi(),
-                self.name,
-                message.as_ptr(),
-                len,
-            ))
-        })
+        Ok(lock
+            .create_error_from_bytes(self.name, self.message.as_bytes())
+            .into())
     }
 }
 
@@ -564,15 +580,14 @@ impl Error {
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// `name` is `Error`, the type JavaScript gets (`Lock::throw_internal_error()` -> C++
+    /// `makeInternalError()`).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::TypeError,
+            name: ExceptionType::Error,
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -594,12 +609,12 @@ impl Error {
 ///
 /// # Supported Types
 ///
-/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
-/// implementations include:
+/// `T` is one of the types a value is otherwise coerced to, those that implement
+/// [`Coercible`]:
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
-/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<f64>` - only accepts JavaScript numbers
 /// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
 ///   numbers, which must be in range
 /// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
@@ -661,147 +676,32 @@ impl<T> Deref for NonCoercible<T> {
     }
 }
 
-/// A JavaScript number (an IEEE 754 double-precision float).
+/// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
 ///
-/// `Number` is a plain value, not a V8 handle, so it needs no `Lock` until it converts to
-/// JavaScript. It is the type of a number parameter: it converts from any value with JavaScript's
-/// `ToNumber`, like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number. An `f64`
-/// or `f32` converts to a number too, but only to JavaScript.
+/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
+/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
 ///
-/// # Usage
-///
-/// Use `Number` when you need to accept or return JavaScript numbers in your API:
-///
-/// ```ignore
-/// use jsg::Number;
-///
-/// #[jsg_method]
-/// pub fn add(&self, a: Number, b: Number) -> Number {
-///     Number::new(a.value() + b.value())
-/// }
-/// ```
-///
-/// # Type Mapping
-///
-/// | Rust Type | JavaScript Type |
-/// |-----------|-----------------|
-/// | `jsg::Number` | `number` |
-/// | `f64` | `number`, to JavaScript only |
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct Number {
-    value: f64,
+/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
+/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
+/// a coarse test. The trait is sealed.
+#[diagnostic::on_unimplemented(
+    message = "`NonCoercible<{Self}>` is not supported",
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+)]
+pub trait Coercible: Type + coercible::Sealed {}
+
+mod coercible {
+    pub trait Sealed {}
 }
 
-impl Number {
-    /// The largest integer that can be represented exactly in JavaScript (2^53 - 1).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER)
-    pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0; // 2^53 - 1
-
-    /// The smallest integer that can be represented exactly in JavaScript (-(2^53 - 1)).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER)
-    pub const MIN_SAFE_INTEGER: f64 = -9_007_199_254_740_991.0; // -(2^53 - 1)
-
-    /// Creates a new `Number` from an `f64` value.
-    #[inline]
-    pub fn new(value: f64) -> Self {
-        Self { value }
-    }
-
-    /// Returns the underlying `f64` value.
-    #[inline]
-    pub fn value(&self) -> f64 {
-        self.value
-    }
-
-    /// Consumes the wrapper and returns the inner `f64` value.
-    #[inline]
-    pub fn into_inner(self) -> f64 {
-        self.value
-    }
-
-    /// Determines whether the value is a finite number.
-    ///
-    /// Returns `true` if the value is finite (not `Infinity`, `-Infinity`, or `NaN`).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite)
-    #[inline]
-    pub fn is_finite(&self) -> bool {
-        self.value.is_finite()
-    }
-
-    /// Determines whether the value is an integer.
-    ///
-    /// Returns `true` if the value is finite and has no fractional part.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
-    #[inline]
-    #[expect(
-        clippy::float_cmp,
-        reason = "exact comparison is intended: an integer equals its own truncation"
-    )]
-    pub fn is_integer(&self) -> bool {
-        self.value.is_finite() && self.value.trunc() == self.value
-    }
-
-    /// Determines whether the value is `NaN`.
-    ///
-    /// This is more robust than the global `isNaN()` because it doesn't coerce
-    /// the value to a number first.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN)
-    #[inline]
-    pub fn is_nan(&self) -> bool {
-        self.value.is_nan()
-    }
-
-    /// Determines whether the value is a safe integer.
-    ///
-    /// A safe integer is an integer that:
-    /// - Can be exactly represented as an IEEE-754 double precision number
-    /// - Has an IEEE-754 representation that cannot be the result of rounding any other integer
-    ///
-    /// Safe integers range from -(2^53 - 1) to 2^53 - 1, inclusive.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger)
-    #[inline]
-    pub fn is_safe_integer(&self) -> bool {
-        self.is_integer()
-            && self.value >= Self::MIN_SAFE_INTEGER
-            && self.value <= Self::MAX_SAFE_INTEGER
-    }
+macro_rules! impl_coercible {
+    ($($t:ty),* $(,)?) => {
+        $(impl coercible::Sealed for $t {}
+        impl Coercible for $t {})*
+    };
 }
 
-impl From<f64> for Number {
-    fn from(value: f64) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<Number> for f64 {
-    fn from(num: Number) -> Self {
-        num.value
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl From<u32> for Number {
-    fn from(value: u32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
+impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
 
 #[expect(
     unsafe_code,
@@ -829,6 +729,11 @@ impl<'s> Lock<'s> {
     ///
     /// Mirrors C++ `jsg::Lock::error()`. The returned object can have additional
     /// properties attached before being thrown or returned.
+    ///
+    /// A message longer than [`v8::String::MAX_LENGTH`] bytes is cut to fit, at a character
+    /// boundary, rather than refused. A message that long is a bug or embeds user data, and
+    /// the cut keeps its start. So the length of the message never makes this,
+    /// [`Lock::throw_exception`] or the other error constructors fail.
     pub fn error(&mut self, message: &str) -> v8::Local<'s, v8::Object> {
         self.create_error(ExceptionType::Error, message)
     }
@@ -884,41 +789,32 @@ impl<'s> Lock<'s> {
         exception_type: ExceptionType,
         message: &[u8],
     ) -> v8::Local<'s, v8::Object> {
-        // Strings longer than i32::MAX bytes are truncated to satisfy V8's
-        // int-typed length parameter; V8 rejects strings that large anyway.
-        let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
-        // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice. V8's error constructors always return an
-        // object.
+        let message = error_message_for_v8(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked. V8's error constructors
+        // always return an object.
         let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
-                message.as_ptr(),
-                len,
+                message,
             ))
         };
         debug_assert!(error.is_object());
         error
     }
 
+    /// Throws a JavaScript `Error` with the given message, as [`Lock::error`] creates it.
+    ///
+    /// Throws nothing while execution is terminating; see [`Lock::throw_exception`].
     pub fn throw_error(&mut self, message: &str) {
-        // SAFETY: Lock guarantees the isolate is valid and locked
-        unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
-    }
-
-    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
-    /// after the current callback has returned, so they must be `'static`.
-    #[expect(
-        clippy::unimplemented,
-        reason = "`await_io` is not implemented for Rust resources yet"
-    )]
-    pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
-    where
-        F: Future<Output = I> + 'static,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
-    {
-        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, so create nothing.
+            return;
+        }
+        let error = self.error(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked; `error` is a handle of its
+        // scope.
+        unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
@@ -987,8 +883,8 @@ impl<'s> Lock<'s> {
             return;
         }
         if self.is_execution_terminating() {
-            // `isolate_throw_exception` would throw nothing, and creating the exception while
-            // execution is terminating fails a V8 debug check.
+            // `isolate_throw_exception` would throw nothing, so there is no point in creating
+            // the exception.
             return;
         }
         match err.to_local(self) {
@@ -1018,7 +914,10 @@ impl<'s> Lock<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    /// match lock.try_catch(|lock| {
+    ///     let result = callback.call(lock, None, &[])?;
+    ///     f64::from_js(lock, result)
+    /// })? {
     ///     Ok(result) => { /* ... */ }
     ///     Err(exception) => { /* handle what the callback threw */ }
     /// }
@@ -1109,8 +1008,8 @@ impl<'s> Lock<'s> {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Creating the exception while execution is terminating fails a V8 debug check, and
-            // nothing could be rejected with it.
+            // Nothing could be rejected with the exception, so it is not created. (Creating it
+            // would be safe: creating an error object takes no context.)
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);
@@ -1183,7 +1082,28 @@ pub trait Type: Sized {
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    ///
+    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
+    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
+    /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+
+    /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
+    /// at compile time; see [`UnionTypes`].
+    #[doc(hidden)]
+    const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
+
+    /// Names that identify the type in a `#[jsg_oneof]` union, flattened as
+    /// [`Self::UNION_TYPES`] is: a union's are those of its variants, and a `Nullable<T>`'s are
+    /// `T`'s. A union may not contain a name twice, as C++ JSG's `webidl::FlattenedTypeTraits`
+    /// rejects a type that appears twice in a flattened `kj::OneOf`.
+    ///
+    /// Resources, handles and `SystemTime` have a name, since most of them are in no category, or
+    /// in one with no limit, so [`UnionTypes::validate`] can't tell that one appears twice. The
+    /// other types that `jsg` implements `Type` for need none: each is in a category that a union
+    /// may hold at most one type of.
+    #[doc(hidden)]
+    const UNION_NAMES: &'static [&'static str] = &[];
 }
 
 /// Represents a constant value that can be exposed to JavaScript.
@@ -1255,14 +1175,21 @@ pub enum PropertyPlacement {
     LazyInstance,
 }
 
+/// A member of a resource type. `length` is the function's Web IDL `.length`, the number of
+/// leading required arguments; it is applied when `spec_compliant_property_attributes` is
+/// enabled, as in C++ JSG.
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
+        length: u32,
     },
     Method {
         name: String,
+        /// Registered with the type's `v8::Signature`, so a `#[jsg_method]` callback trusts its
+        /// receiver; don't use one in any other member.
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
     /// panics). `setter_callback = None` makes the property read-only; `Inspect`
@@ -1297,6 +1224,7 @@ pub enum Member {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     StaticConstant {
         name: String,
@@ -1531,6 +1459,27 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
     } else {
         "<non-string panic payload>"
     }
+}
+
+/// The part of an error message that V8 can hold as a string: all of `message` if it is at most
+/// [`v8::String::MAX_LENGTH`] bytes, otherwise a prefix of that many bytes or fewer, cut before
+/// a UTF-8 sequence rather than inside one. See [`Lock::error`].
+pub(crate) fn error_message_for_v8(message: &[u8]) -> &[u8] {
+    utf8_prefix(message, v8::String::MAX_LENGTH as usize)
+}
+
+/// The longest prefix of `bytes` of at most `max_len` bytes that does not end inside a UTF-8
+/// sequence. A continuation byte is one of the form `10xxxxxx`, and a sequence has at most
+/// three of them, so the cut moves back at most three bytes; `bytes` need not be valid UTF-8.
+fn utf8_prefix(bytes: &[u8], max_len: usize) -> &[u8] {
+    if bytes.len() <= max_len {
+        return bytes;
+    }
+    let mut end = max_len;
+    while end > max_len.saturating_sub(3) && bytes[end] & 0b1100_0000 == 0b1000_0000 {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 #[cfg(test)]

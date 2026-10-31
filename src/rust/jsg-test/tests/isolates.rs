@@ -234,6 +234,52 @@ fn resource_wrapped_in_another_isolate_panics() {
     });
 }
 
+/// The other isolate is found also while an exception is pending, so that the resource is
+/// leaked rather than released without that isolate's lock. The exception is pending inside
+/// `try_catch`, which holds it until the closure returns; the panic is caught inside the
+/// closure, so that it doesn't unwind through V8.
+#[test]
+fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let thing = jsg::Rc::new(Thing);
+    let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
+    a.run_in_context(|lock, _ctx| {
+        let value = thing.clone().to_js(lock)?;
+        wrapper = Some(v8::TracedGlobal::new(lock, value));
+        Ok(())
+    });
+
+    b.run_in_context(|lock, ctx| {
+        let thrower = ctx
+            .eval_raw(lock, "() => { throw new Error('pending'); }")
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
+        let thrower = v8::Local::<v8::Function>::try_from(thrower).unwrap();
+        let caught = lock.try_catch(|lock| {
+            let thrown = thrower.call(lock, None, &[]);
+            assert!(thrown.as_ref().is_err_and(jsg::Error::is_pending));
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                drop(thing.clone().to_js(lock));
+            }));
+            let payload = result.expect_err("wrapping a resource of A in B must panic");
+            assert_eq!(
+                panic_message(&*payload),
+                "attempt to wrap a resource in an isolate other than the one it was wrapped in"
+            );
+            thrown.map(drop)
+        })?;
+        assert!(caught.is_err(), "the exception thrown in B is caught");
+        Ok(())
+    });
+
+    a.run_in_context(move |lock, _ctx| {
+        let value = thing.to_js(lock)?;
+        let existing = wrapper.take().expect("set above");
+        assert_eq!(value, existing.as_local(lock));
+        Ok(())
+    });
+}
+
 #[cfg(not(debug_assertions))]
 #[jsg_resource]
 struct TracedGlobalHolder {
@@ -299,7 +345,7 @@ fn local_of_another_isolate_panics_in_debug_builds() {
     let b = crate::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
-        let number = jsg::Number::new(1.0).to_js(lock_a)?;
+        let number = 1_u32.to_js(lock_a)?;
         // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
         // handle of A is rejected before it reaches V8.
         unsafe {
@@ -311,9 +357,7 @@ fn local_of_another_isolate_panics_in_debug_builds() {
                     // A Smi belongs to no isolate.
                     let global = v8::TracedGlobal::new(lock_b, number);
                     let local = global.as_local(lock_b);
-                    assert!(
-                        (jsg::Number::from_js(lock_b, local)?.value() - 1.0).abs() < f64::EPSILON
-                    );
+                    assert_eq!(u32::from_js(lock_b, local)?, 1);
                     Ok(())
                 });
             });
@@ -345,7 +389,7 @@ fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
                         .try_into()
                         .unwrap();
                     assert_isolate_check_panics("calling B's function with A's object", || {
-                        let _ = func.call::<jsg::Number>(lock_b, None, &[object]);
+                        let _ = func.call(lock_b, None, &[object]);
                     });
                     Ok(())
                 });

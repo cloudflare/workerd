@@ -10,6 +10,6 @@ pub fn t<'s>(
     f: v8::Local<'s, v8::Function>,
 ) -> Result<u8, jsg::Error> {
     let first = bytes.as_slice(lock)[0];
-    f.call::<v8::Local<'s, v8::Value>>(lock, None, &[])?;
+    f.call(lock, None, &[])?;
     Ok(first)
 }

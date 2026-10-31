@@ -108,7 +108,7 @@ fn global_dropped_without_the_lock_is_reset_at_the_next_lock() {
     let mut wrapper = None;
     harness.run_in_context(|lock, _ctx| {
         // Created ahead of the measurements below, so that they only see the wrapper's handle.
-        jsg::resource::function_template_of::<GlobalCounted>(lock);
+        jsg::resource::function_template_of::<GlobalCounted>(lock).unwrap();
         baseline = crate::Harness::used_global_handles_size(lock);
         wrapper = Some(counted_wrapper(lock));
         Ok(())

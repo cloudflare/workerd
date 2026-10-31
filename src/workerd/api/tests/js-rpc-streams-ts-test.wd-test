@@ -24,9 +24,6 @@ const unitTests :Workerd.Config = (
     ),
   ],
   v8Flags = [ "--expose-gc" ],
-  autogates = [
-    "workerd-autogate-rpc-externals-hydration",
-  ],
 );
 
 const modules :List(Workerd.Worker.Module) = [

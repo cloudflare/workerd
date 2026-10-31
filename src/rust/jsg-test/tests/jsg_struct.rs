@@ -70,6 +70,11 @@ struct FailingFieldStruct {
     pub bad: Unconvertible,
 }
 
+#[jsg_struct]
+struct FailingNullishFieldStruct {
+    pub bad: jsg::NullOrUndefined<Unconvertible>,
+}
+
 #[test]
 fn objects_can_be_wrapped_and_unwrapped() {
     let harness = crate::Harness::new();
@@ -390,6 +395,31 @@ fn struct_to_js_fails_with_a_fields_error() {
             let err = instance.to_js(lock).unwrap_err();
             assert_eq!(err.name, ExceptionType::TypeError);
             assert_eq!(err.message, "field does not convert");
+            Ok(())
+        });
+    }
+}
+
+#[test]
+fn nullish_struct_fields_use_consuming_fallible_conversion() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, _ctx| {
+            let err = FailingNullishFieldStruct {
+                bad: jsg::NullOrUndefined::Some(Unconvertible),
+            }
+            .to_js(lock)
+            .unwrap_err();
+            assert_eq!(err.name, ExceptionType::TypeError);
+            assert_eq!(err.message, "field does not convert");
+
+            for bad in [jsg::NullOrUndefined::Null, jsg::NullOrUndefined::Undefined] {
+                let is_null = bad.is_null();
+                let value = FailingNullishFieldStruct { bad }.to_js(lock)?;
+                let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+                assert_eq!(obj.has(lock, "bad")?, fast || is_null);
+                assert_eq!(obj.get(lock, "bad")?.is_null(), is_null);
+            }
             Ok(())
         });
     }

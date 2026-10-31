@@ -15,3 +15,9 @@ export {
   erroringBodyRejectsFormData,
   serializedFormDataBodyRoundTrips,
 } from 'multipart-streams';
+
+export {
+  parseBinaryFileFromFormDataBody,
+  parseBinaryFileFromBufferedBody,
+  parseBinaryFileFromStreamedBody,
+} from 'binary-file-parts';

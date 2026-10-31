@@ -28,6 +28,14 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `nullptr`        | `v8::Null`      | `null`          | Via `kj::Maybe<T>`                         |
 | `nullptr`        | `v8::Undefined` | `undefined`     | Via `jsg::Optional<T>`                     |
 
+An integer of up to 32 bits is unwrapped with `ToNumber`, a range check and a truncating cast
+(`value.h`). NaN and the infinities are a `TypeError` for every type except `int`, which reads
+them as 0, and so is a value out of the type's range. Whether a fraction just past a range limit
+(`2 ** 31 - 0.5` as `int`, `-0.5` as an unsigned type) is out of range or is truncated first, as
+Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, depends on the
+`JSG_INTEGER_ENFORCE_RANGE` autogate (`util/autogate.h`). `int64_t` and `uint64_t` take a
+`BigInt` that fits, or any other value converted to a number that is finite and in range.
+
 ## Nullable/Optional Semantics
 
 | Type                      | JS `undefined` → C++ | JS `null` → C++ | C++ empty → JS |
@@ -142,14 +150,13 @@ so they remain injection-only.
 | `JSG_STATIC_CONSTANT(name)`                         | Class     | No               | N/A                     |
 | `JSG_PRIVATE_SYMBOL(name)`                          | Instance  | No               | No                      |
 
-`JSG_PRIVATE_SYMBOL(kName)` marks every instance with an own, read-only, non-enumerable,
-non-configurable property keyed by the `v8::Symbol::ForApi(isolate, "kName")` API-registry
-symbol, with the symbol itself as the value. C++ (and runtime-provided JS handed the symbol,
-e.g. via the per-isolate bootstrap's `utils.getApiSymbol()`) can re-acquire the identical
-symbol by name at any time; user code cannot mint it (the API registry is distinct from
-`Symbol.for()`'s). Useful as a tamper-resistant instance brand/marker recognizable from both
-sides of the boundary; note it is visible to `Object.getOwnPropertySymbols`, so it is a
-brand, not a secret. Not represented in RTTI/generated types.
+`JSG_PRIVATE_SYMBOL(kName)` marks every instance with a V8-private property whose value is
+`true`, using `v8::Private::ForApi(isolate, "kName")`. C++ reads it with
+`JsObject::getPrivate(js, "kName")`; per-isolate bootstrap code uses
+`utils.getPrivate(object, "kName")`. The slot is not inherited, serialized, or visible to
+JavaScript reflection, including `Object.getOwnPropertySymbols` and `Reflect.ownKeys`.
+An ordinary JavaScript/API symbol with the same label cannot address it. Not represented
+in RTTI/generated types. Keep the native private-property utilities inaccessible to user code.
 
 ### Type Relationships
 

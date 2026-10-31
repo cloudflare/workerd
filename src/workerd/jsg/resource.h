@@ -1524,13 +1524,8 @@ struct ResourceTypeBuilder {
 
   template <const char* name>
   inline void registerPrivateSymbol() {
-    // The symbol is acquired from the per-isolate API symbol registry, so C++ code (and
-    // runtime-provided JavaScript handed the symbol via the same registry) can re-acquire
-    // the identical symbol by name at any time. Both the property key and its value are
-    // the symbol itself, supporting own-property marker checks of the form
-    // `getOwnPropertyDescriptor(obj, sym)?.value === sym`.
-    auto symbol = v8::Symbol::ForApi(isolate, v8StrIntern(isolate, name));
-    instance->Set(symbol, symbol,
+    auto key = v8::Private::ForApi(isolate, v8StrIntern(isolate, name));
+    instance->SetPrivate(key, v8::True(isolate),
         static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::ReadOnly |
             v8::PropertyAttribute::DontEnum | v8::PropertyAttribute::DontDelete));
   }
@@ -1819,9 +1814,17 @@ struct NewContextOptions {
   // Used by the per-isolate bootstrap, which needs to capture these constructors
   // (runPerIsolateBootstrap performs the deferred deletion).
   bool deferWeakRefDeletion = false;
+
+  // If false, the Temporal global and Date.prototype.toTemporalInstant are deleted from
+  // the context at creation. V8 decides whether to install them from the process-wide
+  // --harmony-temporal flag, which cannot vary per isolate, so gating Temporal per Worker
+  // means removing what V8 already installed.
+  bool enableTemporal = false;
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
+
+void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
 // JSG_RESOURCE_TYPE block).
@@ -1963,23 +1966,12 @@ class ResourceWrapper {
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
 
-#if V8_MAJOR_VERSION >= 15
-    // Register a placeholder for Temporal's high-resolution "now" source. We don't enable the
-    // Temporal API yet, but V8 uses this callback to obtain the current time for Temporal once it
-    // is enabled. Returning a constant rather than a real high-resolution clock is important for
-    // Spectre mitigation (high-resolution timers are a timing-attack vector). Install a dummy
-    // returning 0 now so we don't forget this requirement when Temporal is turned on; revisit the
-    // returned value (and its resolution) at that point.
-    int64_t (*temporalNowCallback)(
-        v8::Local<v8::Context>) = [](v8::Local<v8::Context>) -> int64_t { return 0; };
-    context->SetTemporalHostSystemUTCEpochNanosecondsCallback(temporalNowCallback);
-    // V8 stores the callback as a Foreign on the context, so it is serialized into snapshots and
-    // its address must be resolvable by index.
-    isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(temporalNowCallback));
-#endif
-
     if (!options.enableWeakRef && !options.deferWeakRefDeletion) {
       deleteWeakRefGlobals(isolate, context);
+    }
+
+    if (!options.enableTemporal) {
+      deleteTemporalGlobals(isolate, context);
     }
 
     // We need to set the highest used index in every context we create to be a nullptr

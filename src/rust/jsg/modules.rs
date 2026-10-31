@@ -20,9 +20,10 @@ pub use crate::v8::ffi::ModuleType;
 ///
 /// `callback` produces the module's exports when JavaScript imports it. It runs in the module
 /// registry's current scope, so it receives a [`Lock`] for that scope and returns a handle
-/// branded with the same scope; an error it returns is thrown to the importer. It must capture
-/// nothing: C++ calls it through a plain function pointer, so there is nowhere to keep captured
-/// state (see [`UnitType`]).
+/// branded with the same scope; an error it returns is thrown to the importer. It sees no
+/// request, even when a request imports the module: the C++ registration runs it with no current
+/// `IoContext`. It must capture nothing: C++ calls it through a plain function pointer, so there
+/// is nowhere to keep captured state (see [`UnitType`]).
 pub fn add_builtin<F>(
     registry: Pin<&mut ffi::ModuleRegistry>,
     specifier: &str,

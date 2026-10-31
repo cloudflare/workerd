@@ -177,7 +177,8 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 
 ### Configuration System
 
-- Uses **Cap'n Proto** for configuration files (`.capnp` format)
+- Uses **Cap'n Proto** for configuration files (`.capnp` format); a `wrangler.json(c)` is also
+  accepted and translated (`src/workerd/server/cli/wrangler.rs`)
 - Main schema: `src/workerd/server/workerd.capnp`
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model
@@ -187,7 +188,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Task                   | Location                                                      | Notes                                                                                                        |
 | ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Add/modify JS API      | `src/workerd/api/`                                            | C++ with JSG macros; see `jsg/jsg.h` for binding system                                                      |
-| Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro                                               |
+| Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro; Rust modules in `src/rust/api/` (`lib.rs`)   |
 | Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                                                               |
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
@@ -301,6 +302,7 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** edit `types/generated-snapshot/` directly; fix the source layer and run `just generate-types`
 - **NEVER** use C++ JSG in Rust JSG's C++ shims (`jsg::Lock::from`, `JSG_TRY`, `jsg::check`, `createTunneledException`, ...); see `src/rust/jsg/README.md` §Safety rules
 - **NEVER** throw a JS exception while execution is terminating; it replaces the termination and lets the script keep running
+- **NEVER** call a V8 API that takes a `v8::Local<v8::Context>` while a termination, or an exception that must keep propagating, is pending; V8 either clears the exception on entry, so the script runs on, or fails a debug check and in a release build runs on with it pending. (Reading an exception that your own `v8::TryCatch` caught is fine; reset it before calling into Rust JSG, whose shims treat a caught exception as pending.) Rust JSG's C++ shims check `exceptionPending()` for this; see `src/rust/jsg/README.md` §Safety rules. Creating strings, numbers, objects, arrays, error objects and templates is fine at any time
 
 ## Backward Compatibility
 

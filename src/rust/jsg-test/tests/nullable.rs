@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! `Nullable<T>` is `T | null`, with Web IDL's `undefined`-to-`null` coercion.
-//! `Option<Nullable<T>>` is `T | null | undefined`, and keeps the three apart.
+//! `NullOrUndefined<T>` is `T | null | undefined`, and keeps the three apart.
 
 use jsg::FromJS;
 use jsg::Nullable;
@@ -247,7 +247,7 @@ fn lenient_converts_to_optional_nullable() {
 
         let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, "1")?;
         let (value, unconvertable) = lenient.to_parts();
-        assert!(value.is_none());
+        assert!(value.is_undefined());
         assert!(unconvertable.is_some());
 
         assert!(jsg::Lenient::<String>::from(None::<Nullable<String>>).is_undefined_strict());

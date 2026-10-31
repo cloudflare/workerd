@@ -11,6 +11,6 @@ pub fn t<'s>(
     f: v8::Local<'s, v8::Function>,
 ) {
     let slice = bytes.as_slice(lock);
-    let _ = f.call::<v8::Local<'s, v8::Value>>(lock, None, &[]); //~ ERROR E0502
+    let _ = f.call(lock, None, &[]); //~ ERROR E0502
     let _ = slice[0];
 }

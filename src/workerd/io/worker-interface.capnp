@@ -553,6 +553,11 @@ enum SerializationTag {
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
   durableObjectSnapshot @18;
   # A Durable Object storage snapshot handle transferred over RPC.
+
+  emailMessage @19;
+  # An EmailMessage (the `cloudflare:email` class): envelope sender and recipient followed by the
+  # raw message body as a readableStream. Implemented upstream of workerd; the tag is allocated here
+  # so that every embedder agrees on the wire value.
 }
 
 enum StreamEncoding {
@@ -784,9 +789,14 @@ interface StreamCanceler $Cxx.allowCancellation {
   # of the stream is canceled or released before reaching EOF, and the origin then cancels its
   # underlying source. Dropping the capability without calling cancel() carries no meaning.
 
-  cancel @0 (reason :JsValue);
+  cancel @0 (reason :JsValue, reasonUsesEnhancedErrorSerialization :Bool);
   # `reason` is the value the receiver's copy of the stream was canceled with, serialized, when the
   # receiver can supply one. An empty `reason` means the stream was released without one.
+  #
+  # `reasonUsesEnhancedErrorSerialization` is set when `reason` was serialized with enhanced error
+  # serialization, which lets the origin read it without the stacks of any errors it contains.
+  # V8's native error encoding restores each error's stack when read, so the origin ignores a
+  # `reason` without this flag, as if the stream had been released without one.
 }
 
 interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
@@ -926,15 +936,30 @@ interface DatagramStream $Cxx.allowCancellation {
   # Signals that no more datagrams will be sent and reports errors from previous send() calls.
 }
 
+interface TraceCompletion {
+  # Has no methods. A trace sender passes one to EventDispatcher.sendTraces() or
+  # tailStreamSession() and learns that the receiver no longer holds the handler's work when the
+  # capability is released: the work has finished, been canceled, or been abandoned.
+  #
+  # The receiver holds it with the handler's request, until that request drains. For a stateless
+  # receiver, that covers its waitUntil() tasks. An actor's waitUntil() tasks belong to the actor
+  # rather than to one request, and a later request takes them over, so for an actor receiver the
+  # capability can be released while the handler's work continues.
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
   getHttpService @0 () -> (http :HttpService) $Cxx.allowCancellation;
   # Gets the HTTP interface to this worker (to trigger FetchEvents).
 
-  sendTraces @1 (traces :List(Trace)) -> (result :SendTracesRun) $Cxx.allowCancellation;
+  sendTraces @1 (traces :List(Trace), completion :TraceCompletion)
+      -> (result :SendTracesRun) $Cxx.allowCancellation;
   # Deliver a trace event to a trace worker. This always completes immediately; the trace handler
   # runs as a "waitUntil" task.
+  #
+  # If `completion` is set, the callee holds it until the trace handler's request has drained, so
+  # the caller can tell when the handler's work is done. See TraceCompletion.
 
   prewarm @2 (url :Text) $Cxx.allowCancellation;
 
@@ -976,8 +1001,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
-  tailStreamSession @10 () -> (topLevel :TailStreamTarget, result :EventOutcome) $Cxx.allowCancellation;
+  tailStreamSession @10 (completion :TraceCompletion)
+      -> (topLevel :TailStreamTarget, result :EventOutcome) $Cxx.allowCancellation;
   # Opens a streaming tail session. The call does not return until the session is complete.
+  #
+  # If `completion` is set, the callee holds it until the session's work, including work it
+  # continues in the background after the session completes, is done. See TraceCompletion.
   #
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return

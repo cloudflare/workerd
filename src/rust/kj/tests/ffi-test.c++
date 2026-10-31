@@ -16,7 +16,7 @@ using namespace kj_rs;
 static kj::StringPtr tlsHost;
 
 kj::Promise<void> startTls(kj::StringPtr hostName) {
-  tlsHost = hostName;
+  tlsHost = kj::mv(hostName);
   return kj::READY_NOW;
 }
 

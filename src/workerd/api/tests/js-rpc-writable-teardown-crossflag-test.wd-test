@@ -35,7 +35,4 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = [
-    "workerd-autogate-rpc-externals-hydration",
-  ],
 );

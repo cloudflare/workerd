@@ -7,7 +7,6 @@
 //! `jsg::Error` recognizes a `DOMException`.
 
 use jsg::ExceptionType;
-use jsg::Number;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
@@ -101,7 +100,7 @@ impl Thrower {
     /// Fails with the DOM type at `index` in `DOM_TYPES`, or for a negative
     /// `index`, the JS type at `-index - 1` in `JS_TYPES`.
     #[jsg_method]
-    pub fn fail(&self, index: i32) -> Result<Number, jsg::Error> {
+    pub fn fail(&self, index: i32) -> Result<f64, jsg::Error> {
         let ty = match usize::try_from(index) {
             Ok(i) => DOM_TYPES[i].0,
             Err(_) => JS_TYPES[usize::try_from(-index - 1).unwrap()].0,
@@ -111,7 +110,7 @@ impl Thrower {
 
     /// Fails with a `DOMException` named `name`.
     #[jsg_method]
-    pub fn fail_named(&self, name: String) -> Result<Number, jsg::Error> {
+    pub fn fail_named(&self, name: String) -> Result<f64, jsg::Error> {
         Err(jsg::Error::new_dom_exception(&name, "failed"))
     }
 
@@ -121,20 +120,20 @@ impl Thrower {
         &self,
         lock: &mut jsg::Lock<'s>,
         value: jsg::v8::Local<'s, jsg::v8::Value>,
-    ) -> Result<Number, jsg::Error> {
+    ) -> Result<f64, jsg::Error> {
         Err(<jsg::Error as jsg::FromJS>::from_js(lock, value)?)
     }
 
     /// Fails with the error a tunneled KJ exception with `description` converts to.
     #[jsg_method]
-    pub fn fail_tunneled(&self, description: String) -> Result<Number, jsg::Error> {
+    pub fn fail_tunneled(&self, description: String) -> Result<f64, jsg::Error> {
         Err(crate::ffi::throw_kj_exception(&description)
             .unwrap_err()
             .into())
     }
 
     #[jsg_property(readonly)]
-    pub fn get_failing(&self) -> Result<Number, jsg::Error> {
+    pub fn get_failing(&self) -> Result<f64, jsg::Error> {
         Err(jsg::Error::new_dom_invalid_state_error("getter"))
     }
 }
@@ -214,14 +213,14 @@ fn thrown_dom_exceptions_convert_back_to_their_type() {
         set_thrower(lock, ctx);
         for (index, (ty, _, _)) in DOM_TYPES.iter().enumerate() {
             let err = ctx
-                .eval::<Number>(lock, &format!("thrower.fail({index})"))
+                .eval::<f64>(lock, &format!("thrower.fail({index})"))
                 .unwrap_err()
                 .unwrap_jsg_err(lock);
             assert_eq!(err.name, *ty);
             assert_eq!(err.message, format!("failed {index}"));
         }
         let err = ctx
-            .eval::<Number>(lock, "thrower.fail(-5)")
+            .eval::<f64>(lock, "thrower.fail(-5)")
             .unwrap_err()
             .unwrap_jsg_err(lock);
         assert_eq!(err.name, ExceptionType::SyntaxError);
@@ -290,7 +289,7 @@ fn constructors_and_properties_throw_dom_exceptions() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_thrower(lock, ctx);
-        let constructor = jsg::resource::function_template_of::<FailingConstructor>(lock);
+        let constructor = jsg::resource::function_template_of::<FailingConstructor>(lock).unwrap();
         ctx.set_global(lock, "FailingConstructor", constructor);
         let thrown: String = ctx
             .eval(lock, &describe_thrown("new FailingConstructor()"))

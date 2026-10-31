@@ -29,6 +29,9 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Catches an exception with a `v8::TryCatch` and then, without resetting it, evaluates `code`,
+  // as C++ that runs JavaScript while its TryCatch holds a caught exception does.
+  EvalResult eval_with_caught_exception(::rust::Str code) const;
   // Has `registerModules` add builtin modules, then calls the callback of the one named
   // `specifier`, as importing it does. Returns its exports, or the exception it threw.
   EvalResult call_builtin_module(
@@ -119,12 +122,32 @@ bool isolates_share_group(Isolate* a, Isolate* b);
 // Throws a kj::Exception with `description`.
 void throw_kj_exception(::rust::Str description);
 
+// Configures the process's autogates to exactly `names`, each without the `workerd-autogate-`
+// prefix, ignoring WORKERD_ALL_AUTOGATES.
+void set_autogates_for_test(::rust::Slice<const ::rust::Str> names);
+// Deinitializes the autogate configuration, so that the gates follow WORKERD_ALL_AUTOGATES again.
+void deinit_autogates_for_test();
+
 // Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
 // only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
 // and runs a full GC again. Neither call's handles outlive the call.
 void hold_across_gc(Isolate* isolate,
     ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
     ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
+
+// Calls `callback` in a new C++ jsg::AsyncContextFrame that stores `value` under the tests'
+// storage key, as AsyncLocalStorage.run() does, then makes the previous frame current again.
+void run_in_async_context(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    size_t data,
+    ::rust::Fn<void(size_t)> callback);
+
+// The value the current async context frame stores under the tests' storage key, or empty in the
+// root frame or a frame that stores none.
+::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate);
+
+// Returns whether C++ jsg::AsyncContextFrame::current() finds no frame, i.e. sees the root frame.
+bool cpp_sees_root_frame(Isolate* isolate);
 
 }  // namespace rust::jsg_test
 

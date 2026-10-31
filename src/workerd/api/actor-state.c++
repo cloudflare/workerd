@@ -912,6 +912,7 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
 
 jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
     jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
+  requireNotFacet("snapshot"_kj);
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_snapshot"_kjc);
   kj::Maybe<kj::String> bookmark;
@@ -927,6 +928,7 @@ jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
 }
 
 kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+  requireNotFacet("onNextSessionRestore"_kj);
   KJ_SWITCH_ONEOF(target) {
     KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
       return cache->onNextSessionRestore(snapshot->getClient());
@@ -936,6 +938,12 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget
     }
   }
   KJ_UNREACHABLE;
+}
+
+void DurableObjectStorage::requireNotFacet(kj::StringPtr method) {
+  JSG_REQUIRE(!IoContext::current().getActorOrThrow().isFacet(), Error, "storage.", method,
+      "() is not available in a facet. Snapshots and restores apply to the whole Durable Object, "
+      "so only the root Durable Object can use them.");
 }
 
 void DurableObjectStorage::ensureReplicas() {

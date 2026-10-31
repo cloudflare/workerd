@@ -357,6 +357,31 @@ export const eventSourceFromTest = {
   },
 };
 
+// String chunks are read as their UTF-8 encoding, beside byte chunks.
+export const eventSourceFromStringChunksTest = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('data: first\n\n'));
+        c.enqueue('data: caf\u00e9\n\n');
+        c.close();
+      },
+    });
+    const { promise, resolve } = Promise.withResolvers();
+    const eventsource = EventSource.from(rs);
+    const events = [];
+    eventsource.onmessage = (event) => {
+      events.push(event.data);
+      if (events.length === 2) {
+        eventsource.close();
+        resolve();
+      }
+    };
+    await promise;
+    deepStrictEqual(events, ['first', 'caf\u00e9']);
+  },
+};
+
 export const eventSourceFromWithBOMTest = {
   async test() {
     const enc = new TextEncoder();

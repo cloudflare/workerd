@@ -43,6 +43,9 @@ const unitTests :Workerd.Config = (
           "set_tostring_tag",
           "enhanced_error_serialization",
         ],
+        bindings = [
+          ( name = "SELF", service = "streams-identity-cpp" ),
+        ],
       )
     ),
   ],

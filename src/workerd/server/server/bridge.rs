@@ -25,6 +25,9 @@ pub use crate::channels::ServerHandle;
 pub use crate::channels::SubrequestChannel;
 pub use crate::channels::WorkerInterfaceList;
 pub use crate::channels::WorkerStub;
+pub use crate::cluster::Committer;
+pub use crate::cluster::ResultTask;
+pub use crate::cluster::result_task_run;
 pub use crate::entry::PendingCommand;
 pub use crate::entry::run_pending_command;
 pub use crate::in_process::InProcessServer;
@@ -164,6 +167,16 @@ pub mod ffi {
         root_key: String,
         /// A facet's number within its root actor's storage; none for a root actor.
         facet_id: KjMaybe<u32>,
+        /// The cluster replicates the actor's commits: each waits for `Committer::commit`.
+        replicated: bool,
+    }
+
+    /// What an alarm does when another instance owns its object: runs again later, a retry
+    /// that counts against no limit, or is done.
+    #[repr(u8)]
+    enum AlarmElsewhere {
+        Retry,
+        Done,
     }
 
     /// What a channel token is for (`IoChannelFactory::ChannelTokenUsage`): restoring a stub over
@@ -423,6 +436,8 @@ pub mod ffi {
         ) -> Result<bool>;
         /// Resets the actor's SQLite database while its connection is open (`deleteAllActors`).
         fn actor_reset_storage(actor: &ActorHandle);
+        /// Closes the actor's database, if it has one; later use of it throws.
+        fn actor_close_storage(actor: &ActorHandle);
         /// The actor's hibernation manager, to hand to the actor that replaces it after eviction.
         fn actor_hibernation_manager(actor: &ActorHandle) -> KjMaybe<KjRc<HibernationManager>>;
         type HibernationManager;
@@ -455,6 +470,17 @@ pub mod ffi {
         ) -> Result<KjOwn<ActorStorage>>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
+        /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
+        /// is `name`, empty for none, unless one is scheduled no later.
+        fn actor_storage_set_alarm(
+            storage: &ActorStorage,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Result<()>;
+        /// What an alarm runs on when another instance owns its object: nothing, and then
+        /// `then`.
+        fn alarm_owned_elsewhere(then: AlarmElsewhere) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -480,6 +506,8 @@ pub mod ffi {
             parent_facet_id: KjMaybe<u32>,
             name: &str,
         ) -> Result<KjMaybe<u32>>;
+        /// Removes the root actor `root_key`'s databases, its facets', and their index.
+        fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
@@ -559,6 +587,15 @@ pub mod ffi {
             factory: &WorkerFactory,
             stream: KjOwn<AsyncIoStream>,
         ) -> KjOwn<RpcClient>;
+        /// An actor on a cluster peer, by `WorkerdDebugPort.getActor` over `session`, a peer
+        /// session from `new_rpc_client`. Pipelined: no round trip until its first event. It
+        /// keeps the session alive.
+        fn rpc_client_debug_actor(
+            session: &RpcClient,
+            service: &str,
+            class_name: &str,
+            actor_id: &str,
+        ) -> KjOwn<RpcClient>;
         /// Sends a custom event (a trace, a JS RPC session, a tail stream, a UDP flow) to the
         /// peer's `WorkerdBootstrap`.
         async fn rpc_client_custom_event(
@@ -567,6 +604,12 @@ pub mod ffi {
             cf_blob_json: KjMaybe<&str>,
         ) -> Result<CustomEventResult>;
         async fn rpc_client_on_disconnect(client: &RpcClient);
+        /// Starts an event on the peer's `WorkerdBootstrap`: HTTP, WebSockets and JS RPC all
+        /// cross as capnp. The client must outlive the returned interface.
+        fn rpc_client_start_request(
+            client: &RpcClient,
+            metadata: KjOwn<RequestMetadata>,
+        ) -> KjOwn<WorkerInterface>;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -820,6 +863,32 @@ pub mod ffi {
             self: &ActorNamespaceHandle,
             id: KjOwn<ActorIdHandle>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Whether the cluster replicates the namespace's actors.
+        fn replicated(self: &ActorNamespaceHandle) -> bool;
+        /// Called as SQLite opens one of the namespace's files: fails once this instance's
+        /// cluster lease has lapsed.
+        fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
+        /// A write SQLite made to one of the namespace's WAL files.
+        fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);
+        /// The database `file`, a root actor's or a facet's, was deleted with the facet's
+        /// descendants.
+        fn database_reset(self: &ActorNamespaceHandle, file: &str);
+        /// Indexes root actor `actor`'s alarm at `at_ms` (0: cleared) in the cluster: done once
+        /// a peer would find it.
+        fn alarm_set(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
+        /// Indexes the alarm at `at_ms` that root actor `actor` came with as it opened here,
+        /// unless one is indexed no later.
+        fn alarm_opened(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.
@@ -840,10 +909,21 @@ pub mod ffi {
         fn abort_facet(self: &ActorHooks, name: &str, reason: &Exception);
         fn delete_facet(self: &ActorHooks, name: &str) -> Result<()>;
         fn clone_facet(self: &ActorHooks, src: &str, dst: &str) -> Result<()>;
+        /// Whether the cluster replicates the actor's storage.
+        fn replicated(self: &ActorHooks) -> bool;
         /// The actor's first request started.
         fn active(self: &ActorHooks);
         /// The actor's last request ended.
         fn inactive(self: &ActorHooks);
+        /// What makes the actor's commits durable, when the cluster replicates it.
+        fn committer(self: &ActorHooks) -> Result<Box<Committer>>;
+
+        type Committer;
+        /// Makes the commits captured so far durable.
+        fn commit(self: &Committer) -> Box<ResultTask>;
+        /// A Rust future C++ awaits with `result_task_run`.
+        type ResultTask;
+        async fn result_task_run(task: Box<ResultTask>) -> Result<()>;
 
         /// The reason of an `actor_abort`. `raise` returns it as the `Err`, which C++ catches as
         /// the equivalent `kj::Exception`; `Ok` when there is none.

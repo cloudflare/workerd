@@ -328,7 +328,7 @@ fn unlocked_drop_is_deferred_until_the_next_lock() {
     let mut baseline = 0;
     harness.run_in_context(|lock, _ctx| {
         // Created ahead of the measurements below, so that they only see the wrapper's handle.
-        jsg::resource::function_template_of::<Counted>(lock);
+        jsg::resource::function_template_of::<Counted>(lock).unwrap();
         baseline = crate::Harness::used_global_handles_size(lock);
 
         let resource = jsg::Rc::new(Counted);

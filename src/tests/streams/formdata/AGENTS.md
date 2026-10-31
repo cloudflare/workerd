@@ -21,3 +21,6 @@ entries parse as File objects.
 | `parseLargeStreamedMultipart` | 100 fields + a 256 KiB file, 8 KiB chunks |
 | `erroringBodyRejectsFormData` | source error rejects formData() |
 | `serializedFormDataBodyRoundTrips` | Response(FormData) body drained as a stream and reparsed (boundary from the generated content-type) |
+| `parseBinaryFileFromFormDataBody` | a File holding every byte value, serialized as a FormData body and reparsed byte-for-byte (no UTF-8 decode) |
+| `parseBinaryFileFromBufferedBody` | the same file part out of a buffered multipart body |
+| `parseBinaryFileFromStreamedBody` | the same file part out of a streamed multipart body, 7-byte chunks |
