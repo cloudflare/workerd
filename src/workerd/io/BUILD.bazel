@@ -744,6 +744,11 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-stream-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
     src = "trace-scope-test.c++",
     deps = [
         ":io",
