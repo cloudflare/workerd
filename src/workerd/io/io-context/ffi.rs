@@ -78,24 +78,36 @@ pub mod bridge {
     }
 }
 
-/// `io_context_add_wait_until()`: false if it left an exception pending.
+/// `io_context_add_wait_until()`, failing with [`jsg::Error::pending`] if it left an exception
+/// pending.
 pub fn add_wait_until<'s>(
     _lock: &mut jsg::Lock<'s>,
     id: u64,
     promise: v8::Local<'s, v8::Promise>,
-) -> jsg::Result<bool> {
+) -> jsg::Result<()> {
     // SAFETY: the handle belongs to the scope of `lock`, which is open throughout the call.
-    Ok(unsafe { bridge::io_context_add_wait_until(id, promise.into_ffi()) }?)
+    let added = unsafe { bridge::io_context_add_wait_until(id, promise.into_ffi()) }?;
+    pending_unless(added)
 }
 
-/// `io_context_abort()`: false if it left an exception pending.
+/// `io_context_abort()`, failing with [`jsg::Error::pending`] if it left an exception pending.
 pub fn abort<'s>(
     _lock: &mut jsg::Lock<'s>,
     id: u64,
     reason: Option<v8::Local<'s, v8::Value>>,
-) -> jsg::Result<bool> {
+) -> jsg::Result<()> {
     // SAFETY: as in `add_wait_until()`.
-    Ok(unsafe { bridge::io_context_abort(id, v8::Local::into_ffi_maybe(reason)) }?)
+    let aborted = unsafe { bridge::io_context_abort(id, v8::Local::into_ffi_maybe(reason)) }?;
+    pending_unless(aborted)
+}
+
+/// `Ok` if a shim that returns false when it leaves an exception pending returned true.
+fn pending_unless(succeeded: bool) -> jsg::Result<()> {
+    if succeeded {
+        Ok(())
+    } else {
+        Err(jsg::Error::pending())
+    }
 }
 
 /// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.

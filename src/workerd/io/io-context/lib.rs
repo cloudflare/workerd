@@ -196,11 +196,7 @@ impl<'s> IoContext<'s> {
         if lock.is_execution_terminating() {
             return Err(jsg::Error::pending());
         }
-        if ffi::add_wait_until(lock, self.id, promise.into())? {
-            Ok(())
-        } else {
-            Err(jsg::Error::pending())
-        }
+        ffi::add_wait_until(lock, self.id, promise.into())
     }
 
     /// Has the request fail open, as `ctx.passThroughOnException()` does through C++
@@ -214,9 +210,9 @@ impl<'s> IoContext<'s> {
         Ok(bridge::io_context_set_fail_open(self.id)?)
     }
 
-    /// Aborts the request, as `ExecutionContext`'s `ctx.abort(reason)` does, then terminates JavaScript execution, and
-    /// returns the error that carries the termination; return it from the method that called
-    /// this (see [`jsg::Lock::terminate_execution_now`]).
+    /// Aborts the request, as `ExecutionContext`'s `ctx.abort(reason)` does, then terminates
+    /// JavaScript execution, and returns the error that carries the termination; return it from
+    /// the method that called this (see [`jsg::Lock::terminate_execution_now`]).
     ///
     /// The `IoContext` is aborted with `reason` as C++ `jsg::Lock::exceptionToKj()` encodes it,
     /// or, without one, with an `Error` whose message is `Worker execution was aborted due to
@@ -248,8 +244,7 @@ impl<'s> IoContext<'s> {
             return jsg::Error::pending();
         }
         match ffi::abort(lock, self.id, reason) {
-            Ok(true) => lock.terminate_execution_now(),
-            Ok(false) => jsg::Error::pending(),
+            Ok(()) => lock.terminate_execution_now(),
             Err(err) => err,
         }
     }
