@@ -67,10 +67,10 @@ inline void configureJsgIsolate(jsg::Lock& js, CompatibilityFlags::Reader flags)
 // Returns whether the new module registry implementation should be used for a
 // worker with the given flags. Python workers always use the original module
 // registry: the new_module_registry flag is ignored for them, whether it was
-// listed explicitly or (once the flag gains an enable date) implied by the
-// worker's compatibility date. Every decision about which registry to use MUST
-// go through this function rather than reading getNewModuleRegistry() directly;
-// otherwise a Python worker could end up split across the two registries.
+// listed explicitly or implied by the worker's compatibility date. Every decision
+// about which registry to use MUST go through this function rather than reading
+// getNewModuleRegistry() directly; otherwise a Python worker could end up split
+// across the two registries.
 //
 // Note that Cloudflare.compatibilityFlags.new_module_registry (as observed by
 // user code) still reflects the configured flag value, not this function's
