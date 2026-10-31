@@ -545,13 +545,14 @@ class EventTarget: public jsg::Object {
   };
 
   struct EventHandlerHashCallbacks {
-    const jsg::HashableV8Ref<v8::Object>& keyForRow(const kj::Own<EventHandler>& row) const;
-    bool matches(const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const;
+    const jsg::HashableV8Ref<v8::Object>& keyForRow(const jsg::TracedOwn<EventHandler>& row) const;
+    bool matches(
+        const jsg::TracedOwn<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const;
     uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const;
   };
 
   struct EventHandlerSet {
-    kj::Table<kj::Own<EventHandler>,
+    kj::Table<jsg::TracedOwn<EventHandler>,
         kj::HashIndex<EventHandlerHashCallbacks>,
         kj::InsertionOrderIndex>
         handlers;

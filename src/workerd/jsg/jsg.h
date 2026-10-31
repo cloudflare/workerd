@@ -13,6 +13,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -32,6 +33,7 @@
 
 #include <span>
 #include <typeinfo>
+#include <utility>
 
 using kj::byte;
 using kj::uint;
@@ -2212,7 +2214,8 @@ consteval bool hasPublicVisitForGc() {
 // single handle is safe, because the destination becomes strong again. Moving a container of
 // visited handles without moving each element (for example `auto list = kj::mv(pending)` on a
 // `kj::Vector`) is not: the elements are still traced, but nothing visits them anymore, so the
-// GC can free their targets while they are still in use.
+// GC can free their targets while they are still in use. Moving a `kj::Own<T>` of an object with
+// visited handles has the same problem; hold such an object in a `TracedOwn<T>` instead.
 //
 // Note that GC visitation technically only collects JavaScript objects, including wrapper
 // objects. C++ objects will not be collected if they contain reference cycles entirely in C++
@@ -2222,6 +2225,9 @@ consteval bool hasPublicVisitForGc() {
 // therefore the C++ objects cannot be destroyed because there's no correct order in which to
 // destroy them. To avoid this situation, make sure your C++ objects have clear ownership, so
 // that the reference graph is a DAG, just like you always would in C++.
+template <typename T>
+class TracedOwn;
+
 class GcVisitor {
  public:
   template <typename T>
@@ -2249,7 +2255,16 @@ class GcVisitor {
   // object whose trace reached it. Null if neither has happened yet, or the isolate is gone; a
   // visit made by a garbage collection always has one.
   v8::Isolate* v8Isolate() const {
-    return parent.getIsolate();
+    return isMakingStrong() ? strengtheningIsolate : parent->getIsolate();
+  }
+
+  // Makes every handle reachable through `value` strong, so `value` stays alive without being
+  // visited. Use it when an object that a traced owner visited leaves that owner; see
+  // `TracedOwn`. Requires the isolate lock.
+  template <typename T>
+  static void makeStrong(v8::Isolate* isolate, T& value) {
+    GcVisitor visitor(isolate);
+    visitor.visit(value);
   }
 
   void visit(kj::Maybe<Data>& maybeData) {
@@ -2301,17 +2316,120 @@ class GcVisitor {
   }
 
  private:
-  Wrappable& parent;
+  // Null when the visitor makes handles strong instead of matching them to a parent; see
+  // `makeStrong()`.
+  Wrappable* parent;
+  bool isMakingStrong() const {
+    return parent == nullptr;
+  }
+  // Whether this visit leaves handles strong instead of tracing them: when making them strong, or
+  // when the parent is held strongly from C++ and has no wrapper for the GC to trace.
+  bool keepsHandlesStrong() const {
+    return isMakingStrong() || (parent->strongRefcount > 0 && !parent->hasWrapper());
+  }
+  v8::Isolate* strengtheningIsolate = nullptr;
   kj::Maybe<cppgc::Visitor&> cppgcVisitor;
 
   explicit GcVisitor(Wrappable& parent, kj::Maybe<cppgc::Visitor&> cppgcVisitor)
-      : parent(parent),
+      : parent(&parent),
         cppgcVisitor(cppgcVisitor) {}
+  explicit GcVisitor(v8::Isolate* isolate): parent(nullptr), strengtheningIsolate(isolate) {}
   KJ_DISALLOW_COPY_AND_MOVE(GcVisitor);
 
   friend class Wrappable;
   friend class Object;
   friend class HeapTracer;
+  template <typename>
+  friend class TracedOwn;
+};
+
+// An owning pointer, like `kj::Own<T>`, for a heap object whose handles its owner visits.
+//
+// Visiting a handle switches it to traced mode, where only the visit keeps its target alive. A
+// `kj::Own<T>` moves the pointer but not the handles behind it, so an object moved out of the
+// owner that visited it, for example popped from a queue, keeps traced handles that nothing
+// visits, and the GC can free their targets while the object still uses them. A `TracedOwn<T>`
+// makes those handles strong again whenever it moves, or `release()` hands the object out, after
+// a visit. Requires the isolate lock to move or release after a visit.
+//
+// The handles are strong again until the next visit: one that stays in a traced container, for
+// example a `RingBuffer` element relocated as the buffer grows, is traced again by the
+// container's next visit.
+//
+// Making handles strong is behind the gc-complete-tracing autogate; with the gate disabled, a
+// `TracedOwn<T>` behaves like a `kj::Own<T>`.
+template <typename T>
+class TracedOwn {
+ public:
+  TracedOwn(decltype(nullptr)) {}
+  TracedOwn(kj::Own<T> inner): inner(kj::mv(inner)) {}
+  TracedOwn(TracedOwn&& other) noexcept
+      : inner(kj::mv(other.inner)),
+        visitedIn(std::exchange(other.visitedIn, nullptr)) {
+    makeStrong();
+  }
+  // Making handles strong fails only on a broken invariant, so neither move throws.
+  TracedOwn& operator=(TracedOwn&& other) noexcept {
+    inner = kj::mv(other.inner);
+    visitedIn = std::exchange(other.visitedIn, nullptr);
+    makeStrong();
+    return *this;
+  }
+  KJ_DISALLOW_COPY(TracedOwn);
+
+  T& operator*() {
+    return *inner;
+  }
+  const T& operator*() const {
+    return *inner;
+  }
+  T* operator->() {
+    return inner.get();
+  }
+  const T* operator->() const {
+    return inner.get();
+  }
+  T* get() {
+    return inner.get();
+  }
+  const T* get() const {
+    return inner.get();
+  }
+  bool operator==(decltype(nullptr)) const {
+    return inner == nullptr;
+  }
+
+  // Makes the object's handles strong now, for an owner that is about to stop visiting it while
+  // still holding it.
+  void makeStrong() {
+    if (visitedIn != nullptr) {
+      if (inner.get() != nullptr &&
+          util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
+        KJ_ASSERT(v8::Locker::IsLocked(visitedIn), "TracedOwn moved without the isolate lock");
+        GcVisitor::makeStrong(visitedIn, *inner);
+      }
+      visitedIn = nullptr;
+    }
+  }
+
+  // Hands out the object with its handles strong, so it can outlive the owner that visited it.
+  kj::Own<T> release() {
+    makeStrong();
+    return kj::mv(inner);
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    if (inner.get() != nullptr) {
+      // A visit that leaves handles strong leaves nothing for a later move to undo.
+      visitedIn = visitor.keepsHandlesStrong() ? nullptr : visitor.v8Isolate();
+      visitor.visit(*inner);
+    }
+  }
+
+ private:
+  kj::Own<T> inner;
+  // The isolate of the last visit, or null if the handles are strong.
+  v8::Isolate* visitedIn = nullptr;
 };
 
 constexpr bool isGcVisitable_(...) {
