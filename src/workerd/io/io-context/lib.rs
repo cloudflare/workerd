@@ -233,7 +233,7 @@ impl<'s> IoContext<'s> {
     /// exception, when it is an internal error and nothing is terminated. Nothing is aborted
     /// or terminated if encoding `reason` runs JavaScript that throws (a getter of its
     /// `overloaded` or `retryable` property, say), whose exception the error then stands for, or
-    /// if there is a `reason` and execution is already terminating.
+    /// if execution is already terminating.
     #[must_use = "return the error, so that the termination reaches the code that started the \
                   JavaScript"]
     pub fn abort(
@@ -242,9 +242,9 @@ impl<'s> IoContext<'s> {
         reason: Option<jsg::v8::Local<'s, jsg::v8::Value>>,
     ) -> jsg::Error {
         // JavaScript can't call `ctx.abort()` while terminating, but Rust can call this after
-        // catching a termination. Encoding a reason would then create objects, which fails a V8
-        // debug check, and the request ends anyway.
-        if reason.is_some() && lock.is_execution_terminating() {
+        // catching a termination. Encoding a reason would then create objects, and terminating
+        // again would enter V8, both of which fail V8 debug checks, and the request ends anyway.
+        if lock.is_execution_terminating() {
             return jsg::Error::pending();
         }
         match ffi::abort(lock, self.id, reason) {

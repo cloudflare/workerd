@@ -113,9 +113,9 @@ mod ffi {
 }
 
 /// In a request, terminates execution, then calls `IoContext::add_wait_until()` and
-/// `IoContext::abort()` with a reason, as Rust can after catching a termination, and fails unless
-/// both fail with a pending error. C++ checks that the request was not aborted, and cancels the
-/// termination.
+/// `IoContext::abort()` with a reason and without one, as Rust can after catching a termination,
+/// and fails unless each fails with a pending error. C++ checks that the request was not aborted,
+/// and cancels the termination.
 unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()> {
     // SAFETY: see the module documentation.
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
@@ -129,12 +129,17 @@ unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()> {
     assert!(termination.is_pending());
 
     let wait_until = context.add_wait_until(lock, promise);
-    let abort = context.abort(lock, Some(reason));
-    if wait_until.as_ref().is_err_and(jsg::Error::is_pending) && abort.is_pending() {
+    let abort_with_reason = context.abort(lock, Some(reason));
+    let abort_without_reason = context.abort(lock, None);
+    if wait_until.as_ref().is_err_and(jsg::Error::is_pending)
+        && abort_with_reason.is_pending()
+        && abort_without_reason.is_pending()
+    {
         Ok(())
     } else {
         Err(std::io::Error::other(format!(
-            "add_wait_until: {wait_until:?}, abort: {abort:?}"
+            "add_wait_until: {wait_until:?}, abort with a reason: {abort_with_reason:?}, abort \
+             without one: {abort_without_reason:?}"
         )))
     }
 }

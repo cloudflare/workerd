@@ -645,7 +645,7 @@ KJ_TEST("the operations reject an IoContext id that is not the current one") {
   fixture.drainAndDestroy(kj::mv(first));
 }
 
-KJ_TEST("add_wait_until() and abort() with a reason do nothing while terminating") {
+KJ_TEST("add_wait_until() and abort(), with or without a reason, do nothing while terminating") {
   TestFixture fixture;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     request_ops_while_terminating(reinterpret_cast<uintptr_t>(env.isolate));
