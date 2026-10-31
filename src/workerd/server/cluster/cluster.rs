@@ -92,14 +92,21 @@ impl Cluster {
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect();
         let (s3, prefix) = S3::new(&setup.url, &options)?;
-        let bucket = Bucket::new(s3, &format!("{prefix}/{FORMAT}"));
+        Ok(Self::over(
+            Bucket::new(s3, &format!("{prefix}/{FORMAT}")),
+            setup,
+        ))
+    }
+
+    /// Over `bucket`, not the one `setup` names.
+    pub(crate) fn over(bucket: Bucket, setup: Setup) -> Rc<Self> {
         let registry = Rc::new(Registry::new(
             bucket.clone(),
             &setup.node,
             &setup.address,
             setup.ttl_ms,
         ));
-        Ok(Rc::new(Self {
+        Rc::new(Self {
             alarms: Index::new(
                 bucket.clone(),
                 &setup.node,
@@ -113,7 +120,7 @@ impl Cluster {
             claims: RefCell::new(HashMap::new()),
             key: setup.key,
             lease: RefCell::new(Lease::default()),
-        }))
+        })
     }
 
     pub fn node(&self) -> &str {

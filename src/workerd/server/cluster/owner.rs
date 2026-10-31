@@ -627,6 +627,10 @@ fn tmp_path(path: &Path) -> PathBuf {
 pub async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
+    // Tests run on one thread, the simulation outside tokio.
+    if cfg!(test) {
+        return f();
+    }
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| Error::Replica(format!("blocking task: {e}")))?
@@ -730,6 +734,10 @@ fn place(layout: &dyn Layout, lanes: Vec<(String, PathBuf)>) -> Result<Vec<(Stri
     }
     Ok(databases)
 }
+
+#[cfg(test)]
+#[path = "owner-test.rs"]
+mod sim;
 
 #[cfg(test)]
 mod tests {
