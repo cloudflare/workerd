@@ -589,7 +589,7 @@ KJ_TEST("encode to full flag list") {
   }
 }
 
-KJ_TEST("incoming Request.signal defaults on at 2026-11-12") {
+KJ_TEST("incoming Request.signal defaults on at 2026-11-17") {
   auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
     capnp::MallocMessageBuilder message;
     auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
@@ -604,10 +604,10 @@ KJ_TEST("incoming Request.signal defaults on at 2026-11-12") {
     return output.get().getEnableRequestSignal();
   };
 
-  KJ_EXPECT(!compileFlags("2026-11-11", {}));
-  KJ_EXPECT(compileFlags("2026-11-12", {}));
-  KJ_EXPECT(compileFlags("2026-11-11", {"enable_request_signal"_kj}));
-  KJ_EXPECT(!compileFlags("2026-11-12", {"disable_request_signal"_kj}));
+  KJ_EXPECT(!compileFlags("2026-11-16", {}));
+  KJ_EXPECT(compileFlags("2026-11-17", {}));
+  KJ_EXPECT(compileFlags("2026-11-16", {"enable_request_signal"_kj}));
+  KJ_EXPECT(!compileFlags("2026-11-17", {"disable_request_signal"_kj}));
 }
 
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
