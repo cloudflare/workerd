@@ -61,15 +61,16 @@ class CppRef final {
 
   // A new strong reference to the same object.
   kj::Own<CppRef> clone() const {
-    return kj::heap<CppRef>(object, ref.addRef());
+    return kj::heap<CppRef>(kj::Badge<CppRef>(), object, ref.addRef());
   }
 
   void visitForGc(::workerd::jsg::GcVisitor& visitor) const {
     visitor.visit(ref);
   }
 
-  // Public for kj::heap.
-  CppRef(void* object, ::workerd::jsg::Ref<::workerd::jsg::Object> ref)
+  // For clone(): only CppRef can make the badge, so no one else can pair an object with a
+  // reference to a different one. Public only so that kj::heap can call it.
+  CppRef(kj::Badge<CppRef>, void* object, ::workerd::jsg::Ref<::workerd::jsg::Object> ref)
       : object(object),
         ref(kj::mv(ref)) {}
 
