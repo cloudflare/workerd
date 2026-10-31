@@ -26,7 +26,6 @@ flowchart LR
 | Worker | `worker:W` |
 | Preview | `worker:W:preview:P` |
 | Namespace | `durable-object-namespace:N` |
-| Authenticated local | `worker:W:development:local` |
 
 Each getter returns a fresh five-minute JWT. Configure one audience per binding;
 `getToken()` takes no arguments. WAG and HTTP signing require their own limits
@@ -39,5 +38,5 @@ existing handles have no promised invalidation deadline.
 
 Use normal service bindings and RPC forwarding. No native signer, per-object
 identity hook, token cache, identity resource, or assignment approval belongs in
-workerd. Authenticated local tooling retains OAuth credentials outside user code
-and checks Worker-development permission on every call.
+workerd. Local tooling reports unsupported issuance; use deployed Previews or
+explicit test mocks.
