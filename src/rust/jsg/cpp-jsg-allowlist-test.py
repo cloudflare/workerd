@@ -13,11 +13,12 @@ Usage: cpp-jsg-allowlist-test.py ALLOWLIST FILE...
 
 The allowlist has one entry per line, `<path> <construct> <count>`, with `#` comments. A line
 `<path> interop` puts the file in the interop tier instead (src/rust/jsg-cpp, the binding between
-Rust JSG and C++ JSG resources): it may use the constructs in INTEROP_CONSTRUCTS without limit,
-and is checked against the allowlist for the rest like any other file. The path
-is the file's path from the workerd repository root. When workerd is an external repository of
-another Bazel workspace, `$(location)` adds a prefix such as `external/<repo>/` to every path, so
-the test removes the prefix that comes before the allowlist's own path.
+Rust JSG and C++ JSG resources, and no other directory): it may use the constructs in
+INTEROP_CONSTRUCTS without limit, and is checked against the allowlist for the rest like any
+other file. The path is the file's path from the workerd repository root. When workerd is an
+external repository of another Bazel workspace, `$(location)` adds a prefix such as
+`external/<repo>/` to every path, so the test removes the prefix that comes before the
+allowlist's own path.
 """
 
 import re
@@ -34,27 +35,35 @@ CONSTRUCTS = {
     "JsExceptionThrown": r"\bJsExceptionThrown\b",
     "createTunneledException": r"\bcreateTunneledException\b",
     "makeInternalError": r"\bmakeInternalError\b",
-    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|V8Ref|JsObject|JsString)\b",
-    "jsg::Ref": r"\bjsg::(?:Ref|Promise|Function|Optional|Sequence|Object)\b",
+    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|JsObject|JsString)\b",
+    "jsg::V8Ref": r"\bjsg::V8Ref\b",
+    "jsg::Ref": r"\bjsg::(?:Ref|Optional|Object)\b",
+    "jsg::Promise": r"\bjsg::(?:Promise|Function|Sequence)\b",
     "JSG_REQUIRE": r"\bJSG_(?:REQUIRE|FAIL_REQUIRE|ASSERT|FAIL_ASSERT|WARN_ONCE)\b",
     "liftKj": r"\bliftKj\b",
-    "jsg::throw": r"\bjsg::throw[A-Z]\w*",
+    "throwInternalError": r"\bjsg::throwInternalError\b",
+    "jsg::throw": r"\bjsg::throw(?!InternalError\b)[A-Z]\w*",
     # The interop crate, which only the interop tier may use.
     "jsg-cpp": r"\bjsg[-_]cpp\b",
 }
 
 # What the interop tier may use: enough to hold, wrap and unwrap C++ JSG resources through the
-# isolate's TypeHandlers and to turn a C++ exception into a pending JavaScript one. Not allowed,
-# even there: JSG_TRY/tryCatch, createTunneledException, makeInternalError, jsg::check, liftKj and
-# JSG_REQUIRE, for which the interop has its own V8-level replacements (callCpp).
+# isolate's TypeHandlers (jsg::Ref, jsg::Optional, jsg::Object, jsg::V8Ref) and to turn a C++
+# exception into a pending JavaScript one (jsg::throwInternalError). Not allowed, even there:
+# JSG_TRY/tryCatch, createTunneledException, makeInternalError, jsg::check, liftKj, JSG_REQUIRE,
+# the other jsg::throw* functions (throwTunneledException included), JS value handles (jsg::Data,
+# jsg::JsValue, ...) and jsg::Promise/jsg::Function/jsg::Sequence.
 INTEROP_CONSTRUCTS = {
     "jsg::Lock",
     "JsExceptionThrown",
-    "jsg::Data",
+    "jsg::V8Ref",
     "jsg::Ref",
-    "jsg::throw",
+    "throwInternalError",
     "jsg-cpp",
 }
+
+# The only directory whose files may be in the interop tier.
+INTEROP_DIR = "src/rust/jsg-cpp/"
 
 ALTERNATIVES = """\
 Use V8 directly instead:
@@ -98,6 +107,11 @@ def read_allowlist(path):
             continue
         fields = line.split()
         if fields[1:] == ["interop"]:
+            if not fields[0].startswith(INTEROP_DIR):
+                sys.exit(
+                    f"{path}:{number}: only files in {INTEROP_DIR} may be in the interop tier,"
+                    f" got: {line}"
+                )
             interop.add(fields[0])
             continue
         if len(fields) != 3 or not fields[2].isdigit() or fields[1] not in CONSTRUCTS:

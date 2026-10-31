@@ -6,8 +6,8 @@
 #
 # Format: <path from the repository root> <construct> <count>, or
 # <path from the repository root> interop for the shims of src/rust/jsg-cpp, which may use the
-# constructs in INTEROP_CONSTRUCTS in cpp-jsg-allowlist-test.py (README.md, rule 3). Don't add a
-# file to the interop tier outside src/rust/jsg-cpp.
+# constructs in INTEROP_CONSTRUCTS in cpp-jsg-allowlist-test.py (README.md, rule 3). The test
+# rejects an `interop` line for a file outside src/rust/jsg-cpp.
 
 src/rust/jsg-cpp/ffi.c++ interop
 src/rust/jsg-cpp/jsg-cpp.h interop

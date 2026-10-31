@@ -177,18 +177,26 @@ workerd's API objects serialize, since their serializers are written against C++
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
 until C++ JSG is gone. Its shims (`jsg-cpp.h` and `ffi.c++`) form the interop tier of the
-allowlist, and may use `jsg::Lock`, `jsg::Ref`/`jsg::Optional`/`jsg::Object`, `V8Ref`,
-`JsExceptionThrown` and `jsg::throw*`: what holding, wrapping and unwrapping a C++ resource
-through the isolate's `TypeHandler`s and turning a C++ exception into a pending JavaScript one
-take. Even there, `JSG_TRY`/`tryCatch`, `createTunneledException`, `makeInternalError`,
-`jsg::check`, `liftKj` and `JSG_REQUIRE` are not allowed. The containment is:
+allowlist, and may use `jsg::Lock`, `jsg::Ref`/`jsg::Optional`/`jsg::Object`, `jsg::V8Ref`,
+`JsExceptionThrown` and `jsg::throwInternalError`: what holding, wrapping and unwrapping a C++
+resource through the isolate's `TypeHandler`s and turning a C++ exception into a pending
+JavaScript one take. Even there, `JSG_TRY`/`tryCatch`, `createTunneledException`,
+`makeInternalError`, `jsg::check`, `liftKj`, `JSG_REQUIRE`, the other `jsg::throw*` functions
+(`throwTunneledException` included), JavaScript value handles (`jsg::Data`, `jsg::Value`,
+`JsValue`, `JsRef`, ...) and `jsg::Promise`/`jsg::Function`/`jsg::Sequence` are not allowed. The
+containment is:
 
-- Only files with an `interop` line in the allowlist are in the tier, and only `src/rust/jsg-cpp`
-  files belong there.
+- Only files with an `interop` line in the allowlist are in the tier, and the test rejects an
+  `interop` line for a file outside `src/rust/jsg-cpp`.
 - Other shims must not use `jsg_cpp` (the test counts it as a construct), so `src/rust/jsg`
   cannot reach C++ JSG through it. Bazel enforces the direction too: `jsg-cpp` depends on `jsg`.
 - The per-type and per-method shims that instantiate `jsg-cpp.h` for a C++ class live with the
-  class, as C++ API code, not in a Rust JSG crate.
+  class, as C++ API code, not in a Rust JSG crate. They are not Rust JSG shims, so the allowlist
+  does not check them, and they use C++ JSG freely, as the class does. Porting an API to Rust
+  therefore moves C++ JSG use into these shims rather than removing it; it goes away with the C++
+  classes the shims bind.
+
+`cpp-jsg-allowlist-checker-test.py` tests what the tier admits and rejects.
 
 Bad: a shim that wraps a V8 call in `JSG_TRY(js) { ... } JSG_CATCH(error) {
 kj::throwException(createTunneledException(...)); }`. Fix: catch with a `v8::TryCatch` in the

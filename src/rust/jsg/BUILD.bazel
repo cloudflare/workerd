@@ -26,6 +26,14 @@ py_test(
     main = "cpp-jsg-allowlist-test.py",
 )
 
+# Tests the checker itself on small allowlists and shim files.
+py_test(
+    name = "cpp-jsg-allowlist-checker-test",
+    srcs = ["cpp-jsg-allowlist-checker-test.py"],
+    data = ["cpp-jsg-allowlist-test.py"],
+    main = "cpp-jsg-allowlist-checker-test.py",
+)
+
 wd_rust_crate(
     name = "jsg",
     cxx_bridge_deps = {
