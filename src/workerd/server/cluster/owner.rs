@@ -28,6 +28,7 @@ use crate::Result;
 use crate::Sequence;
 use crate::capture::Capture;
 use crate::log::Cursor;
+use crate::log::DB;
 use crate::log::File;
 use crate::log::Log;
 use crate::log::plan;
@@ -39,6 +40,15 @@ const TIER_CONCURRENCY: usize = 64;
 const EVICT_CONCURRENCY: usize = 32;
 /// Evicted objects whose database file this node remembers as current.
 const DORMANT_MAX: usize = 1 << 16;
+
+/// Where an object's databases are on this node, which workerd decides.
+pub trait Layout {
+    /// The database file of lane `lane`, its facet numbered if new.
+    fn place(&self, lane: &str) -> Result<PathBuf>;
+    /// Removes every local file of the object: databases, WALs, and
+    /// whatever numbers its facets.
+    fn clear(&self) -> Result<()>;
+}
 
 /// An owned object, its capture, and how far its commits are acknowledged.
 struct Slot {
@@ -99,8 +109,9 @@ struct Object {
     replica: Replica,
     /// How far the epoch's session in the bucket is contiguous.
     tiered: Sequence,
-    /// Where the capture was at eviction.
+    /// Where the capture was at eviction, and its databases.
     cursor: Cursor,
+    databases: Vec<(String, PathBuf)>,
     /// The files of this epoch's session. Only this owner writes it, so
     /// compaction deletes from here rather than listing it.
     files: Vec<File>,
@@ -151,16 +162,17 @@ impl Owners {
     }
 
     /// Take the object over at `owned.epoch` and open the epoch, leaving its
-    /// database at `path` ready for workerd to open.
+    /// databases where `layout` places them, ready for workerd to open.
     pub async fn take_over(
         &self,
         ownership: &Ownership,
         ns: &str,
         actor: &str,
         owned: &Owned,
-        path: &Path,
+        layout: &dyn Layout,
     ) -> Result<()> {
         let key = object_key(ns, actor);
+        let path = &layout.place(DB)?;
         if owned.recover.is_none() && !self.opened.borrow().contains_key(&key) {
             if self.objects.borrow().contains_key(&key) {
                 return Ok(());
@@ -175,7 +187,7 @@ impl Owners {
                     "{key}: not open here, nor dormant"
                 )));
             };
-            let capture = Capture::resume(path, object.cursor);
+            let capture = Capture::resume(object.cursor.clone(), &object.databases);
             tracing::info!(
                 "cluster: {ns}/{actor} epoch {} resumes at {}",
                 object.epoch,
@@ -193,35 +205,49 @@ impl Owners {
         let dormant = self.dormant.borrow().get(&key).map(|o| o.epoch);
         let recover = owned.recover.filter(|&from| from != 0);
         let local = path.exists() && recover.is_some_and(|from| dormant == Some(from));
-        if !local {
-            remove_database(path)?;
+        let mut databases = vec![(DB.to_owned(), path.clone())];
+        if local {
+            let dormant = self.dormant.borrow().get(&key).map(|o| o.databases.clone());
+            databases = dormant.unwrap_or(databases);
+        } else {
+            layout.clear()?;
+            remove_dir(&cache_root(path))?;
             if let Some(recover) = recover {
                 // Nothing in the bucket: an object that committed nothing.
                 let log = self.client(ns, actor);
-                let end = crate::log::restore(&log, recover as u32, path).await?;
+                let spool = crate::log::with_suffix(path, ".restore");
+                let restored = crate::log::restore(&log, recover as u32, &spool).await;
+                let placed = restored.and_then(|(end, lanes)| {
+                    databases = place(layout, lanes)?;
+                    Ok(end)
+                });
+                remove_dir(&spool)?;
+                let end = placed?;
                 tracing::info!(
-                    "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket up to {end}",
-                    owned.epoch
+                    "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket up to {end}, \
+                     {} databases",
+                    owned.epoch,
+                    databases.len()
                 );
             }
         }
         // The state the epoch inherits is its session's snapshot at frame
-        // 0, written from the file on the blocking pool; a new object has
+        // 0, written from the files on the blocking pool; a new object has
         // none.
         let cache = open_cache(path, owned.epoch)?;
         let session = owned.epoch as u32;
-        let snapshot = if self.opened.borrow().contains_key(&key) {
-            None
+        let (snapshot, lanes) = if self.opened.borrow().contains_key(&key) {
+            (None, Vec::new())
         } else {
-            let (path, cache) = (path.to_owned(), cache.clone());
-            blocking(move || crate::log::snapshot_file(&path, &cache, session)).await?
+            let (databases, cache) = (databases.clone(), cache.clone());
+            blocking(move || crate::log::snapshot_file(&databases, &cache, session)).await?
         };
         let cursor = Cursor {
             session,
-            lane: snapshot.is_some(),
+            lanes,
             ..Cursor::default()
         };
-        let capture = Capture::resume(path, cursor);
+        let capture = Capture::resume(cursor, &databases);
         let object = self
             .open_epoch(ownership, ns, actor, owned, cache, snapshot)
             .await?;
@@ -277,6 +303,7 @@ impl Owners {
             },
             tiered: 0,
             cursor: Cursor::default(),
+            databases: Vec::new(),
             files: Vec::new(),
             prune: false,
         };
@@ -310,9 +337,7 @@ impl Owners {
     /// one at a time uploads everything captured so far on behalf of all,
     /// so a hot object pays an upload per group, not per transaction.
     pub async fn commit(&self, ownership: &Ownership, ns: &str, actor: &str) -> Result<()> {
-        let slot = self.objects.borrow().get(&object_key(ns, actor)).cloned();
-        let slot =
-            slot.ok_or_else(|| Error::Contended(format!("{ns}/{actor} is not open here")))?;
+        let slot = self.slot(ns, actor)?;
         let target = {
             let guard = slot.object.lock().await;
             let target = slot.capture.borrow().last()?;
@@ -474,6 +499,7 @@ impl Owners {
         let mut guard = slot.object.lock().await;
         let last = slot.capture.borrow().last();
         guard.cursor = slot.capture.borrow().cursor();
+        guard.databases = slot.capture.borrow().databases();
         if guard.epoch == epoch && last.is_ok_and(|last| guard.tiered >= last) {
             // Bounded: a forgotten entry costs its object a restore.
             let mut map = self.dormant.borrow_mut();
@@ -497,18 +523,60 @@ impl Owners {
         self.opened.borrow_mut().remove(&key);
     }
 
-    /// An owned object's database was deleted: its session continues with
-    /// an empty database, which the next commit makes durable.
-    pub fn database_reset(&self, ns: &str, actor: &str) {
+    fn slot(&self, ns: &str, actor: &str) -> Result<Rc<Slot>> {
+        let slot = self.objects.borrow().get(&object_key(ns, actor)).cloned();
+        slot.ok_or_else(|| Error::Contended(format!("{ns}/{actor} is not open here")))
+    }
+
+    /// Capture the database at `path`, lane `lane` of an owned object, too.
+    pub fn open_lane(&self, ns: &str, actor: &str, path: &Path, lane: &str) -> Result<()> {
+        let slot = self.slot(ns, actor)?;
+        slot.capture.borrow_mut().open_lane(path, lane);
+        Ok(())
+    }
+
+    /// An owned object's facet with lane prefix `prefix` was deleted with
+    /// its descendants: the next commit makes it durable.
+    pub fn delete_lanes(&self, ns: &str, actor: &str, prefix: &str) -> Result<()> {
+        let slot = self.slot(ns, actor)?;
+        slot.capture.borrow_mut().delete_lanes(prefix);
+        Ok(())
+    }
+
+    /// An owned object's facet with lane prefix `dst` was replaced with
+    /// its descendants by copies of the facet with prefix `src`'s: the next
+    /// commit makes it durable. The copies are captured from now, started
+    /// or not, so a dormant takeover's snapshot holds them.
+    pub fn clone_lanes(
+        &self,
+        ns: &str,
+        actor: &str,
+        src: &str,
+        dst: &str,
+        layout: &dyn Layout,
+    ) -> Result<()> {
+        let slot = self.slot(ns, actor)?;
+        let mut capture = slot.capture.borrow_mut();
+        for lane in capture.clone_lanes(src, dst) {
+            capture.open_lane(&layout.place(&lane)?, &lane);
+        }
+        Ok(())
+    }
+
+    /// An owned object's database `file` was deleted, with its facet's
+    /// descendants: its session continues with an empty database, which
+    /// the next commit makes durable.
+    pub fn database_reset(&self, ns: &str, actor: &str, file: &str) {
         if let Some(slot) = self.objects.borrow().get(&object_key(ns, actor)) {
-            slot.capture.borrow_mut().reset();
+            slot.capture.borrow_mut().reset(file);
         }
     }
 
-    /// A write `SQLite` made to an owned object's WAL.
-    pub fn wal_write(&self, ns: &str, actor: &str, offset: u64, data: &[u8]) {
+    /// A write `SQLite` made to the WAL of an owned object's database
+    /// `file`.
+    pub fn wal_write(&self, ns: &str, actor: &str, file: &str, offset: u64, data: &[u8]) {
         if let Some(slot) = self.objects.borrow().get(&object_key(ns, actor)) {
-            slot.capture.borrow_mut().write(offset, data);
+            slot.capture.borrow_mut().write(file, offset, data);
         }
     }
 }
@@ -648,22 +716,19 @@ async fn put(replica: &Replica, to: Sequence, staged: Option<Vec<u8>>) -> Result
     upload(replica, file).await.map(Some)
 }
 
-fn remove_file(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(crate::Error::from(e)),
-        _ => Ok(()),
+/// Moves restored `lanes` to where `layout` places them. Returns each
+/// lane's name and database.
+fn place(layout: &dyn Layout, lanes: Vec<(String, PathBuf)>) -> Result<Vec<(String, PathBuf)>> {
+    let mut databases = Vec::new();
+    for (lane, file) in lanes {
+        let path = layout.place(&lane)?;
+        std::fs::rename(&file, &path)?;
+        databases.push((lane, path));
     }
-}
-
-/// A local copy is never authoritative at takeover: every acknowledged
-/// commit is in the bucket.
-fn remove_database(path: &Path) -> Result<()> {
-    for suffix in ["", "-wal", "-shm"] {
-        let mut file = path.as_os_str().to_owned();
-        file.push(suffix);
-        remove_file(Path::new(&file))?;
+    if !databases.iter().any(|(lane, _)| lane == DB) {
+        databases.push((DB.to_owned(), layout.place(DB)?));
     }
-    remove_dir(&cache_root(path))
+    Ok(databases)
 }
 
 #[cfg(test)]

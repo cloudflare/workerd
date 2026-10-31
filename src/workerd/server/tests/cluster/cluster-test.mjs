@@ -18,6 +18,7 @@
 //      minted in-process and passed through props.
 //   8. A stub that has resolved to a remote DO keeps failing once that DO
 //      breaks, while a fresh stub reaches the re-instantiated DO.
+//   9. Facets, their deletions and deleteAll() survive a takeover.
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -901,6 +902,117 @@ test("cluster: a killed owner's alarm runs without its record", async () => {
       survivor.stderr,
       /adopting the alarms of \w+, which has no record/
     );
+  });
+});
+
+// Kills the node serving `ownerId` and waits until the other serves DO
+// `name`, returning the survivor.
+async function killOwnerAndTakeOver(nodes, ownerId, name) {
+  const ownerIndex = nodes.findIndex((n) => n.nodeId === ownerId);
+  const survivor = nodes[1 - ownerIndex];
+  await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const got = await fetchJson(survivor.httpPort, `/get?name=${name}`, {
+      timeoutMs: 10_000,
+    }).catch(() => null);
+    if (got?.status === 200 && got.body.nodeId === survivor.nodeId) {
+      return survivor;
+    }
+    await sleep(200);
+  }
+  throw new Error(`${survivor.nodeId} never took ${name} over`);
+}
+
+async function facetAdd(port, name, path) {
+  const r = await fetchJson(port, `/facet-add?name=${name}&path=${path}`);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  return r.body.count;
+}
+
+test('cluster: facets and their deletions survive their owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const port = nodes[0].httpPort;
+    const name = 'faceted';
+    for (const path of ['a', 'a', 'a,b%2Fc', 'x', 'x,y']) {
+      await facetAdd(port, name, path);
+    }
+    // Nothing commits after the delete: it is durable once it returns.
+    const del = await fetchJson(port, `/facet-delete?name=${name}&path=x`);
+    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
+    const survivor = await killOwnerAndTakeOver(nodes, del.body.nodeId, name);
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, name, 'a'), 3);
+    assert.strictEqual(await facetAdd(p, name, 'a,b%2Fc'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'x'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'x,y'), 1);
+  });
+});
+
+test('cluster: facet clones survive their owner', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const port = nodes[0].httpPort;
+    const name = 'cloned';
+    for (const path of ['a', 'a', 'a,b', 'c', 'c,d']) {
+      await facetAdd(port, name, path);
+    }
+    // Over a facet: c's subtree goes, a's is copied, running.
+    let clone = await fetchJson(port, `/facet-clone?name=${name}&path=a,c`);
+    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
+    assert.strictEqual(await facetAdd(port, name, 'c'), 3);
+    // Nothing commits after the clone: it is durable once it returns.
+    clone = await fetchJson(port, `/facet-clone?name=${name}&path=c,e`);
+    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
+    const survivor = await killOwnerAndTakeOver(nodes, clone.body.nodeId, name);
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, name, 'a'), 3);
+    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'c'), 4);
+    assert.strictEqual(await facetAdd(p, name, 'c,b'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'c,d'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'e'), 4);
+    assert.strictEqual(await facetAdd(p, name, 'e,b'), 2);
+  });
+});
+
+test("cluster: a facet's deletion takes its descendants only", async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const port = nodes[0].httpPort;
+    const name = 'nested';
+    for (const path of ['a', 'a,b', 'a,b,c', 'a,bc']) {
+      await facetAdd(port, name, path);
+    }
+    const del = await fetchJson(port, `/facet-delete?name=${name}&path=a,b`);
+    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
+    // A facet created after a deletion takes a freed lane.
+    await facetAdd(port, name, 'd');
+    const survivor = await killOwnerAndTakeOver(nodes, del.body.nodeId, name);
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, name, 'a'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'a,b,c'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'a,bc'), 2);
+    assert.strictEqual(await facetAdd(p, name, 'd'), 2);
+  });
+});
+
+test("cluster: deleteAll() takes a DO's facets across a takeover", async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const port = nodes[0].httpPort;
+    const name = 'wiped';
+    await fetchJson(port, `/increment?name=${name}`);
+    for (const path of ['a', 'a,b']) {
+      await facetAdd(port, name, path);
+    }
+    const wipe = await fetchJson(port, `/delete-all?name=${name}`);
+    assert.strictEqual(wipe.status, 200, JSON.stringify(wipe.body));
+    // The facets were running: they start over, here and after a takeover.
+    assert.strictEqual(await facetAdd(port, name, 'a,b'), 1);
+    const survivor = await killOwnerAndTakeOver(nodes, wipe.body.nodeId, name);
+    const p = survivor.httpPort;
+    const got = await fetchJson(p, `/get?name=${name}`);
+    assert.strictEqual(got.body.count, 0, JSON.stringify(got.body));
+    assert.strictEqual(await facetAdd(p, name, 'a'), 1);
+    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
   });
 });
 
