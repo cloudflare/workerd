@@ -812,7 +812,8 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
     kj::Maybe<kj::String> maybeFallbackService,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    jsg::modules::ModuleRegistry::Builder::Options options) {
 
   return newWorkerModuleRegistry<JsgWorkerdIsolate_TypeWrapper>(maybeSource, featureFlags,
       bundleBase,
@@ -1087,7 +1088,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
         return kj::none;
       }));
     }
-  }, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+  }, options | jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 }
 
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {

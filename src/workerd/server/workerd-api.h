@@ -7,6 +7,7 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/snapshot.h>
 #include <workerd/server/compiled-bindings.capnp.h>
 #include <workerd/server/workerd.capnp.h>
@@ -114,7 +115,9 @@ class WorkerdApi final: public Worker::Api {
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,
       kj::Maybe<kj::String> fallbackService = kj::none,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
+      jsg::modules::ModuleRegistry::Builder::Options options =
+          jsg::modules::ModuleRegistry::Builder::Options::NONE);
 
  private:
   struct Impl;

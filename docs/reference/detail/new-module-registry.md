@@ -47,7 +47,8 @@ The new module registry was designed to address several limitations of the legac
    recompilation. If the embedder gives isolates a code cache store
    (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle modules use the
    store instead, which both registries share; see
-   [Code cache store](#code-cache-store).
+   [Code cache store](#code-cache-store). Modules compiled with `PRODUCE_COMPILE_HINTS`
+   bypass both caches; see [Compile hint production](#compile-hint-production).
 
 5. **Separation of definition from instantiation.** `Module` objects are
    isolate-independent definitions. `IsolateModuleRegistry` holds the per-isolate
@@ -133,13 +134,14 @@ map to multiple rows, so a unique URL index would collide.
 
 ### `Module::Flags` bitmask
 
-| Flag   | Bit  | Meaning                                                            |
-| ------ | ---- | ------------------------------------------------------------------ |
-| `NONE` | 0x00 | No flags                                                           |
-| `MAIN` | 0x01 | `import.meta.main = true` (worker entrypoint)                      |
-| `ESM`  | 0x02 | ECMAScript module (vs synthetic)                                   |
-| `EVAL` | 0x04 | Requires evaluation outside IoContext (deferred to `EvalCallback`) |
-| `WASM` | 0x08 | WebAssembly module                                                 |
+| Flag                    | Bit  | Meaning                                                            |
+| ----------------------- | ---- | ------------------------------------------------------------------ |
+| `NONE`                  | 0x00 | No flags                                                           |
+| `MAIN`                  | 0x01 | `import.meta.main = true` (worker entrypoint)                      |
+| `ESM`                   | 0x02 | ECMAScript module (vs synthetic)                                   |
+| `EVAL`                  | 0x04 | Requires evaluation outside IoContext (deferred to `EvalCallback`) |
+| `WASM`                  | 0x08 | WebAssembly module                                                 |
+| `PRODUCE_COMPILE_HINTS` | 0x10 | Record function positions for bundle ES modules                    |
 
 ### `Module::ContentType` enum
 
@@ -176,6 +178,21 @@ EsModule extends Module {
   [Code cache store](#code-cache-store)). Otherwise it checks the `cachedData`
   shared cache first (shared lock for reading, exclusive lock for writing). On
   cache miss, generates and stores bytecode after compilation.
+
+#### Compile hint production
+
+Bundle ES modules with `Module::Flags::PRODUCE_COMPILE_HINTS` compile with
+V8's `kProduceCompileHints`. This bypasses both code caches and does not
+populate the shared bytecode cache. `newWorkerModuleRegistry()` sets this flag
+when given `ModuleRegistry::Builder::Options::PRODUCE_COMPILE_HINTS`.
+
+`ModuleRegistry::getProducedCompileHints(js)` reads positions from the current
+context's compiled modules. It returns one entry per resolved bundle ES module
+definition, merging and deduplicating positions across query/fragment instances.
+The shared registry does not retain hints between isolates. Positions accumulate
+as functions compile, including during evaluation and subsequent requests.
+`ModuleRegistry::resolveModuleName(js, name)` uses the bundle builder's
+normalization to match a report entry's URL to an original bundle name.
 
 #### Source Encoding (`EncodedSource`)
 
@@ -838,6 +855,7 @@ returning a rejected promise with the cached exception.
 4. **Cross-isolate caching.** ESM compile cache and Wasm compiled modules are
    shared across isolate replicas, reducing startup time for subsequent replicas.
    With a code cache store, bundle module caches are shared across registries.
+   Modules compiled with `PRODUCE_COMPILE_HINTS` bypass both ESM caches.
 
 5. **Compile cache is transparent.** V8 bytecode caching is handled entirely
    within `EsModule::getDescriptor()`. Callers never see compile cache details,
