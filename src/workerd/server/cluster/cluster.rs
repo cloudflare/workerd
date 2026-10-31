@@ -420,7 +420,7 @@ const fn ms(ms: u64) -> Duration {
 /// The object and file name of a database file, `<actor>.sqlite` or a
 /// facet's `<actor>.<n>.sqlite`, under whatever directory SQLite was given.
 fn object_file(path: &str) -> (&str, &str) {
-    let name = path.rsplit('/').next().unwrap_or(path);
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     (name.split('.').next().unwrap_or(name), name)
 }
 
