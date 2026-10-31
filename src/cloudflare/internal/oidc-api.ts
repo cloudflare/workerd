@@ -102,6 +102,18 @@ async function signedFetch(
       'Routing or framing headers cannot override signed fetch. Remove those headers.'
     );
   }
+  for (const name of [
+    'authorization',
+    'content-type',
+    'content-encoding',
+    'idempotency-key',
+  ]) {
+    if (/[^\x00-\x7f]/.test(headers.get(name) ?? '')) {
+      throw new TypeError(
+        `Signed header ${name} must contain only ASCII characters.`
+      );
+    }
+  }
   // Serialize once. The private HTTP service path propagates ordinary fetch
   // cancellation; the signer refuses redirects and chooses the final egress.
   const request = new Request(input, { ...init, redirect: 'manual' });
