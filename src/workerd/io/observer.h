@@ -357,8 +357,11 @@ class IsolateObserver: public kj::AtomicRefcounted {
     virtual void stop() {}
 
     virtual void locked() {}
-    virtual void gcPrologue() {}
-    virtual void gcEpilogue() {}
+
+    // Called just before a successfully taken lock is released, with the garbage collection V8
+    // performed on this thread while the lock was held: its total duration, including
+    // incremental marking steps, and the number of full (mark-compact) collections it finished.
+    virtual void reportGc(kj::Duration gcTime, uint fullGcCount) {}
   };
 
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
@@ -397,11 +400,8 @@ class IsolateObserver: public kj::AtomicRefcounted {
     void locked() {
       KJ_IF_SOME(l, lockTiming) l.get()->locked();
     }
-    void gcPrologue() {
-      KJ_IF_SOME(l, lockTiming) l.get()->gcPrologue();
-    }
-    void gcEpilogue() {
-      KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue();
+    void reportGc(kj::Duration gcTime, uint fullGcCount) {
+      KJ_IF_SOME(l, lockTiming) l.get()->reportGc(gcTime, fullGcCount);
     }
 
    private:
