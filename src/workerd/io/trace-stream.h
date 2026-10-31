@@ -79,7 +79,29 @@ class TailStreamWriter final {
   // reported (the onset) we will arrange to acquire tailStream capabilities from each then use
   // those to report the initial onset.
   using Pending = kj::Array<kj::Own<WorkerInterface>>;
-  TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks);
+
+  // Rewrites the stack traces of exceptions before they are delivered, for example to apply
+  // source maps. One instance is shared by every tail worker the writer delivers to, but each
+  // tail worker receives its own copy of the events, so the same stacks are remapped once per tail
+  // worker. It may outlive the writer, since delivery continues in waitUntil tasks.
+  //
+  // `remap()` runs in those waitUntil tasks, outside of any IoContext. Delivery to a tail worker
+  // waits for it, including delivery of the outcome event, so implementations should bound how
+  // long they take.
+  class StackRemapper: public kj::Refcounted {
+   public:
+    virtual ~StackRemapper() noexcept(false) = default;
+
+    // Rewrites `stacks` in place; each stack is delivered as `remap()` leaves it, even if the
+    // returned promise rejects, so only write a stack once it is fully remapped. Only called for
+    // batches of events that contain at least one exception with a stack trace. `stacks` stays
+    // valid until the returned promise settles.
+    virtual kj::Promise<void> remap(kj::ArrayPtr<kj::String> stacks) = 0;
+  };
+
+  TailStreamWriter(Pending pending,
+      kj::TaskSet& waitUntilTasks,
+      kj::Maybe<kj::Rc<StackRemapper>> stackRemapper = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
   void report(const InvocationSpanContext& context,
@@ -103,14 +125,18 @@ class TailStreamWriter final {
     // the stream.
     uint32_t droppedEvents = 0;
     workerd::util::Queue<TailEvent> queue;
+    kj::Maybe<kj::Rc<StackRemapper>> stackRemapper;
 
-    Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
+    Active(rpc::TailStreamTarget::Client capability, kj::Maybe<kj::Rc<StackRemapper>> stackRemapper)
+        : capability(kj::mv(capability)),
+          stackRemapper(kj::mv(stackRemapper)) {}
   };
 
   struct Closed {};
 
   kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::Rc<StackRemapper>> stackRemapper;
 
   static kj::Promise<void> pump(kj::Own<Active> current);
   // Report an event to the tail stream writer.
@@ -123,6 +149,8 @@ class TailStreamWriter final {
 };
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks);
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Rc<TailStreamWriter::StackRemapper>> stackRemapper = kj::none);
 
 }  // namespace workerd::tracing
