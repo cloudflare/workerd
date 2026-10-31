@@ -1050,7 +1050,7 @@ KJ_TEST("Server: module registry enabled by date starts without experimental mod
     ]
   ))"_kj));
 
-  test.server.setTestCompatibilityDateOverride(kj::str("2026-11-12"));
+  test.server.setTestCompatibilityDateOverride(kj::str("2026-11-17"));
   test.start();
 
   auto conn = test.connect("test-addr");

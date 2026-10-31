@@ -119,10 +119,10 @@ test('module fallback requires experimental mode with either registry', async (t
     join(env.TEST_TMPDIR, 'module-fallback-gate-')
   );
   const cases = [
-    ['date-default', '2026-11-12', []],
-    ['explicit-opt-in', '2026-11-11', ['new_module_registry']],
-    ['legacy-opt-out', '2026-11-12', ['legacy_module_registry']],
-    ['legacy-default', '2026-11-11', []],
+    ['date-default', '2026-11-17', []],
+    ['explicit-opt-in', '2026-11-16', ['new_module_registry']],
+    ['legacy-opt-out', '2026-11-17', ['legacy_module_registry']],
+    ['legacy-default', '2026-11-16', []],
   ];
 
   for (const [name, date, flags] of cases) {

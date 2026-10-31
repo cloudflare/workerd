@@ -589,7 +589,7 @@ KJ_TEST("encode to full flag list") {
   }
 }
 
-KJ_TEST("new module registry defaults on at 2026-11-12") {
+KJ_TEST("new module registry defaults on at 2026-11-17") {
   auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
     capnp::MallocMessageBuilder message;
     auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
@@ -604,15 +604,15 @@ KJ_TEST("new module registry defaults on at 2026-11-12") {
     return capnp::clone(output.getReader());
   };
 
-  auto before = compileFlags("2026-11-11", {});
+  auto before = compileFlags("2026-11-16", {});
   KJ_EXPECT(!isNewModuleRegistryEnabled(*before));
-  auto enabled = compileFlags("2026-11-12", {});
+  auto enabled = compileFlags("2026-11-17", {});
   KJ_EXPECT(isNewModuleRegistryEnabled(*enabled));
-  auto optedIn = compileFlags("2026-11-11", {"new_module_registry"_kj});
+  auto optedIn = compileFlags("2026-11-16", {"new_module_registry"_kj});
   KJ_EXPECT(isNewModuleRegistryEnabled(*optedIn));
-  auto optedOut = compileFlags("2026-11-12", {"legacy_module_registry"_kj});
+  auto optedOut = compileFlags("2026-11-17", {"legacy_module_registry"_kj});
   KJ_EXPECT(!isNewModuleRegistryEnabled(*optedOut));
-  auto python = compileFlags("2026-11-12", {"python_workers"_kj});
+  auto python = compileFlags("2026-11-17", {"python_workers"_kj});
   KJ_EXPECT(!isNewModuleRegistryEnabled(*python));
 }
 
