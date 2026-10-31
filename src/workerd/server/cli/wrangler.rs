@@ -15,6 +15,8 @@
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
 //! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//!
+//! `workerd run` (run.rs) bundles its file with the same esbuild invocation ([`bundle`]).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,7 +31,8 @@ use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
-const DEFAULT_ADDRESS: &str = "localhost:8787";
+/// The port the server listens on, as `wrangler dev` does.
+pub const DEFAULT_PORT: u16 = 8787;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,7 +124,7 @@ struct Rename {
     to: String,
 }
 
-enum Kind {
+pub enum Kind {
     EsModule,
     CommonJs,
     Wasm,
@@ -147,11 +150,7 @@ pub fn is_wrangler_config(path: &str) -> bool {
 }
 
 pub fn load(path: &str, process: &Process) -> Result<Config, String> {
-    let watch = |p: &Path| {
-        process
-            .watch_file(p.as_os_str().as_encoded_bytes())
-            .map_err(|e| e.description().to_owned())
-    };
+    let watch = watcher(process);
     let file = fs::canonicalize(path).map_err(|e| e.to_string())?;
     watch(&file)?;
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
@@ -162,7 +161,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
     let sources = if wrangler.no_bundle {
         unbundled(root, &wrangler.main, &watch)?
     } else {
-        bundle(&esbuild(root), root, &wrangler.main, &watch)?
+        bundle(&esbuild(root), root, Input::File(&wrangler.main), &watch)?
     };
 
     let classes = do_classes(&wrangler)?;
@@ -186,19 +185,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         .set_compatibility_flags(&wrangler.compatibility_flags[..])
         .map_err(|e| e.to_string())?;
 
-    let mut ms = worker.reborrow().init_modules(sources.len() as u32);
-    for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
-        let mut m = ms.reborrow().get(i as u32);
-        m.set_name(module_name);
-        let text = || std::str::from_utf8(bytes).map_err(|_| format!("{module_name}: not UTF-8"));
-        match kind {
-            Kind::EsModule => m.set_es_module(text()?),
-            Kind::CommonJs => m.set_common_js_module(text()?),
-            Kind::Text => m.set_text(text()?),
-            Kind::Wasm => m.set_wasm(bytes),
-            Kind::Data => m.set_data(bytes),
-        }
-    }
+    set_modules(worker.reborrow(), &sources)?;
 
     let do_bindings = wrangler
         .durable_objects
@@ -246,7 +233,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
 
     let mut socket = conf.init_sockets(1).get(0);
     socket.set_name("http");
-    socket.set_address(DEFAULT_ADDRESS);
+    socket.set_address(format!("localhost:{DEFAULT_PORT}"));
     socket.reborrow().init_http();
     socket.init_service().set_name(&name);
 
@@ -256,8 +243,39 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
     .map_err(|e| e.to_string())
 }
 
-type Source = (String, Kind, Vec<u8>);
-type Watch<'a> = &'a dyn Fn(&Path) -> Result<(), String>;
+/// A module of the Worker: its name, its kind and its contents.
+pub type Source = (String, Kind, Vec<u8>);
+pub type Watch<'a> = &'a dyn Fn(&Path) -> Result<(), String>;
+
+/// Registers a file with `process`'s watcher; a no-op without `--watch`.
+pub fn watcher(process: &Process) -> impl Fn(&Path) -> Result<(), String> {
+    |p: &Path| {
+        process
+            .watch_file(p.as_os_str().as_encoded_bytes())
+            .map_err(|e| e.description().to_owned())
+    }
+}
+
+/// Sets `worker`'s modules to `sources`, the first being the entry module.
+pub fn set_modules(
+    worker: workerd_capnp::worker::Builder,
+    sources: &[Source],
+) -> Result<(), String> {
+    let mut ms = worker.init_modules(sources.len() as u32);
+    for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
+        let mut m = ms.reborrow().get(i as u32);
+        m.set_name(module_name);
+        let text = || std::str::from_utf8(bytes).map_err(|_| format!("{module_name}: not UTF-8"));
+        match kind {
+            Kind::EsModule => m.set_es_module(text()?),
+            Kind::CommonJs => m.set_common_js_module(text()?),
+            Kind::Text => m.set_text(text()?),
+            Kind::Wasm => m.set_wasm(bytes),
+            Kind::Data => m.set_data(bytes),
+        }
+    }
+    Ok(())
+}
 
 /// `main` and the modules beside it, as files (`no_bundle`).
 fn unbundled(root: &Path, main: &str, watch: Watch) -> Result<Vec<Source>, String> {
@@ -283,7 +301,7 @@ fn unbundled(root: &Path, main: &str, watch: Watch) -> Result<Vec<Source>, Strin
 
 /// The esbuild to run: `WORKERD_ESBUILD`, else the nearest `node_modules/.bin/esbuild` at or
 /// above the project, else `esbuild` on `PATH`.
-fn esbuild(root: &Path) -> PathBuf {
+pub fn esbuild(root: &Path) -> PathBuf {
     if let Some(path) = std::env::var_os("WORKERD_ESBUILD") {
         return path.into();
     }
@@ -317,21 +335,42 @@ const REQUIRE_BRIDGE: &str = r#"var require = (id) => {
   return builtin;
 };"#;
 
-/// Bundles `main` with esbuild into an ES module plus the files its `copy` loader emits
-/// (`.wasm`), watching every input esbuild read outside `node_modules`.
-fn bundle(esbuild: &Path, root: &Path, main: &str, watch: Watch) -> Result<Vec<Source>, String> {
+/// What esbuild bundles.
+#[derive(Clone, Copy)]
+pub enum Input<'a> {
+    /// A file, relative to the root.
+    File(&'a str),
+    /// Source with no file, written to esbuild's stdin as TypeScript (which JavaScript is too):
+    /// its imports resolve from the root. `name` stands for it in esbuild's messages.
+    Source { name: &'a str, source: &'a str },
+}
+
+/// Bundles `input` with esbuild into an ES module plus the files its `copy` loader emits
+/// (`.wasm`), watching every input esbuild read outside `node_modules`. The bundle is written
+/// under the root's `.wrangler/tmp` for a file, and under the system's temporary directory for
+/// source, which has no project of its own, and removed once read.
+pub fn bundle(
+    esbuild: &Path,
+    root: &Path,
+    input: Input,
+    watch: Watch,
+) -> Result<Vec<Source>, String> {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let out = root.join(format!(
-        ".wrangler/tmp/bundle-{}-{}",
+    let dir = format!(
+        "bundle-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+    );
+    let out = match input {
+        Input::File(_) => root.join(".wrangler/tmp").join(dir),
+        Input::Source { .. } => std::env::temp_dir().join(format!("workerd-{dir}")),
+    };
     let _ = fs::remove_dir_all(&out);
     fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let result = run_esbuild(esbuild, root, main, &out, watch);
+    let result = run_esbuild(esbuild, root, input, &out, watch);
     let _ = fs::remove_dir_all(&out);
     result
 }
@@ -339,23 +378,45 @@ fn bundle(esbuild: &Path, root: &Path, main: &str, watch: Watch) -> Result<Vec<S
 fn run_esbuild(
     esbuild: &Path,
     root: &Path,
-    main: &str,
+    input: Input,
     out: &Path,
     watch: Watch,
 ) -> Result<Vec<Source>, String> {
-    // Watched up front: if `main` is missing, creating it reloads.
-    watch(&root.join(main))?;
+    use std::io::Write;
+    use std::process::Stdio;
+
     let metafile = out.join("meta.json");
-    let output = std::process::Command::new(esbuild)
-        .current_dir(root)
-        .arg(main)
+    let mut command = std::process::Command::new(esbuild);
+    command.current_dir(root);
+    match input {
+        Input::File(main) => {
+            // Watched up front: if `main` is missing, creating it reloads.
+            watch(&root.join(main))?;
+            command
+                .arg(main)
+                .arg("--entry-names=index")
+                .arg(format!("--outdir={}", out.display()))
+                .stdin(Stdio::null());
+        }
+        Input::Source { name, .. } => {
+            // esbuild takes its working directory from `PWD` when that names the same directory,
+            // and places `--sourcefile` in it: an inherited `PWD` spelling the root differently
+            // (through a symlink) would make the source's path in messages climb to `/`.
+            command
+                .env("PWD", root)
+                .arg("--loader=ts")
+                .arg(format!("--sourcefile={name}"))
+                .arg(format!("--outfile={}", out.join("index.js").display()))
+                .stdin(Stdio::piped());
+        }
+    }
+    command
         .args([
             "--bundle",
             "--format=esm",
             "--platform=browser",
             "--target=es2024",
             "--conditions=workerd,worker,browser",
-            "--entry-names=index",
             "--log-level=warning",
             "--external:node:*",
             "--external:cloudflare:*",
@@ -372,21 +433,36 @@ fn run_esbuild(
                 .flat_map(|m| [format!("--external:{m}"), format!("--external:{m}/*")]),
         )
         .arg(format!("--banner:js={REQUIRE_BRIDGE}"))
-        .arg(format!("--outdir={}", out.display()))
         .arg(format!("--metafile={}", metafile.display()))
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = command
+        .spawn()
+        .and_then(|mut child| {
+            if let (Input::Source { source, .. }, Some(mut stdin)) = (input, child.stdin.take()) {
+                // esbuild reads all of stdin before it writes anything, so this cannot deadlock.
+                stdin.write_all(source.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => format!(
-                "esbuild not found ({}). wrangler configs are bundled with esbuild: install it \
-                 (`npm i -D esbuild`), set WORKERD_ESBUILD to its path, or set \"no_bundle\": true.",
+                "esbuild not found ({}). Workers are bundled with esbuild: install it \
+                 (`npm i -D esbuild`) or set WORKERD_ESBUILD to its path. A wrangler config can \
+                 set \"no_bundle\": true instead.",
                 esbuild.display()
             ),
             _ => format!("{}: {e}", esbuild.display()),
         })?;
     if !output.status.success() {
         // No metafile names the inputs, so watch the project's sources: fixing the error reloads.
+        // Source from the command line has no project; the root is just the working directory.
         const SOURCES: &[&str] = &["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "json"];
-        for p in files(root) {
+        let project = match input {
+            Input::File(_) => files(root),
+            Input::Source { .. } => Vec::new(),
+        };
+        for p in project {
             if p.extension()
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| SOURCES.contains(&e))
@@ -403,13 +479,14 @@ fn run_esbuild(
 
     let meta: Value = serde_json::from_slice(&fs::read(&metafile).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    for input in meta["inputs"]
+    for read in meta["inputs"]
         .as_object()
         .into_iter()
         .flat_map(|m| m.keys())
     {
-        let path = root.join(input);
-        if !input.contains("node_modules/") && path.is_file() {
+        // Source from stdin is the input `<stdin>`, which is not a file.
+        let path = root.join(read);
+        if !read.contains("node_modules/") && path.is_file() {
             watch(&path)?;
         }
     }
@@ -604,4 +681,4 @@ fn strip_jsonc(src: &str) -> String {
 
 #[cfg(test)]
 #[path = "wrangler-test.rs"]
-mod tests;
+pub mod tests;
