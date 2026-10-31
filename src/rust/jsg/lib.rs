@@ -954,6 +954,13 @@ impl<'s> Lock<'s> {
     ///
     /// Panics if V8 does not deliver the termination, which C++ asserts too. V8 delivers it
     /// while it runs code in the entered context, so there must be one.
+    ///
+    /// This panics rather than returning an ordinary error, because an ordinary error would
+    /// throw a JavaScript exception that a `catch` or `finally` block could run after, which
+    /// this function exists to prevent. In a callback from V8, such as a `#[jsg_method]`,
+    /// [`catch_panic`] turns the panic into an internal error and terminates execution, as
+    /// intended. Code that C++ calls through `callback_scope!` has no such handler, and a panic
+    /// that reaches C++ aborts the process.
     #[must_use = "return the error, so that the termination reaches the code that started the \
                   JavaScript"]
     pub fn terminate_execution_now(&mut self) -> Error {
