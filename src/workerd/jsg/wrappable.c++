@@ -400,6 +400,32 @@ Wrappable* Wrappable::unwrapFromShimInRangeOrAbort(
   abort();
 }
 
+Wrappable::CppgcShim* Wrappable::tryGetShimWithTag(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, uint16_t tag) {
+  // Unwrap with the full JSG range and check the tag ourselves; see unwrapFromShimInRangeOrAbort()
+  // for why a narrow range can't be passed to Object::Unwrap.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+  if (shim == nullptr || static_cast<uint16_t>(shim->tag) != tag) {
+    return nullptr;
+  }
+  return shim;
+}
+
+kj::Maybe<Wrappable&> Wrappable::tryUnwrapFromShimWithTag(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, uint16_t tag) {
+  // Object::Unwrap reads the CppHeap pointer slot of an API wrapper without checking that the
+  // object is one (V8 only DCHECKs it), and other objects keep other fields at that offset.
+  if (!object->IsApiWrapper()) {
+    return kj::none;
+  }
+  auto* shim = tryGetShimWithTag(isolate, object, tag);
+  if (shim == nullptr) {
+    return kj::none;
+  }
+  return shim->resolve(object);
+}
+
 kj::Maybe<JSGWrappable::CppgcShim&> JSGWrappable::getShim() const {
   auto* shim = weakShim.Get();
   if (shim == nullptr) return kj::none;
@@ -649,11 +675,8 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapGlobalReceiver(
   // In V8 fast API calls the nominal Local<Object> receiver may actually hold undefined.
   if (object.IsEmpty() || !object.As<v8::Value>()->IsObject()) return kj::none;
 
-  // Unwrap with the full JSG range and check the tag ourselves; see unwrapFromShimInRangeOrAbort()
-  // for why a narrow range can't be passed to Object::Unwrap.
-  auto* shim = static_cast<CppgcShim*>(
-      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
-  if (shim == nullptr || static_cast<uint16_t>(shim->tag) != kContextGlobalWrappableTag) {
+  auto* shim = tryGetShimWithTag(isolate, object, kContextGlobalWrappableTag);
+  if (shim == nullptr) {
     return kj::none;
   }
   // Not shim->resolve(): the shim's wrapper is the JSGlobalProxy, but `object` may be the hidden
