@@ -45,6 +45,18 @@ impl From<i64> for TagValue<'_> {
     }
 }
 
+impl From<i32> for TagValue<'_> {
+    fn from(value: i32) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<u32> for TagValue<'_> {
+    fn from(value: u32) -> Self {
+        Self::Int(value.into())
+    }
+}
+
 impl From<f64> for TagValue<'_> {
     fn from(value: f64) -> Self {
         Self::Float(value)
@@ -82,8 +94,9 @@ impl SpanBuilder {
         Ok(Self(span))
     }
 
-    /// Sets tag `key` to `value`, replacing any value it had, as C++ `SpanBuilder::setTag()`
-    /// does. Does nothing if the span is not recorded.
+    /// Sets tag `key` to `value`, as C++ `SpanBuilder::setTag()` does. Does nothing if the span
+    /// is not recorded. Set each tag at most once: as in C++, setting one again replaces its
+    /// value, but is treated as a bug, logged as a warning, and as an error in tests.
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
         let (span, key) = (self.0.pin_mut(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.
@@ -124,7 +137,7 @@ impl TraceContext {
 
     /// Sets tag `key` to `value` on both spans, as C++ `TraceContext::setTag()` does. If the
     /// request has async tracing, it also annotates the span's operation, even if the spans are
-    /// not recorded.
+    /// not recorded. Set each tag at most once, as for [`SpanBuilder::set_tag`].
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
         let (context, key) = (self.0.pin_mut(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.

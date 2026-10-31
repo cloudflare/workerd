@@ -336,14 +336,13 @@ unsafe fn record_trace_spans(isolate: usize) -> Result<()> {
         .make_trace_span(c"rust_span")
         .map_err(|err| to_io(&err))?;
     span.set_tag(c"bool", true);
-    span.set_tag(c"int", 42_i64);
+    span.set_tag(c"int", 42);
     span.set_tag(c"float", 1.5);
     let dynamic = String::from("dynamic");
     span.set_tag(c"str", &dynamic);
     span.set_tag(c"literal", c"literal");
     let mut child = span.new_child(c"rust_child");
-    child.set_tag(c"replaced", 1_i64);
-    child.set_tag(c"replaced", 2_i64);
+    child.set_tag(c"unsigned", 2_u32);
     let mut user = context
         .make_user_trace_span(c"rust_user_span")
         .map_err(|err| to_io(&err))?;

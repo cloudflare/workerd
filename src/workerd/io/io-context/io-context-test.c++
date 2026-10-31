@@ -334,7 +334,7 @@ KJ_TEST("trace spans are recorded with their tags, under the request's span") {
 
   auto& child = KJ_ASSERT_NONNULL(records->find("rust_child"));
   KJ_EXPECT(records->parentName(child) == "rust_span", records->parentName(child));
-  KJ_EXPECT(child.tags == "replaced=int:2", child.tags);
+  KJ_EXPECT(child.tags == "unsigned=int:2", child.tags);
 
   // Its internal half; the request has no user tracing.
   auto& user = KJ_ASSERT_NONNULL(records->find("rust_user_span"));
