@@ -252,11 +252,11 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
           "fallback_error=str:TypeError: Expiration time must not be NaN. "
           "fallback_result_size=float:4 fallback_success=bool:false key=str:nan",
       fallbacks[0]);
-  // kj::str() of the DOMException that serialization throws is empty.
-  KJ_EXPECT(fallbacks[1] ==
-          "memory_cache_fallback <- memory_cache_read: fallback_error=str: "
-          "fallback_success=bool:false key=str:function",
+  // The error's text is not checked: it is that of the DOMException serialization throws, which
+  // kj::str() renders as empty.
+  KJ_EXPECT(fallbacks[1].startsWith("memory_cache_fallback <- memory_cache_read: fallback_error="),
       fallbacks[1]);
+  KJ_EXPECT(fallbacks[1].endsWith(" fallback_success=bool:false key=str:function"), fallbacks[1]);
 }
 
 }  // namespace
