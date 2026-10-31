@@ -11,8 +11,6 @@
 #include <kj/test.h>
 #include <kj/thread.h>
 
-#include <algorithm>
-
 namespace workerd::api {
 namespace {
 
@@ -212,67 +210,12 @@ KJ_TEST("fallback callback stores the value and survives binding destruction") {
   });
 }
 
-// Records the spans of a request as they end, each as "name <- parent: key=type:value ...", with
-// its tags in key order.
-class SpanRecorder final: public SpanObserver {
- public:
-  SpanRecorder(kj::Vector<kj::String>& spans, kj::StringPtr parent)
-      : spans(spans),
-        parent(kj::str(parent)) {}
-
-  kj::Rc<SpanObserver> newChild() override {
-    return kj::rc<SpanRecorder>(spans, name);
-  }
-  void onOpen(kj::ConstString operationName, kj::Date) override {
-    name = kj::str(operationName);
-  }
-  void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
-    auto entries = KJ_MAP(entry, tags) {
-      KJ_SWITCH_ONEOF(entry.value) {
-        KJ_CASE_ONEOF(str, kj::ConstString) {
-          return kj::str(entry.key, "=str:", str);
-        }
-        KJ_CASE_ONEOF(b, bool) {
-          return kj::str(entry.key, "=bool:", b);
-        }
-        KJ_CASE_ONEOF(d, double) {
-          return kj::str(entry.key, "=float:", d);
-        }
-        KJ_CASE_ONEOF(i, int64_t) {
-          return kj::str(entry.key, "=int:", i);
-        }
-      }
-      KJ_UNREACHABLE;
-    };
-    std::sort(entries.begin(), entries.end());
-    spans.add(kj::str(name, " <- ", parent, ": ", kj::strArray(entries, " ")));
-  }
-
- private:
-  kj::Vector<kj::String>& spans;
-  kj::String parent;
-  kj::String name;
-};
-
-class SpanRequestObserver final: public RequestObserver {
- public:
-  explicit SpanRequestObserver(kj::Vector<kj::String>& spans)
-      : span(kj::rc<SpanRecorder>(spans, "none"_kj), "request"_kjc) {}
-
-  SpanParent getSpan() override {
-    return SpanParent(span);
-  }
-
- private:
-  SpanBuilder span;
-};
-
 KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
   // In predictable mode, overwriting a span's tag logs an error, which fails this test. It logs
   // only the first overwrite in the process, so no other test here may overwrite one.
   setPredictableModeForTest();
   MemoryCacheProvider provider;
-  kj::Vector<kj::String> spans;
+  auto records = kj::rc<RecordedSpans>();
   TestFixture fixture({
     .mainModuleSource = R"SCRIPT(
       export default {
@@ -284,10 +227,7 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
         }
       };
     )SCRIPT"_kj,
-    .requestObserverFactory =
-        kj::Function<kj::Own<RequestObserver>()>([&spans]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<SpanRequestObserver>(spans);
-  }),
+    .requestObserverFactory = records->requestObserverFactory(),
   });
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
@@ -299,9 +239,12 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
   auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
   KJ_EXPECT(response.statusCode == 200, response.body);
 
+  // Each as "name <- parent: key=type:value ...".
+  kj::Vector<kj::String> spans;
   kj::Vector<kj::StringPtr> fallbacks;
-  for (auto& span: spans) {
-    if (span.startsWith("memory_cache_fallback ")) fallbacks.add(span);
+  for (auto& span: records->spans) {
+    auto& line = spans.add(kj::str(span.name, " <- ", records->parentName(span), ": ", span.tags));
+    if (span.name == "memory_cache_fallback") fallbacks.add(line);
   }
   KJ_ASSERT(fallbacks.size() == 2, kj::strArray(spans, "\n"));
   KJ_EXPECT(fallbacks[0] ==

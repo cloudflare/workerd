@@ -18,7 +18,6 @@
 #include <capnp/serialize.h>
 #include <kj/test.h>
 
-#include <algorithm>
 #include <bit>
 
 namespace workerd::io_context::test {
@@ -278,115 +277,32 @@ KJ_TEST(
   KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
 }
 
-// A span a SpanRecorder records: its name, the index of its parent, its tags as "key=type:value"
-// in key order, and whether it has ended.
-struct RecordedSpan {
-  kj::String name;
-  uint parent;
-  kj::String tags;
-  bool ended = false;
-};
-
-struct SpanRecords: public kj::Refcounted {
-  kj::Vector<RecordedSpan> spans;
-
-  kj::Maybe<RecordedSpan&> find(kj::StringPtr name) {
-    for (auto& span: spans) {
-      if (span.name == name) return span;
-    }
-    return kj::none;
-  }
-};
-
-class SpanRecorder final: public SpanObserver {
- public:
-  SpanRecorder(kj::Rc<SpanRecords> records, uint parent)
-      : records(kj::mv(records)),
-        index(this->records->spans.size()) {
-    this->records->spans.add(RecordedSpan{.name = kj::str(), .parent = parent, .tags = kj::str()});
-  }
-
-  kj::Rc<SpanObserver> newChild() override {
-    return kj::rc<SpanRecorder>(records.addRef(), index);
-  }
-  void onOpen(kj::ConstString operationName, kj::Date) override {
-    records->spans[index].name = kj::str(operationName);
-  }
-  void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
-    auto entries = KJ_MAP(entry, tags) {
-      kj::String value;
-      KJ_SWITCH_ONEOF(entry.value) {
-        KJ_CASE_ONEOF(str, kj::ConstString) {
-          value = kj::str("str:", str);
-        }
-        KJ_CASE_ONEOF(b, bool) {
-          value = kj::str("bool:", b);
-        }
-        KJ_CASE_ONEOF(d, double) {
-          value = kj::str("float:", d);
-        }
-        KJ_CASE_ONEOF(i, int64_t) {
-          value = kj::str("int:", i);
-        }
-      }
-      return kj::str(entry.key, "=", value);
-    };
-    std::sort(entries.begin(), entries.end());
-    records->spans[index].tags = kj::strArray(entries, " ");
-    records->spans[index].ended = true;
-  }
-
- private:
-  kj::Rc<SpanRecords> records;
-  uint index;
-};
-
-class SpanRequestObserver final: public RequestObserver {
- public:
-  explicit SpanRequestObserver(kj::Rc<SpanRecords> records)
-      : span(kj::rc<SpanRecorder>(kj::mv(records), kj::maxValue), "request"_kjc) {}
-
-  SpanParent getSpan() override {
-    return SpanParent(span);
-  }
-
- private:
-  SpanBuilder span;
-};
-
-TestFixture::SetupParams recordingSpans(kj::Rc<SpanRecords>& records) {
-  return {
-    .requestObserverFactory =
-        kj::Function<kj::Own<RequestObserver>()>([&records]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<SpanRequestObserver>(records.addRef());
-  }),
-  };
+TestFixture::SetupParams recordingSpans(RecordedSpans& records) {
+  return {.requestObserverFactory = records.requestObserverFactory()};
 }
 
 KJ_TEST("trace spans are recorded with their tags, under the request's span") {
-  auto records = kj::rc<SpanRecords>();
-  TestFixture fixture(recordingSpans(records));
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
   auto request = fixture.newIncomingRequest();
   fixture.enterContext(
       *request, [&](const TestFixture::Environment& env) { record_trace_spans(isolateOf(env)); });
   fixture.drainAndDestroy(kj::mv(request));
 
-  auto& root = KJ_ASSERT_NONNULL(records->find("request"));
-  auto rootIndex = &root - records->spans.begin();
   auto& span = KJ_ASSERT_NONNULL(records->find("rust_span"));
-  KJ_EXPECT(span.parent == rootIndex);
+  KJ_EXPECT(records->parentName(span) == "request", records->parentName(span));
   KJ_EXPECT(span.ended);
   KJ_EXPECT(
       span.tags == "bool=bool:true float=float:1.5 int=int:42 literal=str:literal str=str:dynamic",
       span.tags);
 
   auto& child = KJ_ASSERT_NONNULL(records->find("rust_child"));
-  KJ_EXPECT(child.parent == &span - records->spans.begin());
+  KJ_EXPECT(records->parentName(child) == "rust_span", records->parentName(child));
   KJ_EXPECT(child.tags == "replaced=int:2", child.tags);
 
   // Its internal half; the request has no user tracing.
   auto& user = KJ_ASSERT_NONNULL(records->find("rust_user_span"));
-  KJ_EXPECT(user.parent == rootIndex);
+  KJ_EXPECT(records->parentName(user) == "request", records->parentName(user));
   KJ_EXPECT(user.ended);
   KJ_EXPECT(user.tags ==
           "bool=bool:false float=float:0.5 int=int:7 literal=str:user_literal str=str:user",
@@ -394,8 +310,8 @@ KJ_TEST("trace spans are recorded with their tags, under the request's span") {
 }
 
 KJ_TEST("a trace span ends when its SpanBuilder is dropped") {
-  auto records = kj::rc<SpanRecords>();
-  TestFixture fixture(recordingSpans(records));
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
   auto request = fixture.newIncomingRequest();
   fixture.enterContext(
       *request, [&](const TestFixture::Environment& env) { hold_trace_span(isolateOf(env)); });
