@@ -1729,6 +1729,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   workersOidc @196 :Bool
       $compatEnableFlag("workers_oidc")
       $experimental;
-  # Enables experimental OIDC identity bindings. Issuance requires an approved assignment and
-  # protected host evidence. There is no implicit ExecutionContext or DurableObjectState identity.
+  # Reserves the experimental Workers identity feature flag. The compiler binds protected
+  # origin properties and limits to the private signer through ordinary Worker RPC.
 }
