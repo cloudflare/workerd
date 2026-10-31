@@ -6,8 +6,9 @@
 //! after it replaces it, and JavaScript cannot catch it. See `src/rust/jsg/README.md` §Safety
 //! rules, rule 1.
 //!
-//! Each method first has the harness deliver a termination, as a call into JavaScript that ran
+//! Most methods first have the harness deliver a termination, as a call into JavaScript that ran
 //! out of CPU time would, so that the termination exception is pending when the method goes on.
+//! The `terminate_now` methods terminate with `Lock::terminate_execution_now()` instead.
 
 use std::cell::Cell;
 
@@ -138,6 +139,33 @@ impl Terminator {
         crate::Harness::terminate_and_deliver(lock);
         lock.throw_internal_error("thrown while terminating");
     }
+
+    /// Terminates execution itself, with no termination delivered first, and returns the error,
+    /// as `ctx.abort()` does.
+    #[jsg_method]
+    fn terminate_now<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
+        assert!(!lock.is_execution_terminating());
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        TERMINATE_NOW_RETURNED.set(true);
+        Err(err)
+    }
+
+    /// Terminates execution itself, then goes on to throw, which throws nothing.
+    #[jsg_method]
+    fn terminate_now_then_throw_error(&self, lock: &mut jsg::Lock) {
+        let _ = lock.terminate_execution_now();
+        lock.throw_error("thrown while terminating");
+    }
+}
+
+thread_local! {
+    /// Whether `terminate_now` returned.
+    static TERMINATE_NOW_RETURNED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Calls `method` on a `Terminator` from inside a JavaScript `try`/`catch`, and checks that the
@@ -266,6 +294,21 @@ fn returning_a_wrapped_resource_while_terminating_keeps_the_termination() {
 #[test]
 fn returning_a_big_int_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenReturnBigInt");
+}
+
+/// `terminate_execution_now()` delivers the termination before it returns, unlike
+/// `terminate_execution()`, so the method returns its error with the termination pending, and
+/// none of the caller's JavaScript runs after the call.
+#[test]
+fn terminate_execution_now_stops_javascript_at_once() {
+    TERMINATE_NOW_RETURNED.set(false);
+    termination_survives("terminateNow");
+    assert!(TERMINATE_NOW_RETURNED.get());
+}
+
+#[test]
+fn throw_error_after_terminate_execution_now_keeps_the_termination() {
+    termination_survives("terminateNowThenThrowError");
 }
 
 /// A resource type that nothing uses before `terminateThenGetConstructor`, so that getting its

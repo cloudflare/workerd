@@ -1725,6 +1725,17 @@ void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
+bool isolate_terminate_execution_now(Isolate* isolate) {
+  isolate_terminate_execution(isolate);
+  // TerminateExecution() only requests the termination; V8 delivers it at its next interrupt
+  // check. Running V8 code makes it check at once, as in jsg::Lock::terminateExecutionNow(). The
+  // result is empty once the termination is pending; no TryCatch here, so it stays pending.
+  auto context = isolate->GetCurrentContext();
+  KJ_ASSERT(!context.IsEmpty(), "terminating execution now requires an entered context");
+  (void)v8::JSON::Stringify(context, v8::String::Empty(isolate));
+  return isolate->IsExecutionTerminating();
+}
+
 bool isolate_is_execution_terminating(Isolate* isolate) {
   return isolate->IsExecutionTerminating();
 }

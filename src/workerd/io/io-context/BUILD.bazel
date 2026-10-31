@@ -12,7 +12,10 @@ wd_rust_crate(
         "lib.rs",
         "lib-test.rs",
     ],
-    cxx_bridge_deps = ["//src/workerd/io"],
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io",
+    ],
     cxx_bridge_hdrs = ["ffi.h"],
     cxx_bridge_src = "ffi.rs",
     link_deps = [":ffi"],
@@ -27,6 +30,7 @@ wd_cc_library(
     hdrs = ["ffi.h"],
     deps = [
         ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
         "//src/workerd/io",
     ],
 )
@@ -49,7 +53,7 @@ exports_files([
     "ffi.h",
 ])
 
-# The Rust half of io-context-test.
+# The Rust half of io-context-test and request-ops-test.
 wd_rust_crate(
     name = "io-context-test-bridge",
     testonly = True,
@@ -59,6 +63,7 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     link_deps = [":test-bridge"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
     deps = [
         ":io-context",
         "//src/rust/jsg",
@@ -88,6 +93,18 @@ kj_test(
         ":io-context-test-bridge",
         ":test-bridge",
         "//src/rust/jsg:bridge",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+# The operations behind ctx.waitUntil(), ctx.passThroughOnException() and ctx.abort(), compared
+# with the C++ ExecutionContext in the requests of a real worker.
+kj_test(
+    src = "request-ops-test.c++",
+    deps = [
+        ":ffi",
+        ":io-context-test-bridge",
+        "//src/rust/jsg:ffi",
         "//src/workerd/tests:test-fixture",
     ],
 )
