@@ -5,6 +5,7 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/completion-membrane.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/uuid.h>
 
@@ -1085,6 +1086,38 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
   // to debug events arriving when the IoContext is no longer valid.
   bool doneReceiving = false;
 };
+
+// Returns the exception stacks in `events`. They point into the events, so they are only valid
+// while the events are.
+kj::Vector<kj::String*> findExceptionStacks(util::Queue<TailEvent>& events) {
+  kj::Vector<kj::String*> stacks;
+  events.forEach([&](TailEvent& event) {
+    KJ_IF_SOME(exception, event.event.tryGet<Exception>()) {
+      KJ_IF_SOME(stack, exception.stack) {
+        stacks.add(&stack);
+      }
+    }
+  });
+  return stacks;
+}
+
+// Applies `remapper` to the stacks that `targets` point to, which must stay alive until the
+// returned promise settles. A failed remap doesn't stop the events from being delivered.
+kj::Promise<void> remapExceptionStacks(
+    TailStreamWriter::StackRemapper& remapper, kj::Vector<kj::String*> targets) {
+  auto stacks = KJ_MAP(target, targets) { return kj::mv(*target); };
+
+  try {
+    co_await remapper.remap(stacks);
+  } catch (...) {
+    LOG_WARNING_PERIODICALLY(
+        "failed to remap tail stream exception stacks", kj::getCaughtExceptionAsKj());
+  }
+
+  for (auto i: kj::indices(stacks)) {
+    *targets[i] = kj::mv(stacks[i]);
+  }
+}
 }  // namespace
 
 kj::Own<TailStreamCustomEvent> TailStreamCustomEvent::fromRpc(
@@ -1199,9 +1232,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
   }
 }
 
-TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
+TailStreamWriter::TailStreamWriter(
+    Pending pending, kj::TaskSet& waitUntilTasks, kj::Maybe<kj::Rc<StackRemapper>> stackRemapper)
     : inner(kj::mv(pending)),
-      waitUntilTasks(waitUntilTasks) {}
+      waitUntilTasks(waitUntilTasks),
+      stackRemapper(kj::mv(stackRemapper)) {}
 
 bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
@@ -1310,19 +1345,29 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
     // If we got this far then we have a handler for all of our events.
     // Deliver remaining streaming tail events in batches if possible.
     while (!current->queue.empty()) {
-      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-      auto eventsBuilder = builder.initEvents(current->queue.size());
-      size_t n = 0;
-
-      // We're synchronously draining the queue – reset its size.
+      // Take the queued events as one batch. Events reported while the batch is remapped or sent
+      // wait for the next one.
+      util::Queue<TailEvent> batch;
+      batch.swap(current->queue);
       current->queueSize = 0;
-      current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
+
+      KJ_IF_SOME(remapper, current->stackRemapper) {
+        auto stacks = findExceptionStacks(batch);
+        if (!stacks.empty()) {
+          co_await remapExceptionStacks(*remapper, kj::mv(stacks));
+        }
+      }
+
+      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto eventsBuilder = builder.initEvents(batch.size());
+      size_t n = 0;
+      batch.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
       auto result = co_await builder.send();
 
-      // Note that although we cleared the current.queue above, it is
+      // Note that although we took everything from current.queue above, it is
       // possible/likely that additional events were added to the queue
-      // while the above builder.send() was being awaited. If the result
+      // while the batch was remapped or the above builder.send() was being awaited. If the result
       // comes back indicating that we should stop, then we'll stop here
       // without any further processing. We'll defensively clear the
       // queue again and drop the client stub. Otherwise, if result.getStop()
@@ -1348,12 +1393,15 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Rc<TailStreamWriter::StackRemapper>> stackRemapper) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
   }
 
-  return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
+  return kj::heap<TailStreamWriter>(
+      kj::mv(streamingTailWorkers), waitUntilTasks, kj::mv(stackRemapper));
 }
 
 void TailStreamWriter::report(const InvocationSpanContext& context,
@@ -1404,7 +1452,11 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
       inner = kj::Vector<kj::Own<Active>>( KJ_MAP(wi, pending) {
         auto customEvent = kj::heap<TailStreamCustomEvent>();
         auto result = customEvent->getCap();
-        auto active = kj::refcounted<Active>(kj::mv(result));
+        kj::Maybe<kj::Rc<StackRemapper>> activeRemapper;
+        KJ_IF_SOME(remapper, stackRemapper) {
+          activeRemapper = remapper.addRef();
+        }
+        auto active = kj::refcounted<Active>(kj::mv(result), kj::mv(activeRemapper));
 
         // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay alive
         // until tail worker operations including JS execution are complete, including returning the
