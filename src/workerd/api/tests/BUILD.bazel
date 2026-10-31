@@ -1740,7 +1740,7 @@ wd_test(
     src = "oidc-capability-test.wd-test",
     data = [
         "oidc-capability-test.js",
-        "oidc-capability-test-issuer.js",
         "oidc-capability-test-forwarder.js",
+        "oidc-capability-test-issuer.js",
     ],
 )
