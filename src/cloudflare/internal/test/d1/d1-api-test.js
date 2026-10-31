@@ -4,7 +4,11 @@
 
 import * as assert from 'node:assert';
 
-import { testD1ApiQueriesHappyPath, testD1Exec } from './d1-api-test-common';
+import {
+  testD1ApiQueriesHappyPath,
+  testD1BindBlobs,
+  testD1Exec,
+} from './d1-api-test-common';
 
 export const testWithoutSessions = {
   async test(_ctr, env) {
@@ -30,6 +34,12 @@ export const testInnerFetcherIsPrivate = {
     assert.strictEqual(env.d1.alwaysPrimarySession, undefined);
     assert.strictEqual(session.fetcher, undefined);
     assert.strictEqual(statement.dbSession, undefined);
+  },
+};
+
+export const testBindBlobs = {
+  async test(_ctr, env) {
+    await testD1BindBlobs(env.d1);
   },
 };
 
