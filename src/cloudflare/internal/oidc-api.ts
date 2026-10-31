@@ -3,11 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 import wrappedBinding from 'cloudflare-internal:wrapped-binding';
 
+interface IdentityCustomerIdentity {
+  id: string;
+  signatureAgent: string;
+  directoryURL: string;
+}
+
 interface Inner {
   getToken(...args: unknown[]): Promise<string>;
   getAuthorizationGrant(...args: unknown[]): Promise<string>;
   fetch(request: Request): Promise<Response>;
-  checkSignedFetch(url: string, method: string): Promise<void>;
+  getCustomerIdentity(...args: unknown[]): Promise<IdentityCustomerIdentity>;
+  checkSignedFetch(
+    url: string,
+    method: string,
+    customerId?: string
+  ): Promise<void>;
 }
 const INIT = new Set([
   'method',
@@ -51,9 +62,33 @@ class IdentityBinding extends wrappedBinding.WrappedBinding {
   getAuthorizationGrant(...args: unknown[]): Promise<string> {
     return this.#inner.getAuthorizationGrant(...args);
   }
-  async fetch(
+  getCustomerIdentity(...args: unknown[]): Promise<IdentityCustomerIdentity> {
+    return this.#inner.getCustomerIdentity(...args);
+  }
+  fetchForCustomer(
+    customerId: string,
     input: Request | string | URL,
     init?: RequestInit
+  ): Promise<Response> {
+    if (
+      typeof customerId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(customerId)
+    ) {
+      return Promise.reject(
+        new TypeError(
+          'Invalid customerId. Use 1–128 ASCII letters, digits, underscores or hyphens.'
+        )
+      );
+    }
+    return this.#fetch(input, init, customerId);
+  }
+  fetch(input: Request | string | URL, init?: RequestInit): Promise<Response> {
+    return this.#fetch(input, init);
+  }
+  async #fetch(
+    input: Request | string | URL,
+    init?: RequestInit,
+    customerId?: string
   ): Promise<Response> {
     if (init && Reflect.ownKeys(init).some((key) => !INIT.has(String(key)))) {
       throw new TypeError(
@@ -77,8 +112,11 @@ class IdentityBinding extends wrappedBinding.WrappedBinding {
     // cancellation; the signer refuses redirects and chooses the final egress.
     const request = new Request(input, { ...init, redirect: 'manual' });
     request.headers.delete('content-length');
+    request.headers.delete('cf-workers-identity-customer');
+    if (customerId !== undefined)
+      request.headers.set('cf-workers-identity-customer', customerId);
     request.signal.throwIfAborted();
-    await this.#inner.checkSignedFetch(request.url, request.method);
+    await this.#inner.checkSignedFetch(request.url, request.method, customerId);
     request.signal.throwIfAborted();
     return this.#inner.fetch(request);
   }

@@ -14,8 +14,16 @@ export class Issuer extends WorkerEntrypoint {
       jti: crypto.randomUUID(),
     };
   }
+  getCustomerIdentity(customerId) {
+    return { ...this.ctx.props, customerId };
+  }
   checkSignedFetch() {}
-  fetch() {
-    return new Response(JSON.stringify(this.ctx.props));
+  fetch(request) {
+    return new Response(
+      JSON.stringify({
+        ...this.ctx.props,
+        customerId: request.headers.get('cf-workers-identity-customer'),
+      })
+    );
   }
 }

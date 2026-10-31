@@ -6,11 +6,24 @@ export const forwarding = {
   async test(_controller, env) {
     const direct = await env.IDENTITY.getToken();
     const forwarded = await env.FORWARDER.exercise(env.IDENTITY);
-    for (const value of [forwarded.token, forwarded.grant, forwarded.fetch]) {
+    for (const value of [
+      forwarded.token,
+      forwarded.grant,
+      forwarded.fetch,
+      forwarded.customer,
+      forwarded.customerFetch,
+    ]) {
       assert.equal(value.workerId, 'origin-a');
       assert.equal(value.versionId, 'leaf-a');
       assert.equal(value.namespaceId, 'namespace-a');
     }
+    assert.equal(forwarded.customer.customerId, 'customer_x');
+    assert.equal(forwarded.customerFetch.customerId, 'customer_x');
+    assert.equal(forwarded.sanitized.customerId, null);
+    await assert.rejects(
+      env.IDENTITY.fetchForCustomer('', 'https://api.example/'),
+      /customerId/
+    );
     assert.equal(forwarded.token.audience, 'urn:fixed');
     assert.equal(forwarded.fetch.audience, 'urn:fixed');
     assert.equal(forwarded.grant.audience, 'https://auth.example/');

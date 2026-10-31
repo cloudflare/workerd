@@ -12,3 +12,9 @@ binding.getToken({ audience: 'other' });
 binding.getToken({ fresh: true });
 // @ts-expect-error No signing-only API.
 binding.signRequest('https://api.example.com');
+
+const customer: Promise<IdentityCustomerIdentity> = binding.getCustomerIdentity('customer_x');
+const customerResponse: Promise<Response> = binding.fetchForCustomer('customer_x', 'https://api.example.com');
+void [customer, customerResponse];
+// @ts-expect-error Only an opaque customer string, no authority override.
+binding.getCustomerIdentity({ customerId: 'x', accountId: 'forged' });
