@@ -35,11 +35,14 @@ kj::ConstString wrapLiteral(Literal bytes) {
       kj::NullArrayDisposer::instance);
 }
 
-// Sets a tag on a SpanBuilder or TraceContext, if the span is observed; see ffi.h for which
-// strings are copied.
+// Sets a tag on a SpanBuilder or TraceContext; see ffi.h for which strings are copied.
 template <typename Span, typename Value>
 void setTag(Span& span, Literal key, Value value) {
-  if (!span.isObserved()) return;
+  // A TraceContext also annotates its async trace operation, if it has one, whether or not its
+  // spans are observed, so only a SpanBuilder's tag can be skipped here.
+  if constexpr (kj::isSameType<Span, SpanBuilder>()) {
+    if (!span.isObserved()) return;
+  }
   if constexpr (kj::isSameType<Value, ::rust::Str>()) {
     span.setTag(wrapLiteral(key), kj::str(kj::arrayPtr(value.data(), value.size())));
   } else if constexpr (kj::isSameType<Value, Literal>()) {

@@ -182,7 +182,8 @@ KJ_TEST("await_io_and_run() runs its callback in the async context frame that wa
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-// Records the KJ-to-JS bridges and operations an async tracker creates, and the causes of turns.
+// Records the KJ-to-JS bridges and operations an async tracker creates, their annotations, and the
+// causes of turns.
 class BridgeListener final: public AsyncTraceListener {
  public:
   explicit BridgeListener(kj::Vector<kj::String>& events): events(events) {}
@@ -193,6 +194,10 @@ class BridgeListener final: public AsyncTraceListener {
     if (e.kind == AsyncKind::OPERATION) events.add(kj::str("operation ", e.id, " ", e.name));
   }
   void onSettle(uint64_t, AsyncId, AsyncOutcome, uint64_t) override {}
+  void onAnnotate(
+      uint64_t, AsyncId id, kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) override {
+    events.add(kj::str("annotate ", id, " ", key, "=", value));
+  }
   void onBefore(uint64_t, AsyncId, uint64_t) override {}
   void onAfter(uint64_t, AsyncId, uint64_t) override {}
   void onDestroy(uint64_t, AsyncId, uint64_t) override {}
@@ -321,12 +326,33 @@ KJ_TEST("a trace span ends when its SpanBuilder is dropped") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("trace spans record nothing, and tags are ignored, when the request is not traced") {
-  TestFixture fixture;
+KJ_TEST("a user trace span's tags annotate its operation when its spans are not recorded") {
+  kj::Vector<kj::String> events;
+  TestFixture fixture({
+    .useRealTimers = false,
+    .isolateObserver = kj::atomicRefcounted<BridgeObserver>(events),
+  });
   auto request = fixture.newIncomingRequest();
   fixture.enterContext(
       *request, [&](const TestFixture::Environment& env) { record_trace_spans(isolateOf(env)); });
   fixture.drainAndDestroy(kj::mv(request));
+
+  kj::Maybe<kj::String> operationId;
+  for (auto& event: events) {
+    if (event.startsWith("operation ") && event.endsWith(" rust_user_span")) {
+      operationId = kj::str(event.first(event.size() - 15).slice(10));
+    }
+  }
+  auto& id = KJ_ASSERT_NONNULL(operationId, kj::strArray(events, "\n"));
+  kj::Vector<kj::StringPtr> annotations;
+  for (auto& event: events) {
+    if (event.startsWith(kj::str("annotate ", id, " "))) {
+      annotations.add(event.slice(10 + id.size()));
+    }
+  }
+  KJ_EXPECT(
+      kj::strArray(annotations, " ") == "bool=false int=7 float=0.5 str=user literal=user_literal",
+      kj::strArray(events, "\n"));
 }
 
 KJ_TEST("await_io_and_run() resumes the request when its future completes on another thread") {

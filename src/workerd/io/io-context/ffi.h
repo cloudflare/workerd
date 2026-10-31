@@ -70,9 +70,11 @@ kj::Own<TraceContext> io_context_make_user_trace_span(uint64_t id, Literal name)
 // SpanBuilder::newChild().
 kj::Own<SpanBuilder> span_builder_new_child(SpanBuilder& span, Literal name);
 
-// SpanBuilder::setTag() and TraceContext::setTag(). On a span that is not observed, these do
-// nothing. On one that is, a `::rust::Str` value is copied, since it is not NUL-terminated and
-// may not outlive the call; the key and a `Literal` value are not.
+// SpanBuilder::setTag() and TraceContext::setTag(). On a SpanBuilder that is not observed, these
+// do nothing. Otherwise, a `::rust::Str` value is copied, since it is not NUL-terminated and may
+// not outlive the call; the key and a `Literal` value are not. A TraceContext's tag also annotates
+// its async trace operation, if it has one, whether or not its spans are observed, as
+// TraceContext::setTag() does.
 void span_builder_set_tag_bool(SpanBuilder& span, Literal key, bool value);
 void span_builder_set_tag_int(SpanBuilder& span, Literal key, int64_t value);
 void span_builder_set_tag_float(SpanBuilder& span, Literal key, double value);

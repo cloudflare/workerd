@@ -122,7 +122,9 @@ impl TraceContext {
         Ok(Self(context))
     }
 
-    /// Sets tag `key` to `value` on both spans, as C++ `TraceContext::setTag()` does.
+    /// Sets tag `key` to `value` on both spans, as C++ `TraceContext::setTag()` does. If the
+    /// request has async tracing, it also annotates the span's operation, even if the spans are
+    /// not recorded.
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
         let (context, key) = (self.0.pin_mut(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.
