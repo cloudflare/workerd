@@ -1087,6 +1087,15 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
 };
 }  // namespace
 
+kj::Own<TailStreamCustomEvent> TailStreamCustomEvent::fromRpc(
+    rpc::EventDispatcher::TailStreamSessionParams::Reader params) {
+  kj::Maybe<rpc::TraceCompletion::Client> completion;
+  if (params.hasCompletion()) {
+    completion = params.getCompletion();
+  }
+  return kj::heap<TailStreamCustomEvent>(kj::mv(completion));
+}
+
 EventInfo TailStreamCustomEvent::getEventInfo() const {
   return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
 }
@@ -1106,6 +1115,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
       kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller), isDynamicDispatch));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
+
+  // The request is kept until it has drained (below): until its background work finishes, times
+  // out, or aborts. The completion goes with it.
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    incomingRequest = kj::mv(incomingRequest).attach(kj::mv(c));
+  }
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -1144,7 +1159,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
     }
   });
 
-  auto req = dispatcher.tailStreamSessionRequest(capnp::MessageSize{0, 0});
+  auto req = dispatcher.tailStreamSessionRequest(capnp::MessageSize{4, 1});
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    req.setCompletion(kj::mv(c));
+  }
   auto sent = req.send();
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();
