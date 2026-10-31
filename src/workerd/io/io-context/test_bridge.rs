@@ -10,6 +10,7 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -21,6 +22,7 @@ use std::time::UNIX_EPOCH;
 use futures::channel::oneshot;
 use io_context::IoContext;
 use io_context::IoOwned;
+use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 
@@ -73,6 +75,26 @@ mod ffi {
         Dropped,
     }
 
+    /// How the callback of the last `await_promise()` ends once its future has a value.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PromiseEnding {
+        /// The callback returns the value.
+        Value,
+        /// The callback returns a promise resolved with the value plus one.
+        Promise,
+        /// The callback returns an error.
+        Fail,
+        /// The callback calls a function that throws.
+        Throw,
+        /// The callback panics.
+        PanicInCallback,
+        /// The future panics, so the callback never runs.
+        PanicInFuture,
+        /// The future panics when it is dropped, after its output is taken or when it is
+        /// cancelled.
+        PanicDroppingFuture,
+    }
+
     unsafe extern "C++" {
         include!("workerd/io/io-context/test-bridge.h");
 
@@ -90,6 +112,9 @@ mod ffi {
         fn await_observation() -> AwaitObservation;
         fn awaited_value() -> i32;
         fn awaited_future_dropped() -> bool;
+        unsafe fn await_promise(isolate: usize, ending: PromiseEnding) -> Result<()>;
+        unsafe fn await_value(isolate: usize, fail: bool) -> Result<()>;
+        unsafe fn awaited_promise_outcome(isolate: usize) -> Result<String>;
         unsafe fn add_owned_value(isolate: usize) -> Result<()>;
         fn owned_value_dropped() -> bool;
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
@@ -231,6 +256,158 @@ unsafe fn await_released(isolate: usize, ending: ffi::AwaitEnding) -> Result<()>
             })
         })
         .map_err(|err| to_io(&err))
+}
+
+thread_local! {
+    /// The promise the last `await_promise()` or `await_value()` returned.
+    static AWAITED_PROMISE: RefCell<Option<v8::Global<v8::Promise>>> = const { RefCell::new(None) };
+}
+
+/// A future that panics when it is dropped.
+struct PanicOnDrop<F>(Pin<Box<F>>);
+
+impl<F: Future> Future for PanicOnDrop<F> {
+    type Output = F::Output;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        self.0.as_mut().poll(cx)
+    }
+}
+
+impl<F> Drop for PanicOnDrop<F> {
+    fn drop(&mut self) {
+        panic!("the future panicked when dropped");
+    }
+}
+
+/// Starts waiting, as `await_released()` does, and returns a new oneshot receiver for the value.
+fn new_await() -> oneshot::Receiver<i32> {
+    AWAIT_OBSERVATION.store(ffi::AwaitObservation::Pending.repr, Ordering::SeqCst);
+    AWAITED_FUTURE_DROPPED.store(false, Ordering::SeqCst);
+    let (sender, receiver) = oneshot::channel();
+    *AWAIT_SENDER.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
+    receiver
+}
+
+fn keep_promise<'s>(lock: &mut jsg::Lock<'s>, promise: v8::Local<'s, v8::Promise>) {
+    let promise = promise.to_global(lock);
+    AWAITED_PROMISE.with(|cell| *cell.borrow_mut() = Some(promise));
+}
+
+/// In a request, `IoContext::await_io()`s a value that `release_await()` or
+/// `release_await_from_thread()` sends, then ends as `ending` says. `awaited_promise_outcome()`
+/// tells how the promise it returned settled.
+unsafe fn await_promise(isolate: usize, ending: ffi::PromiseEnding) -> Result<()> {
+    let receiver = new_await();
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let future_observer = FutureDropObserver;
+    let future = async move {
+        let _observer = future_observer;
+        let value = receiver.await.unwrap_or(-1);
+        assert!(
+            ending != ffi::PromiseEnding::PanicInFuture,
+            "the future panicked"
+        );
+        value
+    };
+    let result = IoContext::current(lock).and_then(|context| {
+        if ending == ffi::PromiseEnding::PanicDroppingFuture {
+            start_await_io(lock, &context, PanicOnDrop(Box::pin(future)), ending)
+        } else {
+            start_await_io(lock, &context, future, ending)
+        }
+    });
+    let promise = result.map_err(|err| to_io(&err))?;
+    keep_promise(lock, promise);
+    Ok(())
+}
+
+/// `context.await_io(lock, future, ..)` with a callback that ends as `ending` says.
+fn start_await_io<'s, F>(
+    lock: &mut jsg::Lock<'s>,
+    context: &IoContext<'s>,
+    future: F,
+    ending: ffi::PromiseEnding,
+) -> jsg::Result<v8::Local<'s, v8::Promise>>
+where
+    F: Future<Output = i32> + Send + 'static,
+{
+    let callback_observer = CallbackDropObserver;
+    context.await_io(lock, future, move |lock, value| {
+        let _observer = callback_observer;
+        AWAIT_OBSERVATION.store(ffi::AwaitObservation::Ran.repr, Ordering::SeqCst);
+        finish(lock, ending, value)
+    })
+}
+
+fn finish<'t>(
+    lock: &mut jsg::Lock<'t>,
+    ending: ffi::PromiseEnding,
+    value: i32,
+) -> jsg::Result<v8::Local<'t, v8::Value>> {
+    match ending {
+        ffi::PromiseEnding::Promise => {
+            let next = f64::from(value + 1).to_js(lock)?;
+            Ok(v8::Promise::resolved(lock, next)?.into())
+        }
+        ffi::PromiseEnding::Fail => Err(jsg::Error::new_type_error("the callback failed")),
+        ffi::PromiseEnding::Throw => {
+            let thrower = v8::Function::new(lock, (), |_lock, (), _args| {
+                Err(jsg::Error::new_range_error("thrown by JavaScript"))
+            })?;
+            thrower.call(lock, None, &[])
+        }
+        ffi::PromiseEnding::PanicInCallback => panic!("the callback panicked"),
+        _ => f64::from(value).to_js(lock),
+    }
+}
+
+/// In a request, `IoContext::await_io_value()`s a value that `release_await()` sends, which the
+/// future returns, or fails with a `TypeError` if `fail` is set.
+unsafe fn await_value(isolate: usize, fail: bool) -> Result<()> {
+    let receiver = new_await();
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let future = async move {
+        let value = receiver.await.unwrap_or(-1);
+        if fail {
+            Err(jsg::Error::new_type_error("the future failed"))
+        } else {
+            Ok(f64::from(value))
+        }
+    };
+    let promise = IoContext::current(lock)
+        .and_then(|context| context.await_io_value(lock, future))
+        .map_err(|err| to_io(&err))?;
+    keep_promise(lock, promise);
+    Ok(())
+}
+
+/// How the promise the last `await_promise()` or `await_value()` returned has settled: "pending",
+/// "fulfilled: <number>" or "rejected: <name>: <message>".
+unsafe fn awaited_promise_outcome(isolate: usize) -> Result<String> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let promise = AWAITED_PROMISE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|promise| promise.as_local(lock))
+            .ok_or_else(|| std::io::Error::other("no promise has been awaited"))
+    })?;
+    let Some(result) = promise.result(lock) else {
+        return Ok("pending".to_owned());
+    };
+    if promise.state() == v8::PromiseState::Fulfilled {
+        let value = f64::from_js(lock, result).map_err(|err| to_io(&err))?;
+        Ok(format!("fulfilled: {value}"))
+    } else {
+        let error = jsg::Error::from_js(lock, result).map_err(|err| to_io(&err))?;
+        Ok(format!("rejected: {error}"))
+    }
 }
 
 fn take_await_sender() -> oneshot::Sender<i32> {
