@@ -525,10 +525,6 @@ struct Worker {
       #
       # This is a workerd-only API intended for local development and testing.
 
-      oidc @29 :Text;
-      # Fixed assignment selector for an OIDC identity binding. The protected host service must
-      # authorize this assignment for the executing Worker on every use, including cache hits.
-
       # TODO(someday): dispatch, other new features
     }
 
@@ -860,11 +856,6 @@ struct Worker {
   #
   # If not set, `ctx.access.getIdentity()` resolves to `undefined` (even when `accessBlobHeader`
   # is configured and `ctx.access.aud` is available).
-
-  oidcTokenService @21 :ServiceDesignator;
-  # Trusted local-development token broker. Receives POST /token with a JSON object containing
-  # assignment, optional audience, and freshness; returns a compact JWT as text/plain. It is not
-  # global outbound. Only configure this for authenticated local development, never cloud identity.
 
   workflowsEngine @20 :WorkflowsEngine;
   # the externally-supplied service responsible for running Workflows defined in this worker

@@ -97,7 +97,6 @@ struct Global {
     }
     workerLoader @42 :UInt32;
     workerdDebugPort @43 :Void;
-    oidc @44 :Text;
   }
 }
 

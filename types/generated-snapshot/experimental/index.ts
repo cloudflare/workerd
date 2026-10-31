@@ -614,9 +614,6 @@ export interface CloudflareAccessContext {
   readonly aud: string;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
-export interface OidcIdentityBinding {
-  getToken(options?: { audience?: string; fresh?: boolean }): Promise<string>;
-}
 export declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }
@@ -16377,6 +16374,18 @@ export interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
+}
+/** A platform-compiled workload capability. RPC forwarding retains its original authority. */
+export interface IdentityBinding {
+  /** Returns a fresh five-minute JWT for the configured audience. */
+  getToken(): Promise<string>;
+  /** Returns a fresh WAG within the binding's configured AS and scope limits. */
+  getAuthorizationGrant(options: {
+    authorizationServer: string;
+    scope?: string[];
+  }): Promise<string>;
+  /** Signs and sends to a configured HTTPS destination. Redirects fail. */
+  fetch(input: Request | string | URL, init?: RequestInit): Promise<Response>;
 }
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {

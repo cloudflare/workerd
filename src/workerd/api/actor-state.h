@@ -9,7 +9,6 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
-#include <workerd/api/oidc.h>
 #include <workerd/api/snapshot.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
@@ -621,7 +620,6 @@ class DurableObjectState: public jsg::Object {
       jsg::Dict<kj::String> containerImages,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager,
       kj::Maybe<ActorVersion> version = kj::none);
-
 
   void waitUntil(kj::Promise<void> promise);
 

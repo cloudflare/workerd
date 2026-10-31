@@ -18,12 +18,6 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
-    src = "oidc-test.wd-test",
-    args = ["--experimental"],
-    data = ["oidc-test.js"],
-)
-
-wd_test(
     src = "streams-byob-progress-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -1659,7 +1653,10 @@ wd_cli_test(
 )
 
 wd_test(
-    src = "oidc-local-test.wd-test",
-    args = ["--experimental"],
-    data = ["oidc-local-test.js"],
+    src = "oidc-capability-test.wd-test",
+    data = [
+        "oidc-capability-test.js",
+        "oidc-capability-test-issuer.js",
+        "oidc-capability-test-forwarder.js",
+    ],
 )

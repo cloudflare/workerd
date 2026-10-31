@@ -131,18 +131,6 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory: public virtual kj::Refcounted {
  public:
-  struct OidcTokenRequest {
-    kj::String assignment;
-    kj::Maybe<kj::String> audience;
-    bool fresh = false;
-  };
-
-  // The host resolves the fixed assignment and verifies its effective policy and current execution
-  // before issuing or returning a cached assertion. Neither config IDs nor application options
-  // establish authority. Local brokers authenticate both the developer and local assignment.
-  // The default rejects issuance; embedding runtimes opt in by overriding this method.
-  virtual kj::Promise<kj::String> getOidcToken(OidcTokenRequest request);
-
   enum class EvictWebSocketMode {
     HIBERNATE,
     CLOSE,

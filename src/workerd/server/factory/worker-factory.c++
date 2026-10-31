@@ -27,7 +27,6 @@
 #include <workerd/util/strings.h>
 #include <workerd/util/use-perfetto-categories.h>
 
-#include <capnp/compat/json.capnp.h>
 #include <capnp/compat/json.h>
 #include <kj/encoding.h>
 
@@ -395,7 +394,7 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -784,96 +783,6 @@ class RustIoChannelFactory final: public IoChannelFactory {
     }
     return channels->subrequest_channel(channel, kj::mv(props), false)
         ->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
-  }
-
-  kj::Promise<kj::String> getOidcToken(OidcTokenRequest request) override {
-    auto channel = channels->oidc_token_channel();
-    auto promise = requestLocalOidcToken(kj::mv(channel), kj::mv(request));
-    return worker->factory.getImpl().timer.timeoutAfter(30 * kj::SECONDS, kj::mv(promise));
-  }
-
-  static kj::Promise<kj::String> requestLocalOidcToken(
-      ::rust::Box<workerd::server::SubrequestChannel> channel, OidcTokenRequest request) {
-    auto service = channel->start_request(kj::heap<RequestMetadata>(SubrequestMetadata{}));
-    auto client = kj::newHttpClient(*service);
-    kj::HttpHeaderTable table;
-    kj::HttpHeaders headers(table);
-    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
-    capnp::MallocMessageBuilder message;
-    auto object = message.initRoot<capnp::JsonValue>();
-    auto fields = object.initObject(request.audience == kj::none ? 2 : 3);
-    fields[0].setName("assignment");
-    fields[0].initValue().setString(request.assignment);
-    fields[1].setName("fresh");
-    fields[1].initValue().setBoolean(request.fresh);
-    KJ_IF_SOME(audience, request.audience) {
-      fields[2].setName("audience");
-      fields[2].initValue().setString(audience);
-    }
-    auto json = capnp::JsonCodec().encodeRaw(object.asReader());
-    auto http = client->request(kj::HttpMethod::POST, "http://oidc/token", headers, json.size());
-    co_await http.body->write(json.asBytes());
-    http.body = nullptr;
-    auto response = co_await http.response;
-    kj::StringPtr errorCode;
-    response.headers->forEach([&](kj::StringPtr name, kj::StringPtr value) {
-      if (toLower(name.asArray()) == "x-workers-oidc-error") errorCode = kj::mv(value);
-    });
-    requireLocalOidcSuccess(response.statusCode, errorCode);
-    JSG_REQUIRE(response.headers->get(kj::HttpHeaderId::CONTENT_TYPE).orDefault("") == "text/plain",
-        Error, "Invalid local OIDC token response.");
-    auto token = co_await response.body->readAllText(64 * 1024);
-    size_t dots = 0;
-    bool segment = false;
-    for (char c: token) {
-      if (c == '.') {
-        JSG_REQUIRE(segment && dots < 2, Error, "Invalid local OIDC token response.");
-        ++dots;
-        segment = false;
-      } else {
-        JSG_REQUIRE((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-                c == '-' || c == '_',
-            Error, "Invalid local OIDC token response.");
-        segment = true;
-      }
-    }
-    JSG_REQUIRE(dots == 2 && segment, Error, "Invalid local OIDC token response.");
-    co_return token;
-  }
-
-  static void requireLocalOidcSuccess(uint status, kj::StringPtr code) {
-    switch (status) {
-      case 200:
-        return;
-      case 400:
-        JSG_FAIL_REQUIRE(
-            Error, "Local OIDC request is invalid. Check the audience and broker configuration.");
-      case 401:
-        JSG_FAIL_REQUIRE(
-            Error, "Local OIDC login required. Sign in again and create a development session.");
-      case 403:
-        JSG_FAIL_REQUIRE(Error,
-            "Local OIDC access denied. Check account enablement, Worker development permission, and the local identity assignment.");
-      case 409:
-        JSG_FAIL_REQUIRE(Error,
-            "Local OIDC session needs renewal. Create a new development session with the current login.");
-      case 429:
-        if (code == "session_limit") {
-          JSG_FAIL_REQUIRE(
-              Error, "Local OIDC session limit reached. Wait for an existing session to expire.");
-        }
-        JSG_FAIL_REQUIRE(Error, "Local OIDC issuance is rate limited. Retry after 60 seconds.");
-      case 503:
-        if (code == "not_configured") {
-          JSG_FAIL_REQUIRE(Error,
-              "Local OIDC issuance is not configured. Check availability with your account team.");
-        }
-        JSG_FAIL_REQUIRE(Error,
-            "Local OIDC service is unavailable. Retry later; check the dev server for connection errors.");
-      default:
-        JSG_FAIL_REQUIRE(
-            Error, "Local OIDC token issuance failed. Check the dev server connection and retry.");
-    }
   }
 
   capnp::Capability::Client getCapability(uint channel) override {
@@ -1666,7 +1575,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
-    using api::pyodide::ArtifactBundler;
+    using ArtifactBundler = api::pyodide::ArtifactBundler;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           workerSource.variant.tryGet<Worker::Script::ModulesSource>(), featureFlags,
