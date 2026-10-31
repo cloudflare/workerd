@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Validates tracing.withActiveSpan(): what getActiveSpan() returns inside the callback, and that
+# enterSpan children and built-in instrumentation (fetch) are parented under the activated span
+# in the streaming-tail event stream.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tracing-active-span-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracing-active-span-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        streamingTails = ["tail"],
+        bindings = [
+          (
+            name = "fetchTarget",
+            service = "tracing-hierarchy-mock"
+          ),
+        ],
+      )
+    ),
+    ( name = "tracing-hierarchy-mock",
+      worker = (
+        compatibilityFlags = ["nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
+        ],
+      )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
+  ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tracing-active-span-instrumentation-test.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+);

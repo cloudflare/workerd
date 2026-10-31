@@ -14,3 +14,8 @@ wd_test(
     src = "tracing-log-attribution-test.wd-test",
     data = glob(["*.js"]),
 )
+
+wd_test(
+    src = "tracing-active-span-test.wd-test",
+    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+)
