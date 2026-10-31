@@ -4,6 +4,8 @@
 
 #include "ffi.h"
 
+#include "cpp-interop.h"
+
 #include <workerd/io/features.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
@@ -36,7 +38,13 @@ namespace workerd {
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
-JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+JSG_DECLARE_ISOLATE_TYPE(TestIsolate,
+    TestContext,
+    cpp_interop_test::TestCppGreeter,
+    cpp_interop_test::TestCppBase,
+    cpp_interop_test::TestCppDerived,
+    cpp_interop_test::TestCppHolder,
+    jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>);
 
 namespace rust::jsg_test {
 

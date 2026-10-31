@@ -4,19 +4,25 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 wd_cc_library(
     name = "ffi-hdrs",
     hdrs = [
+        "cpp-interop.h",
         "ffi.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg:ffi",
+        "//src/rust/jsg-cpp:ffi",
         "//src/workerd/jsg",
     ],
 )
 
 wd_cc_library(
     name = "ffi-impl",
-    srcs = ["ffi.c++"],
+    srcs = [
+        "cpp-interop.c++",
+        "ffi.c++",
+    ],
     implementation_deps = [
+        ":cpp_interop.rs@cxx",
         ":lib.rs@cxx",
         "//src/workerd/io:features",
         "//src/workerd/util:autogate",
@@ -36,18 +42,20 @@ wd_rust_crate(
         ":ffi-hdrs",
     ],
     cxx_bridge_srcs = [
+        "cpp_interop.rs",
         "lib.rs",
     ],
     link_deps = [
         ":ffi-impl",
     ],
-    test_proc_macro_deps = ["//src/rust/jsg-macros"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
     # The crate has hundreds of subtests and uses RUST_TEST_THREADS=1 (serial),
     # so the default "medium" (15s) timeout is too tight under CI load.
     test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
         "@crates_vendor//:capnp",
     ],
 )

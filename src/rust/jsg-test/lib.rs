@@ -11,6 +11,7 @@ use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
 use kj_rs::KjOwn;
 
+pub mod cpp_interop;
 #[cfg(test)]
 mod tests;
 
