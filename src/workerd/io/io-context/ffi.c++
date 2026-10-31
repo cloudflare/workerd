@@ -192,4 +192,8 @@ void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal v
   setTag(context, key, value);
 }
 
+void trace_context_detach_async(TraceContext& context) {
+  context.detachAsync();
+}
+
 }  // namespace workerd::io_context

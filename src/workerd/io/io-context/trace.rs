@@ -140,6 +140,15 @@ impl TraceContext {
             }
         }
     }
+
+    /// Stops the next [`IoContext::await_io_and_run`](crate::IoContext::await_io_and_run) in this
+    /// turn from reporting its wait under the span's operation, as C++
+    /// `TraceContext::detachAsync()` does. Call it when this outlives the current call without
+    /// being moved into the callback of the next `await_io_and_run()`, such as when it is stored
+    /// for later; otherwise an unrelated wait later in the turn could take over the operation.
+    pub fn detach_async(&mut self) {
+        bridge::trace_context_detach_async(self.0.pin_mut());
+    }
 }
 
 /// Holds no JavaScript handles.

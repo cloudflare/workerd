@@ -86,4 +86,7 @@ void trace_context_set_tag_float(TraceContext& context, Literal key, double valu
 void trace_context_set_tag_str(TraceContext& context, Literal key, ::rust::Str value);
 void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal value);
 
+// TraceContext::detachAsync().
+void trace_context_detach_async(TraceContext& context);
+
 }  // namespace workerd::io_context

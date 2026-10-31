@@ -99,6 +99,7 @@ mod ffi {
         unsafe fn hold_trace_span(isolate: usize) -> Result<()>;
         fn drop_held_trace_span();
         unsafe fn await_in_user_trace_span(isolate: usize) -> Result<()>;
+        unsafe fn await_after_detached_user_trace_span(isolate: usize) -> Result<()>;
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
@@ -378,6 +379,23 @@ unsafe fn await_in_user_trace_span(isolate: usize) -> Result<()> {
     IoContext::current(lock)
         .and_then(|context| {
             let span = context.make_user_trace_span(c"rust_operation")?;
+            context.await_io_and_run(std::future::ready(()), move |_lock, ()| {
+                drop(span);
+                Ok(())
+            })
+        })
+        .map_err(|err| to_io(&err))
+}
+
+/// In a request, starts a user trace span and detaches it from async tracing, then awaits a future
+/// that is already complete, ending the span in the callback.
+unsafe fn await_after_detached_user_trace_span(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    IoContext::current(lock)
+        .and_then(|context| {
+            let mut span = context.make_user_trace_span(c"rust_detached")?;
+            span.detach_async();
             context.await_io_and_run(std::future::ready(()), move |_lock, ()| {
                 drop(span);
                 Ok(())

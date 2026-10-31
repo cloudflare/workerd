@@ -282,6 +282,37 @@ KJ_TEST(
   KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
 }
 
+KJ_TEST("await_io_and_run() reports its wait as its own after a user trace span is detached") {
+  kj::Vector<kj::String> events;
+  TestFixture fixture({
+    .useRealTimers = false,
+    .isolateObserver = kj::atomicRefcounted<BridgeObserver>(events),
+  });
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_after_detached_user_trace_span(isolateOf(env));
+  });
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+
+  // The operation is created, but the wait is a bridge of its own, which causes the turn.
+  bool hasOperation = false;
+  kj::Maybe<kj::String> bridgeId;
+  for (auto& event: events) {
+    if (event.startsWith("operation ") && event.endsWith(" rust_detached")) hasOperation = true;
+    if (event.startsWith("bridge ") && event.endsWith(" awaitIo")) {
+      bridgeId = kj::str(event.first(event.size() - 8).slice(7));
+    }
+  }
+  KJ_EXPECT(hasOperation, kj::strArray(events, "\n"));
+  auto& id = KJ_ASSERT_NONNULL(bridgeId, kj::strArray(events, "\n"));
+  bool causedTurn = false;
+  for (auto& event: events) {
+    if (event == kj::str("turn cause=", id)) causedTurn = true;
+  }
+  KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
+}
+
 TestFixture::SetupParams recordingSpans(RecordedSpans& records) {
   return {.requestObserverFactory = records.requestObserverFactory()};
 }

@@ -182,7 +182,7 @@ impl<'s> IoContext<'s> {
     /// Starts a span of both internal and user tracing, as C++ `IoContext::makeUserTraceSpan()`
     /// does, which ends when the returned [`TraceContext`] is dropped. If the request has async
     /// tracing, the span is an operation, which the next [`IoContext::await_io_and_run`] in the
-    /// same turn reports its wait under.
+    /// same turn reports its wait under, unless [`TraceContext::detach_async`] is called first.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.

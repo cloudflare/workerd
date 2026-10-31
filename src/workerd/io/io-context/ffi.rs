@@ -91,6 +91,7 @@ pub mod bridge {
             key: &[u8],
             value: &[u8],
         );
+        fn trace_context_detach_async(context: Pin<&mut TraceContext>);
     }
 
     /// How `io_callback_run()` ended.
