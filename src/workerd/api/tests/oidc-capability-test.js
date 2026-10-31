@@ -22,24 +22,45 @@ export const forwarding = {
     await assert.rejects(env.IDENTITY.getIdentity(''), /label/);
     assert.equal(forwarded.sanitized.legacySelector, null);
     const identity = await env.IDENTITY.getIdentity('fixed');
-    const relayed = await env.FORWARDER.exerciseIdentity(identity);
-    assert.equal(relayed.id, identity.id);
+    const relayed = await env.FORWARDER.exerciseIdentity(identity.dup());
+    assert.equal(relayed.id, await identity.id);
     assert.equal(relayed.fetch.label, 'fixed');
     assert.equal(relayed.fetch.workerId, 'origin-a');
     assert.equal(relayed.fetch.versionId, 'leaf-a');
     assert.equal(relayed.fetch.namespaceId, 'namespace-a');
-    assert.equal(typeof identity.getIdentity, 'undefined');
-    assert.equal(typeof identity.getToken, 'undefined');
-    assert.throws(() => {
-      identity.id = 'forged';
-    }, TypeError);
+    await assert.rejects(
+      identity.getIdentity('other'),
+      /does not implement|not a function|does not exist/
+    );
+    await assert.rejects(
+      identity.getToken(),
+      /does not implement|not a function|does not exist/
+    );
+    await assert.rejects(
+      identity.fetch(new URL('https://api.example/')),
+      /serializ/
+    );
+    const normalized = await identity.fetch(
+      new Request(new URL('https://api.example/'))
+    );
+    assert.equal((await normalized.json()).label, 'fixed');
+    const copy = identity.dup();
+    identity[Symbol.dispose]();
+    assert.equal(await copy.id, 'origin-a:namespace-a:fixed');
+    assert.equal(
+      (await (await copy.fetch('https://api.example/')).json()).label,
+      'fixed'
+    );
+    copy[Symbol.dispose]();
     const returned = await env.FORWARDER.select(env.IDENTITY);
     assert.equal(
       (await (await returned.fetch('https://api.example/')).json()).label,
       'returned'
     );
     assert.equal(
-      (await env.IDENTITY.getIdentity()).id,
+      await (
+        await env.IDENTITY.getIdentity()
+      ).id,
       'origin-a:namespace-a:workload'
     );
     await assert.rejects(env.IDENTITY.getIdentity('x', {}), /optional label/);

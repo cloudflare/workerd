@@ -3,10 +3,10 @@
 ```ts
 const assertion = await env.API_TOKEN.getToken();
 const grant = await env.API_TOKEN.getAuthorizationGrant({
-  authorizationServer: "https://auth.example.com",
-  scope: ["issues:read"],
+  authorizationServer: 'https://auth.example.com',
+  scope: ['issues:read'],
 });
-const response = await env.API_TOKEN.fetch("https://api.example.com/issues");
+const response = await env.API_TOKEN.fetch('https://api.example.com/issues');
 ```
 
 EWC compiles each binding into a private service capability with protected origin
@@ -21,10 +21,10 @@ flowchart LR
   Keys[Independent public discovery] --> Verifier[Destination verifier]
 ```
 
-| Profile | Subject |
-| --- | --- |
-| Worker | `worker:W` |
-| Preview | `worker:W:preview:P` |
+| Profile   | Subject                      |
+| --------- | ---------------------------- |
+| Worker    | `worker:W`                   |
+| Preview   | `worker:W:preview:P`         |
 | Namespace | `durable-object-namespace:N` |
 
 Each getter returns a fresh five-minute JWT. Configure one audience per binding;
@@ -40,3 +40,32 @@ Use normal service bindings and RPC forwarding. No native signer, per-object
 identity hook, token cache, identity resource, or assignment approval belongs in
 workerd. Local tooling reports unsupported issuance; use deployed Previews or
 explicit test mocks.
+
+## Direct JSRPC
+
+The binding is the service stub itself. The signer Worker implements token/grant
+methods and returns a service-hosted `RpcTarget` from `getIdentity(label?)`.
+No identity-specific runtime module, wrapper or compatibility flag is needed.
+The workerd integration consists of public types and standard RPC tests.
+
+```ts
+using customer = await env.API_TOKEN.getIdentity('customer-x');
+const signatureAgent = await customer.signatureAgent;
+const response = await customer.fetch('https://api.example.com/issues');
+```
+
+Identity metadata getters are remote: await `id`, `signatureAgent` and
+`directoryURL`. Copies and forwarding follow ordinary RPC `dup()` and disposal
+rules. Handles retain their original parent and fixed selection. They expose
+no nested minting, JWT or authorization-grant methods.
+
+Root `fetch()` uses native service fetch normalization. A returned handle's
+`fetch()` is an ordinary RPC method: pass a string or `Request` and RPC-safe
+options. Normalize URL objects, FormData and URLSearchParams at the call site
+with `new Request(url, init)` before passing them to the handle. The service
+validates limits before consuming the body and strips all caller identity
+selector headers. There is no label-selection header transport or RPC preflight.
+
+A runtime wrapper requires a documented requirement standard JSRPC cannot meet,
+a reproducer, an API/transport alternatives analysis and explicit design review.
+Do not add one solely for API convenience or to expose a first-class binding.

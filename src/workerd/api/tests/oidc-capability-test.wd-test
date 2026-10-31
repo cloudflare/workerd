@@ -5,14 +5,9 @@ const unitTests :Workerd.Config = (
       modules = [(name = "test", esModule = embed "oidc-capability-test.js")],
       compatibilityFlags = ["nodejs_compat", "rpc"],
       bindings = [
-        (name = "IDENTITY", wrapped = (
-          moduleName = "cloudflare-internal:oidc-api",
-          innerBindings = [
-            (name = "fetcher", service = (
-              name = "issuer", entrypoint = "Issuer",
-              props = (json = "{\"workerId\":\"origin-a\",\"versionId\":\"leaf-a\",\"audience\":\"urn:fixed\",\"namespaceId\":\"namespace-a\"}")
-            )),
-          ],
+        (name = "IDENTITY", service = (
+          name = "issuer", entrypoint = "Issuer",
+          props = (json = "{\"workerId\":\"origin-a\",\"versionId\":\"leaf-a\",\"audience\":\"urn:fixed\",\"namespaceId\":\"namespace-a\"}")
         )),
         (name = "FORWARDER", service = (name = "forwarder", entrypoint = "Forwarder")),
       ],

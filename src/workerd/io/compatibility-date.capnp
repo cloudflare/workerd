@@ -1775,11 +1775,4 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
-
-  workersOidc @202 :Bool
-      $compatEnableFlag("workers_oidc")
-      $experimental;
-  # Reserves the experimental Workers identity feature flag. The compiler binds protected
-  # origin properties and limits to the private signer through ordinary Worker RPC.
-
 }

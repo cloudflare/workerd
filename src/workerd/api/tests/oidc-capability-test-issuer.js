@@ -1,7 +1,45 @@
 // Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
+
+function responseFor(props, input, init, label) {
+  const request = new Request(input, init);
+  return new Response(
+    JSON.stringify({
+      ...props,
+      label: label ?? null,
+      legacySelector: null,
+      method: request.method,
+      url: request.url,
+    })
+  );
+}
+
+class Identity extends RpcTarget {
+  #props;
+  #label;
+  constructor(props, label) {
+    super();
+    this.#props = Object.freeze({ ...props });
+    this.#label = label;
+  }
+  get id() {
+    return Promise.resolve(
+      `${this.#props.workerId}:${this.#props.namespaceId}:${this.#label ?? 'workload'}`
+    );
+  }
+  get signatureAgent() {
+    return this.id.then((id) => `https://${id}.example`);
+  }
+  get directoryURL() {
+    return this.id.then((id) => `https://${id}.example/directory`);
+  }
+  fetch(input, init) {
+    return responseFor(this.#props, input, init, this.#label);
+  }
+}
+
 export class Issuer extends WorkerEntrypoint {
   getToken(...args) {
     if (args.length) throw new TypeError('getToken takes no arguments');
@@ -14,22 +52,17 @@ export class Issuer extends WorkerEntrypoint {
       jti: crypto.randomUUID(),
     };
   }
-  getIdentity(label) {
-    const id = `${this.ctx.props.workerId}:${this.ctx.props.namespaceId}:${label ?? 'workload'}`;
-    return {
-      id,
-      signatureAgent: `https://${id}.example`,
-      directoryURL: `https://${id}.example/directory`,
-    };
+  getIdentity(label, ...extra) {
+    if (
+      extra.length ||
+      (label !== undefined &&
+        (typeof label !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(label)))
+    ) {
+      throw new TypeError('getIdentity accepts only an optional label');
+    }
+    return new Identity(this.ctx.props, label);
   }
-  checkSignedFetch() {}
   fetch(request) {
-    return new Response(
-      JSON.stringify({
-        ...this.ctx.props,
-        label: request.headers.get('cf-workers-identity-label'),
-        legacySelector: request.headers.get('cf-workers-identity-customer'),
-      })
-    );
+    return responseFor(this.ctx.props, request);
   }
 }
