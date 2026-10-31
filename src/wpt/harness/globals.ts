@@ -95,7 +95,8 @@ globalThis.fetch = async (
 function loadResourceBinding(input: string): unknown {
   const relativePath = getBindingPath(
     path.dirname(globalThis.state.testFileName),
-    input
+    input,
+    globalThis.state.wptPath
   );
   const exports: unknown = globalThis.state.env[relativePath];
   if (exports === undefined) {

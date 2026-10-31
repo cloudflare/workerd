@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 // The S3 calls a bucket cluster makes, for tests: GET, PUT (conditional on
-// If-Match or If-None-Match: *), DELETE, and ListObjectsV2, path-style
-// (`/<bucket>/<key>`). One Durable Object holds every key, so a conditional
-// write is atomic. Requests are not authenticated.
+// If-Match or If-None-Match: *), DELETE, and ListObjectsV2 (with a delimiter,
+// common prefixes only), path-style (`/<bucket>/<key>`). One Durable Object
+// holds every key, so a conditional write is atomic. Requests are not
+// authenticated.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -37,6 +38,25 @@ export class Bucket extends DurableObject {
 
     if (request.method === 'GET' && key === '') {
       const prefix = url.searchParams.get('prefix') ?? '';
+      // With a delimiter, one unpaged answer: tests' buckets are small.
+      const delimiter = url.searchParams.get('delimiter');
+      if (delimiter !== null) {
+        const common = new Set();
+        for (const k of (await storage.list({ prefix })).keys()) {
+          const end = k.indexOf(delimiter, prefix.length);
+          if (end >= 0) common.add(k.slice(0, end + delimiter.length));
+        }
+        const xml =
+          '<ListBucketResult><IsTruncated>false</IsTruncated>' +
+          [...common]
+            .map(
+              (p) =>
+                `<CommonPrefixes><Prefix>${escape(p)}</Prefix></CommonPrefixes>`
+            )
+            .join('') +
+          '</ListBucketResult>';
+        return new Response(xml, { headers });
+      }
       const after = url.searchParams.get('continuation-token');
       const listed = await storage.list({
         prefix,

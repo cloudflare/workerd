@@ -274,6 +274,61 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
       factory, kj::mv(directory), kj::str(uniqueKey), kj::mv(actors)));
 }
 
+void actor_storage_set_alarm(
+    const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs) {
+  auto key = ActorKey(kj::str(actor), name.empty() ? kj::Maybe<kj::String>() : kj::str(name));
+  auto time = kj::UNIX_EPOCH + atMs * kj::MILLISECONDS;
+  auto& scheduler = *storage.getImpl().alarmScheduler;
+  // Only ever earlier: waking an object early is a no-op, late is a missed alarm.
+  KJ_IF_SOME(current, scheduler.getAlarm(key)) {
+    if (current <= time) return;
+  }
+  scheduler.setAlarm(key, time);
+}
+
+namespace {
+// An alarm whose object another instance owns now: that instance runs it. Retried if `again`.
+class AlarmOwnedElsewhere final: public WorkerInterface {
+ public:
+  explicit AlarmOwnedElsewhere(AlarmElsewhere then): again(then == AlarmElsewhere::Retry) {}
+  kj::Promise<AlarmResult> runAlarm(kj::Date, uint32_t) override {
+    return AlarmResult{.retry = again,
+      .retryCountsAgainstLimit = false,
+      .outcome = again ? EventOutcome::CANCELED : EventOutcome::OK};
+  }
+  kj::Promise<void> request(kj::HttpMethod,
+      kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncInputStream&,
+      kj::HttpService::Response&) override {
+    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
+  }
+  kj::Promise<void> connect(kj::StringPtr,
+      const kj::HttpHeaders&,
+      kj::AsyncIoStream&,
+      ConnectResponse&,
+      kj::HttpConnectSettings) override {
+    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
+  }
+  kj::Promise<void> prewarm(kj::StringPtr) override {
+    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date, kj::StringPtr) override {
+    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent>) override {
+    KJ_UNIMPLEMENTED("an alarm's interface only runs the alarm");
+  }
+
+ private:
+  bool again;
+};
+}  // namespace
+
+kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then) {
+  return kj::heap<AlarmOwnedElsewhere>(then);
+}
+
 void actor_storage_delete_all(const ActorStorage& storage) {
   storage.getImpl().alarmScheduler->deleteAll();
 }
@@ -373,8 +428,9 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
   ::rust::Box<ActorHooks> hooks;
 };
 
-// Schedules a root actor's alarms with the namespace's scheduler; the prior task is ignored since
-// everything runs synchronously here.
+// Schedules a root actor's alarms with the namespace's scheduler, at once, and in a cluster indexes
+// them after `priorTask`, as production's alarm manager orders its requests: the index takes them
+// in the order they were made.
 class ActorSqliteHooks final: public ActorSqlite::Hooks {
  public:
   ActorSqliteHooks(kj::Own<ActorStorage::Impl> storage, ActorKey actor)
@@ -383,15 +439,33 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
 
   kj::Promise<void> scheduleRun(
       kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
+    uint64_t atMs = 0;
     KJ_IF_SOME(scheduledTime, newAlarmTime) {
-      // TODO(cluster): an alarm must follow its object between instances.
-      JSG_REQUIRE(
-          !storage->actors->replicated(), Error, "Alarms are not yet supported in cluster mode.");
       storage->alarmScheduler->setAlarm(actor, scheduledTime);
+      atMs = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     } else {
       storage->alarmScheduler->deleteAlarm(actor);
     }
-    return kj::READY_NOW;
+    if (!storage->actors->replicated()) return kj::READY_NOW;
+    // A new or earlier alarm is in the cluster's index before the commit setting it starts, so
+    // that a peer wakes the object if this instance dies once it is durable, acknowledged or not.
+    auto name = kj::str(actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj));
+    return priorTask.then(
+        [storage = kj::addRef(*storage), id = kj::str(actor.actorId), name = kj::mv(name), atMs]() {
+      return result_task_run(storage->actors->alarm_set(toRust(id), toRust(name), atMs));
+    });
+  }
+
+  // The object came here with an alarm at `time`, which this instance has not scheduled. A failed
+  // index write is written again by the index's next tidy.
+  void opened(kj::Date time) {
+    storage->alarmScheduler->setAlarm(actor, time);
+    auto name = actor.name.map([](kj::String& n) { return n.asPtr(); }).orDefault(""_kj);
+    auto atMs = (time - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    result_task_run(storage->actors->alarm_opened(toRust(actor.actorId), toRust(name), atMs))
+        .detach([](kj::Exception&& e) {
+      KJ_LOG(WARNING, "indexing an alarm that came with its object failed", e);
+    });
   }
 
  private:
@@ -428,10 +502,13 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
     }
 
     kj::Own<ActorSqlite::Hooks> sqliteHooks;
+    kj::Maybe<ActorSqliteHooks&> rootHooks;
     uint selfId = facetId.orDefault(0);
     if (facetId == kj::none) {
-      sqliteHooks =
+      auto root =
           kj::heap<ActorSqliteHooks>(kj::addRef(*storage), ActorKey(rootKey.asPtr(), actorName));
+      rootHooks = *root;
+      sqliteHooks = kj::mv(root);
     } else {
       sqliteHooks = kj::heap<FacetAlarmHooks>();
     }
@@ -457,6 +534,15 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
       committer = kj::none;
     }
     auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks);
+    KJ_IF_SOME(root, rootHooks) {
+      if (storage->actors->replicated()) {
+        KJ_IF_SOME(alarm, sqlite->getAlarm({}).tryGet<kj::Maybe<kj::Date>>()) {
+          KJ_IF_SOME(time, alarm) {
+            root.opened(time);
+          }
+        }
+      }
+    }
     return sqlite.attach(kj::mv(sqliteHooks));
   };
 }

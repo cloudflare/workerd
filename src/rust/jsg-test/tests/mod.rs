@@ -36,6 +36,7 @@ mod null_or_undefined;
 mod nullable;
 mod number;
 mod option;
+mod pending_exception;
 mod promise;
 mod resource_callback;
 mod resource_conversion;

@@ -443,7 +443,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             keys: &[&str],
             values: &[Local],
-        ) -> Result<Local>;
+        ) -> Result<MaybeLocal>;
         // Leave what a setter, getter or Proxy trap throws pending; see `call_into_js()`.
         // Fallible: interning the key fails if it is longer than V8's string length limit or V8
         // fails to create the string.
@@ -608,7 +608,7 @@ pub mod ffi {
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
 
         // ArrayBuffer detach/detachable/was-detached
-        pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
+        pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &Local) -> bool;
         pub unsafe fn local_array_buffer_was_detached(buffer: &Local) -> bool;
         pub unsafe fn local_array_buffer_is_detachable(buffer: &Local) -> bool;
 
@@ -811,8 +811,7 @@ pub mod ffi {
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
 
-        // Leaves what creating the wrapper throws pending, and checks for termination itself,
-        // rather than through `call_into_js()`; see `ffi.h`.
+        // Leaves what creating the wrapper throws pending; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
@@ -825,12 +824,12 @@ pub mod ffi {
             args: Pin<&mut FunctionCallbackInfo>,
         );
 
-        // Fallible: throws if the Wrappable already has a wrapper, or if V8 cannot create one,
-        // which happens only when execution is terminating.
+        // Empty if an exception or a termination is pending. Fallible: throws if the Wrappable
+        // already has a wrapper, or if V8 cannot create one.
         pub unsafe fn wrappable_attach_opaque_wrapper(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
-        ) -> Result<Local>;
+        ) -> Result<MaybeLocal>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -850,10 +849,11 @@ pub mod ffi {
             value: Local, /* v8::LocalObject */
         ) -> *const TraitObjectPtr;
 
+        // Empty if an exception or a termination is pending; see `call_into_js()`.
         pub unsafe fn function_template_get_function(
             isolate: *mut Isolate,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> Local /* v8::Local<Function> */;
+        ) -> MaybeLocal /* v8::Local<Function> */;
 
         unsafe fn function_template_set_nested_type(
             isolate: *mut Isolate,
@@ -1725,8 +1725,8 @@ impl<'s, T> Local<'s, T> {
 
     /// Converts the value with JavaScript's `ToInt32`: `ToNumber`, then truncation toward zero
     /// modulo 2^32, so NaN and the infinities are 0 and `2 ** 32 + 5` is 5. If the coercion
-    /// throws, or execution is terminating, fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// throws, or an exception or a termination is already pending, fails with an error for
+    /// which [`Error::is_pending`] is true.
     ///
     /// Corresponds to `v8::Value::Int32Value()`.
     pub fn int32_value(&self, lock: &mut Lock<'s>) -> Result<i32, Error> {
@@ -1743,8 +1743,8 @@ impl<'s, T> Local<'s, T> {
 
     /// Converts the value with JavaScript's `ToUint32`: `ToNumber`, then truncation toward zero
     /// modulo 2^32, so NaN and the infinities are 0 and `-1` is `u32::MAX`. If the coercion
-    /// throws, or execution is terminating, fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// throws, or an exception or a termination is already pending, fails with an error for
+    /// which [`Error::is_pending`] is true.
     ///
     /// Corresponds to `v8::Value::Uint32Value()`.
     pub fn uint32_value(&self, lock: &mut Lock<'s>) -> Result<u32, Error> {
@@ -1760,8 +1760,9 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// Converts the value with JavaScript's `ToInteger` (`ToNumber`, then truncation toward
-    /// zero, with NaN as 0), saturating at the range of `i64`. If the coercion throws, or
-    /// execution is terminating, fails with an error for which [`Error::is_pending`] is true.
+    /// zero, with NaN as 0), saturating at the range of `i64`. If the coercion throws, or an
+    /// exception or a termination is already pending, fails with an error for which
+    /// [`Error::is_pending`] is true.
     ///
     /// Corresponds to `v8::Value::IntegerValue()`.
     pub fn integer_value(&self, lock: &mut Lock<'s>) -> Result<i64, Error> {
@@ -1782,8 +1783,8 @@ impl<'s, T> Local<'s, T> {
 
     /// Converts the value with JavaScript's `ToString`, which, unlike `String()`, rejects a
     /// `Symbol`. The result is a V8 string: nothing is copied out of the V8 heap. If the coercion
-    /// throws, or execution is terminating, fails with an error for which [`Error::is_pending`]
-    /// is true.
+    /// throws, or an exception or a termination is already pending, fails with an error for
+    /// which [`Error::is_pending`] is true.
     ///
     /// Corresponds to `v8::Value::ToString()` and C++ JSG's `JsValue::toJsString()`, and to what
     /// C++ JSG does for a `jsg::JsString` parameter. Unlike `Local<String>::to_string()`, which
@@ -1975,12 +1976,12 @@ impl<'s> Local<'s, Function> {
     ///
     /// # Errors
     ///
-    /// If the function throws, or execution is terminating (then without calling it), the
-    /// exception stays pending and this returns an error for which [`Error::is_pending`] is
-    /// true. [`Lock::throw_exception`] throws nothing for it, so returning it from a callback
-    /// propagates the exception to the callback's JavaScript caller, as C++ JSG does. Don't call
-    /// into JavaScript after such an error; to handle the exception instead, make the call in
-    /// [`Lock::try_catch`].
+    /// If the function throws, or an exception or a termination is already pending (then
+    /// without calling it), the exception stays pending and this returns an error for which
+    /// [`Error::is_pending`] is true. [`Lock::throw_exception`] throws nothing for it, so
+    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
+    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
+    /// instead, make the call in [`Lock::try_catch`].
     ///
     /// # Example
     ///
@@ -2020,26 +2021,23 @@ impl<'s> Local<'s, Function> {
 }
 
 /// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
-/// A call that runs no JavaScript but that V8 doesn't allow while execution is terminating, such
-/// as `CreateDataProperty`, goes through here too, and its `shim` never returns `None`.
+/// A call that runs no JavaScript but that V8 doesn't allow while an exception or a termination
+/// is pending, such as `CreateDataProperty`, goes through here too.
 ///
-/// Every call that can run JavaScript goes through here, so that all of them handle exceptions
-/// and termination alike. `shim` returns `None` if JavaScript threw, leaving the exception pending
-/// (see `ffi.h`); that becomes an error for which [`Error::is_pending`] is true. While execution
-/// is terminating, `shim` is not run and the error is the same: calling into V8 then would clear
-/// the termination.
-/// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
+/// `shim` returns `None` if JavaScript threw, leaving the exception pending, or if an exception
+/// or a termination was already pending, in which case the shim called nothing in V8 (see
+/// `exceptionPending()` in `ffi.h`). Either way that becomes an error for which
+/// [`Error::is_pending`] is true. An error from `shim` itself (a C++ exception, such as a failed
+/// `KJ_REQUIRE`) is passed on.
 ///
-/// The one exception is `wrap_resource`, which checks for termination itself, so that its common
-/// case, reading a wrapper that already exists, takes one FFI call rather than two.
+/// The check that makes these failures uniform is in each C++ shim, not here. Shims whose
+/// callers turn an empty result into [`Error::pending`] themselves (the promise shims,
+/// `function_new`, the opaque wrapper, and `wrap_resource`, whose empty result can also mean a
+/// wrapper in another isolate) don't go through here.
 pub(crate) fn call_into_js<'s, T>(
     lock: &mut Lock<'s>,
     shim: impl FnOnce(&mut Lock<'s>) -> Result<Option<T>, Error>,
 ) -> Result<T, Error> {
-    // SAFETY: lock guarantees the isolate is locked.
-    if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
-        return Err(Error::pending());
-    }
     shim(lock)?.ok_or_else(Error::pending)
 }
 
@@ -2187,9 +2185,9 @@ impl<'s> Local<'s, Array> {
     ///
     /// # Errors
     ///
-    /// If a setter, on the array or its prototype chain, throws, or execution is terminating,
-    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
-    /// true, as for [`Local::<Function>::call`].
+    /// If a setter, on the array or its prototype chain, throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn set(
         self,
         lock: &mut Lock<'s>,
@@ -2218,9 +2216,9 @@ impl<'s> Local<'s, Array> {
     ///
     /// # Errors
     ///
-    /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or
-    /// execution is terminating, the exception stays pending and the error is one for which
-    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
+    /// exception or a termination is already pending, the exception stays pending and the error
+    /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
         let globals = call_into_js(lock, |lock| {
             let mut globals = Vec::new();
@@ -2441,10 +2439,18 @@ impl<'s> Local<'s, ArrayBuffer> {
     ///
     /// Takes the lock mutably so that a detach cannot happen while a slice
     /// borrowed from it (see [`as_slice`](Self::as_slice)) is live.
-    pub fn detach(self, lock: &mut Lock<'_>) {
-        let mut handle = *self.raw();
-        // SAFETY: lock guarantees the isolate is locked; handle is valid.
-        unsafe { ffi::local_array_buffer_detach(lock.isolate().as_ffi(), &mut handle) }
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, detaches nothing and fails with an error for
+    /// which [`Error::is_pending`] is true, as [`Local::<Function>::call`] does: V8 does not allow
+    /// detaching then.
+    pub fn detach(self, lock: &mut Lock<'_>) -> crate::Result<()> {
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked; handle is valid.
+            let ok = unsafe { ffi::local_array_buffer_detach(lock.isolate().as_ffi(), self.raw()) };
+            Ok(ok.then_some(()))
+        })
     }
 
     /// Returns `true` if this `ArrayBuffer` has been detached.
@@ -3531,10 +3537,10 @@ impl Date {
     ///
     /// # Errors
     ///
-    /// If V8 throws while creating it, or execution is terminating, the exception stays pending
-    /// and the error is one for which [`Error::is_pending`] is true, as for
-    /// [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript, which
-    /// would clear a pending termination.
+    /// If V8 throws while creating it, or an exception or a termination is already pending, the
+    /// exception stays pending and the error is one for which [`Error::is_pending`] is true, as
+    /// for [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript,
+    /// which would clear a pending exception or termination.
     #[inline]
     pub fn new<'s>(lock: &mut Lock<'s>, time: f64) -> crate::Result<Local<'s, Self>> {
         call_into_js(lock, |lock| {
@@ -3561,22 +3567,17 @@ impl Local<'_, Date> {
 
 /// Rust equivalent of `v8::String::Utf8Value`.
 ///
-/// Converts any V8 value to its UTF-8 string representation (analogous to calling
-/// `.toString()` in JavaScript) and holds the result for the duration of its lifetime.
+/// Converts a value to a string with V8's `ToString` (as `String(value)` does in JavaScript,
+/// except that a `Symbol` throws) and holds its UTF-8 bytes for the duration of its lifetime.
 ///
 /// The UTF-8 bytes are a **heap-allocated copy** independent of the V8 heap — the data
 /// remains valid and stable for the full lifetime of this `Utf8Value` regardless of GC
 /// activity.
 ///
-/// If the value cannot be converted to a string (e.g. a `Symbol`), V8 stores a null
-/// pointer internally. In that case [`as_ptr`](Self::as_ptr) returns null,
-/// [`length`](Self::length) returns `0`, and [`as_bytes`](Self::as_bytes) /
-/// [`as_str`](Self::as_str) return empty slices.
-///
 /// # Example
 ///
 /// ```ignore
-/// let utf8 = Utf8Value::new(lock, &value);
+/// let utf8 = Utf8Value::new(lock, &value)?;
 /// println!("{}", utf8.as_str().unwrap_or(""));
 /// ```
 pub struct Utf8Value {
@@ -3587,19 +3588,26 @@ impl Utf8Value {
     /// Constructs a `Utf8Value` by converting `value` to its UTF-8 string representation.
     ///
     /// Produces a heap-allocated copy of the UTF-8 bytes that is independent of the V8
-    /// heap. If `value` cannot be converted to a string (e.g. a `Symbol`), the internal
-    /// data pointer will be null and [`length`](Self::length) will return `0`.
+    /// heap.
     ///
-    /// Corresponds to `v8::String::Utf8Value(isolate, obj)`.
-    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> Self {
-        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-        let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), *value.raw()) };
-        Self { inner }
+    /// Corresponds to `v8::String::Utf8Value(isolate, obj)`, except that what the conversion
+    /// throws is not discarded.
+    ///
+    /// # Errors
+    ///
+    /// If the conversion throws (a `Symbol`, or a `toString` that throws), or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> crate::Result<Self> {
+        value.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+            let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), *value.raw()) };
+            Ok((inner.ptr != 0).then(|| Self { inner }))
+        })
     }
 
     /// Returns the number of UTF-8 bytes in the string, excluding the null terminator.
-    ///
-    /// Returns `0` if V8 could not convert the value to a string.
     ///
     /// Corresponds to `v8::String::Utf8Value::length()`.
     #[inline]
@@ -3613,8 +3621,6 @@ impl Utf8Value {
     /// The pointer points into a heap-allocated buffer owned by this `Utf8Value`, not into
     /// V8 memory. It is valid for the lifetime of this `Utf8Value`.
     ///
-    /// Returns null if V8 could not convert the value to a string (e.g. a `Symbol`).
-    ///
     /// Corresponds to `v8::String::Utf8Value::operator*()`.
     #[inline]
     pub fn as_ptr(&self) -> *const u8 {
@@ -3623,17 +3629,11 @@ impl Utf8Value {
     }
 
     /// Returns the UTF-8 content as a byte slice.
-    ///
-    /// Returns an empty slice if V8 could not convert the value to a string (e.g. a `Symbol`),
-    /// in which case `operator*()` returns a null pointer.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
-        let ptr = self.as_ptr();
-        if ptr.is_null() {
-            return &[];
-        }
-        // SAFETY: ptr is non-null and points to length() valid bytes for the lifetime of self.
-        unsafe { std::slice::from_raw_parts(ptr, self.length()) }
+        // SAFETY: the pointer is non-null (the conversion succeeded) and points to length()
+        // valid bytes for the lifetime of self.
+        unsafe { std::slice::from_raw_parts(self.as_ptr(), self.length()) }
     }
 
     /// Returns the UTF-8 content as a `&str`, or `None` if the bytes are not valid UTF-8.
@@ -3664,9 +3664,9 @@ impl Object {
     ///
     /// # Errors
     ///
-    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it. While execution
-    /// is terminating, it creates nothing, and the error is one for which [`Error::is_pending`]
-    /// is true, as for [`Local::<Object>::set`].
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it. While an
+    /// exception or a termination is pending, it creates nothing, and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Object>::set`].
     pub fn with_data_properties<'s>(
         lock: &mut Lock<'s>,
         properties: &[(&str, Local<'s, Value>)],
@@ -3678,8 +3678,8 @@ impl Object {
                 (*key, *value)
             })
             .unzip();
-        // No JavaScript runs, but V8 doesn't allow `CreateDataProperty` while execution is
-        // terminating (a debug check fails), which `call_into_js` checks for.
+        // No JavaScript runs, but V8 doesn't allow `CreateDataProperty` while an exception or a
+        // termination is pending (a debug check fails), which the shim checks for.
         call_into_js(lock, |lock| {
             // SAFETY: lock guarantees the isolate is locked, a context is entered and a
             // HandleScope is active; the values are valid handles in it. The result belongs to
@@ -3692,7 +3692,7 @@ impl Object {
                 )
             }?;
             // SAFETY: as above.
-            Ok(Some(unsafe { Local::from_ffi(object) }))
+            Ok(unsafe { Local::from_ffi_maybe(object) })
         })
     }
 }
@@ -3702,9 +3702,9 @@ impl<'s> Local<'s, Object> {
     ///
     /// # Errors
     ///
-    /// If a setter on the prototype chain or a Proxy trap throws, or execution is terminating,
-    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
-    /// true, as for [`Local::<Function>::call`].
+    /// If a setter on the prototype chain or a Proxy trap throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) -> crate::Result<()> {
         self.debug_assert_isolate(lock);
         value.debug_assert_isolate(lock);
@@ -3727,9 +3727,9 @@ impl<'s> Local<'s, Object> {
     ///
     /// # Errors
     ///
-    /// If a Proxy `has` trap throws, or execution is terminating, the exception stays pending
-    /// and the error is one for which [`Error::is_pending`] is true, as for
-    /// [`Local::<Function>::call`].
+    /// If a Proxy `has` trap throws, or an exception or a termination is already pending, the
+    /// exception stays pending and the error is one for which [`Error::is_pending`] is true, as
+    /// for [`Local::<Function>::call`].
     pub fn has(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<bool> {
         call_into_js(lock, |lock| {
             let mut has = false;
@@ -3745,9 +3745,9 @@ impl<'s> Local<'s, Object> {
     ///
     /// # Errors
     ///
-    /// If a getter or Proxy trap throws, or execution is terminating, the exception stays
-    /// pending and the error is one for which [`Error::is_pending`] is true, as for
-    /// [`Local::<Function>::call`].
+    /// If a getter or Proxy trap throws, or an exception or a termination is already pending,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is true,
+    /// as for [`Local::<Function>::call`].
     pub fn get(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<Local<'s, Value>> {
         call_into_js(lock, |lock| {
             // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid. The
@@ -3792,9 +3792,9 @@ impl<'s> Local<'s, Object> {
     ///
     /// # Errors
     ///
-    /// If a Proxy `ownKeys` or `getOwnPropertyDescriptor` trap throws, or execution is
-    /// terminating, the exception stays pending and the error is one for which
-    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    /// If a Proxy `ownKeys` or `getOwnPropertyDescriptor` trap throws, or an exception or a
+    /// termination is already pending, the exception stays pending and the error is one for
+    /// which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn keys(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, String>>> {
         let names = call_into_js(lock, |lock| {
             let mut names = Vec::new();
@@ -4074,7 +4074,13 @@ impl Global<FunctionTemplate> {
     /// This is the V8 `Function` object that can be called as a constructor or
     /// used to access static methods, analogous to a JavaScript class reference
     /// (e.g., `URL`, `TextEncoder`).
-    pub fn as_local_function<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Function> {
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, returns nothing and fails with an error for
+    /// which [`Error::is_pending`] is true, as [`Local::<Function>::call`] does: getting the
+    /// function prepares to run JavaScript.
+    pub fn as_local_function<'s>(&self, lock: &mut Lock<'s>) -> Result<Local<'s, Function>, Error> {
         assert_in_isolate_of(lock, &self.state);
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { function_template_get_function(lock, &self.handle) }
@@ -4123,20 +4129,26 @@ unsafe fn global_to_local<'s, T>(lock: &mut Lock<'s>, handle: &ffi::Global) -> L
 /// Returns the constructor function of the persistent function template `handle`, in the
 /// scope of `lock`.
 ///
+/// # Errors
+/// If an exception or a termination is pending, fails with an error for which
+/// [`Error::is_pending`] is true; see [`Global::<FunctionTemplate>::as_local_function`].
+///
 /// # Safety
 /// `handle` must be a valid `v8::Global<v8::FunctionTemplate>` of the isolate of `lock`.
 pub(crate) unsafe fn function_template_get_function<'s>(
     lock: &mut Lock<'s>,
     handle: &ffi::Global,
-) -> Local<'s, Function> {
-    // SAFETY: isolate is valid and locked, and a HandleScope is open (guaranteed by Lock); the
-    // handle is a valid function template of its isolate (guaranteed by caller).
-    unsafe {
-        Local::from_ffi(ffi::function_template_get_function(
-            lock.isolate().as_ffi(),
-            handle,
-        ))
-    }
+) -> Result<Local<'s, Function>, Error> {
+    call_into_js(lock, |lock| {
+        // SAFETY: isolate is valid and locked, and a HandleScope is open (guaranteed by Lock);
+        // the handle is a valid function template of its isolate (guaranteed by caller).
+        Ok(unsafe {
+            Local::from_ffi_maybe(ffi::function_template_get_function(
+                lock.isolate().as_ffi(),
+                handle,
+            ))
+        })
+    })
 }
 
 /// Creates a new persistent handle to the value of `handle`.
@@ -4813,9 +4825,9 @@ impl WrappableRc {
     ///
     /// # Errors
     ///
-    /// If V8 fails to create the wrapper, or execution is terminating, the exception stays
-    /// pending and the error is one for which [`Error::is_pending`] is true, as for
-    /// [`Local::<Function>::call`].
+    /// If V8 fails to create the wrapper, or an exception or a termination is already pending,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is true,
+    /// as for [`Local::<Function>::call`].
     pub(crate) fn to_js<'s, R: Resource>(
         &self,
         lock: &mut Lock<'s>,
@@ -4823,8 +4835,7 @@ impl WrappableRc {
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
         let mut wrapped_elsewhere = false;
         // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive. The shim checks for termination
-        // itself, as `call_into_js()` would.
+        // isolate, which the Realm's template cache keeps alive.
         let handle = unsafe {
             ffi::wrap_resource(
                 lock.isolate().as_ffi(),
@@ -4963,34 +4974,41 @@ impl WrappableRc {
     /// Wrappable as its data, which keeps the Wrappable alive while one of them is reachable.
     /// The Wrappable must not have a wrapper yet, and gets one wrapper for all of them.
     ///
-    /// While execution is terminating, or an exception is pending, creates nothing and returns
-    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
-    /// function only while execution is terminating.
+    /// While an exception or a termination is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shims check before
+    /// creating the wrapper or a function, which would clear the exception.
     pub(crate) fn new_functions<'s, const N: usize>(
         &self,
         lock: &Lock<'s>,
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
-        // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
-        // exception or termination, so nothing is created while one is pending.
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        if unsafe {
-            ffi::isolate_is_execution_terminating(isolate)
-                || ffi::isolate_has_pending_exception(isolate)
-        } {
-            return Err(Error::pending());
-        }
         // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
-        // (guaranteed by Lock).
-        let data = unsafe { ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()) }
-            .map_err(|_| Error::pending())?;
+        // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
+        let data: Local<Value> = unsafe {
+            Local::from_ffi_maybe(
+                ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
+                    |exception| {
+                        // `jsg::check` throws when creating the wrapper leaves an exception
+                        // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
+                        if ffi::isolate_has_pending_exception(isolate)
+                            || ffi::isolate_is_execution_terminating(isolate)
+                        {
+                            Error::pending()
+                        } else {
+                            Error::from(exception)
+                        }
+                    },
+                )?,
+            )
+        }
+        .ok_or_else(Error::pending)?;
         let mut functions = Vec::with_capacity(N);
         for callback in callbacks {
             // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
             // lock's scope, in which the function is created.
             let function = unsafe {
-                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, &data))
+                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
             };
             functions.push(function.ok_or_else(Error::pending)?);
         }

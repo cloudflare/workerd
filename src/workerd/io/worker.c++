@@ -215,6 +215,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     // This doesn't appear to be an Error object. Fall back to stringifying the whole value as
     // the message.
     if (!js.v8Isolate->IsExecutionTerminating()) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): its scope ends after the toString().
       v8::TryCatch tryCatch(js.v8Isolate);
       try {
         message = exception.toString(js);
@@ -301,6 +302,7 @@ void reportStartupError(kj::StringPtr id,
     kj::Maybe<kj::Exception>& permanentException,
     SpanParent parentSpan,
     bool isDynamicWorker) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only logs what reporting the exception threw.
   v8::TryCatch catcher2(js.v8Isolate);
   ExceptionOrDuration limitErrorOrTime2 = 0 * kj::NANOSECONDS;
   try {
@@ -328,6 +330,10 @@ void reportStartupError(kj::StringPtr id,
         if (catcher.HasCaught()) {
           js.withinHandleScope([&] {
             auto exception = catcher.Exception();
+            auto exceptionMessage = catcher.Message();
+            // Forget the exception before reading its properties, which can run getters: they
+            // may call into Rust JSG, which fails while an exception is pending.
+            if (catcher.CanContinue()) catcher.Reset();
 
             permanentException = js.exceptionToKj(js.v8Ref(exception));
 
@@ -338,21 +344,21 @@ void reportStartupError(kj::StringPtr id,
               lines.add(kj::str("Uncaught ",
                   jsg::extractTunneledExceptionDescription(
                       KJ_ASSERT_NONNULL(permanentException).getDescription())));
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               e.addError(kj::strArray(lines, "\n"));
 
             } else KJ_IF_SOME(i, inspector) {
               auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
               sendExceptionToInspector(js, *i.get(), UncaughtExceptionSource::INTERNAL,
-                  jsg::JsValue(exception), jsg::JsMessage(catcher.Message()));
+                  jsg::JsValue(exception), jsg::JsMessage(exceptionMessage));
               // When the inspector is active, we don't want to throw here because then the inspector
               // won't be able to connect and the developer will never know what happened.
             } else {
               // We should never get here in production if we've validated scripts before deployment.
               // (unless this is a dynamic worker)
               kj::Vector<kj::String> lines;
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
@@ -977,6 +983,7 @@ struct Worker::Script::Impl {
 
           // We have to wrap the call to handler in a try catch here because
           // we have to tunnel any jsg::JsExceptionThrown instances back.
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): only takes the exception before its scope ends.
           v8::TryCatch tryCatch(js.v8Isolate);
           ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
           try {
@@ -1616,6 +1623,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         });
 
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
@@ -1926,7 +1934,15 @@ void handleLog(jsg::Lock& js,
   // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): forgetCaughtException() resets it.
   v8::TryCatch tryCatch(js.v8Isolate);
+
+  // Forgets an exception that stringifying threw, so that it isn't pending while more JavaScript
+  // runs: a toJSON() or toString() may call into Rust JSG, which fails while an exception is
+  // pending.
+  auto forgetCaughtException = [&]() {
+    if (tryCatch.HasCaught() && tryCatch.CanContinue()) tryCatch.Reset();
+  };
 
   auto message = [&]() {
     int length = info.Length();
@@ -1969,10 +1985,11 @@ void handleLog(jsg::Lock& js,
           // Check if arg has a `toJSON` property which is a function.
           auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
           v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
-          if (!toJSON.IsEmpty()) {
-            if (jsg::check(toJSON)->IsFunction()) {
-              shouldSerialiseToJson = true;
-            }
+          if (toJSON.IsEmpty()) {
+            // A `toJSON` getter threw.
+            forgetCaughtException();
+          } else if (jsg::check(toJSON)->IsFunction()) {
+            shouldSerialiseToJson = true;
           }
         }
 
@@ -1993,6 +2010,7 @@ void handleLog(jsg::Lock& js,
           }
         }) != kj::none) {
           stringified.add(kj::str("{}"));
+          forgetCaughtException();
         };
       });
     }
@@ -2338,6 +2356,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       // Enter the context for compiling and running the script.
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 

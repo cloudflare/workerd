@@ -40,9 +40,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   }
 
   kj::Promise<void> sendTraces(SendTracesContext context) override {
-    auto traces =
-        KJ_MAP(trace, context.getParams().getTraces()) { return kj::refcounted<Trace>(trace); };
-    auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
+    auto event = api::TraceCustomEvent::fromRpc(api::TraceCustomEvent::TYPE, context.getParams());
     auto worker = getWorker();
     auto result = co_await worker->customEvent(kj::mv(event));
     context.getResults().getResult().setOutcome(result.outcome);
@@ -72,7 +70,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   }
 
   kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-    auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
+    auto customEvent = tracing::TailStreamCustomEvent::fromRpc(context.getParams());
     auto cap = customEvent->getCap();
     capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
     pipelineBuilder.setTopLevel(cap);

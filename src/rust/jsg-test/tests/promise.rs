@@ -769,8 +769,8 @@ impl TerminatingPromises {
         record("resolve", resolver.resolve(lock, value));
         record("reject", resolver.reject(lock, value));
         record("reject_with_error", resolver.reject_with_error(lock, &err));
-        // An error that isn't pending: creating its exception while execution is terminating
-        // fails a V8 debug check, so none of these creates it.
+        // An error that isn't pending: nothing could be rejected with its exception while
+        // execution is terminating, so none of these creates it.
         let type_error = jsg::Error::new_type_error("rejected while terminating");
         record(
             "exception(TypeError)",
