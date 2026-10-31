@@ -26,7 +26,7 @@ namespace jsg {
 class Lock;
 }  // namespace jsg
 
-static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
+static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 1'000'000;
 static constexpr uint64_t DEFAULT_MAX_SCRYPT_COST = 1u << 20;
 
 // Interface for an object that enforces resource limits on an Isolate level.
@@ -84,10 +84,12 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   // number of iterations requested is acceptable. If a number is returned, the requested
   // iterations is unacceptable and the return value specifies the maximum.
   virtual kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& js, size_t iterations) const {
-    // By default, historically we've limited this to 100,000 iterations max. We'll set
-    // that as the default for now. To set a default of no-limit, this would be changed
-    // to return kj::none. Note, this current default limit is *WAY* below the recommended
-    // minimum iterations for pbkdf2.
+    // This was historically limited to 100,000 iterations, dating back to when Workers
+    // only supported a 50ms CPU time limit -- 100,000 iterations was enough to exhaust
+    // that budget on its own. Now that CPU limits are measured in minutes rather than
+    // milliseconds, that ceiling sat well below the recommended minimum iterations for
+    // pbkdf2 and rejected counts that callers had good reason to request. To set a
+    // default of no-limit, this would be changed to return kj::none.
     // TODO(maybe): We might consider emitting a warning if the number of iterations is
     // too low to be safe.
     if (iterations > DEFAULT_MAX_PBKDF2_ITERATIONS) return DEFAULT_MAX_PBKDF2_ITERATIONS;
