@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs the complete R2 binding suite using the HTTP transport. The instrumented R2 test uses a
+# restricted set of exports so that every emitted span can be checked exhaustively.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-test.js" )
+        ],
+        bindings = [
+          ( name = "BUCKET", r2Bucket = "r2-test" ),
+          ( name = "SERVICE", service = "r2-test" ),
+          ( name = "R2_TRANSPORT", text = "http" ),
+          ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers",
+                              "streams_enable_constructors", "r2_list_honor_include"],
+      )
+    ),
+  ],
+);
