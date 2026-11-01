@@ -481,7 +481,8 @@ class EventTarget: public jsg::Object {
   // addEventListener() and removeEventListener() — including once-listener removal during
   // dispatch and {signal}-triggered removals — and on managed event handler attribute
   // activation and deactivation, whose trampoline occupies a regular listener slot.
-  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown. Hooks registered
+  // through EventTargetBootstrap::setListenerCountHook() are called on the same occasions.
   virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
@@ -508,6 +509,19 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback);
 
  private:
+  friend class EventTargetBootstrap;
+
+  // Calls listenerCountChanged(), then the bootstrap hook registered for `type`, if any.
+  void notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count);
+
+  struct ListenerCountHook {
+    kj::String type;
+    jsg::JsRef<jsg::JsFunction> hook;
+  };
+  // Hooks registered through EventTargetBootstrap::setListenerCountHook(), at most one per type.
+  // Only EventTargets implemented in the per-isolate bootstrap have any, and then one or two.
+  kj::Vector<ListenerCountHook> listenerCountHooks;
+
   struct EventHandler {
     // The listener's identity (the function or object passed to addEventListener, or a
     // synthesized object for internally-registered listeners), used for removeEventListener

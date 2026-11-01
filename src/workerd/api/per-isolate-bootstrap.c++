@@ -7,10 +7,12 @@
 #include <workerd/api/abort-bootstrap.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
@@ -201,6 +203,105 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The EventTarget seam (see event-target-bootstrap.h). Plain methods: they allocate, can throw,
+// and some call back into JavaScript.
+static void SetListenerCountHook(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setListenerCountHook(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void GetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::getEventHandlerAttribute(
+              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
+    });
+  });
+}
+
+static void SetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setEventHandlerAttribute(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller passes an actual boolean, so this is ToBoolean on a boolean and cannot run
+      // user code.
+      auto report = api::ReportListenerExceptions(args[2]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(api::EventTargetBootstrap::dispatchEvent(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), report)));
+    });
+  });
+}
+
+static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(
+              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]))));
+    });
+  });
+}
+
+static void CreateTrustedEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+// Structured-clones a MessagePort message as postMessage() does: serializes it (which can throw
+// a DataCloneError, and runs any getters on it), rejects a SharedArrayBuffer anywhere in it, and
+// returns the deserialized copy.
+static void CloneMessageData(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    jsg::Serializer ser(js);
+    ser.write(js, jsg::JsValue(args[0]));
+    auto released = ser.release();
+    JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
+        "SharedArrayBuffer is unsupported with MessagePort");
+    jsg::Deserializer deserializer(js, released);
+    return v8::Local<v8::Value>(deserializer.readValue(js));
+  });
+}
+
+// Calls the function argument, with no arguments and an undefined receiver, as a reaction to an
+// already-resolved promise, as jsg::Promise::then() on js.resolvedPromise() does. V8's
+// Promise::Then() involves no species lookup, so scheduling runs no user code. If the function
+// throws, the reaction's promise rejects, and the rejection is reported as unhandled.
+static void QueueReaction(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto fn = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsFunction>(), TypeError,
+        "queueReaction() expects a function");
+    auto context = js.v8Context();
+    auto resolver = jsg::check(v8::Promise::Resolver::New(context));
+    jsg::check(resolver->Resolve(context, js.undefined()));
+    // The reaction's promise is dropped deliberately; see above.
+    std::ignore = jsg::check(resolver->GetPromise()->Then(context, v8::Local<v8::Function>(fn)));
+    return v8::Local<v8::Value>(js.undefined());
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -294,6 +395,14 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "utf8Length",
     "setPrivate",
     "getPrivate",
+    "setListenerCountHook",
+    "getEventHandlerAttribute",
+    "setEventHandlerAttribute",
+    "dispatchEvent",
+    "createTrustedMessageEvent",
+    "createTrustedEvent",
+    "cloneMessageData",
+    "queueReaction",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -310,6 +419,14 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, Utf8Length),
     getMethod(js, SetPrivate),
     getMethod(js, GetPrivate),
+    getMethod(js, SetListenerCountHook),
+    getMethod(js, GetEventHandlerAttribute),
+    getMethod(js, SetEventHandlerAttribute),
+    getMethod(js, DispatchEvent),
+    getMethod(js, CreateTrustedMessageEvent),
+    getMethod(js, CreateTrustedEvent),
+    getMethod(js, CloneMessageData),
+    getMethod(js, QueueReaction),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

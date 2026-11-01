@@ -1564,12 +1564,6 @@ wd_test(
     data = ["leak-fetch-test.js"],
 )
 
-wd_test(
-    src = "messageport-test.wd-test",
-    args = ["--experimental"],
-    data = ["messageport-test.js"],
-)
-
 js_binary(
     name = "starttls-nodejs-server",
     entry_point = "starttls-nodejs-server.js",

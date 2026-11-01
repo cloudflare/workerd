@@ -6,8 +6,16 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
+
+// Under the TS_MESSAGE_CHANNEL autogate, MessageChannel and MessagePort are the TypeScript
+// implementations in src/per_isolate/messagechannel/, installed by the per-isolate bootstrap, and
+// the C++ classes below are registered but never exposed.
+inline bool useTypeScriptMessageChannel() {
+  return util::Autogate::isEnabled(util::AutogateKey::TS_MESSAGE_CHANNEL);
+}
 
 // A closely approximate implementation of the Web platform standard MessagePort.
 // MessagePorts always come in pairs. When a message is posted to
@@ -181,9 +189,18 @@ class MessageChannelModule final: public jsg::Object {
   MessageChannelModule() = default;
   MessageChannelModule(jsg::Lock&, const jsg::Url&) {}
 
+  // The TypeScript classes, under useTypeScriptMessageChannel().
+  jsg::JsValue getMessageChannel(jsg::Lock& js);
+  jsg::JsValue getMessagePort(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(MessageChannelModule) {
-    JSG_NESTED_TYPE(MessageChannel);
-    JSG_NESTED_TYPE(MessagePort);
+    if (useTypeScriptMessageChannel()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(MessageChannel, getMessageChannel);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(MessagePort, getMessagePort);
+    } else {
+      JSG_NESTED_TYPE(MessageChannel);
+      JSG_NESTED_TYPE(MessagePort);
+    }
   }
 };
 
