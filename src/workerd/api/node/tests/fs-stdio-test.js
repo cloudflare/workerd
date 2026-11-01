@@ -10,7 +10,7 @@
 
 import { env } from 'cloudflare:workers';
 import { Buffer } from 'node:buffer';
-import { writeSync } from 'node:fs';
+import { appendFileSync, writeFile, writeFileSync, writeSync } from 'node:fs';
 import { deepStrictEqual, strictEqual } from 'node:assert';
 
 const usingTsImpl = env.USING_TS_IMPL === true;
@@ -85,5 +85,19 @@ export const discardsStdin = {
   async test() {
     const { lines } = await capture(() => writeSync(0, 'ignored\n'));
     deepStrictEqual(lines, []);
+  },
+};
+
+export const writeFileToStdio = {
+  async test() {
+    const { lines } = await capture(() => {
+      writeFileSync(1, 'a\n');
+      appendFileSync(2, 'b\n');
+    });
+    deepStrictEqual(lines, ['a', 'b']);
+    const done = Promise.withResolvers();
+    const cb = await capture(() => writeFile(1, 'c\n', done.resolve));
+    strictEqual(await done.promise, null);
+    deepStrictEqual(cb.lines, ['c']);
   },
 };
