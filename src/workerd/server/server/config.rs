@@ -1115,6 +1115,28 @@ impl Server {
         Ok(server)
     }
 
+    /// Preserve immutable verifier props through ordinary service lookup.
+    fn link_workload_identity(
+        &self,
+        designator: Option<&Designator>,
+        subrequest: &mut Vec<Rc<dyn Channel>>,
+    ) -> Option<u32> {
+        let designator = designator?;
+        if !matches!(
+            self.services.0.get(&designator.service),
+            Some(Service::Worker(_))
+        ) {
+            self.report.error(format!(
+                "Worker workloadIdentityService requires a Worker service: {}",
+                designator.service
+            ));
+            return None;
+        }
+        let channel = len_u32(subrequest);
+        subrequest.push(lookup_service(&self.services.0, &self.report, designator));
+        Some(channel)
+    }
+
     /// Resolves everything `worker`'s config names into its channel table.
     fn link_worker(self: &Rc<Self>, name: &str, worker: &Rc<WorkerService>) -> Result<()> {
         let Some(pending) = worker.take_pending_link() else {
@@ -1145,22 +1167,8 @@ impl Server {
         for entrypoint in &pending.loopback.subrequest_entrypoints {
             subrequest.push(worker.loopback_entrypoint(entrypoint.as_deref())?);
         }
-        // The access binding's entrypoint is a template: its props are each request's identity.
-        let mut workload_identity_channel = None;
-        if let Some(designator) = &pending.workload_identity {
-            let target = &designator.service;
-            match services.get(target) {
-                Some(Service::Worker(_)) => {
-                    workload_identity_channel = Some(len_u32(&subrequest));
-                    // Unlike Access's dynamic identity template, receiver scope is
-                    // immutable service props. Preserve it through the normal lookup.
-                    subrequest.push(lookup(designator));
-                }
-                _ => report.error(format!(
-                    "Worker workloadIdentityService requires a Worker service: {target}"
-                )),
-            }
-        }
+        let workload_identity_channel =
+            self.link_workload_identity(pending.workload_identity.as_ref(), &mut subrequest);
 
         let mut access_binding_channel = None;
         if let Some(designator) = &pending.access_binding {
