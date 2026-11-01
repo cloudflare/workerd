@@ -134,6 +134,7 @@ fn subrequest_channels_start_after_the_special_ones() {
                 service: "target".to_owned(),
                 entrypoint: Some("ep".to_owned()),
                 props_json: Some("{\"x\":1}".to_owned()),
+                suppress_native_caller: false,
                 error_context: "Worker \"main\"'s binding \"SVC\"".to_owned(),
             },
             Designator {

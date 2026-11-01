@@ -1778,7 +1778,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableWorkloadIdentityContext @202 :Bool
       $compatEnableFlag("enable_workload_identity_context")
       $compatDisableFlag("disable_workload_identity_context")
-      $compatEnableDate("2026-10-31");
+      $compatEnableDate("2026-10-29");
   # Adds ctx.identity.caller(). Verification requires an embedder-supplied private service.
 
 }
