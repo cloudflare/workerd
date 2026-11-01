@@ -412,6 +412,9 @@ class Server: public kj::PtrTarget {
   void setDefaultCompatibilityDate(kj::String date) {
     options->defaultCompatibilityDate = kj::mv(date);
   }
+  void setTestCompatibilityDateOverride(kj::String date) {
+    options->testCompatibilityDateOverride = kj::mv(date);
+  }
   void enableDebugPort(kj::String addr) {
     debugPort = kj::str("loopback:", addr);
   }
@@ -1031,6 +1034,27 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+KJ_TEST("Server: module registry enabled by date starts without experimental mode") {
+  TestServer test(singleWorker(R"((
+    modules = [
+      ( name = "worker",
+        esModule =
+          `import message from "./message.js";
+          `export default {
+          `  fetch() { return new Response(message + ":" + import.meta.main); }
+          `}
+      ),
+      ( name = "message.js", esModule = "export default 'date-default';" )
+    ]
+  ))"_kj));
+
+  test.server.setTestCompatibilityDateOverride(kj::str("2026-11-17"));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "date-default:true");
 }
 
 // Note: Python workers ignore the new_module_registry flag entirely — they

@@ -4,14 +4,16 @@ using Workerd = import "/workerd/workerd.capnp";
 # must recompile it rather than keep this worker's URL.
 const unitTests :Workerd.Config = (
   services = [
-    # With the flag, the module's frames name it by its module name.
+    # With the flag and the legacy registry, the module's frames name it by its module name.
     ( name = "wasm-source-url-test",
       worker = (
         modules = [
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "wasm_source_url_support"],
+        compatibilityFlags = [
+          "nodejs_compat", "experimental", "wasm_source_url_support", "legacy_module_registry",
+        ],
         bindings = [
           (name = "expectedFrame", text = "at trap.wasm:wasm-function[0]:0x"),
           (name = "childFlag", text = "no_wasm_source_url_support"),
@@ -45,7 +47,9 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "no_wasm_source_url_support"],
+        compatibilityFlags = [
+          "nodejs_compat", "experimental", "no_wasm_source_url_support", "legacy_module_registry",
+        ],
         bindings = [
           (name = "expectedFrame", text = "at wasm://wasm/"),
           (name = "childFlag", text = "wasm_source_url_support"),

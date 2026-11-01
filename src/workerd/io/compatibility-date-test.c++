@@ -589,6 +589,33 @@ KJ_TEST("encode to full flag list") {
   }
 }
 
+KJ_TEST("new module registry defaults on at 2026-11-17") {
+  auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
+    capnp::MallocMessageBuilder message;
+    auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
+    for (auto i: kj::indices(flags)) {
+      flagList.set(i, flags[i]);
+    }
+    auto output = message.getOrphanage().newOrphan<CompatibilityFlags>();
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(date, flagList.asReader(), output.get(), errorReporter,
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+    return capnp::clone(output.getReader());
+  };
+
+  auto before = compileFlags("2026-11-16", {});
+  KJ_EXPECT(!isNewModuleRegistryEnabled(*before));
+  auto enabled = compileFlags("2026-11-17", {});
+  KJ_EXPECT(isNewModuleRegistryEnabled(*enabled));
+  auto optedIn = compileFlags("2026-11-16", {"new_module_registry"_kj});
+  KJ_EXPECT(isNewModuleRegistryEnabled(*optedIn));
+  auto optedOut = compileFlags("2026-11-17", {"legacy_module_registry"_kj});
+  KJ_EXPECT(!isNewModuleRegistryEnabled(*optedOut));
+  auto python = compileFlags("2026-11-17", {"python_workers"_kj});
+  KJ_EXPECT(!isNewModuleRegistryEnabled(*python));
+}
+
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   // List of specific flags that are allowed to use non-conformant dates
   // (already deployed and can't be changed for compatibility reasons)
@@ -766,7 +793,7 @@ KJ_TEST("isNewModuleRegistryEnabled ignores the flag for Python workers") {
   KJ_EXPECT(check(true, false));
   // Python workers always use the original module registry: the
   // new_module_registry flag is ignored for them, whether set explicitly or
-  // (once the flag has a default-on date) implied by the compatibility date.
+  // implied by the compatibility date.
   KJ_EXPECT(!check(true, true));
   KJ_EXPECT(!check(false, true));
 }
