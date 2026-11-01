@@ -1775,4 +1775,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  webSocketCloseAfterError @202 :Bool
+      $compatEnableFlag("web_socket_close_after_error")
+      $compatDisableFlag("no_web_socket_close_after_error")
+      $compatEnableDate("2027-01-15");
+  # When a WebSocket's read loop ends with an error other than a plain disconnect, for example a
+  # protocol violation by the peer or a message listener that threw, a close event with code 1006
+  # and wasClean false follows the error event, as the WebSocket standard requires. Without the
+  # flag only the error event fires and no close event ever arrives for that WebSocket.
 }

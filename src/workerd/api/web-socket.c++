@@ -900,7 +900,10 @@ void LegacyWebSocketAdapter::startReadLoop(
                   jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;
     KJ_IF_SOME(e, maybeError) {
-      if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
+      // A close event may already have been dispatched from outside the read loop, for example
+      // when the 'open' listener threw; the incoming side then closes only once.
+      bool alreadyClosed = native.closedIncoming;
+      if (!alreadyClosed && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
         dispatchReportOnly(js, shell,
             js.alloc<CloseEvent>(
@@ -911,6 +914,12 @@ void LegacyWebSocketAdapter::startReadLoop(
       } else {
         native.closedIncoming = true;
         reportError(js, e.clone());
+        if (!alreadyClosed && FeatureFlags::get(js).getWebSocketCloseAfterError()) {
+          // The connection failed, so the close steps run after the error event. No Close frame
+          // was received, so the code is 1006 and the close was not clean.
+          dispatchReportOnly(js, shell,
+              js.alloc<CloseEvent>(1006, kj::str("WebSocket connection failed."), false));
+        }
       }
     }
   })));

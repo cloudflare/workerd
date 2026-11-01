@@ -1238,6 +1238,23 @@ wd_test(
 )
 
 js_binary(
+    name = "websocket-close-after-error-sidecar",
+    entry_point = "websocket-close-after-error-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-close-after-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-close-after-error-test.js",
+    ],
+    sidecar = "websocket-close-after-error-sidecar",
+    sidecar_port_bindings = [
+        "RSV_SERVER_PORT",
+    ],
+)
+
+js_binary(
     name = "websocket-open-error-sidecar",
     entry_point = "websocket-open-error-sidecar.js",
 )

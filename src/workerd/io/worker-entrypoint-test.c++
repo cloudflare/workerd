@@ -361,8 +361,10 @@ class LocalWebSocketRequest {
  public:
   explicit LocalWebSocketRequest(kj::Own<kj::WebSocket> transport,
       WorkerClose workerClose = WorkerClose::NONE,
-      WorkerHost host = WorkerHost::STATELESS)
+      WorkerHost host = WorkerHost::STATELESS,
+      kj::Maybe<CompatibilityFlags::Reader> featureFlags = kj::none)
       : fixture(TestFixture::SetupParams{
+          .featureFlags = featureFlags,
           .mainModuleSource = LOCAL_WEB_SOCKET_SOURCE,
           .actorId = host == WorkerHost::ACTOR
               ? kj::Maybe<Worker::Actor::Id>(kj::str("local-web-socket-test"))
@@ -1181,6 +1183,51 @@ KJ_TEST("local WebSocket protocol error is reported as an exception") {
   test.finish();
 
   KJ_EXPECT(getJsEvents(test.fixture) == "error;");
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("local WebSocket protocol error is followed by a close event under "
+        "web_socket_close_after_error") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setWebSocketCloseAfterError(true);
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE,
+      WorkerHost::STATELESS, flags.asReader());
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_EXPECT(!test.request.poll(test.fixture.getWaitScope()));
+
+  auto peerOutput = peer->readAllBytes().eagerlyEvaluate(nullptr);
+  KJ_EXPECT_LOG(ERROR, "WebSocket protocol error");
+  KJ_EXPECT_LOG(ERROR, "WebSocket protocol error");
+
+  // No Close frame was received, so the close that follows the error carries 1006.
+  static constexpr kj::byte invalidFrame[] = {0xa1, 0x80, 0, 0, 0, 0};
+  peer->write(kj::arrayPtr(invalidFrame)).wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "error;close:1006:false;", getJsEvents(test.fixture));
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("local WebSocket listener exception is followed by a close event under "
+        "web_socket_close_after_error") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setWebSocketCloseAfterError(true);
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE,
+      WorkerHost::STATELESS, flags.asReader());
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // A message listener that throws fails the WebSocket the same way, so the close follows here too.
+  peer->send("throw"_kj).wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "error;close:1006:false;", getJsEvents(test.fixture));
   KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
 }
 
