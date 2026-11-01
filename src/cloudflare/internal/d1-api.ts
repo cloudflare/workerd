@@ -632,10 +632,15 @@ class D1PreparedStatement {
         if (r instanceof ArrayBuffer) {
           return Array.from(new Uint8Array(r));
         }
-        // convert view to array
+        // convert the bytes a view covers to an array; Array.from on the
+        // view itself would enumerate its elements, not its bytes
         if (ArrayBuffer.isView(r)) {
-          // For some reason TS doesn't think this is valid, but it is!
-          return Array.from(r as unknown as ArrayLike<unknown>);
+          // a detached view reports zero bytes; skip the Uint8Array
+          // constructor, which would throw on its buffer
+          if (r.byteLength === 0) return [];
+          return Array.from(
+            new Uint8Array(r.buffer, r.byteOffset, r.byteLength)
+          );
         }
       }
 

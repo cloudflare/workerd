@@ -4,7 +4,11 @@
 
 import * as assert from 'node:assert';
 
-import { testD1ApiQueriesHappyPath, testD1Exec } from './d1-api-test-common';
+import {
+  testD1ApiQueriesHappyPath,
+  testD1BindBlobs,
+  testD1Exec,
+} from './d1-api-test-common';
 
 export const testWithoutSessions = {
   async test(_ctr, env) {
@@ -15,6 +19,12 @@ export const testWithoutSessions = {
 export const testExec = {
   async test(_ctr, env) {
     await testD1Exec(env.d1);
+  },
+};
+
+export const testBindBlobs = {
+  async test(_ctr, env) {
+    await testD1BindBlobs(env.d1);
   },
 };
 
