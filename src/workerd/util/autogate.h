@@ -90,15 +90,6 @@ namespace workerd::util {
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
-  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
-     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
-     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
-     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
-     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
-     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
-     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
-     streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)                                                                       \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
@@ -136,7 +127,15 @@ namespace workerd::util {
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)
+  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* Cross-context actions queued on an actor between events wait for its next request instead     \
+     of aborting it, and IoContext::run() without a current request fails with a typed error.      \
+     An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
+     actor's onHibernate event drops the actions queued before it. Also counts the copies of an    \
+     abort's reason its queued deliveries share as external memory, and queues at most one         \
+     request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
+     actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
+  V(DEFER_CROSS_CONTEXT_ACTIONS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

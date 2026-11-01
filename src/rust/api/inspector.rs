@@ -133,7 +133,7 @@ impl InspectorConnection {
                 let message = message.to_js(lock)?;
                 // If the callback throws, its exception propagates from `dispatch()`, and the
                 // rest of the batch is dropped.
-                callback.call::<v8::Local<v8::Value>>(lock, None, &[message])?;
+                callback.call(lock, None, &[message])?;
             }
         }
     }

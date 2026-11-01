@@ -59,6 +59,7 @@ void Stdin::reprl(jsg::Lock& js) {
 
   do {
     v8::HandleScope handle_scope(js.v8Isolate);
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): Fuzzilli loop: only prints what was thrown.
     v8::TryCatch try_catch(js.v8Isolate);
     try_catch.SetVerbose(true);
 

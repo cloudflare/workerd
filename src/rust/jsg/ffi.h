@@ -116,16 +116,38 @@ void global_clear_weak(uintptr_t* global);
 //   `catch_exception()` and return it through a `MaybeLocal` out-parameter.
 // - If a shim can throw a C++ exception, declare it as returning `Result<T>` in v8.rs. Otherwise
 //   the exception becomes a Rust panic (src/rust/AGENTS.md, "Error handling across FFI").
-// - An empty result doesn't always mean that execution is terminating. Rust must check
-//   `isolate_is_execution_terminating` or look at the caught exception.
+// - A shim that calls a V8 API that takes a `v8::Local<v8::Context>`, or that uses the current
+//   context itself (`ArrayBuffer::Detach`), first checks
+//   `if (exceptionPending(isolate)) return ...;` and then fails with an empty result or `false`
+//   without calling V8, leaving the exception pending. These are a call, a property read or
+//   write, a coercion, `Array::Iterate`, `ObjectTemplate::NewInstance`, `Function::New`,
+//   `FunctionTemplate::GetFunction`, `Date::New`, `ArrayBuffer::Detach` and the promise APIs.
+//   None of them may be entered while an exception or a termination is pending. Some clear it
+//   on entry (`PrepareForExecutionScope` in V8's src/api/api-inl.h), so the exception is lost
+//   and JavaScript runs on as if nothing had happened. Others (`EnterV8Scope`,
+//   `EnterV8NoScriptScope`) fail a V8 debug check, and in a release build run on with it still
+//   pending. A shim that skips the check says why in a comment.
+// - Creating strings, numbers, BigInts, symbols, plain objects and arrays, typed arrays, error
+//   objects and templates takes no context. It is fine at any time, also while execution is
+//   terminating.
+// - An empty result doesn't always mean that execution is terminating. It can also mean a stack
+//   overflow or an ordinary exception. Rust treats it as a pending error either way; code that
+//   must tell them apart checks `isolate_is_execution_terminating` or catches the exception.
 // - Never throw a JavaScript exception while `isolate->IsExecutionTerminating()` is true.
 //   `ThrowException` would replace the termination with an exception that JavaScript can catch.
 //   The `isolate_throw_*` shims check this; a shim that calls `ThrowException` itself must too.
 
+// Whether an exception or a termination is pending. This includes an exception that the
+// innermost `v8::TryCatch` has caught and not yet reset, as `v8::Isolate::HasPendingException()`
+// reports it, so C++ code that has caught an exception with its own `v8::TryCatch` resets it
+// before it calls into Rust JSG. See the rules above.
+inline bool exceptionPending(Isolate* isolate) {
+  return isolate->IsExecutionTerminating() || isolate->HasPendingException();
+}
+
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
-Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
@@ -172,6 +194,9 @@ bool local_is_date(const Local& val);
 bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
 bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
 bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
+// Coerce with ToString (v8::Value::ToString()), or return an empty handle if the coercion threw,
+// leaving the exception pending.
+MaybeLocal local_value_to_string(Isolate* isolate, Local value);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
@@ -232,31 +257,31 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 uint64_t local_big_int_uint64_value(const Local& value, bool& lossless);
 
 // Local<Date>
-// Runs no JavaScript, but prepares to, which would clear a pending termination, so Rust doesn't
-// call it while execution is terminating (`call_into_js()` in v8.rs).
+// Empty if creating the date throws, or an exception or a termination is already pending:
+// `Date::New` prepares to run JavaScript.
 MaybeLocal date_new(Isolate* isolate, double time);
 double local_date_value_of(const Local& value);
 
 // Shims that run JavaScript (a call, a getter, setter or Proxy trap, or a coercion through
 // `toString`, `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty
 // result or false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust
-// turns that into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and
-// doesn't call them while execution is terminating.
+// turns that into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs). While an
+// exception or a termination is already pending, they call nothing and fail the same way.
 
 // Local<Function>
 // Returns the call's result, or none if it threw, leaving the exception pending.
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 // Creates a function that calls `callback` with `data`, an opaque wrapper that
-// wrappable_attach_opaque_wrapper() returned, as its data. Returns empty if V8 could not create
-// the function, which happens only when execution is terminating.
+// wrappable_attach_opaque_wrapper() returned, as its data. Returns empty if an exception or a
+// termination is pending, or if V8 could not create the function.
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
 
 // Local<Object>
 // Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
 // JavaScript: no setter on Object.prototype is called. Throws a KJ exception if a key is too
 // long for a V8 string, V8 fails to create one, or there are not as many keys as values.
-Local object_new_with_data_properties(
+MaybeLocal object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values);
 // Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
 // leaving the exception pending.
@@ -282,18 +307,15 @@ PromiseState local_promise_state(const Local& promise);
 // if it is.
 Local local_promise_result(const Local& promise);
 void local_promise_mark_as_handled(const Local& promise);
-// `promise.then(on_fulfilled)`, `promise.catch(on_rejected)` and
 // `promise.then(on_fulfilled, on_rejected)`, without looking up `then` or the species
 // constructor. An empty result means an exception is pending (one that a promise hook threw, or a
-// termination), as local_function_call() leaves it. While one is pending these, and the
+// termination), as local_function_call() leaves it. While one is pending this, and the
 // PromiseResolver shims, call nothing in V8, which would clear it.
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled);
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected);
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected);
 
 // Local<PromiseResolver>
-// An empty result, or false, means an exception is pending, as for local_promise_then().
+// An empty result, or false, means an exception is pending, as for local_promise_then_or_catch().
 MaybeLocal promise_resolver_new(Isolate* isolate);
 Local local_promise_resolver_promise(const Local& resolver);
 // Resolving with a thenable reads its `then` property, which can run JavaScript; an exception it
@@ -395,29 +417,34 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 // - true: the Wrappable already has a wrapper in another isolate. That is a bug in the caller,
 //   which panics. This does not assert, because unwinding would drop the caller's reference to
 //   the Wrappable, and releasing it needs the other isolate's lock.
-// - false: execution is terminating, or creating the wrapper failed and the exception is left
-//   pending. Like `call_into_js()` in v8.rs, this creates and reads nothing while execution is
-//   terminating, even a wrapper that already exists.
+// - false: an exception or a termination is pending, or creating the wrapper failed and the
+//   exception is left pending. Creating the wrapper (`ObjectTemplate::NewInstance`) prepares to
+//   run JavaScript, so it is not created while one is pending. An existing wrapper isn't read
+//   then either, so that wrapping fails the same way whether or not the wrapper exists.
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of
-// them is reachable. Throws if `wrappable` already has a wrapper, or if V8 could not create one,
-// which happens only when execution is terminating.
-Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable);
+// them is reachable. Returns empty if an exception or a termination is pending. Throws if
+// `wrappable` already has a wrapper, or if V8 could not create one.
+MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable);
 
 // Unwrappers
 // Convert with V8's ToString and ToNumber (not JavaScript's String() and Number(), which accept a
 // Symbol and a BigInt): store the result in `result` and return true, or return false if the
-// coercion threw, leaving the exception pending.
+// coercion threw, or an exception or a termination was already pending, leaving the exception
+// pending.
 bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value);
 
 // ArrayBuffer detach/detachable/was-detached
-void local_array_buffer_detach(Isolate* isolate, Local& buffer);
+// Returns false, and detaches nothing, if an exception or a termination is pending.
+bool local_array_buffer_detach(Isolate* isolate, const Local& buffer);
 bool local_array_buffer_was_detached(const Local& buffer);
 bool local_array_buffer_is_detachable(const Local& buffer);
 
@@ -449,8 +476,9 @@ Local pqci_get_this(PropertyQueryCallbackInfo* info);
 // FastApiCallbackOptions
 // Fast callbacks run without a HandleScope; none of these leak a handle.
 TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver);
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message);
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message);
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage);
 void fast_api_terminate_execution(FastApiCallbackOptions* options);
 
@@ -458,9 +486,11 @@ void fast_api_terminate_execution(FastApiCallbackOptions* options);
 // The complete struct definition is generated by CXX from the shared struct in v8.rs.
 struct Utf8Value;
 
-// utf8_value_new converts `value` to a UTF-8 string, producing a heap-allocated copy
-// of the UTF-8 bytes that is independent of the V8 heap. The caller must call
-// utf8_value_drop to free it.
+// utf8_value_new converts `value` to a string with ToString, as JavaScript's `String()` does
+// except that a Symbol throws, and returns a heap-allocated copy of its UTF-8 bytes that is
+// independent of the V8 heap. The caller must call utf8_value_drop to free it. If the
+// conversion throws, or an exception or a termination is already pending, it returns a null
+// `ptr`, leaving the exception pending; there is nothing to free then.
 // utf8_value_data returns a pointer into this copy (not into V8 memory); it is valid
 // for the lifetime of the Utf8Value and must not be used after utf8_value_drop.
 // utf8_value_length returns the number of bytes (excluding the null terminator).
@@ -485,7 +515,9 @@ inline void register_add_builtin_module(ModuleRegistry& registry,
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor);
 
 // FunctionTemplate
-Local function_template_get_function(Isolate* isolate, const Global& tmpl);
+// The template's constructor function. Empty if an exception or a termination is pending:
+// `GetFunction` prepares to run JavaScript.
+MaybeLocal function_template_get_function(Isolate* isolate, const Global& tmpl);
 void function_template_set_nested_type(
     Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested);
 
@@ -521,8 +553,9 @@ MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+// A message longer than V8's string limit is cut to fit, so this never fails.
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -541,11 +574,15 @@ void isolate_try_catch(
 // The isolate_throw_*() functions throw nothing while execution is terminating, so that they
 // never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
-void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// The isolate's continuation-preserved embedder data, which holds the current async context
+// frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
+// workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.
+Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate);
+void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
 void ignore_leak(size_t ptr);

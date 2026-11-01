@@ -2,9 +2,16 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! An object's log in the bucket (`frames.capnp`), laid out as the storage
-//! relay's: one `sqlitePages` lane, the database, whose frames are the
-//! pages each commit wrote.
+//! An object's log in the bucket (`frames.capnp`): a `sqlitePages` lane per
+//! database, the root's and each facet's, whose frames are the pages each
+//! commit wrote. Every lane shares
+//! the object's sessions and sequence, so a restore is a prefix of the
+//! commits of all its databases.
+//!
+//! A lane is named by its facet's path from the root, each name
+//! URI-encoded and followed by `/`, then `db`: the root's lane is `db`,
+//! its facet `a`'s `a/db`, and `a`'s facet `b`'s `a/b/db`. A facet's
+//! subtree is the lanes under its prefix.
 //!
 //! Under `do/<namespace>/<actor>/`, each file gzipped:
 //!
@@ -39,18 +46,70 @@ use crate::Error;
 use crate::Result;
 use crate::Sequence;
 
-/// The database's lane.
-const LANE: &str = "db";
+/// A database's lane, after its facet's prefix.
+pub const DB: &str = "db";
 /// Downloads in flight during a restore, to hide the store's round trips.
 const RESTORE_CONCURRENCY: usize = 16;
 
-/// Where a session's next frame goes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Where a session's next frame goes, and its lanes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Cursor {
     pub session: u32,
     pub sequence: Sequence,
-    /// Whether the database lane exists.
-    pub lane: bool,
+    /// Each lane's name by number, `None` for a number freed.
+    pub lanes: Vec<Option<String>>,
+}
+
+impl Cursor {
+    pub fn lane(&self, name: &str) -> Option<u32> {
+        let n = self.lanes.iter().position(|l| l.as_deref() == Some(name))?;
+        Some(n as u32)
+    }
+
+    /// The lowest free number.
+    fn free(&self) -> u32 {
+        self.lanes
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or(self.lanes.len()) as u32
+    }
+}
+
+/// The prefix of the lanes of a facet with `path` from the root: empty for
+/// the root.
+pub fn facet_prefix<'a>(path: impl IntoIterator<Item = &'a str>) -> String {
+    let mut prefix = String::new();
+    for name in path {
+        for b in name.bytes() {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                prefix.push(char::from(b));
+            } else {
+                prefix += &format!("%{b:02X}");
+            }
+        }
+        prefix.push('/');
+    }
+    prefix
+}
+
+/// The facet path of database lane `lane`: its names from the root.
+pub fn facet_path(lane: &str) -> Option<Vec<String>> {
+    let prefix = lane.strip_suffix(DB)?;
+    let mut path = Vec::new();
+    for part in prefix.split_terminator('/') {
+        let mut name = Vec::new();
+        let mut bytes = part.bytes();
+        while let Some(b) = bytes.next() {
+            if b == b'%' {
+                let hex = [bytes.next()?, bytes.next()?];
+                name.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
+            } else {
+                name.push(b);
+            }
+        }
+        path.push(String::from_utf8(name).ok()?);
+    }
+    (prefix.is_empty() || prefix.ends_with('/')).then_some(path)
 }
 
 /// Pages by number.
@@ -58,41 +117,66 @@ pub type Pages<'a> = BTreeMap<u32, &'a [u8]>;
 
 #[derive(Clone, Copy)]
 pub enum Body<'a> {
-    NewLane,
+    /// The lane named, at the lowest free number.
+    NewLane(&'a str),
+    /// The lane named, at the lowest free number, a copy of lane `from`.
+    CloneLane(&'a str, u32),
     DeleteLane,
     Initialize(&'a [u8]),
     /// A commit's pages, and the database's size after, in pages.
     Pages(u32, &'a Pages<'a>),
 }
 
-/// Appends a frame to `out` at `cursor`, and moves it past.
-pub fn push(out: &mut Vec<u8>, cursor: &mut Cursor, body: Body) {
-    match body {
-        Body::NewLane => cursor.lane = true,
-        Body::DeleteLane => cursor.lane = false,
-        _ => {}
-    }
+/// Appends a frame on `lane` to `out` at `cursor`, and moves it past; the
+/// lane of a new lane is its number. Returns the lane.
+pub fn push(out: &mut Vec<u8>, cursor: &mut Cursor, lane: u32, body: Body) -> u32 {
+    let lane = match body {
+        Body::NewLane(name) | Body::CloneLane(name, _) => {
+            let n = cursor.free();
+            if n as usize == cursor.lanes.len() {
+                cursor.lanes.push(None);
+            }
+            cursor.lanes[n as usize] = Some(name.to_owned());
+            n
+        }
+        Body::DeleteLane => {
+            cursor.lanes[lane as usize] = None;
+            while cursor.lanes.last().is_some_and(Option::is_none) {
+                cursor.lanes.pop();
+            }
+            lane
+        }
+        _ => lane,
+    };
     let (session, sequence) = (cursor.session, cursor.sequence);
-    frame_at(out, session, sequence..=sequence, body);
+    frame_at(out, session, sequence..=sequence, lane, body);
     cursor.sequence += 1;
+    lane
 }
 
-/// Appends a frame covering `sequences` to `out`.
+/// Appends a frame on `lane` covering `sequences` to `out`.
 fn frame_at(
     out: &mut Vec<u8>,
     session: u32,
     sequences: std::ops::RangeInclusive<Sequence>,
+    lane: u32,
     body: Body,
 ) {
     let mut message = capnp::message::Builder::new_default();
     let mut f = message.init_root::<frame::Builder>();
     f.set_session(session);
     f.set_sequence(*sequences.end());
+    f.set_lane(lane);
     match body {
-        Body::NewLane => {
+        Body::NewLane(name) => {
             let mut lane = f.init_new_lane();
-            lane.set_name(LANE);
+            lane.set_name(name);
             lane.set_sqlite_pages(());
+        }
+        Body::CloneLane(name, from) => {
+            let mut lane = f.init_clone_lane();
+            lane.set_name(name);
+            lane.set_from(from);
         }
         Body::DeleteLane => f.set_delete_lane(()),
         Body::Initialize(image) => f.set_initialize(image),
@@ -111,8 +195,19 @@ fn frame_at(
     let _ = capnp::serialize::write_message(&mut *out, &message);
 }
 
+/// A run of page frames, merged: its session and sequences, and each
+/// lane's size and newest pages, by first write.
+struct Run<'a> {
+    session: u32,
+    first: Sequence,
+    last: Sequence,
+    lanes: Vec<(u32, u32, Pages<'a>)>,
+}
+
 /// `batch`, a run of frames, with each run of page frames merged to one
-/// with the newest version of each page.
+/// per lane with the newest version of each page. The lanes are separate
+/// files and no restore stops inside a batch, so reordering them is
+/// invisible; each merged frame carries the run's sequences.
 pub fn merge(batch: &[u8]) -> Result<Vec<u8>> {
     let mut messages = Vec::new();
     let mut r = batch;
@@ -120,23 +215,36 @@ pub fn merge(batch: &[u8]) -> Result<Vec<u8>> {
         messages.push(message);
     }
     let mut out = Vec::new();
-    // The run's session, first and last sequence, size, and pages.
-    let mut run: Option<(u32, Sequence, Sequence, u32, Pages)> = None;
-    let flush = |out: &mut Vec<u8>, run: &mut Option<(u32, Sequence, Sequence, u32, Pages)>| {
-        if let Some((session, first, last, commit, mut pages)) = run.take() {
+    let mut run: Option<Run> = None;
+    let flush = |out: &mut Vec<u8>, run: &mut Option<Run>| {
+        let Some(run) = run.take() else {
+            return;
+        };
+        for (lane, commit, mut pages) in run.lanes {
             pages.retain(|&number, _| number <= commit);
-            frame_at(out, session, first..=last, Body::Pages(commit, &pages));
+            let body = Body::Pages(commit, &pages);
+            frame_at(out, run.session, run.first..=run.last, lane, body);
         }
     };
     for message in &messages {
         let f = message.get_root::<frame::Reader>()?;
-        let (session, sequence) = (f.get_session(), f.get_sequence());
+        let (session, sequence, lane) = (f.get_session(), f.get_sequence(), f.get_lane());
         if let frame::Pages(group) = f.which()? {
-            let first = group.get_first();
-            let r = run.get_or_insert_with(|| (session, first, sequence, 0, BTreeMap::new()));
-            (r.2, r.3) = (sequence, group.get_commit());
+            let r = run.get_or_insert_with(|| Run {
+                session,
+                first: group.get_first(),
+                last: sequence,
+                lanes: Vec::new(),
+            });
+            r.last = sequence;
+            let i = r.lanes.iter().position(|l| l.0 == lane).unwrap_or_else(|| {
+                r.lanes.push((lane, 0, BTreeMap::new()));
+                r.lanes.len() - 1
+            });
+            let l = &mut r.lanes[i];
+            l.1 = group.get_commit();
             for page in group.get_list()? {
-                r.4.insert(page.get_number(), page.get_data()?);
+                l.2.insert(page.get_number(), page.get_data()?);
             }
         } else {
             flush(&mut out, &mut run);
@@ -169,10 +277,17 @@ fn options() -> capnp::message::ReaderOptions {
     *capnp::message::ReaderOptions::new().traversal_limit_in_words(Some(1 << 27))
 }
 
-/// The database lane, replayed into a file.
+/// A lane replayed into a file.
+struct Lane {
+    name: String,
+    path: PathBuf,
+    file: std::fs::File,
+}
+
+/// The lanes, replayed into files in a directory.
 pub struct Replay {
-    db: std::fs::File,
-    live: bool,
+    dir: PathBuf,
+    lanes: Vec<Option<Lane>>,
     /// The next frame, by session and sequence.
     next: Option<(u32, Sequence)>,
     /// The furthest end of a batch skipped for starting past `next`, which
@@ -182,19 +297,43 @@ pub struct Replay {
 }
 
 impl Replay {
-    pub fn new(db: &Path) -> Result<Self> {
+    /// Replays into `dir`, created empty.
+    pub fn new(dir: &Path) -> Result<Self> {
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir)?;
         Ok(Self {
-            db: std::fs::File::options()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(db)?,
-            live: false,
+            dir: dir.to_owned(),
+            lanes: Vec::new(),
             next: None,
             skipped: None,
             log_bytes: 0,
         })
+    }
+
+    /// Lane `n`'s file, created empty, named `name`.
+    fn create(&mut self, n: usize, name: &str) -> Result<&mut std::fs::File> {
+        let path = self.dir.join(n.to_string());
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)?;
+        if self.lanes.len() <= n {
+            self.lanes.resize_with(n + 1, || None);
+        }
+        let name = name.to_owned();
+        let lane = self.lanes[n].insert(Lane { name, path, file });
+        Ok(&mut lane.file)
+    }
+
+    fn lane(&mut self, n: u32) -> Result<&mut std::fs::File> {
+        match self.lanes.get_mut(n as usize) {
+            Some(Some(lane)) => Ok(&mut lane.file),
+            _ => Err(Error::Replica(format!(
+                "a frame on lane {n}, which is not live"
+            ))),
+        }
     }
 
     /// Applies `f`, the local copy at `path`. A batch that does not reach
@@ -207,6 +346,9 @@ impl Replay {
             return self.snapshot(&mut r);
         }
         let end = (f.session, f.frame);
+        // The last frame's session and sequences, and whether it applied: a
+        // merged run's frames, one per lane, share them.
+        let mut run: Option<((u32, Sequence, Sequence), bool)> = None;
         while let Some(message) = capnp::serialize::try_read_message(&mut r, options())? {
             let f = message.get_root::<frame::Reader>()?;
             let (session, last) = (f.get_session(), f.get_sequence());
@@ -214,18 +356,28 @@ impl Replay {
                 frame::Pages(group) => group.get_first(),
                 _ => last,
             };
-            let next = self.next.unwrap_or((session, 0));
-            if (session, last) < next {
-                continue;
+            let key = (session, first, last);
+            let applies = match run {
+                Some((k, applies)) if k == key => applies,
+                _ => {
+                    let next = self.next.unwrap_or((session, 0));
+                    if (session, last) < next {
+                        false
+                    } else if (session, first) > next {
+                        self.skipped = self.skipped.max(Some(end));
+                        return Ok(());
+                    } else {
+                        // Pages a frame before already applied are
+                        // rewritten with the same or newer versions.
+                        self.next = Some((session, last + 1));
+                        true
+                    }
+                }
+            };
+            run = Some((key, applies));
+            if applies {
+                self.frame(f)?;
             }
-            if (session, first) > next {
-                self.skipped = self.skipped.max(Some(end));
-                return Ok(());
-            }
-            // Pages a frame before already applied are rewritten with the
-            // same or newer versions.
-            self.next = Some((session, last + 1));
-            self.frame(f)?;
         }
         self.log_bytes += size;
         Ok(())
@@ -235,22 +387,22 @@ impl Replay {
         let message = capnp::serialize::read_message(&mut *r, options())?;
         let header = message.get_root::<snapshot_header::Reader>()?;
         self.next = Some((header.get_session(), header.get_frame()));
-        (self.live, self.log_bytes) = (false, 0);
-        self.db.set_len(0)?;
-        self.db.seek(SeekFrom::Start(0))?;
-        let lanes = header.get_lanes()?;
-        if lanes.len() > 1 {
-            return Err(Error::Replica("a snapshot of more than one lane".into()));
-        }
-        for lane in lanes {
-            if let snapshot_header::lane::Sqlite(sqlite) = lane.which()? {
-                let size = sqlite.get_database_size();
-                if std::io::copy(&mut r.take(size), &mut self.db)? != size {
-                    return Err(Error::Replica(
-                        "a snapshot shorter than its database".into(),
-                    ));
+        self.log_bytes = 0;
+        self.lanes.clear();
+        for (n, lane) in header.get_lanes()?.iter().enumerate() {
+            match lane.which()? {
+                snapshot_header::lane::Deleted(()) => {}
+                snapshot_header::lane::Sqlite(sqlite) => {
+                    let size = sqlite.get_database_size();
+                    let name = text(lane.get_name()?)?;
+                    let file = self.create(n, name)?;
+                    if std::io::copy(&mut r.take(size), file)? != size {
+                        return Err(Error::Replica(
+                            "a snapshot shorter than its database".into(),
+                        ));
+                    }
                 }
-                self.live = true;
+                _ => return Err(Error::Replica("an unsupported lane".into())),
             }
         }
         // Read to the end, where the decoder checks the checksum.
@@ -261,30 +413,46 @@ impl Replay {
     }
 
     fn frame(&mut self, f: frame::Reader) -> Result<()> {
-        if f.get_lane() != 0 {
-            return Err(Error::Replica(format!("lane {}", f.get_lane())));
-        }
+        let n = f.get_lane();
         match f.which()? {
-            frame::NewLane(_) | frame::DeleteLane(()) => {
-                self.db.set_len(0)?;
-                self.live = matches!(f.which()?, frame::NewLane(_));
+            frame::NewLane(lane) => {
+                let name = text(lane?.get_name()?)?;
+                self.create(n as usize, name)?;
+            }
+            frame::CloneLane(lane) => {
+                self.lane(lane.get_from())?;
+                let from = self.dir.join(lane.get_from().to_string());
+                // Through `dyn Read`: a copy between files takes
+                // `copy_file_range`, which the server's link lacks.
+                let from: &mut dyn std::io::Read = &mut std::fs::File::open(from)?;
+                let name = text(lane.get_name()?)?;
+                std::io::copy(from, self.create(n as usize, name)?)?;
+            }
+            frame::DeleteLane(()) => {
+                self.lane(n)?;
+                if let Some(lane) = self.lanes[n as usize].take() {
+                    drop(lane.file);
+                    let _ = std::fs::remove_file(lane.path);
+                }
             }
             frame::Initialize(image) => {
-                self.db.set_len(0)?;
-                self.db.seek(SeekFrom::Start(0))?;
-                self.db.write_all(image?)?;
+                let db = self.lane(n)?;
+                db.set_len(0)?;
+                db.seek(SeekFrom::Start(0))?;
+                db.write_all(image?)?;
             }
             frame::Pages(group) => {
+                let db = self.lane(n)?;
                 let mut page_size = 0;
                 for page in group.get_list()? {
                     let data = page.get_data()?;
                     page_size = data.len() as u64;
                     let at = u64::from(page.get_number() - 1) * page_size;
-                    self.db.seek(SeekFrom::Start(at))?;
-                    self.db.write_all(data)?;
+                    db.seek(SeekFrom::Start(at))?;
+                    db.write_all(data)?;
                 }
                 if page_size > 0 {
-                    self.db.set_len(u64::from(group.get_commit()) * page_size)?;
+                    db.set_len(u64::from(group.get_commit()) * page_size)?;
                 }
             }
             _ => return Err(Error::Replica("an unsupported frame".into())),
@@ -304,29 +472,39 @@ impl Replay {
         }
     }
 
-    /// The replayed database, whole, and the frame the log continues from.
-    pub fn finish(self) -> Result<Sequence> {
+    /// The frame the log continues from, and each live lane's name and
+    /// database, whole.
+    pub fn finish(self) -> Result<(Sequence, Vec<(String, PathBuf)>)> {
         self.check_gaps()?;
-        self.db.sync_data()?;
-        Ok(self.next.map_or(0, |n| n.1))
+        let mut lanes = Vec::new();
+        for lane in self.lanes.into_iter().flatten() {
+            lane.file.sync_data()?;
+            lanes.push((lane.name, lane.path));
+        }
+        Ok((self.next.map_or(0, |n| n.1), lanes))
     }
 
     /// Writes the replayed state as a snapshot into `dir`.
     pub fn write_snapshot(mut self, dir: &Path) -> Result<File> {
         self.check_gaps()?;
         let (session, frame) = self.next.unwrap_or_default();
-        let size = self.db.seek(SeekFrom::End(0))?;
-        self.db.seek(SeekFrom::Start(0))?;
         let header = Header {
             session,
             frame,
             justification: SnapshotJustification::ClientRequested,
             log_bytes: self.log_bytes,
         };
-        write_snapshot(dir, &header, self.live.then_some(size), |w| {
-            Ok(std::io::copy(&mut self.db, w).map(drop)?)
-        })
+        let mut lanes: Vec<_> = self
+            .lanes
+            .iter_mut()
+            .map(|l| l.as_mut().map(|l| (l.name.clone(), &mut l.file)))
+            .collect();
+        write_snapshot(dir, &header, &mut lanes)
     }
+}
+
+fn text(t: capnp::text::Reader<'_>) -> Result<&str> {
+    Ok(t.to_str().map_err(capnp::Error::from)?)
 }
 
 struct Header {
@@ -336,13 +514,12 @@ struct Header {
     log_bytes: u64,
 }
 
-/// Writes a snapshot into `dir`: the database lane, if it exists, of `size`
-/// bytes that `payload` writes.
+/// Writes a snapshot into `dir` of `lanes`, by number, each a name and its
+/// database.
 fn write_snapshot(
     dir: &Path,
     h: &Header,
-    size: Option<u64>,
-    payload: impl FnOnce(&mut dyn Write) -> Result<()>,
+    lanes: &mut [Option<(String, &mut std::fs::File)>],
 ) -> Result<File> {
     let mut message = capnp::message::Builder::new_default();
     let mut header = message.init_root::<snapshot_header::Builder>();
@@ -350,11 +527,17 @@ fn write_snapshot(
     header.set_frame(h.frame);
     header.set_justification(h.justification);
     header.set_log_bytes_since_last_snapshot(h.log_bytes);
-    let mut lanes = header.init_lanes(u32::from(size.is_some()));
-    if let Some(size) = size {
-        let mut lane = lanes.reborrow().get(0);
-        lane.set_name(LANE);
-        lane.init_sqlite().set_database_size(size);
+    let mut list = header.init_lanes(lanes.len() as u32);
+    for (n, lane) in lanes.iter_mut().enumerate() {
+        let mut entry = list.reborrow().get(n as u32);
+        match lane {
+            Some((name, db)) => {
+                entry.set_name(name.as_str());
+                let size = db.seek(SeekFrom::End(0))?;
+                entry.init_sqlite().set_database_size(size);
+            }
+            None => entry.set_deleted(()),
+        }
     }
     let file = File {
         snapshot: true,
@@ -366,7 +549,10 @@ fn write_snapshot(
     let tmp = with_suffix(&out, ".tmp");
     let mut encoder = encoder(std::io::BufWriter::new(std::fs::File::create(&tmp)?));
     capnp::serialize::write_message(&mut encoder, &message)?;
-    payload(&mut encoder)?;
+    for (_, db) in lanes.iter_mut().flatten() {
+        db.seek(SeekFrom::Start(0))?;
+        std::io::copy(db, &mut encoder)?;
+    }
     let mut w = encoder.finish()?;
     w.flush()?;
     drop(w);
@@ -375,18 +561,28 @@ fn write_snapshot(
     Ok(File { size, ..file })
 }
 
-/// Writes the database at `path`, which no connection has open, as the
-/// snapshot `session` starts from into `dir`, or `None` for an empty
-/// database. Closing the last connection checkpointed the WAL into the
+/// Writes `databases`, lane names and files no connection has open, as the
+/// snapshot `session` starts from into `dir`, numbering the lanes from 0.
+/// Returns it, `None` if every database is empty or missing, and the lanes
+/// it holds. Closing the last connection checkpointed each WAL into its
 /// file.
-pub fn snapshot_file(path: &Path, dir: &Path, session: u32) -> Result<Option<File>> {
-    let mut db = match std::fs::File::open(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        db => db?,
-    };
-    let size = db.metadata()?.len();
-    if size < 100 {
-        return Ok(None);
+pub fn snapshot_file(
+    databases: &[(String, PathBuf)],
+    dir: &Path,
+    session: u32,
+) -> Result<(Option<File>, Vec<Option<String>>)> {
+    let mut opened = Vec::new();
+    for (name, path) in databases {
+        let db = match std::fs::File::open(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            db => db?,
+        };
+        if db.metadata()?.len() >= 100 {
+            opened.push((name.clone(), db));
+        }
+    }
+    if opened.is_empty() {
+        return Ok((None, Vec::new()));
     }
     let header = Header {
         session,
@@ -394,21 +590,26 @@ pub fn snapshot_file(path: &Path, dir: &Path, session: u32) -> Result<Option<Fil
         justification: SnapshotJustification::ColdStartMitigation,
         log_bytes: 0,
     };
-    let file = write_snapshot(dir, &header, Some(size), |w| {
-        Ok(std::io::copy(&mut db, w).map(drop)?)
-    })?;
-    Ok(Some(file))
+    let mut lanes: Vec<_> = opened
+        .iter_mut()
+        .map(|(n, db)| Some((n.clone(), db)))
+        .collect();
+    let file = write_snapshot(dir, &header, &mut lanes)?;
+    Ok((
+        Some(file),
+        opened.into_iter().map(|(n, _)| Some(n)).collect(),
+    ))
 }
 
 /// Replays `files`, a plan with local copies, into a snapshot in `dir`.
 pub fn compact(files: &[(File, PathBuf)], dir: &Path) -> Result<File> {
-    let db = dir.join("compact.db");
-    let mut replay = Replay::new(&db)?;
+    let lanes = dir.join("compact");
+    let mut replay = Replay::new(&lanes)?;
     for (f, path) in files {
         replay.apply(f, path)?;
     }
     let snapshot = replay.write_snapshot(dir);
-    let _ = std::fs::remove_file(&db);
+    let _ = std::fs::remove_dir_all(&lanes);
     snapshot
 }
 
@@ -441,7 +642,7 @@ impl File {
 
 /// Hex, prefixed with its length so names sort as numbers: `a0`, `a1`, ..,
 /// `bff`.
-fn ascending(v: u64) -> String {
+pub fn ascending(v: u64) -> String {
     let hex = format!("{v:x}");
     format!("{}{hex}", char::from(b'a' + hex.len() as u8 - 1))
 }
@@ -463,7 +664,7 @@ fn flip(digit: u8) -> u8 {
     b"fedcba9876543210"[usize::from(value)]
 }
 
-fn parse(name: &str, ascending: bool) -> Option<u64> {
+pub fn parse(name: &str, ascending: bool) -> Option<u64> {
     let (&prefix, digits) = name.as_bytes().split_first()?;
     let len = if ascending {
         prefix.checked_sub(b'a')? + 1
@@ -561,41 +762,40 @@ impl Log {
     }
 }
 
-/// Restores `session` of the log into `output`, which must not exist: the
-/// plan's files spooled to `<output>.restore/`, then replayed on the
-/// blocking pool. The frame the log continues from, 0 for an empty log,
-/// which leaves no file.
-pub async fn restore(log: &Log, session: u32, output: &Path) -> Result<Sequence> {
+/// Restores `session` of the log into `spool`, created empty: the plan's
+/// files downloaded, then replayed on the blocking pool. The frame the log
+/// continues from, 0 for an empty log, and each live lane's name and
+/// database, under `spool`.
+pub async fn restore(
+    log: &Log,
+    session: u32,
+    spool: &Path,
+) -> Result<(Sequence, Vec<(String, PathBuf)>)> {
     let plan = plan(&log.files(session).await?);
     if plan.is_empty() {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
-    let spool = with_suffix(output, ".restore");
-    std::fs::create_dir_all(&spool)?;
+    let downloads = spool.join("files");
+    std::fs::create_dir_all(&downloads)?;
     let files: Vec<_> = (0..plan.len())
-        .map(|i| (plan[i], spool.join(i.to_string())))
+        .map(|i| (plan[i], downloads.join(i.to_string())))
         .collect();
-    let downloaded = stream::iter(&files)
+    stream::iter(&files)
         .map(|(f, path)| log.get(f, path))
         .buffer_unordered(RESTORE_CONCURRENCY)
         .try_collect::<()>()
-        .await;
-    let output = output.to_owned();
-    let result = match downloaded {
-        Ok(()) => {
-            crate::owner::blocking(move || {
-                let mut replay = Replay::new(&output)?;
-                for (f, path) in &files {
-                    replay.apply(f, path)?;
-                }
-                replay.finish()
-            })
-            .await
+        .await?;
+    let lanes = spool.join("lanes");
+    let restored = crate::owner::blocking(move || {
+        let mut replay = Replay::new(&lanes)?;
+        for (f, path) in &files {
+            replay.apply(f, path)?;
         }
-        Err(e) => Err(e),
-    };
-    let _ = std::fs::remove_dir_all(&spool);
-    result
+        replay.finish()
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&downloads);
+    restored
 }
 
 pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {

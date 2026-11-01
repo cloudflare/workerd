@@ -21,5 +21,51 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat_v2", "enhanced_error_serialization", "rpc"],
       )
     ),
+
+    # Mixed flags: an enhanced caller deserializes errors thrown by a legacy callee. The callee's
+    # module has its own name so the test can spot the callee's frames in the caller's stack.
+    ( name = "rpc-error-mixed-enhanced-caller-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-error-mixed-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "enhanced_error_serialization", "rpc"],
+        bindings = [
+          ( name = "RPC", service = "rpc-target-legacy" ),
+          ( name = "CALLEE_MODULE", text = "rpc-target-legacy" ),
+        ]
+      )
+    ),
+    ( name = "rpc-target-legacy",
+      worker = (
+        modules = [
+          (name = "rpc-target-legacy", esModule = embed "rpc-error-test.rpc.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "legacy_error_serialization", "rpc"],
+      )
+    ),
+
+    # Mixed flags, other direction: a legacy caller receives errors thrown by an enhanced callee.
+    # This direction does not leak today; it guards against a fix that only covers one side.
+    ( name = "rpc-error-mixed-legacy-caller-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rpc-error-mixed-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "legacy_error_serialization", "rpc"],
+        bindings = [
+          ( name = "RPC", service = "rpc-target-enhanced" ),
+          ( name = "CALLEE_MODULE", text = "rpc-target-enhanced" ),
+        ]
+      )
+    ),
+    ( name = "rpc-target-enhanced",
+      worker = (
+        modules = [
+          (name = "rpc-target-enhanced", esModule = embed "rpc-error-test.rpc.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "enhanced_error_serialization", "rpc"],
+      )
+    ),
   ],
 );

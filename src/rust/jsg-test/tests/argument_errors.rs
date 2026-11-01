@@ -19,10 +19,12 @@ struct Point {
     pub x: u32,
 }
 
+// `Text` is `NonCoercible` so that a number is not converted to a string,
+// leaving the union nothing to convert it to.
 #[jsg_oneof]
 #[derive(Debug)]
 enum Key {
-    Text(String),
+    Text(jsg::NonCoercible<String>),
     Point(Point),
 }
 
@@ -64,7 +66,7 @@ impl Args {
     #[jsg_method]
     pub fn take_key(&self, key: Key) -> String {
         match key {
-            Key::Text(text) => text,
+            Key::Text(text) => text.into_inner(),
             Key::Point(point) => point.x.to_string(),
         }
     }

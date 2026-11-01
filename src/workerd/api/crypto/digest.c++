@@ -108,6 +108,10 @@ class HmacKey final: public CryptoKey::Impl {
     return keyAlgorithm;
   }
 
+  size_t getSymmetricKeySize() const override {
+    return keyData.size();
+  }
+
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
   }
@@ -154,7 +158,7 @@ kj::Own<HMAC_CTX> initHmacContext(
     }
     KJ_CASE_ONEOF(key2, CryptoKey::Impl*) {
       // We already checked that the key is a secret key, so the following should succeed.
-      SubtleCrypto::ExportKeyData keyData = key2->exportKey(js, "raw"_kj);
+      SubtleCrypto::ExportKeyData keyData = key2->exportKey(js, "raw-secret"_kj);
 
       KJ_SWITCH_ONEOF(keyData) {
         KJ_CASE_ONEOF(key_data, jsg::JsRef<jsg::JsArrayBuffer>) {

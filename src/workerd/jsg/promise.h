@@ -528,6 +528,7 @@ Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions
 template <class Func>
 PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
   using Result = RemovePromise<ReturnType<Func, void>>;
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the promise with what it caught.
   v8::TryCatch tryCatch(v8Isolate);
   try {
     if constexpr (isPromise<ReturnType<Func, void>>()) {

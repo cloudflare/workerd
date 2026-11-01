@@ -204,9 +204,7 @@ impl TerminatingCreator {
     ) -> Result<(), jsg::Error> {
         lock.terminate_execution();
         let spin: v8::Local<v8::Function> = spin.try_into().unwrap();
-        let err = spin
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
+        let err = spin.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
         let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
         self.saw_pending.set(err.is_pending());
@@ -255,9 +253,7 @@ impl ThrowingCreator {
         throws: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
         let throws: v8::Local<v8::Function> = throws.try_into().unwrap();
-        let err = throws
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
+        let err = throws.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
         let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
         self.saw_pending.set(err.is_pending());
@@ -376,7 +372,7 @@ fn reentrant_call_sees_its_own_data() {
             if depth > 0 {
                 let again: v8::Local<v8::Function> = args.get(1).try_into().unwrap();
                 let next = (depth - 1).to_js(lock)?;
-                again.call::<v8::Local<v8::Value>>(lock, None, &[next])?;
+                again.call(lock, None, &[next])?;
             }
             log.borrow_mut().push(format!("-{depth}"));
             log.borrow().join(" ").to_js(lock)

@@ -1,7 +1,7 @@
-# Same as js-rpc-socket-test.wd-test but with the TypeScript streams implementation and the
-# rpc-externals-hydration autogate enabled, pinning socket transfer over RPC (and the rest of
-# the js-rpc suite) for TypeScript-backed streams. Socket transfer exercises the whole-socket
-# hydration slot: the socket external subsumes its two stream externals.
+# Same as js-rpc-socket-test.wd-test but with the TypeScript streams implementation, pinning
+# socket transfer over RPC (and the rest of the js-rpc suite) for TypeScript-backed streams.
+# Socket transfer exercises the whole-socket hydration slot: the socket external subsumes its
+# two stream externals.
 #
 # Note that in the BUILD file we explicitly disable info logging for this test because it's too
 # noisy.
@@ -88,9 +88,6 @@ const unitTests :Workerd.Config = (
     (name = "tcp", address = "*:8081", tcp = (), service = "js-rpc-test-target")
   ],
   v8Flags = [ "--expose-gc" ],
-  autogates = [
-    "workerd-autogate-rpc-externals-hydration",
-  ],
 );
 
 const modules :List(Workerd.Worker.Module) = [

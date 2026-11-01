@@ -2406,6 +2406,7 @@ kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     .referrerNormalizedSpecifier = base,
     .rawSpecifier = specifier,
   };
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows what the module threw.
   v8::TryCatch tryCatch(js.v8Isolate);
   auto option = IsolateModuleRegistry::RequireOption::RETURN_EMPTY;
   // Following the behavior of Node.js' require(esm) implementation, we disallow top-level await

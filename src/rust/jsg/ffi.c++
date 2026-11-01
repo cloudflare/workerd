@@ -60,33 +60,32 @@ namespace workerd::rust::jsg {
 // BackingStore — the size_t handle is the address of a heap-allocated
 // std::shared_ptr<v8::BackingStore> allocated with `new`.
 
-// Creates a V8 string from UTF-8. NewFromUtf8 fails only when the string is longer than
-// v8::String::kMaxLength, and then leaves no JavaScript exception pending, so an overlong string
-// throws a KJ exception instead. The length is checked before the call, which keeps a length
-// above INT_MAX from reaching NewFromUtf8's int parameter, where a negative value means
-// "NUL-terminated". kMaxLength counts UTF-16 code units and the check counts UTF-8 bytes, of
-// which there are never fewer, so it may reject a long multi-byte string that V8 could hold, but
-// never lets through one that V8 would reject.
-static v8::Local<v8::String> newUtf8String(
+// The longest UTF-8 input that NewFromUtf8 accepts. kMaxLength counts UTF-16 code units, and a
+// string never has more of those than it has UTF-8 bytes, so a UTF-8 input of at most this many
+// bytes always fits.
+static constexpr size_t MAX_UTF8_STRING_SIZE = static_cast<size_t>(v8::String::kMaxLength);
+
+// Creates a V8 string from UTF-8. Returns an empty handle, with no JavaScript exception pending,
+// if the input is longer than MAX_UTF8_STRING_SIZE, as NewFromUtf8 itself does. The length is
+// checked here so that a length above INT_MAX never reaches NewFromUtf8's int parameter, where a
+// negative value means "NUL-terminated". Never throws, and never fails for a shorter input, so
+// each caller decides what an overlong string means.
+static v8::MaybeLocal<v8::String> newUtf8String(
     v8::Isolate* isolate, kj::ArrayPtr<const char> utf8, v8::NewStringType type) {
-  KJ_REQUIRE(utf8.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "string exceeds V8's string length limit", utf8.size());
-  v8::Local<v8::String> result;
-  if (!v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()))
-           .ToLocal(&result)) {
-    KJ_FAIL_REQUIRE("V8 failed to create a string", utf8.size());
-  }
-  return result;
+  if (utf8.size() > MAX_UTF8_STRING_SIZE) return {};
+  return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
-// overlong name is checked here too, so that the error names it.
+// overlong name throws. The property shims, which take a key from arbitrary Rust text, are
+// declared fallible in v8.rs for that reason. The names a resource template interns come from
+// Rust source and are far shorter.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
-  KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-      "Rust identifier name exceeds V8 string length limit", name);
+  KJ_REQUIRE(name.size() <= MAX_UTF8_STRING_SIZE, "name exceeds V8's string length limit", name);
   return newUtf8String(
-      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
+      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized)
+      .ToLocalChecked();
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
@@ -120,12 +119,6 @@ Global local_to_global(Isolate* isolate, Local value) {
 
 Local local_new_number(Isolate* isolate, double value) {
   v8::Local<v8::Number> val = v8::Number::New(isolate, value);
-  return to_ffi(kj::mv(val));
-}
-
-Local local_new_string(Isolate* isolate, ::rust::Str value) {
-  auto val =
-      newUtf8String(isolate, kj::arrayPtr(value.data(), value.size()), v8::NewStringType::kNormal);
   return to_ffi(kj::mv(val));
 }
 
@@ -292,32 +285,51 @@ bool local_is_shared_array_buffer(const Local& val) {
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
+  // No exceptionPending() check: TypeOf takes no context, and `typeStr` is a string, which
+  // Utf8Value's ToString returns as it is, before it prepares to run JavaScript.
   v8::String::Utf8Value utf8(isolate, typeStr);
   return ::rust::String(*utf8, utf8.length());
 }
 
 bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->Int32Value(isolate->GetCurrentContext())
       .To(&result);
 }
 
 bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->Uint32Value(isolate->GetCurrentContext())
       .To(&result);
 }
 
 bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->IntegerValue(isolate->GetCurrentContext())
       .To(&result);
 }
 
+MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(
+      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
+}
+
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
-  auto* v = new v8::String::Utf8Value(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
-  return Utf8Value{reinterpret_cast<size_t>(v)};
+  if (exceptionPending(isolate)) return Utf8Value{0};
+  // Converted here rather than by Utf8Value, which would catch and discard what `toString`
+  // throws. Utf8Value then copies a string, which runs no JavaScript.
+  v8::Local<v8::String> str;
+  if (!local_from_ffi<v8::Value>(kj::mv(value))
+           ->ToString(isolate->GetCurrentContext())
+           .ToLocal(&str)) {
+    return Utf8Value{0};
+  }
+  return Utf8Value{reinterpret_cast<size_t>(new v8::String::Utf8Value(isolate, str))};
 }
 
 void utf8_value_drop(Utf8Value value) {
@@ -496,6 +508,7 @@ uint64_t local_big_int_uint64_value(const Local& value, bool& lossless) {
 // Local<Date>
 // Empty, with the exception pending, if creating the object throws.
 MaybeLocal date_new(Isolate* isolate, double time) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(v8::Date::New(isolate->GetCurrentContext(), time));
 }
 
@@ -506,6 +519,7 @@ double local_date_value_of(const Local& value) {
 // Local<Function>
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
@@ -523,32 +537,35 @@ MaybeLocal local_function_call(
 }
 
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
       local_as_ref_from_ffi<v8::Value>(data)));
 }
 
 // Local<Object>
-Local object_new_with_data_properties(
+MaybeLocal object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values) {
   KJ_REQUIRE(keys.size() == values.size());
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
   auto context = isolate->GetCurrentContext();
   auto object = v8::Object::New(isolate);
   for (size_t i = 0; i < keys.size(); i++) {
     // Unlike Set(), CreateDataProperty() doesn't look up the prototype chain, so no setter runs,
     // and on an ordinary object no Proxy trap runs either: nothing here runs JavaScript, so it
-    // can't throw. V8 doesn't allow it while execution is terminating, which the caller checks.
+    // can't throw.
     auto defined = object->CreateDataProperty(
         context, makeInternedStr(isolate, keys[i]), local_as_ref_from_ffi<v8::Value>(values[i]));
     KJ_ASSERT(defined.FromMaybe(false), "defining a property of a new object failed", keys[i]);
   }
-  return to_ffi(kj::mv(object));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(object));
 }
 
 // No TryCatch in the shims below that run JavaScript: what it throws stays pending, as in
 // local_function_call().
 
 bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -556,6 +573,7 @@ bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
 }
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -563,6 +581,7 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 }
 
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -571,6 +590,7 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 
 MaybeLocal local_object_get_property_by_name(
     Isolate* isolate, const Local& object, const Local& name) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
@@ -578,6 +598,7 @@ MaybeLocal local_object_get_property_by_name(
 
 bool local_object_get_own_property_names(
     Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   // The filter of GetOwnPropertyNames(context), with the names as strings.
@@ -617,29 +638,6 @@ Local local_promise_result(const Local& promise) {
 
 void local_promise_mark_as_handled(const Local& promise) {
   local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
-}
-
-namespace {
-// Whether an exception or a termination is pending, in which case the promise shims call nothing
-// in V8 and fail, leaving it pending. Promise::Resolver::New(), Then() and Catch() would clear
-// it: they open a PrepareForExecutionScope, which clears the pending exception, a termination
-// included, so that a terminated script would run on. V8 also requires that embedders don't
-// enter it at all while execution is terminating.
-bool exceptionPending(Isolate* isolate) {
-  return isolate->IsExecutionTerminating() || isolate->HasPendingException();
-}
-}  // namespace
-
-MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled)));
-}
-
-MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected) {
-  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
-  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Catch(
-      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_rejected)));
 }
 
 MaybeLocal local_promise_then_or_catch(
@@ -693,6 +691,7 @@ Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> eleme
 }
 
 bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
+  if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
   return v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
@@ -803,8 +802,12 @@ bool backing_store_is_resizable_by_user_javascript(size_t ptr) {
 }
 
 // ArrayBuffer detach/detachable/was-detached
-void local_array_buffer_detach(Isolate* isolate, Local& buffer) {
+bool local_array_buffer_detach(Isolate* isolate, const Local& buffer) {
+  // Detach() runs no JavaScript, but enters V8 with the current context, which V8 does not allow
+  // while an exception or a termination is pending.
+  if (exceptionPending(isolate)) return false;
   local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Detach(v8::Local<v8::Value>()).Check();
+  return true;
 }
 
 bool local_array_buffer_was_detached(const Local& buffer) {
@@ -835,15 +838,11 @@ DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 // Wrappers
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
-  // Checked here rather than through `call_into_js()`, which would make a second FFI call on
-  // every wrap, though most only read the cached handle.
-  if (isolate->IsExecutionTerminating()) {
-    wrappedElsewhere = false;
-    return MaybeLocal{.ptr = 0};
-  }
-
+  // Checked first, also while an exception is pending: the caller must then leak its reference
+  // rather than release it, which would need the other isolate's lock. Reading the wrapper's
+  // isolate enters nothing in V8.
   wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
-  if (wrappedElsewhere) {
+  if (wrappedElsewhere || exceptionPending(isolate)) {
     return MaybeLocal{.ptr = 0};
   }
 
@@ -862,7 +861,7 @@ MaybeLocal wrap_resource(
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -879,7 +878,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,
-      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kNonResourceWrappableTag));
+      static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
 
   // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
@@ -888,14 +887,17 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
-Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+  if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
   // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
-  return to_ffi(wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true)));
 }
 
 // Unwrappers
 
 bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
+  if (exceptionPending(isolate)) return false;
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw. (String wrapper objects are
   // not IsString.)
@@ -920,6 +922,7 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
 }
 
 bool unwrap_number(Isolate* isolate, Local value, double& result) {
+  if (exceptionPending(isolate)) return false;
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a number primitive needs no coercion and can't throw.
   if (v8Value->IsNumber()) {
@@ -930,6 +933,13 @@ bool unwrap_number(Isolate* isolate, Local value, double& result) {
 }
 
 namespace {
+// For an object already known to be a Rust resource wrapper, from the marker or a signature.
+// Anything else is an invariant violation and aborts.
+Wrappable& unwrapRustWrapper(Isolate* isolate, v8::Local<v8::Object> object) {
+  return *static_cast<Wrappable*>(::workerd::jsg::Wrappable::unwrapFromShimInRangeOrAbort(
+      isolate, object, ::workerd::jsg::kRustResourceWrappableTagRange));
+}
+
 // Creates no handles, so fast callbacks can use it without a HandleScope.
 kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
@@ -944,15 +954,7 @@ kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Val
           const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
     return kj::none;
   }
-  // The WORKERD_RUST_WRAPPABLE_TAG marker check above established that this is one of our Rust
-  // wrappables, so the pointer can be taken directly through the shim.
-  auto* wrappable = ::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, v8_obj);
-  if (wrappable == nullptr) {
-    // unwrapFromShimAnyType() should never return null for a marked object.
-    KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
-    abort();
-  }
-  return *static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
+  return unwrapRustWrapper(isolate, v8_obj);
 }
 }  // namespace
 
@@ -963,9 +965,23 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
   return kj::none;
 }
 
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value) {
+  KJ_IF_SOME(wrappable, tryUnwrapRustWrappable(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    return &wrappable.trait_object;
+  }
+  return nullptr;
+}
+
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
+  // V8 has checked the receiver against the method's Signature, so it is a wrapper made from a
+  // Rust resource template, and needs no marker check.
+  return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
+}
+
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
 bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result) {
+  if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
 
@@ -1212,12 +1228,14 @@ TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local r
   return {};
 }
 
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message) {
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message) {
+  // `isolate_throw_exception` would throw nothing, so create nothing.
+  if (options->isolate->IsExecutionTerminating()) return;
   v8::HandleScope scope(options->isolate);
-  isolate_throw_exception(options->isolate,
-      exception_create_from_bytes(options->isolate, exceptionType,
-          reinterpret_cast<const uint8_t*>(message.data()), static_cast<int32_t>(message.size())));
+  isolate_throw_exception(
+      options->isolate, exception_create_from_bytes(options->isolate, exceptionType, message));
 }
 
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
@@ -1364,8 +1382,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   instance->SetInternalFieldCount(workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
+  // A resource's name comes from Rust source, so it is far shorter than V8's limit.
   auto classname = newUtf8String(isolate,
-      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal);
+      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
 
   if (workerd::jsg::getShouldSetToStringTag(isolate)) {
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
@@ -1545,11 +1565,11 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 }
 
 // FunctionTemplate
-Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
+MaybeLocal function_template_get_function(Isolate* isolate, const Global& tmpl) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
-  auto function = ::workerd::jsg::check(local_tmpl->GetFunction(isolate->GetCurrentContext()));
-  return to_ffi(kj::mv(function));
+  return maybe_local_to_ffi(local_tmpl->GetFunction(isolate->GetCurrentContext()));
 }
 
 // Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
@@ -1629,16 +1649,22 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
 }  // namespace
 
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length) {
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
   // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
   // js.str() behavior.
-  auto message = newUtf8String(isolate,
-      kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
-      v8::NewStringType::kNormal);
-  return exceptionCreateFromMessage(exception_type, message);
+  //
+  // A message longer than V8's limit is cut to fit rather than refused, so that creating an
+  // error never fails. The Rust callers cut it at a character boundary first (see
+  // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
+  // after it NewFromUtf8 cannot refuse the string.
+  auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
+  auto v8Message = newUtf8String(
+      isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
+                       .ToLocalChecked();
+  return exceptionCreateFromMessage(exception_type, v8Message);
 }
 
 namespace {
@@ -1672,6 +1698,7 @@ bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
 
 void isolate_try_catch(
     Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): try_catch() takes the exception out first.
   v8::TryCatch tryCatch(isolate);
   if (callback(data)) {
     catch_exception(tryCatch, exception);
@@ -1684,21 +1711,10 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
-void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
-  // kNormal (not kInternalized): error messages are arbitrary caller-supplied
-  // strings and should not pollute the internalized string table (which is never
-  // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
-  if (isolate->IsExecutionTerminating()) return;
-  auto message = newUtf8String(
-      isolate, kj::arrayPtr(description.data(), description.size()), v8::NewStringType::kNormal);
-  isolate->ThrowError(message);
-}
-
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
   if (isolate->IsExecutionTerminating()) {
-    // Logs the message, but creates no error: creating one while execution is terminating fails
-    // a V8 debug check, and it would not be thrown. See createInternalError() for why the message
-    // is copied.
+    // Logs the message, but creates no error, since it would not be thrown. See
+    // createInternalError() for why the message is copied.
     KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
     return;
   }
@@ -1715,6 +1731,14 @@ bool isolate_is_execution_terminating(Isolate* isolate) {
 
 bool isolate_has_pending_exception(Isolate* isolate) {
   return isolate->HasPendingException();
+}
+
+Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {
+  return to_ffi(isolate->GetContinuationPreservedEmbedderData().As<v8::Value>());
+}
+
+void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value) {
+  isolate->SetContinuationPreservedEmbedderData(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
 void ignore_leak(size_t ptr) {

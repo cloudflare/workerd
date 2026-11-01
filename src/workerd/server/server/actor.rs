@@ -60,6 +60,7 @@ use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
+use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::config::Factory;
 use crate::tasks::TaskHandle;
@@ -155,7 +156,16 @@ impl ActorNamespace {
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
     pub fn set_cluster(&self, cluster: Rc<ClusterNode>) {
+        if let Some(unique_key) = self.unique_key() {
+            cluster.add_namespace(unique_key, Weak::clone(&self.this));
+        }
         let _ = self.cluster.set(cluster);
+    }
+
+    /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
+    pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
+        Ok(())
     }
 
     /// The cluster, for a namespace linked on disk; in-memory namespaces stay local.
@@ -163,13 +173,30 @@ impl ActorNamespace {
         self.directory.get().and_then(|_| self.cluster.get())
     }
 
-    /// The database of root actor `key`.
-    fn sqlite_path(&self, key: &str) -> Result<String> {
+    /// The database of root actor `key`'s facet numbered `facet_id`, the root's own for none.
+    fn sqlite_path(&self, key: &str, facet_id: Option<u32>) -> Result<String> {
         let directory = self
             .directory
             .get()
             .ok_or_else(|| kj::failed!("the namespace has no directory"))?;
-        Ok(format!("{directory}/{key}.sqlite"))
+        Ok(match facet_id {
+            Some(id) => format!("{directory}/{key}.{id}.sqlite"),
+            None => format!("{directory}/{key}.sqlite"),
+        })
+    }
+
+    /// The container running the database `file`, `<key>.sqlite` or a facet's
+    /// `<key>.<n>.sqlite`.
+    fn database_container(&self, file: &str) -> Option<Rc<ActorContainer>> {
+        fn find(c: &Rc<ActorContainer>, id: Option<u32>) -> Option<Rc<ActorContainer>> {
+            if c.facet_id.get() == id {
+                return Some(Rc::clone(c));
+            }
+            c.facets.borrow().values().find_map(|f| find(f, id))
+        }
+        let mut parts = file.split('.');
+        let root = self.actors.borrow().get(parts.next()?).cloned()?;
+        find(&root, parts.next().and_then(|n| n.parse().ok()))
     }
 
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
@@ -204,7 +231,7 @@ impl ActorNamespace {
             .route(&unique_key, &self.service, &self.class_name, &key)
             .await?
         {
-            Owner::Remote(connection) => Ok(Resolved::Remote(connection)),
+            Owner::Remote(connection, node) => Ok(Resolved::Remote(connection, node)),
             Owner::Here(epoch) => {
                 // A concurrent request may have taken it meanwhile.
                 if let Some(container) = self.owned_container(&key) {
@@ -409,6 +436,11 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        if self.cluster().is_some() {
+            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
+            // its alarms from the bucket.
+            ffi::actor_storage_delete_all(&storage)?;
+        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -474,9 +506,70 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
-        namespace
-            .container_for(id)
-            .start_request(ffi::new_request_metadata(KjMaybe::None, KjMaybe::None))
+        let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+        let Some(node) = namespace.cluster().map(Rc::clone) else {
+            return namespace.container_for(id).start_request(metadata);
+        };
+        // Only an object's owner runs its alarm. One that moved since this instance scheduled
+        // the alarm has it scheduled where it lives now, since opening an object schedules its
+        // alarm, unless the owner died before indexing it: this instance fires it again until
+        // the owner has outlived that (`Index::elsewhere`).
+        let key = ffi::actor_id_key(&id);
+        Ok(PromisedInterface::new(async move {
+            match namespace.resolve(id).await? {
+                Resolved::Here(client) => client.start_request(metadata),
+                Resolved::Remote(_, owner) => {
+                    let unique_key = namespace.unique_key().unwrap_or_default();
+                    let again = node
+                        .cluster
+                        .alarm_elsewhere(unique_key, &key, &owner, cluster::now_ms())
+                        .await
+                        .unwrap_or(true);
+                    let then = if again {
+                        ffi::AlarmElsewhere::Retry
+                    } else {
+                        ffi::AlarmElsewhere::Done
+                    };
+                    Ok(ffi::alarm_owned_elsewhere(then))
+                }
+            }
+        })
+        .into_kj())
+    }
+
+    pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            let at_ms = (at_ms != 0).then_some(at_ms);
+            cluster.arm_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    pub fn alarm_opened(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            cluster.opened_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    /// A task running `index` with the cluster and the namespace's unique key; nothing outside
+    /// a cluster.
+    fn index_alarm<F: Future<Output = cluster::Result<()>> + 'static>(
+        &self,
+        index: impl FnOnce(Rc<cluster::Cluster>, String) -> F + 'static,
+    ) -> ResultTask {
+        let target = self.namespace().and_then(|ns| {
+            let unique_key = ns.unique_key()?.to_owned();
+            Some((Rc::clone(&ns.cluster()?.cluster), unique_key))
+        });
+        ResultTask(Box::pin(async move {
+            let Some((cluster, unique_key)) = target else {
+                return Ok(());
+            };
+            (index(cluster, unique_key).await).map_err(|e| kj::failed!("indexing an alarm: {e}"))
+        }))
     }
 
     fn namespace(&self) -> Option<Rc<ActorNamespace>> {
@@ -496,11 +589,20 @@ impl ActorNamespaceHandle {
         }
     }
 
-    pub(crate) fn database_reset(&self, root_key: &str) {
-        if let Some(ns) = self.namespace()
-            && let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key())
-        {
-            node.cluster.database_reset(unique_key, root_key);
+    pub(crate) fn database_reset(&self, file: &str) {
+        let Some(ns) = self.namespace() else {
+            return;
+        };
+        // The facets beneath the database go with it: their connections close before their
+        // files are removed.
+        if let Some(container) = ns.database_container(file) {
+            let names: Vec<String> = container.facets.borrow().keys().cloned().collect();
+            for name in names {
+                container.abort_facet(&name, kj::failed!("jsg.Error: Facet was deleted."));
+            }
+        }
+        if let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key()) {
+            node.cluster.database_reset(unique_key, file);
         }
     }
 
@@ -516,7 +618,8 @@ impl ActorNamespaceHandle {
 /// Where a request to a clustered actor goes.
 enum Resolved {
     Here(Client),
-    Remote(Rc<RpcConnection>),
+    /// On the node named.
+    Remote(Rc<RpcConnection>, String),
 }
 
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
@@ -550,7 +653,7 @@ impl Channel for RoutedChannel {
             };
             match &*resolved {
                 Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection) => Ok(attach(
+                Resolved::Remote(connection, _) => Ok(attach(
                     connection.start_request(metadata),
                     Rc::clone(connection),
                 )),
@@ -584,7 +687,7 @@ impl Channel for RoutedChannel {
                 .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
             match namespace.resolve(ffi::actor_id_clone(&self.id)).await? {
                 Resolved::Here(container) => container.evict_for_test(hibernate).await,
-                Resolved::Remote(_) => Err(kj::failed!(
+                Resolved::Remote(..) => Err(kj::failed!(
                     "jsg.Error: Cannot evict a Durable Object another instance owns."
                 )),
             }
@@ -833,12 +936,15 @@ impl ActorContainer {
     /// next request claims anew.
     async fn prepare_storage(&self) -> Result<()> {
         let ns = self.namespace()?;
-        if ns.cluster().is_none() {
+        let Some(node) = ns.cluster() else {
             return Ok(());
-        }
-        let root_path = ns.sqlite_path(&self.root_key)?;
+        };
         if self.is_root() {
-            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(root_path)) else {
+            let layout = Rc::new(Databases {
+                ns: Rc::clone(&ns),
+                root_key: self.root_key.clone(),
+            });
+            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(layout)) else {
                 return Err(kj::failed!("a clustered actor without ownership"));
             };
             if let Err(e) = restore.await {
@@ -847,12 +953,24 @@ impl ActorContainer {
                 return Err(e);
             }
         } else {
-            // TODO(cluster): facets, each a log of its own in the root's epoch.
-            return Err(kj::failed!(
-                "jsg.Error: Facets are not supported in cluster mode."
-            ));
+            // A facet runs once its root has taken the object over: its database is a lane of
+            // the root's log.
+            let path = ns.sqlite_path(&self.root_key, self.facet_id()?)?;
+            let lane = self.lane_prefix()? + cluster::DB;
+            let unique_key = ns.unique_key().unwrap_or_default();
+            node.cluster
+                .open_lane(unique_key, &self.root_key, &path, &lane)
+                .map_err(|e| kj::failed!("{e}"))?;
         }
         Ok(())
+    }
+
+    /// The prefix of the lanes of this actor's subtree in its object's log: empty for the root.
+    fn lane_prefix(&self) -> Result<String> {
+        Ok(match self.parent()? {
+            Some(parent) => parent.lane_prefix()? + &cluster::facet_prefix([self.key.as_str()]),
+            None => String::new(),
+        })
     }
 
     /// Constructs the actor and starts watching it for breakage.
@@ -1343,18 +1461,19 @@ impl ActorContainer {
             &self.root_key,
             self.facet_id()?.into(),
             name,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some(node) = ns.cluster() {
+            let prefix = self.lane_prefix()? + &cluster::facet_prefix([name]);
+            let unique_key = ns.unique_key().unwrap_or_default();
+            node.cluster
+                .delete_lanes(unique_key, &self.root_key, &prefix)
+                .map_err(|e| kj::failed!("{e}"))?;
+        }
+        Ok(())
     }
 
     fn clone_facet(&self, src: &str, dst: &str) -> Result<()> {
         let ns = self.namespace()?;
-        if ns.cluster().is_some() {
-            // TODO(cluster): clone in the bucket's terms.
-            return Err(kj::failed!(
-                "jsg.Error: Cloning facets is not supported in cluster mode."
-            ));
-        }
         // Replacing a facet implies aborting it.
         self.abort_facet(dst, kj::failed!("jsg.Error: Facet was cloned-over."));
         if src == dst {
@@ -1368,9 +1487,57 @@ impl ActorContainer {
             self.facet_id()?.into(),
             src,
             dst,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some(node) = ns.cluster() {
+            let prefix = self.lane_prefix()?;
+            let [src, dst] = [src, dst].map(|n| prefix.clone() + &cluster::facet_prefix([n]));
+            let unique_key = ns.unique_key().unwrap_or_default();
+            let layout = Databases {
+                ns: Rc::clone(&ns),
+                root_key: self.root_key.clone(),
+            };
+            node.cluster
+                .clone_lanes(unique_key, &self.root_key, &src, &dst, &layout)
+                .map_err(|e| kj::failed!("{e}"))?;
+        }
+        Ok(())
     }
+}
+
+/// Where a clustered object's databases are: the root's, and each facet's beside it as the
+/// root's facet index numbers it.
+struct Databases {
+    ns: Rc<ActorNamespace>,
+    root_key: String,
+}
+
+impl Databases {
+    fn place(&self, lane: &str) -> Result<String> {
+        let path = cluster::facet_path(lane).ok_or_else(|| kj::failed!("a lane named {lane}"))?;
+        let storage = self.ns.storage()?;
+        let mut id = None;
+        for name in &path {
+            id = ffi::actor_storage_facet_id(storage, &self.root_key, id.into(), name)?.into();
+        }
+        self.ns.sqlite_path(&self.root_key, id)
+    }
+}
+
+impl cluster::Layout for Databases {
+    fn place(&self, lane: &str) -> cluster::Result<std::path::PathBuf> {
+        let path = Self::place(self, lane).map_err(|e| layout_error(&e))?;
+        Ok(path.into())
+    }
+
+    fn clear(&self) -> cluster::Result<()> {
+        let storage = self.ns.storage().map_err(|e| layout_error(&e))?;
+        ffi::actor_storage_clear(storage, &self.root_key)
+            .map_err(|e| layout_error(&crate::Error::from(e)))
+    }
+}
+
+fn layout_error(e: &crate::Error) -> cluster::Error {
+    cluster::Error::Replica(e.description().to_owned())
 }
 
 impl ActorHooks {
@@ -1429,6 +1596,14 @@ impl ActorHooks {
 
     pub(crate) fn delete_facet(&self, name: &str) -> Result<()> {
         self.container()?.delete_facet(name)
+    }
+
+    /// Whether the cluster replicates the actor's storage.
+    pub(crate) fn replicated(&self) -> bool {
+        self.0
+            .upgrade()
+            .and_then(|c| c.namespace.upgrade())
+            .is_some_and(|ns| ns.cluster().is_some())
     }
 
     pub(crate) fn clone_facet(&self, src: &str, dst: &str) -> Result<()> {
