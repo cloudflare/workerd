@@ -996,7 +996,14 @@ struct TailEvent final {
       kj::uint sequence,
       Event&& event,
       kj::Maybe<TraceFlags> traceFlags = kj::none);
-  TailEvent(rpc::Trace::TailEvent::Reader reader);
+  // Keep one reader per stream to ignore unknown union members and warn at most once.
+  class BatchReader final {
+   public:
+    kj::Array<TailEvent> readBatch(capnp::List<rpc::Trace::TailEvent>::Reader readers);
+
+   private:
+    bool warnedUnknownEvents = false;
+  };
   TailEvent(TailEvent&&) = default;
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);
@@ -1012,6 +1019,10 @@ struct TailEvent final {
 
   void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
+
+ private:
+  // BatchReader checks the union discriminant before constructing an event.
+  explicit TailEvent(rpc::Trace::TailEvent::Reader reader);
 };
 
 kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event);

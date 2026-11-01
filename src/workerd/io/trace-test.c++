@@ -5,12 +5,88 @@
 #include <workerd/io/trace.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/dynamic.h>
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
 
+#include <type_traits>
+
 namespace workerd::tracing {
 namespace {
+
+static_assert(!std::is_constructible_v<TailEvent, rpc::Trace::TailEvent::Reader>);
+
+void setUnknownTailEvent(rpc::Trace::TailEvent::Builder builder) {
+  auto unknown = builder.initEvent();
+  auto offset =
+      capnp::toDynamic(unknown).getSchema().getProto().getStruct().getDiscriminantOffset();
+  auto data = capnp::AnyStruct::Builder(kj::mv(unknown)).getDataSection();
+  data[offset * sizeof(uint16_t)] = 0xff;
+  data[offset * sizeof(uint16_t) + 1] = 0xff;
+}
+
+KJ_TEST("Tail batches skip unknown union members and retain subsequent events") {
+  capnp::MallocMessageBuilder message;
+  auto batch = message.initRoot<capnp::List<rpc::Trace::TailEvent>>(3);
+  batch[0].initEvent().initSpanClose();
+  batch[0].setSequence(1);
+  setUnknownTailEvent(batch[1]);
+  batch[2].initEvent().initOutcome();
+  batch[2].setSequence(3);
+  KJ_EXPECT_LOG(WARNING, "Skipping unknown streaming tail event types");
+  TailEvent::BatchReader reader;
+  auto events = reader.readBatch(batch.asReader());
+  KJ_ASSERT(events.size() == 2);
+  KJ_EXPECT(events[0].event.is<SpanClose>());
+  KJ_EXPECT(events[1].event.is<Outcome>());
+  KJ_EXPECT(events[0].sequence == 1 && events[1].sequence == 3);
+  capnp::MallocMessageBuilder unknownMessage;
+  unknownMessage.setRoot(batch.asReader()[1]);
+  auto unknownBatch = message.initRoot<capnp::List<rpc::Trace::TailEvent>>(1);
+  unknownBatch.setWithCaveats(0, unknownMessage.getRoot<rpc::Trace::TailEvent>());
+  KJ_EXPECT(reader.readBatch(unknownBatch.asReader()).size() == 0);
+}
+
+KJ_TEST("Tail batch readers warn only once per stream") {
+  class WarningCounter final: public kj::ExceptionCallback {
+   public:
+    uint count = 0;
+
+    void logMessage(kj::LogSeverity severity,
+        const char* file,
+        int line,
+        int contextDepth,
+        kj::String&& text) override {
+      if (severity == kj::LogSeverity::WARNING &&
+          text.contains("Skipping unknown streaming tail event types"_kj)) {
+        ++count;
+        return;
+      }
+      kj::ExceptionCallback::logMessage(severity, file, line, contextDepth, kj::mv(text));
+    }
+  } warnings;
+
+  TailEvent::BatchReader reader;
+  capnp::MallocMessageBuilder knownMessage;
+  auto knownBatch = knownMessage.initRoot<capnp::List<rpc::Trace::TailEvent>>(1);
+  knownBatch[0].initEvent().initSpanClose();
+  KJ_EXPECT(reader.readBatch(knownBatch.asReader()).size() == 1);
+  KJ_EXPECT(warnings.count == 0);
+
+  capnp::MallocMessageBuilder unknownMessage;
+  auto unknownBatch = unknownMessage.initRoot<capnp::List<rpc::Trace::TailEvent>>(3);
+  for (auto event: unknownBatch) setUnknownTailEvent(event);
+  KJ_EXPECT(reader.readBatch(unknownBatch.asReader()).size() == 0);
+  KJ_EXPECT(warnings.count == 1);
+  KJ_EXPECT(reader.readBatch(unknownBatch.asReader()).size() == 0);
+  KJ_EXPECT(reader.readBatch(knownBatch.asReader()).size() == 1);
+  KJ_EXPECT(warnings.count == 1);
+
+  TailEvent::BatchReader otherStream;
+  KJ_EXPECT(otherStream.readBatch(unknownBatch.asReader()).size() == 0);
+  KJ_EXPECT(warnings.count == 2);
+}
 
 class FakeEntropySource final: public kj::EntropySource {
  public:
@@ -682,7 +758,8 @@ KJ_TEST("Read/Write Outcome works") {
 
 KJ_TEST("Read/Write TailEvent works") {
   capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
+  auto batch = builder.initRoot<capnp::List<rpc::Trace::TailEvent>>(1);
+  auto infoBuilder = batch[0];
 
   auto context = SpanContext(TraceId(0, 0), {staticSpanId});
   Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
@@ -691,9 +768,10 @@ KJ_TEST("Read/Write TailEvent works") {
       context.getTraceId(), invocationId, context.getSpanId(), kj::UNIX_EPOCH, 0, kj::mv(log));
   info.copyTo(infoBuilder);
 
-  auto reader = infoBuilder.asReader();
-
-  TailEvent info2(reader);
+  TailEvent::BatchReader reader;
+  auto events = reader.readBatch(batch.asReader());
+  KJ_ASSERT(events.size() == 1);
+  auto& info2 = events[0];
   KJ_ASSERT(info2.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info2.sequence == 0);
   KJ_ASSERT(info2.invocationId == invocationId);
@@ -718,7 +796,8 @@ KJ_TEST("Read/Write TailEvent works") {
 
 KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
+  auto batch = builder.initRoot<capnp::List<rpc::Trace::TailEvent>>(1);
+  auto infoBuilder = batch[0];
 
   TraceId traceId(0, 0);
   auto context = SpanContext(traceId, {staticSpanId});
@@ -731,7 +810,10 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
   info.copyTo(infoBuilder);
 
-  TailEvent info2(infoBuilder.asReader());
+  TailEvent::BatchReader reader;
+  auto events = reader.readBatch(batch.asReader());
+  KJ_ASSERT(events.size() == 1);
+  auto& info2 = events[0];
   auto& attrs2 = KJ_ASSERT_NONNULL(info2.event.tryGet<kj::Array<Attribute>>());
   KJ_ASSERT(attrs2.size() == 2);
 
