@@ -2632,16 +2632,14 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        auto result = js.alloc<Fetcher>(IoContext::current().addObject(channel.addRef()),
+        return js.alloc<Fetcher>(IoContext::current().addObject(channel.addRef()),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         auto result = js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
+        result->nativeCallerUnsupported = true;
         return result;
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
@@ -2664,10 +2662,8 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
         KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
       }
 
-      auto result = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
           RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
     } else KJ_IF_SOME(storedHandler,
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
@@ -2685,10 +2681,8 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
         // Token stored out-of-line as an external.
         channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
       }
-      auto result = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
           RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
     }
   }
 
@@ -2955,13 +2949,21 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
   return ClientWithTracing{kj::mv(result.client), kj::none};
 }
 
+IoChannelFactory::NativeCallerMode Fetcher::getNativeCallerMode(uint channel) {
+  if (nativeCallerUnsupported) return IoChannelFactory::NativeCallerMode::UNSUPPORTED;
+  return channel >= IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
+      ? IoChannelFactory::NativeCallerMode::DIRECT
+      : IoChannelFactory::NativeCallerMode::NONE;
+}
+
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
-      auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext, nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+      auto client = ioContext.getSubrequestChannel(
+          channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
@@ -3031,9 +3033,10 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       kj::Own<WorkerInterface> client;
       KJ_IF_SOME(parent, userSpanParent) {
         client = ioContext.getSubrequestChannel(
-            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent), nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent), getNativeCallerMode(channel));
       } else {
-        client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext, nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+        client = ioContext.getSubrequestChannel(
+            channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       }
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }

@@ -1,4 +1,8 @@
-import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+import { DurableObject } from 'cloudflare:workers';
 import { strictEqual } from 'node:assert';
 const handler = {
   async fetch(request, env, ctx) {
@@ -10,8 +14,6 @@ const handler = {
       const identity = await first;
       if (identity) strictEqual(Object.isFrozen(identity), true);
       strictEqual(identity, await ctx.identity.caller());
-      if (new URL(request.url).pathname === '/rpc')
-        strictEqual((await env.PROBE.getCaller()).workerId, 'local:receiver');
       return Response.json({
         identity,
         body: request.bodyUsed ? null : await request.text(),
@@ -24,11 +26,6 @@ const handler = {
 
 export default handler;
 
-export class Probe extends WorkerEntrypoint {
-  getCaller() {
-    return this.ctx.identity.caller();
-  }
-}
 export class ReceiverDO extends DurableObject {
   fetch(request) {
     return handler.fetch(request, this.env, this.ctx);

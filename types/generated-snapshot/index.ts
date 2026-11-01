@@ -502,7 +502,6 @@ export interface ExecutionContext<Props = unknown> {
   readonly props: Props;
   cache?: CacheContext;
   readonly access?: CloudflareAccessContext;
-  readonly identity: CloudflareIdentityContext;
   mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
@@ -619,9 +618,6 @@ export interface CloudflareAccessContext {
   readonly aud: string;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
-export interface CloudflareIdentityContext {
-  caller(): Promise<CloudflareWorkloadIdentity | null>;
-}
 export declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }
@@ -703,7 +699,6 @@ export interface DurableObjectClass<
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  readonly identity: CloudflareIdentityContext;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;

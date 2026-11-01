@@ -454,14 +454,12 @@ class ExecutionContext: public jsg::Object {
             readonly override?: string;
           };
           readonly access?: CloudflareAccessContext;
-          readonly identity: CloudflareIdentityContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
           readonly exports: Cloudflare.Exports;
           readonly access?: CloudflareAccessContext;
-          readonly identity: CloudflareIdentityContext;
         });
       }
     } else {
@@ -475,13 +473,11 @@ class ExecutionContext: public jsg::Object {
             readonly override?: string;
           };
           readonly access?: CloudflareAccessContext;
-          readonly identity: CloudflareIdentityContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
           readonly access?: CloudflareAccessContext;
-          readonly identity: CloudflareIdentityContext;
         });
       }
     }

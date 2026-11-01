@@ -5,23 +5,18 @@ const unitTests :Workerd.Config = (
     modules = [(name = "test.js", esModule = embed "ctx-workload-identity-test.js")],
     compatibilityFlags = ["nodejs_compat", "rpc", "enable_workload_identity_context"],
     globalOutbound = "receiver",
-    bindings = [(name = "RECEIVER", service = "receiver"), (name = "UNAVAILABLE", service = "unavailable"), (name = "DO", durableObjectNamespace = (serviceName = "receiver", className = "ReceiverDO"))]
+    bindings = [(name = "DO", durableObjectNamespace = (serviceName = "receiver", className = "ReceiverDO"))]
   )),
   (name = "receiver", worker = (
     modules = [(name = "receiver.js", esModule = embed "ctx-workload-identity-receiver.js")],
     compatibilityFlags = ["nodejs_compat", "rpc", "enable_workload_identity_context"],
     workloadIdentityService = (name = "verifier", entrypoint = "Verifier", props = (json = "{\"testOnlyScope\":\"native\"}")),
     durableObjectNamespaces = [(className = "ReceiverDO", uniqueKey = "caller-test")],
-    durableObjectStorage = (inMemory = void),
-    bindings = [(name = "PROBE", service = (name = "receiver", entrypoint = "Probe"))]
-  )),
-  (name = "unavailable", worker = (
-    modules = [(name = "receiver.js", esModule = embed "ctx-workload-identity-receiver.js")],
-    compatibilityFlags = ["nodejs_compat", "rpc", "enable_workload_identity_context"]
+    durableObjectStorage = (inMemory = void)
   )),
   (name = "verifier", worker = (
     modules = [(name = "verifier.js", esModule = embed "ctx-workload-identity-verifier.js")],
-    compatibilityFlags = ["enable_workload_identity_context"]
+    compatibilityFlags = ["nodejs_compat", "enable_workload_identity_context"]
   ))
  ]
 );

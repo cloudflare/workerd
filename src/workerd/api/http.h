@@ -447,10 +447,6 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   // Internal method for use from bindings code. It skips compatibility flags checks.
-  void markNativeCallerUnsupported() {
-    nativeCallerUnsupported = true;
-  }
-
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodInternal(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
     return getRpcMethod(js, kj::mv(name));
@@ -581,6 +577,8 @@ class Fetcher: public JsRpcClientProvider {
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
       MakeUserSpanParent makeUserSpanParent);
+
+  IoChannelFactory::NativeCallerMode getNativeCallerMode(uint channel);
 
   // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
   // dispatch span when it created one. Factories that create no dispatch span

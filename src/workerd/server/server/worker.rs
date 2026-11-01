@@ -103,7 +103,6 @@ pub struct LinkedChannels {
     /// The subrequest channel whose props come from the request's Access blob.
     pub access_binding_channel: Option<u32>,
     pub workload_identity_channel: Option<u32>,
-    pub direct_service_channels: Vec<u32>,
     pub suppress_native_caller_channels: Vec<u32>,
     pub has_debug_port: bool,
     pub server: Weak<Server>,
@@ -354,7 +353,6 @@ impl WorkerService {
                 worker_loaders: Vec::new(),
                 access_binding_channel: None,
                 workload_identity_channel: None,
-                direct_service_channels: Vec::new(),
                 suppress_native_caller_channels: Vec::new(),
                 has_debug_port: false,
                 server,
@@ -1063,7 +1061,14 @@ impl ChannelFactory {
     }
 
     pub(crate) fn direct_service_channel(&self, channel: u32) -> bool {
-        self.0.direct_service_channels.contains(&channel)
+        // Configured bindings bind props, including empty props; ctx.exports templates do not.
+        self.0.workload_identity_channel != Some(channel)
+            && self
+                .0
+                .subrequest(channel)
+                .ok()
+                .and_then(|target| target.worker_entrypoint())
+                .is_some_and(|entrypoint| entrypoint.props.is_some())
     }
 
     pub(crate) fn workload_identity_channel(&self) -> KjMaybe<u32> {

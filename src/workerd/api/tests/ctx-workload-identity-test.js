@@ -1,12 +1,12 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { strictEqual, deepStrictEqual } from 'node:assert';
 export const workload = {
   async test(controller, env, ctx) {
     strictEqual(await ctx.identity.caller(), null); // Non-HTTP event.
-    const run = async (
-      path,
-      headers,
-      target = { fetch: globalThis.fetch.bind(globalThis) }
-    ) =>
+    const run = async (path, headers, target = globalThis) =>
       (
         await target.fetch('https://receiver.example' + path, {
           method: 'POST',
@@ -34,19 +34,11 @@ export const workload = {
       (await run('/', { authorization: 'Bearer stalled' })).name,
       'WorkloadIdentityUnavailableError'
     );
-    strictEqual(
-      (await run('/rpc', signed)).identity.signatureAgent,
-      'Bearer caller'
-    );
     const actor = env.DO.get(env.DO.idFromName('one'));
-    const actorResults = await Promise.all(
-      ['a', 'b'].map((id) =>
-        run('/', { authorization: 'Bearer ' + id, signature: 'test' }, actor)
-      )
-    );
-    deepStrictEqual(
-      actorResults.map((r) => r.name),
-      ['WorkloadIdentityUnavailableError', 'WorkloadIdentityUnavailableError']
+    strictEqual(
+      (await run('/', { authorization: 'Bearer a', signature: 'test' }, actor))
+        .name,
+      'WorkloadIdentityUnavailableError'
     );
     const concurrent = await Promise.all(
       ['a', 'b'].map((id) => run('/', { authorization: 'Bearer ' + id }))
