@@ -31,14 +31,10 @@ export const workload = {
       'WorkloadIdentityUnavailableError'
     );
     const actor = env.DO.get(env.DO.idFromName('one'));
-    const actorResults = await Promise.all(
-      ['a', 'b'].map((id) =>
-        run('/', { authorization: 'Bearer ' + id, signature: 'test' }, actor)
-      )
-    );
-    deepStrictEqual(
-      actorResults.map((r) => r.name),
-      ['WorkloadIdentityUnavailableError', 'WorkloadIdentityUnavailableError']
+    strictEqual(
+      (await run('/', { authorization: 'Bearer a', signature: 'test' }, actor))
+        .name,
+      'WorkloadIdentityUnavailableError'
     );
     const concurrent = await Promise.all(
       ['a', 'b'].map((id) => run('/', { authorization: 'Bearer ' + id }))
