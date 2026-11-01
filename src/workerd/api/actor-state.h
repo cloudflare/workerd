@@ -827,7 +827,6 @@ class DurableObjectState: public jsg::Object {
     if (flags.getEnableCtxExports()) {
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
-        readonly identity: CloudflareIdentityContext;
         readonly exports: Cloudflare.Exports;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
@@ -837,7 +836,6 @@ class DurableObjectState: public jsg::Object {
       // No ctx.exports yet.
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
-        readonly identity: CloudflareIdentityContext;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
         blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
