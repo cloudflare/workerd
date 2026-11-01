@@ -182,7 +182,8 @@ KJ_TEST("await_io_and_run() runs its callback in the async context frame that wa
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-// Records the KJ-to-JS bridges an async tracker creates, and the causes of turns.
+// Records the KJ-to-JS bridges and operations an async tracker creates, their annotations, and the
+// causes of turns.
 class BridgeListener final: public AsyncTraceListener {
  public:
   explicit BridgeListener(kj::Vector<kj::String>& events): events(events) {}
@@ -190,8 +191,13 @@ class BridgeListener final: public AsyncTraceListener {
   void onContextBegin(uint64_t, uint64_t) override {}
   void onInit(uint64_t, const AsyncInitEvent& e) override {
     if (e.kind == AsyncKind::KJ_TO_JS) events.add(kj::str("bridge ", e.id, " ", e.name));
+    if (e.kind == AsyncKind::OPERATION) events.add(kj::str("operation ", e.id, " ", e.name));
   }
   void onSettle(uint64_t, AsyncId, AsyncOutcome, uint64_t) override {}
+  void onAnnotate(
+      uint64_t, AsyncId id, kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) override {
+    events.add(kj::str("annotate ", id, " ", key, "=", value));
+  }
   void onBefore(uint64_t, AsyncId, uint64_t) override {}
   void onAfter(uint64_t, AsyncId, uint64_t) override {}
   void onDestroy(uint64_t, AsyncId, uint64_t) override {}
@@ -245,6 +251,139 @@ KJ_TEST("await_io_and_run() is recorded for async tracing, as awaitIo() is") {
     if (event == kj::str("turn cause=", id)) causedTurn = true;
   }
   KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
+}
+
+KJ_TEST(
+    "await_io_and_run() reports its wait under the operation of a user trace span started before") {
+  kj::Vector<kj::String> events;
+  TestFixture fixture({
+    .useRealTimers = false,
+    .isolateObserver = kj::atomicRefcounted<BridgeObserver>(events),
+  });
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request,
+      [&](const TestFixture::Environment& env) { await_in_user_trace_span(isolateOf(env)); });
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+
+  // No bridge of its own: the operation causes the turn that runs the callback.
+  kj::Maybe<kj::String> operationId;
+  for (auto& event: events) {
+    KJ_EXPECT(!event.endsWith(" awaitIo"), kj::strArray(events, "\n"));
+    if (event.startsWith("operation ") && event.endsWith(" rust_operation")) {
+      operationId = kj::str(event.first(event.size() - 15).slice(10));
+    }
+  }
+  auto& id = KJ_ASSERT_NONNULL(operationId, kj::strArray(events, "\n"));
+  bool causedTurn = false;
+  for (auto& event: events) {
+    if (event == kj::str("turn cause=", id)) causedTurn = true;
+  }
+  KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
+}
+
+KJ_TEST("await_io_and_run() reports its wait as its own after a user trace span is detached") {
+  kj::Vector<kj::String> events;
+  TestFixture fixture({
+    .useRealTimers = false,
+    .isolateObserver = kj::atomicRefcounted<BridgeObserver>(events),
+  });
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_after_detached_user_trace_span(isolateOf(env));
+  });
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+
+  // The operation is created, but the wait is a bridge of its own, which causes the turn.
+  bool hasOperation = false;
+  kj::Maybe<kj::String> bridgeId;
+  for (auto& event: events) {
+    if (event.startsWith("operation ") && event.endsWith(" rust_detached")) hasOperation = true;
+    if (event.startsWith("bridge ") && event.endsWith(" awaitIo")) {
+      bridgeId = kj::str(event.first(event.size() - 8).slice(7));
+    }
+  }
+  KJ_EXPECT(hasOperation, kj::strArray(events, "\n"));
+  auto& id = KJ_ASSERT_NONNULL(bridgeId, kj::strArray(events, "\n"));
+  bool causedTurn = false;
+  for (auto& event: events) {
+    if (event == kj::str("turn cause=", id)) causedTurn = true;
+  }
+  KJ_EXPECT(causedTurn, kj::strArray(events, "\n"));
+}
+
+TestFixture::SetupParams recordingSpans(RecordedSpans& records) {
+  return {.requestObserverFactory = records.requestObserverFactory()};
+}
+
+KJ_TEST("trace spans are recorded with their tags, under the request's span") {
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { record_trace_spans(isolateOf(env)); });
+  fixture.drainAndDestroy(kj::mv(request));
+
+  auto& span = KJ_ASSERT_NONNULL(records->find("rust_span"));
+  KJ_EXPECT(records->parentName(span) == "request", records->parentName(span));
+  KJ_EXPECT(span.ended);
+  KJ_EXPECT(
+      span.tags == "bool=bool:true float=float:1.5 int=int:42 literal=str:literal str=str:dynamic",
+      span.tags);
+
+  auto& child = KJ_ASSERT_NONNULL(records->find("rust_child"));
+  KJ_EXPECT(records->parentName(child) == "rust_span", records->parentName(child));
+  KJ_EXPECT(child.tags == "unsigned=int:2", child.tags);
+
+  // Its internal half; the request has no user tracing.
+  auto& user = KJ_ASSERT_NONNULL(records->find("rust_user_span"));
+  KJ_EXPECT(records->parentName(user) == "request", records->parentName(user));
+  KJ_EXPECT(user.ended);
+  KJ_EXPECT(user.tags ==
+          "bool=bool:false float=float:0.5 int=int:7 literal=str:user_literal str=str:user",
+      user.tags);
+}
+
+KJ_TEST("a trace span ends when its SpanBuilder is dropped") {
+  auto records = kj::rc<RecordedSpans>();
+  TestFixture fixture(recordingSpans(*records));
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { hold_trace_span(isolateOf(env)); });
+  KJ_EXPECT(!KJ_ASSERT_NONNULL(records->find("held_span")).ended);
+  drop_held_trace_span();
+  KJ_EXPECT(KJ_ASSERT_NONNULL(records->find("held_span")).ended);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a user trace span's tags annotate its operation when its spans are not recorded") {
+  kj::Vector<kj::String> events;
+  TestFixture fixture({
+    .useRealTimers = false,
+    .isolateObserver = kj::atomicRefcounted<BridgeObserver>(events),
+  });
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { record_trace_spans(isolateOf(env)); });
+  fixture.drainAndDestroy(kj::mv(request));
+
+  kj::Maybe<kj::String> operationId;
+  for (auto& event: events) {
+    if (event.startsWith("operation ") && event.endsWith(" rust_user_span")) {
+      operationId = kj::str(event.first(event.size() - 15).slice(10));
+    }
+  }
+  auto& id = KJ_ASSERT_NONNULL(operationId, kj::strArray(events, "\n"));
+  kj::Vector<kj::StringPtr> annotations;
+  for (auto& event: events) {
+    if (event.startsWith(kj::str("annotate ", id, " "))) {
+      annotations.add(event.slice(10 + id.size()));
+    }
+  }
+  KJ_EXPECT(
+      kj::strArray(annotations, " ") == "bool=false int=7 float=0.5 str=user literal=user_literal",
+      kj::strArray(events, "\n"));
 }
 
 KJ_TEST("await_io_and_run() resumes the request when its future completes on another thread") {
