@@ -22,6 +22,9 @@
 
 #include <v8-wasm.h>
 
+#include <tuple>
+#include <utility>
+
 namespace workerd::jsg {
 
 // True if there is an unwrap() overload which does *not* take a v8::Value to unwrap for this
@@ -686,6 +689,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         GeneratorWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration),
         config(getConfig(configuration)) {
+    if constexpr (hasSplitResourceTemplates<Self>) {
+      // Registered once per process, before any isolate of this type builds a template.
+      [[maybe_unused]] static const bool registered = (Self::registerTemplates(), true);
+    }
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
@@ -703,6 +710,34 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         static_cast<ResourceWrapper<Self, T>*>(this)->iterateResourceTypeTemplates(cb);
       }
     }(), ...);
+  }
+
+  // For an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE, registers the template
+  // builders of the resource types at positions index, index + count, index + 2 * count, ... of
+  // the isolate type's declaration, compiling them in the calling translation unit.
+  template <size_t index, size_t count>
+  static void registerTemplateShard() {
+    static_assert(index < count);
+    []<size_t... i>(std::index_sequence<i...>) {
+      ([] {
+        using U = std::tuple_element_t<i, std::tuple<T...>>;
+        if constexpr (i % count == index && U::JSG_KIND == JsgKind::RESOURCE) {
+          ResourceWrapper<Self, U>::template registerTemplate<false>();
+        }
+      }(), ...);
+    }(std::make_index_sequence<sizeof...(T)>());
+  }
+
+  // For an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE, registers the builder of the
+  // template that contexts whose global object is a GlobalType are created with, and those of the
+  // context templates of GlobalType's JSG superclasses, which it inherits.
+  template <typename GlobalType>
+  static void registerContextTemplate() {
+    ResourceWrapper<Self, GlobalType>::template registerTemplate<true>();
+    using Super = typename GlobalType::jsgSuper;
+    if constexpr (!kj::isSameType<Super, Object>()) {
+      registerContextTemplate<Super>();
+    }
   }
 
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
@@ -1002,6 +1037,33 @@ class TypeWrapperOps<Self>::TypeHandlerImpl final: public TypeHandler<T> {
     /* argument match. Without this, those overloads would lose to deducing-this overloads */      \
     /* (which are not yet used in JSG yet but will be introduced soon and always deduce an */      \
     /* identity `self`) and overload resolution would differ from calling through the base. */     \
+    using Type##_TypeWrapperBase::wrap;                                                            \
+    using Type##_TypeWrapperBase::tryUnwrap;                                                       \
+    using Type##_TypeWrapperBase::getName;                                                         \
+    using Type##_TypeWrapperBase::unwrap;                                                          \
+  };                                                                                               \
+  class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
+   public:                                                                                         \
+    using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
+  }
+
+// Like JSG_DECLARE_ISOLATE_TYPE, but each resource type's template builder -- the code binding its
+// members to JavaScript, which is most of an isolate type's code -- is compiled where the
+// application registers it with registerTemplateShard() or registerContextTemplate(), rather
+// than wherever the isolate type is used. The application does that registration in its
+// definition of `Type_TypeWrapper::registerTemplates()`, which JSG calls once per process. See
+// "Splitting an isolate type across translation units" in docs/jsg.md.
+#define JSG_DECLARE_SPLIT_ISOLATE_TYPE(Type, ...)                                                  \
+  class Type##_TypeWrapper;                                                                        \
+  using Type##_TypeWrapperBase =                                                                   \
+      ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>;           \
+  class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
+   public:                                                                                         \
+    [[maybe_unused]] static constexpr bool trackCallCounts = false;                                \
+    [[maybe_unused]] static constexpr bool splitResourceTemplates = true;                          \
+    static void registerTemplates();                                                               \
+    using Type##_TypeWrapperBase::TypeWrapper;                                                     \
+    /* See the comment in JSG_DECLARE_ISOLATE_TYPE for why these are re-exported. */               \
     using Type##_TypeWrapperBase::wrap;                                                            \
     using Type##_TypeWrapperBase::tryUnwrap;                                                       \
     using Type##_TypeWrapperBase::getName;                                                         \
