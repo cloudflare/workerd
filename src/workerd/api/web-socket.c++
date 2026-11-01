@@ -270,7 +270,7 @@ void WebSocket::setPeer(jsg::WeakRef<WebSocket> peer) {
 }
 
 void WebSocket::visitForGc(jsg::GcVisitor& visitor) {
-  impl->visitForGc(visitor);
+  visitor.visit(impl);
 }
 
 void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

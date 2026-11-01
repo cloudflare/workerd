@@ -250,6 +250,17 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Generator<T>`         | Sync generator                   |
 | `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
+| `jsg::TracedOwn<T>`         | Owned heap object with handles   |
+
+Hold a heap object whose handles you visit in a `jsg::TracedOwn<T>`, not a `kj::Own<T>`.
+Moving a `kj::Own<T>` moves only the pointer, so an object moved out of the owner that
+visited it keeps traced handles that nothing visits, and the GC can free their targets
+while the object still uses them. A `TracedOwn<T>` makes them strong again when it moves.
+This is behind the `gc-complete-tracing` autogate; with it disabled, a `TracedOwn<T>` behaves
+like a `kj::Own<T>`.
+The `jsg-traced-own` clang-tidy check flags a `visitForGc()`, or a helper handed the
+visitor, that visits through a `kj::Own`, and moves of whole containers whose elements
+hold a `TracedOwn`.
 
 **Not GC-visitable** (compile error if visited):
 `jsg::WeakRef<T>`.

@@ -1753,8 +1753,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   }
   queue.push_back(WriteEvent{
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = kj::heap<Pipe>(*this, kj::mv(source), kj::mv(sourceLock), kj::mv(prp.resolver),
-        preventAbort, preventClose, preventCancel, kj::mv(options.signal)),
+    .event = jsg::TracedOwn(kj::heap<Pipe>(*this, kj::mv(source), kj::mv(sourceLock),
+        kj::mv(prp.resolver), preventAbort, preventClose, preventCancel, kj::mv(options.signal))),
   });
   ensureWriting(js);
   return kj::mv(prp.promise);
@@ -1990,7 +1990,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           KJ_CASE_ONEOF(close, Close) {
             events.add(kj::str("Close"));
           }
-          KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
+          KJ_CASE_ONEOF(pipe, jsg::TracedOwn<Pipe>) {
             events.add(kj::str("Pipe"));
           }
         }
@@ -2019,7 +2019,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       if constexpr (kj::isSameType<Request, Close>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
-      } else if constexpr (kj::isSameType<Request, kj::Own<Pipe>>()) {
+      } else if constexpr (kj::isSameType<Request, jsg::TracedOwn<Pipe>>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
       }
@@ -2167,7 +2167,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }));
     }
-    KJ_CASE_ONEOF(request, kj::Own<Pipe>) {
+    KJ_CASE_ONEOF(request, jsg::TracedOwn<Pipe>) {
       if (request->checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
         return js.resolvedPromise();
@@ -2247,7 +2247,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // teardown, so we track the Pipe itself via its weak ref.
           if (pipeState->isAborted()) return js.resolvedPromise();
 
-          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
+          auto& request = check.template operator()<jsg::TracedOwn<Pipe>>(controller);
 
           // KJ_IF_SOME on request.source(): if pipeLoop already released the
           // source (via Pipe::State::releaseSource()), source is now
@@ -2316,7 +2316,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
           auto handle = jsg::JsValue(reason.getHandle(js));
 
-          auto& request = check.template operator()<kj::Own<Pipe>>(controller);
+          auto& request = check.template operator()<jsg::TracedOwn<Pipe>>(controller);
 
           auto fulfiller = request->takePromise();
           maybeRejectPromise<void>(js, fulfiller, handle);
@@ -2865,14 +2865,12 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         maybeRejectPromise<void>(js, promise, reason);
         queue.pop_front();
       }
-      KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
-        // The Pipe lives on the heap and cannot be moved, so moving the kj::Own out of the
-        // queue would not re-strengthen its handles. It therefore stays in `queue`, where
-        // visitForGc() keeps reaching it, until it has been settled. The promise is taken
-        // first (the move makes it strong), and only a weak reference is held across
-        // releaseSource(): with a cancel reason, it runs the source's cancel algorithm
-        // (arbitrary user JS), which may re-enter this controller and tear the Pipe down.
-        // `pipeRequest` must not be used after that call.
+      KJ_CASE_ONEOF(pipeRequest, jsg::TracedOwn<Pipe>) {
+        // The Pipe stays in `queue`, where visitForGc() keeps reaching it, until it has been
+        // settled. The promise is taken first (the move makes it strong), and only a weak
+        // reference is held across releaseSource(): with a cancel reason, it runs the source's
+        // cancel algorithm (arbitrary user JS), which may re-enter this controller and tear the
+        // Pipe down. `pipeRequest` must not be used after that call.
         auto promise = pipeRequest->takePromise();
         auto weakPipe = pipeRequest->addWeakRef();
         // Cancel (unless preventCancel) and unlock the source. Note that the unlock
@@ -2917,8 +2915,8 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       KJ_CASE_ONEOF(flush, Flush) {
         visitor.visit(flush.promise);
       }
-      KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
-        pipe->visitForGc(visitor);
+      KJ_CASE_ONEOF(pipe, jsg::TracedOwn<Pipe>) {
+        visitor.visit(pipe);
       }
     }
   }

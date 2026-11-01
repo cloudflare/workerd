@@ -22,6 +22,7 @@
 #include "coroutine-hostile-raii.h"
 #include "legacy-stream-alloc.h"
 #include "promise-ignore-result.h"
+#include "traced-own.h"
 #include "unsafe-continuation-capture.h"
 #include "use-after-move.h"
 #include "visit-for-gc.h"
@@ -38,6 +39,7 @@ class WorkerdLintModule: public clang::tidy::ClangTidyModule {
     CheckFactories.registerCheck<CoroutineHostileRAIICheck>("workerd-coroutine-hostile-raii");
     CheckFactories.registerCheck<LegacyStreamAllocCheck>("workerd-legacy-stream-alloc");
     CheckFactories.registerCheck<PromiseIgnoreResultCheck>("workerd-promise-ignore-result");
+    CheckFactories.registerCheck<TracedOwnCheck>("jsg-traced-own");
     CheckFactories.registerCheck<UnsafeContinuationCaptureCheck>(
         "workerd-unsafe-continuation-capture");
     CheckFactories.registerCheck<UseAfterMoveCheck>("workerd-use-after-move");
