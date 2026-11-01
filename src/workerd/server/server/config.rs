@@ -1140,16 +1140,6 @@ impl Server {
             .enumerate()
             .filter_map(|(index, d)| d.suppress_native_caller.then_some(index as u32 + 2))
             .collect();
-        let direct_service_channels = pending
-            .bindings
-            .subrequest
-            .iter()
-            .enumerate()
-            .filter_map(|(index, d)| match self.services.0.get(&d.service) {
-                Some(Service::Worker(_)) => Some(index as u32 + 2),
-                _ => None,
-            })
-            .collect();
         subrequest.extend(pending.bindings.subrequest.iter().map(lookup));
         // The loopback channels, in the order `ctx.exports` was numbered with.
         for entrypoint in &pending.loopback.subrequest_entrypoints {
@@ -1244,7 +1234,6 @@ impl Server {
                 worker_loaders,
                 access_binding_channel,
                 workload_identity_channel,
-                direct_service_channels,
                 suppress_native_caller_channels,
                 has_debug_port: pending.bindings.has_debug_port,
                 server: Rc::downgrade(self),

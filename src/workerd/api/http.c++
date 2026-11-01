@@ -2632,16 +2632,14 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        auto result = js.alloc<Fetcher>(IoContext::current().addObject(channel.addRef()),
+        return js.alloc<Fetcher>(IoContext::current().addObject(channel.addRef()),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         auto result = js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
+        result->nativeCallerUnsupported = true;
         return result;
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
@@ -2664,10 +2662,8 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
         KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
       }
 
-      auto result = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
           RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
     } else KJ_IF_SOME(storedHandler,
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
@@ -2685,10 +2681,8 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
         // Token stored out-of-line as an external.
         channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
       }
-      auto result = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)),
           RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
-        result->markNativeCallerUnsupported();
-        return result;
     }
   }
 

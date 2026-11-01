@@ -2037,10 +2037,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
   // separate subclasses handling the case of an entrypoint vs. a transient RPC object.
   virtual TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) = 0;
 
-  virtual bool isEntrypointTarget() {
-    return false;
-  }
-
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
     co_await kj::yield();
@@ -2378,7 +2374,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         ctx.makeAsyncTraceScope(lock, kj::mv(traceParent));
     jsg::AsyncContextFrame::StorageScope userTraceScope =
         ctx.makeUserAsyncTraceScope(lock, kj::mv(userTraceParent));
-    auto callerScope = IdentityContext::makeRpcScope(lock, isEntrypointTarget());
+    auto callerScope = IdentityContext::makeRpcScope(lock, getTargetKind() == "entrypoint"_kjc);
     return dispatch().attach(kj::mv(jsRpcCallSpan));
   }
 
@@ -3222,10 +3218,6 @@ kj::Maybe<jsg::JsObject> findMethodWithoutUserCode(
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  public:
-  bool isEntrypointTarget() override {
-    return true;
-  }
-
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::StringPtr> entrypointName,

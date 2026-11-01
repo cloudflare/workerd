@@ -447,10 +447,6 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   // Internal method for use from bindings code. It skips compatibility flags checks.
-  void markNativeCallerUnsupported() {
-    nativeCallerUnsupported = true;
-  }
-
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodInternal(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
     return getRpcMethod(js, kj::mv(name));

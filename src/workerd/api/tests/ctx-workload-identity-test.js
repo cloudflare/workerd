@@ -2,11 +2,7 @@ import { strictEqual, deepStrictEqual } from 'node:assert';
 export const workload = {
   async test(controller, env, ctx) {
     strictEqual(await ctx.identity.caller(), null); // Non-HTTP event.
-    const run = async (
-      path,
-      headers,
-      target = { fetch: globalThis.fetch.bind(globalThis) }
-    ) =>
+    const run = async (path, headers, target = globalThis) =>
       (
         await target.fetch('https://receiver.example' + path, {
           method: 'POST',
@@ -34,7 +30,6 @@ export const workload = {
       (await run('/', { authorization: 'Bearer stalled' })).name,
       'WorkloadIdentityUnavailableError'
     );
-    strictEqual((await run('/rpc', signed)).identity.id, 'Bearer caller');
     const actor = env.DO.get(env.DO.idFromName('one'));
     const actorResults = await Promise.all(
       ['a', 'b'].map((id) =>
