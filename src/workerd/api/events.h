@@ -99,6 +99,21 @@ class MessageEvent final: public Event {
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
+  // An origin already serialized, or none for a null origin. A distinct type, so that kj::none
+  // passed for the constructors' urlForOrigin is not ambiguous.
+  struct SerializedOrigin {
+    kj::Maybe<kj::String> origin;
+  };
+
+  // A trusted event as the runtime fires one, from an implementation that keeps its origin
+  // serialized (the bootstrap's EventSource).
+  MessageEvent(jsg::Lock& js,
+      kj::String type,
+      const jsg::JsValue& data,
+      kj::String lastEventId,
+      kj::Maybe<messageevent::MessagePort> source,
+      SerializedOrigin origin);
+
   // The spec's MessageEventInit dictionary. Only `data` is ever meaningful to the runtime
   // itself; the remaining members exist so that user-constructed events reflect the
   // standard surface.

@@ -121,6 +121,18 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       maybeSource(kj::mv(source)),
       maybeOrigin(urlForOrigin.map([](auto& url) { return kj::str(url.getOrigin()); })) {}
 
+MessageEvent::MessageEvent(jsg::Lock& js,
+    kj::String type,
+    const jsg::JsValue& data,
+    kj::String lastEventId,
+    kj::Maybe<messageevent::MessagePort> source,
+    SerializedOrigin origin)
+    : Event(kj::mv(type), {}, Trusted::YES),
+      data(jsg::JsRef(js, data)),
+      lastEventId(kj::mv(lastEventId)),
+      maybeSource(kj::mv(source)),
+      maybeOrigin(kj::mv(origin.origin)) {}
+
 MessageEvent::MessageEvent(jsg::Lock& js, kj::String type, Initializer initializer)
     : Event(kj::mv(type),
           Event::Init{

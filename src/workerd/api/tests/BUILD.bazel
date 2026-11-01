@@ -41,21 +41,6 @@ wd_test(
 )
 
 wd_test(
-    src = "eventsource-context-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "eventsource-context-test.js",
-        "eventsource-context-worker.js",
-    ],
-)
-
-wd_test(
-    src = "eventsource-lifetime-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-lifetime-test.js"],
-)
-
-wd_test(
     src = "queue-backing-store-test.wd-test",
     args = [
         "--experimental",
@@ -749,24 +734,6 @@ wd_test(
         "events-pedantic-test.js",
         "events-test.js",
     ],
-)
-
-wd_test(
-    src = "eventsource-gc-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-gc-test.js"],
-)
-
-wd_test(
-    src = "eventsource-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-test.js"],
-)
-
-wd_test(
-    src = "eventsource-ts-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-test.js"],
 )
 
 wd_test(

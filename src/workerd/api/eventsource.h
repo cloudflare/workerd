@@ -5,6 +5,7 @@
 #pragma once
 #include "basics.h"
 #include "events.h"
+#include "eventsource-bootstrap.h"
 #include "http.h"
 
 #include <workerd/jsg/jsg.h>
@@ -22,6 +23,10 @@ class Response;
 
 // Implements the web standard EventSource API
 // https://developer.mozilla.org/en-US/docs/Web/API/EventSource
+//
+// Under the TS_EVENT_SOURCE autogate, EventSource is instead the TypeScript implementation in
+// src/per_isolate/eventsource/, installed by the per-isolate bootstrap, and this class is
+// registered but never exposed.
 class EventSource: public EventTarget {
  public:
   struct EventSourceInit {
@@ -197,4 +202,5 @@ class EventSource: public EventTarget {
 
 }  // namespace workerd::api
 
-#define EW_EVENTSOURCE_ISOLATE_TYPES api::EventSource, api::EventSource::EventSourceInit
+#define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
+  api::EventSource, api::EventSource::EventSourceInit, api::EventSourceIo

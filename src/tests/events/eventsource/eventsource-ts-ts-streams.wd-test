@@ -1,0 +1,50 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventSourceModules = import "eventsource-modules.capnp";
+
+# Main cell, TypeScript implementation (src/per_isolate/eventsource/,
+# under the TS_EVENT_SOURCE autogate), reading the TypeScript streams
+# (typescript_implemented_streams, which needs --experimental).
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - nodejs_compat: node:assert and node:util.
+# - enable_weak_ref: WeakRef, for gc.js.
+# - rpc: gc.js calls its Durable Object's method.
+# - streams_enable_constructors: the ReadableStream constructor.
+# - set_tostring_tag: [object EventSource].
+# - spec_compliant_dispatch_exceptions: listener exceptions are reported.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-eventsource-ts-ts-streams",
+      worker = (
+        modules = EventSourceModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_weak_ref",
+          "rpc",
+          "streams_enable_constructors",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+          "typescript_implemented_streams",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "true"),
+          (name = "subrequest", service = "events-eventsource-ts-ts-streams"),
+          (name = "ns", durableObjectNamespace = "EventSourceGcDo"),
+          (name = "current", service = "context-current"),
+          (name = "legacy", service = "context-legacy"),
+        ],
+        durableObjectNamespaces = [
+          (className = "EventSourceGcDo", uniqueKey = "6984eceb22924037ab88556a7dc2eb6e"),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+    EventSourceModules.contextCurrent,
+    EventSourceModules.contextLegacy,
+    EventSourceModules.contextHelper,
+  ],
+  autogates = ["workerd-autogate-ts-event-source"],
+  v8Flags = ["--expose-gc"],
+);
