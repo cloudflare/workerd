@@ -96,3 +96,12 @@ receiverContext.identity.caller({ issuer: 'https://attacker.example' });
 declare const actorContext: DurableObjectState;
 const actorCaller: Promise<CloudflareWorkloadIdentity | null> = actorContext.identity.caller();
 void actorCaller;
+
+const publicMetadata: IdentityOAuthClientMetadataDocument = await selected.getClientMetadata();
+const explicitMetadata = await selected.getClientMetadata('https://client.example/client.json');
+const assertion: string = await selected.getClientAssertion({ clientId: 'provider-id', audience: 'https://auth.example' });
+// @ts-expect-error Client and AS selection are required for public assertions.
+selected.getClientAssertion();
+// @ts-expect-error No token, key or nonce API is exposed.
+selected.getDpopProof('https://api.example');
+void [publicMetadata, explicitMetadata, assertion];

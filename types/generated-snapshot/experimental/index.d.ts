@@ -16445,6 +16445,21 @@ type IdentityFetchOptions = Omit<RequestInit, "body" | "cf" | "signal"> & {
   body?:
     string | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array> | Blob;
 };
+/** Public registration metadata; contains no private key, assertion or access token. */
+interface IdentityOAuthClientMetadataDocument {
+  /** Exact configured or explicitly selected client ID. */
+  client_id: string;
+  /** Public opaque workload name. */
+  client_name: string;
+  token_endpoint_auth_method: "private_key_jwt";
+  token_endpoint_auth_signing_alg: "Ed25519";
+  /** Active and spare public verification keys. */
+  jwks: {
+    keys: JsonWebKey[];
+  };
+  grant_types: "client_credentials"[];
+  response_types: never[];
+}
 /** Service-hosted managed HTTP identity with a fixed parent and optional label. */
 interface IdentityFetcher extends Rpc.RpcTargetBranded {
   /** Stable opaque identity ID; await this property on its RPC stub. */
@@ -16453,7 +16468,16 @@ interface IdentityFetcher extends Rpc.RpcTargetBranded {
   readonly signatureAgent: Promise<string>;
   /** Public signed key directory URL; await this property on its RPC stub. */
   readonly directoryURL: Promise<string>;
-  /** Signs and sends within the parent binding's destination limits. */
+  /** Configured client metadata; explicit publication URLs require client_authentication. */
+  getClientMetadata(
+    clientId?: string,
+  ): Promise<IdentityOAuthClientMetadataDocument>;
+  /** Fresh 60-second assertion. Requires client_authentication; performs no exchange. */
+  getClientAssertion(options: {
+    clientId: string;
+    audience: string;
+  }): Promise<string>;
+  /** Authenticates and sends within the parent binding's destination limits. */
   fetch(
     input: Request | string,
     init?: IdentityFetchOptions,
