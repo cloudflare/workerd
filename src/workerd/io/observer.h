@@ -343,6 +343,8 @@ class IsolateObserver: public kj::AtomicRefcounted {
 
   class LockTiming {
    public:
+    virtual ~LockTiming() noexcept(false) = default;
+
     // Called by `Isolate::takeAsyncLock()` when it is blocked by a different isolate lock on the
     // same thread.
     virtual void waitingForOtherIsolate(kj::StringPtr id) {}
