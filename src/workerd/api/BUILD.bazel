@@ -809,6 +809,14 @@ kj_test(
 )
 
 kj_test(
+    src = "web-socket-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "api-rtti-test.c++",
     deps = [
         ":encoding",
