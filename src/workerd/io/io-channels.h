@@ -160,7 +160,26 @@ class IoChannelFactory: public virtual kj::Refcounted {
 
   // Contains metadata attached to an outgoing subrequest from a worker, independent of the type
   // of request.
+  // Private invocation metadata. Embedders populate facts from their service graph,
+  // never from headers, props or RPC arguments.
+  struct NativeCaller {
+    enum class State { ABSENT, DIRECT, UNSUPPORTED, UNAVAILABLE };
+    State state = State::ABSENT;
+    kj::String accountId;
+    kj::String workerId;
+    NativeCaller clone() const {
+      return {state, kj::str(accountId), kj::str(workerId)};
+    }
+  };
+  virtual NativeCaller getNativeCaller() {
+    return {};
+  }
+  enum class NativeCallerMode { NONE, DIRECT, UNSUPPORTED };
+
   struct SubrequestMetadata {
+    NativeCallerMode nativeCallerMode = NativeCallerMode::NONE;
+    NativeCaller nativeCaller;
+
     // The `request.cf` blob, JSON-encoded.
     kj::Maybe<kj::String> cfBlobJson;
 
@@ -228,6 +247,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
 
   // Get a CacheClient, used to implement the Cache API.
   virtual kj::Own<CacheClient> getCache() = 0;
+
+  // Private platform verifier. Absence is an availability failure for credential-bearing HTTP.
+  virtual kj::Maybe<uint> getWorkloadIdentityChannel() {
+    return kj::none;
+  }
 
   // Get the singleton timer instance, used to back Date.now(), setTimeout(), etc. This object
   // may implement Spectre mitigations.

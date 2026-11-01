@@ -905,6 +905,7 @@ pub fn lookup_service(
         entrypoint,
         props_json,
         error_context: context,
+        ..
     } = designator;
     let Some(service) = services.get(target) else {
         report.error(format!(
@@ -964,6 +965,7 @@ pub fn lookup_actor_class(
         entrypoint,
         props_json,
         error_context: context,
+        ..
     } = designator;
     let Some(service) = services.get(target) else {
         report.error(format!(
@@ -1113,6 +1115,28 @@ impl Server {
         Ok(server)
     }
 
+    /// Preserve immutable verifier props through ordinary service lookup.
+    fn link_workload_identity(
+        &self,
+        designator: Option<&Designator>,
+        subrequest: &mut Vec<Rc<dyn Channel>>,
+    ) -> Option<u32> {
+        let designator = designator?;
+        if !matches!(
+            self.services.0.get(&designator.service),
+            Some(Service::Worker(_))
+        ) {
+            self.report.error(format!(
+                "Worker workloadIdentityService requires a Worker service: {}",
+                designator.service
+            ));
+            return None;
+        }
+        let channel = len_u32(subrequest);
+        subrequest.push(lookup_service(&self.services.0, &self.report, designator));
+        Some(channel)
+    }
+
     /// Resolves everything `worker`'s config names into its channel table.
     fn link_worker(self: &Rc<Self>, name: &str, worker: &Rc<WorkerService>) -> Result<()> {
         let Some(pending) = worker.take_pending_link() else {
@@ -1131,12 +1155,21 @@ impl Server {
         for _ in 0..SPECIAL_SUBREQUEST_CHANNEL_COUNT {
             subrequest.push(Rc::clone(&global));
         }
+        let suppress_native_caller_channels = pending
+            .bindings
+            .subrequest
+            .iter()
+            .enumerate()
+            .filter_map(|(index, d)| d.suppress_native_caller.then_some(index as u32 + 2))
+            .collect();
         subrequest.extend(pending.bindings.subrequest.iter().map(lookup));
         // The loopback channels, in the order `ctx.exports` was numbered with.
         for entrypoint in &pending.loopback.subrequest_entrypoints {
             subrequest.push(worker.loopback_entrypoint(entrypoint.as_deref())?);
         }
-        // The access binding's entrypoint is a template: its props are each request's identity.
+        let workload_identity_channel =
+            self.link_workload_identity(pending.workload_identity.as_ref(), &mut subrequest);
+
         let mut access_binding_channel = None;
         if let Some(designator) = &pending.access_binding {
             let target = &designator.service;
@@ -1208,6 +1241,8 @@ impl Server {
                 streaming_tails,
                 worker_loaders,
                 access_binding_channel,
+                workload_identity_channel,
+                suppress_native_caller_channels,
                 has_debug_port: pending.bindings.has_debug_port,
                 server: Rc::downgrade(self),
                 abort_isolate: None,

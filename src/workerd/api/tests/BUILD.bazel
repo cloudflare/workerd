@@ -459,6 +459,23 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-service-binding-caller.wd-test",
+    data = [
+        "ctx-service-binding-caller-receiver.js",
+        "ctx-service-binding-caller-test.js",
+    ],
+)
+
+wd_test(
+    src = "ctx-workload-identity-test.wd-test",
+    data = [
+        "ctx-workload-identity-receiver.js",
+        "ctx-workload-identity-test.js",
+        "ctx-workload-identity-verifier.js",
+    ],
+)
+
+wd_test(
     src = "cache-test.wd-test",
     args = ["--experimental"],
     data = [

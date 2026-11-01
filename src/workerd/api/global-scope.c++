@@ -114,6 +114,154 @@ jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   return js.alloc<Tracing>();
 }
 
+namespace {
+kj::Arc<jsg::AsyncContextFrame::StorageKey> workloadIdentityKey() {
+  static const auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
+  return key.addRef();
+}
+
+struct WorkloadIdentityInvocation {
+  kj::Maybe<jsg::Ref<Request>> request;
+  kj::Maybe<uint> channel;
+  IoChannelFactory::NativeCaller nativeCaller;
+  kj::Maybe<jsg::V8Ref<v8::Promise>> result;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(request, result);
+  }
+};
+
+[[noreturn]] void workloadIdentityFailure(kj::StringPtr name, kj::StringPtr message) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::str("jsg.DOMException(", name, "): ", message)));
+}
+}  // namespace
+
+kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> IdentityContext::makeRpcScope(
+    jsg::Lock& js, bool isEntrypoint) {
+  if (!FeatureFlags::get(js).getEnableWorkloadIdentityContext()) return kj::none;
+  auto native = IoContext::current().getIoChannelFactory().getNativeCaller();
+  // A callback/returned target has no direct configured-binding provenance.
+  if (!isEntrypoint) native = {IoChannelFactory::NativeCaller::State::UNSUPPORTED, {}, {}};
+  auto state = jsg::wrapOpaque(
+      js.v8Context(), WorkloadIdentityInvocation{kj::none, kj::none, kj::mv(native), kj::none});
+  return kj::heap<jsg::AsyncContextFrame::StorageScope>(js, workloadIdentityKey(), js.v8Ref(state));
+}
+
+jsg::Value IdentityContext::caller(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Ref<Request>)>>& callHandler) {
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_SOME(value, frame.get(*workloadIdentityKey())) {
+      auto& invocation =
+          jsg::unwrapOpaqueRef<WorkloadIdentityInvocation>(js.v8Isolate, value.getHandle(js));
+      KJ_IF_SOME(result, invocation.result) {
+        return jsg::Value(js.v8Isolate, result.getHandle(js));
+      }
+      auto promise = js.evalNow([&]() -> jsg::Promise<jsg::Value> {
+        auto& native = invocation.nativeCaller;
+        if (native.state == IoChannelFactory::NativeCaller::State::DIRECT) {
+          if (native.accountId.size() == 0 || native.workerId.size() == 0)
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The platform could not establish the service-binding caller. Retry on a supported runtime.");
+          auto object = js.obj();
+          object.set(js, "kind", js.str("service-binding"_kj));
+          object.set(js, "accountId", js.str(native.accountId));
+          object.set(js, "workerId", js.str(native.workerId));
+          v8::Local<v8::Object> handle = object;
+          handle->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen).Check();
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, handle));
+        }
+        if (native.state != IoChannelFactory::NativeCaller::State::ABSENT)
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Caller identity supports direct configured service-binding calls between deployed static Workers in one account. Use a supported direct binding path.");
+        if (invocation.request == kj::none)
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
+        auto& originalRequest = KJ_ASSERT_NONNULL(invocation.request);
+
+        auto headers = originalRequest->getHeaders(js);
+        bool signedRequest = headers->has(kj::str("signature")) ||
+            headers->has(kj::str("signature-input")) || headers->has(kj::str("signature-agent"));
+        auto authorization = headers->get(js, kj::str("authorization"));
+        bool bearer = false;
+        KJ_IF_SOME(auth, authorization) {
+          if (auth.size() >= 6) {
+            auto prefix = kj::str(auth.slice(0, 6));
+            for (auto& c: prefix)
+              if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            bearer = prefix == "bearer" &&
+                (auth.size() == 6 || auth[6] == ' ' || auth[6] == '\t' || auth[6] == '\r' ||
+                    auth[6] == '\n');
+          }
+        }
+        if (!signedRequest && !bearer)
+          return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
+        auto channel = invocation.channel;
+        if (channel == kj::none)
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Workload verification is unavailable. Retry later or use a supported deployed runtime.");
+        auto request = originalRequest->cloneForWorkloadIdentity(js, signedRequest);
+        auto fetcher = js.alloc<Fetcher>(
+            KJ_ASSERT_NONNULL(channel), Fetcher::RequiresHostAndProtocol::NO, true);
+        auto property = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("verify")),
+            Error, "The workload verifier has no verify method.");
+        auto call =
+            JSG_REQUIRE_NONNULL(callHandler.tryUnwrap(js, rpcHandler.wrap(js, kj::mv(property))),
+                Error, "The workload verifier is not callable.");
+        auto paf = js.newPromiseAndResolver<jsg::Value>();
+        paf.resolver.resolve(js, call(js, kj::mv(request)));
+        auto verification =
+            paf.promise.then(js, [](jsg::Lock& js, jsg::Value result) -> jsg::Value {
+          auto handle = result.getHandle(js);
+          if (!handle->IsObject())
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The verifier returned no result. Retry later.");
+          jsg::JsObject object(handle.As<v8::Object>());
+          auto status = object.get(js, "status").toString(js);
+          if (status == "missing") return jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate));
+          if (status == "invalid")
+            workloadIdentityFailure("WorkloadIdentityError",
+                "The workload credential is invalid, expired, unsupported, or replayed. Send a fresh supported credential.");
+          if (status != "verified")
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "Workload verification could not complete. Retry later.");
+          auto identity = object.get(js, "identity");
+          if (!identity.isObject())
+            workloadIdentityFailure("WorkloadIdentityUnavailableError",
+                "The verifier returned no identity. Retry later.");
+          static_cast<v8::Local<v8::Value>>(identity)
+              .As<v8::Object>()
+              ->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen)
+              .Check();
+          return jsg::Value(js.v8Isolate, identity);
+        }, [](jsg::Lock& js, jsg::Value error) -> jsg::Value {
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "The workload verification service could not complete. Retry later.");
+        });
+        // Bound transport failure as well as the managed service's own deadline.
+        auto& context = IoContext::current();
+        auto persistent = verification.then(
+            js, [](jsg::Lock& js, jsg::Value value) { return js.v8Ref(value.getHandle(js)); });
+        auto timeout =
+            context.afterLimitTimeout(10 * kj::SECONDS).then([]() -> jsg::V8Ref<v8::Value> {
+          workloadIdentityFailure("WorkloadIdentityUnavailableError",
+              "Workload verification exceeded its deadline. Retry later.");
+        });
+        return context.awaitIo(js,
+            context.awaitJs(js, kj::mv(persistent)).exclusiveJoin(kj::mv(timeout)),
+            [](jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
+          return jsg::Value(js.v8Isolate, value.getHandle(js));
+        });
+      });
+      auto handle = promise.consumeHandle(js);
+      invocation.result = js.v8Ref(handle);
+      return jsg::Value(js.v8Isolate, handle);
+    }
+  }
+  return jsg::Value(js.v8Isolate,
+      js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate))).consumeHandle(js));
+}
+
 kj::StringPtr AccessContext::getAud() {
   return info->getAudience();
 }
@@ -349,7 +497,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler,
+    kj::FunctionParam<kj::Maybe<kj::Own<ExportedHandler>>()> getExportedHandler,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
@@ -449,6 +597,16 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
+  kj::Maybe<jsg::AsyncContextFrame::StorageScope> identityScope;
+  if (FeatureFlags::get(js).getEnableWorkloadIdentityContext()) {
+    auto state = jsg::wrapOpaque(js.v8Context(),
+        WorkloadIdentityInvocation{jsRequest.addRef(),
+          ioContext.getIoChannelFactory().getWorkloadIdentityChannel(),
+          ioContext.getIoChannelFactory().getNativeCaller(), kj::none});
+    identityScope.emplace(js, workloadIdentityKey(), js.v8Ref(state));
+  }
+
+  auto exportedHandler = getExportedHandler();
   auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
@@ -457,8 +615,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("fetch_handler"_kjc);
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
-    KJ_IF_SOME(f, h.fetch) {
-      auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
+    KJ_IF_SOME(f, h->fetch) {
+      auto promise = f(lock, event->getRequest(), h->env.addRef(js), h->getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {

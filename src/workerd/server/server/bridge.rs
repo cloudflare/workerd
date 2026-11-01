@@ -801,6 +801,9 @@ pub mod ffi {
         /// The channel of the worker's Cloudflare Access identity binding, whose props come from
         /// the request's access blob, if the worker has one.
         fn access_binding_channel(self: &ChannelFactory) -> KjMaybe<u32>;
+        fn workload_identity_channel(self: &ChannelFactory) -> KjMaybe<u32>;
+        fn direct_service_channel(self: &ChannelFactory, channel: u32) -> bool;
+        fn suppress_native_caller(self: &ChannelFactory, channel: u32) -> bool;
         fn abort_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>);
         fn delete_all_actors(self: &ChannelFactory, reason: KjMaybe<&Exception>) -> Result<()>;
         async unsafe fn evict_all_actors_for_test<'a>(

@@ -554,6 +554,27 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
+jsg::Ref<Request> Request::cloneForWorkloadIdentity(jsg::Lock& js, bool includeBody) {
+  kj::Maybe<Body::ExtractedBody> bodyCopy;
+  if (includeBody) {
+    JSG_REQUIRE(!getBodyUsed(js), DOMInvalidStateError,
+        "The signed request body has been consumed. Call caller() before reading it.");
+    KJ_IF_SOME(stream, getBody(js)) {
+      JSG_REQUIRE(!stream.isLocked(js), DOMInvalidStateError,
+          "The signed request body is locked. Call caller() before acquiring a reader.");
+      // RPC deserialization uses the public Request constructor, which forbids GET/HEAD bodies.
+      // An ingress Content-Length: 0 can still produce an empty stream; omit only a known-empty
+      // stream from the verifier copy, leaving the original request's body available to the handler.
+      if ((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+          stream.tryGetLength(js).orDefault(1) != 0) {
+        bodyCopy = Body::clone(js);
+      }
+    }
+  }
+  return js.alloc<Request>(js, method, url, Redirect::MANUAL, headers->clone(js), kj::none,
+      kj::none, CfProperty(), kj::mv(bodyCopy), kj::none);
+}
+
 kj::StringPtr Request::getMethod() {
   return kj::toCharSequence(method);
 }
@@ -2621,9 +2642,11 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
-        return js.alloc<Fetcher>(
+        auto result = js.alloc<Fetcher>(
             channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
+        result->nativeCallerUnsupported = true;
+        return result;
       } else {
         KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
       }
@@ -2932,20 +2955,28 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
   return ClientWithTracing{kj::mv(result.client), kj::none};
 }
 
+IoChannelFactory::NativeCallerMode Fetcher::getNativeCallerMode(uint channel) {
+  if (nativeCallerUnsupported) return IoChannelFactory::NativeCallerMode::UNSUPPORTED;
+  return channel >= IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
+      ? IoChannelFactory::NativeCallerMode::DIRECT
+      : IoChannelFactory::NativeCallerMode::NONE;
+}
+
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
-      auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
+      auto client = ioContext.getSubrequestChannel(
+          channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-        return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
+        return channel->startRequest({.nativeCallerMode = IoChannelFactory::NativeCallerMode::UNSUPPORTED, .cfBlobJson = kj::mv(cfStr),
             .parentSpan = tracing.getInternalSpanParent(),
             .userSpanParent = tracing.getUserSpanParent()});
       }, {
@@ -3008,9 +3039,10 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       kj::Own<WorkerInterface> client;
       KJ_IF_SOME(parent, userSpanParent) {
         client = ioContext.getSubrequestChannel(
-            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent));
+            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent), getNativeCallerMode(channel));
       } else {
-        client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
+        client = ioContext.getSubrequestChannel(
+            channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       }
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
@@ -3022,7 +3054,7 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       }
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-        return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
+        return channel->startRequest({.nativeCallerMode = IoChannelFactory::NativeCallerMode::UNSUPPORTED, .cfBlobJson = kj::mv(cfStr),
             .parentSpan = tracing.getInternalSpanParent(),
             .userSpanParent = kj::mv(propagatedUserSpanParent)});
       }, {

@@ -578,6 +578,8 @@ class Fetcher: public JsRpcClientProvider {
       kj::ConstString operationName,
       MakeUserSpanParent makeUserSpanParent);
 
+  IoChannelFactory::NativeCallerMode getNativeCallerMode(uint channel);
+
   // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
   // dispatch span when it created one. Factories that create no dispatch span
   // (result.spanParents == kj::none) yield no inner span and no trace context.
@@ -590,6 +592,7 @@ class Fetcher: public JsRpcClientProvider {
       IoOwn<OutgoingFactory>>
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
+  bool nativeCallerUnsupported = false;
   bool isInHouse;
 
   // Generic stubs use the receiving isolate's compat flags. Wrapped bindings explicitly bypass
@@ -847,6 +850,8 @@ class Request final: public Body {
       jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init);
 
   jsg::Ref<Request> clone(jsg::Lock& js);
+  // Private RPC copy: no abort signal, cf overrides, or fetcher capability crosses this boundary.
+  jsg::Ref<Request> cloneForWorkloadIdentity(jsg::Lock& js, bool includeBody);
 
   kj::StringPtr getMethod();
   kj::StringPtr getUrl();

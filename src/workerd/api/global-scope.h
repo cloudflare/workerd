@@ -318,6 +318,23 @@ class AccessContext: public jsg::Object {
   IoOwn<AccessInfo> info;
 };
 
+// Stateless namespace; the HTTP invocation's async frame owns request state and memoization.
+class IdentityContext: public jsg::Object {
+ public:
+  static kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> makeRpcScope(
+      jsg::Lock& js, bool isEntrypoint);
+  jsg::Value caller(jsg::Lock& js,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Ref<Request>)>>& callHandler);
+
+  JSG_RESOURCE_TYPE(IdentityContext) {
+    JSG_METHOD(caller);
+    JSG_TS_OVERRIDE(CloudflareIdentityContext {
+      caller(): Promise<CloudflareWorkloadIdentity | null>;
+    });
+  }
+};
+
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
@@ -386,6 +403,10 @@ class ExecutionContext: public jsg::Object {
 
   jsg::Ref<Tracing> getTracing(jsg::Lock& js);
 
+  jsg::Ref<IdentityContext> getIdentity(jsg::Lock& js) {
+    return js.alloc<IdentityContext>();
+  }
+
   // Returns an AccessContext for the current request, or empty jsg::Optional otherwise.
   // Called by the runtime to provide Cloudflare Access authentication context.
   jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
@@ -409,6 +430,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
+    if (flags.getEnableWorkloadIdentityContext()) {
+      JSG_LAZY_INSTANCE_PROPERTY(identity, getIdentity);
+    }
     JSG_METHOD(mapVirtualHost);
 
     // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
@@ -717,8 +741,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
   // Received request (called from C++, not JS).
   //
-  // If `exportedHandler` is provided, the request will be delivered to it rather than to event
-  // listeners.
+  // Calls `getExportedHandler` synchronously inside the request's identity scope. If it returns a
+  // handler, the request will be delivered to it rather than to event listeners.
   kj::Promise<DeferredProxy<void>> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
@@ -726,7 +750,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::HttpService::Response& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
-      kj::Maybe<ExportedHandler&> exportedHandler,
+      kj::FunctionParam<kj::Maybe<kj::Own<ExportedHandler>>()> getExportedHandler,
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
@@ -1283,6 +1307,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
       api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
       api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+      api::AccessContext, api::IdentityContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

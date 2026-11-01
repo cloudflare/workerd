@@ -329,6 +329,10 @@ struct ServiceDesignator {
     # A JSON-encoded value.
   }
 
+  suppressNativeCaller @4 :Bool;
+  # Standalone internal ingress routing only. Preserve ordinary HTTP credential semantics.
+  # Local service graph configuration establishes no production authentication.
+
   # TODO(someday): Options to specify which event types are allowed.
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
 }
@@ -934,6 +938,10 @@ struct Worker {
   # worker (if configured via `accessBindingService`) when `ctx.access.getIdentity()` is called.
   # Requests that carry the header get `ctx.access` populated; requests without it get
   # `ctx.access === undefined`.
+
+  workloadIdentityService @21 :ServiceDesignator;
+  # Private workload verifier for development/tests. Receives verify(originalRequest) over RPC.
+  # Hosted Workers supplies this channel automatically, with protected receiver scope.
 
   accessBindingService @19 :ServiceDesignator;
   # Names a service that acts as the Cloudflare Access identity binding worker for local dev.
