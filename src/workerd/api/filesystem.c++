@@ -7,7 +7,9 @@
 #include <workerd/api/node/exceptions.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -492,6 +494,15 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
 void FileSystemModule::close(jsg::Lock& js, int fd) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   vfs.closeFd(js, fd);
+}
+
+bool FileSystemModule::tsStdio() {
+  return util::Autogate::isEnabled(util::AutogateKey::TS_STDIO);
+}
+
+kj::StringPtr FileSystemModule::stdioPrefix(jsg::Lock& js, int fd) {
+  auto& isolate = Worker::Isolate::from(js);
+  return fd == 1 ? isolate.getStdoutPrefix() : isolate.getStderrPrefix();
 }
 
 uint32_t FileSystemModule::write(

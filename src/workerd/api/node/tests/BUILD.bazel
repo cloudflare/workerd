@@ -366,6 +366,25 @@ sh_test(
 )
 
 sh_test(
+    name = "process-stdio-sh-test@all-autogates",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location process-stdio-nodejs-test.wd-test)",
+        "$(location process-stdio-nodejs-test.expected_stdout)",
+        "$(location process-stdio-nodejs-test.expected_stderr)",
+        "--all-autogates",
+    ],
+    data = [
+        "process-stdio-nodejs-test.expected_stderr",
+        "process-stdio-nodejs-test.expected_stdout",
+        "process-stdio-nodejs-test.js",
+        "process-stdio-nodejs-test.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+sh_test(
     name = "process-stdio-fs-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
@@ -373,6 +392,25 @@ sh_test(
         "$(location process-stdio-fs-nodejs-test.wd-test)",
         "$(location process-stdio-fs-nodejs-test.expected_stdout)",
         "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-fs-nodejs-test.expected_stderr",
+        "process-stdio-fs-nodejs-test.expected_stdout",
+        "process-stdio-fs-nodejs-test.js",
+        "process-stdio-fs-nodejs-test.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+)
+
+sh_test(
+    name = "process-stdio-fs-sh-test@all-autogates",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location process-stdio-fs-nodejs-test.wd-test)",
+        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
+        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+        "--all-autogates",
     ],
     data = [
         "process-stdio-fs-nodejs-test.expected_stderr",
@@ -662,6 +700,23 @@ wd_test(
     src = "fs-access-test.wd-test",
     args = ["--experimental"],
     data = ["fs-access-test.js"],
+)
+
+# The stdio suite runs the same module under a C++ and a TypeScript cell. The
+# C++ cell disables the @all-autogates variant: enabling every autogate enables
+# TS_STDIO, which swaps in the TypeScript implementation under a cell whose
+# USING_TS_IMPL binding says C++.
+wd_test(
+    src = "fs-stdio-cpp.wd-test",
+    args = ["--experimental"],
+    data = ["fs-stdio-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "fs-stdio-ts.wd-test",
+    args = ["--experimental"],
+    data = ["fs-stdio-test.js"],
 )
 
 wd_test(

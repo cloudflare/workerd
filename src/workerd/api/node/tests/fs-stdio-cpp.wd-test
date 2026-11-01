@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs fs-stdio-test.js against the C++ implementation
+# (StdioFile in io/worker-fs.c++).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fs-stdio-cpp",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fs-stdio-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "enable_nodejs_fs_module"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
+      )
+    ),
+  ],
+);

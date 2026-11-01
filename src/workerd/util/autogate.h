@@ -122,6 +122,10 @@ namespace workerd::util {
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
   V(NODEJS_I18N_RUST)                                                                              \
+  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
+     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
+     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
+  V(TS_STDIO)                                                                                      \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
