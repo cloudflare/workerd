@@ -49,3 +49,35 @@ export const workload = {
     );
   },
 };
+
+export const constructedReceiver = {
+  async test(_controller, env) {
+    const response = await env.CONSTRUCTED.fetch('https://receiver.example', {
+      method: 'POST',
+      body: 'original',
+      headers: { authorization: 'Bearer caller', signature: 'test' },
+    });
+    const result = await response.json();
+    strictEqual(result.identity.signatureAgent, 'Bearer caller');
+    strictEqual(result.identity.body, 'original');
+    strictEqual(result.body, 'original');
+  },
+};
+
+export const emptySignedRequests = {
+  async test() {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await fetch('https://receiver.example/empty', {
+        method,
+        headers: {
+          authorization: 'Bearer caller',
+          signature: 'test',
+          'content-length': '0',
+        },
+      });
+      strictEqual(response.headers.get('x-verified-method'), method);
+      strictEqual(response.headers.get('x-verified-body'), '');
+      strictEqual(response.headers.get('x-original-body'), '');
+    }
+  },
+};

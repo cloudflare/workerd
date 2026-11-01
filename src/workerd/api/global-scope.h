@@ -741,8 +741,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
   // Received request (called from C++, not JS).
   //
-  // If `exportedHandler` is provided, the request will be delivered to it rather than to event
-  // listeners.
+  // Calls `getExportedHandler` synchronously inside the request's identity scope. If it returns a
+  // handler, the request will be delivered to it rather than to event listeners.
   kj::Promise<DeferredProxy<void>> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
@@ -750,7 +750,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::HttpService::Response& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
-      kj::Maybe<ExportedHandler&> exportedHandler,
+      kj::FunctionParam<kj::Maybe<kj::Own<ExportedHandler>>()> getExportedHandler,
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.

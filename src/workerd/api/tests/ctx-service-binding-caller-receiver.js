@@ -27,10 +27,18 @@ class Target extends RpcTarget {
   }
 }
 export class Named extends WorkerEntrypoint {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.constructorCaller = ctx.identity.caller();
+    // Some tests deliberately invoke this entrypoint from an unsupported RPC scope.
+    this.constructorCaller.catch(() => {});
+  }
   who() {
+    strictEqual(this.constructorCaller, this.ctx.identity.caller());
     return who(this.ctx);
   }
   async fetch(request) {
+    strictEqual(this.constructorCaller, this.ctx.identity.caller());
     const body = await request.text();
     return Response.json({ caller: await who(this.ctx), body });
   }

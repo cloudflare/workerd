@@ -522,17 +522,19 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
                     ->getSignal());
           }
 
-          // Getting the handler finishes actor construction, so the claim sees a constructed actor
-          // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
-              kj::mv(props), context.getActor(), isDynamicDispatch);
-          auto retryable = IsRetryableHandler::NO;
-          KJ_IF_SOME(h, handler) {
-            retryable = h->isFetchRetryable(lock);
-          }
-          metrics->claimRetryTokenBeforeUserCode(retryable);
-          return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-              cfBlobJson, lock, handler, kj::mv(signal));
+          return lock.getGlobalScope().request(
+              method, url, headers, requestBody, wrappedResponse, cfBlobJson, lock, [&]() {
+            // Construct the handler inside the HTTP invocation's identity scope. The retry claim
+            // sees a constructed actor but still precedes fetch handler selection and invocation.
+            auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
+                kj::mv(props), context.getActor(), isDynamicDispatch);
+            auto retryable = IsRetryableHandler::NO;
+            KJ_IF_SOME(h, handler) {
+              retryable = h->isFetchRetryable(lock);
+            }
+            metrics->claimRetryTokenBeforeUserCode(retryable);
+            return handler;
+          }, kj::mv(signal));
         });
 
         // Record the proxy task and the tracer return time on the success path.

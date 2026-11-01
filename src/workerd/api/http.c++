@@ -562,8 +562,14 @@ jsg::Ref<Request> Request::cloneForWorkloadIdentity(jsg::Lock& js, bool includeB
     KJ_IF_SOME(stream, getBody(js)) {
       JSG_REQUIRE(!stream.isLocked(js), DOMInvalidStateError,
           "The signed request body is locked. Call caller() before acquiring a reader.");
+      // RPC deserialization uses the public Request constructor, which forbids GET/HEAD bodies.
+      // An ingress Content-Length: 0 can still produce an empty stream; omit only a known-empty
+      // stream from the verifier copy, leaving the original request's body available to the handler.
+      if ((method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD) ||
+          stream.tryGetLength(js).orDefault(1) != 0) {
+        bodyCopy = Body::clone(js);
+      }
     }
-    bodyCopy = Body::clone(js);
   }
   return js.alloc<Request>(js, method, url, Redirect::MANUAL, headers->clone(js), kj::none,
       kj::none, CfProperty(), kj::mv(bodyCopy), kj::none);

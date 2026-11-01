@@ -497,7 +497,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler,
+    kj::FunctionParam<kj::Maybe<kj::Own<ExportedHandler>>()> getExportedHandler,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
@@ -606,6 +606,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     identityScope.emplace(js, workloadIdentityKey(), js.v8Ref(state));
   }
 
+  auto exportedHandler = getExportedHandler();
   auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
@@ -614,8 +615,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("fetch_handler"_kjc);
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
-    KJ_IF_SOME(f, h.fetch) {
-      auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
+    KJ_IF_SOME(f, h->fetch) {
+      auto promise = f(lock, event->getRequest(), h->env.addRef(js), h->getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
