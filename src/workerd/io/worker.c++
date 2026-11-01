@@ -4936,6 +4936,9 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
+  }
   // Cross-context actions queued while the actor was idle are dropped rather than run with the
   // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
   // start. Those queued once its request is current still run, since the handler may await them.
@@ -4974,6 +4977,9 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);
     reported = true;
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setReturn(context.now());
+    }
   }
 
   // The writes the handler made must be flushed before a successor can read storage. A failed
