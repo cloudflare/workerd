@@ -4942,6 +4942,13 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
 
+  // A call canceled before the handler settles, e.g. by abort(), never reaches the reports below.
+  bool reported = false;
+  KJ_DEFER(if (!reported) {
+    observerRef.reportOnHibernateOutcome(EventOutcome::CANCELED);
+    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
+  });
+
   {
     // Nothing may run in the actor after its handler, including during the flush below. The
     // cleanup also runs if the caller cancels this call while the handler is pending.
@@ -4966,6 +4973,7 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     }
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);
+    reported = true;
   }
 
   // The writes the handler made must be flushed before a successor can read storage. A failed
