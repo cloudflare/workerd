@@ -582,10 +582,11 @@ struct OnHibernateObserver final: public RequestObserver {
 kj::Promise<void> runOnHibernate(TestFixture& fixture,
     Worker::Actor& actor,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<TimerChannel&> timer = kj::none) {
+    kj::Maybe<TimerChannel&> timer = kj::none,
+    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none) {
   return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
-      kj::mv(observer), kj::none);
+      kj::mv(observer), kj::mv(tracer));
 }
 
 // An actor whose onHibernate handler never settles, leaving a timer behind.
@@ -640,6 +641,82 @@ KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it 
 
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
     KJ_EXPECT(readEvents(fixture) == "onHibernate:inactive:true;");
+  });
+}
+
+// Records, in order, the onset and return events reported to it.
+class RecordingTracer final: public BaseTracer {
+ public:
+  kj::String events;
+
+  void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&& info) override {
+    events = kj::str(events, info.is<tracing::CustomEventInfo>() ? "customOnset;" : "onset;");
+  }
+  void setReturn(kj::Maybe<kj::Date>, kj::Maybe<tracing::FetchResponseInfo>) override {
+    events = kj::str(events, "return;");
+  }
+
+  void addLog(const tracing::InvocationSpanContext&,
+      kj::Date,
+      LogLevel,
+      kj::String,
+      tracing::LogErrorInfo) override {}
+  void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
+  void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
+  void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
+  void addSpanAttribute(const tracing::InvocationSpanContext&,
+      kj::ConstString,
+      tracing::Attribute::Value) override {}
+  void addException(const tracing::InvocationSpanContext&,
+      kj::Date,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  void addSpanException(tracing::SpanId,
+      kj::Date,
+      kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  void addDiagnosticChannelEvent(
+      const tracing::InvocationSpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
+  void setOutcome(EventOutcome, kj::Duration, kj::Duration) override {}
+  void recordTimestamp(kj::Date) override {}
+  void setJsRpcInfo(
+      const tracing::InvocationSpanContext&, kj::Date, const kj::ConstString&) override {}
+  void markUnused() override {}
+};
+
+KJ_TEST("runOnHibernate() reports the handler to the tracer as a custom event") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    export default class extends DurableObject {
+      async [onHibernate]() {}
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-trace-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto tracer = kj::rc<RecordingTracer>();
+    runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()))
+        .wait(fixture.getWaitScope());
+
+    KJ_EXPECT(tracer->events == "customOnset;return;", tracer->events);
+  });
+}
+
+KJ_TEST("canceling runOnHibernate() reports the handler's onset but no return") {
+  withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, "on-hibernate-trace-cancel-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto tracer = kj::rc<RecordingTracer>();
+    auto promise = runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()));
+    KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
+
+    promise = nullptr;
+
+    KJ_EXPECT(tracer->events == "customOnset;", tracer->events);
   });
 }
 
