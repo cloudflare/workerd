@@ -116,4 +116,8 @@ kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlo
       context.addObject(kj::heap<::rust::Box<IoOwnedSlot>>(kj::mv(slot))));
 }
 
+void io_context_log_error(::rust::Str message) {
+  KJ_LOG(ERROR, kj::str(kj::arrayPtr(message.data(), message.size())));
+}
+
 }  // namespace workerd::io_context

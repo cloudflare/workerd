@@ -58,4 +58,7 @@ class IoOwnedObject {
 // IoContext::addObject() for `slot`.
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
 
+// Logs `message` as an error, as KJ_LOG(ERROR) does.
+void io_context_log_error(::rust::Str message);
+
 }  // namespace workerd::io_context

@@ -36,6 +36,7 @@ pub mod bridge {
             callback: Box<IoCallback>,
         ) -> Result<()>;
         fn io_context_add_object(id: u64, slot: Box<IoOwnedSlot>) -> Result<KjOwn<IoOwnedObject>>;
+        fn io_context_log_error(message: &str);
     }
 
     /// How `io_callback_run()` ended.
@@ -81,11 +82,15 @@ pub struct IoCallback(pub IoCallbackFn);
 pub struct IoOwnedSlot(#[expect(dead_code, reason = "only dropped")] pub Box<dyn Send>);
 
 /// Waits for `future`. A panic while polling it fails the wait, so that it becomes a KJ exception
-/// rather than unwinding into the KJ event loop, which would abort the process.
+/// rather than unwinding into the KJ event loop, which would abort the process. A panic while
+/// dropping it, when the wait is cancelled, is logged.
 async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjError> {
-    let mut future = future.0;
+    let mut future = CatchDropPanic(Some(*future));
     std::future::poll_fn(move |cx| {
-        match std::panic::catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
+        let Some(inner) = future.0.as_mut() else {
+            unreachable!("dropped only with the wait")
+        };
+        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.0.as_mut().poll(cx))) {
             Ok(poll) => poll.map(|output| Ok(Box::new(IoOutput(output)))),
             Err(payload) => Poll::Ready(Err(cxx::KjError::new(
                 cxx::KjExceptionType::Failed,
@@ -99,7 +104,23 @@ async fn io_future_wait(future: Box<IoFuture>) -> Result<Box<IoOutput>, cxx::KjE
     .await
 }
 
-fn panic_message(payload: &(dyn Any + Send)) -> &str {
+/// Holds the future of an `io_future_wait()`, which kj-rs drops through an `extern "C"` function,
+/// where a panic would abort the process.
+struct CatchDropPanic(Option<IoFuture>);
+
+impl Drop for CatchDropPanic {
+    fn drop(&mut self) {
+        let future = self.0.take();
+        if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| drop(future))) {
+            bridge::io_context_log_error(&format!(
+                "dropping the future that IoContext::await_io_and_run() waited for panicked: {}",
+                panic_message(&*payload)
+            ));
+        }
+    }
+}
+
+pub fn panic_message(payload: &(dyn Any + Send)) -> &str {
     if let Some(message) = payload.downcast_ref::<&str>() {
         message
     } else if let Some(message) = payload.downcast_ref::<String>() {
