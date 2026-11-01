@@ -927,13 +927,36 @@ jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
   });
 }
 
-kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(
+    jsg::Lock& js, RestoreTarget target, jsg::Optional<RestoreOptions> options) {
   requireNotFacet("onNextSessionRestore"_kj);
+  kj::Vector<ActorCacheInterface::RestoreKvEntry> kvData;
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(data, o.kvData) {
+      JSG_REQUIRE(data.fields.size() <= MAX_RESTORE_KV_ENTRIES, RangeError,
+          "kvData can contain at most ", MAX_RESTORE_KV_ENTRIES, " keys.");
+      size_t totalBytes = 0;
+      for (auto& field: data.fields) {
+        auto value = serializeV8Value(js, field.name, field.value.getHandle(js));
+        totalBytes += field.name.size() + value.size();
+        JSG_REQUIRE(totalBytes <= MAX_RESTORE_KV_BYTES, RangeError, "kvData can contain at most ",
+            MAX_RESTORE_KV_BYTES, " bytes of keys and serialized values.");
+        kvData.add(ActorCacheInterface::RestoreKvEntry{
+          .key = kj::mv(field.name),
+          .value = kj::mv(value),
+        });
+      }
+    }
+  }
+
   KJ_SWITCH_ONEOF(target) {
     KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
-      return cache->onNextSessionRestore(snapshot->getClient());
+      return cache->onNextSessionRestore(snapshot->getClient(), kvData.releaseAsArray());
     }
     KJ_CASE_ONEOF(bookmark, jsg::NonCoercible<kj::String>) {
+      // TODO(soon): Support kvData when restoring from a bookmark.
+      JSG_REQUIRE(kvData.empty(), TypeError,
+          "kvData is only supported when restoring from a snapshot.");
       return cache->onNextSessionRestoreBookmark(bookmark.value);
     }
   }
