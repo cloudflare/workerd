@@ -146,6 +146,13 @@ class Span: public jsg::Object {
   // for errors.
   jsg::Ref<Span> setStatus(jsg::Lock& js, TracingSpanStatus status);
 
+  // Records `error`, which escaped an enterSpan() callback: an exception, if recordException()
+  // accepts `error` (a string, or an object with a code, name or message), then an error status
+  // described by the error's message. Does nothing if the span isn't traced, or if the callback
+  // has set an "ok" or "error" status itself, before throwing or while the error is read.
+  void recordCallbackError(
+      jsg::Lock& js, jsg::Value& error, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
+
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
@@ -177,6 +184,25 @@ class Span: public jsg::Object {
  private:
   kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
+  // Whether setStatus() set an "ok" or "error" status, which recordCallbackError() leaves alone.
+  bool statusSet = false;
+
+  // What recordException() records about an exception.
+  struct ExceptionFields {
+    kj::Maybe<tracing::Exception::Code> code;
+    kj::String name;
+    kj::String message;
+    kj::Maybe<kj::String> stack;
+  };
+
+  // Reads `exception` the way recordException() does, which can run user code. Returns kj::none
+  // for a value recordException() ignores.
+  static kj::Maybe<ExceptionFields> readException(jsg::Lock& js,
+      v8::Local<v8::Value> exception,
+      const jsg::TypeHandler<ExceptionData>& exceptionHandler);
+
+  void recordExceptionFields(ExceptionFields fields);
+
   friend class ::workerd::api::Tracing;
 };
 
@@ -202,6 +228,9 @@ class Tracing: public jsg::Object {
   // callback returns synchronously (or throws synchronously), the span is ended
   // before the return (or rethrow).
   //
+  // If the callback throws or its promise rejects, the error is recorded on the span before it
+  // ends (see Span::recordCallbackError()), then propagates unchanged.
+  //
   // The span is constructed as a child of whatever span is currently active on the
   // AsyncContextFrame (or, if none, the root user request span on the current
   // IncomingRequest, via IoContext::getCurrentUserTraceSpan()).
@@ -213,7 +242,8 @@ class Tracing: public jsg::Object {
       v8::Local<v8::Function> callback,
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
-      const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
+      const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler,
+      const jsg::TypeHandler<user_tracing::ExceptionData>& exceptionHandler);
 
   // Creates a new child span, pushes it onto the AsyncContextFrame while invoking
   // callback(span, ...args), and returns the callback result without ending the span.

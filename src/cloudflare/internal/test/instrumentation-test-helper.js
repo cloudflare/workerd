@@ -88,6 +88,23 @@ export function createTailStreamHandler(state) {
         }
         case 'spanUpdate': {
           state.spanUpdates.push(event);
+          const span = state.spans.get(spanKey);
+          if (span && event.event.info.type === 'status') {
+            span['status'] = event.event.info.status;
+          }
+          break;
+        }
+        case 'exception': {
+          // Exception recorded on a span. Uncaught exceptions are reported on the root span,
+          // which is not tracked here. The stack is omitted since it varies.
+          const span = state.spans.get(spanKey);
+          if (span) {
+            span['exceptions'] ??= [];
+            span['exceptions'].push({
+              name: event.event.name,
+              message: event.event.message,
+            });
+          }
           break;
         }
         case 'outcome':
