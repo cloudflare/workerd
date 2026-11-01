@@ -1,0 +1,19 @@
+MODULE.bazel.lock
+  s_1b9ab9fb100cf8::t_6ce01181e8bbed 51-52,118-119,145-146,156-159,162-163,169-170,176-177,253-254,258-262,316-317,339,351-352,1522,1623,1635,1664-1665,1715,2129-2130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b929d94219ea78b3fae3cf61cfed844e53403e33",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
