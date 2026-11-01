@@ -1,0 +1,29 @@
+src/workerd/io/worker.c++
+  s_c77095033a1105::t_f927786ee0f97b 4939-4941,4980-4982
+src/workerd/io/incoming-request-test.c++
+  s_2f2053ab7eed9e::t_372fa0f749121d 585-586,589,647-722
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "38db875098f7564257bc6e9e1c67ef7be0b041c2",
+  "prompts": {},
+  "sessions": {
+    "s_2f2053ab7eed9e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e676959e0ffemIINA9o5ceKcEP",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c77095033a1105": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a984a51ffeLxK55Db4aJKHDK",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
