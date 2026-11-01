@@ -1,0 +1,25 @@
+src/workerd/api/worker-rpc.c++
+  s_1c76ae2bf94860::t_7f3b3153c290dd 1524-1527,1719-1721,2175-2177,2534,2545,2554,2647-2656,2697-2708,2735-2737
+src/workerd/io/worker-entrypoint-test.c++
+  s_1c76ae2bf94860::t_505471edd49bce 95-106,109-113,115-129,131,134-146,149-161,269-273,275-279,284,288,290-300,303-307,309-323,328-345,348,353-354,357,359-362,365,367-368,371,374,380,382-383
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_1c76ae2bf94860::t_486bc3f1b71897 741-763,766-785,787-796,800-812,816-817,819-901,903-904
+src/workerd/io/worker-entrypoint.c++
+  s_1c76ae2bf94860::t_c4b6bd1f476ca4 373-379,468-469,490-494,496,516-517,519-523,538-539,544-546,640-642,644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e081705c59c77769d3d94d431180625fc6a7e844",
+  "prompts": {},
+  "sessions": {
+    "s_1c76ae2bf94860": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2d898ceeffeUeaNXVDLn1H391",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

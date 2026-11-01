@@ -1,0 +1,21 @@
+src/workerd/util/sqlite-test.c++
+  s_172469310966d0::t_c1dc14a79f5147 1802-1821
+src/workerd/util/sqlite.c++
+  s_172469310966d0::t_20d75086763816 1450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9426fffe771bad9b63fbed8a389247e146143816",
+  "prompts": {},
+  "sessions": {
+    "s_172469310966d0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_eba0c8f0bffekxDFyrmyWjzmeP",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}

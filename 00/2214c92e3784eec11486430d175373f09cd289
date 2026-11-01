@@ -1,0 +1,19 @@
+src/workerd/api/actor-fetch-retry-test.c++
+  s_f9467207d3fab9::t_36967708d89e4c 543-554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "002214c92e3784eec11486430d175373f09cd289",
+  "prompts": {},
+  "sessions": {
+    "s_f9467207d3fab9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd12f606dffeQhnbJzly2YeGuA",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

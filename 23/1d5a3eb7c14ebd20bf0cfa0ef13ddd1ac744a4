@@ -1,0 +1,23 @@
+src/workerd/api/capnp.c++
+  s_9e291bb5d844d4::t_ae12679b50aa34 554
+src/workerd/api/eventsource.c++
+  s_9e291bb5d844d4::t_92d58d2c8e9db1 520
+src/workerd/api/js-readable-stream.c++
+  s_9e291bb5d844d4::t_1a5950f8f9fb5c 457-458,462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "231d5a3eb7c14ebd20bf0cfa0ef13ddd1ac744a4",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}

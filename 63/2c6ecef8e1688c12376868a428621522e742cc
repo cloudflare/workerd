@@ -1,0 +1,50 @@
+src/workerd/api/tests/actor-cross-context-promise-test.js
+  s_9e291bb5d844d4::t_59b67c615bb57a 1-275
+src/workerd/io/io-context.c++
+  s_9e291bb5d844d4::t_49250c500e4768 400-407,656-657,1997-1998,2000-2018,2020-2036,2042-2055,2062
+  s_9e291bb5d844d4::t_4bbe36cbe81c04 2056-2058
+  s_9e291bb5d844d4::t_3ac92ee3d82510 2059-2061
+  s_9e291bb5d844d4::t_24fd3c7135849a 2063
+src/workerd/io/compatibility-date.capnp
+  s_9e291bb5d844d4::t_d72f5b62fc8597 601-605
+src/workerd/io/io-own.h
+  s_9e291bb5d844d4::t_77220326f8317a 199
+  s_9e291bb5d844d4::t_3a218c978d364f 201
+  s_9e291bb5d844d4::t_d09e956509622f 95-107,122-124,129,156-160,163-169,171,182-183,200
+src/workerd/io/io-own.c++
+  s_9e291bb5d844d4::t_8f2108b849a0ac 187-188
+  s_9e291bb5d844d4::t_c562e26b865487 190
+  s_9e291bb5d844d4::t_d571b86e1641bd 97
+  s_9e291bb5d844d4::t_e04c86d3788949 95
+  s_9e291bb5d844d4::t_aa3ce50de3578e 93
+  s_9e291bb5d844d4::t_4dda6f41cdb2ec 85
+  s_9e291bb5d844d4::t_848e014a442da7 89-91
+  s_9e291bb5d844d4::t_0079457711402e 87
+  s_9e291bb5d844d4::t_8b59ddfa2e8ac3 134-136
+  s_9e291bb5d844d4::t_375055c20c149e 137-139
+  s_9e291bb5d844d4::t_422fdd733fe778 142
+  s_9e291bb5d844d4::t_ebbcb2a4ccf762 82-83
+  s_9e291bb5d844d4::t_f82f1c3261117d 74-81,84,86,88,92,94,96,140-141,189
+  s_9e291bb5d844d4::t_846b3cfae3b5d8 131-133
+src/workerd/api/tests/BUILD.bazel
+  s_9e291bb5d844d4::t_7441999a2701c8 1317-1320
+  s_9e291bb5d844d4::t_d7cd4c31417715 1315-1316
+src/workerd/api/tests/actor-cross-context-promise-test.wd-test
+  s_9e291bb5d844d4::t_7743922d50ff7d 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "632c6ecef8e1688c12376868a428621522e742cc",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}

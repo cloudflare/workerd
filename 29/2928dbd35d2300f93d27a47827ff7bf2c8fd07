@@ -1,0 +1,29 @@
+src/workerd/io/io-context-timer-test.c++
+  s_48f2b862a9a91a::t_cbd6723be98eb4 346-376,678-680,696,702,716,718-735
+src/workerd/io/AGENTS.md
+  s_48f2b862a9a91a::t_28867583c404e1 53
+src/workerd/io/io-channels.h
+  s_48f2b862a9a91a::t_ff99652b900e27 75-78
+src/workerd/io/io-context.c++
+  s_48f2b862a9a91a::t_abc87bc5f5845a 1060-1062,1214-1217
+src/workerd/io/io-context.h
+  s_48f2b862a9a91a::t_afdb826949fd1e 1234-1235,1238
+src/workerd/io/timer-test-fixture.h
+  s_48f2b862a9a91a::t_04fd018e62f3a5 16-24,26-27,31,43-45,61,125-127,216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "292928dbd35d2300f93d27a47827ff7bf2c8fd07",
+  "prompts": {},
+  "sessions": {
+    "s_48f2b862a9a91a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a132ff-ea0c-7dd0-9191-f6e47ca9d30f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

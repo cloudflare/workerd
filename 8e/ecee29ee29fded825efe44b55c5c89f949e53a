@@ -1,0 +1,69 @@
+src/cloudflare/internal/test/instrumentation-test-helper.js
+  s_ab4e43acd62623::t_dc2ba90a7261d7 173,188-189
+src/workerd/api/actor-state.c++
+  s_ab4e43acd62623::t_98a1909d044498 989-990,993-994,997-1001,1005,1010
+src/workerd/api/actor.c++
+  s_ab4e43acd62623::t_ab62e82cf28db0 45-46,49-50,53-57,62,67,101-103,106-109,112-113,116-120,125,131,139-141,144-147,150-151,154-158,164,170
+src/workerd/api/actor.h
+  s_ab4e43acd62623::t_8579cf89148600 349-350,354-356,390-391,416-417,421-423
+src/workerd/api/bench-container-ingress.c++
+  s_ab4e43acd62623::t_47eb870d8ab997 231-235,238
+src/workerd/api/container.c++
+  s_ab4e43acd62623::t_5b26fe74eda814 1452-1455,1457,1460
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_ab4e43acd62623::t_a4df43ffb531e0 83,85,92-94,96,108,110,401-402,428-429
+src/workerd/api/http.c++
+  s_ab4e43acd62623::t_864fe055a8de47 2124-2128,2131-2144,2150-2155,2159-2161,2513,2523-2544,2546-2547,2549-2551,2573-2578,2581-2583,2596-2654
+src/workerd/api/http.h
+  s_ab4e43acd62623::t_902c3fd0500276 190-195,243-254,262-264,284-287,313,324-326,424-426,540-552
+src/workerd/api/sockets.c++
+  s_ab4e43acd62623::t_47cf0973e28882 1089-1090,1155-1157,1162-1164,1167
+src/workerd/api/tests/BUILD.bazel
+  s_ab4e43acd62623::t_a73623110d610f 200-223
+src/workerd/api/tests/actor-kv-test-tail.js
+  s_ab4e43acd62623::t_93c1fc51825a28 23-32
+src/workerd/api/tests/jsrpc-callback-trace-test-tail.js
+  s_ab4e43acd62623::t_e3dc7c890504a5 1-119
+src/workerd/api/tests/jsrpc-callback-trace-test.js
+  s_ab4e43acd62623::t_0bac63da346fed 1-28
+src/workerd/api/tests/jsrpc-callback-trace-test.wd-test
+  s_ab4e43acd62623::t_474dc887311456 1-30
+src/workerd/api/tests/jsrpc-pipelined-trace-test-tail.js
+  s_ab4e43acd62623::t_ab1e727ee5f9cf 1-186
+src/workerd/api/tests/jsrpc-pipelined-trace-test.js
+  s_ab4e43acd62623::t_bd5e71dae5b7cd 1-46
+src/workerd/api/tests/jsrpc-pipelined-trace-test.wd-test
+  s_ab4e43acd62623::t_ae6c695f83e812 1-31
+src/workerd/api/tests/sql-test-tail.js
+  s_ab4e43acd62623::t_19507dd2ac4276 32-38
+src/workerd/api/tests/tail-worker-test.js
+  s_ab4e43acd62623::t_163826819688cf 86-146,153-157,172-175,236-238,240,327-329,331,333,335,337,339,341,343,345,347,349,351,353,355,441-461,464,468
+src/workerd/api/worker-rpc.c++
+  s_ab4e43acd62623::t_59120a5bb21f8e 214-215,218-219,250-254,322-329,334-335,338,373,376-377,380-383,408-409,423-425,428,434,448-451,454,458-509,537-553,562-568,630-634,638-639,641-644,663,791-792,795-796,803-804,808-809,923,926-930,1145-1146,1149-1150,1317-1320,1348-1366,1493-1509,1511-1526,1529-1530,1533-1534,1536,1689-1690,1693,1724-1725,1752,1907-1910,2385-2388,2413-2417
+src/workerd/api/worker-rpc.h
+  s_ab4e43acd62623::t_e24b52f8b500bf 123-127,129-130,171-174,195,220-232,237-241,267-268,274-278,318-321,366-372,453-454,458-459,468-472,526-538
+src/workerd/io/io-context.c++
+  s_ab4e43acd62623::t_43239d064e0882 1101-1117,1138-1143,1147
+src/workerd/io/io-context.h
+  s_ab4e43acd62623::t_855ef0168202c3 982-987,1200-1201
+src/workerd/io/trace.h
+  s_ab4e43acd62623::t_ff146678f2028e 1377-1405,1430-1442,1448-1455
+src/workerd/io/worker-interface.capnp
+  s_ab4e43acd62623::t_e089436ead738a 811-818
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8eecee29ee29fded825efe44b55c5c89f949e53a",
+  "prompts": {},
+  "sessions": {
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

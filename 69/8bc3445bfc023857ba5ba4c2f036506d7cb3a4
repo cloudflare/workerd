@@ -1,0 +1,23 @@
+src/workerd/api/tests/BUILD.bazel
+  s_eea3478878c46d::t_2a4945de97ab44 285-289
+src/workerd/api/tests/actor-exception-attribution-tail-test.js
+  s_eea3478878c46d::t_4128f40bb27bac 1-91
+src/workerd/api/tests/actor-exception-attribution-tail-test.wd-test
+  s_eea3478878c46d::t_6e22063bd33ca1 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "698bc3445bfc023857ba5ba4c2f036506d7cb3a4",
+  "prompts": {},
+  "sessions": {
+    "s_eea3478878c46d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f34ed1936fferoS5gpX1xA0J5h",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}

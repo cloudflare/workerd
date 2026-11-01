@@ -1,0 +1,25 @@
+src/workerd/api/node/tests/als-gc-test.js
+  s_f45b1e1284761f::t_5ef5e01897f8d9 27-57
+src/workerd/api/node/tests/als-gc-test.wd-test
+  s_f45b1e1284761f::t_f37cc8629fb2a3 4,11
+src/workerd/jsg/async-context-test.c++
+  s_f45b1e1284761f::t_a9c43af613bbe1 235-308
+src/workerd/jsg/async-context.c++
+  s_f45b1e1284761f::t_687595eab4d2ff 276-292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "12a9f17309a33ed2da4a5a8f41f17351d90fef84",
+  "prompts": {},
+  "sessions": {
+    "s_f45b1e1284761f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "582c3f8f-8b99-468e-81b4-3b06386332bb",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

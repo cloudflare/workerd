@@ -1,0 +1,25 @@
+.github/workflows/coverage.yml
+  s_1b9ab9fb100cf8::t_6bf5457a13b2fe 29,32
+.github/workflows/release.yml
+  s_1b9ab9fb100cf8::t_33f80447c3df77 111
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_eb348ede252e6d 87-89
+build/wpt_test.bzl
+  s_1b9ab9fb100cf8::t_82b59047e4b0ed 93-95,113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b2e2220527aef86348bc31394877c88552e7b862",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

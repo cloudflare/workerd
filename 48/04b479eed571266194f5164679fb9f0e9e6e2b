@@ -1,0 +1,63 @@
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_c1a7662859f799::t_8add5056777c93 405
+  s_c1a7662859f799::t_8b2bf58b3d4804 15-16,73,231,238-249,253-262,265-266,275,406-410,412-415,418-424
+  s_c1a7662859f799::t_50db46829f0702 75-76,79,90,235-237,263-264,269-274,284-287,403-404,416-417
+  s_c1a7662859f799::t_9632383f28549c 232,315
+  s_c1a7662859f799::t_d83809f899adc2 252,279,411
+  s_c1a7662859f799::t_2393173dd3a702 230,267-268
+  s_c1a7662859f799::t_43e3e1d5eceb87 336,381-402
+  s_c1a7662859f799::t_264d8bebf26721 233-234
+  s_c1a7662859f799::t_6b13b29275a476 250-251
+src/workerd/api/actor-state.c++
+  s_c1a7662859f799::t_01b7b68f5a3edf 244-245
+  s_c1a7662859f799::t_59540013cc1d27 1099
+  s_c1a7662859f799::t_4bed332c4a28c6 1100
+src/workerd/api/sockets.c++
+  s_c1a7662859f799::t_8ca8efb800a167 1155-1156
+src/workerd/api/actor.h
+  s_c1a7662859f799::t_554daef2cf05de 91-93
+  s_acade4cac5b71c::t_0f6e7653c85f76 412-413
+src/workerd/api/bench-container-ingress.c++
+  s_c1a7662859f799::t_f838f3ec890e58 369
+  s_c1a7662859f799::t_d150c3d7fea009 368
+src/workerd/io/io-channels.h
+  s_c1a7662859f799::t_fa1b4ed6d8a793 171-172,654-656
+  s_c1a7662859f799::t_6292b159945706 38-42
+src/workerd/api/actor.c++
+  s_c1a7662859f799::t_5e362def1ac473 165-166,250-251
+src/workerd/api/http.c++
+  s_c1a7662859f799::t_f188531ccc9f1b 1516-1517,2472
+  s_c1a7662859f799::t_9930d0f3e52039 2482-2483
+  s_c1a7662859f799::t_2b4230dc5adee3 1505-1512
+src/workerd/api/container.c++
+  s_c1a7662859f799::t_2350e3e42e0d92 1459
+  s_c1a7662859f799::t_61bac04e934a09 1460
+src/workerd/api/http.h
+  s_c1a7662859f799::t_5ec974a791f050 274,278,307-310,513
+src/workerd/io/io-channels.c++
+  s_c1a7662859f799::t_974f907ae67df5 5-7,11-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4804b479eed571266194f5164679fb9f0e9e6e2b",
+  "prompts": {},
+  "sessions": {
+    "s_acade4cac5b71c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_009d455cfffeSCh04tz2YSMi4d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

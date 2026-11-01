@@ -1,0 +1,23 @@
+src/workerd/jsg/exception.h
+  s_b44f25982d1498::t_ee5e11da71d3a0 164-183
+src/workerd/jsg/util-test.c++
+  s_b44f25982d1498::t_8d0f0f63a7b5cb 425-457
+src/workerd/jsg/util.c++
+  s_b44f25982d1498::t_8eb45d7a23a733 227-230,232-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b9bc80563980e1e7b6a864cb286f754ef97459e4",
+  "prompts": {},
+  "sessions": {
+    "s_b44f25982d1498": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee3c6a1a3ffezbllFirrEZWzH4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

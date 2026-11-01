@@ -1,0 +1,19 @@
+.bazelrc
+  s_0b06bab0bca86e::t_9aa3f10936a10a 253-257,260,262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c579efc118216121ef550510d67bc33f036cedb3",
+  "prompts": {},
+  "sessions": {
+    "s_0b06bab0bca86e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c119bf4-5a11-4cf5-8efd-8fa67b483b3e",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

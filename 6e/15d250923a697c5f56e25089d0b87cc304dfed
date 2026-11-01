@@ -1,0 +1,31 @@
+.github/workflows/test.yml
+  s_dadaf0660bfcbe::t_a2945ca1c599fc 3,7-8,14,22,24-25,27-28
+src/workerd/api/web-socket.c++
+  s_dadaf0660bfcbe::t_a5be500459d00d 1309-1313,1317-1321,1408,1430-1431
+src/workerd/io/async-lock-scheduler.h
+  s_dadaf0660bfcbe::t_e586110ad85a52 22-29,247-248,257
+src/workerd/io/io-context.c++
+  s_dadaf0660bfcbe::t_6eb037c6daade5 909,911,975-977,1022
+src/workerd/io/io-context.h
+  s_dadaf0660bfcbe::t_248176738ada7a 1415,1424,1433,1910,1934
+src/workerd/io/io-gate.c++
+  s_dadaf0660bfcbe::t_f4b67bac0fea2e 52-53,87-88,109-110,226-227,236,287
+src/workerd/io/io-gate.h
+  s_dadaf0660bfcbe::t_69f9e6916fafde 29-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6e15d250923a697c5f56e25089d0b87cc304dfed",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

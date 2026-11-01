@@ -1,0 +1,19 @@
+src/workerd/util/sqlite-test.c++
+  s_3836a6ef44bba5::t_84aa68a615cdb4 1038
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "318b6e240370cb6820674b168242e301dafb532d",
+  "prompts": {},
+  "sessions": {
+    "s_3836a6ef44bba5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_12f7ad815ffeZfQK6ay1QBigP6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "frostzt <aidenfrostbite@gmail.com>"
+    }
+  }
+}

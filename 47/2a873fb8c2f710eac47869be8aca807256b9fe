@@ -1,0 +1,21 @@
+src/workerd/io/io-context.c++
+  s_f8650c47fba012::t_70d4f157ef5aeb 329-339,589-611,629,631-633,635-636,639-643,651
+src/workerd/io/worker.c++
+  s_f8650c47fba012::t_4ab4c12da88c23 268-269,273,292-303,1294-1296,2749-2755,2758-2764,2766,2797-2808,2815,2825
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "472a873fb8c2f710eac47869be8aca807256b9fe",
+  "prompts": {},
+  "sessions": {
+    "s_f8650c47fba012": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5eb7f831ffe9VV0nKD4guBC3X",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}

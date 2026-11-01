@@ -1,0 +1,19 @@
+src/workerd/api/streams/readable.h
+  s_7524bbe5163cf9::t_ebaa89823c945b 281-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "419ee0bf993182795823a638f7ed67356228c538",
+  "prompts": {},
+  "sessions": {
+    "s_7524bbe5163cf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74032352-a58f-4b3b-9ed8-794c12f0461b",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

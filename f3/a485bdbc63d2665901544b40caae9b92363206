@@ -1,0 +1,21 @@
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_80fd8e845a3525::t_d5fa99a0dc5fc7 1-230
+src/workerd/api/worker-rpc.c++
+  s_80fd8e845a3525::t_ffc256ca19cbf8 593-608,753-766,778
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f3a485bdbc63d2665901544b40caae9b92363206",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

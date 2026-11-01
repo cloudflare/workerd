@@ -1,0 +1,42 @@
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_8a3e42e9fd2b11 510-511,516-517
+types/defines/rpc.d.ts
+  s_0f868da28cf400::t_953dbf965abc77 266-270
+src/workerd/io/compatibility-date.capnp
+  s_0f868da28cf400::t_693151eb72a405 1651-1658
+types/generated-snapshot/experimental/index.d.ts
+  s_0f868da28cf400::t_bb3900b656e6d0 15435-15439
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_9f392589607d20 827-842
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_07c5efb438cf78 1087-1088
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_b7ef67360cb387 1110-1114
+  s_0f868da28cf400::t_9d7d9f375b7e24 1175-1182
+  s_0f868da28cf400::t_842c70e3048755 862
+  s_0f868da28cf400::t_ba4fdf7512b084 1107-1109,1119-1123,1125-1138
+  s_0f868da28cf400::t_af232f71612908 1143,1149-1156,1158-1171
+  s_0f868da28cf400::t_ec264a4295b4b0 852-855,858-861
+types/generated-snapshot/index.d.ts
+  s_0f868da28cf400::t_bb3900b656e6d0 15139-15143
+types/generated-snapshot/index.ts
+  s_0f868da28cf400::t_bb3900b656e6d0 15117-15121
+types/generated-snapshot/experimental/index.ts
+  s_0f868da28cf400::t_bb3900b656e6d0 15413-15417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b066ce775b401572d3ae78fb11a1fea9c06f764f",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/io/observer.h
+  s_f081b49ad7ad01::t_075c066fa12dcd 346-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bc6c62f48cbf3aacbdd808ea8f8feff82da02907",
+  "prompts": {},
+  "sessions": {
+    "s_f081b49ad7ad01": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_f081b49ad7ad01",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

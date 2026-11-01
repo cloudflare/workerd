@@ -1,0 +1,34 @@
+src/rust/cxx/kj-hyper/client-test.rs
+  s_dadaf0660bfcbe::t_730ba703ae0743 38,43,111,132
+  s_dadaf0660bfcbe::t_44b845e5e1923c 11-12,71-106
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_0ba941f2cbca49 292,375-378,380,386-387,406-409,419,422,440,443-460,462,468,508-509,562,752,783,856,863
+  s_dadaf0660bfcbe::t_47e53067e95e8e 48,390-391
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_89929d0583f76b 14-17
+  s_dadaf0660bfcbe::t_63054d39f1bae1 19-24
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_97104e742542e3 26,338-341,373
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_03906fbeb0955d 76
+src/workerd/server/server-test.c++
+  s_dadaf0660bfcbe::t_82b14336bedf10 4703-4747,5563-5568,5570-5573,5575-5578,5580
+src/workerd/server/server/services/mod.rs
+  s_dadaf0660bfcbe::t_5def1e288af517 9-11,36,197-199,208,219-220,239,308,330-333,433-434,454,458-485,558,609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1faa4021858be573f25e762107e90be84cdf3073",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

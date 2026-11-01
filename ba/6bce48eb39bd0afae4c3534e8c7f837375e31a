@@ -1,0 +1,38 @@
+.github/workflows/bigbonk.yml
+  s_d47f00959a824f::t_acf9679fa7ee0c 1,17,29,32-34,39-42
+  s_d47f00959a824f::t_2590a4e090eedc 50-53
+.github/bonk_reviewer.md
+  s_bc1ce62da9d11e::t_1f1bcb74fb91fb 11
+  s_d47f00959a824f::t_79ac6d7c34487d 19,21-25
+  s_d47f00959a824f::t_a60e1e5acaec93 59
+.github/workflows/new-pr-review.yml
+  s_d47f00959a824f::t_7c4c29f03d55ef 5,9-12,41-43,48-51
+  s_d47f00959a824f::t_f13c954fe55fda 59-62
+.github/workflows/bonk.yml
+  s_d47f00959a824f::t_769ca42bb0fb3e 50-53
+  s_d47f00959a824f::t_874b208e6b4f25 17,29,32-34,39-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ba6bce48eb39bd0afae4c3534e8c7f837375e31a",
+  "prompts": {},
+  "sessions": {
+    "s_bc1ce62da9d11e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad5470e1322dfd218",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_d47f00959a824f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f0edf6e-9af5-4419-ae90-ea2787327637",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

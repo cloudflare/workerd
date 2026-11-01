@@ -1,0 +1,19 @@
+src/workerd/jsg/fast-api-test.c++
+  s_7524bbe5163cf9::t_d235061a2846c0 67-94,103-107,112-113,518-565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "35d01d82230acba4db63094a4fc7622ae993bd10",
+  "prompts": {},
+  "sessions": {
+    "s_7524bbe5163cf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74032352-a58f-4b3b-9ed8-794c12f0461b",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

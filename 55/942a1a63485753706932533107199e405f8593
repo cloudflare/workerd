@@ -1,0 +1,19 @@
+src/workerd/io/observer.h
+  s_80fd8e845a3525::t_2e405bea924b18 86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "55942a1a63485753706932533107199e405f8593",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

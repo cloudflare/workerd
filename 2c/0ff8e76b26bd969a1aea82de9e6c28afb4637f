@@ -1,0 +1,21 @@
+src/rust/cxx/kj-hyper/server.rs
+  s_b3f84740300285::t_687abf0abe2bab 38-42
+src/workerd/server/server-test.c++
+  s_b3f84740300285::t_b91b9f6a6fe524 1224-1277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2c0ff8e76b26bd969a1aea82de9e6c28afb4637f",
+  "prompts": {},
+  "sessions": {
+    "s_b3f84740300285": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "35f40b8f-e49e-4b3a-8d56-7895ab93d2cb",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

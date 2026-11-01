@@ -1,0 +1,31 @@
+.bazelrc
+  s_c855efb1c295a0::t_a38b969b3e150e 106-110
+build/deps/v8.MODULE.bazel
+  s_c855efb1c295a0::t_3a4a7a99745a6e 76
+patches/v8/0051-Make-cppgc-young-generation-buildable-and-usable-in-.patch
+  s_c855efb1c295a0::t_41fab2d34428a0 1-183
+src/workerd/jsg/setup.c++
+  s_c855efb1c295a0::t_c1ad15c99e7571 12-13,179-184,230-241
+src/workerd/jsg/wrappable.c++
+  s_c855efb1c295a0::t_10d2c00962d728 266-270
+src/workerd/jsg/wrappable.h
+  s_c855efb1c295a0::t_3ac996c189f202 482-485
+src/workerd/util/autogate.h
+  s_c855efb1c295a0::t_3b12bfdff08089 139-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "538280df28c5e5a341a7038ec7d4f55df0e41797",
+  "prompts": {},
+  "sessions": {
+    "s_c855efb1c295a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad125e721c08aa65a",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
