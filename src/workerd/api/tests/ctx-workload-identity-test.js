@@ -17,7 +17,7 @@ export const workload = {
     deepStrictEqual(await run('/', {}), { identity: null, body: 'original' });
     const signed = { authorization: 'Bearer caller', signature: 'test' };
     const success = await run('/', signed);
-    strictEqual(success.identity.id, 'Bearer caller');
+    strictEqual(success.identity.signatureAgent, 'Bearer caller');
     strictEqual(success.identity.body, 'original');
     strictEqual(success.body, 'original');
     for (const path of ['/consumed', '/locked'])
@@ -34,7 +34,10 @@ export const workload = {
       (await run('/', { authorization: 'Bearer stalled' })).name,
       'WorkloadIdentityUnavailableError'
     );
-    strictEqual((await run('/rpc', signed)).identity.id, 'Bearer caller');
+    strictEqual(
+      (await run('/rpc', signed)).identity.signatureAgent,
+      'Bearer caller'
+    );
     const actor = env.DO.get(env.DO.idFromName('one'));
     const actorResults = await Promise.all(
       ['a', 'b'].map((id) =>
@@ -49,7 +52,7 @@ export const workload = {
       ['a', 'b'].map((id) => run('/', { authorization: 'Bearer ' + id }))
     );
     deepStrictEqual(
-      concurrent.map((r) => r.identity.id),
+      concurrent.map((r) => r.identity.signatureAgent),
       ['Bearer a', 'Bearer b']
     );
   },

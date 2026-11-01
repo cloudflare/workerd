@@ -81,26 +81,35 @@ selected.fetch('https://api.example.com', {
 declare const receiverContext: ExecutionContext;
 const caller: CloudflareWorkloadIdentity | null = await receiverContext.identity.caller();
 if (caller?.kind === 'signed-request') {
-  const id: string = caller.id;
+  const signatureAgent: string = caller.signatureAgent;
+  // @ts-expect-error Signed callers expose the URL as signatureAgent, not an opaque id.
+  caller.id;
   // @ts-expect-error Signed URLs do not assert JWT workload metadata.
   caller.subject;
+  // @ts-expect-error Signed requests do not expose a JWT originating version.
+  caller.originVersionId;
   // @ts-expect-error Validated facts are immutable.
-  caller.id = 'forged';
-  void id;
+  caller.signatureAgent = 'forged';
+  void signatureAgent;
  } else if (caller?.kind === 'service-binding') {
   const native: CloudflareServiceBindingCaller = caller;
   const ids: [string, string] = [native.accountId, native.workerId];
   // @ts-expect-error Native callers expose no delegated credential subject.
   native.subject;
+  // @ts-expect-error Native caller facts do not expose a JWT originating version.
+  native.originVersionId;
   // @ts-expect-error Native caller facts are immutable.
   native.workerId = 'forged';
   void ids;
 } else if (caller?.kind === 'jwt') {
   const audience: string = caller.audience;
   const expiry: number = caller.expiresAt;
+  const version: string = caller.originVersionId;
+  // @ts-expect-error Verified origin metadata is immutable.
+  caller.originVersionId = 'forged';
   // @ts-expect-error JWT identities do not assert a Signature-Agent URL.
-  caller.id;
-  void [audience, expiry];
+  caller.signatureAgent;
+  void [audience, expiry, version];
 }
 // @ts-expect-error Receiver trust is platform-owned; no issuer/configuration argument.
 receiverContext.identity.caller({ issuer: 'https://attacker.example' });

@@ -16105,17 +16105,22 @@ interface IdentityBinding {
   /** Returns a fixed identity RPC stub; use normal dup() and disposal rules. */
   getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
 }
-/** Verified credential facts. Your code must still authorize the caller and JWT audience. */
+/** Protected facts about the immediate calling Worker on an eligible direct binding. */
 type CloudflareServiceBindingCaller = Readonly<{
   kind: "service-binding";
   accountId: string;
   workerId: string;
 }>;
+/**
+ * Native facts identify the immediate caller; HTTP facts identify credential authority.
+ * Forwarded identity capabilities retain their originating authority, not the current executor.
+ * Your code must still authorize the caller and JWT issuer, subject and audience.
+ */
 type CloudflareWorkloadIdentity =
   | CloudflareServiceBindingCaller
   | Readonly<{
       kind: "signed-request";
-      id: string;
+      signatureAgent: string;
     }>
   | Readonly<{
       kind: "jwt";
@@ -16125,6 +16130,8 @@ type CloudflareWorkloadIdentity =
       issuedAt: number;
       expiresAt: number;
       tokenId: string;
+      /** Signed version_id of the originating identity binding, preserved by forwarding. */
+      originVersionId: string;
     }>;
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {

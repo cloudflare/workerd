@@ -13,7 +13,7 @@ export class Verifier extends WorkerEntrypoint {
       status: 'verified',
       identity: {
         kind: 'signed-request',
-        id: token,
+        signatureAgent: token,
         body: await request.text(),
         method: request.method,
         url: request.url,
