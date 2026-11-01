@@ -103,6 +103,9 @@ How the code keeps the rule:
   [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
   `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
+- To terminate execution from Rust, as C++ `jsg::Lock::terminateExecutionNow()` does, return the
+  error `Lock::terminate_execution_now` returns. It delivers the termination before returning,
+  so no more JavaScript runs; `Lock::terminate_execution` only requests one.
 - An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
   overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
   with a `v8::TryCatch` in the shim and decide with `catch_exception()` (`ffi.h`).
@@ -162,9 +165,12 @@ leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are 
 allowlist described below, and are to be removed. The one exception is in
 `src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
 `JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+learns of exceptions no other way, and two shims call the C++ functions that `ctx.waitUntil()` and
+`ctx.abort()` call, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
+explains why that is sound. Don't extend it.
 
-Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from`),
+Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
+`IoContext::getCurrentLock()`),
 `JSG_TRY`/`JSG_CATCH`/`tryCatch`, `jsg::check`/`JsExceptionThrown`, `createTunneledException`,
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.

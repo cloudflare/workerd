@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The Rust half of `io-context-test.c++`, which calls these functions inside and outside a
-//! request of a real worker.
+//! The Rust half of `io-context-test.c++` and `request-ops-test.c++`, which call these functions
+//! inside and outside a request of a real worker.
 //!
 //! Those that take an `isolate` take the `v8::Isolate*` of the caller: locked by the calling
 //! thread, with a context entered and a `v8::HandleScope` open.
@@ -18,6 +18,9 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
+use execution_context::new_gate;
+use execution_context::new_rust_execution_context;
+use execution_context::open_gate;
 use futures::channel::oneshot;
 use io_context::IoContext;
 use io_context::IoOwned;
@@ -45,8 +48,11 @@ mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
+        include!("workerd/rust/jsg/v8.rs.h");
 
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
+        type Isolate = jsg::v8::ffi::Isolate;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
     }
 
     /// How the last `await_released()` ends once its future has a value.
@@ -95,9 +101,46 @@ mod ffi {
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
 
+        pub unsafe fn new_rust_execution_context(isolate: *mut Isolate) -> MaybeLocal;
+        pub unsafe fn new_gate(isolate: *mut Isolate) -> MaybeLocal;
+        fn open_gate() -> bool;
+        unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()>;
+
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
+    }
+}
+
+/// In a request, terminates execution, then calls `IoContext::add_wait_until()` and
+/// `IoContext::abort()` with a reason and without one, as Rust can after catching a termination,
+/// and fails unless each fails with a pending error. C++ checks that the request was not aborted,
+/// and cancels the termination.
+unsafe fn request_ops_while_terminating(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    // Created before terminating, since V8 creates no objects while terminating.
+    let promise = v8::PromiseResolver::new(lock)
+        .map_err(|err| to_io(&err))?
+        .promise();
+    let reason = lock.null();
+    let termination = lock.terminate_execution_now();
+    assert!(termination.is_pending());
+
+    let wait_until = context.add_wait_until(lock, promise);
+    let abort_with_reason = context.abort(lock, Some(reason));
+    let abort_without_reason = context.abort(lock, None);
+    if wait_until.as_ref().is_err_and(jsg::Error::is_pending)
+        && abort_with_reason.is_pending()
+        && abort_without_reason.is_pending()
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "add_wait_until: {wait_until:?}, abort with a reason: {abort_with_reason:?}, abort \
+             without one: {abort_without_reason:?}"
+        )))
     }
 }
 
@@ -332,4 +375,107 @@ unsafe fn await_and_record_async_context(isolate: usize) -> Result<()> {
             })
         })
         .map_err(|err| to_io(&err))
+}
+
+/// Resources for the JavaScript of `request-ops-test.c++`, in a module of their own because the
+/// resource macros expect the prelude's `Result`.
+mod execution_context {
+    use std::cell::RefCell;
+
+    use io_context::IoContext;
+    use jsg::ToJS;
+    use jsg::v8;
+    use jsg_macros::jsg_method;
+    use jsg_macros::jsg_resource;
+
+    /// `ctx.waitUntil()`, `ctx.passThroughOnException()` and `ctx.abort()`, implemented as a Rust
+    /// `ExecutionContext` would implement them, for `request-ops-test.c++` to compare with the C++
+    /// `ExecutionContext`.
+    #[jsg_resource(name = "ExecutionContext")]
+    struct RustExecutionContext;
+
+    #[jsg_resource]
+    impl RustExecutionContext {
+        #[jsg_method]
+        fn wait_until<'s>(
+            &self,
+            lock: &mut jsg::Lock<'s>,
+            promise: v8::VoidPromise<'s>,
+        ) -> jsg::Result<()> {
+            IoContext::current(lock)?.add_wait_until(lock, promise)
+        }
+
+        #[jsg_method]
+        fn pass_through_on_exception(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+            IoContext::current(lock)?.set_fail_open()
+        }
+
+        #[jsg_method]
+        fn abort<'s>(
+            &self,
+            lock: &mut jsg::Lock<'s>,
+            reason: Option<v8::Local<'s, v8::Value>>,
+        ) -> jsg::Result<()> {
+            Err(IoContext::current(lock)?.abort(lock, reason))
+        }
+    }
+
+    /// Creates a `RustExecutionContext` for C++ to hand to JavaScript.
+    ///
+    /// # Safety
+    /// C++ calls this with the isolate locked, a context entered and a `HandleScope` open.
+    pub unsafe fn new_rust_execution_context(
+        isolate: *mut v8::ffi::Isolate,
+    ) -> v8::ffi::MaybeLocal {
+        // SAFETY: forwarded from the caller.
+        unsafe {
+            v8::run_ffi_callback(isolate, |lock| {
+                jsg::Rc::new(RustExecutionContext).to_js(lock)
+            })
+        }
+    }
+
+    thread_local! {
+        /// What opens the gate the last `Gate.wait()` returned a promise for.
+        static GATE: RefCell<Option<futures::channel::oneshot::Sender<()>>> =
+            const { RefCell::new(None) };
+    }
+
+    /// A promise that only C++ settles, through `open_gate()`, as I/O would.
+    #[jsg_resource]
+    struct Gate;
+
+    #[jsg_resource]
+    impl Gate {
+        /// Returns a promise that resolves, in the request, once C++ calls `open_gate()`.
+        #[jsg_method]
+        fn wait<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+            let resolver = v8::PromiseResolver::new(lock)?;
+            let promise = resolver.promise();
+            let resolver = v8::Global::new(lock, resolver);
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            GATE.with(|cell| *cell.borrow_mut() = Some(sender));
+            IoContext::current(lock)?.await_io_and_run(receiver, move |lock, _| {
+                let resolver = resolver.as_local(lock);
+                let undefined = lock.undefined();
+                resolver.resolve(lock, undefined)
+            })?;
+            Ok(promise)
+        }
+    }
+
+    /// Creates a `Gate` for C++ to hand to JavaScript.
+    ///
+    /// # Safety
+    /// As for `new_rust_execution_context()`.
+    pub unsafe fn new_gate(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
+        // SAFETY: forwarded from the caller.
+        unsafe { v8::run_ffi_callback(isolate, |lock| jsg::Rc::new(Gate).to_js(lock)) }
+    }
+
+    /// Opens the gate of the last `Gate.wait()`; false if there was none.
+    pub fn open_gate() -> bool {
+        GATE.with(|cell| cell.borrow_mut().take())
+            .is_some_and(|sender| sender.send(()).is_ok())
+    }
 }

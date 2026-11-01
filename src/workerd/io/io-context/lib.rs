@@ -163,6 +163,91 @@ impl<'s> IoContext<'s> {
             _object: object,
         })
     }
+
+    /// Has the request wait for `promise` after the response, as `ctx.waitUntil()` does through
+    /// C++ `IoContext::awaitJs()` and `IoContext::addWaitUntil()`: the request is not done until
+    /// `promise` settles. If `promise` rejects, the rejection is logged as an uncaught exception,
+    /// as for every JavaScript promise that C++ waits for, and the response is unaffected.
+    ///
+    /// As with `awaitJs()`, `promise` must settle in this request. Its reactions run in the
+    /// request that settles it, or, under the `handle_cross_request_promise_resolution`
+    /// compatibility flag, in the one it was created in. If that is another request, the
+    /// reaction fails there, as an unhandled rejection, and the wait fails with "Promise will
+    /// never complete.", which is logged as an uncaught exception. So does the wait for a
+    /// promise that is garbage-collected without settling.
+    ///
+    /// To take a value of any type, as `ctx.waitUntil()` does, take a [`jsg::v8::VoidPromise`]
+    /// argument, and pass it on as it is. It converts the value as C++ JSG converts the
+    /// `kj::Promise<void>` argument, before the method runs and so before it looks up the
+    /// `IoContext`.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one. Fails with
+    /// an error for which [`jsg::Error::is_pending`] is true if V8 does, leaving the exception
+    /// pending (see [`jsg::v8::Promise`]), or if execution is terminating.
+    pub fn add_wait_until(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        promise: impl Into<jsg::v8::Local<'s, jsg::v8::Promise>>,
+    ) -> jsg::Result<()> {
+        // JavaScript can't call `ctx.waitUntil()` while terminating, but Rust can call this after
+        // catching a termination. `awaitJs()` would then create objects, which fails a V8 debug
+        // check, and the request ends anyway.
+        if lock.is_execution_terminating() {
+            return Err(jsg::Error::pending());
+        }
+        ffi::add_wait_until(lock, self.id, promise.into())
+    }
+
+    /// Has the request fail open, as `ctx.passThroughOnException()` does through C++
+    /// `IoContext::setFailOpen()`: if the handler then fails before it has sent a response, the
+    /// request is passed on to the origin, as if there were no Worker, rather than answered with
+    /// an error.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn set_fail_open(&self) -> jsg::Result<()> {
+        Ok(bridge::io_context_set_fail_open(self.id)?)
+    }
+
+    /// Aborts the request, as `ExecutionContext`'s `ctx.abort(reason)` does, then terminates
+    /// JavaScript execution, and returns the error that carries the termination; return it from
+    /// the method that called this (see [`jsg::Lock::terminate_execution_now`]).
+    ///
+    /// The `IoContext` is aborted with `reason` as C++ `jsg::Lock::exceptionToKj()` encodes it,
+    /// or, without one, with an `Error` whose message is `Worker execution was aborted due to
+    /// call to ctx.abort().`, through C++ `IoContext::abort()`, so the request fails with that
+    /// exception.
+    ///
+    /// `ctx.abort()` terminates right after aborting, so this does too, and no caller can forget
+    /// to. `state.abort()` in a Durable Object aborts with an exception of its own, after breaking
+    /// storage, so it can't use this.
+    ///
+    /// # Errors
+    /// Always returns an error, for which [`jsg::Error::is_pending`] is true unless this
+    /// `IoContext` is no longer the current one, or the C++ shim otherwise fails with a KJ
+    /// exception, when it is an internal error and nothing is terminated. Nothing is aborted
+    /// or terminated if encoding `reason` runs JavaScript that throws (a getter of its
+    /// `overloaded` or `retryable` property, say), whose exception the error then stands for, or
+    /// if execution is already terminating.
+    #[must_use = "return the error, so that the termination reaches the code that started the \
+                  JavaScript"]
+    pub fn abort(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        reason: Option<jsg::v8::Local<'s, jsg::v8::Value>>,
+    ) -> jsg::Error {
+        // JavaScript can't call `ctx.abort()` while terminating, but Rust can call this after
+        // catching a termination. Encoding a reason would then create objects, and terminating
+        // again would enter V8, both of which fail V8 debug checks, and the request ends anyway.
+        if lock.is_execution_terminating() {
+            return jsg::Error::pending();
+        }
+        match ffi::abort(lock, self.id, reason) {
+            Ok(()) => lock.terminate_execution_now(),
+            Err(err) => err,
+        }
+    }
 }
 
 /// A value an `IoContext` owns, from [`IoContext::add_object`].
