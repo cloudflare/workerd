@@ -8,10 +8,10 @@ implementation dependency of v8_libbase instead of inputs to every
 dependent's compiles.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 166c685a0a3cd70ca405d68847f75619b120a615..661a10d58964a5b02f2a9f6686a48f8cfe69b195 100644
+index 790d2fcc82ee19c428f23d699abd6899d27a43ca..e0360267ea0d9aad55b4ca292965a9a09cf6cb39 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4923,8 +4923,10 @@ v8_library(
+@@ -4934,8 +4934,10 @@ v8_library(
          ":v8_shared_internal_headers",
      ],
      copts = ["-Wno-implicit-fallthrough"],

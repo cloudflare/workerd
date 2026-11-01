@@ -1,5 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_macro")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_proc_macro.bzl", "PROC_MACRO_TARGET_COMPATIBLE_WITH")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 # The crates derived from upstream cxx (the runtime, the bridge parser and generators, and their
@@ -121,6 +122,7 @@ rust_proc_macro(
     proc_macro_deps = [
         "@crates_vendor//:rustversion",
     ],
+    target_compatible_with = PROC_MACRO_TARGET_COMPATIBLE_WITH,
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         ":gen",

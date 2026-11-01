@@ -6,10 +6,10 @@ Subject: Remove unneded -latomic linker flag
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0fecd0f8d15199770037fc11e3108feaeffdc83d..f78571fafea1ca4a2fe9854416ed16aedcd8258e 100644
+index ddb0534a1985bd23b69cab516ca461d7a8742912..5e6a4ec75411305e96266ca93b790e6d131346b9 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -222,7 +222,7 @@ def _default_args():
+@@ -226,7 +226,7 @@ def _default_args():
                  "Shell32.lib",
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],

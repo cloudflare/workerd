@@ -183,7 +183,11 @@ KJ_TEST("Uint8Arrays") {
 struct UnwrappingContext: public ContextGlobalObject {
   v8::Local<v8::ArrayBufferView> mutateArrayBufferView(v8::Local<v8::ArrayBufferView> value) {
     if (value->ByteLength() > 0) {
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto backing = value->GetBuffer()->GetBackingStore();
+#else
       auto backing = value->Buffer()->GetBackingStore();
+#endif
       *static_cast<kj::byte*>(backing->Data()) = 123;
     }
     return value;
