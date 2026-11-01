@@ -117,9 +117,9 @@ http.archive(
     patches = [
         "@workerd//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
     ],
-    sha256 = "e45f3ab903c74784ce5e41fc61f72200a0adf429f06203fe3e16bf2abeaa9431",
-    strip_prefix = "wpt-2f17dec1f",
+    sha256 = "13178cd609d76494a3f04a7a6c3ab13d4b9c07b519b70b7b1388e6acf1e58636",
+    strip_prefix = "wpt-2e4dc257c",
     type = "tgz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-2f17dec1f/wpt-2f17dec1f.tar.gz",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-2e4dc257c/wpt-2e4dc257c.tar.gz",
 )
 use_repo(http, "wpt")
