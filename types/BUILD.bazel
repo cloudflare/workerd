@@ -3,6 +3,12 @@ load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wd_ts_test.bzl", "wd_ts_test")
 load("//:build/wd_ts_type_test.bzl", "wd_ts_type_test")
 
+# The Wasm ABI generator takes parameter names from the declarations.
+exports_files(
+    ["generated-snapshot/index.d.ts"],
+    visibility = ["//src/workerd/wasm-abi:__pkg__"],
+)
+
 wd_ts_project(
     name = "types_lib",
     srcs = glob(

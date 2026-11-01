@@ -1,0 +1,661 @@
+{
+  "module": "cf:http/v1",
+  "compatDate": "2026-10-23",
+  "generator": "src/workerd/wasm-abi/generator/generate.py",
+  "imports": [
+    {
+      "name": "Headers.constructor",
+      "binding": "headers_new",
+      "kind": "ctor",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "constructor",
+        "signature": "constructor(<jsgLock>, jsg::Optional<kj::OneOf<workerd::api::Headers, jsg::Sequence<jsg::Sequence<kj::String>>, jsg::Dict<kj::String, kj::String>>>) -> workerd::api::Headers"
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "init",
+          "lowered": {
+            "k": "maybe",
+            "inner": { "k": "handle", "js": null, "of": "oneof" },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<kj::OneOf<workerd::api::Headers, jsg::Sequence<jsg::Sequence<kj::String>>, jsg::Dict<kj::String, kj::String>>>",
+          "type": "maybe<handle(oneof)>"
+        }
+      ],
+      "result": { "k": "handle", "js": "Headers", "of": "structure:Headers" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "handle(Headers)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#get",
+      "binding": "headers_get",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "get",
+        "signature": "get(<jsgLock>, kj::String) -> kj::Maybe<kj::String>"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        }
+      ],
+      "result": {
+        "k": "maybe",
+        "inner": { "k": "string", "kind": "kj::String" },
+        "absent": "null"
+      },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "maybe<string(kj::String)>",
+      "resultSlot": { "size": 24, "align": 8 },
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#has",
+      "binding": "headers_has",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "has",
+        "signature": "has(kj::String) -> bool"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        }
+      ],
+      "result": { "k": "bool" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "bool",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32", "i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#set",
+      "binding": "headers_set",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "set",
+        "signature": "set(<jsgLock>, kj::String, kj::String) -> void"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        },
+        {
+          "name": "value",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#append",
+      "binding": "headers_append",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "append",
+        "signature": "append(<jsgLock>, kj::String, kj::String) -> void"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        },
+        {
+          "name": "value",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#delete",
+      "binding": "headers_delete",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "delete",
+        "signature": "delete(kj::String) -> void"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "name",
+          "lowered": { "k": "string", "kind": "kj::String" },
+          "rtti": "kj::String",
+          "type": "string(kj::String)"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Headers#getSetCookie",
+      "binding": "headers_get_set_cookie",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "getSetCookie",
+        "signature": "getSetCookie() -> kj::Array<kj::StringPtr>"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "handle", "js": "Array", "of": "array:kj::Array" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "handle(Array)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": "http_headers_getsetcookie",
+        "enableDate": "2023-03-01"
+      }
+    },
+    {
+      "name": "Headers#forEach",
+      "binding": "headers_for_each",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Headers",
+        "jsName": "Headers",
+        "member": "forEach",
+        "signature": "forEach(<jsgLock>, jsg::Function<void(kj::StringPtr, kj::StringPtr, workerd::api::Headers)>, jsg::Optional<unknown>) -> void"
+      },
+      "self": true,
+      "params": [
+        {
+          "name": "callback",
+          "lowered": { "k": "callback", "arity": 3 },
+          "rtti": "jsg::Function<void(kj::StringPtr, kj::StringPtr, workerd::api::Headers)>",
+          "type": "callback/3"
+        },
+        {
+          "name": "this_arg",
+          "lowered": {
+            "k": "maybe",
+            "inner": { "k": "handle", "js": null, "of": "unknown" },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<unknown>",
+          "type": "maybe<handle(unknown)>"
+        }
+      ],
+      "result": { "k": "void" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "void",
+      "resultSlot": { "size": 0, "align": 1 },
+      "wasm": { "params": ["i32", "i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Body#text",
+      "binding": "body_text",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Body",
+        "jsName": "Body",
+        "member": "text",
+        "signature": "text(<jsgLock>) -> Promise<kj::String>"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "string", "kind": "kj::String" },
+      "suspending": true,
+      "ret": "rc",
+      "resultType": "string(kj::String)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Body#bytes",
+      "binding": "body_bytes",
+      "kind": "method",
+      "origin": {
+        "structure": "workerd::api::Body",
+        "jsName": "Body",
+        "member": "bytes",
+        "signature": "bytes(<jsgLock>) -> Promise<v8Uint8Array>"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "bytes", "js": "Uint8Array" },
+      "suspending": true,
+      "ret": "rc",
+      "resultType": "bytes(Uint8Array)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Request.constructor",
+      "binding": "request_new",
+      "kind": "ctor",
+      "origin": {
+        "structure": "workerd::api::Request",
+        "jsName": "Request",
+        "member": "constructor",
+        "signature": "constructor(<jsgLock>, kj::OneOf<workerd::api::Request, kj::String>, jsg::Optional<kj::OneOf<workerd::api::RequestInitializerDict, workerd::api::Request>>) -> workerd::api::Request"
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "input",
+          "lowered": {
+            "k": "oneof",
+            "variants": [
+              { "k": "handle", "js": "Request", "of": "structure:Request" },
+              { "k": "string", "kind": "kj::String" }
+            ],
+            "payload": ["i32", "i32"]
+          },
+          "rtti": "kj::OneOf<workerd::api::Request, kj::String>",
+          "type": "oneof<handle(Request), string(kj::String)>"
+        },
+        {
+          "name": "init",
+          "lowered": {
+            "k": "maybe",
+            "inner": { "k": "handle", "js": null, "of": "oneof" },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<kj::OneOf<workerd::api::RequestInitializerDict, workerd::api::Request>>",
+          "type": "maybe<handle(oneof)>"
+        }
+      ],
+      "result": { "k": "handle", "js": "Request", "of": "structure:Request" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "handle(Request)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Request#method.get",
+      "binding": "request_get_method",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Request",
+        "jsName": "Request",
+        "member": "method",
+        "signature": "method() -> kj::StringPtr"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "string", "kind": "kj::StringPtr" },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "string(kj::StringPtr)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Request#url.get",
+      "binding": "request_get_url",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Request",
+        "jsName": "Request",
+        "member": "url",
+        "signature": "url() -> kj::StringPtr"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "string", "kind": "kj::StringPtr" },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "string(kj::StringPtr)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Request#headers.get",
+      "binding": "request_get_headers",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Request",
+        "jsName": "Request",
+        "member": "headers",
+        "signature": "headers() -> workerd::api::Headers"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "handle", "js": "Headers", "of": "structure:Headers" },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "handle(Headers)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Response.constructor",
+      "binding": "response_new",
+      "kind": "ctor",
+      "origin": {
+        "structure": "workerd::api::Response",
+        "jsName": "Response",
+        "member": "constructor",
+        "signature": "constructor(<jsgLock>, jsg::Optional<kj::Maybe<kj::OneOf<workerd::api::ReadableStream, kj::String, jsgBufferSource, workerd::api::Blob, workerd::api::FormData, workerd::api::URLSearchParams, workerd::api::url::URLSearchParams, jsg::AsyncGeneratorIgnoringStrings<unknown>>>>, jsg::Optional<kj::OneOf<workerd::api::Response::InitializerDict, workerd::api::Response>>) -> workerd::api::Response"
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "body",
+          "lowered": {
+            "k": "maybe",
+            "inner": {
+              "k": "oneof",
+              "variants": [
+                {
+                  "k": "handle",
+                  "js": "ReadableStream",
+                  "of": "structure:ReadableStream"
+                },
+                { "k": "string", "kind": "kj::String" },
+                { "k": "bytes", "js": "Uint8Array" },
+                { "k": "handle", "js": "Blob", "of": "structure:Blob" },
+                { "k": "handle", "js": "FormData", "of": "structure:FormData" },
+                {
+                  "k": "handle",
+                  "js": "URLSearchParams",
+                  "of": "structure:URLSearchParams"
+                },
+                {
+                  "k": "handle",
+                  "js": "Array",
+                  "of": "array:jsg::AsyncGeneratorIgnoringStrings"
+                }
+              ],
+              "payload": ["i32", "i32"]
+            },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<kj::Maybe<kj::OneOf<workerd::api::ReadableStream, kj::String, jsgBufferSource, workerd::api::Blob, workerd::api::FormData, workerd::api::URLSearchParams, workerd::api::url::URLSearchParams, jsg::AsyncGeneratorIgnoringStrings<unknown>>>>",
+          "type": "maybe<oneof<handle(ReadableStream), string(kj::String), bytes(Uint8Array), handle(Blob), handle(FormData), handle(URLSearchParams), handle(Array)>>"
+        },
+        {
+          "name": "init",
+          "lowered": {
+            "k": "maybe",
+            "inner": { "k": "handle", "js": null, "of": "oneof" },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<kj::OneOf<workerd::api::Response::InitializerDict, workerd::api::Response>>",
+          "type": "maybe<handle(oneof)>"
+        }
+      ],
+      "result": { "k": "handle", "js": "Response", "of": "structure:Response" },
+      "suspending": false,
+      "ret": "rc",
+      "resultType": "handle(Response)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Response#status.get",
+      "binding": "response_get_status",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Response",
+        "jsName": "Response",
+        "member": "status",
+        "signature": "status() -> int"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "i32", "unsigned": false },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "i32",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Response#statusText.get",
+      "binding": "response_get_status_text",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Response",
+        "jsName": "Response",
+        "member": "statusText",
+        "signature": "statusText() -> kj::StringPtr"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "string", "kind": "kj::StringPtr" },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "string(kj::StringPtr)",
+      "resultSlot": { "size": 16, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "Response#headers.get",
+      "binding": "response_get_headers",
+      "kind": "get",
+      "origin": {
+        "structure": "workerd::api::Response",
+        "jsName": "Response",
+        "member": "headers",
+        "signature": "headers() -> workerd::api::Headers"
+      },
+      "self": true,
+      "params": [],
+      "result": { "k": "handle", "js": "Headers", "of": "structure:Headers" },
+      "suspending": false,
+      "ret": "rc",
+      "proto": true,
+      "resultType": "handle(Headers)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": { "params": ["i32", "i32"], "results": ["i32"] },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    },
+    {
+      "name": "globalThis.fetch",
+      "binding": "global_fetch",
+      "kind": "global",
+      "origin": {
+        "structure": "workerd::api::ServiceWorkerGlobalScope",
+        "jsName": "globalThis",
+        "member": "fetch",
+        "signature": "fetch(<jsgLock>, kj::OneOf<workerd::api::Request, kj::String>, jsg::Optional<kj::OneOf<workerd::api::RequestInitializerDict, workerd::api::Request>>) -> Promise<workerd::api::Response>"
+      },
+      "self": false,
+      "params": [
+        {
+          "name": "input",
+          "lowered": {
+            "k": "oneof",
+            "variants": [
+              { "k": "handle", "js": "Request", "of": "structure:Request" },
+              { "k": "string", "kind": "kj::String" }
+            ],
+            "payload": ["i32", "i32"]
+          },
+          "rtti": "kj::OneOf<workerd::api::Request, kj::String>",
+          "type": "oneof<handle(Request), string(kj::String)>"
+        },
+        {
+          "name": "init",
+          "lowered": {
+            "k": "maybe",
+            "inner": { "k": "handle", "js": null, "of": "oneof" },
+            "absent": "undefined"
+          },
+          "rtti": "jsg::Optional<kj::OneOf<workerd::api::RequestInitializerDict, workerd::api::Request>>",
+          "type": "maybe<handle(oneof)>"
+        }
+      ],
+      "result": { "k": "handle", "js": "Response", "of": "structure:Response" },
+      "suspending": true,
+      "ret": "rc",
+      "resultType": "handle(Response)",
+      "resultSlot": { "size": 4, "align": 4 },
+      "wasm": {
+        "params": ["i32", "i32", "i32", "i32", "i32"],
+        "results": ["i32"]
+      },
+      "compat": {
+        "enableFlag": null,
+        "checkedFrom": "2023-01-01",
+        "checkedTo": "2026-10-23"
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "name": "Headers#getAll",
+      "reason": "Legacy non-standard extension, superseded by Headers#getSetCookie (comment on Headers::getAll in src/workerd/api/headers.h)."
+    }
+  ]
+}

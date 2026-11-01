@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The shim needs JSPI (WebAssembly.Suspending and WebAssembly.promising) in worker contexts. The
+# test variants run at the oldest and at the newest compatibility date.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "jspi-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "jspi-test.js" ),
+          ( name = "jspi.wasm", wasm = embed "../jspi.wasm" ),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
