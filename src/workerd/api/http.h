@@ -578,6 +578,8 @@ class Fetcher: public JsRpcClientProvider {
       kj::ConstString operationName,
       MakeUserSpanParent makeUserSpanParent);
 
+  IoChannelFactory::NativeCallerMode getNativeCallerMode(uint channel);
+
   // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
   // dispatch span when it created one. Factories that create no dispatch span
   // (result.spanParents == kj::none) yield no inner span and no trace context.

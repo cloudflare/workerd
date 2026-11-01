@@ -2949,13 +2949,21 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
   return ClientWithTracing{kj::mv(result.client), kj::none};
 }
 
+IoChannelFactory::NativeCallerMode Fetcher::getNativeCallerMode(uint channel) {
+  if (nativeCallerUnsupported) return IoChannelFactory::NativeCallerMode::UNSUPPORTED;
+  return channel >= IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
+      ? IoChannelFactory::NativeCallerMode::DIRECT
+      : IoChannelFactory::NativeCallerMode::NONE;
+}
+
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
-      auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext, nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+      auto client = ioContext.getSubrequestChannel(
+          channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
@@ -3025,9 +3033,10 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       kj::Own<WorkerInterface> client;
       KJ_IF_SOME(parent, userSpanParent) {
         client = ioContext.getSubrequestChannel(
-            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent), nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+            channel, isInHouse, kj::mv(cfStr), traceContext, kj::mv(parent), getNativeCallerMode(channel));
       } else {
-        client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext, nativeCallerUnsupported ? IoChannelFactory::NativeCallerMode::UNSUPPORTED : (channel >= 2 ? IoChannelFactory::NativeCallerMode::DIRECT : IoChannelFactory::NativeCallerMode::NONE));
+        client = ioContext.getSubrequestChannel(
+            channel, isInHouse, kj::mv(cfStr), traceContext, getNativeCallerMode(channel));
       }
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
