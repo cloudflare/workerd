@@ -5,17 +5,17 @@ The identity service owns OAuth acquisition, credential custody, authentication
 headers, cache partitioning, and destination limits. The runtime does not inspect
 OAuth configuration, access tokens, or DPoP proofs.
 
-The service supports `oauth.dpop: "preferred"` (the public default), `"required"`,
-and `"disabled"`. Preferred accepts either a DPoP or Bearer token response to its
-proof-carrying token request. Required accepts only DPoP. Disabled sends no token
-proof and accepts only Bearer. Only DPoP credentials carry API proofs and process
-DPoP nonce challenges. Bearer API responses never trigger an authentication replay.
+The service uses automatic DPoP for new capabilities, with no public policy
+setting. It sends a token proof, accepts DPoP or Bearer, and authenticates API
+requests using the returned type. Only DPoP credentials carry API proofs and
+process resource nonce challenges. Bearer API responses never trigger an
+authentication replay. Failed exchanges never retry without proof.
 
-New OAuth compilations carry explicit resolved policy in protected schema version
-3. Legacy version-1/2 OAuth retains required DPoP. Forwarding a selected handle
-preserves its compiled authority and policy through ordinary RPC. No additional
+New compiler OAuth capabilities use protected schema version 4 without policy
+fields. Earlier compiled versions 1–3 retain their original behavior internally.
+Forwarding a selected handle preserves its compiled authority through ordinary RPC. No additional
 runtime method, compatibility flag, or OAuth-aware native wrapper is needed for
-these policy choices. The existing local unsupported stub remains appropriate.
+this automatic behavior. The existing local unsupported stub remains appropriate.
 
 Web Bot Auth composition signs final Authorization and DPoP when present. It does
 not convert a bearer token into a bound token. Receiving Workers still need an
