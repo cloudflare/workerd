@@ -77,8 +77,13 @@ class Hyperdrive: public jsg::Object {
   // Registers the connect/dns overrides for the hostname and synthetic IP. Requires an active
   // IoContext, so it is done lazily on first access rather than in the constructor.
   void registerConnectOverride();
-
-  kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb();
 };
+
+// A Socket for `host:port` whose connection is a CONNECT to `host:port` over the subrequest
+// channel `clientIndex`: what Hyperdrive::connect() returns, and what the connect overrides of a
+// Hyperdrive binding's host and synthetic IP return.
+jsg::Ref<Socket> connectHyperdrive(
+    jsg::Lock& js, uint clientIndex, kj::StringPtr host, uint16_t port);
+
 #define EW_HYPERDRIVE_ISOLATE_TYPES api::Hyperdrive
 }  // namespace workerd::api

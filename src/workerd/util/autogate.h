@@ -135,7 +135,11 @@ namespace workerd::util {
      abort's reason its queued deliveries share as external memory, and queues at most one         \
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* A Hyperdrive binding is the Rust Hyperdrive (src/workerd/api/hyperdrive/) instead of the     \
+     C++ one (api/hyperdrive.h). Both connect through connectHyperdrive(). The C++                 \
+     implementation is retained for rollback. */                                                   \
+  V(RUST_HYPERDRIVE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
