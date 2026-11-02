@@ -2514,6 +2514,156 @@ KJ_TEST("Server: Hyperdrive connect via IPv4-mapped IPv6") {
   conn.recvHttp200("OK");
 }
 
+// Runs a script that describes two Hyperdrive bindings and connects through them, with the
+// RUST_HYPERDRIVE autogate on or off, so that the C++ and the Rust Hyperdrive must behave the same.
+// Under @all-autogates both runs are of the Rust one.
+void testHyperdriveParity(bool rust) {
+  auto autogates = rust ? "autogates = [\"workerd-autogate-rust-hyperdrive\"],"_kj : ""_kj;
+  TestServer test(kj::str("(", autogates, R"(
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `function describe(hd) {
+                `  const out = [`keys: ${Object.keys(hd).join(",")}`];
+                `  for (const key of Object.keys(hd)) {
+                `    const d = Object.getOwnPropertyDescriptor(hd, key);
+                `    out.push(`${key}: ${typeof d.value} ${d.writable} ${d.enumerable} ${d.configurable}`);
+                `  }
+                `  out.push(`database=${hd.database} user=${hd.user} password=${hd.password}`);
+                `  out.push(`port=${hd.port}`);
+                `  out.push(`host ok: ${/^[0-9a-f]{32}\.hyperdrive\.local$/.test(hd.host)}`);
+                `  out.push(`ip ok: ${/^240\.0\.\d{1,3}\.\d{1,3}$/.test(hd.ip)}`);
+                `  out.push(`same host: ${hd.host === hd.host}`);
+                `  out.push(`connectionString=${hd.connectionString.replace(hd.host, "HOST")}`);
+                `  const proto = Object.getPrototypeOf(hd);
+                `  out.push(`proto: ${Object.getOwnPropertyNames(proto).sort().join(",")}`);
+                `  out.push(`constructor: ${proto.constructor.name} ${hd instanceof proto.constructor}`);
+                `  out.push(`connect: ${typeof hd.connect} ${hd.connect.name} ${hd.connect.length}`);
+                `  out.push(`toString: ${Object.prototype.toString.call(hd)}`);
+                `  try { proto.connect.call({}); } catch (e) { out.push(`bad this: ${e.name}: ${e.message}`); }
+                `  try { hd.port = 1; } catch (e) { out.push(`assign: ${e.name}: ${e.message}`); }
+                `  return out.join("\n");
+                `}
+                `async function send(socket, text) {
+                `  await socket.writable.getWriter().write(new TextEncoder().encode(text));
+                `  return socket;
+                `}
+                `export default {
+                `  async fetch(request, env) {
+                `    const out = [describe(env.pg), describe(env.mysql)];
+                `    out.push(`distinct: ${env.pg.host !== env.mysql.host} ${env.pg.ip !== env.mysql.ip}`);
+                `    const socket = await send(env.pg.connect(), "pg-connect");
+                `    out.push(`socket: ${socket.constructor.name} ${socket.opened instanceof Promise}`);
+                `    await send(connect(`${env.pg.host}:5432`), "pg-host");
+                `    await send(connect(`${env.pg.ip}:5432`), "pg-ip");
+                `    await send(connect(`${env.mysql.host}:3306`), "mysql-host");
+                `    await send(connect(`${env.mysql.ip}:3306`), "mysql-ip");
+                `    return new Response(out.join("\n") + "\n");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "pg",
+              hyperdrive = (
+                designator = "pg-outbound",
+                database = "pg-db",
+                user = "pg-user",
+                password = "pg-password",
+                scheme = "postgresql"
+              )
+            ),
+            ( name = "mysql",
+              hyperdrive = (
+                designator = "mysql-outbound",
+                database = "mysql-db",
+                user = "mysql-user",
+                password = "mysql-password",
+                scheme = "mysql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "pg-outbound", external = (address = "pg-host", tcp = ()) ),
+      ( name = "mysql-outbound", external = (address = "mysql-host", tcp = ()) )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  test.receiveSubrequest("pg-host").recv("pg-connect");
+  test.receiveSubrequest("pg-host").recv("pg-host");
+  test.receiveSubrequest("pg-host").recv("pg-ip");
+  test.receiveSubrequest("mysql-host").recv("mysql-host");
+  test.receiveSubrequest("mysql-host").recv("mysql-ip");
+  conn.recvHttp200(R"(
+    keys: connectionString,port,ip,host,password,user,database
+    connectionString: string false true true
+    port: number false true true
+    ip: string false true true
+    host: string false true true
+    password: string false true true
+    user: string false true true
+    database: string false true true
+    database=pg-db user=pg-user password=pg-password
+    port=5432
+    host ok: true
+    ip ok: true
+    same host: true
+    connectionString=postgresql://pg-user:pg-password@HOST:5432/pg-db?sslmode=disable
+    proto: connect,constructor
+    constructor: Hyperdrive true
+    connect: function connect 0
+    toString: [object Object]
+    bad this: TypeError: Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.
+    assign: TypeError: Cannot assign to read only property 'port' of object '#<Hyperdrive>'
+    keys: connectionString,port,ip,host,password,user,database
+    connectionString: string false true true
+    port: number false true true
+    ip: string false true true
+    host: string false true true
+    password: string false true true
+    user: string false true true
+    database: string false true true
+    database=mysql-db user=mysql-user password=mysql-password
+    port=3306
+    host ok: true
+    ip ok: true
+    same host: true
+    connectionString=mysql://mysql-user:mysql-password@HOST:3306/mysql-db?ssl-mode=disabled
+    proto: connect,constructor
+    constructor: Hyperdrive true
+    connect: function connect 0
+    toString: [object Object]
+    bad this: TypeError: Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.
+    assign: TypeError: Cannot assign to read only property 'port' of object '#<Hyperdrive>'
+    distinct: true true
+    socket: Socket true
+  )"_blockquote);
+}
+
+KJ_TEST("Server: Hyperdrive in C++") {
+  testHyperdriveParity(false);
+}
+
+KJ_TEST("Server: Hyperdrive in Rust") {
+  testHyperdriveParity(true);
+}
+
 KJ_TEST("Server: cyclic bindings") {
   TestServer test(R"((
     services = [
