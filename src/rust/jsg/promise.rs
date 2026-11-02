@@ -276,6 +276,13 @@ impl<'s> Local<'s, Promise> {
         unsafe { ffi::local_promise_mark_as_handled(self.raw()) }
     }
 
+    /// Whether the promise has a reaction or was marked as handled, so that its rejection is not
+    /// reported as unhandled.
+    pub fn has_handler(self) -> bool {
+        // SAFETY: self is a valid promise handle.
+        unsafe { ffi::local_promise_has_handler(self.raw()) }
+    }
+
     /// Registers `on_fulfilled` to run when the promise is fulfilled, like
     /// `promise.then(onFulfilled)`, and returns the promise for its result. A rejection passes
     /// through to the returned promise unchanged.

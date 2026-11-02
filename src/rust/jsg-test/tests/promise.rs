@@ -70,6 +70,21 @@ fn rejected_promise_holds_its_reason() {
 }
 
 #[test]
+fn has_handler_reports_reactions_and_marks() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let reacted = v8::PromiseResolver::new(lock)?.promise();
+        assert!(!reacted.has_handler());
+        reacted.then(lock, (), |_lock, (), value| Ok(value))?;
+        assert!(reacted.has_handler());
+
+        let marked = v8::PromiseResolver::new(lock)?.promise();
+        marked.mark_as_handled();
+        assert!(marked.has_handler());
+        Ok(())
+    });
+}
+
+#[test]
 fn resolved_returns_promises_unchanged_and_follows_thenables() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let existing = ctx

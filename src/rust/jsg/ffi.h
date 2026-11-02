@@ -307,6 +307,7 @@ PromiseState local_promise_state(const Local& promise);
 // if it is.
 Local local_promise_result(const Local& promise);
 void local_promise_mark_as_handled(const Local& promise);
+bool local_promise_has_handler(const Local& promise);
 // `promise.then(on_fulfilled, on_rejected)`, without looking up `then` or the species
 // constructor. An empty result means an exception is pending (one that a promise hook threw, or a
 // termination), as local_function_call() leaves it. While one is pending this, and the
