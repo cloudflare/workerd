@@ -19,7 +19,11 @@ namespace workerd::jsg {
 // frees code, so an address can appear more than once, and the latest line covering it wins.
 //
 // `add()` may be called from any thread. Each line goes out in a single write() to a descriptor
-// opened with O_APPEND, so lines from concurrent callers never interleave.
+// opened with O_APPEND, so lines from concurrent callers never interleave without a lock, and a
+// profiler can name new code as soon as it runs. V8 reports code once per compiled block, not per
+// execution, so a write per line is cheap; buffering would delay those lines and need a lock.
+//
+// Not supported on Windows, where the constructor throws.
 class PerfMapWriter {
  public:
   explicit PerfMapWriter(kj::OwnFd fd);

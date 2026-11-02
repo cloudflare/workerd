@@ -4,14 +4,25 @@
 
 #include "perf-map.h"
 
+#include <kj/debug.h>
+
+#if !_WIN32
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <kj/debug.h>
+#endif
 
 namespace workerd::jsg {
 
+#if _WIN32
+PerfMapWriter::PerfMapWriter(kj::OwnFd fdParam): fd(kj::mv(fdParam)) {
+  KJ_UNIMPLEMENTED("perf maps are not supported on Windows");
+}
+
+void PerfMapWriter::add(const void*, size_t, kj::ArrayPtr<const char>) const {
+  KJ_UNIMPLEMENTED("perf maps are not supported on Windows");
+}
+#else
 PerfMapWriter::PerfMapWriter(kj::OwnFd fdParam): fd(kj::mv(fdParam)) {
   int flags;
   KJ_SYSCALL(flags = fcntl(fd.get(), F_GETFL));
@@ -43,5 +54,6 @@ void PerfMapWriter::add(const void* start, size_t size, kj::ArrayPtr<const char>
     KJ_LOG(ERROR, "failed to write perf map; no longer recording JIT code", n, errno);
   }
 }
+#endif  // _WIN32
 
 }  // namespace workerd::jsg
