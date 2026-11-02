@@ -103,6 +103,9 @@ build:unix --config=perfetto
 build --@v8//:v8_enable_temporal_support=True
 build --@v8//:v8_temporal_capi=//deps/rust:temporal_capi
 
+# Room for every jsg::ContextDataSlot; V8 does not grow a context's embedder-data array.
+build --@v8//:v8_embedder_data_array_size=10
+
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
 # kept in a separate configuration to make it easy to disable.

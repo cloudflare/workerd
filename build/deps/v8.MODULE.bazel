@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.7.112.5"
+VERSION = "15.8.62.5"
 
-INTEGRITY = "sha256-75cdFxzDnZQ3t5FG1zp57TVdT/dpu++dd5ASvCKsSzQ="
+INTEGRITY = "sha256-8ZCLdqBpJMPk/ij2TxucDnaWv/dpweaIt/x46NNV0mo="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -63,16 +63,15 @@ PATCHES = [
     "0038-Fix-TSan-build-without-the-V8-sandbox.patch",
     "0039-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
     "0040-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
-    "0041-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
-    "0042-Build-V8-release-archives-without-metagen.patch",
-    "0043-Load-cc_library-in-BUILD.icu.patch",
-    "0044-Consider-all-dynamic-functions-code-like.patch",
-    "0045-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
-    "0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch",
-    "0047-Add-v8-Data-IsCompatibleWithIsolate.patch",
-    "0048-Keep-llvm-libc-private-to-v8_libbase.patch",
-    "0049-Keep-v8_libshared-private-to-v8.patch",
-    "0050-Build-Temporal-in-the-V8-Bazel-build.patch",
+    "0041-Build-V8-release-archives-without-metagen.patch",
+    "0042-Load-cc_library-in-BUILD.icu.patch",
+    "0043-Consider-all-dynamic-functions-code-like.patch",
+    "0044-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
+    "0045-Forward-ThinStrings-shortcut-by-the-scavenger.patch",
+    "0046-Add-v8-Data-IsCompatibleWithIsolate.patch",
+    "0047-Keep-llvm-libc-private-to-v8_libbase.patch",
+    "0048-Keep-v8_libshared-private-to-v8.patch",
+    "0049-Build-Temporal-in-the-V8-Bazel-build.patch",
 ]
 
 http_archive(
