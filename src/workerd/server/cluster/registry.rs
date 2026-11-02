@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -45,6 +46,8 @@ pub struct Registry {
     listed: RefCell<HashMap<String, NodeRecord>>,
     /// Dead peers whose records remain, as of the last listing.
     dead: RefCell<Vec<String>>,
+    /// This instance left the cluster: it renews its record no more.
+    left: Cell<bool>,
 }
 
 fn node_key(node: &str) -> String {
@@ -65,6 +68,7 @@ impl Registry {
             ),
             listed: RefCell::new(HashMap::new()),
             dead: RefCell::new(Vec::new()),
+            left: Cell::new(false),
         }
     }
 
@@ -101,6 +105,11 @@ impl Registry {
             .clone()
             .map_or(Guard::Absent, Guard::Match);
         loop {
+            // A renewal that lands after `deregister` would bring this
+            // instance back to life.
+            if self.left.get() {
+                return Err(Error::NotHere(format!("{} left the cluster", self.node)));
+            }
             if let Some(version) = self.bucket.put_if(&key, body.clone(), guard).await? {
                 self.own.replace(Some(version));
                 return Ok(record.expires_ms);
@@ -122,9 +131,11 @@ impl Registry {
 
     /// Expire this instance's record on a clean shutdown, so peers stop
     /// routing to it before its lease would have run out and adopt its
-    /// alarms. The record goes once they have.
+    /// alarms. The record goes once they have. A renewal of ours that lands
+    /// first is expired too; no renewal starts after this.
     pub async fn deregister(&self) -> Result<()> {
-        let Some(version) = self.own.take() else {
+        self.left.set(true);
+        let Some(mut version) = self.own.take() else {
             return Ok(());
         };
         let record = NodeRecord {
@@ -135,10 +146,26 @@ impl Registry {
         };
         let body = serde_json::to_vec(&record)?;
         let key = node_key(&self.node);
-        self.bucket
-            .put_if(&key, body, Guard::Match(version))
-            .await
-            .map(drop)
+        for _ in 0..DEREGISTER_ATTEMPTS {
+            let guard = Guard::Match(version);
+            if self
+                .bucket
+                .put_if(&key, body.clone(), guard)
+                .await?
+                .is_some()
+            {
+                return Ok(());
+            }
+            let Some((current, current_version)) = self.bucket.get(&key).await? else {
+                return Ok(());
+            };
+            let current: NodeRecord = serde_json::from_slice(&current)?;
+            if current.instance != self.instance {
+                return Err(Error::Fenced(self.node.clone()));
+            }
+            version = current_version;
+        }
+        Err(Error::Contended(key))
     }
 
     /// Whether `node` held a lease past `now_ms` at the last listing. No
@@ -250,6 +277,8 @@ impl Registry {
 
 /// How many lease lifetimes past its expiry a node record is deleted.
 const DEAD_RECORD_TTLS: u64 = 10;
+/// How many renewals of ours in flight a deregistration outlasts.
+const DEREGISTER_ATTEMPTS: usize = 4;
 
 #[cfg(test)]
 #[path = "registry-test.rs"]

@@ -125,3 +125,30 @@ fn a_listing_deletes_records_long_expired() {
         assert_eq!(keys, ["nodes/b.json", "nodes/c.json"]);
     });
 }
+
+#[test]
+fn a_deregistration_outlasts_a_renewal_of_ours_that_landed_first() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
+        let b = Registry::new(bucket.clone(), "b", "b:1", 10_000);
+        a.renew(0).await.unwrap();
+        // A timed-out renewal of a's lands before the deregistration.
+        let landed = NodeRecord {
+            node: "a".into(),
+            address: "a:1".into(),
+            expires_ms: 11_000,
+            instance: a.instance,
+        };
+        let body = serde_json::to_vec(&landed).unwrap();
+        bucket.put(&node_key("a"), body, &[]).await.unwrap();
+        a.deregister().await.unwrap();
+        b.renew(1).await.unwrap();
+        let live = b.peers(1).await.unwrap();
+        assert_eq!(live.iter().map(|p| &*p.node).collect::<Vec<_>>(), ["b"]);
+        // No renewal brings a back.
+        assert!(matches!(a.renew(2).await, Err(Error::NotHere(_))));
+        let live = b.peers(2).await.unwrap();
+        assert_eq!(live.iter().map(|p| &*p.node).collect::<Vec<_>>(), ["b"]);
+    });
+}

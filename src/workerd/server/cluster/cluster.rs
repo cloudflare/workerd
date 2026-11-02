@@ -127,7 +127,10 @@ impl Cluster {
         self.bucket.clock_skew_ms().unwrap_or(0)
     }
 
+    /// Expires this instance's membership: it renews its lease no more,
+    /// and peers take over what it still owns and adopt its alarms.
     pub async fn deregister(&self) -> Result<()> {
+        self.lease.borrow_mut().left = true;
         self.registry.deregister().await
     }
 
@@ -339,7 +342,7 @@ impl Cluster {
     /// serving: answers why. Runs for the life of the process.
     pub async fn maintain(&self) -> String {
         loop {
-            if self.lease.borrow().draining {
+            if self.lease.borrow().left {
                 std::future::pending::<()>().await;
             }
             let observed = lease::Observed {
@@ -354,9 +357,9 @@ impl Cluster {
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err("renewal timed out".into()),
                 };
-                // A drain began meanwhile, and its deregistration may have
-                // failed this renewal: what it found no longer matters.
-                if self.lease.borrow().draining {
+                // The instance left meanwhile, which may have failed this
+                // renewal: what it found no longer matters.
+                if self.lease.borrow().left {
                     continue;
                 }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
@@ -388,10 +391,10 @@ impl Cluster {
         }
     }
 
-    /// Stops claiming before the claim reaches the bucket, and parks the
-    /// lease loop; then `deregister`.
+    /// Stops claiming before the claim reaches the bucket. The lease is
+    /// still renewed, so that the objects this instance owns stay where
+    /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
-        self.lease.borrow_mut().draining = true;
         self.ownership.may_claim.set(false);
     }
 
