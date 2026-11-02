@@ -281,21 +281,27 @@ export function getActiveResourcesInfo(): string[] {
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.getActiveResourcesInfo');
 }
 
-export function memoryUsage(): {
+export interface MemoryUsage {
   rss: number;
   heapTotal: number;
   heapUsed: number;
   external: number;
   arrayBuffers: number;
-} {
-  return {
-    rss: 0,
-    heapTotal: 0,
-    heapUsed: 0,
-    external: 0,
-    arrayBuffers: 0,
-  };
 }
+
+export const memoryUsage = Object.assign(
+  function memoryUsage(): MemoryUsage {
+    return processImpl.getMemoryUsage();
+  },
+  // Node.js attaches a `.rss()` helper method directly onto the
+  // `process.memoryUsage` function object:
+  // https://nodejs.org/api/process.html#processmemoryusagerss
+  {
+    rss(): number {
+      return 0;
+    },
+  }
+);
 
 export function resourceUsage(): {
   userCPUTime: number;

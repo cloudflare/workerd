@@ -1172,3 +1172,40 @@ export const processGetReport = {
     assert.deepStrictEqual(process.report.getReport(), {});
   },
 };
+
+export const processMemoryUsage = {
+  test() {
+    assert.strictEqual(typeof process.memoryUsage, 'function');
+    assert.strictEqual(process.memoryUsage.name, 'memoryUsage');
+    assert.strictEqual(typeof process.memoryUsage.rss, 'function');
+    assert.strictEqual(process.memoryUsage.rss.name, 'rss');
+    assert.strictEqual(process.memoryUsage.rss(), 0);
+
+    const usage = process.memoryUsage();
+    assert.strictEqual(usage.rss, 0);
+    assert.strictEqual(usage.arrayBuffers, 0);
+    assert.strictEqual(typeof usage.heapTotal, 'number');
+    assert.strictEqual(typeof usage.heapUsed, 'number');
+    assert.strictEqual(typeof usage.external, 'number');
+
+    if (
+      Cloudflare.compatibilityFlags.enable_nodejs_process_memory_usage === true
+    ) {
+      assert.ok(usage.heapTotal > 0, 'heapTotal should be > 0');
+      assert.ok(usage.heapUsed > 0, 'heapUsed should be > 0');
+      assert.ok(
+        usage.heapUsed <= usage.heapTotal,
+        'heapUsed should be <= heapTotal'
+      );
+      assert.ok(usage.external >= 0, 'external should be >= 0');
+    } else {
+      assert.deepStrictEqual(usage, {
+        rss: 0,
+        heapTotal: 0,
+        heapUsed: 0,
+        external: 0,
+        arrayBuffers: 0,
+      });
+    }
+  },
+};

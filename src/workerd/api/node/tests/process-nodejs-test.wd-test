@@ -24,5 +24,28 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
+    ( name = "nodejs-process-memory-usage-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-nodejs-test.js"),
+          (name = "mod", esModule = "export const { FOO } = process.env;")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "enable_nodejs_process_v2",
+          "enable_nodejs_fs_module",
+          "nodejs_compat_populate_process_env",
+          "enable_nodejs_process_memory_usage"
+        ],
+        bindings = [
+          (name = "FOO", text = "BAR"),
+          (name = "BAR", json = "{}"),
+          (name = "BAZ", json = "\"abc\""),
+          (name = "DUB", json = "\"\\\"abc\\\"\""),
+          (name = "NON", data = "abcdef")
+        ],
+      )
+    ),
   ],
 );

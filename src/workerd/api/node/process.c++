@@ -267,4 +267,20 @@ bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
   return FeatureFlags::get(js).getThrowOnNotImplementedTlsOptions();
 }
 
+ProcessModule::MemoryUsage ProcessModule::getMemoryUsage(jsg::Lock& js) {
+  if (!FeatureFlags::get(js).getEnableNodejsProcessMemoryUsage()) {
+    return {};
+  }
+
+  v8::HeapStatistics stats;
+  js.v8Isolate->GetHeapStatistics(&stats);
+  return {
+    .rss = 0,
+    .heapTotal = static_cast<double>(stats.total_heap_size()),
+    .heapUsed = static_cast<double>(stats.used_heap_size()),
+    .external = static_cast<double>(stats.external_memory()),
+    .arrayBuffers = 0,
+  };
+}
+
 }  // namespace workerd::api::node

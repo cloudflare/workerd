@@ -54,6 +54,18 @@ class ProcessModule final: public jsg::Object {
   // (caller should throw). Otherwise returns false (caller should silently continue).
   bool shouldThrowOnNotImplementedTlsOption(jsg::Lock& js);
 
+  struct MemoryUsage {
+    double rss = 0;
+    double heapTotal = 0;
+    double heapUsed = 0;
+    double external = 0;
+    double arrayBuffers = 0;
+
+    JSG_STRUCT(rss, heapTotal, heapUsed, external, arrayBuffers);
+  };
+
+  MemoryUsage getMemoryUsage(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ProcessModule) {
     JSG_METHOD(getEnvObject);
     JSG_METHOD(getBuiltinModule);
@@ -63,9 +75,11 @@ class ProcessModule final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(versions, getVersions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
     JSG_METHOD(shouldThrowOnNotImplementedTlsOption);
+    JSG_METHOD(getMemoryUsage);
   }
 };
 
-#define EW_NODE_PROCESS_ISOLATE_TYPES api::node::ProcessModule
+#define EW_NODE_PROCESS_ISOLATE_TYPES                                                              \
+  api::node::ProcessModule, api::node::ProcessModule::MemoryUsage
 
 }  // namespace workerd::api::node
