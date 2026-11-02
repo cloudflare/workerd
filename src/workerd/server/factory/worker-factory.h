@@ -413,6 +413,8 @@ kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
 kj::Own<WorkerInterface> worker_interface_watch_moved(
     kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 

@@ -65,6 +65,7 @@ use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::cluster::is_moved;
 use crate::cluster::moved;
+use crate::cluster::not_delivered;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
 use crate::tasks::TaskHandle;
@@ -692,9 +693,17 @@ enum Resolved {
     Remote(Rc<RpcConnection>, String),
 }
 
+impl Resolved {
+    fn is_down(&self) -> bool {
+        matches!(self, Self::Remote(connection, _) if connection.is_down())
+    }
+}
+
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
 /// the stub stays with that instance, as a local stub stays with its container, until the
-/// instance answers that the object moved (`MovedHook`).
+/// instance answers that the object moved, or the connection to it is lost (`MovedHook`).
+/// A failure before the request reaches that instance is marked as not delivered
+/// (`not_delivered`): a peer that forwards the request answers it so, and its caller may retry.
 struct RoutedChannel {
     namespace: Weak<ActorNamespace>,
     id: KjOwn<ActorIdHandle>,
@@ -708,20 +717,27 @@ impl Channel for RoutedChannel {
         mut metadata: KjOwn<RequestMetadata>,
     ) -> Result<KjOwn<WorkerInterface>> {
         ffi::request_metadata_set_from_persistent_stub(metadata.as_mut(), self.persistent);
-        let namespace = self
-            .namespace
-            .upgrade()
-            .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
+        let namespace = self.namespace.upgrade().ok_or_else(|| {
+            not_delivered(kj::disconnected!("the Durable Object namespace is gone"))
+        })?;
         let id = ffi::actor_id_clone(&self.id);
         let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
         Ok(PromisedInterface::new(async move {
-            let resolved = bound.borrow().clone();
-            let resolved = if let Some(resolved) = resolved {
+            // A resolution over a session known to be down would fail unsent: resolve again.
+            let live = bound
+                .borrow()
+                .clone()
+                .filter(|resolved| !resolved.is_down());
+            let resolved = if let Some(resolved) = live {
                 resolved
             } else {
-                let resolved = Rc::new(namespace.resolve(id).await?);
-                Rc::clone(bound.borrow_mut().get_or_insert(resolved))
+                let resolved = Rc::new(namespace.resolve(id).await.map_err(not_delivered)?);
+                let mut bound = bound.borrow_mut();
+                match &*bound {
+                    Some(other) if !other.is_down() => Rc::clone(other),
+                    _ => Rc::clone(bound.insert(resolved)),
+                }
             };
             let hook = MovedHook {
                 namespace: Rc::downgrade(&namespace),
@@ -741,7 +757,7 @@ impl Channel for RoutedChannel {
                         Err(e)
                     }
                 },
-                Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_moved(
+                Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_peer(
                     attach(connection.start_request(metadata), Rc::clone(connection)),
                     Box::new(hook),
                 )),
@@ -783,10 +799,11 @@ impl Channel for RoutedChannel {
     }
 }
 
-/// What a stub's request does when the instance it reached answers that the object moved.
+/// What a stub's request does when the instance it reached answers that the object moved, or
+/// the connection to it is lost.
 ///
-/// The stub forgets that resolution, and the cluster its route there, so that the stub's next
-/// request, or a retry of this one, resolves the object again.
+/// The stub forgets that resolution, so that the stub's next request, or a retry of this one,
+/// resolves the object again. On a move the cluster also forgets its route there.
 pub struct MovedHook {
     namespace: Weak<ActorNamespace>,
     key: String,
@@ -797,17 +814,20 @@ pub struct MovedHook {
 
 impl MovedHook {
     pub fn moved(&self) {
-        {
-            let mut bound = self.bound.borrow_mut();
-            if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, &self.tried)) {
-                *bound = None;
-            }
-        }
+        self.lost();
         if let Resolved::Remote(_, node) = &*self.tried
             && let Some(namespace) = self.namespace.upgrade()
             && let (Some(cluster), Some(unique_key)) = (namespace.cluster(), namespace.unique_key())
         {
             cluster.cluster.forget_route(unique_key, &self.key, node);
+        }
+    }
+
+    /// The connection to the instance was lost.
+    pub fn lost(&self) {
+        let mut bound = self.bound.borrow_mut();
+        if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, &self.tried)) {
+            *bound = None;
         }
     }
 }

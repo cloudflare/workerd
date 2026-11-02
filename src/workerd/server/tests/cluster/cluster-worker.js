@@ -34,6 +34,7 @@
 //                    error's `retryable`.
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
+//   /hold-increment  Waits `ms` (default 1000), then increments.
 //   /break           Aborts the DO via ctx.abort(). The request fails.
 //   /set-alarm       Sets the DO's alarm `ms` (default 60000) from now.
 //   /alarms          Returns `fired`, the NODE_ID of each instance that ran the
@@ -329,6 +330,11 @@ export class Counter extends DurableObject {
     } else if (url.pathname === '/hold') {
       await scheduler.wait(1000);
       return Response.json({ nodeId, id: idHex });
+    } else if (url.pathname === '/hold-increment') {
+      await scheduler.wait(Number(url.searchParams.get('ms') ?? '1000'));
+      const count = ((await this.state.storage.get('count')) ?? 0) + 1;
+      await this.state.storage.put('count', count);
+      return Response.json({ count, nodeId, id: idHex });
     } else if (url.pathname === '/set-alarm') {
       const ms = Number(url.searchParams.get('ms') ?? '60000');
       await this.state.storage.setAlarm(Date.now() + ms);

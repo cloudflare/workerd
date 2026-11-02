@@ -631,6 +631,13 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             hook: Box<MovedHook>,
         ) -> KjOwn<WorkerInterface>;
+        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
+        /// marked as before or after delivery is marked as after it, and one that is a
+        /// disconnect calls `hook.lost()`.
+        fn worker_interface_watch_peer(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -960,6 +967,7 @@ pub mod ffi {
         /// (`worker_interface_watch_moved`).
         type MovedHook;
         fn moved(self: &MovedHook);
+        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.

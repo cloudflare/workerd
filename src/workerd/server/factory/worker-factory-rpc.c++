@@ -221,12 +221,21 @@ kj::Own<WorkerInterface> rpc_client_start_request(
 }
 
 namespace {
+// Where the interface a `MovedWatcher` forwards to runs.
+enum class Reach { LOCAL, PEER };
+
 // Forwards every event to `inner`, and tells `hook` of each that fails with a `moved` answer.
+//
+// On a peer, any other failure that neither side marked as before or after delivery is marked as
+// after it: the request may have run there, so it is not replayed. It stays retryable for the
+// application to decide. Such a failure that is a disconnect is the peer or the connection to it
+// failing, not the object, so `hook` is told of that too.
 class MovedWatcher final: public WorkerInterface {
  public:
-  MovedWatcher(kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook)
+  MovedWatcher(kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook, Reach reach)
       : inner(kj::mv(inner)),
-        hook(kj::mv(hook)) {}
+        hook(kj::mv(hook)),
+        reach(reach) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -268,6 +277,7 @@ class MovedWatcher final: public WorkerInterface {
  private:
   kj::Own<WorkerInterface> inner;
   ::rust::Box<MovedHook> hook;
+  Reach reach;
 
   // An interface outlives the promises of its events.
   template <typename T>
@@ -276,7 +286,14 @@ class MovedWatcher final: public WorkerInterface {
       co_return co_await promise;
     }
     KJ_CATCH(exception) {
-      if (jsg::isActorPredecessorRejection(exception)) hook->moved();
+      if (jsg::isActorPredecessorRejection(exception)) {
+        hook->moved();
+      } else if (reach == Reach::PEER &&
+          exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none &&
+          exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
+        if (exception.getType() == kj::Exception::Type::DISCONNECTED) hook->lost();
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      }
       kj::throwException(kj::mv(exception));
     }
   }
@@ -285,7 +302,12 @@ class MovedWatcher final: public WorkerInterface {
 
 kj::Own<WorkerInterface> worker_interface_watch_moved(
     kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook) {
-  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook));
+  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook), Reach::LOCAL);
+}
+
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook) {
+  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook), Reach::PEER);
 }
 
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client) {

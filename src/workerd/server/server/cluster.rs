@@ -11,6 +11,7 @@
 //! JS RPC to the object cross unchanged. A request for an object this instance
 //! does not own routes on through its own channel to the owner.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
@@ -73,7 +74,11 @@ pub struct ClusterNode {
 /// How often an instance tidies its alarm index and adopts dead peers' alarms.
 const ALARMS_INTERVAL: Duration = Duration::from_secs(5);
 
-pub struct RpcConnection(KjOwn<ffi::RpcClient>);
+pub struct RpcConnection {
+    client: KjOwn<ffi::RpcClient>,
+    /// Set once the session it runs over disconnected: nothing sent on it arrives.
+    down: Rc<Cell<bool>>,
+}
 
 type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
 
@@ -328,14 +333,17 @@ impl ClusterNode {
                 let _ = cluster.refresh_route(&namespace, &actor, now).await;
             });
         }
-        let session = self
-            .session(&address)
-            .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor} on {node}: {e}"))?;
+        let session = self.session(&address).await.map_err(|e| {
+            // Unreachable: its own record, not the listing, tells whether it still owns the
+            // object (`forget_route`).
+            self.cluster.forget_route(namespace, actor, &node);
+            kj::disconnected!("{namespace}/{actor} on {node}: {e}")
+        })?;
         // A channel per stub, so a stub stays with the instance it reached.
-        let connection = RpcConnection(ffi::rpc_client_debug_actor(
-            &session.0, service, class, actor,
-        ));
+        let connection = RpcConnection {
+            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor),
+            down: Rc::clone(&session.down),
+        };
         Ok(Owner::Remote(Rc::new(connection), node))
     }
 
@@ -359,13 +367,14 @@ impl ClusterNode {
                 .await
                 .map_err(|_| "no answer to CONNECT".to_owned())?
                 .map_err(|e| e.to_string())?;
-            let session = Rc::new(RpcConnection(ffi::new_rpc_client(
-                factory.raw(),
-                Dialed::from(stream).into_kj(),
-            )));
+            let session = Rc::new(RpcConnection {
+                client: ffi::new_rpc_client(factory.raw(), Dialed::from(stream).into_kj()),
+                down: Rc::default(),
+            });
             let watched = Rc::clone(&session);
             factory.spawn_detached(async move {
-                let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
+                let _ = ffi::rpc_client_on_disconnect(&watched.client).await;
+                watched.down.set(true);
                 sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
@@ -422,6 +431,16 @@ pub fn moved(description: &str) -> crate::Error {
     ])
 }
 
+/// `error`, marked as a failure before the request reached the object: it may be sent again.
+pub fn not_delivered(error: crate::Error) -> crate::Error {
+    let mut details = error.details().cloned().unwrap_or_default();
+    if details.iter().any(|(id, _)| *id == NOT_DELIVERED) {
+        return error;
+    }
+    details.push((NOT_DELIVERED, vec![]));
+    error.with_details(details)
+}
+
 /// Whether `error` is a `moved` answer.
 pub fn is_moved(error: &crate::Error) -> bool {
     let has = |id| {
@@ -433,12 +452,17 @@ pub fn is_moved(error: &crate::Error) -> bool {
 }
 
 impl RpcConnection {
+    /// Whether its session disconnected.
+    pub fn is_down(&self) -> bool {
+        self.down.get()
+    }
+
     /// Starts a request on the remote owner; the caller keeps the session alive with it.
     pub fn start_request(
         &self,
         metadata: KjOwn<ffi::RequestMetadata>,
     ) -> KjOwn<ffi::WorkerInterface> {
-        ffi::rpc_client_start_request(&self.0, metadata)
+        ffi::rpc_client_start_request(&self.client, metadata)
     }
 }
 

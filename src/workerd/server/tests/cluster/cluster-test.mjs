@@ -18,7 +18,9 @@
 //      minted in-process and passed through props.
 //   8. A stub that has resolved to a remote DO keeps failing once that DO
 //      breaks, while a fresh stub reaches the re-instantiated DO. One whose
-//      owner drains follows the DO to its next owner.
+//      owner drains follows the DO to its next owner, also once that owner
+//      exited, and a request that may have run on the drained owner is not
+//      replayed there.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
 //  11. A fresh cluster serves its bucket's deployment, Durable Objects
@@ -1469,6 +1471,134 @@ test(
     });
   }
 );
+
+test(
+  'cluster: a request that reached a draining owner is not replayed',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=once');
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      const held = await fetchJson(
+        nodes[1].httpPort,
+        '/hold-stub?name=holder&target=once'
+      );
+      assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual(held.body.target.nodeId, nodes[0].nodeId);
+
+      // The request waits in the DO on node 0, which drains and exits under
+      // it, cutting the connection. Whether it ran there is unknown, so it
+      // fails, as retryable, and does not run again on the node that takes the
+      // DO over.
+      const inFlight = fetchJson(
+        nodes[1].httpPort,
+        '/call-held-stub?name=holder&target=once&path=/hold-increment%3Fms%3D3000',
+        { timeoutMs: 10_000 }
+      );
+      await sleep(500);
+      const exit = await nodes[0].stop({
+        signal: 'SIGTERM',
+        timeoutMs: 10_000,
+      });
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+      const response = await inFlight;
+      assert.strictEqual(response.status, 500, JSON.stringify(response.body));
+      assert.strictEqual(response.body.retryable, true);
+
+      // Until node 1's listing drops node 0, a request routes there and fails.
+      let state = null;
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        state = await fetchJson(nodes[1].httpPort, '/get?name=once', {
+          timeoutMs: 15_000,
+        }).catch(() => null);
+        if (state?.status === 200) break;
+        await sleep(200);
+      }
+      assert.strictEqual(state?.status, 200, JSON.stringify(state?.body));
+      assert.strictEqual(state.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual(state.body.count, 1);
+
+      // The held stub lost its connection, not its DO: its next call finds
+      // the DO's new owner.
+      const next = await fetchJson(
+        nodes[1].httpPort,
+        '/call-held-stub?name=holder&target=once&path=/increment',
+        { timeoutMs: 15_000 }
+      );
+      assert.strictEqual(next.status, 200, JSON.stringify(next.body));
+      assert.strictEqual(next.body.target.nodeId, nodes[1].nodeId);
+      assert.strictEqual(next.body.target.count, 2);
+    });
+  }
+);
+
+test(
+  'cluster: a held stub follows its DO once the drained owner exited',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=gone');
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      const held = await fetchJson(
+        nodes[1].httpPort,
+        '/hold-stub?name=holder&target=gone'
+      );
+      assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual(held.body.target.nodeId, nodes[0].nodeId);
+      const exit = await nodes[0].stop({
+        signal: 'SIGTERM',
+        timeoutMs: 10_000,
+      });
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+
+      // The stub's session to node 0 is gone with it: the call is never sent
+      // there, and resolves the DO again.
+      const called = await fetchJson(
+        nodes[1].httpPort,
+        '/call-held-stub?name=holder&target=gone&path=/increment',
+        { timeoutMs: 15_000 }
+      );
+      assert.strictEqual(called.status, 200, JSON.stringify(called.body));
+      assert.strictEqual(called.body.target.nodeId, nodes[1].nodeId);
+      assert.strictEqual(called.body.target.count, 2);
+    });
+  }
+);
+
+test('cluster: a request a forwarding peer could not route is retried', async () => {
+  await withCluster(2, async ({ nodes, bucket }) => {
+    const first = await fetchJson(nodes[1].httpPort, '/increment?name=relay');
+    assert.strictEqual(first.body.nodeId, nodes[1].nodeId);
+    // Node 0 learns the route to node 1.
+    const routed = await fetchJson(nodes[0].httpPort, '/increment?name=relay');
+    assert.strictEqual(routed.body.nodeId, nodes[1].nodeId);
+    // Node 1 drops its instance, so the next request there reads the DO's
+    // owner record, which fails once.
+    const broken = await fetchJson(nodes[1].httpPort, '/break?name=relay');
+    assert.strictEqual(broken.status, 500, JSON.stringify(broken.body));
+    await bucket.setFaults([
+      {
+        prefix: `${objectPrefix(first.body.id)}/own.json`,
+        method: 'GET',
+        status: 500,
+        times: 1,
+      },
+    ]);
+
+    // Node 1 fails the request before it reaches the DO, so node 0 sends it
+    // again.
+    const response = await fetchJson(
+      nodes[0].httpPort,
+      '/increment?name=relay',
+      { timeoutMs: HANG_TIMEOUT_MS }
+    );
+    assert.deepStrictEqual(await bucket.faultHits(), [1]);
+    assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+    assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
+    assert.strictEqual(response.body.count, 3);
+  });
+});
 
 test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO after it breaks', async () => {
   await withCluster(2, async ({ nodes }) => {
