@@ -96,7 +96,7 @@ impl SpanBuilder {
 
     /// Sets tag `key` to `value`, as C++ `SpanBuilder::setTag()` does. Does nothing if the span
     /// is not recorded. Set each tag at most once: as in C++, setting one again replaces its
-    /// value, but is treated as a bug, logged as a warning, and as an error in tests.
+    /// value, but is treated as a bug, logged as a warning, and as an error in predictable mode.
     pub fn set_tag<'v>(&mut self, key: &'static CStr, value: impl Into<TagValue<'v>>) {
         let (span, key) = (self.0.pin_mut(), literal(key));
         // SAFETY: `key`, and a `Literal` value, are `'static`.
