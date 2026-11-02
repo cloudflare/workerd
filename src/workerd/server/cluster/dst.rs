@@ -32,6 +32,10 @@ use crate::bucket::memory::Memory;
 pub struct Rng(u64);
 
 impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1)
+    }
+
     pub fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
@@ -165,7 +169,7 @@ impl Harness {
     pub fn new(seed: u64) -> Self {
         let store = Rc::new(Store::default());
         Self {
-            rng: Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1),
+            rng: Rng::new(seed),
             bucket: Bucket::new(Shared(Rc::clone(&store)), ""),
             store,
             aborts: Vec::new(),

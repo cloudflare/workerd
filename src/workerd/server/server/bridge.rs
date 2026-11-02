@@ -506,6 +506,8 @@ pub mod ffi {
             parent_facet_id: KjMaybe<u32>,
             name: &str,
         ) -> Result<KjMaybe<u32>>;
+        /// Removes the root actor `root_key`'s databases, its facets', and their index.
+        fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
@@ -868,8 +870,9 @@ pub mod ffi {
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
         /// A write SQLite made to one of the namespace's WAL files.
         fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);
-        /// The database of the root actor `root_key` was deleted.
-        fn database_reset(self: &ActorNamespaceHandle, root_key: &str);
+        /// The database `file`, a root actor's or a facet's, was deleted with the facet's
+        /// descendants.
+        fn database_reset(self: &ActorNamespaceHandle, file: &str);
         /// Indexes root actor `actor`'s alarm at `at_ms` (0: cleared) in the cluster: done once
         /// a peer would find it.
         fn alarm_set(
@@ -906,6 +909,8 @@ pub mod ffi {
         fn abort_facet(self: &ActorHooks, name: &str, reason: &Exception);
         fn delete_facet(self: &ActorHooks, name: &str) -> Result<()>;
         fn clone_facet(self: &ActorHooks, src: &str, dst: &str) -> Result<()>;
+        /// Whether the cluster replicates the actor's storage.
+        fn replicated(self: &ActorHooks) -> bool;
         /// The actor's first request started.
         fn active(self: &ActorHooks);
         /// The actor's last request ended.

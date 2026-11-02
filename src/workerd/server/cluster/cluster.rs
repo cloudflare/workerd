@@ -30,6 +30,7 @@ use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::hmac_sha256;
 use crate::namespace_hash;
+use crate::owner::Layout;
 use crate::owner::Owners;
 use crate::ownership::Owned;
 use crate::s3::S3;
@@ -91,14 +92,21 @@ impl Cluster {
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect();
         let (s3, prefix) = S3::new(&setup.url, &options)?;
-        let bucket = Bucket::new(s3, &format!("{prefix}/{FORMAT}"));
+        Ok(Self::over(
+            Bucket::new(s3, &format!("{prefix}/{FORMAT}")),
+            setup,
+        ))
+    }
+
+    /// Over `bucket`, not the one `setup` names.
+    pub(crate) fn over(bucket: Bucket, setup: Setup) -> Rc<Self> {
         let registry = Rc::new(Registry::new(
             bucket.clone(),
             &setup.node,
             &setup.address,
             setup.ttl_ms,
         ));
-        Ok(Rc::new(Self {
+        Rc::new(Self {
             alarms: Index::new(
                 bucket.clone(),
                 &setup.node,
@@ -112,7 +120,7 @@ impl Cluster {
             claims: RefCell::new(HashMap::new()),
             key: setup.key,
             lease: RefCell::new(Lease::default()),
-        }))
+        })
     }
 
     pub fn node(&self) -> &str {
@@ -190,14 +198,20 @@ impl Cluster {
     }
 
     /// Take a claimed object over: recover what earlier epochs committed
-    /// into the database at `path`, and open the claimed epoch.
-    pub async fn restore_actor(&self, ns: &str, actor: &str, epoch: u64, path: &str) -> Result<()> {
+    /// into the databases `layout` places, and open the claimed epoch.
+    pub async fn restore_actor(
+        &self,
+        ns: &str,
+        actor: &str,
+        epoch: u64,
+        layout: &dyn Layout,
+    ) -> Result<()> {
         let claim = self.claims.borrow_mut().remove(&format!("{ns}/{actor}"));
         let owned = claim.filter(|owned| owned.epoch == epoch).ok_or_else(|| {
             crate::Error::Replica(format!("{ns}/{actor}: no claim at epoch {epoch}"))
         })?;
         self.owners
-            .take_over(&self.ownership, ns, actor, &owned, Path::new(path))
+            .take_over(&self.ownership, ns, actor, &owned, layout)
             .await
     }
 
@@ -211,18 +225,43 @@ impl Cluster {
         self.owners.retire(ns, actor);
     }
 
-    /// An owned object's database was deleted, before anything writes a
-    /// new one.
-    pub fn database_reset(&self, ns: &str, actor: &str) {
-        self.owners.database_reset(ns, actor);
+    /// Capture the database at `path` of an owned object's facet, lane
+    /// `lane`, before it opens.
+    pub fn open_lane(&self, ns: &str, actor: &str, path: &str, lane: &str) -> Result<()> {
+        self.owners.open_lane(ns, actor, Path::new(path), lane)
+    }
+
+    /// An owned object's facet with lane prefix `prefix` and its
+    /// descendants were deleted.
+    pub fn delete_lanes(&self, ns: &str, actor: &str, prefix: &str) -> Result<()> {
+        self.owners.delete_lanes(ns, actor, prefix)
+    }
+
+    /// An owned object's facet with lane prefix `dst` and its descendants
+    /// were replaced by copies of the facet with prefix `src`'s.
+    pub fn clone_lanes(
+        &self,
+        ns: &str,
+        actor: &str,
+        src: &str,
+        dst: &str,
+        layout: &dyn Layout,
+    ) -> Result<()> {
+        self.owners.clone_lanes(ns, actor, src, dst, layout)
+    }
+
+    /// One of namespace `ns`'s databases was deleted, before anything
+    /// writes a new one.
+    pub fn database_reset(&self, ns: &str, file: &str) {
+        let (actor, file) = object_file(file);
+        self.owners.database_reset(ns, actor, file);
     }
 
     /// A write SQLite made to a WAL file in namespace `ns`'s storage.
     pub fn wal_write(&self, ns: &str, file: &str, offset: u64, data: &[u8]) {
-        // `<actor>.sqlite-wal`, under whatever directory SQLite was given.
-        let name = file.rsplit('/').next().unwrap_or(file);
-        if let Some(actor) = name.strip_suffix(".sqlite-wal") {
-            self.owners.wal_write(ns, actor, offset, data);
+        if let Some(db) = file.strip_suffix("-wal") {
+            let (actor, db) = object_file(db);
+            self.owners.wal_write(ns, actor, db, offset, data);
         }
     }
 
@@ -376,6 +415,13 @@ const TIER_INTERVAL: Duration = Duration::from_secs(2);
 
 const fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)
+}
+
+/// The object and file name of a database file, `<actor>.sqlite` or a
+/// facet's `<actor>.<n>.sqlite`, under whatever directory SQLite was given.
+fn object_file(path: &str) -> (&str, &str) {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    (name.split('.').next().unwrap_or(name), name)
 }
 
 pub fn now_ms() -> u64 {
