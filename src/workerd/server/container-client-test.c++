@@ -303,5 +303,99 @@ KJ_TEST("ContainerCreateRequest omits empty container privileges") {
   KJ_EXPECT(decodedHostConfig.getSecurityOpt().size() == 0);
 }
 
+KJ_TEST("ContainerCreateRequest labels the container with its session and enable-internet") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+
+  {
+    capnp::MallocMessageBuilder message;
+    auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+    root.setImage("test-image");
+    setContainerLabels(root, kj::str("session-1"), true);
+
+    auto json = codec.encode(root);
+    auto jsonText = json.asPtr();
+    KJ_EXPECT(jsonText.contains("\"dev.workerd.session\":\"session-1\""));
+    KJ_EXPECT(jsonText.contains("\"dev.workerd.enable-internet\":\"true\""));
+
+    // What Docker hands back in Config.Labels is read as what was written.
+    auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+    auto labels = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>().getLabels();
+    KJ_EXPECT(labels.getObject().size() == 2);
+    auto enabled = readEnableInternetLabel(labels);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(enabled) == true);
+  }
+
+  {
+    // No session: the enable-internet label alone.
+    capnp::MallocMessageBuilder message;
+    auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+    root.setImage("test-image");
+    setContainerLabels(root, kj::none, false);
+
+    auto json = codec.encode(root);
+    auto jsonText = json.asPtr();
+    KJ_EXPECT(!jsonText.contains("\"dev.workerd.session\""));
+    KJ_EXPECT(jsonText.contains("\"dev.workerd.enable-internet\":\"false\""));
+
+    auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+    auto labels = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>().getLabels();
+    KJ_EXPECT(labels.getObject().size() == 1);
+    auto enabled = readEnableInternetLabel(labels);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(enabled) == false);
+  }
+}
+
+KJ_TEST("ContainerInspectResponse enable-internet label: read; absent or malformed is unknown") {
+  // Config.Labels as Docker returns them for a running container: the image's labels and ours.
+  auto withLabel = R"({
+    "Id": "abc123",
+    "State": { "Status": "running", "Running": true },
+    "Config": {
+      "Image": "cloudflare/workerd/container-client-test",
+      "Labels": {
+        "org.opencontainers.image.title": "test",
+        "dev.workerd.session": "session-1",
+        "dev.workerd.enable-internet": "true"
+      }
+    }
+  })"_kj;
+  auto message = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(withLabel);
+  auto root = message->getRoot<docker_api::Docker::ContainerInspectResponse>();
+  KJ_EXPECT(root.getState().getStatus() == "running");
+  KJ_EXPECT(root.hasConfig() && root.getConfig().hasLabels());
+  auto enabled = readEnableInternetLabel(root.getConfig().getLabels());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(enabled) == true);
+
+  // A container created by a workerd from before the label: unknown, not false.
+  auto withoutLabel = R"({
+    "Id": "abc123",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "cloudflare/workerd/container-client-test", "Labels": {} }
+  })"_kj;
+  auto message2 = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(withoutLabel);
+  auto root2 = message2->getRoot<docker_api::Docker::ContainerInspectResponse>();
+  KJ_EXPECT(readEnableInternetLabel(root2.getConfig().getLabels()) == kj::none);
+
+  // Labels null (an image without any), or a value that is not "true" / "false": unknown.
+  auto nullLabels = R"({
+    "Id": "abc123",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "x", "Labels": null }
+  })"_kj;
+  auto message3 = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(nullLabels);
+  auto root3 = message3->getRoot<docker_api::Docker::ContainerInspectResponse>();
+  KJ_EXPECT(readEnableInternetLabel(root3.getConfig().getLabels()) == kj::none);
+
+  auto malformed = R"({
+    "Id": "abc123",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "x", "Labels": { "dev.workerd.enable-internet": "maybe" } }
+  })"_kj;
+  auto message4 = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(malformed);
+  auto root4 = message4->getRoot<docker_api::Docker::ContainerInspectResponse>();
+  KJ_EXPECT(readEnableInternetLabel(root4.getConfig().getLabels()) == kj::none);
+}
+
 }  // namespace
 }  // namespace workerd::server

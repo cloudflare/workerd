@@ -58,6 +58,10 @@ constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
 constexpr kj::StringPtr SESSION_LABEL = "dev.workerd.session"_kj;
+// Whether the application container was started with internet access ("true" / "false"). Read back
+// by a ContainerClient that recovers the container after a workerd restart (status()), which never
+// saw the start() that set it.
+constexpr kj::StringPtr ENABLE_INTERNET_LABEL = "dev.workerd.enable-internet"_kj;
 
 // Labels a container with its session, if there is one, so the session's supervisor can find it.
 void setSessionLabel(docker_api::Docker::ContainerCreateRequest::Builder request,
@@ -1058,6 +1062,49 @@ kj::Promise<void> ensureSystemImageAvailable(
 
 }  // namespace
 
+void setContainerLabels(docker_api::Docker::ContainerCreateRequest::Builder request,
+    const kj::Maybe<kj::String>& sessionId,
+    bool enableInternet) {
+  // initLabels() replaces the whole object, so every label of the application container is written
+  // here, in one place.
+  uint count = sessionId == kj::none ? 1 : 2;
+  auto labels = request.initLabels().initObject(count);
+  uint i = 0;
+  KJ_IF_SOME(id, sessionId) {
+    labels[i].setName(SESSION_LABEL);
+    labels[i].initValue().setString(id);
+    ++i;
+  }
+  labels[i].setName(ENABLE_INTERNET_LABEL);
+  labels[i].initValue().setString(enableInternet ? "true"_kj : "false"_kj);
+}
+
+kj::Maybe<bool> readEnableInternetLabel(capnp::JsonValue::Reader labels) {
+  if (!labels.isObject()) {
+    return kj::none;
+  }
+
+  for (auto field: labels.getObject()) {
+    if (field.getName() != ENABLE_INTERNET_LABEL) {
+      continue;
+    }
+
+    auto value = field.getValue();
+    if (!value.isString()) {
+      return kj::none;
+    }
+    auto text = value.getString();
+    if (text == "true") {
+      return true;
+    } else if (text == "false") {
+      return false;
+    }
+    return kj::none;
+  }
+
+  return kj::none;
+}
+
 void configureContainerPrivileges(
     docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
     const ContainerPrivileges& privileges) {
@@ -1802,13 +1849,21 @@ kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspec
   bool running = status == "running" || status == "restarting";
 
   kj::String image;
-  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasImage()) {
-    image = kj::str(getContainerImageAlias(jsonRoot.getConfig().getImage()));
+  kj::Maybe<bool> enableInternet;
+  if (jsonRoot.hasConfig()) {
+    auto config = jsonRoot.getConfig();
+    if (config.hasImage()) {
+      image = kj::str(getContainerImageAlias(config.getImage()));
+    }
+    if (config.hasLabels()) {
+      enableInternet = readEnableInternetLabel(config.getLabels());
+    }
   }
 
   co_return InspectResponse{
     .isRunning = running,
     .image = kj::mv(image),
+    .enableInternet = enableInternet,
   };
 }
 
@@ -1913,7 +1968,7 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
   jsonRoot.setImage(resolveContainerImage(effectiveImage));
-  setSessionLabel(jsonRoot, sessionId);
+  setContainerLabels(jsonRoot, sessionId, params.getEnableInternet());
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
@@ -2480,8 +2535,10 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   KJ_DEFER(done->fulfill());
 
   bool isRunning = false;
+  kj::Maybe<bool> startedWithInternet;
   KJ_IF_SOME(info, co_await inspectContainer()) {
     isRunning = info.isRunning;
+    startedWithInternet = info.enableInternet;
   }
   containerStarted.store(isRunning, std::memory_order_release);
   if (!isRunning) {
@@ -2498,6 +2555,15 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
         "Recovered running container without a running networking sidecar");
     containerSidecarStarted.store(true, std::memory_order_release);
     this->sidecarIngressHostPort = sidecar.ingressHostPort;
+    // Whether a connection no egress mapping covers may pass through to the internet is
+    // `internetEnabled`, which only start() sets -- on the client that started the container,
+    // which this one is not. Without this, a recovered container's egress listener accepted every
+    // such connection and closed it at once: it could reach workerd and the Docker bridge, and
+    // nothing beyond, while its health checks stayed green. A container created before the label
+    // existed is left as before (unknown).
+    KJ_IF_SOME(enabled, startedWithInternet) {
+      internetEnabled = enabled;
+    }
     co_await ensureEgressListenerStarted();
     co_await updateSidecarEgressPort(sidecar.ingressHostPort, egressListenerPort);
     co_await readCACert();

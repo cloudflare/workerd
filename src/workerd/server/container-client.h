@@ -72,6 +72,18 @@ void configureContainerPrivileges(
     docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
     const ContainerPrivileges& privileges);
 
+// The application container's labels: its session, if there is one, so the session's supervisor
+// can find it, and whether it was started with internet access, so a ContainerClient that recovers
+// the container after a workerd restart can answer its egress as start() configured it. Declared
+// here solely so the unit test can call them directly; production callers reach them via
+// createContainer() and status() in the .c++ file.
+void setContainerLabels(docker_api::Docker::ContainerCreateRequest::Builder request,
+    const kj::Maybe<kj::String>& sessionId,
+    bool enableInternet);
+// Reads the enable-internet label from a container's `Config.Labels`; none when the container was
+// created without it (by a workerd from before the label) or it does not parse.
+kj::Maybe<bool> readEnableInternetLabel(capnp::JsonValue::Reader labels);
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::refcounted<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -164,6 +176,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct InspectResponse {
     bool isRunning;
     kj::String image;
+    // From the enable-internet label; none for a container created without it.
+    kj::Maybe<bool> enableInternet;
   };
 
   struct IPAMConfigResult {
