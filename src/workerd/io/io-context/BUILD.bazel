@@ -11,6 +11,7 @@ wd_rust_crate(
         "ffi.rs",
         "lib.rs",
         "lib-test.rs",
+        "trace.rs",
     ],
     cxx_bridge_deps = [
         "//src/rust/jsg",
