@@ -1,9 +1,11 @@
 src/workerd/server/BUILD.bazel
   s_2468263fb7681a::t_6032b31bf397e9 215-228,245-247
 src/workerd/server/workerd-api-isolate.h
-  s_2468263fb7681a::t_4ce6b2b58cb338 65-134,136-141,156
+  s_2468263fb7681a::t_4ce6b2b58cb338 65-134,136-141,136-140,156
 src/workerd/server/workerd-api.c++
   s_2468263fb7681a::t_fdbe4cc8d9b202 86,98
+docs/jsg.md
+  s_2468263fb7681a::t_2f8737f61e832a 1348
 ---
 {
   "schema_version": "authorship/3.0.0",
