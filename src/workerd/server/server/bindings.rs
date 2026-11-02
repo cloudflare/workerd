@@ -221,18 +221,8 @@ pub fn compile_bindings(
     Ok(out)
 }
 
-/// Miniflare's own Workflow engine namespaces use this key prefix, which determines actor IDs and
-/// the storage subdirectory; matching it lets both reach the same local instances.
-///
-/// TODO(cleanup): Make this configurable rather than hardcoding Miniflare's prefix; a configurable
-///   key must keep this value for Miniflare.
-pub const WORKFLOW_NAMESPACE_KEY_PREFIX: &str = "miniflare-workflows-";
-
-/// The unique key of the namespace backing the Workflow `workflow_name`.
-#[must_use]
-pub fn workflow_namespace_key(workflow_name: &str) -> String {
-    format!("{WORKFLOW_NAMESPACE_KEY_PREFIX}{workflow_name}")
-}
+// The cluster's deployments are checked against the same keys.
+pub use ::cluster::compose::workflow_namespace_key;
 
 /// The `ctx.exports` globals, numbered after the `subrequest_channels`, `actor_channels` and
 /// `actor_class_channels` the worker's `env` took.
