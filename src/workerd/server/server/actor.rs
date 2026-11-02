@@ -288,6 +288,18 @@ impl ActorNamespace {
         Ok(())
     }
 
+    /// Removes `container` from the map, unless a newer container has taken its key: one whose
+    /// restore or shutdown ends after it was released and replaced must leave its successor.
+    fn remove_container(&self, container: &ActorContainer) {
+        let mut actors = self.actors.borrow_mut();
+        if actors
+            .get(&container.key)
+            .is_some_and(|c| std::ptr::eq(Rc::as_ptr(c), container))
+        {
+            actors.remove(&container.key);
+        }
+    }
+
     fn owned_container(&self, key: &str) -> Option<Rc<ActorContainer>> {
         let actors = self.actors.borrow();
         let container = actors.get(key)?;
@@ -1111,7 +1123,7 @@ impl ActorContainer {
             };
             if let Err(e) = restore.await {
                 self.abort(Some(e.clone()));
-                ns.actors.borrow_mut().remove(&self.key);
+                ns.remove_container(self);
                 return Err(e);
             }
             // Released meanwhile: its ownership went before the restore opened the object here.
@@ -1307,7 +1319,7 @@ impl ActorContainer {
             }
             None => {
                 if let Some(ns) = self.namespace.upgrade() {
-                    ns.actors.borrow_mut().remove(&self.key);
+                    ns.remove_container(self);
                 }
             }
         }
