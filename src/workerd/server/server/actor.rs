@@ -63,6 +63,7 @@ use crate::cluster::Owned;
 use crate::cluster::Owner;
 use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
+use crate::cluster::is_moved;
 use crate::cluster::moved;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
@@ -692,7 +693,8 @@ enum Resolved {
 }
 
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
-/// the stub stays with that instance, as a local stub stays with its container.
+/// the stub stays with that instance, as a local stub stays with its container, until the
+/// instance answers that the object moved (`MovedHook`).
 struct RoutedChannel {
     namespace: Weak<ActorNamespace>,
     id: KjOwn<ActorIdHandle>,
@@ -711,6 +713,7 @@ impl Channel for RoutedChannel {
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
         let id = ffi::actor_id_clone(&self.id);
+        let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
         Ok(PromisedInterface::new(async move {
             let resolved = bound.borrow().clone();
@@ -720,11 +723,27 @@ impl Channel for RoutedChannel {
                 let resolved = Rc::new(namespace.resolve(id).await?);
                 Rc::clone(bound.borrow_mut().get_or_insert(resolved))
             };
+            let hook = MovedHook {
+                namespace: Rc::downgrade(&namespace),
+                key,
+                bound,
+                tried: Rc::clone(&resolved),
+            };
             match &*resolved {
-                Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection, _) => Ok(attach(
-                    connection.start_request(metadata),
-                    Rc::clone(connection),
+                Resolved::Here(container) => match container.start_request(metadata) {
+                    Ok(interface) => {
+                        Ok(ffi::worker_interface_watch_moved(interface, Box::new(hook)))
+                    }
+                    Err(e) => {
+                        if is_moved(&e) {
+                            hook.moved();
+                        }
+                        Err(e)
+                    }
+                },
+                Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_moved(
+                    attach(connection.start_request(metadata), Rc::clone(connection)),
+                    Box::new(hook),
                 )),
             }
         })
@@ -761,6 +780,35 @@ impl Channel for RoutedChannel {
                 )),
             }
         })
+    }
+}
+
+/// What a stub's request does when the instance it reached answers that the object moved.
+///
+/// The stub forgets that resolution, and the cluster its route there, so that the stub's next
+/// request, or a retry of this one, resolves the object again.
+pub struct MovedHook {
+    namespace: Weak<ActorNamespace>,
+    key: String,
+    bound: Rc<RefCell<Option<Rc<Resolved>>>>,
+    /// The resolution the request used.
+    tried: Rc<Resolved>,
+}
+
+impl MovedHook {
+    pub fn moved(&self) {
+        {
+            let mut bound = self.bound.borrow_mut();
+            if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, &self.tried)) {
+                *bound = None;
+            }
+        }
+        if let Resolved::Remote(_, node) = &*self.tried
+            && let Some(namespace) = self.namespace.upgrade()
+            && let (Some(cluster), Some(unique_key)) = (namespace.cluster(), namespace.unique_key())
+        {
+            cluster.cluster.forget_route(unique_key, &self.key, node);
+        }
     }
 }
 

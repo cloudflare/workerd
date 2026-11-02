@@ -8,6 +8,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/trace-stream.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/util/mimetype.h>
 
@@ -217,6 +218,74 @@ kj::Own<WorkerInterface> rpc_client_start_request(
   auto& factory = impl.factory.getImpl();
   return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,
       getUnsupportedFrankenvalueHandler(), kj::mv(dispatcher));
+}
+
+namespace {
+// Forwards every event to `inner`, and tells `hook` of each that fails with a `moved` answer.
+class MovedWatcher final: public WorkerInterface {
+ public:
+  MovedWatcher(kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook)
+      : inner(kj::mv(inner)),
+        hook(kj::mv(hook)) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    return watch(inner->request(method, url, headers, requestBody, response));
+  }
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    return watch(inner->connect(host, headers, connection, response, kj::mv(settings)));
+  }
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    return watch(inner->prewarm(url));
+  }
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    return watch(inner->runScheduled(scheduledTime, cron));
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    return watch(inner->runAlarm(scheduledTime, retryCount));
+  }
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    return watch(inner->abandonAlarm(scheduledTime));
+  }
+  kj::Promise<bool> test() override {
+    return watch(inner->test());
+  }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    return watch(inner->bench(params, report));
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return watch(inner->customEvent(kj::mv(event)));
+  }
+
+ private:
+  kj::Own<WorkerInterface> inner;
+  ::rust::Box<MovedHook> hook;
+
+  // An interface outlives the promises of its events.
+  template <typename T>
+  kj::Promise<T> watch(kj::Promise<T> promise) {
+    KJ_TRY {
+      co_return co_await promise;
+    }
+    KJ_CATCH(exception) {
+      if (jsg::isActorPredecessorRejection(exception)) hook->moved();
+      kj::throwException(kj::mv(exception));
+    }
+  }
+};
+}  // namespace
+
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook) {
+  return kj::heap<MovedWatcher>(kj::mv(inner), kj::mv(hook));
 }
 
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client) {

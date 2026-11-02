@@ -28,8 +28,10 @@
 //                    would not keep it alive past the request; an instance field
 //                    of a long-lived DO does.) Returns the target's response.
 //   /call-held-stub  Calls /identity on the stub kept by /hold-stub for the DO
-//                    named by the `target` query param. Returns the target's
-//                    response.
+//                    named by the `target` query param, or the path given by
+//                    `path`, or with `rpc` set its identity() method. Returns
+//                    the target's response. A failure is reported with the
+//                    error's `retryable`.
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /break           Aborts the DO via ctx.abort(). The request fails.
@@ -275,12 +277,21 @@ export class Counter extends DurableObject {
       if (stub === undefined) {
         return Response.json({ error: 'no held stub' }, { status: 400 });
       }
-      const response = await stub.fetch('http://do/identity');
-      return Response.json({
-        nodeId,
-        id: idHex,
-        target: await response.json(),
-      });
+      try {
+        const result = url.searchParams.has('rpc')
+          ? await stub.identity()
+          : await (
+              await stub.fetch(
+                'http://do' + (url.searchParams.get('path') ?? '/identity')
+              )
+            ).json();
+        return Response.json({ nodeId, id: idHex, target: result });
+      } catch (err) {
+        return Response.json(
+          { error: String(err), retryable: err.retryable === true },
+          { status: 500 }
+        );
+      }
     } else if (url.pathname === '/vend-stub') {
       const kind = url.searchParams.get('kind');
       const target = url.searchParams.get('target');
@@ -352,6 +363,14 @@ export class Counter extends DurableObject {
     const fired = (await this.state.storage.get('fired')) ?? [];
     fired.push(this.env.NODE_ID);
     await this.state.storage.put('fired', fired);
+  }
+
+  // See /call-held-stub.
+  identity() {
+    return {
+      nodeId: this.env.NODE_ID ?? '<unknown>',
+      id: this.state.id.toString(),
+    };
   }
 
   // RPC method used by /vend-stub on the *target* DO.

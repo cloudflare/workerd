@@ -422,6 +422,16 @@ pub fn moved(description: &str) -> crate::Error {
     ])
 }
 
+/// Whether `error` is a `moved` answer.
+pub fn is_moved(error: &crate::Error) -> bool {
+    let has = |id| {
+        error
+            .details()
+            .is_some_and(|d| d.iter().any(|(k, _)| *k == id))
+    };
+    has(NOT_DELIVERED) && has(PREDECESSOR_REJECTED)
+}
+
 impl RpcConnection {
     /// Starts a request on the remote owner; the caller keeps the session alive with it.
     pub fn start_request(

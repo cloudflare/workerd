@@ -321,6 +321,11 @@ impl Cluster {
         self.ownership.refresh_route(ns, actor, now_ms).await
     }
 
+    /// `node` answered that it does not serve the object (`Ownership::forget_route`).
+    pub fn forget_route(&self, ns: &str, actor: &str, node: &str) {
+        self.ownership.forget_route(ns, actor, node);
+    }
+
     /// The MAC a peer call carries. The cluster key is used only through
     /// labelled derivations, so no two uses share a key: this, with each
     /// message labelled, and the channel token key.

@@ -157,6 +157,62 @@ fn a_stale_listing_keeps_a_route_to_a_live_owner() {
 }
 
 #[test]
+fn a_forgotten_route_is_read_again_from_its_node_record() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, b_own) = node(&store, "b");
+        a.renew(0).await.unwrap();
+        b.renew(0).await.unwrap();
+        open_x(&a_own).await;
+        let route_to_a = Claim::Route {
+            node: "a".into(),
+            address: "a:1".into(),
+            stale: false,
+        };
+        assert_eq!(
+            b_own.acquire_or_route("ns", "x", 1).await.unwrap(),
+            route_to_a
+        );
+        // a drains and leaves. b's listing still shows it, and so does its
+        // route, until a answers that it does not serve x.
+        a.deregister().await.unwrap();
+        assert_eq!(
+            b_own.acquire_or_route("ns", "x", 2).await.unwrap(),
+            route_to_a
+        );
+        b_own.forget_route("ns", "x", "a");
+        assert_eq!(
+            b_own.acquire_or_route("ns", "x", 3).await.unwrap(),
+            owned(2)
+        );
+    });
+}
+
+#[test]
+fn a_route_refreshed_after_its_node_refused_is_not_used() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, b_own) = node(&store, "b");
+        a.renew(0).await.unwrap();
+        b.renew(0).await.unwrap();
+        open_x(&a_own).await;
+        let route = b_own.acquire_or_route("ns", "x", 1).await;
+        assert!(matches!(route.unwrap(), Claim::Route { .. }));
+        a.deregister().await.unwrap();
+        b_own.forget_route("ns", "x", "a");
+        // A refresh that read the owner record before a answered puts the
+        // route back, from the stale listing.
+        b_own.refresh_route("ns", "x", 2).await.unwrap();
+        assert_eq!(
+            b_own.acquire_or_route("ns", "x", 3).await.unwrap(),
+            owned(2)
+        );
+    });
+}
+
+#[test]
 fn a_dead_owners_object_is_taken_over_at_the_next_epoch() {
     block_on(async {
         let store = Bucket::memory("");

@@ -81,6 +81,11 @@ pub struct Ownership {
     pub may_claim: Cell<bool>,
     /// Where each routed object's owner was, and when that was read.
     routes: RefCell<HashMap<String, Route>>,
+    /// The peer each object's last route led to, which answered that it
+    /// does not serve the object (`forget_route`): until a claim of the
+    /// object succeeds, a route there is not used, and the claim reads that
+    /// peer's own record, not the listing.
+    refused: RefCell<HashMap<String, String>>,
     /// The record each claim wrote, and the guard that it is still the
     /// current one, so `open` changes it without reading it back. A claim
     /// of an object with no record writes nothing: `open` creates the
@@ -120,8 +125,22 @@ impl Ownership {
             registry,
             may_claim: Cell::new(true),
             routes: RefCell::new(HashMap::new()),
+            refused: RefCell::new(HashMap::new()),
             claimed: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Forgets that `node` serves the object, after it answered that it does
+    /// not. The route there goes, and the next claim reads the owner record
+    /// and, if that still names `node`, `node`'s own record: the listing may
+    /// predate its drain.
+    pub fn forget_route(&self, namespace: &str, actor: &str, node: &str) {
+        let key = owner_key(namespace, actor);
+        let mut routes = self.routes.borrow_mut();
+        if routes.get(&key).is_some_and(|route| route.node == node) {
+            routes.remove(&key);
+        }
+        self.refused.borrow_mut().insert(key, node.to_owned());
     }
 
     /// Own the object, or learn which live peer does. A record with no owner,
@@ -134,6 +153,22 @@ impl Ownership {
         now_ms: u64,
     ) -> Result<Claim> {
         let key = owner_key(namespace, actor);
+        let refused = self.refused.borrow().get(&key).cloned();
+        if let Some(node) = &refused {
+            // Put back since by a concurrent claim or a refresh.
+            let mut routes = self.routes.borrow_mut();
+            if routes.get(&key).is_some_and(|route| &route.node == node) {
+                routes.remove(&key);
+            }
+        }
+        let claim = self.claim(key.clone(), refused.as_deref(), now_ms).await;
+        if claim.is_ok() && self.refused.borrow().get(&key) == refused.as_ref() {
+            self.refused.borrow_mut().remove(&key);
+        }
+        claim
+    }
+
+    async fn claim(&self, key: String, refused: Option<&str>, now_ms: u64) -> Result<Claim> {
         let me = self.registry.node();
         // A route whose node a stale listing no longer shows: its own record
         // decides, not the object's.
@@ -169,9 +204,14 @@ impl Ownership {
                         }
                         return Ok(Claim::Owned(record.owned()));
                     }
-                    if !record.node.is_empty()
-                        && let Some(peer) = self.registry.live(&record.node, now_ms).await?
-                    {
+                    let peer = if record.node.is_empty() {
+                        None
+                    } else if refused == Some(record.node.as_str()) {
+                        self.registry.live_now(&record.node, now_ms).await?
+                    } else {
+                        self.registry.live(&record.node, now_ms).await?
+                    };
+                    if let Some(peer) = peer {
                         // An earlier process at our address, restarted
                         // before its lease ran out: a route there loops back
                         // here. Its lease, not a route, ends this.

@@ -58,6 +58,7 @@ struct Committer;
 struct ResultTask;
 struct AbortReason;
 struct KeepAlive;
+struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
@@ -410,6 +411,8 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 
