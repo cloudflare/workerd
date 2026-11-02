@@ -88,7 +88,15 @@ export default {
     ],
   },
   'blob/Blob-stream.any.js': {},
-  'blob/Blob-text.any.js': {},
+  'blob/Blob-text.any.js': {
+    comment:
+      'Blob.text() decodes its bytes without UTF-8 decode, so a leading byte order mark is kept instead of stripped',
+    expectedFailures: [
+      'Blob.text() strips a UTF-8 byte order mark',
+      'Blob.text() strips only one UTF-8 byte order mark',
+      'Blob.text() strips a UTF-8 byte order mark split across blob parts',
+    ],
+  },
   'blob/Blob-textStream.any.js': {
     comment: 'Blob.prototype.textStream() is not implemented',
     expectedFailures: true,
