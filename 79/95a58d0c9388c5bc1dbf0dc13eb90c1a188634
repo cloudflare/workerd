@@ -1,0 +1,54 @@
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_4bcd2f07aa5d0a::t_527eb7ed093c86 50-55
+src/workerd/util/virtual-time.c++
+  s_4bcd2f07aa5d0a::t_3a1b34ac2ba709 44-47,51,57-58,64,70,147-148,153,157-161,176-183,186,204-205,212-216,218,233,254-258,265-268,291-293,304-305,326-329,472-475
+src/workerd/server/workerd.capnp
+  s_4bcd2f07aa5d0a::t_e7b5e902989786 168-181
+src/workerd/util/virtual-time.h
+  s_4bcd2f07aa5d0a::t_ee258fe4c43afe 28-30,56-58,72-73,129-130,132,138-139,150-153,171,188-190,272,310-326
+src/workerd/util/virtual-time-test.c++
+  s_4bcd2f07aa5d0a::t_7bd37ff8a590a8 232-341
+src/workerd/server/server.c++
+  s_4bcd2f07aa5d0a::t_b0ebe66605717f 221-226,237-238,241-242,245,286,468,629,685-692,784,954-956,1135,1157,1188,1244,1252,1365,1377-1378,1421-1423,1767-1769,1783-1794,1823-1828,7191-7198
+  s_e2c48765393779::t_d51cc8d35a842d 7199-7200,7208,7218-7221,7249,7279-7289
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_4bcd2f07aa5d0a::t_a618e9bcbf2ded 1-212
+docs/virtual-time.md
+  s_e2c48765393779::t_f1d1e409d0a855 48,204-207,237-253
+src/workerd/api/unsafe.h
+  s_e2c48765393779::t_01415cb7e0564b 391
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.wd-test
+  s_e2c48765393779::t_db68b1d84f68f5 1-30
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_e2c48765393779::t_2cf072777aa505 212,306-309
+src/workerd/util/storage-telemetry-test.c++
+  s_e2c48765393779::t_e8df251ad4dea5 51,102,109,151,164-165
+src/workerd/util/storage-telemetry.c++
+  s_e2c48765393779::t_57655033af2400 54-71,159,166-169
+src/workerd/util/storage-telemetry.h
+  s_e2c48765393779::t_6a321c8c3aca9d 85-88,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7995a58d0c9388c5bc1dbf0dc13eb90c1a188634",
+  "prompts": {},
+  "sessions": {
+    "s_4bcd2f07aa5d0a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f80b-b3fd-718f-a242-352c049eed26",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_e2c48765393779": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f896-3960-708a-9649-5bdcbe58e9cc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

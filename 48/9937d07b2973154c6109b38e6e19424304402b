@@ -1,0 +1,61 @@
+src/workerd/api/actor-state.c++
+  s_beec2eef2fbbe5::t_38f3acabe5a9fb 25,657-700,702
+src/workerd/api/actor-state.h
+  s_beec2eef2fbbe5::t_33997985409acc 34-37
+src/workerd/api/actor.c++
+  s_beec2eef2fbbe5::t_20eb272be65a53 290-295,304,307,311,316-319
+src/workerd/api/actor.h
+  s_beec2eef2fbbe5::t_c692a075196a38 103-112,288-293,345
+src/workerd/api/http.h
+  s_beec2eef2fbbe5::t_7ca1993712407b 567-577,584
+src/workerd/api/sql.c++
+  s_beec2eef2fbbe5::t_f3e3820fa8c10a 34
+src/workerd/api/unsafe.c++
+  s_beec2eef2fbbe5::t_27052f7c784389 260-261,265-332
+src/workerd/api/unsafe.h
+  s_beec2eef2fbbe5::t_d58093f3c71381 119-120,122,163-220,262-265,273,307-308,313-314
+src/workerd/api/worker-rpc.c++
+  s_beec2eef2fbbe5::t_7aea0c47463406 17,1228-1287,1308
+src/workerd/api/worker-rpc.h
+  s_beec2eef2fbbe5::t_b3e4e8fbd6432c 354-365,551-554
+src/workerd/io/worker.c++
+  s_beec2eef2fbbe5::t_754e56917f5034 4056-4057,4284-4287
+src/workerd/io/worker.h
+  s_beec2eef2fbbe5::t_60bc27f079aced 1066-1069,1164
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_14500f40e31223 20-25
+src/workerd/server/tests/virtual-time/virtual-time-fault-test.js
+  s_beec2eef2fbbe5::t_fcbaaf09b5a9da 1-237
+src/workerd/server/tests/virtual-time/virtual-time-fault-test.wd-test
+  s_beec2eef2fbbe5::t_f547b0f021cfd9 1-26
+src/workerd/server/workerd-api.c++
+  s_beec2eef2fbbe5::t_774140c523fdad 603-608,677-681
+src/workerd/util/BUILD.bazel
+  s_beec2eef2fbbe5::t_39370e142b0255 38-47,54,450-456
+src/workerd/util/fault-injector-test.c++
+  s_beec2eef2fbbe5::t_df8ce9eeadeead 1-259
+src/workerd/util/fault-injector.c++
+  s_beec2eef2fbbe5::t_769741d897cb21 1-176
+src/workerd/util/fault-injector.h
+  s_beec2eef2fbbe5::t_838715d8110f9f 1-101
+src/workerd/util/virtual-time.c++
+  s_beec2eef2fbbe5::t_4555f68862a36e 110-112,175,182-189,196-199
+src/workerd/util/virtual-time.h
+  s_beec2eef2fbbe5::t_5d7a3aee75ceaa 7-8,117-118,127-128,147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "489937d07b2973154c6109b38e6e19424304402b",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

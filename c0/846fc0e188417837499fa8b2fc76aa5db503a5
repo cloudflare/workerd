@@ -1,0 +1,35 @@
+docs/virtual-time.md
+  s_710093cfa2d5fb::t_4c5b165aa61b25 46,186-192,204-221
+src/workerd/api/unsafe.c++
+  s_710093cfa2d5fb::t_ec2b433aa6535c 455
+src/workerd/api/unsafe.h
+  s_710093cfa2d5fb::t_54326fc6c3fe29 339-340,350,366,444
+src/workerd/server/server.c++
+  s_710093cfa2d5fb::t_339b222b85ce92 241-243,279-294,1379,1391,1400,1404-1412,1415-1419,7107-7116,7123,7125-7128,7155,7174-7184
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_710093cfa2d5fb::t_ba6b29dff6a264 44-49
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.wd-test
+  s_710093cfa2d5fb::t_356e7bfec3c1fe 1-25
+src/workerd/util/sqlite.c++
+  s_710093cfa2d5fb::t_cf291689281a37 690,693,749-759
+src/workerd/util/storage-telemetry.c++
+  s_710093cfa2d5fb::t_e32f0262613bca 38,42-43
+src/workerd/util/storage-telemetry.h
+  s_710093cfa2d5fb::t_15bbb101acc10d 43-44,48,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c0846fc0e188417837499fa8b2fc76aa5db503a5",
+  "prompts": {},
+  "sessions": {
+    "s_710093cfa2d5fb": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ed11-9617-7551-bfea-22d824e1f190",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

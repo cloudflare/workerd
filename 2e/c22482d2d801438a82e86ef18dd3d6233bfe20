@@ -1,0 +1,19 @@
+src/workerd/api/node/tests/zlib-zstd-nodejs-test.js
+  s_499408e7218217::t_f70bc241d6e428 449-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2ec22482d2d801438a82e86ef18dd3d6233bfe20",
+  "prompts": {},
+  "sessions": {
+    "s_499408e7218217": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a19db6-73f9-7190-bd36-ca369f090c2f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

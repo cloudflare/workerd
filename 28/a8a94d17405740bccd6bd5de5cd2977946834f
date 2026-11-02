@@ -1,0 +1,71 @@
+src/workerd/server/server.c++
+  s_710093cfa2d5fb::t_339b222b85ce92 1403-1406,1411-1415,1418-1422,7129-7138,7145,7151-7154,7181
+  s_4bcd2f07aa5d0a::t_7069ff0ae408b8 242-244,280-295,1380,1383,7200-7210
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_2dfe3889216c4d::t_375153f5c9b663 118
+  s_4bcd2f07aa5d0a::t_f3296b91ef7a44 42-45,150-171
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_710093cfa2d5fb::t_ba6b29dff6a264 44-49
+docs/virtual-time.md
+  s_710093cfa2d5fb::t_4c5b165aa61b25 194-200
+  s_4bcd2f07aa5d0a::t_7b2b279e7d5af2 47,209-227
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.wd-test
+  s_710093cfa2d5fb::t_356e7bfec3c1fe 1-25
+  s_4bcd2f07aa5d0a::t_0b6942abf1290b 26-30
+src/workerd/util/storage-telemetry.h
+  s_710093cfa2d5fb::t_15bbb101acc10d 46
+  s_2dfe3889216c4d::t_345a8b16e07dc8 43-45,47-48
+  s_4bcd2f07aa5d0a::t_155376aaa6b267 49-50,72
+src/workerd/api/unsafe.h
+  s_4bcd2f07aa5d0a::t_09cebec4784e62 387
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.js
+  s_4bcd2f07aa5d0a::t_c9f48a65e4f27e 1-181
+src/workerd/server/workerd.capnp
+  s_4bcd2f07aa5d0a::t_a28688da13f69f 154-167
+src/workerd/util/sqlite-test.c++
+  s_4bcd2f07aa5d0a::t_03c45ff615ae00 1998-2089
+src/workerd/util/sqlite.c++
+  s_4bcd2f07aa5d0a::t_9e58c38a231957 642-644,698-708,714,759-769
+src/workerd/util/sqlite.h
+  s_4bcd2f07aa5d0a::t_051c161aa910a6 373,376-383,453,456-458
+src/workerd/util/storage-telemetry-test.c++
+  s_4bcd2f07aa5d0a::t_8fa0c5e0ce6df3 42,55,90,113,117-118,121
+src/workerd/util/storage-telemetry.c++
+  s_4bcd2f07aa5d0a::t_ba644c30bfee07 82,86,89-91
+src/workerd/util/virtual-time.c++
+  s_4bcd2f07aa5d0a::t_0815bed3e66655 439-442
+src/workerd/util/virtual-time.h
+  s_4bcd2f07aa5d0a::t_c896710ebdb9e9 138-141,157-158,255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "28a8a94d17405740bccd6bd5de5cd2977946834f",
+  "prompts": {},
+  "sessions": {
+    "s_2dfe3889216c4d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ecb8-bdfb-706a-b701-bd5fdc9b167f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_4bcd2f07aa5d0a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f80b-b3fd-718f-a242-352c049eed26",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_710093cfa2d5fb": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ed11-9617-7551-bfea-22d824e1f190",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}
