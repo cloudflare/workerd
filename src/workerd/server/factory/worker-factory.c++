@@ -1093,7 +1093,8 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
   auto tailStreamWriter = tracing::initializeTailStreamWriter(
       streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
-      entrypointName.clone(), executionModel, kj::mv(durableObjectId));
+      entrypointName.clone(), executionModel,
+      durableObjectId.map([](kj::String& id) { return kj::str(id); }));
   kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
       kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
@@ -1124,6 +1125,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     OtlpServiceInfo service{
       .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
       .entrypoint = entrypointName,
+      .durableObjectId = durableObjectId.map([](kj::String& id) { return id.asPtr(); }),
     };
     tracer->setStartInvocationSpanFunc(
         [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),

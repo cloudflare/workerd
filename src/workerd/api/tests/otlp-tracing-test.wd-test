@@ -13,9 +13,16 @@ const tracedWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "otlp-tracing-test.js")
   ],
   compatibilityFlags = ["nodejs_compat"],
+  durableObjectNamespaces = [
+    (className = "TestObject", uniqueKey = "otlp-tracing-test"),
+    (className = "EphemeralObject", ephemeralLocal = void),
+  ],
+  durableObjectStorage = (inMemory = void),
   bindings = [
     (name = "SELF", service = "traced"),
     (name = "COLLECTOR", service = "collector"),
+    (name = "OBJECTS", durableObjectNamespace = "TestObject"),
+    (name = "EPHEMERAL_OBJECTS", durableObjectNamespace = "EphemeralObject"),
   ],
 );
 

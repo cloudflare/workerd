@@ -29,6 +29,20 @@ export default {
   },
 };
 
+export class TestObject {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch() {
+    await (await this.env.SELF.fetch('http://traced/leaf')).text();
+    return new Response(this.state.id.toString());
+  }
+}
+
+export class EphemeralObject extends TestObject {}
+
 // The requests the collector has received, once there are at least `count` of them. Spans are
 // posted after the response that ends their invocation, so the test has to wait for them.
 async function collected(env, count) {
@@ -52,7 +66,13 @@ export const test = {
     const [leaf, outer] = requests;
     for (const request of requests) {
       assert.strictEqual(request.contentType, 'application/x-protobuf');
-      for (const span of request.spans) assert.strictEqual(span.flags & 1, 1);
+      for (const span of request.spans) {
+        assert.strictEqual(span.flags & 1, 1);
+        assert.strictEqual(
+          span.attributes['cloudflare.durable_object.id'],
+          undefined
+        );
+      }
       assert.deepStrictEqual(request.resource, {
         'service.name': 'traced',
         'telemetry.sdk.name': 'workers-runtime',
@@ -138,5 +158,45 @@ export const test = {
     assert.strictEqual(attributes['exception.type'], 'Error');
     assert.strictEqual(attributes['exception.message'], 'handler failed');
     assert.match(attributes['exception.stacktrace'], /at Object\.fetch/);
+
+    // Durable and ephemeral namespaces use different actor ID representations. Both attach the
+    // ID to the invocation and its children, without leaking it into a stateless subrequest.
+    let count = 3;
+    for (const [namespace, id, className] of [
+      [env.OBJECTS, env.OBJECTS.idFromName('otlp'), 'TestObject'],
+      [env.EPHEMERAL_OBJECTS, 'local-otlp', 'EphemeralObject'],
+    ]) {
+      const response = await namespace.get(id).fetch('http://object/');
+      assert.strictEqual(await response.text(), id.toString());
+      count += 2;
+      const requests = (await collected(env, count)).slice(count - 2);
+      assert.strictEqual(requests.length, 2);
+      const object = requests.find(
+        (request) => request.resource['cloudflare.entrypoint'] === className
+      );
+      assert.ok(object);
+      assert.deepStrictEqual(
+        object.spans.map((span) => span.name),
+        ['fetch', 'GET']
+      );
+      const [child, root] = object.spans;
+      assert.strictEqual(root.kind, SPAN_KIND_SERVER);
+      assert.strictEqual(child.kind, SPAN_KIND_CLIENT);
+      assert.strictEqual(child.parentSpanId, root.spanId);
+      for (const span of object.spans) {
+        assert.strictEqual(
+          span.attributes['cloudflare.durable_object.id'],
+          id.toString()
+        );
+      }
+      const leaf = requests.find((request) => request !== object);
+      assert.strictEqual(leaf.spans[0].parentSpanId, child.spanId);
+      for (const span of leaf.spans) {
+        assert.strictEqual(
+          span.attributes['cloudflare.durable_object.id'],
+          undefined
+        );
+      }
+    }
   },
 };
