@@ -83,6 +83,11 @@ pub enum Error {
     /// A claim or a commit's capture could not proceed.
     #[error("replica: {0}")]
     Replica(String),
+    /// This instance does not serve the object and cannot claim it: it is draining, or the
+    /// object's owner is this address's previous instance. Nothing ran, so a request may follow
+    /// the object to whichever instance serves it next.
+    #[error("{0}")]
+    NotHere(String),
     /// A bucket request failed or answered with an unexpected status.
     #[error("bucket: {0}")]
     Http(String),

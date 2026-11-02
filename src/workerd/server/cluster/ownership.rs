@@ -106,7 +106,7 @@ const ROUTE_REFRESH_MS: u64 = 5_000;
 const ATTEMPTS: usize = 8;
 
 fn draining(key: &str) -> Error {
-    Error::Replica(format!("{key}: this node is draining"))
+    Error::NotHere(format!("{key}: this node is draining"))
 }
 
 fn owner_key(namespace: &str, actor: &str) -> String {
@@ -176,7 +176,7 @@ impl Ownership {
                         // before its lease ran out: a route there loops back
                         // here. Its lease, not a route, ends this.
                         if peer.address == self.registry.advertise() {
-                            return Err(Error::Replica(format!(
+                            return Err(Error::NotHere(format!(
                                 "{key}: owned by this address's previous instance"
                             )));
                         }
@@ -199,6 +199,12 @@ impl Ownership {
                 let version = self.bucket.put_if(&key, body, guard).await?;
                 version.map(Guard::Match)
             };
+            // Draining may have started during the write. The record it
+            // wrote names this node, which leaves the cluster: the next claim
+            // takes the object over at the next epoch.
+            if !self.may_claim.get() {
+                return Err(draining(&key));
+            }
             if let Some(guard) = written {
                 self.claimed
                     .borrow_mut()

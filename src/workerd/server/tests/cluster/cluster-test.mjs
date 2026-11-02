@@ -330,6 +330,26 @@ class FakeS3 {
     return record === null ? null : JSON.parse(record).node;
   }
 
+  // Arms `faults` (fake-s3.js), each `prefix` a key in the cluster's layout,
+  // replacing those armed before.
+  async setFaults(faults) {
+    const armed = faults.map((f) => ({
+      ...f,
+      prefix: `cluster/v1/${f.prefix}`,
+    }));
+    const res = await fetch(`http://127.0.0.1:${this.port}/_faults`, {
+      method: 'POST',
+      body: JSON.stringify(armed),
+    });
+    await res.arrayBuffer();
+  }
+
+  // How many requests each armed fault has matched.
+  async faultHits() {
+    const res = await fetch(`http://127.0.0.1:${this.port}/_faults`);
+    return (await res.json()).map((f) => f.hits);
+  }
+
   // How many GET, PUT and DELETE requests the bucket served for `key`.
   async requests(key) {
     const query = new URLSearchParams({ key });
@@ -751,6 +771,75 @@ test(
       assert.deepStrictEqual(exit, { code: 0, signal: null });
       assert(drainMs < 5_000, `the drain took ${drainMs} ms`);
       assert.strictEqual((await eviction).status, 500);
+    });
+  }
+);
+
+test(
+  'cluster: a DO whose node drains while restoring it does not start there',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(3, async ({ nodes, bucket }) => {
+      const first = await fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=restoring'
+      );
+      assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+      const exit0 = await nodes[0].stop({
+        signal: 'SIGTERM',
+        timeoutMs: 10_000,
+      });
+      assert.deepStrictEqual(exit0, { code: 0, signal: null });
+
+      // Node 1 takes the DO over; its reads of the DO's log wait, so that it
+      // is still restoring the DO when it drains.
+      await bucket.setFaults([
+        {
+          prefix: `${objectPrefix(first.body.id)}/`,
+          except: '/own.json',
+          method: 'GET',
+          delayMs: 3000,
+          times: 1000,
+        },
+      ]);
+      const request = fetchJson(
+        nodes[1].httpPort,
+        '/increment?name=restoring',
+        {
+          timeoutMs: 20_000,
+        }
+      ).catch((err) => ({ status: null, body: { error: String(err) } }));
+      const deadline = Date.now() + 10_000;
+      while ((await bucket.faultHits())[0] === 0) {
+        assert(Date.now() < deadline, 'node 1 never restored the DO');
+        await sleep(50);
+      }
+      const exit1 = nodes[1].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      const response = await request;
+      assert.notStrictEqual(
+        response.status,
+        200,
+        `the DO started on the drained node: ${JSON.stringify(response.body)}`
+      );
+      await bucket.setFaults([]);
+      assert.deepStrictEqual(await exit1, { code: 0, signal: null });
+
+      let after = null;
+      const until = Date.now() + 15_000;
+      while (Date.now() < until) {
+        after = await fetchJson(
+          nodes[2].httpPort,
+          '/increment?name=restoring',
+          {
+            timeoutMs: 15_000,
+          }
+        ).catch(() => null);
+        if (after?.status === 200) break;
+        await sleep(200);
+      }
+      assert.strictEqual(after?.status, 200, JSON.stringify(after?.body));
+      assert.strictEqual(after.body.nodeId, nodes[2].nodeId);
+      assert.strictEqual(after.body.count, 2);
     });
   }
 );

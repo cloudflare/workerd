@@ -63,6 +63,7 @@ use crate::cluster::Owned;
 use crate::cluster::Owner;
 use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
+use crate::cluster::moved;
 use crate::config::Factory;
 use crate::config::invalid_config_error;
 use crate::tasks::TaskHandle;
@@ -256,6 +257,10 @@ impl ActorNamespace {
                 if let Some(container) = self.owned_container(&key) {
                     return Ok(Resolved::Here(Client(container)));
                 }
+                // A container added once `release_all` ran would never be released.
+                if cluster.cluster.is_draining() {
+                    return Err(moved(&format!("{key}: this node is draining")));
+                }
                 let container = ActorContainer::new_root(key.clone(), self, id);
                 let owned = Owned::new(Rc::clone(cluster), &unique_key, &key, epoch);
                 *container.owned.borrow_mut() = Some(owned);
@@ -404,6 +409,19 @@ impl ActorNamespace {
         let actors = std::mem::take(&mut *self.actors.borrow_mut());
         for container in actors.values() {
             container.abort(reason.cloned());
+        }
+    }
+
+    /// Lets every actor go as this instance drains, failing nothing in flight. A later request
+    /// that still reaches one here, through a stub or a peer that found it here, started nothing:
+    /// it is answered as `moved`, so that it can follow the actor to its next owner.
+    pub fn release_all(&self) {
+        let actors = std::mem::take(&mut *self.actors.borrow_mut());
+        for (key, container) in &actors {
+            // `moved` is only the error of requests that start after this: the actor is shut down
+            // without a reason, so no request in flight fails with it.
+            let left = moved(&format!("{key}: this node is draining"));
+            container.abort_then(None, Some(left));
         }
     }
 
@@ -1015,13 +1033,23 @@ impl ActorContainer {
                 ns: Rc::clone(&ns),
                 root_key: self.root_key.clone(),
             });
-            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(layout)) else {
+            let restoring = self
+                .owned
+                .borrow()
+                .as_ref()
+                .map(|o| (o.restore(layout), o.retire()));
+            let Some((restore, retire)) = restoring else {
                 return Err(kj::failed!("a clustered actor without ownership"));
             };
             if let Err(e) = restore.await {
                 self.abort(Some(e.clone()));
                 ns.actors.borrow_mut().remove(&self.key);
                 return Err(e);
+            }
+            // Released meanwhile: its ownership went before the restore opened the object here.
+            // Unless another container serves the object now, what the restore opened goes too.
+            if self.broken_reason.borrow().is_some() && ns.owned_container(&self.key).is_none() {
+                retire.run();
             }
         } else {
             // A facet runs once its root has taken the object over: its database is a lane of
@@ -1241,6 +1269,11 @@ impl ActorContainer {
     /// that could route traffic to it: at most call sites the map is at hand, and `abort` on a
     /// facet's tree leaves the facets filed under their parent.
     fn abort(&self, reason: Option<crate::Error>) {
+        self.abort_then(reason, None);
+    }
+
+    /// `abort`, with `later`, if given, the error of every request after it.
+    fn abort_then(&self, reason: Option<crate::Error>, later: Option<crate::Error>) {
         if self.broken_reason.borrow().is_some() {
             return;
         }
@@ -1263,7 +1296,9 @@ impl ActorContainer {
         self.cancel_shutdown();
         *self.manager.borrow_mut() = None;
         *self.broken_reason.borrow_mut() = Some(
-            reason.unwrap_or_else(|| kj::failed!("jsg.Error: Actor aborted for unknown reason.")),
+            later
+                .or(reason)
+                .unwrap_or_else(|| kj::failed!("jsg.Error: Actor aborted for unknown reason.")),
         );
         self.release(actor.as_deref());
         drop(actor);

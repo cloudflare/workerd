@@ -168,6 +168,11 @@ impl Cluster {
             }
             claim = self.ownership.acquire_or_route(ns, actor, now_ms).await?;
         }
+        if matches!(claim, Claim::Owned(_)) && self.is_draining() {
+            return Err(crate::Error::NotHere(format!(
+                "{ns}/{actor}: this node is draining"
+            )));
+        }
         Ok(match claim {
             Claim::Owned(owned) => {
                 let epoch = owned.epoch;
@@ -383,6 +388,11 @@ impl Cluster {
     pub fn start_draining(&self) {
         self.lease.borrow_mut().draining = true;
         self.ownership.may_claim.set(false);
+    }
+
+    /// Whether `start_draining` ran: this node claims nothing more.
+    pub fn is_draining(&self) -> bool {
+        !self.ownership.may_claim.get()
     }
 
     /// The first renewal, before the node serves.

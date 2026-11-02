@@ -309,7 +309,10 @@ impl ClusterNode {
             .cluster
             .acquire_or_route(namespace, actor, now)
             .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor}: {e}"))?;
+            .map_err(|e| match e {
+                cluster::Error::NotHere(_) => moved(&format!("{namespace}/{actor}: {e}")),
+                e => kj::disconnected!("{namespace}/{actor}: {e}"),
+            })?;
         let (node, address, stale) = match route {
             Route::Owned(epoch) => return Ok(Owner::Here(epoch)),
             Route::Remote {
@@ -400,6 +403,23 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
 pub enum Owner {
     Here(u64),
     Remote(Rc<RpcConnection>, String),
+}
+
+/// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+/// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+const NOT_DELIVERED: u64 = 0x1a07_d0b6_559b_aea6;
+const PREDECESSOR_REJECTED: u64 = 0xaef1_c0c9_72f2_1fe7;
+
+/// "Moved, not started": the answer of an instance that does not serve a Durable Object.
+///
+/// It is given before anything runs. It is a disconnect, which the application sees as
+/// retryable, and its details tell it from one: the caller may send the request again to
+/// whichever instance serves the object now.
+pub fn moved(description: &str) -> crate::Error {
+    kj::disconnected!("{description}").with_details(vec![
+        (NOT_DELIVERED, vec![]),
+        (PREDECESSOR_REJECTED, vec![]),
+    ])
 }
 
 impl RpcConnection {
@@ -611,11 +631,37 @@ impl Owned {
     }
 }
 
+impl Owned {
+    /// What dropping this does, to run again for an object a restore opened after the drop.
+    pub fn retire(&self) -> Retire {
+        Retire {
+            node: Rc::clone(&self.node),
+            namespace: self.namespace.clone(),
+            actor: self.actor.clone(),
+            epoch: self.epoch,
+        }
+    }
+}
+
 impl Drop for Owned {
     fn drop(&mut self) {
+        self.retire().run();
+    }
+}
+
+/// Stops capturing an object that left this node, and evicts it (`Owned::retire`).
+pub struct Retire {
+    node: Rc<ClusterNode>,
+    namespace: String,
+    actor: String,
+    epoch: u64,
+}
+
+impl Retire {
+    pub fn run(self) {
         let cluster = Rc::clone(&self.node.cluster);
         cluster.close_actor(&self.namespace, &self.actor);
-        let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
+        let (namespace, actor, epoch) = (self.namespace, self.actor, self.epoch);
         self.node.factory.spawn_detached(async move {
             cluster.evict_actor(&namespace, &actor, epoch).await;
         });

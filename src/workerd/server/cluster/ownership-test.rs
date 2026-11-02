@@ -84,7 +84,7 @@ fn a_restart_never_routes_to_its_previous_instance() {
         a_.renew(1_000).await.unwrap();
         let a_own_ = Ownership::new(bucket, a_);
         let claim = a_own_.acquire_or_route("ns", "x", 1_000).await;
-        assert!(matches!(claim, Err(Error::Replica(_))), "{claim:?}");
+        assert!(matches!(claim, Err(Error::NotHere(_))), "{claim:?}");
         // Once a's lease ends, the restart takes it over.
         let claim = a_own_.acquire_or_route("ns", "x", 11_000).await;
         assert_eq!(claim.unwrap(), owned(2));
