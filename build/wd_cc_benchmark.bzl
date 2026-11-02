@@ -1,11 +1,12 @@
 """wd_cc_benchmark definition"""
 
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC", "LINKOPTS_DEFAULT_FEATURES")
 
 def wd_cc_benchmark(
         name,
         deps = [],
+        features = [],
         tags = [],
         visibility = None,
         **kwargs):
@@ -14,6 +15,7 @@ def wd_cc_benchmark(
     cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
+        features = features + LINKOPTS_DEFAULT_FEATURES,
         linkstatic = CC_TEST_LINKSTATIC,
         visibility = visibility,
         deps = deps + [
@@ -27,8 +29,7 @@ def wd_cc_benchmark(
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        # Tag with cpu:2 since this target depends on linkopts_default.
-        tags = ["workerd-benchmark", "google_benchmark", "cpu:2"] + tags,
+        tags = ["workerd-benchmark", "google_benchmark"] + tags,
         size = "large",
         **kwargs
     )

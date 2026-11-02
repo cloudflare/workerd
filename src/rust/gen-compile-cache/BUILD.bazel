@@ -1,10 +1,14 @@
-load("@workerd//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("@workerd//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC", "SHARED_NONLTO_BACKENDS_FEATURES")
 load("@workerd//:build/wd_cc_library.bzl", "wd_cc_library")
 load("@workerd//:build/wd_rust_binary.bzl", "wd_rust_binary")
 
 wd_rust_binary(
     name = "gen-compile-cache",
     cxx_bridge_src = "main.rs",
+    # Do not thinLTO-optimize this binary – linking it is on the critical path which we don't want
+    # to slow down. Since this runs in the target configuration we need to opt out explicitly (this
+    # is already done for tests by default).
+    features = SHARED_NONLTO_BACKENDS_FEATURES,
     link_deps = [
         ":cxx-bridge",
     ],

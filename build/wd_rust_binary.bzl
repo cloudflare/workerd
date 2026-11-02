@@ -1,5 +1,6 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("@workerd//:build/linking.bzl", "LINKOPTS_DEFAULT_FEATURES")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
 load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
@@ -47,6 +48,7 @@ def wd_rust_binary(
         malloc = None,
         tool = False,
         test = True,
+        features = [],
         visibility = None,
         tags = [],
         cxx_bridge_src = None,
@@ -70,6 +72,7 @@ def wd_rust_binary(
         malloc: the malloc implementation to link, if not the default.
         tool: True for a binary where performance matters: linked with linkopts_tool, as
             wd_cc_binary does. False for development tools and tests (linkopts_default).
+        features: additional C++ toolchain features for the binary's link action.
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
@@ -125,16 +128,14 @@ def wd_rust_binary(
             "//build/deps:linkopts_tool" if tool else "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
+        features = features + ([] if tool else LINKOPTS_DEFAULT_FEATURES),
         visibility = visibility,
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
         lint_config = "@workerd//build/rust:lints",
-        # linkopts_tool links with full optimization, so it is given more CPUs.
-        tags = tags + ["cpu:4" if tool else "cpu:2"],
+        tags = tags,
         target_compatible_with = target_compatible_with,
-        # Use dedicated high-CPU runner if available
-        exec_properties = {"runner": "high-cpu"},
         **binary_kwargs
     )
 
@@ -155,7 +156,7 @@ def wd_rust_binary(
         target_compatible_with = target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
+        features = LINKOPTS_DEFAULT_FEATURES,
         size = test_size,
-        # Tag with cpu:2 since this target depends on linkopts_default.
-        tags = ["no-coverage", "cpu:2"],
+        tags = ["no-coverage"],
     )
