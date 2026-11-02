@@ -172,24 +172,7 @@ impl_traced_noop!(
     f32,
     f64,
     std::time::SystemTime,
-    crate::v8::ArrayBuffer,
-    crate::v8::ArrayBufferView,
     crate::v8::BackingStore,
-    crate::v8::BigInt64Array,
-    crate::v8::BigUint64Array,
-    crate::v8::Boolean,
-    crate::v8::Float32Array,
-    crate::v8::Float64Array,
-    crate::v8::Int8Array,
-    crate::v8::Int16Array,
-    crate::v8::Int32,
-    crate::v8::Int32Array,
-    crate::v8::Integer,
-    crate::v8::Number,
-    crate::v8::Uint8Array,
-    crate::v8::Uint16Array,
-    crate::v8::Uint32,
-    crate::v8::Uint32Array,
     &str,
 );
 
@@ -418,10 +401,10 @@ pub trait ToJS<'s>: Sized {
 
     /// Converts this Rust value into a JavaScript value for `creator`, the object whose method or
     /// property returned it, as C++ JSG's `wrap()` takes the `creator` of a value: a value that
-    /// stays pending can keep `creator` alive until it settles, as C++ JSG's promises do. A
-    /// `#[jsg_method]` or property of a resource passes the resource's wrapper, and a static one
-    /// `None`. A container passes `creator` on to what it holds; any other type converts as
-    /// [`ToJS::to_js`] does, which is the default.
+    /// stays pending, such as a [`Promise`](crate::Promise), keeps `creator` alive until it
+    /// settles, as C++ JSG's promises do. A `#[jsg_method]` or property of a resource passes the
+    /// resource's wrapper, and a static one `None`. A container passes `creator` on to what it
+    /// holds; any other type converts as [`ToJS::to_js`] does, which is the default.
     fn to_js_with_creator(
         self,
         lock: &mut Lock<'s>,

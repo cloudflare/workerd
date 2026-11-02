@@ -37,8 +37,8 @@ use crate::v8::ffi;
 /// is true, as [`Local::<Function>::call`] does, so that returning it propagates the exception.
 ///
 /// The handles are untyped, like C++ JSG's `JsPromise`: values are JavaScript values, converted
-/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. C++ JSG's typed `jsg::Promise<T>`,
-/// which can carry C++ values through JavaScript, has no counterpart.
+/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. The counterpart of C++ JSG's typed
+/// `jsg::Promise<T>`, which carries Rust values, is [`jsg::Promise`](crate::Promise).
 pub struct Promise;
 
 /// Marker for a `v8::Promise::Resolver` handle: the capability to settle one promise.

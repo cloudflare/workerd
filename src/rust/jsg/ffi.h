@@ -426,10 +426,15 @@ MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
-// function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of
-// them is reachable. Returns empty if an exception or a termination is pending. Throws if
-// `wrappable` already has a wrapper, or if V8 could not create one.
-MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable);
+// function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,
+// and traced if `needs_gc_tracing`, for as long as it is reachable. Returns empty if an exception
+// or a termination is pending. Throws if `wrappable` already has a wrapper, or if V8 could not
+// create one.
+MaybeLocal wrappable_attach_opaque_wrapper(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing);
+// The Rust Wrappable whose opaque wrapper `value` is, as wrappable_attach_opaque_wrapper() returns
+// it; none if `value` is anything else, including the opaque wrapper of a C++ Wrappable.
+kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value);
 
 // Unwrappers
 // Convert with V8's ToString and ToNumber (not JavaScript's String() and Number(), which accept a

@@ -54,5 +54,6 @@ mod to_js_creator;
 mod to_js_errors;
 mod traceable_gc;
 mod traced_global_lifetime;
+mod typed_promise;
 mod unwrap;
 mod wildcard_property;

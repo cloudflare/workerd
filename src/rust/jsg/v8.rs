@@ -830,7 +830,13 @@ pub mod ffi {
         pub unsafe fn wrappable_attach_opaque_wrapper(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
+            needs_gc_tracing: bool,
         ) -> Result<MaybeLocal>;
+        // Infallible: returns kj::none for anything but the opaque wrapper of a Rust Wrappable.
+        pub unsafe fn wrappable_try_unwrap_opaque(
+            isolate: *mut Isolate,
+            value: &Local, /* v8::Local<Value> */
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -4551,9 +4557,22 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
 /// `GcVisitor` wraps a C++ `jsg::GcVisitor` pointer. All GC visitation logic
 /// (strong/traced switching, parent tracking) is handled by the C++ side via
 /// `Wrappable::visitRef()`.
+///
+/// A visitor can also detach a value from its GC owner (see [`GcVisitor::is_detaching`]):
+/// that visit has no C++ visitor.
 #[derive(Debug)]
 pub struct GcVisitor {
     pub(crate) handle: ffi::GcVisitor,
+    pub(crate) mode: VisitMode,
+}
+
+/// What a [`GcVisitor`] visits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VisitMode {
+    /// For the C++ `jsg::GcVisitor` of its owner's visit.
+    Visit,
+    /// To detach the value from its owner; see [`GcVisitor::is_detaching`].
+    Detach,
 }
 
 impl GcVisitor {
@@ -4568,7 +4587,29 @@ impl GcVisitor {
                 // SAFETY: visitor is a valid, non-null pointer (guaranteed by caller).
                 ptr: unsafe { (*visitor).ptr },
             },
+            mode: VisitMode::Visit,
         }
+    }
+
+    /// Detaches `value`, which its GC owner no longer holds, from that owner, as moving a C++
+    /// `jsg::Ref` out of its field does: every `jsg::Rc` it traces becomes strong again and
+    /// forgets its parent, and every `TracedGlobal` it traces lets go of its traced reference and
+    /// makes its strong handle strong. The value is then safe to use and to put in another owner,
+    /// however the garbage collector last visited it.
+    pub(crate) fn detach<T: crate::Traced>(_lock: &mut Lock<'_>, value: &T) {
+        let mut visitor = Self {
+            handle: ffi::GcVisitor { ptr: 0 },
+            mode: VisitMode::Detach,
+        };
+        value.trace(&mut visitor);
+    }
+
+    /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
+    /// visit runs under the isolate lock and has no C++ visitor: a `Traced` impl that visits
+    /// through [`GcVisitor::as_ffi`] must instead make its reference strong again and forget its
+    /// parent, as a moved C++ `jsg::Ref` does.
+    pub fn is_detaching(&self) -> bool {
+        self.mode == VisitMode::Detach
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -4576,13 +4617,19 @@ impl GcVisitor {
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
     pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
-        r.visit(self);
+        if self.is_detaching() {
+            r.detach();
+        } else {
+            r.visit(self);
+        }
     }
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
     /// reference Rust JSG doesn't know, such as a C++ JSG `jsg::Ref`, through its own FFI. The
-    /// pointer is valid for the duration of the visit.
+    /// pointer is valid for the duration of the visit. A detaching visit has none; check
+    /// [`GcVisitor::is_detaching`] first.
     pub fn as_ffi(&mut self) -> *mut ffi::GcVisitor {
+        debug_assert!(!self.is_detaching(), "a detaching visit has no C++ visitor");
         &raw mut self.handle
     }
 
@@ -4642,6 +4689,21 @@ impl GcVisitor {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
             // of a dropped `TracedGlobal` are.
+            return;
+        }
+        if self.is_detaching() {
+            // SAFETY: see below, and `GlobalSlot`.
+            let (strong, traced) = unsafe {
+                (
+                    &raw mut (*global.slot.strong.get()).ptr,
+                    &mut *global.slot.traced.get(),
+                )
+            };
+            if traced.ptr != 0 {
+                traced.ptr = 0;
+                // SAFETY: the strong handle is valid, and `detach` runs under the isolate lock.
+                unsafe { ffi::global_clear_weak(strong) };
+            }
             return;
         }
         // SAFETY: the visitor is valid for the duration of the visit.
@@ -4953,7 +5015,7 @@ impl WrappableRc {
     ///
     /// Called when a new `Rc<R>` is created (clone, unwrap) to inform the GC
     /// that this Wrappable has an additional strong reference from Rust.
-    pub(crate) fn add_strong_ref(&mut self) {
+    pub(crate) fn add_strong_ref(&self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }
@@ -4991,30 +5053,12 @@ impl WrappableRc {
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
-        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
-        // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
-        let data: Local<Value> = unsafe {
-            Local::from_ffi_maybe(
-                ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
-                    |exception| {
-                        // `jsg::check` throws when creating the wrapper leaves an exception
-                        // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
-                        if ffi::isolate_has_pending_exception(isolate)
-                            || ffi::isolate_is_execution_terminating(isolate)
-                        {
-                            Error::pending()
-                        } else {
-                            Error::from(exception)
-                        }
-                    },
-                )?,
-            )
-        }
-        .ok_or_else(Error::pending)?;
+        let data = self.attach_opaque_wrapper(lock, true)?;
         let mut functions = Vec::with_capacity(N);
         for callback in callbacks {
-            // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
-            // lock's scope, in which the function is created.
+            // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+            // (guaranteed by Lock); `callback` is a V8 function callback and `data` a handle in
+            // the lock's scope, in which the function is created.
             let function = unsafe {
                 Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
             };
@@ -5024,6 +5068,59 @@ impl WrappableRc {
             unreachable!("one function per callback")
         };
         Ok(functions)
+    }
+
+    /// Attaches an opaque wrapper to this Wrappable and returns it: an object with no properties
+    /// and a null prototype, which keeps the Wrappable alive, and traced, while it is reachable,
+    /// and which [`of_opaque`](Self::of_opaque) finds the Wrappable from. The Wrappable must not
+    /// have a wrapper yet.
+    ///
+    /// While an exception or a termination is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shim checks before
+    /// creating the wrapper, which would clear the exception.
+    // The bool maps directly to the C++ parameter, as in `remove_strong_ref`.
+    pub(crate) fn attach_opaque_wrapper<'s>(
+        &self,
+        lock: &Lock<'s>,
+        needs_gc_tracing: bool,
+    ) -> crate::Result<Local<'s, Value>> {
+        let isolate = lock.isolate().as_ffi();
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
+        unsafe {
+            Local::from_ffi_maybe(
+                ffi::wrappable_attach_opaque_wrapper(
+                    isolate,
+                    self.handle.clone(),
+                    needs_gc_tracing,
+                )
+                .map_err(|exception| {
+                    // `jsg::check` throws when creating the wrapper leaves an exception
+                    // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
+                    if ffi::isolate_has_pending_exception(isolate)
+                        || ffi::isolate_is_execution_terminating(isolate)
+                    {
+                        Error::pending()
+                    } else {
+                        Error::from(exception)
+                    }
+                })?,
+            )
+        }
+        .ok_or_else(Error::pending)
+    }
+
+    /// Returns the Rust Wrappable whose opaque wrapper `value` is, as
+    /// [`attach_opaque_wrapper`](Self::attach_opaque_wrapper) returns it, or `None` if `value` is
+    /// anything else.
+    pub(crate) fn of_opaque<'s>(lock: &Lock<'s>, value: Local<'s, Value>) -> Option<Self> {
+        value.debug_assert_isolate(lock);
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); `value` is a handle in the
+        // lock's scope.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::wrappable_try_unwrap_opaque(lock.isolate().as_ffi(), value.raw()) }
+                .into();
+        handle.map(|handle| Self { handle })
     }
 
     /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
