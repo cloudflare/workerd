@@ -15,8 +15,8 @@ namespace workerd {
 // but before any user code evaluation. The entry point script named "main" is
 // loaded via a minimal synchronous require() mechanism.
 //
-// The require() function and compatFlags object are injected into each script's
-// scope via V8's CompileFunction context extensions, not via globalThis. Scripts
+// The require() function and compatFlags object are passed to each script as
+// parameters of the function V8's CompileFunction wraps it in, not via globalThis. Scripts
 // can install properties on globalThis; those become visible to user code.
 //
 // The bootstrap state (require cache, compat flags) is heap-allocated and stored

@@ -13,8 +13,8 @@ private-brand dispatch, no `instanceof`) apply here — see
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; `drain()` settles a whole queue, emptying it before the first settlement can run user code; leaf module |
-| `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; leaf module |
-| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t), `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush) and the promise-slot helpers (`newHandledPending`, `newHandledRejected`, `slotPromise`, `slotResolved` and `slotRejected`: a writer's ready and closed promises and a reader's closed promise are made, read and settled through them, and every promise they make is marked handled); leaf module |
+| `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; requires only `common` |
+| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t), `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush) and the promise-slot helpers (`newHandledPending`, `newHandledRejected`, `slotPromise`, `slotResolved` and `slotRejected`: a writer's ready and closed promises and a reader's closed promise are made, read and settled through them, and every promise they make is marked handled) and `nullPrototypeRecord`, which makes a class's instances null-prototype records (the `convert*` results are its record classes); leaf module |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
 | `readable.ts` | Reader layer + queued controllers (their shared state machine in `QueuedControllerCore`) + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
@@ -155,7 +155,12 @@ connection.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
   an omitted argument (`kNullProtoObject`) — is null-prototype, so a
-  polluted `Object.prototype` cannot supply members. Members of the C++
+  polluted `Object.prototype` cannot supply members. The internal pairs
+  build theirs from the same record classes the `convert*` functions
+  return (`QueuingStrategyRecord`, `UnderlyingSinkRecord`,
+  `UnderlyingSourceRecord`, `TransformerRecord` in `common.ts`), whose
+  prototypes `nullPrototypeRecord` detaches; see `src/per_isolate/AGENTS.md`
+  for when to use a record class. Members of the C++
   native source are read with `declaresMember`, which stops before
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
   (spec CloneArrayBuffer), never the species-consulting `slice`.

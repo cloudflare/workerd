@@ -6,7 +6,7 @@ at context creation, before any user code. C++ entry point:
 
 ## EXECUTION MODEL
 
-- Scripts are compiled as functions with a context-extension object — the
+- Scripts are compiled as functions whose parameters are the
   pseudo-globals `require`, `module`, `exports`, `compatFlags`,
   `autogates`, `primordials`, `utils` are in scope but NOT on
   `globalThis` (see `per_isolate-env.d.ts`).
@@ -199,9 +199,21 @@ path, and the same pollution breaks the user's own code in every engine:
   through the C++ bridge, which resolves a null-prototype record (see
   KEY RULES in `webstreams/AGENTS.md`).
 
-Internal-only records should still be null-prototype
-(`{ __proto__: null, ... }`) wherever nothing requires the
-`Object.prototype` chain.
+Internal-only records should still be null-prototype wherever nothing
+requires the `Object.prototype` chain. How depends on how often the record
+is made:
+
+- Made once (module scope, a frozen constant): an object literal,
+  `{ __proto__: kNullProtoObject, ... }`. Avoid `{ __proto__: null, ... }`,
+  which creates a dictionary-mode object with slow properties.
+- Made per chunk, per operation or per stream, and never reachable by user
+  code: an instance of a class passed through `nullPrototypeRecord`
+  (`webstreams/common.ts`), whose constructor sets every member. Any
+  object literal with a `__proto__` member sets its prototype with a
+  runtime call each time it is evaluated, about 20 times the cost of a
+  plain literal or a class instance.
+- With constant contents, however often it is used: hoist one frozen
+  module-level constant instead of making it each time.
 
 ### Never expose primordials to user code
 

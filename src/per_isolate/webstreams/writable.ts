@@ -1581,15 +1581,15 @@ function writerCloseWithErrorPropagation<W>(
 }
 
 ObjectDefineProperties(WritableStream, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(WritableStreamDefaultController, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(WritableStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   locked: kEnumerable,
   abort: kEnumerable,
   close: kEnumerable,
@@ -1597,7 +1597,7 @@ ObjectDefineProperties(WritableStream.prototype, {
   [SymbolToStringTag]: toStringTagProperty('WritableStream'),
 });
 ObjectDefineProperties(WritableStreamDefaultWriter.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   closed: kEnumerable,
   ready: kEnumerable,
   desiredSize: kEnumerable,
@@ -1608,7 +1608,7 @@ ObjectDefineProperties(WritableStreamDefaultWriter.prototype, {
   [SymbolToStringTag]: toStringTagProperty('WritableStreamDefaultWriter'),
 });
 ObjectDefineProperties(WritableStreamDefaultController.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   signal: kEnumerable,
   error: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('WritableStreamDefaultController'),
