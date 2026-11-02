@@ -1828,8 +1828,7 @@ void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context)
 
 // Whether TypeWrapper belongs to an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE.
 template <typename TypeWrapper>
-constexpr bool hasSplitResourceTemplates =
-    requires { requires TypeWrapper::splitResourceTemplates; };
+constexpr bool hasSplitResourceTemplates = requires { TypeWrapper::templateShards; };
 
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
 // JSG_RESOURCE_TYPE block).
@@ -1952,6 +1951,9 @@ class ResourceWrapper {
       Args&&... args) {
     // Construct an instance of this type to be used as the Javascript global object, creating
     // a new JavaScript context.
+    static_assert(!hasSplitResourceTemplates<TypeWrapper> || std::is_base_of_v<ContextGlobal, T>,
+        "a split isolate type registers context templates only for types that inherit "
+        "jsg::ContextGlobal");
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
     v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
@@ -2057,8 +2059,7 @@ class ResourceWrapper {
       v8::Local<v8::FunctionTemplate> result;
       if constexpr (hasSplitResourceTemplates<TypeWrapper>) {
         auto createTemplate = createTemplateFuncs[isContext];
-        KJ_ASSERT(createTemplate != nullptr,
-            "resource type's template was not registered with registerTemplateShard()",
+        KJ_ASSERT(createTemplate != nullptr, "resource type's template was not registered",
             typeName(typeid(T)), isContext);
         result = createTemplate(*this, isolate);
       } else {

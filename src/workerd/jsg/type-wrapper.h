@@ -22,7 +22,6 @@
 
 #include <v8-wasm.h>
 
-#include <tuple>
 #include <utility>
 
 namespace workerd::jsg {
@@ -690,8 +689,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         PromiseWrapper<Self>(configuration),
         config(getConfig(configuration)) {
     if constexpr (hasSplitResourceTemplates<Self>) {
-      // Registered once per process, before any isolate of this type builds a template.
-      [[maybe_unused]] static const bool registered = (Self::registerTemplates(), true);
+      // Registered once per process, before any isolate of this type builds a template. Each shard
+      // is defined by JSG_DEFINE_ISOLATE_TEMPLATE_SHARD, normally in a translation unit of its own.
+      [[maybe_unused]] static const bool registered = []<size_t... i>(std::index_sequence<i...>) {
+        (Self::template registerTemplateShard<i>(), ...);
+        return true;
+      }(std::make_index_sequence<Self::templateShards>());
     }
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
   }
@@ -714,30 +717,24 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   // For an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE, registers the template
   // builders of the resource types at positions index, index + count, index + 2 * count, ... of
-  // the isolate type's declaration, compiling them in the calling translation unit.
+  // the isolate type's declaration, compiling them in the calling translation unit. For each of
+  // those types that can be a context's global object, it also registers the builders of the
+  // context templates of the type and of its JSG superclasses, which a context template inherits.
+  // JSG_DEFINE_ISOLATE_TEMPLATE_SHARD calls this.
   template <size_t index, size_t count>
-  static void registerTemplateShard() {
+  static void registerShardTemplates() {
     static_assert(index < count);
+    // `i` and `T` expand together: `i` is the position of `T` in the declaration.
     []<size_t... i>(std::index_sequence<i...>) {
       ([] {
-        using U = std::tuple_element_t<i, std::tuple<T...>>;
-        if constexpr (i % count == index && U::JSG_KIND == JsgKind::RESOURCE) {
-          ResourceWrapper<Self, U>::template registerTemplate<false>();
+        if constexpr (i % count == index && T::JSG_KIND == JsgKind::RESOURCE) {
+          ResourceWrapper<Self, T>::template registerTemplate<false>();
+          if constexpr (std::is_base_of_v<ContextGlobal, T>) {
+            registerContextTemplate<T>();
+          }
         }
       }(), ...);
     }(std::make_index_sequence<sizeof...(T)>());
-  }
-
-  // For an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE, registers the builder of the
-  // template that contexts whose global object is a GlobalType are created with, and those of the
-  // context templates of GlobalType's JSG superclasses, which it inherits.
-  template <typename GlobalType>
-  static void registerContextTemplate() {
-    ResourceWrapper<Self, GlobalType>::template registerTemplate<true>();
-    using Super = GlobalType::jsgSuper;
-    if constexpr (!kj::isSameType<Super, Object>()) {
-      registerContextTemplate<Super>();
-    }
   }
 
   void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
@@ -996,6 +993,16 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
  private:
   const JsgConfig config;
+
+  // Registers the builders of GlobalType's context template and those of its JSG superclasses.
+  template <typename GlobalType>
+  static void registerContextTemplate() {
+    ResourceWrapper<Self, GlobalType>::template registerTemplate<true>();
+    using Super = GlobalType::jsgSuper;
+    if constexpr (!kj::isSameType<Super, Object>()) {
+      registerContextTemplate<Super>();
+    }
+  }
 };
 
 // Implementation of the abstract `TypeHandler<T>` interface, which converts between `T` and
@@ -1048,20 +1055,21 @@ class TypeWrapperOps<Self>::TypeHandlerImpl final: public TypeHandler<T> {
   }
 
 // Like JSG_DECLARE_ISOLATE_TYPE, but each resource type's template builder -- the code binding its
-// members to JavaScript, which is most of an isolate type's code -- is compiled where the
-// application registers it with registerTemplateShard() or registerContextTemplate(), rather
-// than wherever the isolate type is used. The application does that registration in its
-// definition of `Type_TypeWrapper::registerTemplates()`, which JSG calls once per process. See
-// "Splitting an isolate type across translation units" in docs/jsg.md.
-#define JSG_DECLARE_SPLIT_ISOLATE_TYPE(Type, ...)                                                  \
+// members to JavaScript, which is most of an isolate type's code -- is compiled in one of `shards`
+// translation units, rather than wherever the isolate type is used. Each of those translation units
+// defines one shard with JSG_DEFINE_ISOLATE_TEMPLATE_SHARD. See "Splitting an isolate type across
+// translation units" in docs/jsg.md.
+#define JSG_DECLARE_SPLIT_ISOLATE_TYPE(Type, shards, ...)                                          \
   class Type##_TypeWrapper;                                                                        \
   using Type##_TypeWrapperBase =                                                                   \
       ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>;           \
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
    public:                                                                                         \
     [[maybe_unused]] static constexpr bool trackCallCounts = false;                                \
-    [[maybe_unused]] static constexpr bool splitResourceTemplates = true;                          \
-    static void registerTemplates();                                                               \
+    static constexpr size_t templateShards = shards;                                               \
+    /* Defined by JSG_DEFINE_ISOLATE_TEMPLATE_SHARD. */                                            \
+    template <size_t index>                                                                        \
+    static void registerTemplateShard();                                                           \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \
     /* See the comment in JSG_DECLARE_ISOLATE_TYPE for why these are re-exported. */               \
     using Type##_TypeWrapperBase::wrap;                                                            \
@@ -1073,6 +1081,17 @@ class TypeWrapperOps<Self>::TypeHandlerImpl final: public TypeHandler<T> {
    public:                                                                                         \
     using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
   }
+
+// Defines shard `index` of an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE, compiling
+// the template builders of the resource types at positions index, index + shards, ... of its
+// declaration. Use it once in each of `shards` translation units, in the namespace of the
+// declaration. The isolate type's constructor calls every shard, so leaving one out fails to link.
+#define JSG_DEFINE_ISOLATE_TEMPLATE_SHARD(Type, index)                                             \
+  template <size_t jsgShardIndex>                                                                  \
+  void Type##_TypeWrapper::registerTemplateShard() {                                               \
+    registerShardTemplates<jsgShardIndex, templateShards>();                                       \
+  }                                                                                                \
+  template void Type##_TypeWrapper::registerTemplateShard<index>()
 
 #define JSG_DECLARE_DEBUG_ISOLATE_TYPE(Type, ...)                                                  \
   class Type##_TypeWrapper;                                                                        \

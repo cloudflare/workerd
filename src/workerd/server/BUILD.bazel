@@ -246,8 +246,6 @@ wd_cc_library(
         "@platforms//os:windows": ["WORKERD_API_UNSPLIT_TEMPLATES"],
         "//conditions:default": [],
     }),
-    # TODO(EW-11081): This is temporarily disabled because it takes a lifetime to complete.
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",

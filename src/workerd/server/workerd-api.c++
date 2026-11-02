@@ -6,55 +6,11 @@
 
 #include "workerd-api-isolate.h"
 
-#include <workerd/api/actor-state.h>
-#include <workerd/api/actor.h>
-#include <workerd/api/analytics-engine.h>
-#include <workerd/api/base64.h>
-#include <workerd/api/cache.h>
-#include <workerd/api/capnp.h>
-#include <workerd/api/commonjs.h>
-#include <workerd/api/container.h>
 #include <workerd/api/crypto/impl.h>
-#include <workerd/api/encoding.h>
-#include <workerd/api/events.h>
-#include <workerd/api/eventsource.h>
-#include <workerd/api/export-loopback.h>
-#include <workerd/api/filesystem.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/html-rewriter.h>
-#include <workerd/api/hyperdrive.h>
-#include <workerd/api/kv.h>
-#include <workerd/api/memory-cache.h>
-#include <workerd/api/modules.h>
-#include <workerd/api/node/node.h>
-#include <workerd/api/performance.h>
-#include <workerd/api/pyodide/pyodide.h>
-#include <workerd/api/queue.h>
-#include <workerd/api/r2.h>
-#include <workerd/api/scheduled.h>
-#include <workerd/api/snapshot.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/sql.h>
-#include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
-#include <workerd/api/sync-kv.h>
-#include <workerd/api/trace.h>
-#include <workerd/api/tracing.h>
-#include <workerd/api/unsafe.h>
-#include <workerd/api/url-standard.h>
-#include <workerd/api/urlpattern-standard.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/worker-loader.h>
-#include <workerd/api/worker-rpc.h>
-#include <workerd/api/workers-module.h>
-#include <workerd/api/wrapped-binding.h>
-#include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
-#include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker-modules.h>
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
 #ifdef WORKERD_USE_TRANSPILER
@@ -62,7 +18,6 @@
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
-#include <workerd/server/workerd-debug-port-client.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -82,20 +37,6 @@ using namespace kj_rs;
 namespace workerd::server {
 
 using api::pyodide::PythonConfig;
-
-#ifndef WORKERD_API_UNSPLIT_TEMPLATES
-void JsgWorkerdIsolate_TypeWrapper::registerTemplates() {
-  static_assert(JSG_WORKERD_ISOLATE_TEMPLATE_SHARDS == 8, "register every shard");
-  registerJsgWorkerdIsolateTemplates0();
-  registerJsgWorkerdIsolateTemplates1();
-  registerJsgWorkerdIsolateTemplates2();
-  registerJsgWorkerdIsolateTemplates3();
-  registerJsgWorkerdIsolateTemplates4();
-  registerJsgWorkerdIsolateTemplates5();
-  registerJsgWorkerdIsolateTemplates6();
-  registerJsgWorkerdIsolateTemplates7();
-}
-#endif  // !defined(WORKERD_API_UNSPLIT_TEMPLATES)
 
 namespace {
 static const PythonConfig defaultConfig{

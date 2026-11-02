@@ -138,21 +138,9 @@ namespace workerd::server {
 // Windows builds compile all of the isolate's template builders in workerd-api.c++.
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate, JSG_WORKERD_ISOLATE_TYPES);
 #else
-JSG_DECLARE_SPLIT_ISOLATE_TYPE(JsgWorkerdIsolate, JSG_WORKERD_ISOLATE_TYPES);
-
-// JsgWorkerdIsolate's template builders, most of its code, are split across this many translation
-// units, workerd-api-templates-<n>.c++, which compile, and are optimized at link time, in
-// parallel. Each defines registerJsgWorkerdIsolateTemplates<n>().
-constexpr size_t JSG_WORKERD_ISOLATE_TEMPLATE_SHARDS = 8;
-
-void registerJsgWorkerdIsolateTemplates0();
-void registerJsgWorkerdIsolateTemplates1();
-void registerJsgWorkerdIsolateTemplates2();
-void registerJsgWorkerdIsolateTemplates3();
-void registerJsgWorkerdIsolateTemplates4();
-void registerJsgWorkerdIsolateTemplates5();
-void registerJsgWorkerdIsolateTemplates6();
-void registerJsgWorkerdIsolateTemplates7();
-#endif  // defined(WORKERD_API_UNSPLIT_TEMPLATES)
+// JsgWorkerdIsolate's template builders, most of its code, are split across 8 translation units,
+// workerd-api-templates-<n>.c++, which compile, and are optimized at link time, in parallel.
+JSG_DECLARE_SPLIT_ISOLATE_TYPE(JsgWorkerdIsolate, 8, JSG_WORKERD_ISOLATE_TYPES);
+#endif
 
 }  // namespace workerd::server

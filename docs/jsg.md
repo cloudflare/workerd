@@ -1318,38 +1318,29 @@ it is compiled, and optimized at link time, as part of the translation unit that
 isolate. An application with many types can spread that code over several translation units
 instead, which compile, and are optimized at link time, in parallel.
 
-Declare the isolate type with `JSG_DECLARE_SPLIT_ISOLATE_TYPE`, in a header that each of those
-translation units includes. Each translation unit registers a share of the types' builders, and
-one of them registers the builder of each global object type the isolate creates contexts with:
+Declare the isolate type with `JSG_DECLARE_SPLIT_ISOLATE_TYPE`, giving the number of shards, in a
+header that each of those translation units includes. Each translation unit defines one shard with
+`JSG_DEFINE_ISOLATE_TEMPLATE_SHARD`:
 
 ```cpp
 // my-isolate.h
-JSG_DECLARE_SPLIT_ISOLATE_TYPE(MyIsolate, MyGlobalObject, api::Foo, api::Bar, ...);
-void registerMyIsolateTemplates0();
-void registerMyIsolateTemplates1();
+JSG_DECLARE_SPLIT_ISOLATE_TYPE(MyIsolate, 2, MyGlobalObject, api::Foo, api::Bar, ...);
 
 // my-isolate-templates-0.c++
-void registerMyIsolateTemplates0() {
-  MyIsolate_TypeWrapper::registerTemplateShard<0, 2>();
-  MyIsolate_TypeWrapper::registerContextTemplate<MyGlobalObject>();
-}
+JSG_DEFINE_ISOLATE_TEMPLATE_SHARD(MyIsolate, 0);
 
 // my-isolate-templates-1.c++
-void registerMyIsolateTemplates1() {
-  MyIsolate_TypeWrapper::registerTemplateShard<1, 2>();
-}
-
-// my-isolate.c++
-void MyIsolate_TypeWrapper::registerTemplates() {
-  registerMyIsolateTemplates0();
-  registerMyIsolateTemplates1();
-}
+JSG_DEFINE_ISOLATE_TEMPLATE_SHARD(MyIsolate, 1);
 ```
 
-JSG calls `registerTemplates()` once per process, when the first isolate of the type is created.
-Shard `i` of `N` registers the resource types at positions `i`, `i + N`, `i + 2N`, ... of the
-declaration, so the shards together cover every type, including ones added later. Building the
-template of a type that no shard registered throws.
+Shard `i` of `N` compiles the builders of the resource types at positions `i`, `i + N`, `i + 2N`,
+... of the declaration, so the shards together cover every type, including ones added later. A
+shard also compiles the builders of the context templates of its types that inherit
+`jsg::ContextGlobal`, and of their superclasses. The isolate type registers every shard's builders
+when the first isolate of the type is created, so leaving a shard out fails to link.
+
+Define the shards in translation units that don't create isolates of the type: one that does
+compiles every shard whose definition it can see.
 
 ---
 

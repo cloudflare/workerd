@@ -6,9 +6,6 @@
 
 namespace workerd::server {
 
-void registerJsgWorkerdIsolateTemplates0() {
-  JsgWorkerdIsolate_TypeWrapper::registerTemplateShard<0, JSG_WORKERD_ISOLATE_TEMPLATE_SHARDS>();
-  JsgWorkerdIsolate_TypeWrapper::registerContextTemplate<api::ServiceWorkerGlobalScope>();
-}
+JSG_DEFINE_ISOLATE_TEMPLATE_SHARD(JsgWorkerdIsolate, 0);
 
 }  // namespace workerd::server
