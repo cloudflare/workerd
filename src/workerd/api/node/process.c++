@@ -269,4 +269,19 @@ bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
   return FeatureFlags::get(js).getThrowOnNotImplementedTlsOptions();
 }
 
+ProcessModule::MemoryUsage ProcessModule::getMemoryUsage(jsg::Lock& js) {
+  v8::HeapStatistics stats;
+  js.v8Isolate->GetHeapStatistics(&stats);
+  return {
+    // Process-wide RSS includes other tenants. Approximate it using this isolate's
+    // allocated heap and external memory instead.
+    .rss =
+        static_cast<double>(stats.total_heap_size()) + static_cast<double>(stats.external_memory()),
+    .heapTotal = static_cast<double>(stats.total_heap_size()),
+    .heapUsed = static_cast<double>(stats.used_heap_size()),
+    .external = static_cast<double>(stats.external_memory()),
+    .arrayBuffers = 0,
+  };
+}
+
 }  // namespace workerd::api::node

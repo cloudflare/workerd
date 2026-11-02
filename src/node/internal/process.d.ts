@@ -11,6 +11,17 @@ export const versions: Record<string, string>;
 export const platform: string;
 export function shouldThrowOnNotImplementedTlsOption(): boolean;
 
+export interface MemoryUsage {
+  // Isolate-local approximation: heapTotal + external, not process-wide RSS.
+  rss: number;
+  heapTotal: number;
+  heapUsed: number;
+  external: number;
+  // Always 0: workerd does not track ArrayBuffer allocations per isolate.
+  arrayBuffers: number;
+}
+export function getMemoryUsage(): MemoryUsage;
+
 declare global {
   const Cloudflare: {
     readonly compatibilityFlags: Record<string, boolean> & {
