@@ -1,0 +1,25 @@
+src/rust/jsg-macros/lib.rs
+  s_144e1c38c83f9e::t_d5162c15afd9e2 386
+src/rust/jsg/ffi.c++
+  s_144e1c38c83f9e::t_2da7d597a489aa 867-873
+src/rust/jsg/ffi.h
+  s_144e1c38c83f9e::t_8e19640799ca2b 381
+src/rust/jsg/v8.rs
+  s_144e1c38c83f9e::t_021c85f65fb293 788-793,4346-4362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "57083bee9b037dcb3183c0bd71c8c9e381cc7dd2",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

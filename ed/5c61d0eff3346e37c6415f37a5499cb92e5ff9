@@ -1,0 +1,25 @@
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_3fb4938f1a3fd7 38,91,132,293,297-298
+build/BUILD.wpt
+  s_1b9ab9fb100cf8::t_190c59535c57c1 14-20,25,28
+build/wpt_test.bzl
+  s_1b9ab9fb100cf8::t_46dd7eb4a5880d 25,41-43,94,118
+src/wpt/BUILD.bazel
+  s_1b9ab9fb100cf8::t_fe12ad711217d7 64,84,111,151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ed5c61d0eff3346e37c6415f37a5499cb92e5ff9",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

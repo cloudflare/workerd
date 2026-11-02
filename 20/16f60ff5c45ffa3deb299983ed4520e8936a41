@@ -1,0 +1,83 @@
+src/workerd/jsg/jsg.h
+  s_144e1c38c83f9e::t_91c68c8e171204 2426
+  s_144e1c38c83f9e::t_04e2d1f6003aac 35,2227-2228,2238-2240,2268-2277,2329-2332,2336,2338,2344-2425
+src/workerd/api/tests/streams-pending-gc-test.wd-test
+  s_144e1c38c83f9e::t_f2e431bcda9411 1-15
+src/workerd/jsg/README.md
+  s_144e1c38c83f9e::t_6a9d3327e7516e 254-261
+tools/clang-tidy/traced-own.h
+  s_144e1c38c83f9e::t_1a261a820e26b9 1-32
+src/workerd/api/crypto/crypto.c++
+  s_144e1c38c83f9e::t_66aa309fdc7de3 699
+src/workerd/util/autogate.h
+  s_144e1c38c83f9e::t_73885222f9edbf 133-135
+  s_144e1c38c83f9e::t_76893aa6366098 136
+  s_144e1c38c83f9e::t_300d12cc95c29b 130-132
+.clang-tidy
+  s_144e1c38c83f9e::t_0cbec2710f8c64 70
+tools/clang-tidy/traced-own-negative-test.c++
+  s_144e1c38c83f9e::t_6770cd522c0308 1-145
+tools/clang-tidy/traced-own-positive-test.c++
+  s_144e1c38c83f9e::t_058400dd0ae32e 1-149
+src/workerd/jsg/AGENTS.md
+  s_144e1c38c83f9e::t_56336fc771d21a 148-153
+src/workerd/api/streams/queue.h
+  s_144e1c38c83f9e::t_fb24c4a95e0dea 10
+  s_144e1c38c83f9e::t_59c56e0a68aeb0 260-268,406,566-576,600,643-644,749-752,938-942
+src/workerd/jsg/wrappable.c++
+  s_144e1c38c83f9e::t_4242dc71dadada 705-715,717,719,723,727,774-783,818-826
+src/workerd/api/streams/internal.c++
+  s_144e1c38c83f9e::t_e7dcba2af3c2de 1756-1757,1993,2022,2170,2250,2319,2868-2870,2919-2920
+src/workerd/api/streams/queue.c++
+  s_144e1c38c83f9e::t_cb4e207d8055f7 490-492,1318-1320
+src/workerd/api/basics.h
+  s_144e1c38c83f9e::t_01ff9ad1ed14af 548-550,555
+src/workerd/api/trace.h
+  s_144e1c38c83f9e::t_2bce7f6cc102a4 279-282,326,331
+tools/clang-tidy/workerd-lint.c++
+  s_144e1c38c83f9e::t_7d94e9550553ad 25,42
+src/workerd/api/basics.c++
+  s_144e1c38c83f9e::t_59b342402073d2 39,44,1326
+src/workerd/api/web-socket.c++
+  s_144e1c38c83f9e::t_1c5c2a8317ada5 273
+tools/clang-tidy/BUILD.bazel
+  s_144e1c38c83f9e::t_3644883fb8bc42 17-19,52,70,188-203
+tools/clang-tidy/traced-own.c++
+  s_144e1c38c83f9e::t_a6c4d83f15d3e6 1-72
+src/workerd/jsg/tracing-test.c++
+  s_144e1c38c83f9e::t_10565c24872d78 115-151,153-166,203-205,219-220,326-385
+src/workerd/api/crypto/crypto.h
+  s_144e1c38c83f9e::t_ec68c0a1eaa5b3 341
+src/workerd/api/streams/standard.c++
+  s_144e1c38c83f9e::t_8e2846502e616b 342,345,958-959,1914,1955,2153,2847,2851,2913,2918,2967,3065,3071,3156,3170,3249,3262,3325,3335,3365-3366,3368-3369,3391,3394,3427,3430,3460,3463,3876,3879,3919,3921,3926,3928,3969,3972,5016,5019
+src/workerd/api/tests/BUILD.bazel
+  s_144e1c38c83f9e::t_3dca0e6ccd90bb 25-29
+src/workerd/api/web-socket.h
+  s_144e1c38c83f9e::t_0898232e374e44 439
+src/workerd/jsg/memory.h
+  s_144e1c38c83f9e::t_fea0bea58e930c 127-128,196-200,408-415
+src/workerd/api/tests/streams-pending-gc-test.js
+  s_144e1c38c83f9e::t_e61750b86da811 1-130
+tools/clang-tidy/traced-own-test.sh
+  s_144e1c38c83f9e::t_0665c16c2094a7 1-79
+src/workerd/api/streams/internal.h
+  s_144e1c38c83f9e::t_2198f8701ec852 527,534,545
+src/workerd/api/streams/README.md
+  s_144e1c38c83f9e::t_7b4effe71d6040 468-471
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2016f60ff5c45ffa3deb299983ed4520e8936a41",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+src/workerd/api/streams/readable.h
+  s_7524bbe5163cf9::t_ebaa89823c945b 282-285
+  s_8b080d960d1bef::t_72645c687f9735 279-280
+src/workerd/api/streams/readable.c++
+  s_8b080d960d1bef::t_fc37d36a903f84 566-576,581-583
+src/workerd/api/streams/standard-test.c++
+  s_8b080d960d1bef::t_930bd6d4d3859b 2027-2048
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb3ae4cef351e29351e32024b6a8778c9389d8c1",
+  "prompts": {},
+  "sessions": {
+    "s_7524bbe5163cf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74032352-a58f-4b3b-9ed8-794c12f0461b",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_8b080d960d1bef": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "faeda7e2-f267-4ea7-b4b5-74cef3e03f77",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

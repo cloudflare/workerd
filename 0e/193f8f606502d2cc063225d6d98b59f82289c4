@@ -1,0 +1,23 @@
+src/workerd/io/io-context.c++
+  s_f332e176eb9835::t_f39ed6b6dc8494 429-435,474-477,491-513
+src/workerd/io/incoming-request-test.c++
+  s_f332e176eb9835::t_c49bc766a77918 27-33,308-311,313-335,338-344,346-348
+src/workerd/io/io-context.h
+  s_f332e176eb9835::t_16300ebe587228 60-62,1368-1372
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0e193f8f606502d2cc063225d6d98b59f82289c4",
+  "prompts": {},
+  "sessions": {
+    "s_f332e176eb9835": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec654b52dffe5R4MDhsJqmPWkg",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

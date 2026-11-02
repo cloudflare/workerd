@@ -1,0 +1,19 @@
+src/workerd/server/tests/python/BUILD.bazel
+  s_1b9ab9fb100cf8::t_db5681e6c5baed 95-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "63a9efdee1f72f0e7b1a42368b116cebe43da74c",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
