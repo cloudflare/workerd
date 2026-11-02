@@ -12929,6 +12929,39 @@ interface ArtifactsCommitMetadata {
   /** Committer timestamp in Unix seconds. */
   committedAt: number;
 }
+/** One changed file, symbolic link, or submodule reference. */
+interface ArtifactsDiffEntry {
+  /** Repository-relative path, ordered by raw bytes. */
+  path: string;
+  /** Renames are reported as deletion plus addition. Mode-only changes are modified. */
+  status: "added" | "modified" | "deleted" | "type_changed";
+  /** Original Git mode; absent for additions. */
+  oldMode?: string;
+  /** Destination Git mode; absent for deletions. */
+  newMode?: string;
+  /** Original object hash; absent for additions. */
+  oldHash?: string;
+  /** Destination object hash; absent for deletions. */
+  newHash?: string;
+}
+/** Options for a page of snapshot changes. */
+interface ArtifactsDiffOptions {
+  /** Page size: defaults to 100, from 1 through 1000. */
+  limit?: number;
+  /** Opaque continuation valid only for the same resolved from/to commits. */
+  cursor?: string;
+}
+/** A page of file-level changes between two repository snapshots. */
+interface ArtifactsDiffResult {
+  /** Resolved original commit hash, or null for the empty tree. */
+  from: string | null;
+  /** Resolved destination commit hash. */
+  to: string;
+  /** File-level changes ordered by raw path bytes. Directories are excluded. */
+  changes: ArtifactsDiffEntry[];
+  /** Present only when more changes remain. No total count is computed. */
+  cursor?: string;
+}
 /**
  * Repository capability returned by {@link Artifacts.get}.
  *
@@ -12939,6 +12972,23 @@ interface ArtifactsCommitMetadata {
  * `using repo = await env.ARTIFACTS.get(name);`, to release it before the request ends.
  */
 interface ArtifactsRepo extends Disposable {
+  /**
+   * Compare snapshots without rename detection, ordered by raw path bytes.
+   * Unrelated histories are valid; identical commits return an empty page.
+   * This read records read analytics and emits no events.
+   * @param from Branch name, tag, or full 40-character commit hash; null means the empty tree.
+   * @param to Branch name, tag, or full 40-character commit hash. Tags resolve to their commit.
+   * @param opts Page size (default 100, range 1–1000) and opaque cursor for the resolved pair.
+   * @returns Resolved commits and one page of file changes, with a cursor only if more remain.
+   * @throws {ArtifactsError} INVALID_INPUT for invalid arguments, non-commit hashes, or cursors;
+   * NOT_FOUND for a missing side or deleted repository; MEMORY_LIMIT if the walk exceeds
+   * its memory budget; INTERNAL_ERROR for unexpected failures.
+   */
+  diff(
+    from: string | null,
+    to: string,
+    opts?: ArtifactsDiffOptions,
+  ): Promise<ArtifactsDiffResult>;
   /**
    * Create an access token for this repo.
    * @param scope Token scope: "write" (default) or "read".
