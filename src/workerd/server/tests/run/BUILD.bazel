@@ -1,0 +1,19 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+# `workerd run` end to end, with the esbuild from the root package.json.
+js_test(
+    name = "run-test",
+    size = "medium",
+    data = [
+        "greeting.ts",
+        "template.capnp",
+        "//:node_modules/esbuild",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "run-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "RUN_TEST_DIR": package_name(),
+    },
+    tags = ["js-test"],
+)
