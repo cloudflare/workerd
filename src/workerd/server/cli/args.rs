@@ -77,6 +77,26 @@ pub enum Command {
         serve: ServeArgs,
     },
 
+    /// check a config and report every problem, without serving
+    #[command(
+        long_about = "Loads a config and reports every problem with it, without serving.",
+        after_long_help = "Accepts the same <config-file> as `serve`. Every service is built and \
+            every Worker compiled, so errors in a Worker's top-level code are reported too, but no \
+            socket is bound, so a check can run next to a server using the same ports. Every \
+            error is reported, rather than only the first, followed by their count, or by \
+            \"Config OK\" if there were none. Exits with status 1 if there was any error."
+    )]
+    Check {
+        #[command(flatten)]
+        config: ConfigFileArgs,
+
+        #[command(flatten)]
+        const_name: ConstNameArg,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+    },
+
     /// create a self-contained binary
     #[command(
         long_about = "Builds a self-contained binary from a config.",
