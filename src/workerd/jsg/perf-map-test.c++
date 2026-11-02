@@ -6,15 +6,23 @@
 #include "perf-map.h"
 
 #include <fcntl.h>
-#include <sys/mman.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 namespace workerd::jsg::test {
 namespace {
 
+// An anonymous temporary file, so the test runs wherever mkstemp() does (not just Linux).
+kj::OwnFd newTempFile() {
+  char path[] = "/tmp/perf-map-test-XXXXXX";
+  auto fd = KJ_SYSCALL_FD(mkstemp(path));
+  KJ_SYSCALL(unlink(path));
+  return fd;
+}
+
 kj::OwnFd newAppendOnlyFile() {
-  auto fd = KJ_SYSCALL_FD(memfd_create("perf-map-test", MFD_CLOEXEC));
+  auto fd = newTempFile();
   KJ_SYSCALL(fcntl(fd, F_SETFL, O_APPEND));
   return fd;
 }
@@ -55,7 +63,7 @@ KJ_TEST("PerfMapWriter writes one line per code block") {
 }
 
 KJ_TEST("PerfMapWriter requires O_APPEND") {
-  auto fd = KJ_SYSCALL_FD(memfd_create("perf-map-test", MFD_CLOEXEC));
+  auto fd = newTempFile();
   KJ_EXPECT_THROW_MESSAGE("O_APPEND", PerfMapWriter(kj::mv(fd)));
 }
 

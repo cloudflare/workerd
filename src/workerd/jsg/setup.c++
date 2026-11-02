@@ -224,7 +224,8 @@ void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
 }
 
 void V8System::enablePerfMap(kj::OwnFd fd) {
-  KJ_REQUIRE(jitCodeEventTracking == JitCodeEventTracking::YES, "a perf map is written from JIT code events");
+  KJ_REQUIRE(jitCodeEventTracking == JitCodeEventTracking::YES,
+      "a perf map is written from JIT code events");
   perfMap = kj::heap<const PerfMapWriter>(kj::mv(fd));
 }
 

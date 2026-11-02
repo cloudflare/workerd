@@ -365,8 +365,20 @@ wd_cc_library(
         "tracing-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
+        "perf-map-test.c++",
     ],
 )]
+
+# Perf maps are a POSIX feature; the implementation throws on Windows.
+kj_test(
+    src = "perf-map-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [":jsg"],
+)
 
 # The native allocation regression creates a million wrappers to trigger an automatic major GC.
 # Debug builds need more than the default 15-second budget to finish the allocation loop.
