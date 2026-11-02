@@ -1530,7 +1530,7 @@ kj::String wellFormedUtf8(kj::ArrayPtr<const char16_t> utf16) {
 
 kj::String DigestStringEncoder::encode(jsg::Lock& js, jsg::JsString str) {
   if (encoding == DigestStringEncoding::WTF8) {
-    // WriteUtf8V2 without kReplaceInvalidUtf8, so lone surrogates survive as the
+    // WriteUtf8 without kReplaceInvalidUtf8, so lone surrogates survive as the
     // three bytes V8 holds them in.
     return str.toString(js);
   }

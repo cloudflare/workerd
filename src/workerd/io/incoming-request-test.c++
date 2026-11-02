@@ -569,11 +569,13 @@ kj::String readEvents(TestFixture& fixture) {
   return events;
 }
 
-// Records the outcome that runOnHibernate() reports.
+// Records the outcome that runOnHibernate() reports, and how many times it reports one.
 struct OnHibernateObserver final: public RequestObserver {
   kj::Maybe<EventOutcome> outcome;
+  uint reportCount = 0;
   void reportOnHibernateOutcome(EventOutcome reported) override {
     outcome = reported;
+    ++reportCount;
   }
 };
 
@@ -601,17 +603,22 @@ constexpr kj::StringPtr PENDING_ON_HIBERNATE_SOURCE = R"SCRIPT(
 )SCRIPT"_kj;
 
 // Starts the onHibernate handler of an actor running PENDING_ON_HIBERNATE_SOURCE, then calls
-// `body` while the handler is pending.
+// `body` while the handler is pending. Checks that the call reports CANCELED, once, by the time
+// `body` returns.
 void withPendingOnHibernate(kj::StringPtr actorId,
     kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&, kj::Promise<void>&)> body) {
   withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, actorId,
       [&](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
-    auto promise = runOnHibernate(fixture, actor, kj::refcounted<RequestObserver>());
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
     KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
     auto events = readEvents(fixture);
     KJ_ASSERT(events == "onHibernate;", events);
 
     body(fixture, context, actor, promise);
+
+    KJ_EXPECT(observer->outcome == EventOutcome::CANCELED);
+    KJ_EXPECT(observer->reportCount == 1, observer->reportCount);
   });
 }
 
@@ -707,6 +714,7 @@ KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
     KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
     KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(observer->reportCount == 1, observer->reportCount);
   }, {.flushActorStorage = true});
 }
 

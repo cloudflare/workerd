@@ -20,6 +20,7 @@ use std::rc::Weak;
 use std::time::Duration;
 
 use cluster::Cluster;
+use cluster::Layout;
 use cluster::Route;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -542,9 +543,9 @@ impl Owned {
         &self.node.cluster
     }
 
-    /// Takes the object over into the database at `path`, once: recovers what earlier epochs
-    /// committed and opens this one.
-    pub fn restore(&self, path: String) -> impl Future<Output = Result<()>> + use<> {
+    /// Takes the object over into the databases `layout` places, once: recovers what earlier
+    /// epochs committed and opens this one.
+    pub fn restore(&self, layout: Rc<dyn Layout>) -> impl Future<Output = Result<()>> + use<> {
         let mut restore = self.restore.borrow_mut();
         let cluster = Rc::clone(&self.node.cluster);
         let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
@@ -552,7 +553,7 @@ impl Owned {
             .get_or_insert_with(|| {
                 async move {
                     cluster
-                        .restore_actor(&namespace, &actor, epoch, &path)
+                        .restore_actor(&namespace, &actor, epoch, &*layout)
                         .await
                         .map_err(|e| kj::failed!("{namespace}/{actor}: takeover failed: {e}"))
                 }

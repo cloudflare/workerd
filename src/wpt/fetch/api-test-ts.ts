@@ -361,6 +361,13 @@ export default {
       'Set-Cookie is a forbidden response header',
     ],
   },
+  'headers/header-values-last-event-id.any.js': {
+    comment:
+      'Header values containing code points U+0080 to U+00FF are sent UTF-8 encoded instead of as one byte per code point',
+    expectedFailures: [
+      'fetch() sends the bytes of a non-ASCII Last-Event-ID header value unchanged',
+    ],
+  },
   'headers/header-values-normalize.any.js': {
     comment: 'XMLHttpRequest is not supported',
     expectedFailures: [
@@ -729,10 +736,8 @@ export default {
   },
   'request/request-consume.any.js': {},
   'request/request-disturbed.any.js': {
-    comment:
-      "(1) To be investigated, (2) They're literally passing URL, the constructor, as the URL!?!",
+    comment: "They're literally passing URL, the constructor, as the URL!?!",
     expectedFailures: [
-      'Input request used for creating new request became disturbed even if body is not used',
       'Request construction failure should not set "bodyUsed"',
     ],
   },

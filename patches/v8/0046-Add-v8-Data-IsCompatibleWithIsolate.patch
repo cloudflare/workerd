@@ -27,7 +27,7 @@ index 7be431b31921a7e72674217416c916cf0b7bfab8..291406a39ffaf7a754e32e541172c9e9
    Data() = delete;
  };
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 982babcaefff0123e4cdf8d4a5102383db799a8b..16da080dc2c388c582b61f5d381100cd7587d79e 100644
+index 9fb39992101d83a4b4b880d644a12809f46956d4..3d9eaa9823815561acf63249af8f9323301fa61b 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -79,6 +79,7 @@
