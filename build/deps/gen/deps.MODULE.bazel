@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "19dfb44a62ae60ce6b0060de8c0cef5d5c527177",
+    commit = "2a51536dfb3b448bdf3dae70c782ea2879c90904",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],

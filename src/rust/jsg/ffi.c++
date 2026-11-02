@@ -26,13 +26,6 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
-#if V8_MAJOR_VERSION >= 15
-#define Utf8LengthV2 Utf8Length
-#define WriteV2 Write
-#define WriteOneByteV2 WriteOneByte
-#define WriteUtf8V2 WriteUtf8
-#endif
-
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {
@@ -368,7 +361,7 @@ bool local_string_contains_only_one_byte(const Local& value) {
 }
 
 size_t local_string_utf8_length(Isolate* isolate, const Local& value) {
-  return local_as_ref_from_ffi<v8::String>(value)->Utf8LengthV2(isolate);
+  return local_as_ref_from_ffi<v8::String>(value)->Utf8Length(isolate);
 }
 
 void local_string_write_v2(Isolate* isolate,
@@ -377,7 +370,7 @@ void local_string_write_v2(Isolate* isolate,
     uint32_t length,
     uint16_t* buffer,
     int32_t flags) {
-  local_as_ref_from_ffi<v8::String>(value)->WriteV2(isolate, offset, length, buffer, flags);
+  local_as_ref_from_ffi<v8::String>(value)->Write(isolate, offset, length, buffer, flags);
 }
 
 void local_string_write_one_byte_v2(Isolate* isolate,
@@ -386,12 +379,12 @@ void local_string_write_one_byte_v2(Isolate* isolate,
     uint32_t length,
     uint8_t* buffer,
     int32_t flags) {
-  local_as_ref_from_ffi<v8::String>(value)->WriteOneByteV2(isolate, offset, length, buffer, flags);
+  local_as_ref_from_ffi<v8::String>(value)->WriteOneByte(isolate, offset, length, buffer, flags);
 }
 
 size_t local_string_write_utf8_v2(
     Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags) {
-  return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8V2(
+  return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8(
       isolate, reinterpret_cast<char*>(buffer), capacity, flags);
 }
 

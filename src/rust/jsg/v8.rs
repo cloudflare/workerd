@@ -3156,7 +3156,7 @@ impl<'s> Local<'s, String> {
     ///
     /// Does not include a null terminator.
     ///
-    /// Corresponds to `v8::String::Utf8LengthV2()`.
+    /// Corresponds to `v8::String::Utf8Length()`.
     #[inline]
     pub fn utf8_length(&self, lock: &mut crate::Lock) -> usize {
         // SAFETY: Lock guarantees the isolate is locked; the handle is a valid String handle.
@@ -3173,7 +3173,7 @@ impl<'s> Local<'s, String> {
     ///
     /// Panics if `buffer.len() < length`.
     ///
-    /// Corresponds to `v8::String::WriteV2()`.
+    /// Corresponds to `v8::String::Write()`.
     pub fn write(
         &self,
         lock: &mut crate::Lock,
@@ -3208,7 +3208,7 @@ impl<'s> Local<'s, String> {
     ///
     /// Panics if `buffer.len() < length`.
     ///
-    /// Corresponds to `v8::String::WriteOneByteV2()`.
+    /// Corresponds to `v8::String::WriteOneByte()`.
     pub fn write_one_byte(
         &self,
         lock: &mut crate::Lock,
@@ -3239,7 +3239,7 @@ impl<'s> Local<'s, String> {
     /// Returns the number of bytes written. `flags` is a combination of
     /// [`WriteFlags`] constants.
     ///
-    /// Corresponds to `v8::String::WriteUtf8V2()`.
+    /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
         &self,
         lock: &mut crate::Lock,
