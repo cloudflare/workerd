@@ -47,6 +47,7 @@
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
+#include <v8-metrics.h>
 #include <v8-profiler.h>
 #include <v8-wasm.h>
 
@@ -215,6 +216,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     // This doesn't appear to be an Error object. Fall back to stringifying the whole value as
     // the message.
     if (!js.v8Isolate->IsExecutionTerminating()) {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): its scope ends after the toString().
       v8::TryCatch tryCatch(js.v8Isolate);
       try {
         message = exception.toString(js);
@@ -301,6 +303,7 @@ void reportStartupError(kj::StringPtr id,
     kj::Maybe<kj::Exception>& permanentException,
     SpanParent parentSpan,
     bool isDynamicWorker) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only logs what reporting the exception threw.
   v8::TryCatch catcher2(js.v8Isolate);
   ExceptionOrDuration limitErrorOrTime2 = 0 * kj::NANOSECONDS;
   try {
@@ -328,6 +331,10 @@ void reportStartupError(kj::StringPtr id,
         if (catcher.HasCaught()) {
           js.withinHandleScope([&] {
             auto exception = catcher.Exception();
+            auto exceptionMessage = catcher.Message();
+            // Forget the exception before reading its properties, which can run getters: they
+            // may call into Rust JSG, which fails while an exception is pending.
+            if (catcher.CanContinue()) catcher.Reset();
 
             permanentException = js.exceptionToKj(js.v8Ref(exception));
 
@@ -338,21 +345,21 @@ void reportStartupError(kj::StringPtr id,
               lines.add(kj::str("Uncaught ",
                   jsg::extractTunneledExceptionDescription(
                       KJ_ASSERT_NONNULL(permanentException).getDescription())));
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               e.addError(kj::strArray(lines, "\n"));
 
             } else KJ_IF_SOME(i, inspector) {
               auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
               sendExceptionToInspector(js, *i.get(), UncaughtExceptionSource::INTERNAL,
-                  jsg::JsValue(exception), jsg::JsMessage(catcher.Message()));
+                  jsg::JsValue(exception), jsg::JsMessage(exceptionMessage));
               // When the inspector is active, we don't want to throw here because then the inspector
               // won't be able to connect and the developer will never know what happened.
             } else {
               // We should never get here in production if we've validated scripts before deployment.
               // (unless this is a dynamic worker)
               kj::Vector<kj::String> lines;
-              jsg::JsMessage message(catcher.Message());
+              jsg::JsMessage message(exceptionMessage);
               message.addJsStackTrace(js, lines);
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
@@ -638,8 +645,11 @@ struct Worker::Isolate::Impl {
       __atomic_add_fetch(&impl.lockSuccessCount, 1, __ATOMIC_RELAXED);
       metrics.locked();
 
-      // We record the current lock so our GC prologue/epilogue callbacks can report GC time via
-      // Jaeger tracing.
+      // Start measuring the garbage collection this lock pays for. We use only this window of
+      // V8's LongTaskStats; nothing else may call Reset().
+      v8::metrics::LongTaskStats::Reset(lock->v8Isolate);
+
+      // We record the current lock so our GC prologue/epilogue callbacks can reach it.
       KJ_DASSERT(impl.currentLock == kj::none, "Isolate lock taken recursively");
       impl.currentLock = *this;
 
@@ -670,6 +680,7 @@ struct Worker::Isolate::Impl {
         // The isolate asked this lock to report the stats when it released. Let's do it.
         limitEnforcer.reportMetrics(impl.metrics);
       }
+      reportGc();
       impl.currentLock = kj::none;
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
@@ -699,14 +710,15 @@ struct Worker::Isolate::Impl {
     }
 
     void gcPrologue() {
-      metrics.gcPrologue();
       // Filter out tracked WASM instance entries where the instance has been
       // garbage-collected (weak instanceRef is empty), allowing the linear memory
       // to be reclaimed.
       limitEnforcer.getTrackedWasmInstances().filter(*lock);
     }
-    void gcEpilogue() {
-      metrics.gcEpilogue();
+    void gcEpilogue(v8::GCType type) {
+      if (type == v8::kGCTypeMarkSweepCompact) {
+        ++fullGcCount;
+      }
     }
 
     // Call limitEnforcer.exitJs(), and also schedule to call limitEnforcer.reportMetrics()
@@ -715,10 +727,21 @@ struct Worker::Isolate::Impl {
     bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
 
    private:
+    // Reports to `metrics` the garbage collection performed since the lock was taken.
+    void reportGc() {
+      auto stats = v8::metrics::LongTaskStats::Get(lock->v8Isolate);
+      int64_t gcUs = stats.gc_young_wall_clock_duration_us +
+          stats.gc_full_atomic_wall_clock_duration_us +
+          stats.gc_full_incremental_wall_clock_duration_us;
+      metrics.reportGc(gcUs * kj::MICROSECONDS, fullGcCount);
+    }
+
     const Impl& impl;
     IsolateObserver::LockRecord metrics;
     ThreadProgressCounter progressCounter;
     bool shouldReportIsolateMetrics = false;
+    // Full (mark-compact) collections finished while this lock was held.
+    uint fullGcCount = 0;
     const Api* oldCurrentApi;
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
@@ -977,6 +1000,7 @@ struct Worker::Script::Impl {
 
           // We have to wrap the call to handler in a try catch here because
           // we have to tunnel any jsg::JsExceptionThrown instances back.
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): only takes the exception before its scope ends.
           v8::TryCatch tryCatch(js.v8Isolate);
           ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
           try {
@@ -1278,8 +1302,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // as well just throw the switch to "moderate" right away.
     lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
-    // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
-    // "request_context" Jaeger span.
+    // Register GC prologue and epilogue callbacks so that the current lock can release tracked
+    // WebAssembly instances and count the full collections it pays for.
     lock->v8Isolate->AddGCPrologueCallback(
         [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
       // We assume that a v8::Locker is alive during GC.
@@ -1297,7 +1321,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       KJ_DASSERT(v8::Locker::IsLocked(isolate));
       auto& self = *reinterpret_cast<Isolate*>(data);
       KJ_IF_SOME(currentLock, self.impl->currentLock) {
-        currentLock.gcEpilogue();
+        currentLock.gcEpilogue(type);
       }
     }, this);
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
@@ -1410,16 +1434,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           // refcounted pointer to the DeleteQueue for the correct isolate.
           // We simply pass the given callback, reactions, and argument to
           // a function that will be added to the queue inside DeleteQueue.
-          // The next time the relevant IoContext is entered, this queue will
-          // be drained and the actions will be run. Adding the task to the
-          // delete queue will also signal the IoContext that it should wake
-          // up and drain the queue. Simple, eh?
-          //
-          // A word of warning tho! It is possible for the IoContext to be
-          // destroyed before the promise is resolved. Any actions that have
-          // already been added to the queue would end up being dropped silently
-          // on the floor. Actions that are added to the queue now will be run
-          // immediately in the wrong IoContext.
+          // Adding the task to the delete queue also signals the IoContext
+          // that it should wake up and run it. See DeleteQueue::scheduleAction()
+          // for when it runs, and for what happens if the IoContext is
+          // destroyed first.
           auto& ref = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(isolate, tag);
           ref->execute(js,
               [reactions = jsg::Data(isolate, reactions), argument = jsg::V8Ref(isolate, argument),
@@ -1622,6 +1640,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         });
 
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
@@ -1889,7 +1908,11 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       if (terminatedRaw >= 0) {
         terminatedOffset = static_cast<uint32_t>(terminatedRaw);
       }
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto backingStore = memory->GetBuffer()->GetBackingStore();
+#else
       auto backingStore = memory->Buffer()->GetBackingStore();
+#endif
       auto wasmMemory =
           kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
               .attach(kj::mv(backingStore));
@@ -1932,7 +1955,15 @@ void handleLog(jsg::Lock& js,
   // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): forgetCaughtException() resets it.
   v8::TryCatch tryCatch(js.v8Isolate);
+
+  // Forgets an exception that stringifying threw, so that it isn't pending while more JavaScript
+  // runs: a toJSON() or toString() may call into Rust JSG, which fails while an exception is
+  // pending.
+  auto forgetCaughtException = [&]() {
+    if (tryCatch.HasCaught() && tryCatch.CanContinue()) tryCatch.Reset();
+  };
 
   auto message = [&]() {
     int length = info.Length();
@@ -1975,10 +2006,11 @@ void handleLog(jsg::Lock& js,
           // Check if arg has a `toJSON` property which is a function.
           auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
           v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
-          if (!toJSON.IsEmpty()) {
-            if (jsg::check(toJSON)->IsFunction()) {
-              shouldSerialiseToJson = true;
-            }
+          if (toJSON.IsEmpty()) {
+            // A `toJSON` getter threw.
+            forgetCaughtException();
+          } else if (jsg::check(toJSON)->IsFunction()) {
+            shouldSerialiseToJson = true;
           }
         }
 
@@ -1999,6 +2031,7 @@ void handleLog(jsg::Lock& js,
           }
         }) != kj::none) {
           stringified.add(kj::str("{}"));
+          forgetCaughtException();
         };
       });
     }
@@ -2344,6 +2377,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       // Enter the context for compiling and running the script.
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): reportStartupError() resets it first.
         v8::TryCatch catcher(lock.v8Isolate);
         ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
@@ -4526,6 +4560,13 @@ kj::Maybe<jsg::Ref<api::DurableObjectStorage>> Worker::Actor::makeStorageForSwSy
   });
 }
 
+bool Worker::Actor::isFacet() {
+  KJ_IF_SOME(fm, impl->facetManager) {
+    return fm.getDepth() > 0;
+  }
+  return false;
+}
+
 void Worker::Actor::assertCanSetAlarm() {
   KJ_SWITCH_ONEOF(impl->classInstance) {
     KJ_CASE_ONEOF(_, Impl::NoClass) {
@@ -4916,8 +4957,18 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
-  incomingRequest->delivered("onHibernate"_kj);
+  // Cross-context actions queued while the actor was idle are dropped rather than run with the
+  // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
+  // start. Those queued once its request is current still run, since the handler may await them.
+  incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
+
+  // A call canceled before the handler settles, e.g. by abort(), never reaches the reports below.
+  bool reported = false;
+  KJ_DEFER(if (!reported) {
+    observerRef.reportOnHibernateOutcome(EventOutcome::CANCELED);
+    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
+  });
 
   {
     // Nothing may run in the actor after its handler, including during the flush below. The
@@ -4943,6 +4994,7 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     }
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);
+    reported = true;
   }
 
   // The writes the handler made must be flushed before a successor can read storage. A failed

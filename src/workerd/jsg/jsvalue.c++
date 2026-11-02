@@ -10,13 +10,6 @@
 
 #include <cmath>
 
-#if V8_MAJOR_VERSION >= 15
-#define Utf8LengthV2 Utf8Length
-#define WriteV2 Write
-#define WriteOneByteV2 WriteOneByte
-#define WriteUtf8V2 WriteUtf8
-#endif
-
 namespace workerd::jsg {
 
 JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {
@@ -83,9 +76,19 @@ void JsObject::setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& v
       js.v8Context(), name.inner, value.inner, v8::PropertyAttribute::DontEnum));
 }
 
+void JsObject::setPrivate(Lock& js, const JsString& name, const JsValue& value) {
+  auto p = v8::Private::ForApi(js.v8Isolate, name);
+  check(inner->SetPrivate(js.v8Context(), p, value.inner));
+}
+
 void JsObject::setPrivate(Lock& js, kj::StringPtr name, const JsValue& value) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   check(inner->SetPrivate(js.v8Context(), p, value.inner));
+}
+
+JsValue JsObject::getPrivate(Lock& js, const jsg::JsString& name) {
+  auto p = v8::Private::ForApi(js.v8Isolate, name);
+  return JsValue(check(inner->GetPrivate(js.v8Context(), p)));
 }
 
 JsValue JsObject::getPrivate(Lock& js, kj::StringPtr name) {
@@ -359,21 +362,21 @@ JsArray::operator JsObject() const {
 }
 
 kj::String JsString::toString(jsg::Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
-  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
+  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
   return kj::String(kj::mv(buf));
 }
 
 jsg::USVString JsString::toUSVString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
-  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(),
+  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
+  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(),
       v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
   return jsg::USVString(kj::mv(buf));
 }
 
 jsg::DOMString JsString::toDOMString(Lock& js) const {
-  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
-  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  auto buf = kj::heapArray<char>(inner->Utf8Length(js.v8Isolate) + 1);
+  inner->WriteUtf8(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
   return jsg::DOMString(kj::mv(buf));
 }
 
@@ -398,7 +401,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written =
-        inner->WriteUtf8V2(js.v8Isolate, buffer.begin(), buffer.size(), options, &result.read);
+        inner->WriteUtf8(js.v8Isolate, buffer.begin(), buffer.size(), options, &result.read);
   }
   return result;
 }
@@ -408,7 +411,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written = kj::min(buffer.size(), length(js));
-    inner->WriteV2(js.v8Isolate, 0, result.written, buffer.begin(), options);
+    inner->Write(js.v8Isolate, 0, result.written, buffer.begin(), options);
     result.read = length(js);
   }
   return result;
@@ -419,7 +422,7 @@ JsString::WriteIntoStatus JsString::writeInto(
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
     result.written = kj::min(buffer.size(), length(js));
-    inner->WriteOneByteV2(
+    inner->WriteOneByte(
         js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
     result.read = length(js);
   }
@@ -1618,7 +1621,7 @@ JsUint8Array JsUint8Array::detachAndTake(Lock& js) {
   v8::Local<v8::Uint8Array> inner = *this;
   auto length = inner->ByteLength();
   auto offset = inner->ByteOffset();
-  auto ab = getBuffer().detachAndTake(js);
+  v8::Local<v8::ArrayBuffer> ab = getBuffer().detachAndTake(js);
   return JsUint8Array(v8::Uint8Array::New(ab, offset, length));
 }
 
@@ -1651,7 +1654,7 @@ JsUint8Array JsUint8Array::clone(jsg::Lock& js) {
   // "shallow clone". Intentionally does not copy the data.
   auto buf = inner->Buffer();
   auto backing = buf->GetBackingStore();
-  auto ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
+  v8::Local<v8::ArrayBuffer> ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
   return JsUint8Array(v8::Uint8Array::New(ab, inner->ByteOffset(), inner->ByteLength()));
 }
 

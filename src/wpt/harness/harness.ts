@@ -115,6 +115,9 @@ class RunnerState {
   // Filename of the current test. Used in error messages.
   testFileName: string;
 
+  // Path of the tested directory within the WPT tree (e.g. fetch/api).
+  wptPath: string;
+
   // The worker environment. Used to allow fetching resources in the test.
   env: Env;
 
@@ -127,14 +130,19 @@ class RunnerState {
   // Callbacks to be run once the entire test is done.
   completionCallbacks: UnknownFunc[] = [];
 
+  // The test covering the whole file, if it called setup({single_test: true})
+  singleTest?: Test;
+
   constructor(
     testUrl: URL,
     testFileName: string,
+    wptPath: string,
     env: Env,
     options: TestRunnerOptions
   ) {
     this.testUrl = testUrl;
     this.testFileName = testFileName;
+    this.wptPath = wptPath;
     this.env = env;
     this.options = options;
   }
@@ -430,7 +438,7 @@ async function runTest(
   // Update the URL's port so we can connect to it
   testUrl.port = env.HTTP_PORT ?? '';
 
-  globalThis.state = new RunnerState(testUrl, file, env, options);
+  globalThis.state = new RunnerState(testUrl, file, wptPath, env, options);
   globalThis.results[file] = globalThis.state;
 
   if (options.disabledTests === true) {
@@ -460,7 +468,20 @@ async function runTest(
   }
 
   files.push(getCodeAtPath(env, wptPath, './', file, options.replace));
-  evalAsBlock(env, options.runInGlobalScope ?? false, files);
+
+  try {
+    evalAsBlock(env, options.runInGlobalScope ?? false, files);
+  } catch (err) {
+    // In single test mode, a top-level exception fails the single test rather than the file.
+    const singleTest = globalThis.state.singleTest;
+    if (!singleTest) {
+      throw err;
+    }
+
+    singleTest.step(() => {
+      throw err;
+    });
+  }
 
   if (options.after) {
     options.after();

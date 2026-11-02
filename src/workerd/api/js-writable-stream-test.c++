@@ -799,10 +799,7 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // Wrap an instance via the Lock-acquired TypeHandler -- the same path create()'s
-    // TypeScript arm uses -- then verify the contract's detection shape: an own data
-    // property keyed by the kNativeSink API-registry symbol whose value is the symbol
-    // itself.
+    // Template-created instances carry a private marker, not an ordinary API symbol.
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<WritableStreamNativeSink>>());
     auto handle = handler.wrap(
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none));
@@ -810,8 +807,8 @@ KJ_TEST("WritableStreamNativeSink instances carry the kNativeSink marker") {
 
     auto symbol = jsg::JsValue(
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSink")));
-    KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
-    KJ_EXPECT(obj.get(js, symbol) == symbol);
+    KJ_EXPECT(obj.getPrivate(js, "kNativeSink"_kj).isTrue());
+    KJ_EXPECT(!obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
   });
 }
 
@@ -1487,7 +1484,7 @@ KJ_TEST("WritableStreamNativeSink pipeFrom rejects while a close is in flight") 
                       // use-after-free.
                       auto handle = KJ_ASSERT_NONNULL(destination.tryGetTs(js));
                       auto extractor =
-                          KJ_ASSERT_NONNULL(handle.get(js, js.symbolInternal("kExtractNativeSink"))
+                          KJ_ASSERT_NONNULL(handle.getPrivate(js, "kExtractNativeSink"_kj)
                                                 .tryCast<jsg::JsFunction>());
                       auto sinkObj =
                           KJ_ASSERT_NONNULL(extractor.call(js, handle).tryCast<jsg::JsObject>());
@@ -1720,21 +1717,16 @@ KJ_TEST("JsWritableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
         js, js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none)));
     KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, sinkObj) == kj::none);
 
-    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
-    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
-    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
-    // on the adopted impostor throws.
+    // An ordinary API symbol cannot forge the constructor's private brand.
     auto impostorObj = js.obj();
     impostorObj.setNonEnumerable(js, js.symbolInternal("kWritableStreamBrand"), js.boolean(true));
-    auto impostor = KJ_ASSERT_NONNULL(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
-    bool threw = false;
-    js.tryCatch(
-        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
-      threw = true;
-      auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
-    });
-    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
+    KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+      KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)) != kj::none);
+      KJ_EXPECT(JsWritableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    }
   });
 }
 

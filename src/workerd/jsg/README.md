@@ -150,14 +150,13 @@ so they remain injection-only.
 | `JSG_STATIC_CONSTANT(name)`                         | Class     | No               | N/A                     |
 | `JSG_PRIVATE_SYMBOL(name)`                          | Instance  | No               | No                      |
 
-`JSG_PRIVATE_SYMBOL(kName)` marks every instance with an own, read-only, non-enumerable,
-non-configurable property keyed by the `v8::Symbol::ForApi(isolate, "kName")` API-registry
-symbol, with the symbol itself as the value. C++ (and runtime-provided JS handed the symbol,
-e.g. via the per-isolate bootstrap's `utils.getApiSymbol()`) can re-acquire the identical
-symbol by name at any time; user code cannot mint it (the API registry is distinct from
-`Symbol.for()`'s). Useful as a tamper-resistant instance brand/marker recognizable from both
-sides of the boundary; note it is visible to `Object.getOwnPropertySymbols`, so it is a
-brand, not a secret. Not represented in RTTI/generated types.
+`JSG_PRIVATE_SYMBOL(kName)` marks every instance with a V8-private property whose value is
+`true`, using `v8::Private::ForApi(isolate, "kName")`. C++ reads it with
+`JsObject::getPrivate(js, "kName")`; per-isolate bootstrap code uses
+`utils.getPrivate(object, "kName")`. The slot is not inherited, serialized, or visible to
+JavaScript reflection, including `Object.getOwnPropertySymbols` and `Reflect.ownKeys`.
+An ordinary JavaScript/API symbol with the same label cannot address it. Not represented
+in RTTI/generated types. Keep the native private-property utilities inaccessible to user code.
 
 ### Type Relationships
 

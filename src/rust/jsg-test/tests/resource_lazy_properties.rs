@@ -293,7 +293,7 @@ impl Resource for Settable {
 #[should_panic(expected = "a lazy instance property has no setter")]
 fn custom_members_reject_lazy_instance_placement_with_setter() {
     Harness::new().run_in_context(|lock, _ctx| {
-        jsg::resource::function_template_of::<Settable>(lock);
+        jsg::resource::function_template_of::<Settable>(lock).unwrap();
         Ok(())
     });
 }

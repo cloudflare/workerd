@@ -696,7 +696,8 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces,
     bool isDynamicDispatch,
-    kj::TaskSet& waitUntilTasks) {
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<rpc::TraceCompletion::Client> completion) {
   // Mark the request as delivered because we're about to run some JS.
   incomingRequest->delivered("trace"_kj);
 
@@ -740,9 +741,24 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), request);
   }));
 
+  // drain() keeps the request until its background work, including the handler above, finishes,
+  // times out, or aborts; the completion goes with it.
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    incomingRequest = kj::mv(incomingRequest).attach(kj::mv(c));
+  }
   incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
 }
 }  // namespace
+
+kj::Own<TraceCustomEvent> TraceCustomEvent::fromRpc(
+    uint16_t typeId, rpc::EventDispatcher::SendTracesParams::Reader params) {
+  auto traces = KJ_MAP(trace, params.getTraces()) { return kj::refcounted<Trace>(trace); };
+  kj::Maybe<rpc::TraceCompletion::Client> completion;
+  if (params.hasCompletion()) {
+    completion = params.getCompletion();
+  }
+  return kj::heap<TraceCustomEvent>(typeId, kj::mv(traces), kj::mv(completion));
+}
 
 tracing::EventInfo TraceCustomEvent::getEventInfo() const {
   return tracing::TraceEventInfo(traces);
@@ -756,7 +772,7 @@ auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     bool isDynamicDispatch) -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
   sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, kj::mv(versionInfo),
-      kj::mv(props), traces, isDynamicDispatch, waitUntilTasks);
+      kj::mv(props), traces, isDynamicDispatch, waitUntilTasks, kj::mv(completion));
 
   // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
   // running the tail handler...
@@ -773,6 +789,9 @@ auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory
   auto out = req.initTraces(traces.size());
   for (auto i: kj::indices(traces)) {
     traces[i]->copyTo(out[i]);
+  }
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    req.setCompletion(kj::mv(c));
   }
 
   auto resp = co_await req.send();

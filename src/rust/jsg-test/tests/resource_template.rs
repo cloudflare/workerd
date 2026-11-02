@@ -156,7 +156,7 @@ impl Resource for Sample {
 fn eval_string(harness: &Harness, code: &str) -> String {
     let mut out = String::new();
     harness.run_in_context(|lock, ctx| {
-        let constructor = jsg::resource::function_template_of::<Sample>(lock);
+        let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
         ctx.set_global(lock, "Sample", constructor);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
@@ -223,7 +223,7 @@ fn constant_descriptor_follows_spec_compliant_property_attributes() {
 fn constructor_called_without_new_throws_type_error() {
     let harness = Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let constructor = jsg::resource::function_template_of::<Sample>(lock);
+        let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
         ctx.set_global(lock, "Sample", constructor);
 
         for code in ["Sample('x')", "Sample.call({}, 'x')"] {
@@ -364,7 +364,7 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
                 "wrapped",
                 jsg::Rc::new(Sample::constructor("x".to_owned(), None)),
             );
-            let constructor = jsg::resource::function_template_of::<Sample>(lock);
+            let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
             ctx.set_global(lock, "Sample", constructor);
             let prototype = lock
                 .feature_flags()

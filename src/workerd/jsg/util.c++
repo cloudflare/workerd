@@ -290,6 +290,7 @@ DecodedException decodeTunneledException(
       // that, otherwise, we'll fall back to constructing a new error object. If
       // the ignoreDetail optiom is set, we skip trying to deserialize.
       KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): only logs what deserializing threw.
         v8::TryCatch tryCatch(isolate);
         try {
           auto& js = Lock::from(isolate);
@@ -458,6 +459,7 @@ void throwInternalError(
 }
 
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows a termination.
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
     Serializer ser(js,

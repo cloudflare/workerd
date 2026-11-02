@@ -6,7 +6,16 @@ import { DurableObject } from 'cloudflare:workers';
 
 interface Env {
   GREETING: string;
-  COUNTER: DurableObjectNamespace<Counter>;
+}
+
+// Types `ctx.exports`: the main module's exports, and which are Durable Objects.
+declare global {
+  namespace Cloudflare {
+    interface GlobalProps {
+      mainModule: typeof import('./index');
+      durableNamespaces: 'Counter';
+    }
+  }
 }
 
 // One counter per name, stored in the object's SQLite database.
@@ -22,9 +31,9 @@ export class Counter extends DurableObject<Env> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx): Promise<Response> {
     const name = new URL(request.url).pathname.slice(1) || 'world';
-    const n = await env.COUNTER.getByName(name).increment();
+    const n = await ctx.exports.Counter.getByName(name).increment();
     return new Response(`${env.GREETING}, ${name}! (visit ${n})\n`);
   },
 } satisfies ExportedHandler<Env>;

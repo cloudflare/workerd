@@ -9,10 +9,9 @@
 // ReadableStreamNativeSource in src/workerd/api/js-readable-stream.{h,c++},
 // which must conform; JS mocks in tests exercise the conduit
 // independently of it):
-//   - A native underlying source is an ordinary object carrying the
-//     kNativeSource marker as an OWN property whose value is the marker
-//     symbol itself. Marker presence ⇒ native ⇒ BYTE CAPABLE (there is
-//     no separate byte flag).
+//   - A native underlying source carries a V8-private kNativeSource
+//     marker whose value is true. Marker presence ⇒ native ⇒ BYTE CAPABLE
+//     (there is no separate byte flag).
 //   - The source implements the standard UnderlyingSource shape:
 //     pull(controller) and cancel(reason) as regular methods ARE the
 //     hooks, driven by the standard pull algorithm (pulling/pullAgain
@@ -189,30 +188,19 @@ const { createReadResult, filledView, unfilledView } =
 // ---------------------------------------------------------------------------
 // The construction-time handshake
 
-// A native underlying source carries this symbol as an own property whose
-// value is the symbol itself. The value is currently meaningless beyond
-// the identity check (reserved for future capability data).
-const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
+// These labels resolve V8-private slots, not JavaScript properties or symbols.
+const kNativeSource = 'kNativeSource';
 
-// Whether `object` carries `marker` (kNativeSource or kNativeSink) as its
-// own; `kind` names the object in the error. Throws on a malformed marker
-// — by the time the marker key is present at all, this is a contract
-// violation on the native/mock side, never a user-input condition.
-//
-// Hardening: OWN-property read via descriptor — a marker symbol planted
-// on Object.prototype must not convert every plain source or sink into a
-// native one, and a hostile accessor at the marker is never invoked (we
-// read desc.value; accessor-defined markers are ignored).
+// Private markers are not inherited and cannot invoke user property traps.
+// Only native code and bootstrap utilities can install them.
 function hasOwnMarker(
   object: object,
-  marker: symbol,
+  marker: string,
   kind: 'source' | 'sink'
 ): boolean {
-  const desc = ObjectGetOwnPropertyDescriptor(object, marker) as
-    PropertyDescriptor | undefined;
-  const value = desc?.value as unknown;
+  const value = utils.getPrivate(object, marker);
   if (value === undefined) return false;
-  if (value !== marker) {
+  if (value !== true) {
     throw new TypeError(`Invalid native stream ${kind} marker`);
   }
   return true;
@@ -220,10 +208,8 @@ function hasOwnMarker(
 
 // --- Writable-side markers (same conventions as the readable side) ---
 
-// A native underlying sink carries this symbol as an own property whose
-// value is the symbol itself. Detection uses own-property descriptor
-// read (inherited/accessor markers ignored). Unlike the source side,
-// native sinks need no new backend machinery — the standard
+// A native underlying sink carries the corresponding V8-private marker.
+// Unlike the source side, native sinks need no new backend machinery — the standard
 // WritableStream drives them via start/write/close/abort. The marker
 // exists for pipe dispatch (is the dest native?) and extraction (hand
 // the sink to C++ for the native+native fast path). Two extension hooks
@@ -235,29 +221,26 @@ function hasOwnMarker(
 //     write in flight) when the underlying connection is taken over
 //     (e.g. Socket startTls). Returns the error the stream's pending
 //     writes reject with.
-const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
+const kNativeSink = 'kNativeSink';
 
-// Extraction marker for native-backed WritableStream instances. Mirrors
-// kExtractNativeSource: own, non-enumerable property, shared extractor
-// function, one-shot via locked precondition. Writable has no
-// "disturbed" concept — locked is the only precondition.
-const kExtractNativeSink: symbol = utils.getApiSymbol('kExtractNativeSink');
+// Private extraction slot for native-backed WritableStream instances.
+// It holds a shared extractor function, one-shot via locked precondition.
+// Writable has no "disturbed" concept — locked is the only precondition.
+const kExtractNativeSink = 'kExtractNativeSink';
 
 function isNativeUnderlyingSink(sink: object): boolean {
   return hasOwnMarker(sink, kNativeSink, 'sink');
 }
 
-// The JS-to-C++ extraction marker. Installed on native-backed
-// ReadableStream instances as an own, non-enumerable, non-writable,
-// non-configurable property whose value is a shared extractor function.
-// The C++ TypeWrapper detects this property's presence to classify the
+// The JS-to-C++ extraction slot. Installed on native-backed
+// ReadableStream instances with utils.setPrivate; its value is a shared
+// extractor function. The C++ bridge detects the private slot to classify the
 // stream: present -> extract the native source for a pure C++ data
 // path; absent -> acquire a DrainingReader instead. The marker is KEPT
 // after extraction (presence means "native-backed", not "extractable");
 // the extractor's locked/disturbed preconditions make it one-shot. The
-// symbol comes from the runtime's API-symbol registry, unreachable from
-// user code.
-const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
+// slot is inaccessible to user code, including symbol reflection.
+const kExtractNativeSource = 'kExtractNativeSource';
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
 // sources.

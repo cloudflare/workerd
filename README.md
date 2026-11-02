@@ -111,8 +111,8 @@ bazel build --config=thin-lto //src/workerd/server:workerd
 For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
 config. `main` is bundled with esbuild, as Wrangler does. The supported fields
 are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
-`durable_objects`, `migrations`, `no_bundle` and `$schema`; any other field
-is an error.
+`durable_objects`, `exports`, `migrations`, `no_bundle` and `$schema`; any
+other field is an error.
 
 A simple "Hello World!" config file might look like:
 

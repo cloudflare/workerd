@@ -400,8 +400,9 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 /// [`Error::invalid_string_length`], a `RangeError` that is not pending. Every other conversion
 /// of a single value in this crate fails only with an error for which [`Error::is_pending`] is
 /// true: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when
-/// V8 throws or execution is terminating. A container passes on the first error from converting
-/// an element, whichever kind it is. A conversion implemented elsewhere may return any `Error`.
+/// V8 throws or an exception or a termination is already pending. A container passes on the
+/// first error from converting an element, whichever kind it is. A conversion implemented
+/// elsewhere may return any `Error`.
 ///
 /// A `#[jsg_method]`, property getter or wildcard property throws an error from converting its
 /// return value with [`Lock::throw_exception`], as it throws an `Err` the method returns. The
@@ -816,8 +817,8 @@ macro_rules! impl_integer {
 }
 
 /// Converts `value` with V8's `ToString` (which, unlike JavaScript's `String()`, rejects a
-/// Symbol). If the coercion throws, or execution is terminating, fails with an error for which
-/// [`Error::is_pending`] is true.
+/// Symbol). If the coercion throws, or an exception or a termination is already pending, fails
+/// with an error for which [`Error::is_pending`] is true.
 fn unwrap_string<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
@@ -833,8 +834,8 @@ fn unwrap_string<'s>(
 }
 
 /// Converts `value` with V8's `ToNumber` (which, unlike JavaScript's `Number()`, rejects a
-/// `BigInt`). If the coercion throws, or execution is terminating, fails with an error for which
-/// [`Error::is_pending`] is true.
+/// `BigInt`). If the coercion throws, or an exception or a termination is already pending, fails
+/// with an error for which [`Error::is_pending`] is true.
 fn unwrap_number<'s>(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<f64, Error> {
     v8::call_into_js(lock, |lock| {
         let mut result = 0.0;

@@ -320,6 +320,7 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
         "); } return sum; }"
         "function expected(n) { let sum=0.5; for(let i=0;i<n;++i) { sum += (",
         test.expected, "); } return sum; }", optimize);
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): benchmark: only reports what the setup threw.
     v8::TryCatch catcher(js.v8Isolate);
     auto script = check(v8::Script::Compile(ctx, js.str(code)));
     v8::Local<v8::Value> compiled;

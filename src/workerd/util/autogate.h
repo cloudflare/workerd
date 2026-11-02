@@ -122,12 +122,24 @@ namespace workerd::util {
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
   V(NODEJS_I18N_RUST)                                                                              \
+  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
+     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
+     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
+  V(TS_STDIO)                                                                                      \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)
+  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* Cross-context actions queued on an actor between events wait for its next request instead     \
+     of aborting it, and IoContext::run() without a current request fails with a typed error.      \
+     An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
+     actor's onHibernate event drops the actions queued before it. Also counts the copies of an    \
+     abort's reason its queued deliveries share as external memory, and queues at most one         \
+     request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
+     actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
+  V(DEFER_CROSS_CONTEXT_ACTIONS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
