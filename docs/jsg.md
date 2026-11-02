@@ -1310,6 +1310,47 @@ JSG_DECLARE_ISOLATE_TYPE(JsgServeIsolate,
 Each `EW_*_ISOLATE_TYPES` macro is defined in its respective header file as a shortcut.
 `JSG_DECLARE_ISOLATE_TYPE` should only be defined once in your application.
 
+### Splitting an isolate type across translation units
+
+Most of an isolate type's code is its resource types' template builders: the code that binds each
+type's methods, properties and nested types to JavaScript. With `JSG_DECLARE_ISOLATE_TYPE`, all of
+it is compiled, and optimized at link time, as part of the translation unit that creates the
+isolate. An application with many types can spread that code over several translation units
+instead, which compile, and are optimized at link time, in parallel.
+
+Declare the isolate type with `JSG_DECLARE_SPLIT_ISOLATE_TYPE`, in a header that each of those
+translation units includes. Each translation unit registers a share of the types' builders, and
+one of them registers the builder of each global object type the isolate creates contexts with:
+
+```cpp
+// my-isolate.h
+JSG_DECLARE_SPLIT_ISOLATE_TYPE(MyIsolate, MyGlobalObject, api::Foo, api::Bar, ...);
+void registerMyIsolateTemplates0();
+void registerMyIsolateTemplates1();
+
+// my-isolate-templates-0.c++
+void registerMyIsolateTemplates0() {
+  MyIsolate_TypeWrapper::registerTemplateShard<0, 2>();
+  MyIsolate_TypeWrapper::registerContextTemplate<MyGlobalObject>();
+}
+
+// my-isolate-templates-1.c++
+void registerMyIsolateTemplates1() {
+  MyIsolate_TypeWrapper::registerTemplateShard<1, 2>();
+}
+
+// my-isolate.c++
+void MyIsolate_TypeWrapper::registerTemplates() {
+  registerMyIsolateTemplates0();
+  registerMyIsolateTemplates1();
+}
+```
+
+JSG calls `registerTemplates()` once per process, when the first isolate of the type is created.
+Shard `i` of `N` registers the resource types at positions `i`, `i + N`, `i + 2N`, ... of the
+declaration, so the shards together cover every type, including ones added later. Building the
+template of a type that no shard registered throws.
+
 ---
 
 ## 7. Memory Management

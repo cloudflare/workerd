@@ -1826,6 +1826,11 @@ void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 void deleteTemporalGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
+// Whether TypeWrapper belongs to an isolate type declared with JSG_DECLARE_SPLIT_ISOLATE_TYPE.
+template <typename TypeWrapper>
+constexpr bool hasSplitResourceTemplates =
+    requires { requires TypeWrapper::splitResourceTemplates; };
+
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
 // JSG_RESOURCE_TYPE block).
 template <typename TypeWrapper, typename T>
@@ -2049,82 +2054,30 @@ class ResourceWrapper {
     v8::Global<v8::FunctionTemplate>& slot = isContext ? contextConstructor : memoizedConstructor;
     if (slot.IsEmpty()) {
       // Construct lazily.
-      v8::EscapableHandleScope scope(isolate);
-
-      v8::Local<v8::FunctionTemplate> constructor;
-      if constexpr (!isContext && HasConstructorMethod<T>) {
-        // Per Web IDL, constructor .length = number of required arguments.
-        constexpr int specCtorLength = requiredArgumentCount<TypeWrapper, decltype(T::constructor)>;
-        const int ctorLength = getSpecCompliantPropertyAttributes(isolate) ? specCtorLength : 0;
-        using Cc = ConstructorCallback<TypeWrapper, T>;
-        constructor = v8::FunctionTemplate::New(
-            isolate, &Cc::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), ctorLength);
-        isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(&Cc::callback));
+      v8::Local<v8::FunctionTemplate> result;
+      if constexpr (hasSplitResourceTemplates<TypeWrapper>) {
+        auto createTemplate = createTemplateFuncs[isContext];
+        KJ_ASSERT(createTemplate != nullptr,
+            "resource type's template was not registered with registerTemplateShard()",
+            typeName(typeid(T)), isContext);
+        result = createTemplate(*this, isolate);
       } else {
-        constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
-        isolateRegisterExternalReference(
-            isolate, reinterpret_cast<intptr_t>(&throwIllegalConstructor));
+        result = this->createTemplate<isContext>(isolate);
       }
-
-      auto prototype = constructor->PrototypeTemplate();
-
-      // Signatures protect our methods from being invoked with the wrong `this`.
-      auto signature = v8::Signature::New(isolate, constructor);
-
-      auto instance = constructor->InstanceTemplate();
-
-      instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
-
-      auto classname = v8StrIntern(isolate, typeName(typeid(T)));
-
-      if (getShouldSetToStringTag(isolate)) {
-        prototype->Set(
-            v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
-      }
-
-      // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
-      // detect a type that came from the runtime. That's obviously a bit problematic because
-      // Symbol.toStringTag is required for full compliance on standard web platform APIs.
-      // To help use cases where it is necessary to detect if a class is a runtime class, we
-      // will add a special symbol to the prototype of the class to indicate. Note that
-      // because this uses the global symbol registry user code could still mark their own
-      // classes with this symbol but that's unlikely to be a problem in any practical case.
-      auto internalMarker =
-          v8::Symbol::For(isolate, v8StrIntern(isolate, "cloudflare:internal-class"));
-      prototype->Set(internalMarker, internalMarker,
-          static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
-              v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
-
-      if (getShouldSetImmutablePrototype(isolate)) {
-        constructor->ReadOnlyPrototype();
-      }
-
-      constructor->SetClassName(classname);
-
-      static_assert(kj::isSameType<typename T::jsgThis, T>(),
-          "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
-
-      auto& typeWrapper = static_cast<TypeWrapper&>(*this);
-
-      ResourceTypeBuilder<TypeWrapper, T, isContext> builder(
-          typeWrapper, isolate, constructor, instance, prototype, signature);
-
-      if constexpr (isDetected<GetConfiguration, T>()) {
-        T::template registerMembers<decltype(builder), T>(builder, configuration);
-      } else {
-        T::template registerMembers<decltype(builder), T>(builder);
-      }
-
-      KJ_IF_SOME(handler, wildcardHandler) {
-        instance->SetHandler(handler);
-      }
-
-      auto result = scope.Escape(constructor);
       slot.Reset(isolate, result);
       return result;
     } else {
       return slot.Get(isolate);
     }
+  }
+
+  // In a split isolate type, makes this type's template builder available to getTemplate(). The
+  // translation unit that calls this compiles the builder: the code binding the type's members.
+  template <bool isContext = false>
+  static void registerTemplate() {
+    createTemplateFuncs[isContext] = [](ResourceWrapper& wrapper, v8::Isolate* isolate) {
+      return wrapper.template createTemplate<isContext>(isolate);
+    };
   }
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
@@ -2143,6 +2096,86 @@ class ResourceWrapper {
   Configuration configuration;
   v8::Global<v8::FunctionTemplate> memoizedConstructor;
   v8::Global<v8::FunctionTemplate> contextConstructor;
+
+  // In a split isolate type, the builders of the plain and context templates, which
+  // registerTemplate() registers.
+  using CreateTemplateFunc = v8::Local<v8::FunctionTemplate>(ResourceWrapper&, v8::Isolate*);
+  static inline CreateTemplateFunc* createTemplateFuncs[2] = {};
+
+  template <bool isContext>
+  v8::Local<v8::FunctionTemplate> createTemplate(v8::Isolate* isolate) {
+    v8::EscapableHandleScope scope(isolate);
+
+    v8::Local<v8::FunctionTemplate> constructor;
+    if constexpr (!isContext && HasConstructorMethod<T>) {
+      // Per Web IDL, constructor .length = number of required arguments.
+      constexpr int specCtorLength = requiredArgumentCount<TypeWrapper, decltype(T::constructor)>;
+      const int ctorLength = getSpecCompliantPropertyAttributes(isolate) ? specCtorLength : 0;
+      using Cc = ConstructorCallback<TypeWrapper, T>;
+      constructor = v8::FunctionTemplate::New(
+          isolate, &Cc::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), ctorLength);
+      isolateRegisterExternalReference(isolate, reinterpret_cast<intptr_t>(&Cc::callback));
+    } else {
+      constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+      isolateRegisterExternalReference(
+          isolate, reinterpret_cast<intptr_t>(&throwIllegalConstructor));
+    }
+
+    auto prototype = constructor->PrototypeTemplate();
+
+    // Signatures protect our methods from being invoked with the wrong `this`.
+    auto signature = v8::Signature::New(isolate, constructor);
+
+    auto instance = constructor->InstanceTemplate();
+
+    instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+
+    auto classname = v8StrIntern(isolate, typeName(typeid(T)));
+
+    if (getShouldSetToStringTag(isolate)) {
+      prototype->Set(
+          v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
+    }
+
+    // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
+    // detect a type that came from the runtime. That's obviously a bit problematic because
+    // Symbol.toStringTag is required for full compliance on standard web platform APIs.
+    // To help use cases where it is necessary to detect if a class is a runtime class, we
+    // will add a special symbol to the prototype of the class to indicate. Note that
+    // because this uses the global symbol registry user code could still mark their own
+    // classes with this symbol but that's unlikely to be a problem in any practical case.
+    auto internalMarker =
+        v8::Symbol::For(isolate, v8StrIntern(isolate, "cloudflare:internal-class"));
+    prototype->Set(internalMarker, internalMarker,
+        static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
+            v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
+
+    if (getShouldSetImmutablePrototype(isolate)) {
+      constructor->ReadOnlyPrototype();
+    }
+
+    constructor->SetClassName(classname);
+
+    static_assert(kj::isSameType<typename T::jsgThis, T>(),
+        "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
+
+    auto& typeWrapper = static_cast<TypeWrapper&>(*this);
+
+    ResourceTypeBuilder<TypeWrapper, T, isContext> builder(
+        typeWrapper, isolate, constructor, instance, prototype, signature);
+
+    if constexpr (isDetected<GetConfiguration, T>()) {
+      T::template registerMembers<decltype(builder), T>(builder, configuration);
+    } else {
+      T::template registerMembers<decltype(builder), T>(builder);
+    }
+
+    KJ_IF_SOME(handler, wildcardHandler) {
+      instance->SetHandler(handler);
+    }
+
+    return scope.Escape(constructor);
+  }
 
   void setupJavascript(jsg::Lock& js) {
     JsSetup<TypeWrapper, T> setup(js, js.v8Context());
