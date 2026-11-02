@@ -19,6 +19,12 @@
 //!   write from the old owner lands where nothing reads it.
 //! - `alarms/<node>/<time>/<namespace>/<actor>/<seq>`: an alarm `node`
 //!   wakes `actor` for no later than `time` (`alarms.rs`).
+//! - `deploy/catalog.json`: the current version of every named deployment,
+//!   which each node serves beside its own config; replaced only by a
+//!   conditional write, so a deploy publishes atomically (`deploy.rs`).
+//! - `deploy/<name>/<version>/{config.bin,manifest.json}`: one immutable
+//!   version of a deployment, its services as an encoded `Config`; `version`
+//!   is the SHA-256 of `config.bin` (`deploy.rs`, `compose.rs`).
 //!
 //! `<namespace>` is a hash of the namespace's `uniqueKey`, and `<actor>` the
 //! actor ID's hex, so no key's length depends on a name.
@@ -36,6 +42,8 @@ mod alarms;
 mod bucket;
 mod capture;
 pub mod cluster;
+pub mod compose;
+pub mod deploy;
 #[cfg(test)]
 mod dst;
 mod http;
@@ -93,6 +101,10 @@ pub enum Error {
     Log(#[from] capnp::Error),
     #[error("log: {0}")]
     Schema(#[from] capnp::NotInSchema),
+    /// A deployment, or the catalog naming it, is refused: one line per
+    /// reason.
+    #[error("{0}")]
+    Deploy(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

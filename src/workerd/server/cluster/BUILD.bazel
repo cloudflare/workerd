@@ -17,6 +17,7 @@ wd_rust_crate(
     visibility = ["//src/workerd/server:__subpackages__"],
     deps = [
         ":frames_capnp_rust",
+        "//src/workerd/server:workerd_capnp_rust",
         "//src/workerd/server/cluster/logic:cluster-logic",
         "@crates_vendor//:base64",
         "@crates_vendor//:bytes",
