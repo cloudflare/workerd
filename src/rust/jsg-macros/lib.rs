@@ -142,6 +142,15 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl<'s> jsg::ToJS<'s> for #name {
             fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
+                jsg::ToJS::to_js_with_creator(self, lock, None)
+            }
+
+            // As C++ JSG's `JSG_STRUCT` does, passes `creator` on to the fields.
+            fn to_js_with_creator(
+                self,
+                lock: &mut jsg::Lock<'s>,
+                creator: Option<jsg::v8::Local<'s, jsg::v8::Object>>,
+            ) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
                 #to_js_body
             }
         }
@@ -213,13 +222,16 @@ fn to_js_fn_body(
     // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
     let data_properties = fields.iter().map(|(field_name, js_name, _)| {
         quote! {
-            properties.push((#js_name, jsg::ToJS::to_js(this.#field_name, lock)?));
+            properties.push((
+                #js_name,
+                jsg::ToJS::to_js_with_creator(this.#field_name, lock, creator)?,
+            ));
         }
     });
     // Set() skips an absent optional field rather than setting it to undefined.
     let field_sets = fields.iter().map(|(field_name, js_name, present)| {
         let set = quote! {
-            let value = jsg::ToJS::to_js(value, lock)?;
+            let value = jsg::ToJS::to_js_with_creator(value, lock, creator)?;
             obj.set(lock, #js_name, value)?;
         };
         if let Some(present) = present {
@@ -235,6 +247,8 @@ fn to_js_fn_body(
     });
     quote! {
         let this = self;
+        // Unused by a struct without public fields.
+        let _ = creator;
         if lock.feature_flags().get_fast_jsg_struct() {
             // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
             // no setter a script put on Object.prototype runs.
@@ -396,26 +410,7 @@ fn callback_with_instance(
         })
         .unzip();
 
-    // Check if return type is Result<T, E>
-    let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
-
-    let conversion = if is_result {
-        quote! {
-            match result {
-                Ok(value) => jsg::ToJS::to_js(value, lock),
-                Err(err) => Err(err.into()),
-            }
-        }
-    } else {
-        quote! { jsg::ToJS::to_js(result, lock) }
-    };
-    let result_handling = quote! {
-        let converted: ::std::result::Result<_, jsg::Error> = #conversion;
-        match converted {
-            Ok(value) => args.set_return_value(value),
-            Err(err) => lock.throw_exception(&err),
-        }
-    };
+    let result_handling = result_handling(fn_sig, receiver);
 
     let invocation = invocation(fn_name, receiver, receiver_check, &arg_exprs);
 
@@ -446,6 +441,40 @@ fn callback_with_instance(
         #(#callbacks)*
     }
     .into()
+}
+
+/// The statements that convert the call's `result` and return it to JavaScript, or throw what
+/// the method or the conversion failed with.
+fn result_handling(fn_sig: &syn::Signature, receiver: Receiver) -> proc_macro2::TokenStream {
+    // Check if return type is Result<T, E>
+    let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
+
+    // Like C++ JSG, an instance method or property passes its receiver as the `creator` of the
+    // value it returns, which a promise keeps alive until it settles; a static one passes none.
+    let creator = match receiver {
+        Receiver::SelfRef | Receiver::This => {
+            quote! { jsg::v8::Local::<jsg::v8::Object>::try_from(args.this()).ok() }
+        }
+        Receiver::None => quote! { None },
+    };
+    let conversion = if is_result {
+        quote! {
+            match result {
+                Ok(value) => jsg::ToJS::to_js_with_creator(value, lock, creator),
+                Err(err) => Err(err.into()),
+            }
+        }
+    } else {
+        quote! { jsg::ToJS::to_js_with_creator(result, lock, creator) }
+    };
+    quote! {
+        let creator: Option<jsg::v8::Local<'_, jsg::v8::Object>> = #creator;
+        let converted: ::std::result::Result<_, jsg::Error> = #conversion;
+        match converted {
+            Ok(value) => args.set_return_value(value),
+            Err(err) => lock.throw_exception(&err),
+        }
+    }
 }
 
 /// The statements that call `fn_name` with `arg_exprs` and bind the call's `result`: on the
