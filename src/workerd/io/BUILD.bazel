@@ -648,6 +648,11 @@ kj_test(
 )
 
 wd_test(
+    src = "caught-exception-reset-test.wd-test",
+    data = ["caught-exception-reset-test.js"],
+)
+
+wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],

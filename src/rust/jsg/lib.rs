@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -239,8 +238,8 @@ impl<'s> FromJS<'s> for Error {
     /// Otherwise, converts the value to a string for the message.
     ///
     /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or execution is terminating, this fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// If it throws, or an exception or a termination is already pending, this fails with an
+    /// error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
@@ -303,7 +302,11 @@ impl Error {
 
     /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
     /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
-    pub(crate) fn pending() -> Self {
+    ///
+    /// Outside this crate, it is for FFI shims that leave an exception pending and return an
+    /// empty result, as C++ code that calls into JavaScript does.
+    #[must_use]
+    pub fn pending() -> Self {
         Self {
             pending: true,
             ..Self::new_internal_error("a JavaScript exception is pending")
@@ -459,15 +462,14 @@ impl Error {
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// `name` is `Error`, the type JavaScript gets (`Lock::throw_internal_error()` -> C++
+    /// `makeInternalError()`).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::TypeError,
+            name: ExceptionType::Error,
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -696,20 +698,6 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
     }
 
-    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
-    /// after the current callback has returned, so they must be `'static`.
-    #[expect(
-        clippy::unimplemented,
-        reason = "`await_io` is not implemented for Rust resources yet"
-    )]
-    pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
-    where
-        F: Future<Output = I> + 'static,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
-    {
-        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
-    }
-
     pub(crate) fn realm(&mut self) -> &mut Realm {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
@@ -767,8 +755,8 @@ impl<'s> Lock<'s> {
             return;
         }
         if self.is_execution_terminating() {
-            // `isolate_throw_exception` would throw nothing, and creating the exception while
-            // execution is terminating fails a V8 debug check.
+            // `isolate_throw_exception` would throw nothing, so there is no point in creating
+            // the exception.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
@@ -890,8 +878,8 @@ impl<'s> Lock<'s> {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Creating the exception while execution is terminating fails a V8 debug check, and
-            // nothing could be rejected with it.
+            // Nothing could be rejected with the exception, so it is not created. (Creating it
+            // would be safe: creating an error object takes no context.)
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);

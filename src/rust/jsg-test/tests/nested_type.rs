@@ -57,7 +57,7 @@ impl Outer {
 fn set_outer(lock: &mut jsg::Lock, ctx: &EvalContext) {
     let outer = jsg::Rc::new(Outer {}).to_js(lock).unwrap();
     ctx.set_global(lock, "outer", outer);
-    let constructor = jsg::resource::function_template_of::<Outer>(lock);
+    let constructor = jsg::resource::function_template_of::<Outer>(lock).unwrap();
     ctx.set_global(lock, "Outer", constructor);
 }
 
@@ -101,7 +101,7 @@ fn nested_type_is_type_constructor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
-        let inner = jsg::resource::function_template_of::<Inner>(lock);
+        let inner = jsg::resource::function_template_of::<Inner>(lock).unwrap();
         ctx.set_global(lock, "Inner", inner);
         let result: String = ctx
             .eval(
@@ -151,7 +151,7 @@ fn nested_type_with_name() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
-        let renamed = jsg::resource::function_template_of::<Renamed>(lock);
+        let renamed = jsg::resource::function_template_of::<Renamed>(lock).unwrap();
         ctx.set_global(lock, "RenamedInner", renamed);
         let result: String = ctx
             .eval(
@@ -187,7 +187,7 @@ fn nested_type_with_name_first_reached_by_name() {
 fn nested_type_created_before_outer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let inner = jsg::resource::function_template_of::<Inner>(lock);
+        let inner = jsg::resource::function_template_of::<Inner>(lock).unwrap();
         ctx.set_global(lock, "Inner", inner);
         set_outer(lock, ctx);
         let result: String = ctx
@@ -242,7 +242,7 @@ fn nested_type_cycle_panics() {
         };
         for _ in 0..2 {
             let payload = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                jsg::resource::function_template_of::<SelfNesting>(lock);
+                jsg::resource::function_template_of::<SelfNesting>(lock).unwrap();
             }))
             .expect_err("a type nesting itself must panic");
             assert_eq!(
@@ -254,7 +254,7 @@ fn nested_type_cycle_panics() {
             );
 
             let payload = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                jsg::resource::function_template_of::<CycleA>(lock);
+                jsg::resource::function_template_of::<CycleA>(lock).unwrap();
             }))
             .expect_err("types nesting each other must panic");
             assert_eq!(

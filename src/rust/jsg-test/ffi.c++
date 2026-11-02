@@ -4,6 +4,8 @@
 
 #include "ffi.h"
 
+#include "cpp-interop.h"
+
 #include <workerd/io/features.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
@@ -36,7 +38,13 @@ namespace workerd {
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
-JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+JSG_DECLARE_ISOLATE_TYPE(TestIsolate,
+    TestContext,
+    cpp_interop_test::TestCppGreeter,
+    cpp_interop_test::TestCppBase,
+    cpp_interop_test::TestCppDerived,
+    cpp_interop_test::TestCppHolder,
+    jsg::TypeWrapperExtension<rust::jsg_cpp::RustResourceWrapper>);
 
 namespace rust::jsg_test {
 
@@ -90,6 +98,7 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
 namespace {
 EvalResult runScript(
     v8::Isolate* v8Isolate, v8::Local<v8::Context> ctx, v8::Local<v8::Script> script) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
   v8::TryCatch catcher(v8Isolate);
 
   v8::MaybeLocal<v8::Value> value = script->Run(ctx);
@@ -128,6 +137,28 @@ EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResou
   return runScript(v8Isolate, ctx, script);
 }
 
+EvalResult EvalContext::eval_with_caught_exception(::rust::Str code) const {
+  v8::Isolate::Scope isolateScope(v8Isolate);
+  v8::Local<v8::Context> ctx = v8Context.Get(v8Isolate);
+  v8::Context::Scope contextScope(ctx);
+
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): holds what it caught, for a test.
+  v8::TryCatch catcher(v8Isolate);
+  auto thrower = ::workerd::jsg::check(
+      v8::Script::Compile(ctx, v8::String::NewFromUtf8Literal(v8Isolate, "throw new Error()")));
+  KJ_ASSERT(thrower->Run(ctx).IsEmpty());
+  KJ_ASSERT(catcher.HasCaught());
+
+  v8::Local<v8::String> source = ::workerd::jsg::check(v8::String::NewFromUtf8(
+      v8Isolate, code.data(), v8::NewStringType::kNormal, static_cast<int>(code.size())));
+  auto script = ::workerd::jsg::check(v8::Script::Compile(ctx, source));
+  v8::MaybeLocal<v8::Value> value = script->Run(ctx);
+  return EvalResult{
+    .success = !value.IsEmpty(),
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
+}
+
 namespace {
 // Keeps the callbacks of the builtin modules Rust registers.
 struct RecordingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistry {
@@ -153,6 +184,7 @@ EvalResult EvalContext::call_builtin_module(
 
   v8::Isolate::Scope isolateScope(v8Isolate);
   v8::Context::Scope contextScope(v8Context.Get(v8Isolate));
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): test harness: only returns what was thrown.
   v8::TryCatch catcher(v8Isolate);
   auto value = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(callback(v8Isolate));
   bool success = !value.IsEmpty();

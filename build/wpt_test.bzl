@@ -36,8 +36,11 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
        paths to modules needed to run the test: generated test suite, test config
        file, WPT test scripts, associated JSON resources.
 
-    extra_wpt_directories lists further WPT modules whose JS files the tests load by absolute path
-    (e.g. `// META: script=/wasm/jsapi/assertions.js`). They are bound under that absolute path.
+    extra_wpt_directories lists further WPT modules whose JS and JSON files the tests load from
+    outside wpt_directory, by absolute path (e.g. `// META: script=/wasm/jsapi/assertions.js`) or
+    by a relative path that leaves wpt_directory (e.g.
+    `fetch('../../../fetch/data-urls/resources/base64.json')`). They are bound under their
+    absolute path.
 
     extra_wpt_files lists individual WPT .wasm resources that tests fetch by absolute path (e.g.
     `fetch('/wasm/incrementer.wasm')`). They are bound under that absolute path as data, which the
@@ -355,7 +358,7 @@ _wpt_wd_test_gen = rule(
         "wpt_resources": attr.label(),
         # Target specifying the WPT interfaces directory module
         "wpt_interfaces": attr.label(),
-        # Further WPT directory modules whose JS files are bound by absolute path
+        # Further WPT directory modules whose JS and JSON files are bound by absolute path
         "extra_wpt_directories": attr.label_list(),
         # Individual WPT .wasm resources bound as data by absolute path
         "extra_wpt_files": attr.label_list(allow_files = [".wasm"]),
@@ -482,18 +485,25 @@ def generate_common_bindings(wd_test_file, base, files):
 
 def generate_absolute_bindings(wd_test_file, module_info, files):
     """
-    Generates a text binding for each JS file in a WPT module, named by its absolute path within
-    the WPT tree (e.g. /wasm/jsapi/assertions.js), as tests refer to them in META scripts.
+    Generates a binding for each JS and JSON file in a WPT module, named by its absolute path
+    within the WPT tree (e.g. /wasm/jsapi/assertions.js).
+
+    - JS files: text binding to allow code to be evaluated
+    - JSON files: JSON binding to allow test code to fetch resources
     """
 
     result = []
 
     for file in files:
-        if file.extension != "js":
+        if file.extension == "js":
+            binding_type = "text"
+        elif file.extension == "json":
+            binding_type = "json"
+        else:
             continue
 
         relative_path = module_relative_path(module_info.base, file)
-        result.append('(name = "/{}/{}", text = embed "{}")'.format(module_info.path, relative_path, wd_test_relative_path(wd_test_file, file)))
+        result.append('(name = "/{}/{}", {} = embed "{}")'.format(module_info.path, relative_path, binding_type, wd_test_relative_path(wd_test_file, file)))
 
     return ",\n".join(result)
 
@@ -671,14 +681,17 @@ def relative_path(from_path, to_path):
 
     length = from_len if from_len < to_len else to_len
     last_common_sep = -1
-    i = 0
 
-    for i in range(length):
+    # Unlike a JS for loop, a Starlark loop variable doesn't advance past the last element, so
+    # count matching characters explicitly. i == length means one path is a prefix of the other.
+    i = 0
+    for _ in range(length):
         from_ch = from_path[from_start + i]
         if from_ch != to_path[to_start + i]:
             break
         elif from_ch == "/":
             last_common_sep = i
+        i += 1
 
     # Compare paths to find the longest common path from root
     if i == length:
@@ -692,15 +705,15 @@ def relative_path(from_path, to_path):
                 # We get here if `from` is the root
                 # For example: from='/'; to='/foo'
                 return to_path[to_start + i:]
-    elif from_len > length:
-        if from_path[from_start + i] == "/":
-            # We get here if `to` is the exact base path for `from`.
-            # For example: from='/foo/bar/baz'; to='/foo/bar'
-            last_common_sep = i
-        elif i == 0:
-            # We get here if `to` is the root.
-            # For example: from='/foo/bar'; to='/'
-            last_common_sep = 0
+        elif from_len > length:
+            if from_path[from_start + i] == "/":
+                # We get here if `to` is the exact base path for `from`.
+                # For example: from='/foo/bar/baz'; to='/foo/bar'
+                last_common_sep = i
+            elif i == 0:
+                # We get here if `to` is the root.
+                # For example: from='/foo/bar'; to='/'
+                last_common_sep = 0
 
     out = ""
 

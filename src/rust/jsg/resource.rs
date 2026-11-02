@@ -405,8 +405,8 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// # Errors
 ///
-/// If V8 fails to create the wrapper, or execution is terminating, the exception stays pending
-/// and the error is one for which [`Error::is_pending`] is true.
+/// If V8 fails to create the wrapper, or an exception or a termination is already pending, the
+/// exception stays pending and the error is one for which [`Error::is_pending`] is true.
 ///
 /// # Panics
 /// Panics if the resource already has a JavaScript wrapper in another isolate. The `Rc` is
@@ -435,9 +435,15 @@ pub fn wrap<'s, R: Resource + 'static>(
 ///
 /// Lazily creates and caches the `FunctionTemplate` in the `Realm` on first call.
 /// The returned function can be exposed as a global (e.g., `ctx.set_global("MyClass", func)`).
+///
+/// # Errors
+///
+/// If an exception or a termination is pending, fails with an error for which
+/// [`Error::is_pending`] is true, as [`v8::Global::<v8::FunctionTemplate>::as_local_function`]
+/// does.
 pub fn function_template_of<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
-) -> v8::Local<'s, v8::Function> {
+) -> Result<v8::Local<'s, v8::Function>, Error> {
     let constructor = lock.realm().get_constructor::<R>().as_ffi();
     // SAFETY: the constructor is a function template of the lock's isolate, which the Realm's
     // template cache keeps alive.

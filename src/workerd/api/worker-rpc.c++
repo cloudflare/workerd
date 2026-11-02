@@ -2326,6 +2326,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
           auto invocationResult = [&]() -> InvocationResult {
             jsg::Value error = nullptr;
             {
+              // NOLINTNEXTLINE(custom-raw-v8-trycatch): its scope ends before the error is used.
               v8::TryCatch tryCatch(js.v8Isolate);
               try {
                 KJ_IF_SOME(envCtx, targetInfo.envCtx) {

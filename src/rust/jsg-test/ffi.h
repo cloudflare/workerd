@@ -29,6 +29,9 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Catches an exception with a `v8::TryCatch` and then, without resetting it, evaluates `code`,
+  // as C++ that runs JavaScript while its TryCatch holds a caught exception does.
+  EvalResult eval_with_caught_exception(::rust::Str code) const;
   // Has `registerModules` add builtin modules, then calls the callback of the one named
   // `specifier`, as importing it does. Returns its exports, or the exception it threw.
   EvalResult call_builtin_module(

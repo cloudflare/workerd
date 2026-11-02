@@ -22,11 +22,40 @@ namespace workerd::io_context {
 // IoContext::tryGetCurrentId(), as a uint64_t.
 kj::Maybe<uint64_t> io_context_try_current_id();
 
+// IoContext::requireCurrentOrThrowJs(): throws the error for an I/O object used by another
+// request unless `id` identifies the current IoContext.
+void io_context_require_current(uint64_t id);
+
 // IoContext::now(), in nanoseconds since the Unix epoch.
 int64_t io_context_now(uint64_t id);
 
 // IoContext::writeLogfwdr(), for a serialized Cap'n Proto message. In a Durable Object, the
 // write waits for the output gate, as AnalyticsEngine::writeDataPoint() does.
 void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const uint8_t> message);
+
+// Rust types, defined in ffi.rs.
+struct IoFuture;
+struct IoCallback;
+struct IoOwnedSlot;
+
+// IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
+// event, then runs `callback` with its output in IoContext::run(), in the critical section and
+// async context frame that are current when this is called. Both are dropped if the IoContext is
+// destroyed first. If `future` panics, or `callback` fails or panics, the task fails.
+void io_context_await_io_and_run(
+    uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback);
+
+// Holds what IoContext::addObject() returns for a Rust value, which the IoContext then destroys
+// when it is destroyed, unless this is destroyed first.
+class IoOwnedObject {
+ public:
+  explicit IoOwnedObject(IoOwn<::rust::Box<IoOwnedSlot>> object): object(kj::mv(object)) {}
+
+ private:
+  IoOwn<::rust::Box<IoOwnedSlot>> object;
+};
+
+// IoContext::addObject() for `slot`.
+kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
 
 }  // namespace workerd::io_context

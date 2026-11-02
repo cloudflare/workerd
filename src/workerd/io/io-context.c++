@@ -1756,6 +1756,7 @@ void IoContext::runImpl(Runnable& runnable,
       // Run microtask checkpoint with an active IoContext
       {
         // Running the microtask queue can itself trigger a pending exception in the isolate.
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
         v8::TryCatch tryCatch(workerLock.getIsolate());
 
         js.runMicrotasks();
@@ -1795,6 +1796,7 @@ void IoContext::runImpl(Runnable& runnable,
           // It is possible that a microtask got enqueued during pumpMsgLoop execution
           // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
           // without an active IoContext
+          // NOLINTNEXTLINE(custom-raw-v8-trycatch): catches only a termination, and resets it.
           v8::TryCatch tryCatch(workerLock.getIsolate());
 
           js.runMicrotasks();
@@ -1823,6 +1825,7 @@ void IoContext::runImpl(Runnable& runnable,
           v8::Isolate::kFullGarbageCollection);
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): reset before the exception is used.
     v8::TryCatch tryCatch(workerLock.getIsolate());
     try {
       runnable.run(workerLock);
@@ -1850,6 +1853,11 @@ void IoContext::runImpl(Runnable& runnable,
           JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
         } else {
           auto jsException = tryCatch.Exception();
+          auto jsMessage = tryCatch.Message();
+          // Reset, so that the exception isn't pending while it is logged and tunneled: that reads
+          // its properties, whose getters may call into Rust JSG, which fails while an exception
+          // is pending.
+          tryCatch.Reset();
 
           // TODO(someday): We log "uncaught exception" here whenever throwing from JS to C++.
           //   However, the C++ code calling us may still catch the exception and do its own logging,
@@ -1860,7 +1868,7 @@ void IoContext::runImpl(Runnable& runnable,
           //   useful. We should improve the tunneling to include stack traces and ensure that all
           //   consumers do in fact log exceptions, then we can remove this.
           workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
-              jsg::JsValue(jsException), jsg::JsMessage(tryCatch.Message()));
+              jsg::JsValue(jsException), jsg::JsMessage(jsMessage));
 
           jsg::throwTunneledException(workerLock.getIsolate(), jsException);
         }

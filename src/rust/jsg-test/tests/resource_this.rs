@@ -143,9 +143,9 @@ impl Queue {
 /// `Local` in the test's handle scope keeps a wrapper alive; the tests' scripts likewise end in
 /// `undefined` where their completion value would be one.
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let task = jsg::resource::function_template_of::<Task>(lock);
+    let task = jsg::resource::function_template_of::<Task>(lock).unwrap();
     ctx.set_global(lock, "Task", task);
-    let queue = jsg::resource::function_template_of::<Queue>(lock);
+    let queue = jsg::resource::function_template_of::<Queue>(lock).unwrap();
     ctx.set_global(lock, "Queue", queue);
     ctx.eval_raw(
         lock,
