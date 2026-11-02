@@ -27,7 +27,7 @@ import { connect, createServer } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -45,6 +45,19 @@ assert(
 );
 
 const CONTROL_FD = 3;
+
+// Bazel runs this file in several shards (see BUILD.bazel), each of which runs
+// every TEST_TOTAL_SHARDS-th test. Touching the status file tells Bazel that
+// the test supports sharding.
+const SHARD_COUNT = Number(env.TEST_TOTAL_SHARDS ?? 1);
+const SHARD_INDEX = Number(env.TEST_SHARD_INDEX ?? 0);
+if (env.TEST_SHARD_STATUS_FILE !== undefined) {
+  await writeFile(env.TEST_SHARD_STATUS_FILE, '');
+}
+let testCount = 0;
+function test(...args) {
+  if (testCount++ % SHARD_COUNT === SHARD_INDEX) nodeTest(...args);
+}
 
 // Node's SIGTERM is TerminateProcess on Windows, so a node cannot drain there.
 const SIGTERM_DRAINS = {
