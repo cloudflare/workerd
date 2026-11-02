@@ -47,6 +47,7 @@
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
+#include <v8-metrics.h>
 #include <v8-profiler.h>
 #include <v8-wasm.h>
 
@@ -644,8 +645,11 @@ struct Worker::Isolate::Impl {
       __atomic_add_fetch(&impl.lockSuccessCount, 1, __ATOMIC_RELAXED);
       metrics.locked();
 
-      // We record the current lock so our GC prologue/epilogue callbacks can report GC time via
-      // Jaeger tracing.
+      // Start measuring the garbage collection this lock pays for. We use only this window of
+      // V8's LongTaskStats; nothing else may call Reset().
+      v8::metrics::LongTaskStats::Reset(lock->v8Isolate);
+
+      // We record the current lock so our GC prologue/epilogue callbacks can reach it.
       KJ_DASSERT(impl.currentLock == kj::none, "Isolate lock taken recursively");
       impl.currentLock = *this;
 
@@ -676,6 +680,7 @@ struct Worker::Isolate::Impl {
         // The isolate asked this lock to report the stats when it released. Let's do it.
         limitEnforcer.reportMetrics(impl.metrics);
       }
+      reportGc();
       impl.currentLock = kj::none;
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
@@ -705,14 +710,15 @@ struct Worker::Isolate::Impl {
     }
 
     void gcPrologue() {
-      metrics.gcPrologue();
       // Filter out tracked WASM instance entries where the instance has been
       // garbage-collected (weak instanceRef is empty), allowing the linear memory
       // to be reclaimed.
       limitEnforcer.getTrackedWasmInstances().filter(*lock);
     }
-    void gcEpilogue() {
-      metrics.gcEpilogue();
+    void gcEpilogue(v8::GCType type) {
+      if (type == v8::kGCTypeMarkSweepCompact) {
+        ++fullGcCount;
+      }
     }
 
     // Call limitEnforcer.exitJs(), and also schedule to call limitEnforcer.reportMetrics()
@@ -721,10 +727,21 @@ struct Worker::Isolate::Impl {
     bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
 
    private:
+    // Reports to `metrics` the garbage collection performed since the lock was taken.
+    void reportGc() {
+      auto stats = v8::metrics::LongTaskStats::Get(lock->v8Isolate);
+      int64_t gcUs = stats.gc_young_wall_clock_duration_us +
+          stats.gc_full_atomic_wall_clock_duration_us +
+          stats.gc_full_incremental_wall_clock_duration_us;
+      metrics.reportGc(gcUs * kj::MICROSECONDS, fullGcCount);
+    }
+
     const Impl& impl;
     IsolateObserver::LockRecord metrics;
     ThreadProgressCounter progressCounter;
     bool shouldReportIsolateMetrics = false;
+    // Full (mark-compact) collections finished while this lock was held.
+    uint fullGcCount = 0;
     const Api* oldCurrentApi;
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
@@ -1285,8 +1302,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // as well just throw the switch to "moderate" right away.
     lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
-    // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
-    // "request_context" Jaeger span.
+    // Register GC prologue and epilogue callbacks so that the current lock can release tracked
+    // WebAssembly instances and count the full collections it pays for.
     lock->v8Isolate->AddGCPrologueCallback(
         [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
       // We assume that a v8::Locker is alive during GC.
@@ -1304,7 +1321,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       KJ_DASSERT(v8::Locker::IsLocked(isolate));
       auto& self = *reinterpret_cast<Isolate*>(data);
       KJ_IF_SOME(currentLock, self.impl->currentLock) {
-        currentLock.gcEpilogue();
+        currentLock.gcEpilogue(type);
       }
     }, this);
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
