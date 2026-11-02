@@ -448,6 +448,7 @@ wd_test(
 
 wd_test(
     src = "otlp-tracing-test.wd-test",
+    args = ["--experimental"],
     data = [
         "otlp-tracing-test.js",
         "otlp-tracing-test-collector.js",
