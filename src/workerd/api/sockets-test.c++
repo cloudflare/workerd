@@ -94,12 +94,17 @@ kj::Promise<size_t> turnTimeout(int n) {
 
 struct AsyncSendState {
   bool called = false;
+  bool closed = false;
   kj::Array<kj::byte> observed;
 };
 
 class AsyncObservingDatagramChannel final: public DatagramChannel {
  public:
   explicit AsyncObservingDatagramChannel(kj::Weak<AsyncSendState> state): state(kj::mv(state)) {}
+
+  void close() override {
+    KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed").closed = true;
+  }
 
   kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
     return kj::Promise<kj::Maybe<kj::Array<kj::byte>>>(kj::NEVER_DONE);
@@ -145,13 +150,14 @@ KJ_TEST("Socket protocol property requires experimental flag") {
   enabledFlags.setStreamsJavaScriptControllers(true);
   enabledFlags.setWorkerdExperimental(true);
   KJ_EXPECT(socketHasProtocolProperty(enabledFlags.asReader()));
+
+  enabledFlags.setWorkerdExperimental(false);
+  enabledFlags.setOutboundUdpSockets(true);
+  KJ_EXPECT(socketHasProtocolProperty(enabledFlags.asReader()));
 }
 
-KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-  TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
+void runDatagramSnapshotTest(CompatibilityFlags::Reader flags) {
+  TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags});
   kj::Pin<AsyncSendState> state;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -159,8 +165,11 @@ KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
         env.js, kj::heap<AsyncObservingDatagramChannel>(state.addWeak()), kj::none, kj::none);
 
     auto data = jsg::JsUint8Array::create(env.js, "before"_kjb);
-    auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<Datagram>>());
-    auto chunk = jsg::JsValue(handler.wrap(env.js, env.js.alloc<Datagram>(env.js, data)));
+    auto chunk = [&]() -> jsg::JsValue {
+      if (flags.getOutboundUdpSockets()) return data;
+      auto& handler = KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+      return jsg::JsValue(handler.wrap(env.js, env.js.alloc<Datagram>(env.js, data)));
+    }();
     auto writePromise = socket->getWritable(env.js).writeForTest(env.js, chunk);
     env.js.runMicrotasks();
     KJ_REQUIRE(state->called);
@@ -170,6 +179,84 @@ KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
   });
 
   KJ_EXPECT(state->observed.asPtr() == "before"_kjb);
+}
+
+KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
+  for (bool rawValues: {false, true}) {
+    for (bool tsStreams: {false, true}) {
+      capnp::MallocMessageBuilder flagsMessage;
+      auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+      flags.setStreamsJavaScriptControllers(true);
+      flags.setOutboundUdpSockets(rawValues);
+      flags.setTypeScriptImplementedStreams(tsStreams);
+      runDatagramSnapshotTest(flags.asReader());
+    }
+  }
+}
+
+KJ_TEST("UDP close releases the channel after a rejected write") {
+  for (bool tsStreams: {false, true}) {
+    capnp::MallocMessageBuilder flagsMessage;
+    auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setOutboundUdpSockets(true);
+    flags.setTypeScriptImplementedStreams(tsStreams);
+    TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
+    kj::Pin<AsyncSendState> state;
+    fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+        [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto socket = setupDatagramSocket(
+          env.js, kj::heap<AsyncObservingDatagramChannel>(state.addWeak()), kj::none, kj::none);
+      socket->getWritable(env.js)
+          .writeForTest(env.js, env.js.str("invalid"_kj))
+          .markAsHandled(env.js);
+      env.js.runMicrotasks();
+      return env.context.awaitJs(env.js, socket->close(env.js)).then([state = state.addWeak()]() {
+        KJ_EXPECT(KJ_REQUIRE_NONNULL(state.tryGet()).closed);
+      });
+    }));
+  }
+}
+
+KJ_TEST("UDP writes on an open flow wait for the DO output gate") {
+  for (bool tsStreams: {false, true}) {
+    capnp::MallocMessageBuilder flagsMessage;
+    auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setOutboundUdpSockets(true);
+    flags.setTypeScriptImplementedStreams(tsStreams);
+    TestFixture fixture(TestFixture::SetupParams{
+      .featureFlags = flags.asReader(),
+      .actorId = Worker::Actor::Id(kj::str("udp-output-gate")),
+      .useRealTimers = false,
+    });
+    kj::Pin<AsyncSendState> state;
+    static constexpr kj::StringPtr errorsToIgnore[] = {
+      "failed to invoke drain()"_kj,
+      "no subrequests"_kj,
+    };
+    fixture.runInIoContext(kj::Function<kj::Promise<void>(const TestFixture::Environment&)>(
+                               [&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto socket = setupDatagramSocket(
+          env.js, kj::heap<AsyncObservingDatagramChannel>(state.addWeak()), kj::none, kj::none);
+      auto paf = kj::newPromiseAndFulfiller<void>();
+      auto blocker =
+          env.context.getActorOrThrow().getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
+      auto bytes = jsg::JsUint8Array::create(env.js, "packet"_kjb);
+      auto write =
+          env.context.awaitJs(env.js, socket->getWritable(env.js).writeForTest(env.js, bytes));
+      env.js.runMicrotasks();
+      // No JS/IoOwn accesses after yielding the isolate lock.
+      for (uint i = 0; i < 10; ++i) co_await kj::evalLater([]() {});
+      KJ_EXPECT(!state->called, "a packet escaped while storage was uncommitted");
+      paf.fulfiller->fulfill();
+      co_await blocker;
+      co_await write;
+      KJ_EXPECT(state->called);
+      KJ_EXPECT(state->observed.asPtr() == "packet"_kjb);
+    }),
+        errorsToIgnore);
+  }
 }
 
 // The output-gate write test body, run against both stream backends: with useTsStreams

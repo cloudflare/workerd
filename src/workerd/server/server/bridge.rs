@@ -34,6 +34,7 @@ pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::services::udp::UdpEgress;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 
@@ -618,6 +619,12 @@ pub mod ffi {
         fn new_jsgify_websocket_errors() -> KjOwn<WebSocketErrorHandler>;
         /// A `connect()` event delivering one UDP flow, addressed as `address`.
         fn new_udp_connect_event(address: &str, flow: Box<UdpFlow>) -> KjOwn<CustomEvent>;
+        fn is_udp_egress(event: Pin<&mut CustomEvent>) -> bool;
+        fn udp_egress_host(event: Pin<&mut CustomEvent>) -> Result<String>;
+        async fn complete_udp_egress(
+            event: KjOwn<CustomEvent>,
+            socket: Box<UdpEgress>,
+        ) -> Result<CustomEventResult>;
 
         type TokenUsage;
         /// Channel tokens (channel-token.h): what restores a channel later, over RPC or from
@@ -899,6 +906,10 @@ pub mod ffi {
         /// The next datagram, or `ended`. One call at a time.
         async unsafe fn receive<'a>(self: &'a UdpFlow) -> Result<UdpDatagram>;
         async unsafe fn send<'a>(self: &'a UdpFlow, datagram: &'a [u8]) -> Result<()>;
+
+        type UdpEgress;
+        async unsafe fn udp_receive<'a>(self: &'a UdpEgress) -> Result<UdpDatagram>;
+        async unsafe fn udp_send<'a>(self: &'a UdpEgress, datagram: &'a [u8]) -> Result<()>;
 
         /// The `WorkerInterface`s of a request's tail workers.
         type WorkerInterfaceList;

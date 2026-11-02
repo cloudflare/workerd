@@ -1775,4 +1775,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  outboundUdpSockets @202 :Bool
+      $compatEnableFlag("outbound_udp_sockets")
+      $experimental;
+  # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of
+  # Uint8Array, with one chunk per packet. Also selects this chunk type for UDP ingress.
 }

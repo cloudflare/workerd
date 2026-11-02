@@ -16,20 +16,20 @@ export default {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      const bytes = value.data;
+      const bytes = value;
       if (first) {
         first = false;
         const prefix = encoder.encode(`first:${socket.protocol}:`);
         const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
         combined.set(bytes, prefix.length);
-        await writer.write(new Datagram(combined));
+        await writer.write(combined);
       } else {
         const prefix = encoder.encode('echo:');
         const combined = new Uint8Array(prefix.length + bytes.length);
         combined.set(prefix, 0);
         combined.set(bytes, prefix.length);
-        await writer.write(new Datagram(combined));
+        await writer.write(combined);
       }
     }
   },

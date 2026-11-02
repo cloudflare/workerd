@@ -319,7 +319,7 @@ DisconnectWatcher watchForDisconnect(kj::AsyncIoStream& connection) {
 }
 
 // Builds a value-mode ReadableStream whose pull() performs exactly one DatagramChannel::receive()
-// call and enqueues exactly what came back as one Datagram chunk. Uses
+// call and enqueues exactly what came back as one packet value. Uses
 // JsReadableStream::fromPull() rather than create(), since create() requires a byte-oriented
 // ReadableStreamSource.
 JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
@@ -330,8 +330,11 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
     return ioContext.awaitIo(js, channel->receive(),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
-        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
         auto data = jsg::JsUint8Array::create(js, bytes.asPtr());
+        if (FeatureFlags::get(js).getOutboundUdpSockets()) {
+          return js.v8Ref<v8::Value>(data);
+        }
+        auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
         return js.v8Ref<v8::Value>(handler.wrap(js, js.alloc<Datagram>(js, data)));
       }
       return kj::none;
@@ -341,22 +344,74 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
 
 // Builds a value-mode WritableStream whose write() sends exactly one outbound datagram per call.
 // Unlike a byte-stream sink, chunks are never merged or split: each write() call becomes exactly
-// one DatagramChannel::send() call. Only Datagram instances are accepted -- writing a raw
-// Uint8Array or any other value is a TypeError, since UDP's chunk boundaries are packet
-// boundaries, unlike a byte stream's.
-JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel> channel) {
+// one DatagramChannel::send() call. The new experiment accepts Uint8Array values; the older
+// ingress experiment accepts Datagram instances.
+JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<kj::Rc<DatagramChannel>> channel) {
   return JsWritableStream::fromWrite(js,
       [channel = kj::mv(channel)](jsg::Lock& js, jsg::JsValue chunk) mutable -> jsg::Promise<void> {
-    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
-    auto datagram = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, chunk), TypeError,
-        "This socket's writable stream only accepts Datagram instances.");
-    auto bytes = kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
-    auto sendPromise = channel->send(bytes).attach(kj::mv(bytes));
+    // Copy under the isolate lock. The send may outlive the JS buffer or its backing store.
+    auto bytes = [&]() {
+      if (FeatureFlags::get(js).getOutboundUdpSockets()) {
+        auto data = JSG_REQUIRE_NONNULL(chunk.tryCast<jsg::JsUint8Array>(), TypeError,
+            "This socket's writable stream only accepts Uint8Array values.");
+        JSG_REQUIRE(
+            data.asArrayPtr().size() <= 65507, RangeError, "UDP payload exceeds 65507 bytes.");
+        return kj::heapArray<kj::byte>(data.asArrayPtr());
+      }
+      auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<Datagram>>());
+      auto datagram = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, chunk), TypeError,
+          "This socket's writable stream only accepts Datagram instances.");
+      return kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
+    }();
     auto& ioContext = IoContext::current();
+    // Every packet must respect the DO output gate, including writes on an already-open flow.
+    auto send = [native = channel->addRef(), bytes = kj::mv(bytes)]() mutable {
+      return native->send(bytes).attach(kj::mv(bytes), kj::mv(native));
+    };
+    kj::Promise<void> sendPromise = nullptr;
+    KJ_IF_SOME(gate, ioContext.waitForOutputLocksIfNecessary()) {
+      sendPromise = gate.then(kj::mv(send));
+    } else {
+      sendPromise = send();
+    }
     IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_send"_kj);
     return ioContext.awaitIo(js, kj::mv(sendPromise));
   });
 }
+
+// Reads and writes can be issued immediately, but cannot reach the channel until the routed
+// open succeeds. Separate branches allow a pending receive and a send at the same time.
+class PromisedDatagramChannel final: public DatagramChannel {
+ public:
+  explicit PromisedDatagramChannel(kj::Promise<kj::Own<DatagramChannel>> channel)
+      : channel(channel.then([](auto channel) { return kj::Rc<DatagramChannel>(kj::mv(channel)); })
+                    .fork()) {}
+
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    return canceler.wrap(receiveImpl());
+  }
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> bytes) override {
+    return canceler.wrap(sendImpl(bytes));
+  }
+
+  void close() override {
+    canceler.cancel("UDP socket closed");
+    channel = nullptr;
+  }
+
+ private:
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receiveImpl() {
+    auto connected = co_await channel.addBranch();
+    co_return co_await connected->receive();
+  }
+  kj::Promise<void> sendImpl(kj::ArrayPtr<const kj::byte> bytes) {
+    auto connected = co_await channel.addBranch();
+    co_await connected->send(bytes);
+  }
+
+  kj::ForkedPromise<kj::Rc<DatagramChannel>> channel;
+  kj::Canceler canceler;
+};
 
 class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
  public:
@@ -456,20 +511,25 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
 
 class IncomingRpcDatagramStream final: public rpc::DatagramStream::Server {
  public:
-  IncomingRpcDatagramStream(kj::Rc<RpcDatagramChannel> channel): channel(kj::mv(channel)) {}
+  IncomingRpcDatagramStream(kj::WeakRc<RpcDatagramChannel> channel): channel(kj::mv(channel)) {}
 
  private:
   kj::Promise<void> send(SendContext context) override {
     auto datagram = context.getParams().getDatagram();
-    return channel->deliver(kj::heapArray<kj::byte>(datagram));
+    return channel.assertLive().deliver(kj::heapArray<kj::byte>(datagram));
   }
 
   kj::Promise<void> end(EndContext) override {
-    channel->endIncoming();
+    channel.assertLive().endIncoming();
     return kj::READY_NOW;
   }
 
-  kj::Rc<RpcDatagramChannel> channel;
+  kj::Promise<void> abort(AbortContext context) override {
+    channel.assertLive().disconnect(KJ_EXCEPTION(DISCONNECTED, "jsg.Error: UDP session failed."));
+    return kj::READY_NOW;
+  }
+
+  kj::WeakRc<RpcDatagramChannel> channel;
 };
 
 class OutgoingRpcDatagramStream final: public rpc::DatagramStream::Server {
@@ -691,7 +751,8 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
 jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
     kj::Own<DatagramChannel> channelOwn,
     kj::Maybe<kj::String> remoteAddress,
-    kj::Maybe<kj::String> localAddress) {
+    kj::Maybe<kj::String> localAddress,
+    kj::Promise<kj::Maybe<kj::Exception>> status) {
   auto& ioContext = IoContext::current();
 
   kj::Rc<DatagramChannel> channel(kj::mv(channelOwn));
@@ -706,7 +767,8 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
 
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
-  auto writable = newDatagramWritableStream(js, ioContext.addObject(channel.addRef()));
+  auto writable = newDatagramWritableStream(
+      js, ioContext.addObject(kj::heap<kj::Rc<DatagramChannel>>(channel.addRef())));
 
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(channel), kj::mv(remoteAddress),
       kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
@@ -718,11 +780,128 @@ jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
       false /* isDefaultFetchPort */, kj::mv(openedPrPair));
 
   result->handleReadableEof(js, kj::mv(eofPromise));
-  // The flow already exists by the time a Socket is minted for it, so `opened` resolves
-  // immediately, mirroring the inbound TCP connect() handler path.
-  result->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+  // Ingress flows are already open. Outbound flows resolve only after routing and policy setup.
+  result->handleProxyStatus(js, kj::mv(status));
   result->trackOpenedState(js);
   return result;
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpEgressCustomEvent::complete(
+    kj::Promise<kj::Own<DatagramChannel>> channel) {
+  KJ_TRY {
+    connected->fulfill(co_await channel);
+    co_return Result{.outcome = EventOutcome::OK};
+  }
+  KJ_CATCH(exception) {
+    connected->reject(exception.clone());
+    throw kj::mv(exception);
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpEgressCustomEvent::notSupported() {
+  auto exception =
+      KJ_EXCEPTION(UNIMPLEMENTED, "jsg.Error: Outbound UDP is not supported by this service.");
+  connected->reject(exception.clone());
+  return kj::mv(exception);
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpEgressCustomEvent::run(
+    kj::Own<IoContext_IncomingRequest>,
+    kj::Maybe<kj::StringPtr>,
+    kj::Maybe<Worker_VersionInfo>,
+    Frankenvalue,
+    kj::TaskSet&,
+    bool) {
+  return notSupported();
+}
+
+tracing::EventInfo UdpEgressCustomEvent::getEventInfo() const {
+  return tracing::ConnectEventInfo();
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> UdpEgressCustomEvent::sendRpc(
+    capnp::HttpOverCapnpFactory&,
+    capnp::ByteStreamFactory&,
+    FrankenvalueHandler&,
+    rpc::EventDispatcher::Client dispatcher) {
+  auto send = kj::newPromiseAndFulfiller<rpc::DatagramStream::Client>();
+  auto channel = kj::rc<RpcDatagramChannel>(rpc::DatagramStream::Client(kj::mv(send.promise)));
+  auto request = dispatcher.openUdpRequest();
+  request.setHost(host);
+  request.setReceived(kj::heap<IncomingRpcDatagramStream>(channel.downgrade()));
+  KJ_TRY {
+    auto response = co_await request.send();
+    send.fulfiller->fulfill(response.getSend());
+    connected->fulfill(channel.toOwn());
+    co_return Result{.outcome = EventOutcome::OK};
+  }
+  KJ_CATCH(exception) {
+    connected->reject(exception.clone());
+    throw kj::mv(exception);
+  }
+  KJ_UNREACHABLE;
+}
+
+// The returned capability owns both directions and the request's accounting/lifetime state.
+// A blocked receive (including an application that never reads) does not block send().
+class UdpEgressRpcStream final: public rpc::DatagramStream::Server {
+ public:
+  UdpEgressRpcStream(kj::Own<DatagramChannel> channel,
+      rpc::DatagramStream::Client received,
+      kj::Own<void> ownWorker)
+      : ownWorker(kj::mv(ownWorker)),
+        channel(kj::mv(channel)),
+        pump(run(kj::mv(received)).eagerlyEvaluate(nullptr)) {}
+
+ private:
+  kj::Promise<void> send(SendContext context) override {
+    KJ_REQUIRE(channel.get() != nullptr, "UDP session has ended");
+    co_await channel->send(context.getParams().getDatagram());
+  }
+  kj::Promise<void> end(EndContext) override {
+    pump = nullptr;
+    channel = nullptr;
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> run(rpc::DatagramStream::Client received) {
+    KJ_TRY {
+      for (;;) {
+        KJ_IF_SOME(datagram, co_await channel->receive()) {
+          auto request = received.sendRequest();
+          request.setDatagram(datagram);
+          co_await request.send();
+        } else {
+          break;
+        }
+      }
+      co_await received.endRequest().sendIgnoringResult();
+    }
+    KJ_CATCH(exception) {
+      KJ_LOG(INFO, "UDP receive failed", exception);
+      co_await received.abortRequest().sendIgnoringResult();
+    }
+  }
+  kj::Own<void> ownWorker;
+  kj::Own<DatagramChannel> channel;
+  kj::Promise<void> pump;
+};
+
+kj::Promise<void> UdpEgressCustomEvent::receiveRpc(
+    OpenUdpContext context, kj::Own<WorkerInterface> worker) {
+  auto& workerRef = *worker;
+  return receiveRpc(context, workerRef, kj::mv(worker));
+}
+
+kj::Promise<void> UdpEgressCustomEvent::receiveRpc(
+    OpenUdpContext context, WorkerInterface& worker, kj::Own<void> ownWorker) {
+  auto opened = kj::newPromiseAndFulfiller<kj::Own<DatagramChannel>>();
+  auto params = context.getParams();
+  auto event = kj::heap<UdpEgressCustomEvent>(kj::str(params.getHost()), kj::mv(opened.fulfiller));
+  co_await worker.customEvent(kj::mv(event));
+  auto channel = co_await opened.promise;
+  context.getResults().setSend(
+      kj::heap<UdpEgressRpcStream>(kj::mv(channel), params.getReceived(), kj::mv(ownWorker)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
@@ -792,7 +971,7 @@ kj::Promise<void> UdpConnectCustomEvent::receiveRpc(
   auto channel = kj::rc<RpcDatagramChannel>(params.getDown());
   KJ_DEFER(channel->disconnect(KJ_EXCEPTION(DISCONNECTED, "UDP RPC event ended")));
 
-  rpc::DatagramStream::Client up = kj::heap<IncomingRpcDatagramStream>(channel.addRef());
+  rpc::DatagramStream::Client up = kj::heap<IncomingRpcDatagramStream>(channel.downgrade());
   capnp::PipelineBuilder<rpc::EventDispatcher::UdpConnectResults> pipelineBuilder;
   pipelineBuilder.setUp(kj::cp(up));
   context.setPipeline(pipelineBuilder.build());
@@ -828,6 +1007,22 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     jsg::Optional<SocketOptions> options) {
 
   auto& ioContext = IoContext::current();
+
+  bool udp = false;
+  KJ_IF_SOME(opts, options) {
+    if (FeatureFlags::get(js).getOutboundUdpSockets()) {
+      KJ_IF_SOME(protocol, opts.protocol) {
+        JSG_REQUIRE(protocol == "tcp" || protocol == "udp", TypeError,
+            "Socket protocol must be 'tcp' or 'udp'.");
+        udp = protocol == "udp";
+      }
+    }
+    if (udp) {
+      JSG_REQUIRE(
+          opts.secureTransport == kj::none && !opts.allowHalfOpen && opts.highWaterMark == kj::none,
+          TypeError, "UDP does not support TCP socket options.");
+    }
+  }
 
   // Extract the domain/ip we are connecting to from the address.
   kj::String domain;
@@ -886,12 +1081,14 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
     auto& globalScope = ioContext.getCurrentLock().getGlobalScope();
-    KJ_IF_SOME(fn, globalScope.getConnectOverride(addressStr)) {
-      return fn(js);
-    }
-    KJ_IF_SOME(key, mappedOverrideKey) {
-      KJ_IF_SOME(fn, globalScope.getConnectOverride(key)) {
+    if (!udp) {
+      KJ_IF_SOME(fn, globalScope.getConnectOverride(addressStr)) {
         return fn(js);
+      }
+      KJ_IF_SOME(key, mappedOverrideKey) {
+        KJ_IF_SOME(fn, globalScope.getConnectOverride(key)) {
+          return fn(js);
+        }
       }
     }
     actualFetcher =
@@ -901,6 +1098,25 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   CfProperty cf;
   kj::Own<WorkerInterface> client =
       actualFetcher->getClient(ioContext, cf.serialize(js), "connect"_kjc);
+
+  if (udp) {
+    KJ_IF_SOME(gate, ioContext.waitForOutputLocksIfNecessary()) {
+      client = newPromisedWorkerInterface(
+          kj::mv(gate).then([client = kj::mv(client)]() mutable { return kj::mv(client); }));
+    }
+    auto opened = kj::newPromiseAndFulfiller<kj::Own<DatagramChannel>>();
+    auto event = kj::heap<UdpEgressCustomEvent>(kj::str(addressStr), kj::mv(opened.fulfiller));
+    kj::Rc<WorkerInterface> owner(kj::mv(client));
+    auto status = owner->customEvent(kj::mv(event))
+                      .attach(owner.addRef())
+                      .then([](auto) -> kj::Maybe<kj::Exception> {
+      return kj::none;
+    }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> { return kj::mv(exception); });
+    auto channel = opened.promise.then(
+        [owner = kj::mv(owner)](auto channel) mutable { return channel.attach(kj::mv(owner)); });
+    return setupDatagramSocket(js, kj::heap<PromisedDatagramChannel>(kj::mv(channel)),
+        kj::mv(addressStr), kj::none, kj::mv(status));
+  }
 
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
@@ -938,21 +1154,42 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
   return result;
 }
 
+void Socket::closeConnection() {
+  KJ_IF_SOME(data, connectionData) {
+    KJ_IF_SOME(channel, data->connectionStream.tryGet<kj::Rc<DatagramChannel>>()) {
+      channel->close();
+    }
+  }
+  { auto _ = kj::mv(connectionData); }
+  connectionData = kj::none;
+}
+
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
   if (isClosing) {
     return closedPromiseCopy.whenResolved(js);
   }
 
   isClosing = true;
-  writable.setPendingClosure(js);
-  readable.setPendingClosure(js);
+  kj::Maybe<jsg::Promise<void>> datagramClose;
+  if (protocol == SocketProtocol::UDP) {
+    // Value streams have a normal close queue, rather than the byte controller's flush and
+    // pending-closure hooks. Queue close now so subsequent writes fail and prior packets drain.
+    datagramClose = writable.isClosedOrClosing(js) ? js.resolvedPromise() : writable.forceClose(js);
+    KJ_ASSERT_NONNULL(datagramClose).markAsHandled(js);
+  } else {
+    writable.setPendingClosure(js);
+    readable.setPendingClosure(js);
+  }
 
   // Wait until the socket connects (successfully or otherwise)
   // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
   // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [self = JSG_THIS](jsg::Lock& js) mutable {
+          [self = JSG_THIS, datagramClose = kj::mv(datagramClose)](jsg::Lock& js) mutable {
+    KJ_IF_SOME(closed, datagramClose) {
+      return kj::mv(closed);
+    }
     if (!self->writable.isClosedOrClosing(js)) {
       return self->writable.forceFlush(js);
     } else {
@@ -975,12 +1212,13 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   })
       .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
     // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(self->connectionData); }
-    self->connectionData = kj::none;
+    self->closeConnection();
 
     self->resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
+    // A failed write still leaves an owning UDP flow to release.
+    if (self->protocol == SocketProtocol::UDP) self->closeConnection();
     self->errorHandler(js, kj::mv(err));
   });
 }
