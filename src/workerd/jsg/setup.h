@@ -7,6 +7,7 @@
 
 #include "async-context.h"
 #include "jsg.h"
+#include "perf-map.h"
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
 
@@ -88,12 +89,18 @@ class V8System {
   using FatalErrorCallback = void(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
+  // Records the machine code V8 generates for every isolate in a Linux perf map written to `fd`,
+  // which must be open for appending. See PerfMapWriter. Requires `JitCodeEventTracking::YES`,
+  // and must be called before any isolate is created.
+  void enablePerfMap(kj::OwnFd fd);
+
  private:
   kj::Own<v8::Platform> platformInner;
   kj::Own<V8PlatformWrapper> platformWrapper;
   PumpMsgLoopType pumpMsgLoop;
   ShutdownIsolateType shutdownIsolate;
   JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO;
+  kj::Maybe<kj::Own<const PerfMapWriter>> perfMap;
   friend class IsolateBase;
 
   void init(kj::Own<v8::Platform>,

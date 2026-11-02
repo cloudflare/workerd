@@ -223,6 +223,11 @@ void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
   v8FatalErrorCallback = callback;
 }
 
+void V8System::enablePerfMap(kj::OwnFd fd) {
+  KJ_REQUIRE(jitCodeEventTracking == JitCodeEventTracking::YES, "a perf map is written from JIT code events");
+  perfMap = kj::heap<const PerfMapWriter>(kj::mv(fd));
+}
+
 IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
 }
@@ -794,6 +799,11 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       info.size = event->code_len;
       info.name = kj::str(kj::arrayPtr(event->name.str, event->name.len));
       info.type = event->code_type;
+      KJ_IF_SOME(perfMap, self->v8System.perfMap) {
+        if (event->code_type != v8::JitCodeEvent::BYTE_CODE) {
+          perfMap->add(event->code_start, event->code_len, info.name.asArray());
+        }
+      }
       break;
     }
 
@@ -801,6 +811,13 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       KJ_IF_SOME(entry, codeMap.findEntry(startAddr)) {
         auto info = kj::mv(entry.value);
         codeMap.erase(entry);
+        KJ_IF_SOME(perfMap, self->v8System.perfMap) {
+          KJ_IF_SOME(type, info.type) {
+            if (type != v8::JitCodeEvent::BYTE_CODE) {
+              perfMap->add(event->new_code_start, info.size, info.name.asArray());
+            }
+          }
+        }
         codeMap.upsert(reinterpret_cast<uintptr_t>(event->new_code_start), kj::mv(info),
             [&](CodeBlockInfo& existing, CodeBlockInfo&& replacement) {
           // It seems sometimes V8 tells us that it "moved" a block to a location that already
