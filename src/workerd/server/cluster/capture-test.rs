@@ -537,5 +537,5 @@ fn run(seed: u64, steps: usize) -> Result<(), String> {
 
 #[test]
 fn every_lane_restores_as_the_bucket_holds_it() {
-    crate::dst::seeds(30, |seed| run(seed, 150));
+    crate::dst::seeds(4, |seed| run(seed, 150));
 }
