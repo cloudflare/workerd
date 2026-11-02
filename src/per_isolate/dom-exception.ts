@@ -9,9 +9,6 @@
 // that install() hands it, and recognizes them by their brand. This constructor returns one that
 // utils.createDOMException() creates in place of `this`, with the same brand, so
 // utils.isDOMException() is true for either kind, and for a subclass instance.
-//
-// DOMException is a function rather than a class so that its `prototype` property is
-// writable, as a JSG class's is unless the immutable_api_prototypes flag is set.
 
 const {
   ErrorCaptureStackTrace,
@@ -56,6 +53,11 @@ const LEGACY_CODES: readonly (readonly [string, number])[] = [
   ['DATA_CLONE_ERR', 25],
 ];
 
+// DOMException is a function rather than a class so that its `prototype` property is writable,
+// as a JSG class's is unless the immutable_api_prototypes flag is set. A class's `prototype` is
+// non-writable and non-configurable, so setUpClass() could not give it the JSG class's attributes.
+// TODO(soon): Make this a class once immutable_api_prototypes is enabled by default.
+//
 // The message and name are converted as Web IDL converts a DOMString, which a template literal
 // does too: a Symbol throws a TypeError.
 function DOMException(this: object, ...args: unknown[]): object {
