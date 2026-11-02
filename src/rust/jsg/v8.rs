@@ -155,6 +155,17 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
+
+        /// Called from C++ `Wrappable::jsgGetMemorySelfSize`: the size of the Rust resource,
+        /// which C++ adds to the Wrappable's own.
+        unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &Wrappable) -> usize;
+
+        /// Called from C++ `Wrappable::jsgGetMemoryInfo` while a heap snapshot is taken, to
+        /// report the resource's fields to `tracker`.
+        unsafe fn wrappable_invoke_get_memory_info(
+            wrappable: &Wrappable,
+            tracker: Pin<&mut MemoryTracker>,
+        );
     }
 
     unsafe extern "C++" {
@@ -167,6 +178,9 @@ pub mod ffi {
         type PropertySetterCallbackInfo;
         type PropertyQueryCallbackInfo;
         type Wrappable;
+        /// C++ `jsg::MemoryTracker`, which builds the graph of embedder objects in a heap
+        /// snapshot.
+        type MemoryTracker;
 
         // BackingStore
         pub unsafe fn backing_store_drop(store: usize);
@@ -587,6 +601,46 @@ pub mod ffi {
         /// Makes a weak `v8::Global` strong again (`ClearWeak`), if it is not empty. `global`
         /// points to the `ptr` field of the `ffi::Global`.
         pub unsafe fn global_clear_weak(global: *mut usize);
+
+        // MemoryTracker
+        //
+        // Every name is a NUL-terminated string literal, or null: V8 reads the names after the
+        // heap snapshot's BuildEmbedderGraph callback returns. A null edge name is the empty
+        // name of a container's element, and a null node name is none.
+        pub unsafe fn memory_tracker_isolate(tracker: Pin<&mut MemoryTracker>) -> *mut Isolate;
+        pub unsafe fn memory_tracker_track_field_with_size(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            size: usize,
+            node_name: *const c_char,
+        );
+        pub unsafe fn memory_tracker_track_wrappable(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            wrappable: &Wrappable,
+        );
+        /// `global` is a handle of the tracker's isolate, or empty.
+        pub unsafe fn memory_tracker_track_global(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            global: &Global,
+        );
+        /// `address` and `type_tag` identify the retainer; an `address` of 0 identifies nothing.
+        pub unsafe fn memory_tracker_push_retainer(
+            tracker: Pin<&mut MemoryTracker>,
+            address: usize,
+            type_tag: usize,
+            name: *const c_char,
+            size: usize,
+            edge_name: *const c_char,
+        ) -> bool;
+        pub unsafe fn memory_tracker_push_container(
+            tracker: Pin<&mut MemoryTracker>,
+            name: *const c_char,
+            size: usize,
+            edge_name: *const c_char,
+        );
+        pub unsafe fn memory_tracker_pop_node(tracker: Pin<&mut MemoryTracker>);
 
         // Unwrappers
         //
@@ -3950,6 +4004,23 @@ impl<T> crate::Traced for TracedGlobal<T> {
     }
 }
 
+/// An edge to the value in the V8 heap, as C++ reports a `jsg::V8Ref`.
+impl<T> crate::MemoryInfo for TracedGlobal<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        if !tracker.can_track_handle_of(&self.state) {
+            return;
+        }
+        // SAFETY: the handle belongs to the snapshot's isolate, as checked above, whose lock the
+        // snapshot holds, so reading the slot races with no GC. The handle is empty if it was
+        // weak and its value died.
+        unsafe { tracker.track_global(edge_name, &self.strong_handle()) };
+    }
+}
+
 // Note: TracedGlobal<T> intentionally does NOT implement the std Clone trait.
 // Cloning a V8 persistent handle requires an isolate pointer to create an
 // independent handle via v8::Global::New(isolate, original). The Clone trait
@@ -4093,6 +4164,21 @@ impl<T> Drop for Global<T> {
     fn drop(&mut self) {
         let handle = std::mem::replace(&mut self.handle, ffi::Global { ptr: 0 });
         self.state.drop_global(handle);
+    }
+}
+
+/// An edge to the value in the V8 heap, as C++ reports a strong `v8::Global`.
+impl<T> crate::MemoryInfo for Global<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        if !tracker.can_track_handle_of(&self.state) {
+            return;
+        }
+        // SAFETY: the handle belongs to the snapshot's isolate, as checked above.
+        unsafe { tracker.track_global(edge_name, &self.handle) };
     }
 }
 
@@ -4545,6 +4631,28 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
     }
 }
 
+unsafe fn wrappable_invoke_get_memory_self_size(wrappable: &ffi::Wrappable) -> usize {
+    // SAFETY: wrappable is valid, and a trait object that is not cleared is alive.
+    unsafe {
+        ffi::TraitObjectPtr::from_wrappable(wrappable)
+            .map_or(0, |trait_ptr| trait_ptr.as_gc_ref().memory_self_size())
+    }
+}
+
+unsafe fn wrappable_invoke_get_memory_info(
+    wrappable: &ffi::Wrappable,
+    tracker: Pin<&mut ffi::MemoryTracker>,
+) {
+    // SAFETY: wrappable is valid, and a trait object that is not cleared is alive.
+    unsafe {
+        let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
+            return;
+        };
+        let mut tracker = crate::MemoryTracker::from_ffi(tracker);
+        trait_ptr.as_gc_ref().memory_info(&mut tracker);
+    }
+}
+
 /// Visitor for garbage collection tracing.
 ///
 /// `GcVisitor` wraps a C++ `jsg::GcVisitor` pointer. All GC visitation logic
@@ -4946,6 +5054,16 @@ impl WrappableRc {
     pub(crate) fn as_ptr(&self) -> NonNull<ffi::Wrappable> {
         // SAFETY: KjRc always holds a valid, non-null pointer.
         unsafe { NonNull::new_unchecked(self.handle.get().cast_mut()) }
+    }
+
+    /// Reports the Wrappable to a heap snapshot, as C++ reports a `jsg::Ref`.
+    pub(crate) fn track(
+        &self,
+        tracker: &mut crate::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        // SAFETY: the KjRc keeps the Wrappable alive.
+        tracker.track_wrappable(edge_name, unsafe { &*self.handle.get() });
     }
 
     /// Increments the strong reference count on the underlying Wrappable.

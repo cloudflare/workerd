@@ -28,6 +28,7 @@ pub mod bridge {
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
         type GcVisitor = jsg::v8::ffi::GcVisitor;
+        type MemoryTracker = jsg::v8::ffi::MemoryTracker;
     }
 
     unsafe extern "C++" {
@@ -47,6 +48,18 @@ pub mod bridge {
         ///
         /// `visitor` is the visitor of a visit in progress.
         pub unsafe fn cpp_ref_visit(visitor: *mut GcVisitor, cpp_ref: &CppRef);
+        /// Reports the reference to a heap snapshot as C++ reports a `jsg::Ref` field, under
+        /// the edge `edge_name`.
+        ///
+        /// # Safety
+        ///
+        /// `edge_name` is a NUL-terminated string literal, or null for none: V8 reads it after
+        /// the snapshot's BuildEmbedderGraph callback returns.
+        pub unsafe fn cpp_ref_track(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            cpp_ref: &CppRef,
+        );
     }
 
     impl KjOwn<CppRef> {}
@@ -206,6 +219,19 @@ impl<T: CppResource> jsg::Traced for Ref<T> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
         // SAFETY: the visitor's pointer is valid for the duration of the visit.
         unsafe { bridge::cpp_ref_visit(visitor.as_ffi(), &self.inner) };
+    }
+}
+
+/// The C++ resource's node, as C++ reports a `jsg::Ref` field.
+impl<T: CppResource> jsg::MemoryInfo for Ref<T> {
+    fn track_as_field(
+        &self,
+        tracker: &mut jsg::MemoryTracker<'_>,
+        edge_name: Option<&'static std::ffi::CStr>,
+    ) {
+        let edge_name = edge_name.map_or(std::ptr::null(), std::ffi::CStr::as_ptr);
+        // SAFETY: the name is a literal or null.
+        unsafe { bridge::cpp_ref_track(tracker.as_ffi(), edge_name, &self.inner) };
     }
 }
 

@@ -44,6 +44,20 @@ pub fn is_attr(attr: &syn::Attribute, name: &str) -> bool {
 /// When set, `#[jsg_resource]` on a struct suppresses the auto-generated `Traced`
 /// impl, letting the user write their own.
 pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
+    has_flag(attr, "custom_trace")
+}
+
+/// Returns `true` if the `memory_info` bare word is present in the attribute token stream.
+///
+/// When set, the `GarbageCollected::memory_info` that `#[jsg_resource]` generates on a struct
+/// calls the user's `jsg::VisitForMemoryInfo` impl.
+pub fn has_memory_info_flag(attr: &TokenStream) -> bool {
+    has_flag(attr, "memory_info")
+}
+
+/// Returns `true` if the bare word `flag` is present in the comma-separated attribute token
+/// stream.
+fn has_flag(attr: &TokenStream, flag: &str) -> bool {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
@@ -56,7 +70,7 @@ pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
 
     parsed
         .iter()
-        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident("custom_trace")))
+        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident(flag)))
 }
 
 /// Emits a `compile_error!` token stream anchored to `tokens` with message `msg`.

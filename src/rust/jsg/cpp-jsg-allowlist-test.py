@@ -25,8 +25,8 @@ import re
 import sys
 from pathlib import Path
 
-# Allowlist name -> pattern. `jsg::Wrappable`, `jsg::GcVisitor` and the module registries are not
-# listed, because Rust JSG still shares them with C++ JSG.
+# Allowlist name -> pattern. `jsg::Wrappable`, `jsg::GcVisitor`, `jsg::MemoryTracker` and the
+# module registries are not listed, because Rust JSG still shares them with C++ JSG.
 CONSTRUCTS = {
     "jsg::Lock": r"\bjsg::Lock\b",
     "JSG_TRY": r"\bJSG_(?:TRY|CATCH)\b",

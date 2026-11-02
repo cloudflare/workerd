@@ -21,6 +21,7 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
+use crate::utils::has_memory_info_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -45,8 +46,10 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         return err.to_compile_error().into();
     }
 
-    // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
+    // Check for `#[jsg_resource(custom_trace)]` and `#[jsg_resource(memory_info)]` before
+    // consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
+    let memory_info = has_memory_info_flag(&attr);
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -81,6 +84,18 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         }
     };
 
+    // `memory_info` reports the fields through the user's `VisitForMemoryInfo` impl, as C++
+    // `JSG_RESOURCE_TYPE` calls a resource's `visitForMemoryInfo`.
+    let memory_info_fn = if memory_info {
+        quote! {
+            fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+                <Self as jsg::VisitForMemoryInfo>::visit_for_memory_info(self, tracker);
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let gc_impl = quote! {
         #[automatically_derived]
         impl jsg::GarbageCollected for #name {
@@ -93,6 +108,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
                 ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
                     .unwrap()
             }
+
+            #memory_info_fn
         }
     };
 
@@ -481,8 +498,8 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
-                            the struct)";
+                            #[jsg_resource] impl block (`name`, `custom_trace` and \
+                            `memory_info` belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;

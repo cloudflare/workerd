@@ -10,6 +10,7 @@
 use std::any::TypeId;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::fmt;
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -23,6 +24,8 @@ use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
+use crate::MemoryInfo;
+use crate::MemoryTracker;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
@@ -363,6 +366,18 @@ impl<R: Resource> Traced for Weak<R> {
     fn holds_gc_references() -> bool {
         false
     }
+}
+
+/// The resource's node, as C++ reports a `jsg::Ref`.
+impl<R: Resource> MemoryInfo for Rc<R> {
+    fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
+        self.wrappable.track(tracker, edge_name);
+    }
+}
+
+/// A weak reference retains nothing.
+impl<R: Resource> MemoryInfo for Weak<R> {
+    fn track_as_field(&self, _: &mut MemoryTracker<'_>, _: Option<&'static CStr>) {}
 }
 
 impl<R: Resource> GarbageCollected for Weak<R> {

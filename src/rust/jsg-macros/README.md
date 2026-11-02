@@ -465,7 +465,9 @@ impl MyResource {
 `#[jsg_resource]` on a struct synthesises:
 
 - `impl jsg::Traced for MyType { fn trace(&self, visitor) { ... } }`
-- `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`
+- `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`, which with
+  `#[jsg_resource(memory_info)]` also reports the fields to heap snapshots (see
+  [Heap Snapshots](#heap-snapshots))
 
 The generated `Traced::trace` body simply calls `Traced::trace` on **every named
 field**:
@@ -590,3 +592,73 @@ impl jsg::Traced for DynamicResource {
 ```
 
 `custom_trace` can be combined with `name`: `#[jsg_resource(name = "MyName", custom_trace)]`.
+
+## Heap Snapshots
+
+Every resource is a node in a V8 heap snapshot, as a C++ resource is: it is named after the
+struct (`workerd / MyType`), sized as the struct plus its C++ `Wrappable`, and linked to its
+JavaScript wrapper. To report its fields as well, as C++ `visitForMemoryInfo` does, add
+`memory_info` to the struct's `#[jsg_resource]` and implement `jsg::VisitForMemoryInfo`. The
+generated `GarbageCollected::memory_info` calls it; without `memory_info` a resource reports no
+fields, and with it but without the impl the resource does not compile.
+
+```rust
+#[jsg_resource(memory_info)]
+pub struct EventRouter {
+    handlers: HashMap<String, jsg::Rc<Handler>>,
+    on_error: RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    name: String,
+}
+
+impl jsg::VisitForMemoryInfo for EventRouter {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"handlers", &self.handlers);
+        tracker.track_field(c"on_error", &self.on_error);
+        tracker.track_field(c"name", &self.name);
+    }
+}
+```
+
+`tracker.track_field` takes any `jsg::MemoryInfo`, the counterpart of C++
+`MemoryTracker::trackField`'s overloads: strings and collections are nodes of the memory they
+allocate, a `jsg::Rc` is an edge to the resource's node, a `TracedGlobal` an edge into the V8 heap,
+and a helper type that implements `jsg::MemoryRetainer` (C++ `JSG_MEMORY_INFO`) is a node of its
+own. Edge and node names are `c"..."` literals, since V8 reads them after the tracker's callback
+returns. See `src/rust/jsg/memory.rs` for the full list.
+
+A helper type registers its `MemoryRetainer` impl with `jsg::jsg_memory_retainer!`, which
+implements `jsg::MemoryInfo` for it, so that `track_field` takes it:
+
+```rust
+struct Cache {
+    entries: HashMap<String, String>,
+}
+
+impl jsg::MemoryRetainer for Cache {
+    fn memory_name(&self) -> &'static CStr {
+        c"Cache"
+    }
+
+    fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"entries", &self.entries);
+    }
+}
+
+jsg::jsg_memory_retainer!(Cache);
+```
+
+A retainer's node counts its own bytes, so a collection of retainers counts only its spare
+capacity. A retainer reached twice, as through two `Rc`s, is one node, so a type in a cycle through
+`std::rc::Rc` or `std::sync::Arc` must be a retainer, or reporting never ends. A retainer type is
+`'static`.
+
+The reporting code (`visit_for_memory_info`, `memory_info` and any `MemoryInfo` impl) follows the
+rules in `jsg::MemoryInfo`'s docs:
+
+- It must not panic. It runs in a callback from C++, where a panic aborts the process.
+- It must not write into anything it can reach, a `Cell` above all. `Cell<T>` is reported in
+  place, through `Cell::as_ptr`, so a `set` or `replace` of a cell while its value is reported drops
+  the value under the reference. The compiler does not check this.
+- It must not call into JavaScript.
+
+`memory_info` can be combined with `name` and `custom_trace`.

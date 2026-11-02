@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/jsg/memory.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/wrappable.h>
 
@@ -68,6 +69,7 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const override;
 
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
@@ -107,6 +109,38 @@ Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
 /// Makes a weak `v8::Global` strong again, if it is not empty. `global` points to the `ptr`
 /// field of the `ffi::Global`.
 void global_clear_weak(uintptr_t* global);
+
+// MemoryTracker
+// Heap snapshots: what a Rust value reports to `jsg::MemoryTracker`. A null `edge_name` is the
+// empty name C++ gives the elements of a container; a null `node_name` is none. V8 reads the names
+// after the snapshot's BuildEmbedderGraph callback returns, so they are string literals; see
+// `pushRetainer()` in workerd/jsg/memory.h.
+using MemoryTracker = ::workerd::jsg::MemoryTracker;
+// The edge name of a `memory_tracker_*` shim's `edge_name`: a null one is the empty name.
+inline kj::StringPtr memoryTrackerEdgeName(const char* edgeName) {
+  if (edgeName == nullptr) return nullptr;
+  return kj::StringPtr(edgeName);
+}
+// The isolate whose heap the snapshot is of.
+Isolate* memory_tracker_isolate(MemoryTracker& tracker);
+void memory_tracker_track_field_with_size(
+    MemoryTracker& tracker, const char* edge_name, size_t size, const char* node_name);
+// Tracks a Wrappable, as `trackField` tracks a `jsg::Ref` field.
+void memory_tracker_track_wrappable(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable);
+// Adds an edge to the value of `global`, a handle of the tracker's isolate, unless it is empty.
+void memory_tracker_track_global(
+    MemoryTracker& tracker, const char* edge_name, const Global& global);
+// `address` and `type` identify the retainer; a null `address` identifies nothing.
+bool memory_tracker_push_retainer(MemoryTracker& tracker,
+    size_t address,
+    size_t type,
+    const char* name,
+    size_t size,
+    const char* edge_name);
+void memory_tracker_push_container(
+    MemoryTracker& tracker, const char* name, size_t size, const char* edge_name);
+void memory_tracker_pop_node(MemoryTracker& tracker);
 
 // Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
 // - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,
