@@ -3960,6 +3960,9 @@ struct Worker::Actor::Impl {
 
   kj::Own<ActorObserver> metrics;
 
+  kj::Rc<NonHibernatableWebSocketCount> nonHibernatableWebSocketCount =
+      kj::rc<NonHibernatableWebSocketCount>();
+
   // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
   // on the first `ensureConstructed()`.
   kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
@@ -4748,6 +4751,10 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
 
 ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
+}
+
+kj::Rc<NonHibernatableWebSocketCount> Worker::Actor::getNonHibernatableWebSocketCount() {
+  return impl->nonHibernatableWebSocketCount.addRef();
 }
 
 kj::Own<Worker::Actor::WaitUntilTaskHandle> Worker::Actor::addedWaitUntilTask() {

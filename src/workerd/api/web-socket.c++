@@ -19,8 +19,7 @@
 // commented-out helpers are also waiting on that.
 //
 // #include "hibernatable-adapter.h"
-//
-// #include <workerd/util/autogate.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
@@ -281,6 +280,35 @@ void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 // LegacyWebSocketAdapter — operational implementation.
 // =============================================================================
 
+// The most non-hibernatable WebSockets a single Durable Object instance can have open at once,
+// whether accepted with accept() or opened with `new WebSocket(url)`. Enabling the
+// DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH autogate removes this limit. Hibernatable WebSockets
+// have their own limit of the same size (LegacyHibernationManagerImpl::ACTIVE_CONNECTION_LIMIT) and
+// don't count toward this one.
+static constexpr uint32_t MAX_NON_HIBERNATABLE_WEBSOCKETS_PER_ACTOR = 1024 * 32;
+
+namespace {
+
+// Throws if the current Durable Object already has the most non-hibernatable WebSockets it can.
+// Otherwise returns the count a newly accepted WebSocket should be charged to, or none if the limit
+// doesn't apply (outside Durable Objects, or while its kill switch is on).
+kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> checkNonHibernatableWebSocketLimit(
+    IoContext& context) {
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)) {
+    return kj::none;
+  }
+  KJ_IF_SOME(actor, context.getActor()) {
+    auto count = actor.getNonHibernatableWebSocketCount();
+    JSG_REQUIRE(count->count < MAX_NON_HIBERNATABLE_WEBSOCKETS_PER_ACTOR, Error, "only ",
+        MAX_NON_HIBERNATABLE_WEBSOCKETS_PER_ACTOR,
+        " non-hibernatable websockets can be open on a single Durable Object instance");
+    return kj::mv(count);
+  }
+  return kj::none;
+}
+
+}  // namespace
+
 IoOwn<LegacyWebSocketAdapter::Native> LegacyWebSocketAdapter::initNative(IoContext& ioContext,
     kj::Rc<kj::WebSocket> ws,
     kj::Array<kj::String> tags,
@@ -367,6 +395,12 @@ void LegacyWebSocketAdapter::initConnection(jsg::Lock& js, kj::Promise<PackedWeb
       // We've successfully established our web socket, we do not need to cancel anything.
       pending.canceler.release();
     }
+
+    // Check the limit before taking ownership of the connection, so that a rejected connection is
+    // closed before any listener runs. internalAccept() below checks it again, but by then this
+    // WebSocket holds the connection, and an 'error' listener that throws can stop reportError()
+    // from releasing it.
+    checkNonHibernatableWebSocketLimit(IoContext::current());
 
     native.state.init<AwaitingAcceptanceOrCoupling>(
         AwaitingAcceptanceOrCoupling{IoContext::current().addObject(kj::mv(packedSocket.ws))});
@@ -767,8 +801,15 @@ void LegacyWebSocketAdapter::accept(
 void LegacyWebSocketAdapter::internalAccept(
     jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   auto& native = *farNative;
+  auto& context = IoContext::current();
+  // Check the limit before changing state, so that a rejected WebSocket is left as it was.
+  auto acceptedCount = checkNonHibernatableWebSocketLimit(context);
   auto nativeWs = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
-  native.state.init<Accepted>(kj::mv(nativeWs), native, IoContext::current());
+  auto& accepted = native.state.init<Accepted>(kj::mv(nativeWs), native, context);
+  KJ_IF_SOME(count, acceptedCount) {
+    ++count->count;
+    accepted.nonHibernatableWebSocketCount = kj::mv(count);
+  }
   return startReadLoop(js, kj::mv(cs));
 }
 
@@ -834,6 +875,9 @@ kj::Promise<void> LegacyWebSocketAdapter::Accepted::createAbortTask(
 LegacyWebSocketAdapter::Accepted::~Accepted() noexcept(false) {
   KJ_IF_SOME(a, actorMetrics) {
     a.get()->webSocketClosed();
+  }
+  KJ_IF_SOME(count, nonHibernatableWebSocketCount) {
+    --count->count;
   }
 }
 
