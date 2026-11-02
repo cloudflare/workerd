@@ -50,10 +50,10 @@ index 3a67e56cb496e56d271424333b5adc935b8df21d..68fc0fbf4c70fa850f4bba8c38ef3f54
  };
  
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b97ec7a4098781652527ae9b6db463ed01bb89f7..d6545fb2ce0475454fb1c2b46745b5fd90c92d92 100644
+index 38ed0abb3a65c583b06ca6105ff11fdd4c98d7bc..9fb39992101d83a4b4b880d644a12809f46956d4 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -2042,6 +2042,17 @@ Local<Value> UnboundModuleScript::GetSourceMappingURL() {
+@@ -2075,6 +2075,17 @@ Local<Value> UnboundModuleScript::GetSourceMappingURL() {
    return Utils::ToLocal(i::direct_handle(url, i_isolate));
  }
  
