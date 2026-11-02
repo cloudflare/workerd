@@ -69,6 +69,10 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
     return api::UdpConnectCustomEvent::receiveRpc(context, workerRef).attach(kj::mv(worker));
   }
 
+  kj::Promise<void> openUdp(OpenUdpContext context) override {
+    return api::UdpEgressCustomEvent::receiveRpc(context, getWorker());
+  }
+
   kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
     auto customEvent = tracing::TailStreamCustomEvent::fromRpc(context.getParams());
     auto cap = customEvent->getCap();

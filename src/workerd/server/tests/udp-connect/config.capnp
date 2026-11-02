@@ -15,5 +15,5 @@ const worker :Workerd.Worker = (
     ( name = "./index.mjs", esModule = embed "index.mjs" )
   ],
   compatibilityDate = "2024-01-01",
-  compatibilityFlags = [ "experimental" ],
+  compatibilityFlags = [ "experimental", "outbound_udp_sockets" ],
 );

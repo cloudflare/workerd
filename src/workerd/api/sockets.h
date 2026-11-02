@@ -6,6 +6,7 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/io/datagram-channel.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -14,25 +15,6 @@
 #include <kj/refcount.h>
 
 namespace workerd {
-
-// A single logical UDP flow between a peer and this side, used to deliver datagram-shaped
-// connections to a Worker's connect() handler. Unlike kj::AsyncIoStream, this interface has no
-// byte-stream semantics: each receive() resolves to exactly one datagram (or none, once the flow
-// has ended), and each send() transmits exactly one, so callers cannot accidentally merge or split
-// datagrams the way partial tryRead()/write() calls would allow.
-class DatagramChannel {
- public:
-  virtual ~DatagramChannel() noexcept(false) = default;
-
-  // Resolves with the next inbound datagram, or kj::none once the flow has ended (e.g. an idle
-  // timeout). Must not be called again after resolving kj::none, and must not have more than one
-  // outstanding call at a time.
-  virtual kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() = 0;
-
-  // Sends one outbound datagram to the peer. The caller keeps `datagram` alive until the returned
-  // promise resolves.
-  virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
-};
 
 // A DatagramChannel wrapper that can be disconnected, mirroring
 // workerd::NeuterableIoStream (src/workerd/util/stream-utils.h). Used when a DatagramChannel is
@@ -97,9 +79,21 @@ struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
   bool allowHalfOpen = false;
   jsg::Optional<uint64_t> highWaterMark;
-  JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark);
+  jsg::Optional<kj::String> protocol;
+  JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark, protocol);
+  JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+    if (flags.getOutboundUdpSockets()) {
+      JSG_TS_OVERRIDE({
+        protocol?: 'tcp' | 'udp';
+        allowHalfOpen?: boolean;
+      });
+    } else {
+      JSG_TS_OVERRIDE({ protocol: never; });
+    }
+  }
   JSG_MEMORY_INFO(SocketOptions) {
     tracker.trackField("secureTransport", secureTransport);
+    tracker.trackField("protocol", protocol);
   }
 };
 
@@ -111,8 +105,8 @@ struct TlsOptions {
 // A non-standard extension: not part of the proposed sockets spec
 // (https://sockets-api.proposal.wintertc.org/), which only covers TCP.
 //
-// The value-mode chunk type carried by a UDP Socket's readable/writable streams. Deliberately
-// not a Uint8Array to avoid consumers treating a UDP stream as a byte stream.
+// The value type of the older ingress experiment. The outbound_udp_sockets experiment uses
+// Uint8Array values directly while retaining value-mode streams and packet boundaries.
 class Datagram: public jsg::Object {
  public:
   Datagram(jsg::Lock& js, jsg::JsUint8Array data): data(js, data) {}
@@ -285,7 +279,7 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
-    if (flags.getWorkerdExperimental()) {
+    if (flags.getWorkerdExperimental() || flags.getOutboundUdpSockets()) {
       // non-standard extension, not part of the proposed sockets spec
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_TS_OVERRIDE({
@@ -387,6 +381,7 @@ class Socket: public jsg::Object {
 
   // Helper method for handleProxyStatus implementations.
   void handleProxyError(jsg::Lock& js, kj::Exception e);
+  void closeConnection();
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_SOME(err, maybeErr) {
@@ -439,7 +434,53 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
 jsg::Ref<Socket> setupDatagramSocket(jsg::Lock& js,
     kj::Own<DatagramChannel> channel,
     kj::Maybe<kj::String> remoteAddress,
-    kj::Maybe<kj::String> localAddress);
+    kj::Maybe<kj::String> localAddress,
+    kj::Promise<kj::Maybe<kj::Exception>> status = kj::Maybe<kj::Exception>(kj::none));
+
+// An outbound UDP open, routed through the same channel as other subrequests. The target
+// fulfills `connected` only after its network policy and socket/session setup have succeeded.
+// Unlike UdpConnectCustomEvent, this event does not invoke a Worker's ingress handler.
+class UdpEgressCustomEvent final: public WorkerInterface::CustomEvent {
+ public:
+  UdpEgressCustomEvent(
+      kj::String host, kj::Own<kj::PromiseFulfiller<kj::Own<DatagramChannel>>> connected)
+      : host(kj::mv(host)),
+        connected(kj::mv(connected)) {}
+
+  kj::StringPtr getHost() const {
+    return host;
+  }
+  kj::Promise<Result> complete(kj::Promise<kj::Own<DatagramChannel>> channel);
+  kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest>,
+      kj::Maybe<kj::StringPtr>,
+      kj::Maybe<Worker_VersionInfo>,
+      Frankenvalue,
+      kj::TaskSet&,
+      bool) override;
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory&,
+      capnp::ByteStreamFactory&,
+      FrankenvalueHandler&,
+      rpc::EventDispatcher::Client dispatcher) override;
+  kj::Promise<Result> notSupported() override;
+  void failed(const kj::Exception& exception) override {
+    connected->reject(exception.clone());
+  }
+  uint16_t getType() override {
+    return EVENT_TYPE;
+  }
+  tracing::EventInfo getEventInfo() const override;
+  static constexpr uint16_t EVENT_TYPE = 16;
+
+  using OpenUdpContext =
+      capnp::CallContext<rpc::EventDispatcher::OpenUdpParams, rpc::EventDispatcher::OpenUdpResults>;
+  static kj::Promise<void> receiveRpc(OpenUdpContext context, kj::Own<WorkerInterface> worker);
+  static kj::Promise<void> receiveRpc(
+      OpenUdpContext context, WorkerInterface& worker, kj::Own<void> ownWorker);
+
+ private:
+  kj::String host;
+  kj::Own<kj::PromiseFulfiller<kj::Own<DatagramChannel>>> connected;
+};
 
 // A WorkerInterface::CustomEvent that delivers a single UDP flow to a worker's exported
 // `connect(socket)` handler. Unlike TCP ingress, this bypasses kj::HttpService::connect()
