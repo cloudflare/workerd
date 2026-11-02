@@ -20,6 +20,8 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
+//  11. A fresh cluster serves the deployment its bucket holds, Durable Objects
+//      included, and a node refuses a deployment that holds more than services.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -298,6 +300,14 @@ class FakeS3 {
     });
   }
 
+  async put(key, body, headers = {}) {
+    const res = await fetch(
+      `http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`,
+      { method: 'PUT', body, headers }
+    );
+    assert.strictEqual(res.status, 200, `PUT ${key} answered ${res.status}`);
+  }
+
   // The key of the node that owns the Counter with this ID, or null when no
   // owner record exists.
   async owner(id) {
@@ -327,7 +337,16 @@ class FakeS3 {
 //   bucket     the FakeS3
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
-async function withCluster(numNodes, fn, { extraArgs = () => [] } = {}) {
+// The nodes run `config`, once `before` has prepared the bucket.
+async function withCluster(
+  numNodes,
+  fn,
+  {
+    extraArgs = () => [],
+    config = env.WD_TEST_CONFIG,
+    before = async () => {},
+  } = {}
+) {
   // Each test run gets its own bucket and disks, so state doesn't leak
   // between tests.
   const root = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
@@ -336,12 +355,13 @@ async function withCluster(numNodes, fn, { extraArgs = () => [] } = {}) {
   const nodeKeys = new Map();
   try {
     await bucket.start();
+    await before(bucket);
     for (let i = 0; i < numNodes; i++) {
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
       const node = new ClusterNode({
         binary: env.WORKERD_BINARY,
-        config: env.WD_TEST_CONFIG,
+        config,
         localPath,
         s3Port: bucket.port,
         nodeId: `node${i}`,
@@ -845,6 +865,9 @@ test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigne
 
 test('cluster: a public cluster address is refused', async () => {
   const local = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+  // The bucket is read for deployments before the config is checked.
+  const bucket = new FakeS3();
+  await bucket.start();
   for (const flag of ['--cluster-addr', '--cluster-advertise']) {
     const child = spawn(
       env.WORKERD_BINARY,
@@ -856,7 +879,10 @@ test('cluster: a public cluster address is refused', async () => {
         `${flag}=8.8.8.8:7000`,
         `--directory-path=local=${local}`,
       ],
-      { stdio: ['ignore', 'ignore', 'pipe'] }
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env: { ...env, AWS_ENDPOINT_URL: `http://127.0.0.1:${bucket.port}` },
+      }
     );
     let stderr = '';
     child.stderr.on('data', (d) => (stderr += d));
@@ -864,6 +890,7 @@ test('cluster: a public cluster address is refused', async () => {
     assert.notStrictEqual(code, 0, flag);
     assert.match(stderr, /8\.8\.8\.8 is public/, flag);
   }
+  await bucket.stop();
   await rm(local, { recursive: true });
 });
 
@@ -1302,4 +1329,108 @@ test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO a
     const state = await fetchJson(nodes[1].httpPort, '/get?name=root');
     assert.strictEqual(state.body.restores, 2);
   });
+});
+
+// The encoded message `workerd compile --config-only` writes for the config
+// at `path`.
+async function compileConfig(path) {
+  const child = spawn(env.WORKERD_BINARY, ['compile', '--config-only', path], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const chunks = [];
+  child.stdout.on('data', (chunk) => chunks.push(chunk));
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject).once('close', resolve);
+  });
+  assert.strictEqual(code, 0, `compiling ${path} failed`);
+  return Buffer.concat(chunks);
+}
+
+// Publishes `config`, an encoded Config, as deployment `name` the way any tool
+// may, by writing the bucket's layout (src/workerd/server/cluster/deploy.rs):
+// the version's objects, then the catalog, created conditionally.
+async function deploy(bucket, name, config) {
+  const version = createHash('sha256').update(config).digest('hex');
+  const prefix = `deploy/${name}/${version}`;
+  await bucket.put(`${prefix}/config.bin`, config);
+  const manifest = { format: 1, name, version, requires: [] };
+  await bucket.put(`${prefix}/manifest.json`, JSON.stringify(manifest));
+  const catalog = {
+    format: 1,
+    revision: 1,
+    deployments: { [name]: { version } },
+  };
+  await bucket.put('deploy/catalog.json', JSON.stringify(catalog), {
+    'if-none-match': '*',
+  });
+}
+
+test('cluster: a fresh cluster serves the deployment in its bucket', async () => {
+  const deployment = await compileConfig(env.DEPLOYMENT_CONFIG);
+  await withCluster(
+    2,
+    async ({ nodes, bucket, nodeKeys }) => {
+      // The node configs define no worker: "main" and its Durable Object
+      // namespace are the deployment's.
+      const counts = [];
+      const owners = new Set();
+      let id;
+      for (let i = 0; i < 4; i++) {
+        const node = nodes[i % nodes.length];
+        const { status, body } = await fetchJson(
+          node.httpPort,
+          '/increment?name=deployed'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        counts.push(body.count);
+        owners.add(body.nodeId);
+        id = body.id;
+      }
+      assert.deepStrictEqual(counts, [1, 2, 3, 4]);
+      assert.strictEqual(owners.size, 1, [...owners].join(', '));
+
+      // The object is clustered: its owner record is in the bucket, under
+      // the deployment's namespace.
+      const [owner] = owners;
+      const record = await bucket.get(
+        `${objectPrefix(id, 'deployed-counter-namespace')}/own.json`
+      );
+      assert.notStrictEqual(record, null);
+      assert.strictEqual(JSON.parse(record).node, nodeKeys.get(owner));
+    },
+    {
+      config: env.NODE_CONFIG,
+      before: (bucket) => deploy(bucket, 'app', deployment),
+    }
+  );
+});
+
+test('cluster: a node refuses a deployment that holds more than services', async () => {
+  // The node's own config, sockets and cluster block included.
+  const deployment = await compileConfig(env.NODE_CONFIG);
+  const root = await mkdtemp(join(tmpdir(), 'workerd-cluster-'));
+  const bucket = new FakeS3();
+  try {
+    await bucket.start();
+    await deploy(bucket, 'app', deployment);
+    const node = new ClusterNode({
+      binary: env.WORKERD_BINARY,
+      config: env.NODE_CONFIG,
+      localPath: root,
+      s3Port: bucket.port,
+      nodeId: 'node0',
+    });
+    await assert.rejects(node.start(), /exited before listening/);
+    await node.stop();
+    const refusal =
+      /deployment "app" sets `sockets`, `cluster`; a deployment may contain only services/;
+    const deadline = Date.now() + 5000;
+    while (!refusal.test(node.stderr) && Date.now() < deadline) {
+      await sleep(50);
+    }
+    assert.match(node.stderr, refusal);
+  } finally {
+    await bucket.stop();
+    await rm(root, { recursive: true, force: true });
+  }
 });

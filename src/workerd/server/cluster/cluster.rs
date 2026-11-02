@@ -85,17 +85,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub fn new(setup: Setup) -> Result<Rc<Self>> {
-        let options: Vec<_> = setup
-            .options
-            .iter()
-            .filter_map(|option| option.split_once('='))
-            .map(|(key, value)| (key.to_owned(), value.to_owned()))
-            .collect();
-        let (s3, prefix) = S3::new(&setup.url, &options)?;
-        Ok(Self::over(
-            Bucket::new(s3, &format!("{prefix}/{FORMAT}")),
-            setup,
-        ))
+        Ok(Self::over(open_bucket(&setup.url, &setup.options)?, setup))
     }
 
     /// Over `bucket`, not the one `setup` names.
@@ -413,6 +403,19 @@ impl Cluster {
 
 /// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
+/// under the layout's version: what every key of the layout is relative to.
+/// `options` are `name=value` (see `S3::new`).
+pub fn open_bucket(url: &str, options: &[String]) -> Result<Bucket> {
+    let options: Vec<_> = options
+        .iter()
+        .filter_map(|option| option.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    let (s3, prefix) = S3::new(url, &options)?;
+    Ok(Bucket::new(s3, &format!("{prefix}/{FORMAT}")))
+}
 
 const fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)

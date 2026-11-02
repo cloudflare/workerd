@@ -115,6 +115,20 @@ struct ClusterConfig {
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
   # may differ in backwards-compatible ways.
+  #
+  # The bucket can also hold deployments: named applications, each an encoded `Config` that holds
+  # only services, which every instance serves beside the services of its own config. `serve`
+  # reads the bucket's catalog of deployments at startup and refuses to start if one breaks the
+  # rules they compose by: service names and actor namespace keys (Durable Object `uniqueKey`s and
+  # Workflow names) are unique across the instance's config and every deployment, a deployment
+  # defines no `disk` service (it names the instance's), and a `fromEnvironment` binding in a
+  # deployment must name a variable the instance sets. The layout of the bucket, for tools that
+  # write deployments, is documented in `src/workerd/server/cluster/deploy.rs`.
+  #
+  # A deployment runs with the authority of each instance's config: its services reach the
+  # instance's network, environment variables, container engine and named services. Whoever may
+  # write deployments to the bucket has that authority on every instance; limiting a writer to the
+  # deployments' part of the bucket does not limit it.
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
@@ -544,7 +558,7 @@ struct Worker {
       # Takes the value of an environment variable from the system. The value specified here is
       # the name of a system environment variable. The value of the binding is obtained by invoking
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
-      # `null`.
+      # `null`; in a cluster's deployment (see `ClusterConfig`), it is an error.
 
       analyticsEngine @17 :ServiceDesignator;
       # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.
