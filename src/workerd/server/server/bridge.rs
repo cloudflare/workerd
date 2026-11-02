@@ -383,6 +383,13 @@ pub mod ffi {
             metadata: KjOwn<RequestMetadata>,
             tails: Box<WorkerInterfaceList>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Runs an idle actor's captured hook and flushes its writes, without starting a request
+        /// through the container's retirement gate or counting the actor as active.
+        async fn worker_run_actor_on_hibernate(
+            worker: &CompiledWorker,
+            actor: &ActorHandle,
+            channels: Box<ChannelFactory>,
+        ) -> Result<()>;
         /// `inner` with `keep` attached: dropped once `inner` has been.
         fn worker_interface_attach(
             inner: KjOwn<WorkerInterface>,
@@ -421,6 +428,8 @@ pub mod ffi {
         /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
         /// actor is shut down instead: its background work stops, and nothing is failed.
         fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
+        fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
         /// it on behalf of.
         type ActorLock;

@@ -73,6 +73,8 @@
 // waits that long *before* calling the DO. This lets a test put a request in
 // flight on a node and SIGTERM that node while the request has not yet routed
 // to the DO's owner.
+//
+// Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
 
 import {
   DurableObject,
@@ -84,6 +86,9 @@ import {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/on-hibernate/')) {
+      return env.ON_HIBERNATE.fetch(request);
+    }
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same

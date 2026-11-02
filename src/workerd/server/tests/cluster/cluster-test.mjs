@@ -19,6 +19,7 @@
 //   8. A stub that has resolved to a remote DO keeps failing once that DO
 //      breaks, while a fresh stub reaches the re-instantiated DO.
 //   9. Facets, their deletions and deleteAll() survive a takeover.
+//  10. Draining cancels a running onHibernate handler.
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -654,6 +655,37 @@ test(
       assert.strictEqual(response.body.count, 2);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  'cluster: draining cancels a running onHibernate handler',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(1, async ({ nodes: [node] }) => {
+      const url = (path) =>
+        `http://127.0.0.1:${node.httpPort}/on-hibernate/${path}`;
+      assert.strictEqual(await (await fetch(url('start'))).text(), 'running');
+
+      // The eviction waits for the handler, which outlasts its 10 s budget.
+      const eviction = fetch(url('evict'), {
+        signal: AbortSignal.timeout(20_000),
+      });
+      const deadline = Date.now() + 10_000;
+      while (!(await (await fetch(url('started'))).json())) {
+        assert(Date.now() < deadline, 'the onHibernate handler did not start');
+        await sleep(50);
+      }
+
+      // Releasing the object's ownership cancels the handler, so the waiting
+      // eviction fails at once and the drain doesn't wait out the budget.
+      const drainedAt = Date.now();
+      const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      const drainMs = Date.now() - drainedAt;
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+      assert(drainMs < 5_000, `the drain took ${drainMs} ms`);
+      assert.strictEqual((await eviction).status, 500);
     });
   }
 );
