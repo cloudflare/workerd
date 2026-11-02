@@ -2,8 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/api/tracing.h>
 #include <workerd/io/otlp-span-submitter.h>
 #include <workerd/io/timer-test-fixture.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -120,6 +122,74 @@ KJ_TEST("streaming spans use I/O time while native spans use precise time") {
 
 KJ_TEST("native span clocks work without an IoContext") {
   expectNativeClocks();
+}
+
+KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps") {
+  test::TestTimerChannel timer(test::TimerClock::CLAMPED);
+  timer.advanceTo(123);
+  TestFixture fixture({.ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+                           [&](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timer);
+  })});
+  TestFixture tail({
+    .waitScope = fixture.getWaitScope(),
+    .mainModuleSource = R"JS(
+      const timestamps = [];
+      export default {
+        tailStream() {
+          return event => {
+            if (event.event.type === 'exception') timestamps.push(event.timestamp.getTime());
+          };
+        },
+        fetch() { return Response.json(timestamps); }
+      };
+    )JS"_kj,
+  });
+  struct TaskErrors final: public kj::TaskSet::ErrorHandler {
+    void taskFailed(kj::Exception&& exception) override {
+      KJ_FAIL_ASSERT(exception);
+    }
+  } errors;
+  kj::TaskSet tasks(errors);
+  TestEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer = kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none,
+      kj::heap<tracing::TailStreamWriter>(kj::arr(tail.makeWorkerEntrypoint()), tasks));
+  tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
+    auto root = startExportedUserSpan(entropy, exporter.addRef(),
+        tracing::SpanContext(context.getTraceId(), context.getSpanId(), context.getTraceFlags()),
+        {.serviceName = "clock-test"}, "root"_kjc);
+    expectPreciseTime(KJ_ASSERT_NONNULL(root.getObserver()));
+    return root;
+  });
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
+  tracer->setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    KJ_ASSERT(env.context.now() == kj::UNIX_EPOCH + 123 * kj::MILLISECONDS);
+    auto scope = env.context.makeRequestTraceScope(env.lock);
+    auto tracing = env.js.alloc<api::Tracing>();
+    auto& handler =
+        KJ_ASSERT_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<api::user_tracing::Span>>());
+    auto span = KJ_ASSERT_NONNULL(tracing->getActiveSpan(env.js, handler));
+    KJ_ASSERT(span->getIsTraced());
+    auto object = jsg::JsObject(handler.wrap(env.js, kj::mv(span)).As<v8::Object>());
+    auto record =
+        KJ_ASSERT_NONNULL(object.get(env.js, "recordException"_kj).tryCast<jsg::JsFunction>());
+    record.call(env.js, object, env.js.str("test exception"_kj));
+  });
+  tracer->setOutcome(EventOutcome::OK, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS);
+  tracer->recordTimestamp(kj::UNIX_EPOCH + 123 * kj::MILLISECONDS);
+  fixture.drainAndDestroy(kj::mv(request));
+  tracer = nullptr;
+  tasks.onEmpty().wait(fixture.getWaitScope());
+  auto response = tail.runRequest(kj::HttpMethod::GET, "https://tail/", "");
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(response.body == "[123]");
+  KJ_EXPECT(exporter->spanCount == 1);
 }
 
 }  // namespace
