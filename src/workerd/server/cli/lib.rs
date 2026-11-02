@@ -120,7 +120,12 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
             let process = Process::new(executable, watcher, inherited_sockets);
-            let config = load_config::<T>(config, const_name.const_name, &process);
+            let config = load_config::<T>(
+                config,
+                const_name.const_name,
+                &process,
+                serve_or_test.experimental,
+            );
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -150,7 +155,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(config, None, &process);
+            let config = load_config::<T>(config, None, &process, serve_or_test.experimental);
             entry::test(
                 verbose,
                 config.into_words(),
@@ -170,7 +175,12 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             let filter = test.filter.take().unwrap_or_default();
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let process = Process::new(executable, watcher, Vec::new());
-            let config = load_config::<T>(config, filter.const_name.clone(), &process);
+            let config = load_config::<T>(
+                config,
+                filter.const_name.clone(),
+                &process,
+                serve_or_test.experimental,
+            );
             entry::test(
                 verbose,
                 config.into_words(),
@@ -216,7 +226,8 @@ fn run_compile(
         );
     }
     let process = Process::new(executable, None, Vec::new());
-    let config = load_config::<T>(config, const_name, &process);
+    // The binary checks `--experimental` when it runs.
+    let config = load_config::<T>(config, const_name, &process, true);
     let written = if config_only {
         config.write_to_stdout()
     } else {
@@ -239,7 +250,12 @@ fn run_bench(
     let filter = bench.filter.take().unwrap_or_default();
     let watcher = watcher::<T>(serve_or_test, executable.as_ref());
     let process = Process::new(executable, watcher, Vec::new());
-    let config = load_config::<T>(config, filter.test.const_name.clone(), &process);
+    let config = load_config::<T>(
+        config,
+        filter.test.const_name.clone(),
+        &process,
+        serve_or_test.experimental,
+    );
     entry::bench(
         verbose,
         config.into_words(),
@@ -323,6 +339,7 @@ fn load_config<T: CommandFactory>(
     config: args::ConfigFileArgs,
     const_name: Option<String>,
     process: &Process,
+    experimental: bool,
 ) -> Config {
     let args::ConfigFileArgs {
         import_paths,
@@ -358,7 +375,7 @@ fn load_config<T: CommandFactory>(
         if !std::path::Path::new(&config_file).is_file() {
             usage_error::<T>(format!("{config_file}: No such file."));
         }
-        return wrangler::load(&config_file, process)
+        return wrangler::load(&config_file, process, experimental)
             .unwrap_or_else(|error| config_errors(&[format!("{config_file}: {error}")], process));
     }
 

@@ -9,11 +9,14 @@
 //! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`,
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
-//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `no_bundle` and
-//! `$schema`. Any other field is an error rather than silently ignored.
+//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`
+//! (`binding` and `id`), `no_bundle` and `$schema`. Any other field is an error rather than
+//! silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
-//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
+//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). A KV
+//! namespace is a `kvNamespaceId` binding, workerd's own KV, which needs `--experimental`; its
+//! data is in `.wrangler/state/workerd/builtin/`, the config's `builtinStorage`. The server
 //! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 
 use std::collections::BTreeMap;
@@ -49,7 +52,16 @@ struct Wrangler {
     #[serde(default)]
     migrations: Vec<Migration>,
     #[serde(default)]
+    kv_namespaces: Vec<KvNamespace>,
+    #[serde(default)]
     no_bundle: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KvNamespace {
+    binding: String,
+    id: String,
 }
 
 #[derive(Deserialize)]
@@ -146,7 +158,7 @@ pub fn is_wrangler_config(path: &str) -> bool {
     ext.eq_ignore_ascii_case("json") || ext.eq_ignore_ascii_case("jsonc")
 }
 
-pub fn load(path: &str, process: &Process) -> Result<Config, String> {
+pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config, String> {
     let watch = |p: &Path| {
         process
             .watch_file(p.as_os_str().as_encoded_bytes())
@@ -157,6 +169,13 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
+    if !wrangler.kv_namespaces.is_empty() && !experimental {
+        return Err(
+            "kv_namespaces is an experimental feature which may change or go away \
+                    in the future. You must run workerd with `--experimental` to use it."
+                .to_owned(),
+        );
+    }
     let root = file.parent().unwrap_or(&file);
 
     let sources = if wrangler.no_bundle {
@@ -168,15 +187,30 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
     let classes = do_classes(&wrangler)?;
     let name = wrangler.name.clone().unwrap_or_else(|| "main".to_owned());
     let storage = root.join(".wrangler/state/workerd");
-    if !classes.is_empty() {
-        fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
+    let builtin = storage.join("builtin");
+    let kv = &wrangler.kv_namespaces;
+    for (dir, used) in [(&storage, !classes.is_empty()), (&builtin, !kv.is_empty())] {
+        if used {
+            fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
     }
 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
-    let mut services = conf
-        .reborrow()
-        .init_services(if classes.is_empty() { 1 } else { 2 });
+    // Named after the worker, so it cannot collide with it.
+    let builtin_service = format!("{name}-builtin-storage");
+    if !kv.is_empty() {
+        conf.set_builtin_storage(&builtin_service);
+    }
+    let disks = u32::from(!classes.is_empty()) + u32::from(!kv.is_empty());
+    let mut services = conf.reborrow().init_services(1 + disks);
+    if !kv.is_empty() {
+        let mut disk_service = services.reborrow().get(disks);
+        disk_service.set_name(&builtin_service);
+        let mut disk = disk_service.init_disk();
+        disk.set_path(builtin.to_string_lossy());
+        disk.set_writable(true);
+    }
 
     let mut service = services.reborrow().get(0);
     service.set_name(&name);
@@ -206,7 +240,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         .map_or(&[][..], |d| &d.bindings);
     let mut bs = worker
         .reborrow()
-        .init_bindings((wrangler.vars.len() + do_bindings.len()) as u32);
+        .init_bindings((wrangler.vars.len() + do_bindings.len() + kv.len()) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -220,6 +254,13 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         b.set_name(&d.name);
         b.init_durable_object_namespace()
             .set_class_name(&d.class_name);
+    }
+    for (i, k) in kv.iter().enumerate() {
+        let mut b = bs
+            .reborrow()
+            .get((wrangler.vars.len() + do_bindings.len() + i) as u32);
+        b.set_name(&k.binding);
+        b.set_kv_namespace_id(&k.id);
     }
 
     if !classes.is_empty() {

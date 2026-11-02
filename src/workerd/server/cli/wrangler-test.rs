@@ -32,6 +32,7 @@ fn load_project(files: &[(&str, &str)]) -> Result<Config, String> {
     load(
         dir.join("wrangler.jsonc").to_str().unwrap(),
         &Process::new(None, None, Vec::new()),
+        true,
     )
 }
 
@@ -291,13 +292,83 @@ fn unsupported_field_is_an_error() {
         (
             "wrangler.jsonc",
             r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
-                 "kv_namespaces": [{ "binding": "KV", "id": "x" }] }"#,
+                 "kv_namespaces": [{ "binding": "KV", "id": "x", "preview_id": "y" }] }"#,
         ),
         ("index.js", ""),
     ])
     .err()
     .unwrap();
+    assert!(error.contains("preview_id"), "{error}");
+}
+
+#[test]
+fn kv_namespaces_require_experimental() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
+                 "kv_namespaces": [{ "binding": "KV", "id": "x" }] }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
     assert!(error.contains("kv_namespaces"), "{error}");
+    assert!(error.contains("--experimental"), "{error}");
+}
+
+#[test]
+fn kv_namespaces_are_kv_namespace_ids_in_builtin_storage() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true,
+                 "kv_namespaces": [{ "binding": "A", "id": "a" },
+                                   { "binding": "B", "id": "b" }] }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let config = load(
+        dir.join("wrangler.jsonc").to_str().unwrap(),
+        &Process::new(None, None, Vec::new()),
+        true,
+    )
+    .unwrap();
+    let message = read(config);
+    let conf = message.get_root::<config::Reader>().unwrap();
+    assert_eq!(conf.get_builtin_storage().unwrap(), "app-builtin-storage");
+    let services = conf.get_services().unwrap();
+    assert_eq!(services.len(), 2);
+    let service::Which::Disk(disk) = services.get(1).which().unwrap() else {
+        panic!("not a disk");
+    };
+    let disk = disk.unwrap();
+    assert!(disk.get_writable());
+    let builtin = dir.join(".wrangler/state/workerd/builtin");
+    assert!(builtin.is_dir());
+    assert_eq!(
+        fs::canonicalize(disk.get_path().unwrap().to_str().unwrap()).unwrap(),
+        fs::canonicalize(builtin).unwrap()
+    );
+    let service::Which::Worker(w) = services.get(0).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let ids: Vec<_> = w
+        .unwrap()
+        .get_bindings()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            let worker::binding::Which::KvNamespaceId(id) = b.which().unwrap() else {
+                panic!("not a kvNamespaceId");
+            };
+            let name = b.get_name().unwrap().to_str().unwrap().to_owned();
+            (name, id.unwrap().to_str().unwrap().to_owned())
+        })
+        .collect();
+    assert_eq!(ids, [("A".into(), "a".into()), ("B".into(), "b".into())]);
 }
 
 #[test]
