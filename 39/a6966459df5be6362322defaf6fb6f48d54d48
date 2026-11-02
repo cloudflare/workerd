@@ -1,0 +1,33 @@
+src/workerd/jsg/type-wrapper.h
+  s_2468263fb7681a::t_c70ac92e73cea2 25-27,692-695,715-742,1046-1072
+src/workerd/jsg/resource.h
+  s_2468263fb7681a::t_de922b6840eb4d 1829-1833,2057-2063,2065,2074-2082,2100-2179
+src/workerd/jsg/split-isolate-test.c++
+  s_2468263fb7681a::t_cf17d436b7f297 1-65
+docs/jsg.md
+  s_855e272276aadf::t_54f01364cda857 1313-1353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "39a6966459df5be6362322defaf6fb6f48d54d48",
+  "prompts": {},
+  "sessions": {
+    "s_2468263fb7681a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19374f82-d7ae-4d1a-b695-d56c5f117712",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_855e272276aadf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eeb25c14-0c7c-49d5-8c8c-1c33fd355792",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
