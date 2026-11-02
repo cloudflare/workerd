@@ -1578,8 +1578,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
         // dummy context. (Undocumented, as usual.)
-        context =
-            v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
+        context = v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate),
+            {}, jsg::newContextInternalFieldsDeserializer());
         // We need to set the highest used index in every context we create to be a nullptr
         // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
         // a fatal error if the array is smaller than the given index.
@@ -3334,7 +3334,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
           // HACK: We want to print the error, but we need a context to do that.
           //   We don't know which contexts exist in this isolate, so I guess we have to
           //   create one. Ugh.
-          auto dummyContext = v8::Context::New(lock->v8Isolate);
+          auto dummyContext = v8::Context::New(
+              lock->v8Isolate, nullptr, {}, {}, jsg::newContextInternalFieldsDeserializer());
           // We need to set the highest used index in every context we create to be a nullptr
           // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
           // a fatal error if the array is smaller than the given index.

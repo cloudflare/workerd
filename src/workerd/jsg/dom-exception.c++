@@ -6,6 +6,7 @@
 
 #include "jsvalue.h"
 #include "ser.h"
+#include "setup.h"
 
 #include <workerd/jsg/memory.h>
 
@@ -15,16 +16,32 @@ namespace workerd::jsg {
 
 namespace {
 
-v8::Local<v8::Private> namePrivate(v8::Isolate* isolate) {
-  return v8::Private::ForApi(isolate,
-      v8::String::NewFromUtf8Literal(
-          isolate, "workerd:DOMException.name", v8::NewStringType::kInternalized));
+// The internal fields of a DOMException that createDOMException() creates.
+enum DOMExceptionField : int {
+  // The brand: an aligned pointer to BRAND_TAG. A context snapshot keeps it through
+  // serializeDOMExceptionBrand() and restoreDOMExceptionBrand().
+  BRAND,
+  NAME,
+  MESSAGE,
+  FIELD_COUNT,
+};
+
+// The value the brand points to, chosen next to Wrappable::WORKERD_WRAPPABLE_TAG and
+// WORKERD_RUST_WRAPPABLE_TAG. Only its address matters.
+const uint16_t BRAND_TAG = 0xeb06;
+
+constexpr auto BRAND_TYPE_TAG = static_cast<v8::EmbedderDataTypeTag>(DOMExceptionField::BRAND);
+
+void setBrand(v8::Local<v8::Object> object) {
+  object->SetAlignedPointerInInternalField(
+      DOMExceptionField::BRAND, const_cast<uint16_t*>(&BRAND_TAG), BRAND_TYPE_TAG);
 }
 
-v8::Local<v8::Private> messagePrivate(v8::Isolate* isolate) {
-  return v8::Private::ForApi(isolate,
-      v8::String::NewFromUtf8Literal(
-          isolate, "workerd:DOMException.message", v8::NewStringType::kInternalized));
+// Whether `object` has the brand, without reading a field that may not hold a V8 value.
+bool hasBrand(v8::Local<v8::Object> object) {
+  return object->InternalFieldCount() == DOMExceptionField::FIELD_COUNT &&
+      object->GetAlignedPointerFromInternalField(DOMExceptionField::BRAND, BRAND_TYPE_TAG) ==
+      &BRAND_TAG;
 }
 
 int getCode(v8::Isolate* isolate, v8::Local<v8::String> name) {
@@ -66,11 +83,28 @@ int getDOMExceptionCode(kj::ArrayPtr<const char> name) {
   return 0;
 }
 
-v8::Maybe<void> initDOMException(v8::Isolate* isolate,
+v8::Local<v8::ObjectTemplate> newDOMExceptionTemplate(v8::Isolate* isolate) {
+  auto result = v8::ObjectTemplate::New(isolate);
+  result->SetInternalFieldCount(DOMExceptionField::FIELD_COUNT);
+  return result;
+}
+
+v8::MaybeLocal<v8::Object> createDOMException(v8::Isolate* isolate,
     v8::Local<v8::Context> context,
-    v8::Local<v8::Object> object,
+    v8::Local<v8::Object> prototype,
     v8::Local<v8::String> name,
     v8::Local<v8::String> message) {
+  v8::Local<v8::Object> object;
+  if (!IsolateBase::getDOMExceptionTemplate(isolate)->NewInstance(context).ToLocal(&object)) {
+    return {};
+  }
+  setBrand(object);
+  object->SetInternalField(DOMExceptionField::NAME, name);
+  object->SetInternalField(DOMExceptionField::MESSAGE, message);
+  bool prototypeSet;
+  if (!object->SetPrototype(context, prototype).To(&prototypeSet)) return {};
+  KJ_ASSERT(prototypeSet, "could not set a DOMException's prototype");
+
   // The order of `code`, `name` and `message` is the order in which they have always been own
   // properties of a DOMException, from JSG's lazy instance properties.
   auto code = v8::Integer::New(isolate, getCode(isolate, name));
@@ -84,13 +118,9 @@ v8::Maybe<void> initDOMException(v8::Isolate* isolate,
           v8::String::NewFromUtf8Literal(isolate, "message", v8::NewStringType::kInternalized),
           message)
           .IsNothing()) {
-    return v8::Nothing<void>();
+    return {};
   }
-  if (object->SetPrivate(context, namePrivate(isolate), name).IsNothing() ||
-      object->SetPrivate(context, messagePrivate(isolate), message).IsNothing()) {
-    return v8::Nothing<void>();
-  }
-  return v8::JustVoid();
+  return object;
 }
 
 v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
@@ -101,8 +131,11 @@ v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
   auto prototype = getContextDataSlot(context, ContextDataSlot::DOM_EXCEPTION_PROTOTYPE);
   KJ_ASSERT(prototype->IsValue() && prototype.As<v8::Value>()->IsObject(),
       "the context has no DOMException prototype");
-  auto object = v8::Object::New(isolate, prototype.As<v8::Value>(), nullptr, nullptr, 0);
-  if (initDOMException(isolate, context, object, name, message).IsNothing()) return {};
+  v8::Local<v8::Object> object;
+  if (!createDOMException(isolate, context, prototype.As<v8::Object>(), name, message)
+           .ToLocal(&object)) {
+    return {};
+  }
 
   auto stackName =
       v8::String::NewFromUtf8Literal(isolate, "stack", v8::NewStringType::kInternalized);
@@ -126,17 +159,46 @@ kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
     v8::Isolate* isolate, v8::Local<v8::Value> value) {
   if (!value->IsObject()) return kj::none;
   auto object = value.As<v8::Object>();
-  auto context = isolate->GetCurrentContext();
-  // A private property is never looked up on the prototype chain, and reading one runs no
-  // JavaScript, not even for a Proxy.
-  v8::Local<v8::Value> name;
-  v8::Local<v8::Value> message;
-  if (!object->GetPrivate(context, namePrivate(isolate)).ToLocal(&name) || !name->IsString() ||
-      !object->GetPrivate(context, messagePrivate(isolate)).ToLocal(&message) ||
-      !message->IsString()) {
-    return kj::none;
+
+  if (hasBrand(object)) {
+    return DOMExceptionFields{
+      object->GetInternalField(DOMExceptionField::NAME).As<v8::String>(),
+      object->GetInternalField(DOMExceptionField::MESSAGE).As<v8::String>(),
+    };
   }
-  return DOMExceptionFields{name.As<v8::String>(), message.As<v8::String>()};
+
+  // An instance of the C++ class.
+  if (object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT &&
+      Wrappable::isWorkerdApiObject(object)) {
+    auto wrappable = Wrappable::unwrapFromShimAnyType(isolate, object);
+    if (wrappable == nullptr) return kj::none;
+    auto resource = wrappable->jsgTryGetObject();
+    if (resource == nullptr) return kj::none;
+    auto exception = dynamic_cast<DOMException*>(resource);
+    if (exception == nullptr) return kj::none;
+    // The constructor converted both from JavaScript strings, so they fit in one.
+    auto newString = [&](kj::StringPtr str) {
+      return v8::String::NewFromUtf8(
+          isolate, str.begin(), v8::NewStringType::kNormal, static_cast<int>(str.size()))
+          .ToLocalChecked();
+    };
+    return DOMExceptionFields{
+      newString(exception->getName()),
+      newString(exception->getMessage()),
+    };
+  }
+
+  return kj::none;
+}
+
+bool isDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
+  return index == DOMExceptionField::BRAND && hasBrand(holder);
+}
+
+void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
+  KJ_ASSERT(index == DOMExceptionField::BRAND &&
+      holder->InternalFieldCount() == DOMExceptionField::FIELD_COUNT);
+  setBrand(holder);
 }
 
 void setDOMExceptionPrototype(v8::Local<v8::Context> context, v8::Local<v8::Object> prototype) {
@@ -181,13 +243,8 @@ Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::V
   v8::Local<v8::String> stackName = js.str("stack"_kjc);
   jsg::check(args.This()->DefineProperty(js.v8Context(), stackName, prop));
 
-  auto errName = kj::mv(name).orDefault([] { return kj::str("Error"); });
-  // The name and message are also this class's lazy instance properties, so only the brand is set.
-  auto isolate = js.v8Isolate;
-  jsg::check(args.This()->SetPrivate(js.v8Context(), namePrivate(isolate), js.str(errName)));
-  jsg::check(args.This()->SetPrivate(js.v8Context(), messagePrivate(isolate), js.str(errMessage)));
-
-  return js.alloc<DOMException>(kj::mv(errMessage), kj::mv(errName));
+  return js.alloc<DOMException>(
+      kj::mv(errMessage), kj::mv(name).orDefault([] { return kj::str("Error"); }));
 }
 
 kj::StringPtr DOMException::getName() const {

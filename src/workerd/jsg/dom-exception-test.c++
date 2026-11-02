@@ -100,5 +100,62 @@ KJ_TEST("DOMExceptions are recognized by their brand") {
   });
 }
 
+KJ_TEST("DOMExceptions are recognized while an exception is pending") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      auto created = js.domException(kj::str("AbortError"), kj::str("stopped"));
+      v8::TryCatch tryCatch(js.v8Isolate);
+      js.v8Isolate->ThrowError(js.str("pending"_kj));
+      KJ_ASSERT(js.v8Isolate->HasPendingException());
+      auto fields = KJ_ASSERT_NONNULL(tryGetDOMExceptionFields(js.v8Isolate, created));
+      KJ_EXPECT(JsString(fields.name).toString(js) == "AbortError"_kj);
+      KJ_EXPECT(JsString(fields.message).toString(js) == "stopped"_kj);
+      KJ_EXPECT(js.v8Isolate->HasPendingException());
+    });
+  });
+}
+
+KJ_TEST("A DOMException keeps its brand through a context snapshot") {
+  kj::Own<SnapshotArtifact> artifact;
+  {
+    DOMExceptionIsolate zygote(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>(),
+        defaultExternalStringAllocator(), {}, true,
+        SnapshotConfig(MutableSnapshot{.artifact = kj::atomicRefcounted<SnapshotArtifact>()}));
+    zygote.runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+      v8::Global<v8::Context> contextHandle;
+      lock.withinHandleScope([&] {
+        auto context = lock.template newContext<DOMExceptionContext>();
+        auto handle = context.getHandle(lock.v8Isolate);
+        IsolateBase::from(lock.v8Isolate).setSnapshotDefaultContext(handle);
+        JSG_WITHIN_CONTEXT_SCOPE(lock, handle, [&](jsg::Lock& js) {
+          js.global().set(
+              js, "saved"_kj, js.domException(kj::str("NotFoundError"), kj::str("gone")));
+        });
+        contextHandle = context.extractContextGlobalForSnapshot();
+      });
+      auto& base = IsolateBase::from(lock.v8Isolate);
+      base.createSnapshotBlob(kj::mv(contextHandle), {});
+      artifact = base.extractSnapshotArtifact();
+    });
+  }
+
+  DOMExceptionIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>(),
+      defaultExternalStringAllocator(), {}, true,
+      SnapshotConfig(FinalizedSnapshot{.artifact = artifact->addRef()}));
+  isolate.runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      auto saved = js.global().get(js, "saved"_kj);
+      auto fields = KJ_ASSERT_NONNULL(tryGetDOMExceptionFields(js.v8Isolate, saved));
+      KJ_EXPECT(JsString(fields.name).toString(js) == "NotFoundError"_kj);
+      KJ_EXPECT(JsString(fields.message).toString(js) == "gone"_kj);
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

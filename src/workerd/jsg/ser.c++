@@ -206,15 +206,14 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
-  // By default, V8 will call WriteHostObject() only for objects that have internal fields. A
-  // DOMException is a host object whether or not it has them.
+  // By default, V8 will call WriteHostObject() only for objects that have internal fields. We
+  // also want native errors and class instances (see IsHostObject()).
   return true;
 }
 
 v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  // Any object with internal fields is DEFINITELY a host object, and so is a DOMException, which
-  // writeApiObject() writes by its brand.
-  if (object->InternalFieldCount() > 0 || tryGetDOMExceptionFields(isolate, object) != kj::none) {
+  // Any object with internal fields, a DOMException included, is DEFINITELY a host object.
+  if (object->InternalFieldCount() > 0) {
     return v8::Just(true);
   }
 

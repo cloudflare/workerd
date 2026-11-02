@@ -1949,7 +1949,8 @@ class ResourceWrapper {
     // a new JavaScript context.
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context =
+        v8::Context::New(isolate, nullptr, tmpl, {}, newContextInternalFieldsDeserializer());
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);

@@ -32,6 +32,19 @@ class Deserializer;
 
 // The functions that create and recognize DOMExceptions are declared in jsg.h.
 
+// Creates the template of the DOMExceptions that createDOMException() creates, which IsolateBase
+// holds (IsolateBase::getDOMExceptionTemplate()).
+v8::Local<v8::ObjectTemplate> newDOMExceptionTemplate(v8::Isolate* isolate);
+
+// For a context snapshot, which keeps an internal field that holds an aligned pointer only through
+// the embedder's callbacks (see serializeInternalField() in setup.c++): whether internal field
+// `index` of `holder` is a DOMException's brand.
+bool isDOMExceptionBrand(v8::Local<v8::Object> holder, int index);
+
+// Restores internal field `index` of `holder`, the brand of a DOMException in a context
+// deserialized from a snapshot, for which isDOMExceptionBrand() was true.
+void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index);
+
 // In a Worker, the per-isolate bootstrap replaces this class as the global DOMException with a
 // TypeScript class of the same shape (src/per_isolate/dom-exception.ts), and native code creates
 // instances of that. This class remains the DOMException of isolates that run no bootstrap, such

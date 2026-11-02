@@ -1686,22 +1686,16 @@ MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str 
       isolate, isolate->GetCurrentContext(), newString(name), newString(message))));
 }
 
-bool local_try_unwrap_dom_exception(Isolate* isolate,
-    Local value,
-    bool& isDOMException,
-    ::rust::String& name,
-    ::rust::String& message) {
-  // Reading the brand's private properties takes the context.
-  if (exceptionPending(isolate)) return false;
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message) {
+  // Takes no context, so it needs no exceptionPending() check.
   KJ_IF_SOME(fields,
       ::workerd::jsg::tryGetDOMExceptionFields(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
     name = rustStringFromV8(isolate, fields.name);
     message = rustStringFromV8(isolate, fields.message);
-    isDOMException = true;
-  } else {
-    isDOMException = false;
+    return true;
   }
-  return true;
+  return false;
 }
 
 namespace {

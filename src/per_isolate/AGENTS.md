@@ -21,7 +21,7 @@ at context creation, before any user code. C++ entry point:
 - `main.ts` first installs the TypeScript `DOMException` (`dom-exception.ts`),
   which replaces the C++ class with one of the same shape. Native code creates
   instances of it without running its constructor, and recognizes one by the
-  brand in its V8 private properties (`newDOMException()` and
+  brand in its internal fields (`newDOMException()` and
   `tryGetDOMExceptionFields()` in `src/workerd/jsg/jsg.h`); bootstrap code checks
   for one with `utils.isDOMException()`, never `instanceof`.
 - `main.ts` installs the real stream globals (ReadableStream et al.) when

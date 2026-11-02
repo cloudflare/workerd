@@ -2624,11 +2624,14 @@ class DOMException;
 class ExternalMemoryAdjustment;
 class Serializer;
 
-// A DOMException carries its name and message in V8 private properties, which JavaScript cannot
-// read or change. They brand it: native code recognizes a DOMException by them, and reads the
-// name and message it was created with, without running JavaScript. Both the C++ class
-// (dom-exception.h) and the TypeScript class that the per-isolate bootstrap installs as the
-// global DOMException brand their instances this way, so the functions below work for either.
+// A DOMException that native code or the TypeScript class that the per-isolate bootstrap
+// installs as the global DOMException creates is an API object with internal fields, which
+// JavaScript cannot read or change: a brand, and the name and message it was created with. Native
+// code recognizes a DOMException by them and reads them without the context, so also while an
+// exception or a termination is pending. Having internal fields, a DOMException is a host object
+// to a v8::ValueSerializer without a delegate that overrides IsHostObject(). An instance of the
+// C++ class (dom-exception.h), which is the global DOMException of isolates without the
+// bootstrap, is recognized as the C++ object it wraps.
 //
 // These functions use only V8, not jsg::Lock, so that Rust JSG's shims can call them.
 
@@ -2640,19 +2643,19 @@ struct DOMExceptionFields {
 // Returns the legacy `code` of a DOMException named `name`, or 0 for a name without one.
 int getDOMExceptionCode(kj::ArrayPtr<const char> name);
 
-// Gives `object` the brand of a DOMException named `name` with `message`, and its own read-only
-// `code`, `name` and `message` properties, in that order. Captures no stack. Runs no JavaScript.
-// Returns nothing if defining a property failed, with an exception pending.
-v8::Maybe<void> initDOMException(v8::Isolate* isolate,
+// Creates a DOMException named `name` with `message` that inherits from `prototype`, with its own
+// read-only `code`, `name` and `message` properties, in that order. Captures no stack. Runs no
+// JavaScript. Returns nothing with an exception pending if creating it failed.
+v8::MaybeLocal<v8::Object> createDOMException(v8::Isolate* isolate,
     v8::Local<v8::Context> context,
-    v8::Local<v8::Object> object,
+    v8::Local<v8::Object> prototype,
     v8::Local<v8::String> name,
     v8::Local<v8::String> message);
 
-// Creates a DOMException without running JavaScript, inheriting from the DOMException prototype
-// of `context` (see setDOMExceptionPrototype()). Its own `stack` property is `stack` if given,
-// otherwise the current stack trace. Returns nothing with an exception pending if creating it
-// failed.
+// Creates a DOMException as createDOMException() does, inheriting from the DOMException
+// prototype of `context` (see setDOMExceptionPrototype()). Its own `stack` property is `stack` if
+// given, otherwise the current stack trace. Returns nothing with an exception pending if creating
+// it failed.
 v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
     v8::Local<v8::Context> context,
     v8::Local<v8::String> name,
@@ -2660,7 +2663,7 @@ v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
     v8::MaybeLocal<v8::String> stack = {});
 
 // Returns the name and message of `value` if it is a DOMException, kj::none otherwise. Runs no
-// JavaScript. Only the object's own brand counts, not one on its prototype chain.
+// JavaScript and takes no context. Only the object itself counts, not its prototype chain.
 kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
     v8::Isolate* isolate, v8::Local<v8::Value> value);
 
@@ -2668,6 +2671,12 @@ kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
 // JSG sets this class's prototype when it creates a context, and the per-isolate bootstrap
 // replaces it with the TypeScript class's.
 void setDOMExceptionPrototype(v8::Local<v8::Context> context, v8::Local<v8::Object> prototype);
+
+// The callback that every v8::Context::New() passes as `internal_fields_deserializer`. In an
+// isolate started from a snapshot, every new context is deserialized from the snapshot's default
+// context, and V8 requires a callback to restore the internal fields that the snapshot keeps
+// (IsolateBase::setSnapshotDefaultContext()), such as DOMExceptions' brands.
+v8::DeserializeInternalFieldsCallback newContextInternalFieldsDeserializer();
 
 // Writes `object`, a DOMException with `fields`, as DOMException::SERIALIZATION_TAG_V2 (without
 // the tag). Reads its `stack` property, which can run JavaScript.

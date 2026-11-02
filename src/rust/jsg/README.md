@@ -1133,7 +1133,7 @@ jsg_require!(valid, DOMSyntaxError, "Invalid base64");
 `jsg::Lock::domException()` does; a name without a `DOM`-prefixed type, such as the legacy
 `IndexSizeError`, has the type `Error`, and `Error::dom_exception_name()` returns it. `FromJS`
 for `jsg::Error` reads a caught native error's `name` and `message`, and the name and message a
-`DOMException` was created with, which it carries in V8 private properties (see
+`DOMException` was created with, which it carries in internal fields (see
 `newDOMException()` in `src/workerd/jsg/jsg.h`). An internal error from a tunneled
 `jsg-internal.DOMException(<Name>)` is thrown as a `DOMException` with that name and the
 redacted message, as in C++.

@@ -214,16 +214,19 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
-// Gives a DOMException being constructed by the TypeScript DOMException its brand and its own
-// `code`, `name` and `message` properties (jsg::initDOMException()). The caller passes the
-// object it is constructing and the converted strings.
-static void InitDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// Creates the DOMException that the TypeScript DOMException constructor returns, without a stack
+// (jsg::createDOMException()). The caller passes its prototype and the converted strings.
+static void CreateDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto isolate = args.GetIsolate();
   jsg::liftKj(isolate, [&] {
     KJ_ASSERT(args[0]->IsObject() && args[1]->IsString() && args[2]->IsString());
+    v8::Local<v8::Object> exception;
     // A failure leaves its exception pending, which propagates to the constructor's caller.
-    (void)jsg::initDOMException(isolate, isolate->GetCurrentContext(), args[0].As<v8::Object>(),
-        args[1].As<v8::String>(), args[2].As<v8::String>());
+    if (jsg::createDOMException(isolate, isolate->GetCurrentContext(), args[0].As<v8::Object>(),
+            args[1].As<v8::String>(), args[2].As<v8::String>())
+            .ToLocal(&exception)) {
+      args.GetReturnValue().Set(exception);
+    }
   });
 }
 
@@ -324,7 +327,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
-    "initDOMException",
+    "createDOMException",
     "isDOMException",
     "setDOMExceptionPrototype",
     "setPrivate",
@@ -343,7 +346,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
-    getMethod(js, InitDOMException),
+    getMethod(js, CreateDOMException),
     getMethodNoSideEffect(js, IsDOMException),
     getMethod(js, SetDOMExceptionPrototype),
     getMethod(js, SetPrivate),

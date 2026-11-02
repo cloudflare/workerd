@@ -6,9 +6,9 @@
 // own read-only `code`, `name` and `message` properties, an enumerable own `stack`, and the
 // legacy code constants on both the constructor and the prototype. Native code creates
 // DOMExceptions without running this constructor (jsg::newDOMException()), over the prototype
-// that install() hands it, and recognizes them by the brand that utils.initDOMException() sets.
-// This constructor sets the same brand, so utils.isDOMException() is true for either kind, and
-// for a subclass instance.
+// that install() hands it, and recognizes them by their brand. This constructor returns one that
+// utils.createDOMException() creates in place of `this`, with the same brand, so
+// utils.isDOMException() is true for either kind, and for a subclass instance.
 //
 // DOMException is a function rather than a class so that its `prototype` property is
 // writable, as a JSG class's is unless the immutable_api_prototypes flag is set.
@@ -58,7 +58,7 @@ const LEGACY_CODES: readonly (readonly [string, number])[] = [
 
 // The message and name are converted as Web IDL converts a DOMString, which a template literal
 // does too: a Symbol throws a TypeError.
-function DOMException(this: object, ...args: unknown[]): void {
+function DOMException(this: object, ...args: unknown[]): object {
   if (new.target === undefined) {
     throw new TypeError(
       "Failed to construct 'DOMException': Please use the 'new' operator, this object constructor cannot be called as a function."
@@ -66,11 +66,21 @@ function DOMException(this: object, ...args: unknown[]): void {
   }
   const message = args[0] === undefined ? '' : `${args[0] as string}`;
   const name = args[1] === undefined ? 'Error' : `${args[1] as string}`;
-  utils.initDOMException(this, name, message);
+  // A brand needs internal fields, which `this` lacks. `this` already has the prototype that
+  // `new.target` gives it.
+  const exception = utils.createDOMException(
+    ObjectGetPrototypeOf(this) as object,
+    name,
+    message
+  );
   // Leaves out this constructor's frame, but not a subclass constructor's.
-  ErrorCaptureStackTrace(this, DOMException);
+  ErrorCaptureStackTrace(exception, DOMException);
   // Error properties are not enumerable, but a DOMException's always have been.
-  ObjectDefineProperty(this, 'stack', { __proto__: null, enumerable: true });
+  ObjectDefineProperty(exception, 'stack', {
+    __proto__: null,
+    enumerable: true,
+  });
+  return exception;
 }
 
 // Defines `key` on `target` with the attributes it has on `source`, which JSG chooses by

@@ -694,14 +694,12 @@ pub mod ffi {
             name: &str,
             message: &str,
         ) -> Result<MaybeLocal>;
-        /// Sets `is_dom_exception` to whether `value` is a `DOMException`, stores the name and
-        /// message it was created with if it is, and returns `true`. Returns `false` while an
-        /// exception or a termination is pending. Runs no JavaScript. Fallible: it constructs
-        /// `rust::String`s.
+        /// If `value` is a `DOMException`, stores the name and message it was created with
+        /// and returns `true`; otherwise leaves them untouched and returns `false`. Runs no
+        /// JavaScript and takes no context. Fallible: it constructs `rust::String`s.
         pub unsafe fn local_try_unwrap_dom_exception(
             isolate: *mut Isolate,
             value: Local,
-            is_dom_exception: &mut bool,
             name: &mut String,
             message: &mut String,
         ) -> Result<bool>;

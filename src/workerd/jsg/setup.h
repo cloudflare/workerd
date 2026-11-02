@@ -505,6 +505,9 @@ class IsolateBase {
   // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
 
+  // Every v8::Context::New() passes newContextInternalFieldsDeserializer() (jsg.h) to restore the
+  // internal fields that this has the snapshot keep.
+
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
@@ -532,6 +535,9 @@ class IsolateBase {
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
+  // Returns the template of the DOMExceptions that createDOMException() creates.
+  static v8::Local<v8::ObjectTemplate> getDOMExceptionTemplate(v8::Isolate* isolate);
 
  private:
   template <typename TypeWrapper>
@@ -653,6 +659,9 @@ class IsolateBase {
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
+
+  // The template of the DOMExceptions that createDOMException() creates.
+  v8::Global<v8::ObjectTemplate> domExceptionTemplate;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;

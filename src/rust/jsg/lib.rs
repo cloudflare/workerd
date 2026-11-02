@@ -281,9 +281,10 @@ impl<'s> FromJS<'s> for Error {
     /// as [`Error::new_dom_exception`] takes them. Any other value is rejected
     /// with a `TypeError`.
     ///
-    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or an exception or a termination is already pending, this fails with an
-    /// error for which [`Error::is_pending`] is true.
+    /// Reading a native error's `name` and `message` can run JavaScript (a getter, a Proxy
+    /// trap, or `toString`). If it throws, or an exception or a termination is already pending,
+    /// this fails with an error for which [`Error::is_pending`] is true. Reading a
+    /// `DOMException`'s runs no JavaScript and works while one is pending.
     #[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
     fn from_js(
         lock: &mut Lock<'s>,
@@ -317,23 +318,18 @@ impl<'s> FromJS<'s> for Error {
 
         // A DOMException is not a native error, though its prototype chain includes
         // Error.prototype; it is recognized by its brand.
-        let mut is_dom_exception = false;
         let mut dom_name = String::new();
         let mut dom_message = String::new();
         // SAFETY: Lock guarantees the isolate is valid and locked, and `value`
         // belongs to it.
-        let checked = unsafe {
+        let is_dom_exception = unsafe {
             v8::ffi::local_try_unwrap_dom_exception(
                 lock.isolate().as_ffi(),
                 value.into_ffi(),
-                &mut is_dom_exception,
                 &mut dom_name,
                 &mut dom_message,
             )
         }?;
-        if !checked {
-            return Err(Self::pending());
-        }
         if is_dom_exception {
             return Ok(Self::new_dom_exception(&dom_name, dom_message));
         }

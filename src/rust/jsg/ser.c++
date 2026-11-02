@@ -116,15 +116,14 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   }
 
   bool HasCustomHostObject(v8::Isolate*) override {
-    // V8 treats only objects with internal fields, such as API objects, as host objects.
+    // V8 treats only objects with internal fields, such as API objects and DOMExceptions, as host
+    // objects, and native errors are too if errorsAreHostObjects.
     return true;
   }
 
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
-    // A DOMException is written by its brand, which jsg::writeApiObject() checks.
-    return v8::Just(object->InternalFieldCount() > 0 ||
-        ::workerd::jsg::tryGetDOMExceptionFields(isolate, object) != kj::none ||
-        (errorsAreHostObjects && object->IsNativeError()));
+    return v8::Just(
+        object->InternalFieldCount() > 0 || (errorsAreHostObjects && object->IsNativeError()));
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
