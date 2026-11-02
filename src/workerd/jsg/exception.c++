@@ -104,16 +104,18 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   if (internalMessage.startsWith("expected ")) {
     // This was a test assertion, peel away delimiters until either we find an error or there are
     // none left.
-    auto idx = findDelim(internalMessage);
+    auto remaining = internalMessage;
+    auto idx = findDelim(remaining);
     while (idx) {
-      internalMessage = internalMessage.slice(idx);
-      KJ_IF_SOME(e, tryExtractError(internalMessage, properties)) {
+      remaining = remaining.slice(idx);
+      KJ_IF_SOME(e, tryExtractError(remaining, properties)) {
         return kj::mv(e);
       }
-      idx = findDelim(internalMessage);
+      idx = findDelim(remaining);
     }
 
-    // We failed to extract an expected error, make a default one.
+    // The assertion did not tunnel an error, so it's an internal error. Keep the whole message,
+    // since the segments are all parts of the failed assertion.
     return makeDefaultError(internalMessage, properties);
   }
 
