@@ -234,7 +234,7 @@ thread_local! {
 }
 
 /// A Rust resource that uses C++ resources, as a ported `ExecutionContext` would.
-#[jsg_resource]
+#[jsg_resource(memory_info)]
 pub struct Host {
     pub label: String,
     /// A C++ resource, traced as a `jsg::Ref` field of a C++ resource is.
@@ -244,6 +244,13 @@ pub struct Host {
 impl Drop for Host {
     fn drop(&mut self) {
         HOST_DROPS.with(|drops| drops.set(drops.get() + 1));
+    }
+}
+
+impl jsg::VisitForMemoryInfo for Host {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"label", &self.label);
+        tracker.track_field(c"held", &self.held);
     }
 }
 

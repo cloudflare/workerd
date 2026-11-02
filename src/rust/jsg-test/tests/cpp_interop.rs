@@ -294,3 +294,43 @@ fn held_resources_survive_gc() {
         Ok(())
     });
 }
+
+#[test]
+fn heap_snapshot_follows_a_held_cpp_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_globals(lock, ctx, new_host());
+        ctx.eval_raw(lock, "h.hold(holder)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let host = snapshot.find("Host");
+        let held = snapshot.target(host, "held");
+        assert_eq!(snapshot.nodes[held].name, "workerd / TestCppHolder");
+        // The C++ resource has a wrapper, so the snapshot also reaches it through the isolate's
+        // list of wrapped objects, and that is the same node.
+        assert_eq!(snapshot.find_all("TestCppHolder"), [held]);
+        Ok(())
+    });
+}
+
+#[test]
+fn heap_snapshot_follows_a_held_rust_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        set_globals(lock, ctx, new_host());
+        ctx.eval_raw(lock, "holder.hold(h)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let holder = snapshot.find("TestCppHolder");
+        let host = snapshot.find("Host");
+        // C++ holds a Rust resource by its wrapper, so the edge is to the wrapper, which leads on
+        // to the resource's node.
+        let wrapper = snapshot.target(holder, "held");
+        // V8 shows the wrapper as one node with the cppgc object it holds.
+        assert!(!snapshot.nodes[wrapper].name.starts_with("workerd /"));
+        assert!(
+            snapshot
+                .targets(wrapper, "javascript_to_native")
+                .contains(&host)
+        );
+        Ok(())
+    });
+}

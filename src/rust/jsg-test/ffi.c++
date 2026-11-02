@@ -266,6 +266,26 @@ size_t used_global_handles_size(Isolate* isolate) {
   return stats.used_global_handles_size();
 }
 
+::rust::String take_heap_snapshot(Isolate* isolate) {
+  kj::Vector<char> serialized;
+  ::workerd::jsg::HeapSnapshotActivity activity([](auto, auto) { return true; });
+  ::workerd::jsg::HeapSnapshotWriter writer([&](kj::Maybe<kj::ArrayPtr<char>> maybeChunk) {
+    KJ_IF_SOME(chunk, maybeChunk) {
+      serialized.addAll(chunk);
+    }
+    return true;
+  });
+  ::workerd::jsg::HeapSnapshotDeleter deleter;
+  auto snapshot = kj::Own<const v8::HeapSnapshot>(
+      isolate->GetHeapProfiler()->TakeHeapSnapshot(&activity, nullptr, true, true), deleter);
+  snapshot->Serialize(&writer, v8::HeapSnapshot::kJSON);
+  return ::rust::String(serialized.begin(), serialized.size());
+}
+
+size_t rust_wrappable_size() {
+  return sizeof(::workerd::rust::jsg::Wrappable);
+}
+
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
   auto tmpl = v8::ObjectTemplate::New(isolate);
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);

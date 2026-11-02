@@ -101,6 +101,13 @@ class TestCppHolder final: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(held);
   }
+
+ public:
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_IF_SOME(host, held) {
+      host.trackField(tracker, "held"_kjc);
+    }
+  }
 };
 
 // How many TestCppHolders have been destroyed.
