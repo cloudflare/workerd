@@ -115,6 +115,29 @@ struct ClusterConfig {
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
   # may differ in backwards-compatible ways.
+  #
+  # The bucket can also hold deployments. A deployment is a named application stored as an encoded
+  # `Config`. It may contain only services. A catalog is the bucket record that selects the current
+  # version of every deployment.
+  #
+  # An instance is one workerd process in the cluster. At startup, each instance reads the catalog
+  # and serves its deployments beside the services in its own config. The instance refuses to
+  # start when a deployment breaks any of these rules:
+  #
+  # - Service names must be unique across the instance's config and every deployment.
+  # - Actor namespace keys must also be unique. These keys are Durable Object `uniqueKey` values
+  #   and Workflow namespace keys.
+  # - A deployment cannot define a `disk` service. It can refer to a disk service in the instance's
+  #   config by name.
+  # - A deployment's `fromEnvironment` binding must name a variable set on the instance.
+  #
+  # The bucket layout for tools that write deployments is documented in
+  # `src/workerd/server/cluster/deploy.rs`.
+  #
+  # A deployment has the authority granted by each instance's config. Its services can reach the
+  # instance's network, environment variables, container engine, and named services. Anyone who
+  # can publish deployments can run code with that authority on every instance. Restricting the
+  # writer to the deployment area of the bucket does not reduce that authority.
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
@@ -544,7 +567,7 @@ struct Worker {
       # Takes the value of an environment variable from the system. The value specified here is
       # the name of a system environment variable. The value of the binding is obtained by invoking
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
-      # `null`.
+      # `null`. In a cluster deployment, an unset variable is an error. See `ClusterConfig`.
 
       analyticsEngine @17 :ServiceDesignator;
       # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.
