@@ -57,7 +57,7 @@ pub enum Payload {
 /// The chunks a file is sent and received in.
 const CHUNK: usize = 256 << 10;
 /// The most of a response body held in memory rather than written to a file.
-const MAX_BODY: usize = 16 << 20;
+pub const MAX_BODY: usize = 16 << 20;
 
 pub struct Http {
     client: legacy::Client<Connector, Body>,
@@ -127,7 +127,7 @@ impl Http {
                 .into_data()
                 .unwrap_or_default();
             if writer.is_none() {
-                // Records, listings and errors: an endpoint sending more is broken.
+                // Records, listings, deployments and errors: an endpoint sending more is broken.
                 if body.len() + chunk.len() > MAX_BODY {
                     return Err("response body too large".to_owned());
                 }
