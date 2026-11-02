@@ -180,6 +180,11 @@ struct TracingOptions {
   # with the Worker's invocation span. Traces without an upstream sampling decision are sampled.
   # Invocations of the designated service itself are not traced. While this is set, spans are not
   # delivered to streaming tail workers.
+  #
+  # The server allows 16 concurrent export POSTs and queues up to 4096 encoded requests. Queued
+  # requests are combined until a batch reaches 1 MiB. Each POST, including its response body, has
+  # a 10-second timeout. Requests are dropped when the queue is full or delivery fails; there are
+  # no retries.
 }
 
 struct LoggingOptions {

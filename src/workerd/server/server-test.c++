@@ -5090,7 +5090,115 @@ KJ_TEST("Server: OTLP exports dynamic workers and excludes every collector entry
   stats.httpGet200("/", "2:true");
 }
 
-KJ_TEST("Server: OTLP shutdown cancels an unanswered collector request") {
+KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches queued requests") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `export default {
+            `  fetch(req, env, ctx) {
+            `    const name = "export-" + new URL(req.url).pathname.slice(1);
+            `    return ctx.tracing.enterSpan(name, () => new Response("OK"));
+            `  }
+            `}
+          )],
+        )
+      ),
+      ( name = "other",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `export default {
+            `  fetch(req, env, ctx) {
+            `    const name = "export-" + new URL(req.url).pathname.slice(1);
+            `    return ctx.tracing.enterSpan(name, () => new Response("OK"));
+            `  }
+            `}
+          )],
+        )
+      ),
+      ( name = "collector",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `let hold = true;
+            `const queued = new Set();
+            `const sizes = [];
+            `let dropped = false;
+            `export default {
+            `  async fetch(req) {
+            `    if (req.method === "POST") {
+            `      const body = await req.arrayBuffer();
+            `      const text = new TextDecoder().decode(body);
+            `      for (const [name] of text.matchAll(/export-queued-\d{4}/g)) queued.add(name);
+            `      dropped ||= text.includes("export-dropped-marker");
+            `      if (text.includes("export-queued-")) sizes.push(body.byteLength);
+            `      if (hold) await fetch("http://gate");
+            `      return new Response(null, {status: 204});
+            `    }
+            `    if (new URL(req.url).pathname === "/release") {
+            `      hold = false;
+            `      return new Response("OK");
+            `    }
+            `    const threshold = 1024 * 1024;
+            `    const valid = sizes.length > 1 && sizes[0] >= threshold &&
+            `      sizes.every(n => n < 2 * threshold);
+            `    return new Response(queued.size + ":" + dropped + ":" + valid);
+            `  }
+            `}
+          )],
+        )
+      ),
+    ],
+    tracing = (otlp = "collector"),
+    sockets = [
+      (name = "main", address = "test-addr", service = "hello"),
+      (name = "other", address = "other-addr", service = "other"),
+      (name = "stats", address = "stats-addr", service = "collector"),
+    ],
+  ))"_kj);
+
+  test.useUniqueEntropy();
+  test.start();
+  auto conn = test.connect("test-addr");
+  auto other = test.connect("other-addr");
+  kj::Vector<TestStream> held;
+  for (auto i: kj::zeroTo(16)) {
+    (i % 2 == 0 ? conn : other).httpGet200(kj::str("/active-", i), "OK");
+    held.add(test.receiveInternetSubrequest("gate"));
+  }
+
+  // Each invocation still completes while the collector is stalled. The queue bound counts
+  // encoded export messages, before they are combined into larger HTTP requests.
+  for (auto i: kj::zeroTo(4096)) {
+    (i % 2 == 0 ? conn : other).httpGet200(kj::str("/queued-", 1000 + i), "OK");
+  }
+  {
+    KJ_EXPECT_LOG(WARNING, "OTLP export queue is full; dropping spans");
+    conn.httpGet200("/dropped-marker", "OK");
+  }
+  auto extra = test.server.accept("gate");
+  KJ_EXPECT(!extra.poll(test.ws), "more than 16 exports reached the collector");
+
+  auto stats = test.connect("stats-addr");
+  stats.httpGet200("/release", "OK");
+  held[0].send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+  test.wait(1);
+  stats.httpGet200("/stats", "4096:false:true");
+
+  // Draining the queue reopens admission; the dropped message is never retried.
+  conn.httpGet200("/queued-9999", "OK");
+  test.wait(1);
+  stats.httpGet200("/stats", "4097:false:true");
+  for (uint i = 1; i < held.size(); ++i) {
+    held[i].send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+  }
+  test.wait(1);
+}
+
+KJ_TEST("Server: OTLP timeouts cover response bodies and release concurrency slots") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -5109,7 +5217,79 @@ KJ_TEST("Server: OTLP shutdown cancels an unanswered collector request") {
 
   test.start();
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "OK");
+  kj::HttpHeaderTable headerTable;
+  kj::Vector<TestStream> held;
+  for (uint i = 0; i < 16; ++i) {
+    conn.httpGet200("/", "OK");
+    auto collector = test.receiveSubrequest("collector-addr");
+    auto input = kj::newHttpInputStream(collector.getStream(), headerTable);
+    auto request = input->readRequest().wait(test.ws);
+    KJ_EXPECT(request.body->readAllBytes().wait(test.ws).size() > 0);
+    held.add(kj::mv(collector));
+  }
+  // One response supplies headers but never finishes its body; the others never send headers.
+  held[0].send("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n");
+  conn.httpGet200("/queued", "OK");
+  auto pending = test.server.accept("collector-addr");
+  test.wait(9);
+  KJ_EXPECT(!pending.poll(test.ws), "a concurrency slot was released before the timeout");
+  KJ_EXPECT(!held[0].isEof());
+  {
+    class TimeoutLogs final: public kj::ExceptionCallback {
+     public:
+      uint count = 0;
+      void logMessage(kj::LogSeverity severity,
+          const char* file,
+          int line,
+          int contextDepth,
+          kj::String&& text) override {
+        if (severity == kj::LogSeverity::ERROR &&
+            text.contains("error exporting spans to the OTLP collector") &&
+            text.contains("operation timed out")) {
+          ++count;
+          return;
+        }
+        kj::ExceptionCallback::logMessage(severity, file, line, contextDepth, kj::mv(text));
+      }
+    } logs;
+    test.wait(1);
+    KJ_EXPECT(logs.count == 16);
+  }
+  for (auto& collector: held) {
+    KJ_EXPECT(collector.isEof(), "timed-out export was not canceled");
+  }
+  KJ_ASSERT(pending.poll(test.ws), "queued export did not start after timeouts");
+  TestStream recovered(test.ws, pending.wait(test.ws));
+  auto input = kj::newHttpInputStream(recovered.getStream(), headerTable);
+  auto request = input->readRequest().wait(test.ws);
+  KJ_EXPECT(request.body->readAllBytes().wait(test.ws).size() > 0);
+  recovered.send("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+  test.wait(10);
+  KJ_EXPECT(!test.server.accept("collector-addr").poll(test.ws), "failed exports were retried");
+}
+
+KJ_TEST("Server: OTLP shutdown cancels active and queued collector requests") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `export default { fetch() { return new Response("OK"); } }
+          )],
+        )
+      ),
+      (name = "collector", external = (address = "collector-addr")),
+    ],
+    tracing = (otlp = "collector"),
+    sockets = [(name = "main", address = "test-addr", service = "hello")],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  for (uint i = 0; i < 17; ++i) {
+    conn.httpGet200("/", "OK");
+  }
   auto pending = test.server.accept("collector-addr");
   KJ_ASSERT(pending.poll(test.ws), "no export reached the collector");
   auto collector = pending.wait(test.ws);
@@ -5120,8 +5300,8 @@ KJ_TEST("Server: OTLP shutdown cancels an unanswered collector request") {
   KJ_EXPECT(request.url == "/v1/traces"_kj);
   KJ_EXPECT(request.body->readAllBytes().wait(test.ws).size() > 0);
 
-  // Close while the collector is still waiting to respond. The fixture checks that cancellation
-  // releases every service and its factory, without logging an export error.
+  // Close while all 16 slots are occupied and another request is queued. The fixture checks
+  // that cancellation releases every service and its factory, without logging an export error.
   test.runTask = kj::none;
   test.server.close().wait(test.ws);
 }
