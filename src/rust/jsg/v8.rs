@@ -4605,9 +4605,9 @@ impl GcVisitor {
     }
 
     /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
-    /// visit runs under the isolate lock and has no C++ visitor: a `Traced` impl that visits
-    /// through [`GcVisitor::as_ffi`] must instead make its reference strong again and forget its
-    /// parent, as a moved C++ `jsg::Ref` does.
+    /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
+    /// `None`: a `Traced` impl that visits through it must instead make its reference strong
+    /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
         self.mode == VisitMode::Detach
     }
@@ -4626,11 +4626,10 @@ impl GcVisitor {
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
     /// reference Rust JSG doesn't know, such as a C++ JSG `jsg::Ref`, through its own FFI. The
-    /// pointer is valid for the duration of the visit. A detaching visit has none; check
-    /// [`GcVisitor::is_detaching`] first.
-    pub fn as_ffi(&mut self) -> *mut ffi::GcVisitor {
-        debug_assert!(!self.is_detaching(), "a detaching visit has no C++ visitor");
-        &raw mut self.handle
+    /// pointer is valid for the duration of the visit. A detaching visit has none, so this
+    /// returns `None` (see [`GcVisitor::is_detaching`]).
+    pub fn as_ffi(&mut self) -> Option<*mut ffi::GcVisitor> {
+        (!self.is_detaching()).then_some(&raw mut self.handle)
     }
 
     /// Visits a `v8::TracedGlobal<T>` field during GC tracing.

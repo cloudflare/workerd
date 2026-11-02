@@ -121,8 +121,8 @@ GC owner that traces it: a resource, or a `Wrappable` such as the data of a func
 `Function::new` or the value of a typed promise. A typed promise's reaction takes its value out
 of the wrapper detached, as a moved C++ `jsg::Ref` is: every `jsg::Rc` and `TracedGlobal` in it is
 strong again, with no owner, so the reaction can keep it or put it in another owner (see
-`GcVisitor::is_detaching`, which a `Traced` impl that visits through `GcVisitor::as_ffi` must
-check).
+`GcVisitor::is_detaching`; `GcVisitor::as_ffi` returns `None` for such a visit, which a `Traced`
+impl that visits through it must handle).
 
 - Never put traced state inside an `std::rc::Rc`. A clone of the `Rc` held by a second GC owner
   traces the same state again. For a `jsg::Rc`, C++ asserts a single owner

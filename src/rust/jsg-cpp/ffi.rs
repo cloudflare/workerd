@@ -207,12 +207,11 @@ impl<T: CppResource> Clone for Ref<T> {
 
 impl<T: CppResource> jsg::Traced for Ref<T> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
-        if visitor.is_detaching() {
-            bridge::cpp_ref_detach(&self.inner);
-            return;
+        match visitor.as_ffi() {
+            // SAFETY: the visitor's pointer is valid for the duration of the visit.
+            Some(visitor) => unsafe { bridge::cpp_ref_visit(visitor, &self.inner) },
+            None => bridge::cpp_ref_detach(&self.inner),
         }
-        // SAFETY: the visitor's pointer is valid for the duration of the visit.
-        unsafe { bridge::cpp_ref_visit(visitor.as_ffi(), &self.inner) };
     }
 }
 
