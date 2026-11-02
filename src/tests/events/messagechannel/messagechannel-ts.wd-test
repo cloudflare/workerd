@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+using MessageChannelModules = import "messagechannel-modules.capnp";
+
+# Runs the MessageChannel suite against the TypeScript implementation
+# (src/per_isolate/messagechannel/, under the TS_MESSAGE_CHANNEL autogate),
+# with byte-for-byte the same modules as messagechannel-cpp.wd-test. It pins
+# the same flags: unlike the streams, the TypeScript implementation consults
+# each of the MessageChannel ones, as the C++ one does.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag:
+# - nodejs_compat: node:assert, node:test and node:util.
+# - enable_nodejs_worker_threads_module: node:worker_threads, which must hand
+#   out the same classes as the globals.
+# - expose_global_message_channel: the classes are globals.
+# - set_tostring_tag: [object MessagePort] and [object MessageChannel].
+# - spec_compliant_dispatch_exceptions: listener exceptions are reported,
+#   and the port dispatches 'messageerror'.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-messagechannel-ts",
+      worker = (
+        modules = MessageChannelModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_worker_threads_module",
+          "expose_global_message_channel",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-message-channel"],
+  v8Flags = ["--expose-gc"],
+);

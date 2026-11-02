@@ -196,7 +196,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
       auto sizeBefore = handlerSet.handlers.size();
       handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
       if (handlerSet.handlers.size() != sizeBefore) {
-        listenerCountChanged(js, type, handlerSet.handlers.size());
+        notifyListenerCountChanged(js, type, handlerSet.handlers.size());
       }
     });
   }
@@ -222,10 +222,23 @@ void EventTarget::removeEventListener(jsg::Lock& js,
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
         if (handlerSet.handlers.eraseMatch(handler)) {
-          listenerCountChanged(js, type, handlerSet.handlers.size());
+          notifyListenerCountChanged(js, type, handlerSet.handlers.size());
         }
       }
     });
+  }
+}
+
+void EventTarget::notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  listenerCountChanged(js, type, count);
+  for (auto& entry: listenerCountHooks) {
+    if (entry.type == type) {
+      // The hook may replace itself, reallocating listenerCountHooks, so nothing here touches
+      // `entry` once the call has started.
+      auto hook = entry.hook.getHandle(js);
+      hook.call(js, js.undefined(), js.str(type), js.num(static_cast<double>(count)));
+      return;
+    }
   }
 }
 
@@ -245,7 +258,7 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
   auto sizeBefore = handlerSet.handlers.size();
   handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   if (handlerSet.handlers.size() != sizeBefore) {
-    listenerCountChanged(js, type, handlerSet.handlers.size());
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
   }
 }
 
@@ -1390,6 +1403,9 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(identity);
     }
   }
+  for (auto& entry: listenerCountHooks) {
+    visitor.visit(entry.hook);
+  }
 }
 
 kj::Promise<void> Scheduler::wait(
@@ -1494,6 +1510,9 @@ void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
   tracker.trackFieldWithSize("eventHandlerAttributes",
       eventHandlerAttributes.size() * sizeof(decltype(eventHandlerAttributes)::Entry));
+  for (const auto& entry: listenerCountHooks) {
+    tracker.trackField("listenerCountHook", entry.hook);
+  }
 }
 
 }  // namespace workerd::api
