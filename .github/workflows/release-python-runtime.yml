@@ -74,8 +74,12 @@ jobs:
 
           echo "Found open PR for branch $BRANCH_NAME"
 
+          # python_metadata.bzl is an input of the pyodide module extension, so the lockfile has
+          # to change with it. The same as `just update-lockfile`.
+          bazel build --lockfile_mode=update --nobuild //... //build/deps/formatters:rustfmt@rule
+
           # Commit and push the changes
-          git add build/python_metadata.bzl build/deps/pyodide.MODULE.bazel
+          git add build/python_metadata.bzl build/deps/pyodide.MODULE.bazel MODULE.bazel.lock
           git commit --fixup HEAD -m "Update python_metadata.bzl with new bundle info
 
           This commit updates the backport and integrity values in python_metadata.bzl
