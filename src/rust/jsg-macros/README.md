@@ -32,12 +32,23 @@ produces a property whose value is `null`. An absent input property becomes `Non
 or `Undefined`, respectively. If all public fields are optional, a `null` or
 `undefined` input is accepted as an empty dictionary.
 
+A field that holds a JavaScript value, as a C++ `jsg::JsRef<jsg::JsValue>` field does, is a
+`jsg::v8::TracedGlobal<M>`. It converts as a `Local<'s, M>` does: `TracedGlobal<Value>` takes any
+value, an absent property included, and `TracedGlobal<Object>` only an object. The struct then
+holds GC references, and a resource that keeps it traces the value.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
     pub critical: u8,
     pub tag: String,
     pub value: String,
+}
+
+#[jsg_struct]
+pub struct ProduceResult {
+    pub value: jsg::v8::TracedGlobal<jsg::v8::Value>,
+    pub expiration: Option<f64>,
 }
 
 #[jsg_struct(name = "CustomName")]

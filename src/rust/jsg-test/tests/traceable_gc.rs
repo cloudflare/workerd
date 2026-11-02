@@ -261,3 +261,53 @@ fn cycle_through_struct_field_is_collected() {
         Ok(())
     });
 }
+
+static HOLDER_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// A struct whose field holds a JavaScript value, as a C++ `jsg::JsRef<T>` field does.
+#[jsg_struct]
+struct ValueLink {
+    pub value: jsg::v8::TracedGlobal<jsg::v8::Value>,
+}
+
+#[jsg_resource]
+struct Holder {
+    pub link: RefCell<Option<ValueLink>>,
+}
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl Holder {}
+
+/// A struct with a `TracedGlobal` field holds GC references, and a cycle through it is
+/// collected: `Holder` keeps a `ValueLink` whose value is the `Holder`'s own wrapper.
+#[test]
+fn cycle_through_struct_js_value_field_is_collected() {
+    assert!(ValueLink::holds_gc_references());
+    HOLDER_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let holder = jsg::Rc::new(Holder {
+            link: RefCell::new(None),
+        });
+        let wrapper = holder.clone().to_js(lock)?;
+        *holder.link.borrow_mut() = Some(ValueLink {
+            value: wrapper.to_traced_global(lock),
+        });
+        std::mem::drop(holder);
+        assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}

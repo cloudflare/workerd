@@ -37,6 +37,8 @@
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
 //! | `Dict<V>` | `Record<string, V>`: an object other than an array |
+//! | `v8::Local<'s, M>` | the value itself, of `M`'s type |
+//! | `v8::TracedGlobal<M>` | as `v8::Local<'s, M>`, held past the scope (C++ JSG's `jsg::JsRef<T>`) |
 //!
 //! [`Option`], [`NullOrUndefined`], and [`Lenient`] method arguments may be omitted.
 //! [`Nullable`] arguments remain required even though explicitly passing `undefined` converts to `Null`.
@@ -1672,6 +1674,62 @@ impl_handle_from_js! {
     Object: UnionMember::Fallible;
     Function: UnionMember::Fallible;
     TypedArray: UnionMember::Fallible;
+}
+
+// =============================================================================
+// Persistent handles
+// =============================================================================
+
+// A `TracedGlobal<M>` is C++ JSG's `jsg::JsRef<T>` / `jsg::V8Ref<T>`: it converts as a
+// `Local<'s, M>` does, and outlives the scope, so it can be a field of a `#[jsg_struct]` that
+// a resource keeps or a typed promise carries.
+
+impl<M: Type> Type for v8::TracedGlobal<M> {
+    const UNION_TYPES: UnionTypes = M::UNION_TYPES;
+    const UNION_NAMES: &'static [&'static str] = M::UNION_NAMES;
+
+    fn class_name() -> &'static str {
+        M::class_name()
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        M::is_exact(value)
+    }
+}
+
+impl<'s, M> ToJS<'s> for v8::TracedGlobal<M>
+where
+    v8::Local<'s, M>: Into<v8::Local<'s, v8::Value>>,
+{
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.as_local(lock).into())
+    }
+}
+
+impl<'s, M> FromJS<'s> for v8::TracedGlobal<M>
+where
+    v8::Local<'s, M>: FromJS<'s, ResultType = v8::Local<'s, M>>,
+{
+    type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = <v8::Local<'s, M> as FromJS<'s>>::UNION_MEMBER;
+
+    fn type_name() -> String {
+        <v8::Local<'s, M> as FromJS<'s>>::type_name()
+    }
+
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        let local = <v8::Local<'s, M> as FromJS<'s>>::from_js(lock, value)?;
+        Ok(Self::new(lock, local))
+    }
+
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self>, Error> {
+        Ok(<v8::Local<'s, M> as FromJS<'s>>::try_from_js(lock, value)?
+            .map(|local| Self::new(lock, local)))
+    }
 }
 
 #[cfg(test)]
