@@ -62,6 +62,7 @@ struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
+struct UdpEgress;
 
 // The hibernation manager of an evicted actor, handed to its replacement.
 using HibernationManager = Worker::Actor::HibernationManager;
@@ -462,6 +463,10 @@ kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow);
+bool is_udp_egress(WorkerInterface::CustomEvent& event);
+::rust::String udp_egress_host(WorkerInterface::CustomEvent& event);
+kj::Promise<rust::worker::CustomEventResult> complete_udp_egress(
+    kj::Own<WorkerInterface::CustomEvent> event, ::rust::Box<UdpEgress> socket);
 
 // Channel tokens, through the factory's ChannelTokenHandler.
 kj::Own<PendingToken> factory_encode_subrequest_token(const WorkerFactory& factory,

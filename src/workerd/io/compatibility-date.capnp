@@ -1841,4 +1841,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  outboundUdpSockets @207 :Bool
+      $compatEnableFlag("outbound_udp_sockets")
+      $experimental;
+  # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of
+  # Uint8Array, with one chunk per packet. Also selects this chunk type for UDP ingress.
 }
