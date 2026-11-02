@@ -261,6 +261,64 @@ kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
   co_await paf.promise;
 }
 
+namespace {
+
+// Receives a pushAbortSignal() call redirected by redirectPushAbortSignal() and forwards it to
+// `target`, which is on the far side of the membrane. The membrane wraps neither the params nor the
+// results of a redirected call, so this wraps `signal` itself, in the membrane's
+// DetachedMembranePolicy, and returns `trigger` as is.
+class PushAbortSignalForwarder final: public rpc::JsValue::ExternalPusher::Server {
+ public:
+  PushAbortSignalForwarder(rpc::JsValue::ExternalPusher::Client target,
+      kj::Own<capnp::MembranePolicy> detachedPolicy,
+      MembraneCallDirection direction)
+      : target(kj::mv(target)),
+        detachedPolicy(kj::mv(detachedPolicy)),
+        direction(direction) {}
+
+  kj::Promise<void> pushAbortSignal(PushAbortSignalContext context) override {
+    auto response = co_await target.pushAbortSignalRequest(capnp::MessageSize{2, 0}).send();
+
+    auto results = context.initResults(capnp::MessageSize{4, 2});
+    results.setSignal(wrapInMembrane(response.getSignal()));
+    results.setTrigger(response.getTrigger());
+  }
+
+ private:
+  rpc::JsValue::ExternalPusher::Client target;
+  kj::Own<capnp::MembranePolicy> detachedPolicy;
+  MembraneCallDirection direction;
+
+  rpc::JsValue::ExternalPusher::AbortSignal::Client wrapInMembrane(
+      rpc::JsValue::ExternalPusher::AbortSignal::Client signal) {
+    switch (direction) {
+      case MembraneCallDirection::INBOUND:
+        return capnp::membrane(kj::mv(signal), detachedPolicy->addRef());
+      case MembraneCallDirection::OUTBOUND:
+        return capnp::reverseMembrane(kj::mv(signal), detachedPolicy->addRef());
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
+// Ordinal of ExternalPusher.pushAbortSignal() in worker-interface.capnp.
+constexpr uint16_t PUSH_ABORT_SIGNAL_METHOD_ID = 1;
+
+}  // namespace
+
+kj::Maybe<capnp::Capability::Client> redirectPushAbortSignal(uint64_t interfaceId,
+    uint16_t methodId,
+    capnp::Capability::Client target,
+    DetachedMembranePolicy& detachedPolicy,
+    MembraneCallDirection direction) {
+  if (interfaceId != capnp::typeId<rpc::JsValue::ExternalPusher>() ||
+      methodId != PUSH_ABORT_SIGNAL_METHOD_ID) {
+    return kj::none;
+  }
+  return capnp::Capability::Client(kj::heap<PushAbortSignalForwarder>(
+      target.castAs<rpc::JsValue::ExternalPusher>(), detachedPolicy.addRef(), direction));
+}
+
 // =======================================================================================
 // DelayedChannelToken handling
 
