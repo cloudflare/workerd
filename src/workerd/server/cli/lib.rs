@@ -3,8 +3,9 @@
 //! `main()` finds the executable (a config compiled in by `workerd compile` selects a different
 //! command line), parses the command line, produces the encoded config (C++ compiles schema
 //! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
-//! driver (bootstrap.c++) sets up the process and runs the Rust server. [`process::Process`]
-//! is the `--watch` half: the files to watch, and the reload.
+//! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
+//! first adds the deployments in the cluster's bucket to the config ([`deployments`]).
+//! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
 // and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
@@ -13,6 +14,7 @@
 mod args;
 mod bridge;
 mod config;
+mod deployments;
 mod process;
 mod socket_fd;
 mod watch;
@@ -95,6 +97,7 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
+    let config = with_deployments(config, &args.serve_or_test, &options, &process);
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -121,6 +124,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
             let process = Process::new(executable, watcher, inherited_sockets);
             let config = load_config::<T>(config, const_name.const_name, &process);
+            let config = with_deployments(config, &serve_or_test, &options, &process);
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -375,6 +379,33 @@ fn load_config<T: CommandFactory>(
     }
 
     config_errors(&compiled.errors, process)
+}
+
+/// Adds the deployments in `config`'s cluster bucket when `--experimental` is enabled. It reports a
+/// public cluster address or a deployment that cannot be composed with `config` as a config error.
+/// A bucket that cannot be opened or read ends the process, even under `--watch`, because the cause
+/// may lie outside the config files. See `deployments.rs`.
+fn with_deployments(
+    config: Config,
+    serve_or_test: &args::ServeOrTestArgs,
+    options: &RunOptions,
+    process: &Process,
+) -> Config {
+    if !serve_or_test.experimental {
+        return config;
+    }
+    let address = options.cluster_address.as_deref();
+    let advertise = options.cluster_advertise.as_deref();
+    match deployments::add(config, address, advertise) {
+        Ok(config) => config,
+        Err(deployments::Failure::Config(errors)) => config_errors(&errors, process),
+        Err(deployments::Failure::Remote(errors)) => {
+            for error in errors {
+                eprintln!("{error}");
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Prints errors in the config. Without `--watch` they end the process; with it the process waits

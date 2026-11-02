@@ -64,6 +64,7 @@ pub use cluster::Cluster;
 pub use cluster::Route;
 pub use cluster::Setup;
 pub use cluster::now_ms;
+pub use cluster::open_bucket;
 pub use log::DB;
 pub use log::facet_path;
 pub use log::facet_prefix;
