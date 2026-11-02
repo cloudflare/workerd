@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "5e06b8d047481c7bd095ba1ca04dd028c1085a6cafa2d2e95a9f0800e7a5dbcd",
+  "checksum": "9db26af7f455b322ec241f4839ec05e913050d6e03c7c4030cac78e54f24e929",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -3009,6 +3009,10 @@
           {
             "id": "proc-macro2 1.0.107",
             "target": "proc_macro2"
+          },
+          {
+            "id": "prost 0.14.4",
+            "target": "prost"
           },
           {
             "id": "quote 1.0.47",
@@ -8625,6 +8629,101 @@
         }
       ],
       "version": "1.0.107"
+    },
+    "prost 0.14.4": {
+      "common_attrs": {
+        "crate_features": [
+          "default",
+          "derive",
+          "std"
+        ],
+        "deps": [
+          {
+            "id": "bytes 1.12.1",
+            "target": "bytes"
+          }
+        ],
+        "edition": "2021",
+        "proc_macro_deps": [
+          {
+            "id": "prost-derive 0.14.4",
+            "target": "prost_derive"
+          }
+        ]
+      },
+      "library_target_name": "prost",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "prost",
+      "package_url": "https://github.com/tokio-rs/prost",
+      "repository": {
+        "Http": {
+          "sha256": "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1",
+          "url": "https://static.crates.io/crates/prost/0.14.4/download"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "prost",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.14.4"
+    },
+    "prost-derive 0.14.4": {
+      "common_attrs": {
+        "deps": [
+          {
+            "id": "anyhow 1.0.104",
+            "target": "anyhow"
+          },
+          {
+            "id": "itertools 0.14.0",
+            "target": "itertools"
+          },
+          {
+            "id": "proc-macro2 1.0.107",
+            "target": "proc_macro2"
+          },
+          {
+            "id": "quote 1.0.47",
+            "target": "quote"
+          },
+          {
+            "id": "syn 2.0.119",
+            "target": "syn"
+          }
+        ],
+        "edition": "2021"
+      },
+      "library_target_name": "prost_derive",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "license_ids": [
+        "Apache-2.0"
+      ],
+      "name": "prost-derive",
+      "package_url": "https://github.com/tokio-rs/prost",
+      "repository": {
+        "Http": {
+          "sha256": "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf",
+          "url": "https://static.crates.io/crates/prost-derive/0.14.4/download"
+        }
+      },
+      "targets": [
+        {
+          "ProcMacro": {
+            "crate_name": "prost_derive",
+            "crate_root": "src/lib.rs"
+          }
+        }
+      ],
+      "version": "0.14.4"
     },
     "quote 1.0.47": {
       "build_script_attrs": {},
@@ -16012,6 +16111,7 @@
     "percent-encoding 2.3.2",
     "pico-args 0.5.0",
     "proc-macro2 1.0.107",
+    "prost 0.14.4",
     "quote 1.0.47",
     "rand 0.9.5",
     "ring 0.17.14",

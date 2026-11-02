@@ -71,6 +71,9 @@ hashlink = "0"
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
 pico-args = "0"
+# The OTLP span exporter (src/rust/otlp) encodes its requests with prost. Its messages are written
+# out as structs, so neither prost-build nor protoc is involved.
+prost = "0.14"
 # kj-hyper: WebSocket keys and frame masks. Every Cargo.toml merged into the crate_universe
 # workspace (downstream repos include this one alongside their own) must request the same
 # major version, or crate_universe stops emitting the bare `rand` alias.
