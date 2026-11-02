@@ -469,7 +469,7 @@ fn struct_js_value_field_takes_any_value() {
 
         let result = convert::<JsValueStruct>(lock, ctx, "({ value: 42 })")?;
         let value = result.value.as_local(lock);
-        assert_eq!(f64::from_js(lock, value)?, 42.0);
+        assert_eq!(u32::from_js(lock, value)?, 42);
 
         let Err(err) = convert::<JsValueStruct>(lock, ctx, "null") else {
             panic!("null has no value");
