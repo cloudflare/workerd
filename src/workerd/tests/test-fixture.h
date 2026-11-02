@@ -399,4 +399,32 @@ struct TestFixture {
   };
 };
 
+// A span that RecordedSpans recorded.
+struct RecordedSpan {
+  kj::String name;
+  // The index of its parent in RecordedSpans::spans, or none for a request's span.
+  kj::Maybe<size_t> parent;
+  // Its tags as "key=type:value", in key order and separated by spaces, once it has ended.
+  kj::String tags;
+  bool ended = false;
+};
+
+// Records the spans of the requests a TestFixture runs, when its requestObserverFactory() is
+// passed as TestFixture::SetupParams::requestObserverFactory. Each request's span is named
+// "request".
+class RecordedSpans final: public kj::Refcounted {
+ public:
+  // In the order they opened.
+  kj::Vector<RecordedSpan> spans;
+
+  // The first span named `name`.
+  kj::Maybe<RecordedSpan&> find(kj::StringPtr name);
+
+  // The name of the parent of `span`, or "none" for a request's span.
+  kj::StringPtr parentName(const RecordedSpan& span) const;
+
+  // Gives each request a span that records into this.
+  kj::Function<kj::Own<RequestObserver>()> requestObserverFactory();
+};
+
 }  // namespace workerd
