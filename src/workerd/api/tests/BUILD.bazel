@@ -551,6 +551,12 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-cross-request-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-cross-request-stream-test.js"],
+)
+
+wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = [
