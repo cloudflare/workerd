@@ -2,8 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import base64 from 'cloudflare-internal:base64';
-
 function base64Error(cause: unknown): Error {
   if (Error.isError(cause)) {
     return new Error(`base64 error: ${cause.message}`, { cause });
@@ -12,12 +10,35 @@ function base64Error(cause: unknown): Error {
   }
 }
 
+// The built-ins are captured when the module loads, before user code runs, so user
+// code that replaces them does not change how the bindings encode or decode.
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const { call } = Function.prototype;
+const uint8ArrayToBase64 = call.bind(
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  Uint8Array.prototype.toBase64
+) as (bytes: Uint8Array) => string;
+const uint8ArrayFromBase64 = Uint8Array.fromBase64.bind(Uint8Array);
+const textEncoderEncode = call.bind(
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  TextEncoder.prototype.encode
+) as (encoder: TextEncoder, input: string) => Uint8Array;
+const textDecoderDecode = call.bind(
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  TextDecoder.prototype.decode
+) as (decoder: TextDecoder, input: Uint8Array) => string;
+
+const asciiEncoder = new TextEncoder();
+// ignoreBOM keeps a leading byte order mark as U+FEFF, which fromBase64() rejects
+// like any other byte that is not base64.
+const asciiDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
+
 function toBase64(input: Uint8Array): Uint8Array {
-  return new Uint8Array(base64.encodeArray(input));
+  return textEncoderEncode(asciiEncoder, uint8ArrayToBase64(input));
 }
 
 function fromBase64(input: Uint8Array): Uint8Array {
-  return new Uint8Array(base64.decodeArray(input));
+  return uint8ArrayFromBase64(textDecoderDecode(asciiDecoder, input));
 }
 
 function combineArrays(a: Uint8Array, b: Uint8Array): Uint8Array {
