@@ -8,6 +8,7 @@
 #include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/api/request-io.h>
@@ -370,6 +371,16 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// TextEncoder.encode() for the TypeScript TextEncoderStream: see api::encodeUtf8Chunk.
+static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "encodeUtf8() expects a string");
+    return api::encodeUtf8Chunk(js, str);
+  });
+}
+
 static void SetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     // Argument 0 is an object.
@@ -448,6 +459,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "encodeUtf8",
     "setPrivate",
     "getPrivate",
     "setListenerCountHook",
@@ -479,6 +491,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    getMethod(js, EncodeUtf8),
     getMethod(js, SetPrivate),
     getMethod(js, GetPrivate),
     getMethod(js, SetListenerCountHook),
