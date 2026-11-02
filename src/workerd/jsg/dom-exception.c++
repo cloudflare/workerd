@@ -132,7 +132,8 @@ v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
   KJ_ASSERT(prototype->IsValue() && prototype.As<v8::Value>()->IsObject(),
       "the context has no DOMException prototype");
   v8::Local<v8::Object> object;
-  if (!createDOMException(isolate, context, prototype.As<v8::Object>(), name, message)
+  if (!createDOMException(
+          isolate, context, prototype.As<v8::Value>().As<v8::Object>(), name, message)
            .ToLocal(&object)) {
     return {};
   }
@@ -162,8 +163,8 @@ kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
 
   if (hasBrand(object)) {
     return DOMExceptionFields{
-      object->GetInternalField(DOMExceptionField::NAME).As<v8::String>(),
-      object->GetInternalField(DOMExceptionField::MESSAGE).As<v8::String>(),
+      object->GetInternalField(DOMExceptionField::NAME).As<v8::Value>().As<v8::String>(),
+      object->GetInternalField(DOMExceptionField::MESSAGE).As<v8::Value>().As<v8::String>(),
     };
   }
 
