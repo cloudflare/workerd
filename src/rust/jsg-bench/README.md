@@ -53,7 +53,8 @@ python3 src/rust/jsg-bench/analyze.py "$out"
 The analyzer needs Python 3.9 or later and no other packages. It reads every `process-*.json` in
 the directory and prints a Markdown table. It also writes `summary.json`, with each process's
 medians and ratios, and `summary.csv`, with one row per comparison. It compares each `Cpp/`,
-`CppFast/` and `CppStructFast/` case with the matching `Rust/`, `RustFast/` or `Rust/` case.
+`CppFast/` and `CppStructFast/` case with the matching `Rust/`, `RustFast/` or `RustStructFast/`
+case.
 It exits with an error if a case failed, or if a C++ case has no Rust counterpart from the same
 processes, so a filter must select both versions of a case. Other cases, such as `Metadata/`,
 are ignored.
@@ -71,11 +72,12 @@ are ignored.
   optimization runs check that the loop is still TurboFan-optimized before and after timing.
 - `Cpp/` and `Rust/` use ordinary binding calls. `CppFast/` and `RustFast/` enable V8's Fast API
   for methods with primitive arguments and results, and the analyzer compares them with each
-  other. `CppStructFast/` enables cached templates for creating returned structs, and is compared
-  with `Rust/`. Verification runs count calls to confirm that the Fast API cases take the fast
-  path; performance runs do not count calls.
-- Rust compatibility flags are disabled. The fixtures do not use the Rust test harness because it
-  enables V8's predictable mode.
+  other. `CppStructFast/` and `RustStructFast/` create returned structs from cached templates
+  (`fast_jsg_struct`), and the analyzer compares them with each other. Verification runs count
+  calls to confirm that the Fast API cases take the fast path; performance runs do not count
+  calls.
+- Rust compatibility flags are disabled, except `fast_jsg_struct` in `RustStructFast/`. The
+  fixtures do not use the Rust test harness because it enables V8's predictable mode.
 - The JavaScript benchmarks run a batch of calls per timed iteration. The analyzer divides the
   time reported by Google Benchmark by `ops/batch` to get time per call. CPU time and elapsed
   time are both reported; time spent in the JavaScript loop is included. GC cases and

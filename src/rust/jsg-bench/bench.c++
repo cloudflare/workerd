@@ -246,7 +246,7 @@ V8System& system() {
   return system;
 }
 
-enum class Binding { CPP, RUST, CPP_FAST, RUST_FAST, CPP_STRUCT_FAST };
+enum class Binding { CPP, RUST, CPP_FAST, RUST_FAST, CPP_STRUCT_FAST, RUST_STRUCT_FAST };
 enum class CpuTime { THREAD, PROCESS };
 
 struct Case {
@@ -282,7 +282,8 @@ kj::StringPtr describe(const v8::String::Utf8Value& error) {
 
 template <typename Isolate = BenchIsolate>
 void runCase(benchmark::State& state, Binding binding, const Case& test) {
-  auto rust = binding == Binding::RUST || binding == Binding::RUST_FAST;
+  auto rust = binding == Binding::RUST || binding == Binding::RUST_FAST ||
+      binding == Binding::RUST_STRUCT_FAST;
   JsgConfig config = {
     .fastApiEnabled = binding == Binding::CPP_FAST || binding == Binding::RUST_FAST};
   // Initializes V8 before newIsolateGroup() needs it; argument evaluation order is unspecified.
@@ -291,7 +292,9 @@ void runCase(benchmark::State& state, Binding binding, const Case& test) {
   isolate.runInLockScope([&](auto& js) {
     if (binding == Binding::CPP_STRUCT_FAST) js.setUsingFastJsgStruct();
     capnp::MallocMessageBuilder message;
-    auto flags = capnp::canonicalize(message.initRoot<CompatibilityFlags>().asReader());
+    auto flagsBuilder = message.initRoot<CompatibilityFlags>();
+    if (binding == Binding::RUST_STRUCT_FAST) flagsBuilder.setFastJsgStruct(true);
+    auto flags = capnp::canonicalize(flagsBuilder.asReader());
     // The realm stays attached to the isolate until it is dropped.
     auto realm =
         rustJsg::realm_create(js.v8Isolate, {flags.asBytes().begin(), flags.asBytes().size()});
@@ -461,11 +464,12 @@ int registerCases() {
         kj::str(validation), kj::str(expected), batch});
       auto* testPtr = test.get();
       cases.add(kj::mv(test));
-      auto label = kj::str(binding == Binding::CPP ? "Cpp/"
-              : binding == Binding::RUST           ? "Rust/"
-              : binding == Binding::CPP_FAST       ? "CppFast/"
-              : binding == Binding::RUST_FAST      ? "RustFast/"
-                                                   : "CppStructFast/",
+      auto label = kj::str(binding == Binding::CPP  ? "Cpp/"
+              : binding == Binding::RUST            ? "Rust/"
+              : binding == Binding::CPP_FAST        ? "CppFast/"
+              : binding == Binding::RUST_FAST       ? "RustFast/"
+              : binding == Binding::CPP_STRUCT_FAST ? "CppStructFast/"
+                                                    : "RustStructFast/",
           name);
       auto* registered =
           benchmark::RegisterBenchmark(label.cStr(), [binding, testPtr](benchmark::State& state) {
@@ -486,6 +490,9 @@ int registerCases() {
     }
   };
 
+  // Cases that return structs, which both bindings can also create from cached templates.
+  const std::initializer_list<Binding> STRUCT_FAST = {
+    Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST, Binding::RUST_STRUCT_FAST};
   // Cases whose methods both bindings can call through V8's Fast API.
   const std::initializer_list<Binding> FAST = {
     Binding::CPP, Binding::RUST, Binding::CPP_FAST, Binding::RUST_FAST};
@@ -513,11 +520,10 @@ int registerCases() {
       "124");
   add("struct/pair-in", "const x={a:1,b:2};", "t.pairSum(x)", "t.pairSum(x)===3", "3");
   add("struct/pair-roundtrip", "const x={a:1,b:2};", "t.pairEcho(x).b", "t.pairEcho(x).b===2", "2",
-      1024, {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST});
+      1024, STRUCT_FAST);
   add("struct/octet-in", "const x={a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8};", "t.octetSum(x)",
       "t.octetSum(x)===36", "36");
-  add("struct/octet-out", "", "t.octetMake().h", "t.octetMake().h===8", "8", 1024,
-      {Binding::CPP, Binding::RUST, Binding::CPP_STRUCT_FAST});
+  add("struct/octet-out", "", "t.octetMake().h", "t.octetMake().h===8", "8", 1024, STRUCT_FAST);
   add("resource/unwrap", "const x=t.sameNode();", "t.takeNode(x)", "t.takeNode(x)===7", "7");
   add("resource/cached-wrap", "const x=t.sameNode();", "+(t.sameNode()===x)", "t.sameNode()===x",
       "1");
