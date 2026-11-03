@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "code-cache.h"
+#include "compilation.h"
 #include "jsg-test.h"
 #include "modules-new.h"
 #include "script.h"
@@ -143,8 +144,8 @@ struct CodeCacheContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(CodeCacheIsolate, CodeCacheContext);
 
-// Runs `fn` in a context of a fresh isolate that uses `store`, inside a production window if
-// `defer` is set, and closes the window afterwards.
+// Runs `fn` in a fresh isolate, optionally with a store. Opens and closes a production window
+// when a store is supplied and `defer` is set.
 void withIsolate(kj::Own<const CodeCacheStore> store,
     const CompilationObserver& observer,
     Defer defer,
@@ -154,12 +155,15 @@ void withIsolate(kj::Own<const CodeCacheStore> store,
   isolate.runInLockScope([&](CodeCacheIsolate::Lock& lock) {
     auto& base = IsolateBase::from(lock.v8Isolate);
     if (useNewModuleRegistry) base.setUsingNewModuleRegistry();
-    base.setCodeCacheStore(kj::mv(store));
-    auto& codeCache = KJ_ASSERT_NONNULL(base.tryGetCodeCache());
-    if (defer) codeCache.deferProduction();
+    if (store.get() != nullptr) base.setCodeCacheStore(kj::mv(store));
+    KJ_IF_SOME(codeCache, base.tryGetCodeCache()) {
+      if (defer) codeCache.deferProduction();
+    }
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, lock.newContext<CodeCacheContext>().getHandle(lock), [&](jsg::Lock& js) { fn(js); });
-    if (defer) codeCache.produceDeferred(lock.v8Isolate, observer);
+    KJ_IF_SOME(codeCache, base.tryGetCodeCache()) {
+      if (defer) codeCache.produceDeferred(lock.v8Isolate, observer);
+    }
   });
 }
 
@@ -383,30 +387,92 @@ KJ_TEST("Embedded builtin caches take precedence over the store in both registri
     module.setCompileCache(kj::arrayPtr(data->data, data->length));
     // Invalid syntax at the same length proves that V8 consumes the embedded cache.
     module.getSrc()[0] = ')';
-    for (auto newRegistry: {UseNewModuleRegistry::NO, UseNewModuleRegistry::YES}) {
-      withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
-        if (newRegistry) {
-          modules::ModuleBundle::BuiltinBuilder builtins;
-          modules::ModuleBundle::getBuiltInBundleFromCapnp(builtins, bundle.asReader());
-          const auto base = "file:///"_url;
-          modules::ModuleRegistry::Builder builder(base);
-          auto registry = builder.add(builtins.finish()).finish();
-          auto attached = registry->attachToIsolate(js, observer);
-          KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) != "");
-        } else {
-          ModuleRegistry::ModuleInfo info(js, "test:builtin", module.getSrc().asChars(),
-              module.getCompileCache().asBytes(), observer);
-          auto descriptor = info.module.getHandle(js);
-          instantiateModule(js, descriptor);
-        }
-      }, newRegistry);
+    for (bool useStore: {false, true}) {
+      for (auto newRegistry: {UseNewModuleRegistry::NO, UseNewModuleRegistry::YES}) {
+        kj::Own<const CodeCacheStore> isolateStore;
+        if (useStore) isolateStore = kj::atomicAddRef(*store);
+        withIsolate(kj::mv(isolateStore), observer, Defer::YES, [&](jsg::Lock& js) {
+          if (newRegistry) {
+            modules::ModuleBundle::BuiltinBuilder builtins;
+            modules::ModuleBundle::getBuiltInBundleFromCapnp(builtins, bundle.asReader());
+            const auto base = "file:///"_url;
+            modules::ModuleRegistry::Builder builder(base);
+            auto registry = builder.add(builtins.finish()).finish();
+            auto attached = registry->attachToIsolate(js, observer);
+            KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) != "");
+          } else {
+            ModuleRegistry::ModuleInfo info(js, "test:builtin", module.getSrc().asChars(),
+                module.getCompileCache().asBytes(), observer);
+            auto descriptor = info.module.getHandle(js);
+            instantiateModule(js, descriptor);
+          }
+        }, newRegistry);
+      }
     }
     auto lock = store->state.lockShared();
     KJ_EXPECT(lock->lookups == 0);
     KJ_EXPECT(lock->inserts == 0);
-    KJ_EXPECT(observer.found == 1);
+    KJ_EXPECT(observer.found == 4);
     KJ_EXPECT(observer.rejected == 0);
   }
+}
+
+KJ_TEST("The runtime cache invokes its compilation callback on misses and hits") {
+  auto store = newStore();
+  CountingObserver observer;
+  uint calls = 0;
+  for (uint i = 0; i < 2; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto& cache = KJ_ASSERT_NONNULL(IsolateBase::from(js.v8Isolate).tryGetCodeCache());
+      auto key = cache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, LAZY_MODULE);
+      v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
+      auto module =
+          check(cache.compile<v8::Module>(js.v8Isolate, key, js.str(LAZY_MODULE), origin, observer,
+              [&](v8::ScriptCompiler::Source* source, v8::ScriptCompiler::CompileOptions options) {
+        ++calls;
+        KJ_EXPECT(options ==
+            (i == 0 ? v8::ScriptCompiler::kNoCompileOptions
+                    : v8::ScriptCompiler::kConsumeCodeCache));
+        KJ_EXPECT((source->GetCachedData() != nullptr) == (i == 1));
+        return v8::ScriptCompiler::CompileModule(js.v8Isolate, source, options);
+      }));
+      instantiateModule(js, module);
+    });
+  }
+  KJ_EXPECT(calls == 2);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(store->state.lockShared()->inserts == 1);
+}
+
+KJ_TEST("Hint production and embedded bytecode bypass runtime keys and the shared slot") {
+  auto store = newStore();
+  CountingObserver observer;
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+    v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
+    v8::ScriptCompiler::Source source(js.str(LAZY_MODULE), origin);
+    auto module = check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+    std::unique_ptr<v8::ScriptCompiler::CachedData> data(
+        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+    KJ_ASSERT(data != nullptr);
+    SharedModuleCompilationCache sharedCache;
+    uint keyCalls = 0;
+    for (auto produceHints: {ProduceCompileHints::YES, ProduceCompileHints::NO}) {
+      auto result = check(compileModule(js, js.str(LAZY_MODULE), origin, observer,
+          [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+        ++keyCalls;
+        return kj::none;
+      },
+          {.embeddedCache = kj::arrayPtr(data->data, data->length),
+            .produceHints = produceHints,
+            .sharedCache = sharedCache}));
+      instantiateModule(js, result);
+    }
+    KJ_EXPECT(keyCalls == 0);
+    KJ_EXPECT(observer.found == 1);
+    KJ_EXPECT(observer.generated == 0);
+  });
+  KJ_EXPECT(store->state.lockShared()->lookups == 0);
 }
 
 KJ_TEST("Cached CommonJS functions bind the receiving isolate's context extension") {
@@ -878,6 +944,17 @@ KJ_TEST("Service-worker scripts: a second isolate consumes the cache") {
   KJ_EXPECT(lock->lookups == 2);
   KJ_EXPECT(lock->hits == 1);
   KJ_EXPECT(lock->inserts == 1);
+}
+
+KJ_TEST("Internal script helpers remain uncached when a runtime store is installed") {
+  auto store = newStore();
+  CountingObserver observer;
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+    auto script = NonModuleScript::compile(js, "'helper result'"_kj, "helper"_kj);
+    KJ_EXPECT(script.runAndReturn(js).toString(js) == "helper result");
+  });
+  KJ_EXPECT(store->state.lockShared()->lookups == 0);
+  KJ_EXPECT(store->state.lockShared()->inserts == 0);
 }
 
 }  // namespace

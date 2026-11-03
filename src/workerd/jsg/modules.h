@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/jsg/compilation.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
@@ -101,12 +102,6 @@ class CompiledWasmModuleHolder {
   // Indexed by Lock::isWasmEsmIntegrationBuiltinsEnabled().
   kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> compiled[2];
 };
-
-// Whether a bundle ES module is compiled so that V8 records compile hints for it: from then on,
-// V8 records the start position of each of the module's functions when it first compiles it,
-// which for a lazily compiled function is when it first runs. Read them with
-// ModuleRegistry::getProducedCompileHints() or getProducedCompileHints().
-WD_STRONG_BOOL(ProduceCompileHints);
 
 // Returns the compile hints V8 has recorded so far for `module`, a source text module compiled
 // with ProduceCompileHints::YES, sorted and without duplicates, in the form that

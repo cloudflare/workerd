@@ -76,55 +76,13 @@ CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& ke
   return store->lookup(key, MayElect(deferring));
 }
 
-v8::MaybeLocal<v8::Module> IsolateCodeCache::compileModule(v8::Isolate* isolate,
-    const CodeCacheKey& key,
-    v8::Local<v8::String> source,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer) {
-  return compile<v8::Module>(isolate, key, source, origin, observer,
-      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
-    return v8::ScriptCompiler::CompileModule(isolate, compileSource, options);
-  });
-}
-
-v8::MaybeLocal<v8::UnboundScript> IsolateCodeCache::compileScript(v8::Isolate* isolate,
-    const CodeCacheKey& key,
-    v8::Local<v8::String> source,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer) {
-  return compile<v8::UnboundScript>(isolate, key, source, origin, observer,
-      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
-    return v8::ScriptCompiler::CompileUnboundScript(isolate, compileSource, options);
-  });
-}
-
-v8::MaybeLocal<v8::Function> IsolateCodeCache::compileFunction(v8::Isolate* isolate,
-    const CodeCacheKey& key,
-    v8::Local<v8::String> source,
-    const v8::ScriptOrigin& origin,
-    kj::Maybe<v8::Local<v8::Object>> contextExtension,
-    const CompilationObserver& observer) {
-  KJ_ASSERT(key.unit ==
-      (contextExtension == kj::none ? CodeCacheKey::Unit::FUNCTION
-                                    : CodeCacheKey::Unit::FUNCTION_WITH_CONTEXT));
-  return compile<v8::Function>(isolate, key, source, origin, observer,
-      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
-    KJ_IF_SOME(extension, contextExtension) {
-      return v8::ScriptCompiler::CompileFunction(
-          isolate->GetCurrentContext(), compileSource, 0, nullptr, 1, &extension, options);
-    }
-    return v8::ScriptCompiler::CompileFunction(
-        isolate->GetCurrentContext(), compileSource, 0, nullptr, 0, nullptr, options);
-  });
-}
-
-template <typename T, typename Compile>
+template <typename T>
 v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
     const CodeCacheKey& key,
     v8::Local<v8::String> source,
     const v8::ScriptOrigin& origin,
     const CompilationObserver& observer,
-    Compile&& compileWithOptions) {
+    CompileCallback<T> compileWithOptions) {
   // `lookup.hit` owns the cached bytes, which V8 reads without taking ownership, so it must
   // outlive `compileSource`.
   auto lookup = takeLookup(key);
@@ -171,6 +129,28 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
   }
   return result;
 }
+
+template v8::MaybeLocal<v8::Module> IsolateCodeCache::compile<v8::Module>(v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::Module>);
+
+template v8::MaybeLocal<v8::UnboundScript> IsolateCodeCache::compile<v8::UnboundScript>(
+    v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::UnboundScript>);
+
+template v8::MaybeLocal<v8::Function> IsolateCodeCache::compile<v8::Function>(v8::Isolate*,
+    const CodeCacheKey&,
+    v8::Local<v8::String>,
+    const v8::ScriptOrigin&,
+    const CompilationObserver&,
+    CompileCallback<v8::Function>);
 
 void IsolateCodeCache::deferProduction() {
   // The window is per isolate, but each script opens its own, so a second window would mean a

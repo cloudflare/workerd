@@ -19,6 +19,7 @@
 #include <v8-script.h>
 
 #include <kj/array.h>
+#include <kj/function.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -143,29 +144,21 @@ class IsolateCodeCache {
   // vouch for. Their prepared lookups are kept.
   void forgetPreparedSources();
 
-  // Compiles a module, consuming the store's cache for `key` if it has one. `origin` must have
-  // `is_module` set.
-  v8::MaybeLocal<v8::Module> compileModule(v8::Isolate* isolate,
-      const CodeCacheKey& key,
-      v8::Local<v8::String> source,
-      const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer);
+  template <typename T>
+  using CompileCallback = kj::FunctionParam<v8::MaybeLocal<T>(
+      v8::ScriptCompiler::Source*, v8::ScriptCompiler::CompileOptions)>;
 
-  // Compiles a classic script, consuming the store's cache for `key` if it has one.
-  v8::MaybeLocal<v8::UnboundScript> compileScript(v8::Isolate* isolate,
+  // Selects the store's bytecode and invokes the V8 operation on both hits and misses. The
+  // callback consumes cached data through V8's compile API; a miss may retain its result for
+  // deferred serialization. T is Module, UnboundScript or Function. The key must identify the
+  // exact source and compilation shape used by the callback.
+  template <typename T>
+  v8::MaybeLocal<T> compile(v8::Isolate* isolate,
       const CodeCacheKey& key,
       v8::Local<v8::String> source,
       const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer);
-
-  // Compiles a function with no parameters and at most one context extension. The key's unit
-  // must distinguish whether an extension is present.
-  v8::MaybeLocal<v8::Function> compileFunction(v8::Isolate* isolate,
-      const CodeCacheKey& key,
-      v8::Local<v8::String> source,
-      const v8::ScriptOrigin& origin,
-      kj::Maybe<v8::Local<v8::Object>> contextExtension,
-      const CompilationObserver& observer);
+      const CompilationObserver& observer,
+      CompileCallback<T> compileWithOptions);
 
   // Opens a production window: until it is closed, a miss may elect this isolate to produce the
   // cache, which produceDeferred() then does. The window must not be open already.
@@ -193,14 +186,6 @@ class IsolateCodeCache {
     size_t size;
     CodeCacheKey key;
   };
-
-  template <typename T, typename Compile>
-  v8::MaybeLocal<T> compile(v8::Isolate* isolate,
-      const CodeCacheKey& key,
-      v8::Local<v8::String> source,
-      const v8::ScriptOrigin& origin,
-      const CompilationObserver& observer,
-      Compile&& compileWithOptions);
 
   static void produce(v8::Isolate* isolate,
       CodeCacheStore::Producer& producer,
