@@ -580,7 +580,13 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   kj::Vector<Wrappable*> wrappersToTrace;
 
   // Wrappables on which detachWrapper() should be called at the end of this GC pass.
-  kj::Vector<Wrappable*> detachLater;
+  //
+  // Detaching runs destructors inside the GC epilogue, and those can trigger a nested GC. V8 skips
+  // GC callbacks for nested GCs, so a nested scavenge's ResetRoot() calls append here while the
+  // epilogue is draining the vector, and a nested major GC can finalize the shim of an entry not
+  // yet drained, dropping the shim's reference to the Wrappable. Each entry therefore holds its own
+  // reference, and the epilogue keeps draining until the vector stays empty.
+  kj::Vector<kj::Own<Wrappable>> detachLater;
 
   // List of all Wrappables for which a JavaScript wrapper exists.
   kj::List<Wrappable, &Wrappable::link> wrappers;
