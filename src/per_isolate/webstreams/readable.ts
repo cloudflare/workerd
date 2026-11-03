@@ -355,7 +355,11 @@ let controllerCancelSteps: (
   controller: AnyReadableController,
   reason: unknown
 ) => Promise<void>;
-let controllerMaybeCloseStream: (controller: AnyReadableController) => void;
+// `readBy`, when given, is the stream whose read prompted the check.
+let controllerMaybeCloseStream: (
+  controller: AnyReadableController,
+  readBy?: ReadableStream<unknown>
+) => void;
 // A reader released its lock. The native controller drops its cached
 // byobRequest; the queued byte controller keeps its own (spec).
 let controllerOnReaderRelease: (controller: AnyReadableController) => void;
@@ -914,7 +918,7 @@ function readCompletionSteps<R>(
   // transitions now — checked on every read completion, not just done
   // results, because a default read that drains the final chunk resolves
   // with done: false.
-  if (controller !== undefined) controllerMaybeCloseStream(controller);
+  if (controller !== undefined) controllerMaybeCloseStream(controller, stream);
   if (done) {
     // This stream's cursor reached the sentinel. Close THIS stream (tee
     // branches close independently of the controller's primary stream).
@@ -1179,7 +1183,9 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       // the last queued bytes with close requested must transition the
       // stream — without this, the NEXT read(view) would pend forever (BYOB
       // descriptors are not auto-committed at the sentinel).
-      if (controller !== undefined) controllerMaybeCloseStream(controller);
+      if (controller !== undefined) {
+        controllerMaybeCloseStream(controller, stream);
+      }
       if (submitting) {
         answeredFromQueue = result;
         return;
@@ -1535,8 +1541,15 @@ class QueuedControllerCore<T, R> {
     this.#pendingCancel?.resolve();
   }
 
-  maybeCloseStream(): void {
+  maybeCloseStream(readBy?: ReadableStream<unknown>): void {
     if (!this.#closeRequested) return;
+    // A read moves only its own stream's cursor: unless that cursor has
+    // drained, no consumer has, and the walk below would change nothing.
+    if (readBy !== undefined) {
+      const cursor = getReadableStreamConsumer(readBy) as
+        QueueCursorType<T, R> | undefined;
+      if (cursor !== undefined && !this.#isDrained(cursor)) return;
+    }
     // A stream whose cursor has reached the close sentinel transitions to
     // 'closed'; one with buffered data before the sentinel stays 'readable'
     // until drained (drain-then-close on subsequent reads).
@@ -1758,8 +1771,8 @@ class ReadableStreamDefaultController<
     controllerCancelSteps = (controller, reason) =>
       queuedCoreOf(controller)?.cancelSteps(reason) ?? PromiseResolve();
 
-    controllerMaybeCloseStream = (controller) => {
-      queuedCoreOf(controller)?.maybeCloseStream();
+    controllerMaybeCloseStream = (controller, readBy) => {
+      queuedCoreOf(controller)?.maybeCloseStream(readBy);
     };
 
     controllerConsumerLeaving = (controller, reason, isLastConsumer) =>
@@ -4344,11 +4357,11 @@ class ReadableStream<R> {
     };
 
     const prevMaybeCloseStream = controllerMaybeCloseStream;
-    controllerMaybeCloseStream = (controller) => {
+    controllerMaybeCloseStream = (controller, readBy) => {
       if (isNativeController(controller)) {
         nativeControllerMaybeCloseStream(controller);
       } else {
-        prevMaybeCloseStream(controller);
+        prevMaybeCloseStream(controller, readBy);
       }
     };
 
