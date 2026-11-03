@@ -1,0 +1,10 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "startup-snapshot-modules-test.wd-test",
+    args = ["--experimental"],
+    data = glob([
+        "*.js",
+        "*.json",
+    ]),
+)

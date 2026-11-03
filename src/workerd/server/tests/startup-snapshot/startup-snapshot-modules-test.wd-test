@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The Worker starts from a startup snapshot of its top-level evaluation. Its module registry must
+# know the modules that evaluation left in the snapshot's heap, or a later import evaluates a
+# second instance of a module the main module already imported statically.
+#
+# A Worker starts from a snapshot only under the STARTUP_SNAPSHOT autogate and the conditions of
+# supportsStartupSnapshot() in worker-factory.c++ (TypeScript streams, the legacy module
+# registry, no Wasm modules).
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "startup-snapshot-modules-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "startup-snapshot-modules-test.js" ),
+          ( name = "counter.js", esModule = embed "counter.js" ),
+          ( name = "lazy.js", esModule = embed "lazy.js" ),
+          ( name = "data.json", json = embed "data.json" ),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "typescript_implemented_streams",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-startup-snapshot",
+  ],
+);
