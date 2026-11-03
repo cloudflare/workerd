@@ -53,7 +53,7 @@ import { connect } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -69,6 +69,17 @@ assert(
   env.FAKE_S3_CONFIG !== undefined,
   'You must set the FAKE_S3_CONFIG environment variable.'
 );
+
+// Bazel shards this file (`shard_count`): each shard runs every n-th test.
+const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
+const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
+if (env.TEST_SHARD_STATUS_FILE !== undefined) {
+  await writeFile(env.TEST_SHARD_STATUS_FILE, '');
+}
+let testIndex = 0;
+function test(...args) {
+  if (testIndex++ % SHARDS === SHARD) nodeTest(...args);
+}
 
 const CONTROL_FD = 3;
 
