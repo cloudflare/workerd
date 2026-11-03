@@ -1,6 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_cc_library.bzl", "WD_CC_ARCH_COPTS")
 load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
 
 def rust_cxx_bridge(
@@ -28,6 +29,7 @@ def rust_cxx_bridge(
         name = name,
         srcs = [src + ".cc"],
         hdrs = [src + ".h"] + hdrs,
+        copts = WD_CC_ARCH_COPTS,
         strip_include_prefix = strip_include_prefix,
         include_prefix = include_prefix,
         local_defines = local_defines,
