@@ -516,9 +516,12 @@ class IdentityTransformStream {
 
   // A parked pull takes a write as soon as it is written. The write's
   // size() callback is where it arrives, inside writer.write() and before
-  // the write is queued, so the delivery waits a microtask.
+  // the write is queued, so the delivery waits a microtask; unless the
+  // sink takes the write before writer.write() returns, as its sink step
+  // delivers it to the parked pull itself.
   #scheduleDelivery(): void {
     if (!this.#parkedPull || this.#deliveryScheduled) return;
+    if (writableInternals.sinkTakesWriteNow(this.#writable)) return;
     this.#deliveryScheduled = true;
     PromisePrototypeThen(PromiseResolve(), () => {
       this.#deliveryScheduled = false;

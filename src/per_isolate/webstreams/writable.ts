@@ -896,6 +896,8 @@ class WritableStream<W = unknown> {
 // Started-flag peek used by the stream's erroring machinery; assigned in
 // the controller's static block.
 let controllerStartedOf: ControllerOp<[], boolean>;
+// Whether the controller's queue holds nothing, writes or markers.
+let controllerQueueIsEmpty: ControllerOp<[], boolean>;
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultController
@@ -948,6 +950,8 @@ class WritableStreamDefaultController<
         throw new TypeError('Illegal invocation');
     };
     controllerStartedOf = (controller) => controller.#started;
+
+    controllerQueueIsEmpty = (controller) => controller.#queue.length === 0;
 
     controllerGetDesiredSize = (controller) => {
       return controller.#strategyHWM - controller.#queueTotalSize;
@@ -1872,6 +1876,19 @@ module.exports = {
     willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
       getWritableStreamState(stream) === 'writable' &&
       !writableStreamCloseQueuedOrInFlight(stream),
+    // Whether a writer.write() issued NOW, if accepted, reaches the sink's
+    // write() before it returns: the sink has started, and nothing is in
+    // flight or queued ahead of it. Like willAcceptWrite, for size()
+    // callbacks; the answer cannot change before the write is enqueued.
+    sinkTakesWriteNow: <W>(stream: WritableStream<W>): boolean => {
+      const controller = getWritableStreamController(stream);
+      return (
+        controller !== undefined &&
+        controllerStartedOf(controller) &&
+        controllerQueueIsEmpty(controller) &&
+        !writableStreamHasOperationMarkedInFlight(stream)
+      );
+    },
     // Wraps a sink write() rejection so it rejects only ITS write request,
     // leaving the stream writable (the identity streams' invalid-chunk
     // contract — see NonFatalWriteRejection). The sink throws (or rejects
