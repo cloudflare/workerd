@@ -82,6 +82,10 @@ pub unsafe trait CppResource: Sized + 'static {
     /// The JavaScript class name, for error messages.
     fn class_name() -> &'static str;
 
+    /// The C++ class's name as `jsg::fullyQualifiedTypeName()` gives it, such as
+    /// `workerd::api::Fetcher`. The RTTI export refers to the C++ class's description by it.
+    fn fully_qualified_name() -> &'static str;
+
     /// A reference to the object that `value` wraps, if it wraps an instance of the class or of
     /// a subclass. Fails only if the class is not registered with the isolate.
     ///
@@ -222,6 +226,15 @@ impl<T: CppResource> jsg::Type for Ref<T> {
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_object()
+    }
+}
+
+impl<T: CppResource> jsg::TypeInfo for Ref<T> {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::CppStructure {
+            name: T::class_name(),
+            fully_qualified_name: T::fully_qualified_name(),
+        }
     }
 }
 

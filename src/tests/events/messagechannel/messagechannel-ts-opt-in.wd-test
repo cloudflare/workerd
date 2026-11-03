@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+using MessageChannelModules = import "messagechannel-modules.capnp";
+
+# The main TypeScript cell plus the dateless opt-in flags of
+# messagechannel-cpp-opt-in.wd-test. The TypeScript implementation consults
+# spec_compliant_property_attributes; immutable_api_prototypes is pinned to
+# show it makes no difference, the prototypes being immutable regardless.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-messagechannel-ts-opt-in",
+      worker = (
+        modules = MessageChannelModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_worker_threads_module",
+          "expose_global_message_channel",
+          "set_tostring_tag",
+          "spec_compliant_dispatch_exceptions",
+          "spec_compliant_property_attributes",
+          "immutable_api_prototypes",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-message-channel"],
+  v8Flags = ["--expose-gc"],
+);
