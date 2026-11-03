@@ -1,7 +1,9 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
+# Waits out the real blob grace period, seconds at a time.
 wd_test(
+    size = "large",
     src = "kv-test.wd-test",
     args = ["--experimental"],
     data = ["kv-test.js"],
