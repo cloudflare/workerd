@@ -4741,14 +4741,15 @@ function acquireReadableStreamDrainingReader<R>(
 }
 
 // The collected bytes, copied out of the drained chunks as they arrive so
-// nothing is retained per chunk. Small chunks are packed into blocks, each
-// as large as the blocks before it together (from the first chunk's size,
-// up to kCollectBlockSize); a chunk of kCollectCopySize or more that the
-// current block can't hold is taken on its own instead, closing that
-// block, so a large chunk never lands in a block mostly left unused. Such
-// a chunk is copied, unless the collector owns it (see collectChunks) and
-// it spans its whole buffer, in which case it is kept as it is: keeping a
-// view keeps its whole buffer alive, and the memory limit counts only the
+// that no chunk is retained, other than the large chunks kept as they are
+// (below). Small chunks are packed into blocks, each as large as the
+// blocks before it together (from the first chunk's size, up to
+// kCollectBlockSize); a chunk of kCollectCopySize or more that the current
+// block can't hold is taken on its own instead, closing that block, so a
+// large chunk never lands in a block mostly left unused. Such a chunk is
+// copied, unless the collector owns it (see collectChunks) and it spans
+// its whole buffer, in which case it is kept as it is: keeping a view
+// keeps its whole buffer alive, and the memory limit counts only the
 // view's bytes. A declared length that fits one block is allocated whole
 // up front, so a body that meets it fills exactly one block and is handed
 // over without a further copy, as is a body of one kept chunk.

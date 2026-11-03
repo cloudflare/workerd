@@ -231,6 +231,7 @@ export {
   oddChunkSizesAssembleIntact,
   chunkWiderThanABlockAssemblesIntact,
   mixedChunkSizesAssembleIntact,
+  largeViewsIntoLargerBuffersAssembleIntact,
   declaredLengthBodyIsExact,
 } from 'integration-body-memory';
 

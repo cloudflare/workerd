@@ -160,6 +160,60 @@ export const mixedChunkSizesAssembleIntact = {
   },
 };
 
+// A byte body of views into larger buffers, each given as [buffer size,
+// view offset, view length]: the view's bytes are position-encoded and the
+// rest of its buffer holds 0xee, so bytes from outside a view show up.
+function viewsBody(views) {
+  views = [...views];
+  let offset = 0;
+  return new ReadableStream({
+    type: 'bytes',
+    pull(c) {
+      if (views.length === 0) {
+        c.close();
+        return;
+      }
+      const [bufferSize, viewOffset, size] = views.shift();
+      const chunk = new Uint8Array(
+        new ArrayBuffer(bufferSize),
+        viewOffset,
+        size
+      );
+      new Uint8Array(chunk.buffer).fill(0xee);
+      for (let i = 0; i < size; i++) chunk[i] = (offset + i) & 0xff;
+      offset += size;
+      c.enqueue(chunk);
+    },
+  });
+}
+
+// Large chunks of a byte stream that are views into larger buffers, which
+// the TypeScript implementation copies out rather than keep (keeping one
+// would keep its whole buffer), among chunks that span their buffers and
+// small ones; and a body of one such view, whose result is the view's
+// bytes alone.
+export const largeViewsIntoLargerBuffersAssembleIntact = {
+  async test() {
+    const views = [
+      [1 << 20, 4096, 20000],
+      [100, 0, 100],
+      [40000, 0, 40000],
+      [65536, 0, 16384],
+      [65536, 49152, 16384],
+      [30, 10, 7],
+      [1 << 20, 1, (1 << 20) - 2],
+    ];
+    checkPositionEncoded(
+      await new Response(viewsBody(views)).arrayBuffer(),
+      sum(views.map((view) => view[2]))
+    );
+    checkPositionEncoded(
+      await new Response(viewsBody([[1 << 20, 4096, 20000]])).arrayBuffer(),
+      20000
+    );
+  },
+};
+
 // A byte source that declares its total and meets it, in several chunks.
 export const declaredLengthBodyIsExact = {
   async test() {
