@@ -45,11 +45,11 @@ bool isDOMExceptionBrand(v8::Local<v8::Object> holder, int index);
 // deserialized from a snapshot, for which isDOMExceptionBrand() was true.
 void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index);
 
-// In a Worker, the per-isolate bootstrap replaces this class as the global DOMException with a
-// TypeScript class of the same shape (src/per_isolate/dom-exception.ts), and native code creates
-// instances of that. This class remains the DOMException of isolates that run no bootstrap, such
-// as those of JSG's and Rust JSG's tests, and supplies the deserializer for its serialization
-// tags.
+// Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap replaces this class as a Worker's
+// global DOMException with a TypeScript class of the same shape (src/per_isolate/dom-exception.ts),
+// and native code creates instances of that. This class remains the global DOMException without
+// the gate and in isolates that run no bootstrap, such as those of JSG's and Rust JSG's tests, and
+// supplies the deserializer for its serialization tags.
 //
 // JSG allows DOMExceptions to be tunneled through kj::Exceptions (see exceptionToJs() for
 // details). While this feature is activated conditionally at run-time, and thus does not depend
@@ -60,9 +60,9 @@ void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index);
 // treatment because it is the only non-builtin JS exception that standard web APIs are allowed to
 // throw, per Web IDL.
 //
-// Users of JSG are free (and encouraged) to use this implementation, but they can also opt into
-// the same tunneled exception feature by defining their own globally-accessible type named
-// "DOMException".
+// Native code recognizes a DOMException by its brand (tryGetDOMExceptionFields() in jsg.h), not by
+// a global named "DOMException", so a DOMException must come from this class, from
+// createDOMException() or from newDOMException().
 class DOMException: public Object {
  public:
   DOMException(kj::String message, kj::String name): message(kj::mv(message)), name(kj::mv(name)) {}

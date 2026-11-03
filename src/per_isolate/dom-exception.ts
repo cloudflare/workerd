@@ -1,6 +1,7 @@
 'use strict';
 
-// The global DOMException (https://webidl.spec.whatwg.org/#idl-DOMException).
+// The global DOMException (https://webidl.spec.whatwg.org/#idl-DOMException), installed under the
+// TS_DOM_EXCEPTION autogate. Without it the C++ class remains the global.
 //
 // A DOMException looks as the C++ JSG class's instances do (src/workerd/jsg/dom-exception.h):
 // own read-only `code`, `name` and `message` properties, an enumerable own `stack`, and the
@@ -13,11 +14,12 @@
 const {
   ErrorCaptureStackTrace,
   ErrorPrototype,
-  ObjectCreate,
   ObjectDefineProperty,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   ObjectGetPrototypeOf,
+  ObjectSetPrototypeOf,
+  ReflectDeleteProperty,
   SymbolFor,
   SymbolToStringTag,
   TypeError,
@@ -53,36 +55,30 @@ const LEGACY_CODES: readonly (readonly [string, number])[] = [
   ['DATA_CLONE_ERR', 25],
 ];
 
-// DOMException is a function rather than a class so that its `prototype` property is writable,
-// as a JSG class's is unless the immutable_api_prototypes flag is set. A class's `prototype` is
-// non-writable and non-configurable, so setUpClass() could not give it the JSG class's attributes.
-// TODO(soon): Make this a class once immutable_api_prototypes is enabled by default.
-//
-// The message and name are converted as Web IDL converts a DOMString, which a template literal
-// does too: a Symbol throws a TypeError.
-function DOMException(this: object, ...args: unknown[]): object {
-  if (new.target === undefined) {
-    throw new TypeError(
-      "Failed to construct 'DOMException': Please use the 'new' operator, this object constructor cannot be called as a function."
+// DOMException's `prototype` is read-only, as Web IDL specifies, whereas a JSG class's is
+// read-only only under the immutable_api_prototypes flag.
+class DOMException {
+  // The message and name are converted as Web IDL converts a DOMString, which a template literal
+  // does too: a Symbol throws a TypeError. A rest parameter keeps `DOMException.length` 0.
+  constructor(...args: unknown[]) {
+    const message = args[0] === undefined ? '' : `${args[0] as string}`;
+    const name = args[1] === undefined ? 'Error' : `${args[1] as string}`;
+    // A brand needs internal fields, which `this` lacks. `this` already has the prototype that
+    // `new.target` gives it.
+    const exception = utils.createDOMException(
+      ObjectGetPrototypeOf(this) as object,
+      name,
+      message
     );
+    // Leaves out this constructor's frame, but not a subclass constructor's.
+    ErrorCaptureStackTrace(exception, DOMException);
+    // Error properties are not enumerable, but a DOMException's always have been.
+    ObjectDefineProperty(exception, 'stack', {
+      __proto__: null,
+      enumerable: true,
+    });
+    return exception;
   }
-  const message = args[0] === undefined ? '' : `${args[0] as string}`;
-  const name = args[1] === undefined ? 'Error' : `${args[1] as string}`;
-  // A brand needs internal fields, which `this` lacks. `this` already has the prototype that
-  // `new.target` gives it.
-  const exception = utils.createDOMException(
-    ObjectGetPrototypeOf(this) as object,
-    name,
-    message
-  );
-  // Leaves out this constructor's frame, but not a subclass constructor's.
-  ErrorCaptureStackTrace(exception, DOMException);
-  // Error properties are not enumerable, but a DOMException's always have been.
-  ObjectDefineProperty(exception, 'stack', {
-    __proto__: null,
-    enumerable: true,
-  });
-  return exception;
 }
 
 // Defines `key` on `target` with the attributes it has on `source`, which JSG chooses by
@@ -101,13 +97,16 @@ function copyProperty(
 }
 
 // Gives DOMException the properties of `native`, the C++ class it replaces, with their
-// attributes and in their order.
+// attributes and in their order, except for `prototype`, which stays read-only.
 function setUpClass(native: Function): void {
   const nativePrototype = native.prototype as object;
   copyProperty(DOMException, native, 'length', 0);
   copyProperty(DOMException, native, 'name', 'DOMException');
 
-  const prototype = ObjectCreate(ErrorPrototype) as object;
+  const prototype = DOMException.prototype as object;
+  ObjectSetPrototypeOf(prototype, ErrorPrototype);
+  // Redefined after the constants, where JSG puts it.
+  ReflectDeleteProperty(prototype, 'constructor');
   for (let i = 0; i < LEGACY_CODES.length; i++) {
     const [name, code] = LEGACY_CODES[i] as readonly [string, number];
     copyProperty(DOMException, native, name, code);
@@ -132,9 +131,6 @@ function setUpClass(native: Function): void {
     inspect,
     ObjectFreeze({ __proto__: null })
   );
-
-  // Not writable under the immutable_api_prototypes flag.
-  copyProperty(DOMException, native, 'prototype', prototype);
 }
 
 // Replaces the C++ class as the global DOMException, keeping the property where JSG defines it

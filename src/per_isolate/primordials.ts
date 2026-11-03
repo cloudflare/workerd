@@ -281,6 +281,7 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 
 // Reflect
 const ReflectConstruct = Reflect.construct;
+const ReflectDeleteProperty = Reflect.deleteProperty;
 
 // Math / Number (statics — plain value captures)
 const MathMax = Math.max;
@@ -793,6 +794,7 @@ module.exports = ObjectFreeze({
 
   // Reflect
   ReflectConstruct,
+  ReflectDeleteProperty,
 
   // Math / Number
   MathMax,

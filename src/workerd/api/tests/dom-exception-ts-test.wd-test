@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs dom-exception-test.js against the TypeScript DOMException
+# (src/per_isolate/dom-exception.ts, under the TS_DOM_EXCEPTION autogate).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "dom-exception-ts-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "dom-exception-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-dom-exception"],
+);

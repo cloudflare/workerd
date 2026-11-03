@@ -34,7 +34,9 @@
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
 // Native code creates DOMExceptions of the class installed here, so it is installed first.
-require('dom-exception').install();
+if (autogates['ts-dom-exception']) {
+  require('dom-exception').install();
+}
 
 if (compatFlags['typescript_implemented_streams']) {
   const {

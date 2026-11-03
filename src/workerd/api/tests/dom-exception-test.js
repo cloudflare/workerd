@@ -2,12 +2,22 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// The global DOMException is a TypeScript class (src/per_isolate/dom-exception.ts). These tests
-// pin the shape it shares with the C++ class it replaced, and check that the DOMExceptions the
-// runtime creates are instances of it.
+// Under the TS_DOM_EXCEPTION autogate, the global DOMException is a TypeScript class
+// (src/per_isolate/dom-exception.ts), and otherwise the C++ class (jsg/dom-exception.h). These
+// tests run against either (dom-exception-test.wd-test and dom-exception-ts-test.wd-test, whose
+// USING_TS_IMPL binding says which), pin the shape the two share, and check that the
+// DOMExceptions the runtime creates are instances of the global.
 
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { types } from 'node:util';
+import { env } from 'cloudflare:workers';
+
+const usingTsImpl = env.USING_TS_IMPL === true;
+
+// A class's `prototype` is read-only; a JSG class's is read-only under immutable_api_prototypes.
+const prototypeWritable =
+  !usingTsImpl &&
+  globalThis.Cloudflare.compatibilityFlags['immutable_api_prototypes'] !== true;
 
 const describe = (object, key) => {
   const { value, get, set, ...attributes } = Object.getOwnPropertyDescriptor(
@@ -98,8 +108,9 @@ export const constructed = {
     throws(() => new DOMException(Symbol()), TypeError);
     throws(() => DOMException('m'), {
       name: 'TypeError',
-      message:
-        "Failed to construct 'DOMException': Please use the 'new' operator, this object constructor cannot be called as a function.",
+      message: usingTsImpl
+        ? "Class constructor DOMException cannot be invoked without 'new'"
+        : "Failed to construct 'DOMException': Please use the 'new' operator, this object constructor cannot be called as a function.",
     });
 
     throws(() => {
@@ -137,9 +148,10 @@ export const subclassed = {
 
 export const classShape = {
   test() {
-    // The TypeScript class, whose source shows; the C++ class's showed [native code].
-    ok(
-      !Function.prototype.toString.call(DOMException).includes('[native code]')
+    // The TypeScript class's source shows; the C++ class shows [native code].
+    strictEqual(
+      Function.prototype.toString.call(DOMException).includes('[native code]'),
+      !usingTsImpl
     );
     strictEqual(DOMException.name, 'DOMException');
     strictEqual(DOMException.length, 0);
@@ -151,6 +163,12 @@ export const classShape = {
       'prototype',
       ...CODES,
     ]);
+    deepStrictEqual(describe(DOMException, 'prototype'), {
+      writable: prototypeWritable,
+      enumerable: false,
+      configurable: false,
+      accessor: false,
+    });
     deepStrictEqual(Reflect.ownKeys(DOMException.prototype).slice(0, 26), [
       ...CODES,
       'constructor',
@@ -203,7 +221,13 @@ export const userCodeCannotRedirectTheRuntime = {
     const originalPrototype = DOMException.prototype;
     try {
       globalThis.DOMException = class Fake {};
-      original.prototype = {};
+      if (prototypeWritable) {
+        original.prototype = {};
+      } else {
+        throws(() => {
+          original.prototype = {};
+        }, TypeError);
+      }
       let e;
       try {
         atob('*');
@@ -212,7 +236,9 @@ export const userCodeCannotRedirectTheRuntime = {
       }
       strictEqual(Object.getPrototypeOf(e), originalPrototype);
     } finally {
-      original.prototype = originalPrototype;
+      if (prototypeWritable) {
+        original.prototype = originalPrototype;
+      }
       globalThis.DOMException = original;
     }
   },

@@ -2625,13 +2625,13 @@ class ExternalMemoryAdjustment;
 class Serializer;
 
 // A DOMException that native code or the TypeScript class that the per-isolate bootstrap
-// installs as the global DOMException creates is an API object with internal fields, which
-// JavaScript cannot read or change: a brand, and the name and message it was created with. Native
-// code recognizes a DOMException by them and reads them without the context, so also while an
-// exception or a termination is pending. Having internal fields, a DOMException is a host object
-// to a v8::ValueSerializer without a delegate that overrides IsHostObject(). An instance of the
-// C++ class (dom-exception.h), which is the global DOMException of isolates without the
-// bootstrap, is recognized as the C++ object it wraps.
+// installs as the global DOMException (under the TS_DOM_EXCEPTION autogate) creates is an API
+// object with internal fields, which JavaScript cannot read or change: a brand, and the name and
+// message it was created with. Native code recognizes a DOMException by them and reads them
+// without the context, so also while an exception or a termination is pending. Having internal
+// fields, a DOMException is a host object to a v8::ValueSerializer without a delegate that
+// overrides IsHostObject(). An instance of the C++ class (dom-exception.h), which is the global
+// DOMException otherwise, is recognized as the C++ object it wraps.
 //
 // These functions use only V8, not jsg::Lock, so that Rust JSG's shims can call them.
 
@@ -2668,8 +2668,8 @@ kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
     v8::Isolate* isolate, v8::Local<v8::Value> value);
 
 // Sets the prototype that newDOMException() gives the DOMExceptions it creates in `context`.
-// JSG sets this class's prototype when it creates a context, and the per-isolate bootstrap
-// replaces it with the TypeScript class's.
+// JSG sets the C++ class's prototype when it creates a context, and the per-isolate bootstrap
+// replaces it with the TypeScript class's under the TS_DOM_EXCEPTION autogate.
 void setDOMExceptionPrototype(v8::Local<v8::Context> context, v8::Local<v8::Object> prototype);
 
 // The callback that every v8::Context::New() passes as `internal_fields_deserializer`. In an

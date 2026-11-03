@@ -1,5 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# Runs dom-exception-test.js against the C++ DOMException (jsg/dom-exception.h).
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "dom-exception-test",
@@ -7,7 +9,8 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "dom-exception-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat"]
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
       )
     ),
   ],
