@@ -229,6 +229,7 @@ export {
   chunksCollectibleDuringConsumption,
   oddChunkSizesAssembleIntact,
   chunkWiderThanABlockAssemblesIntact,
+  mixedChunkSizesAssembleIntact,
   declaredLengthBodyIsExact,
 } from 'integration-body-memory';
 

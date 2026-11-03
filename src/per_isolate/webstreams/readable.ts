@@ -4729,22 +4729,28 @@ function acquireReadableStreamDrainingReader<R>(
 }
 
 // The collected bytes, copied out of the drained chunks as they arrive so
-// nothing is retained per chunk. Blocks grow geometrically from the first
-// chunk's size to kCollectBlockSize; a declared length that fits one block
-// is allocated whole up front, so a body that meets it fills exactly one
-// block and is handed over without a further copy.
+// nothing is retained per chunk. Small chunks are packed into blocks, each
+// as large as the blocks before it together (from the first chunk's size,
+// up to kCollectBlockSize); a chunk of kCollectCopySize or more that the
+// current block can't hold is copied out on its own instead, closing that
+// block, so a large chunk never lands in a block mostly left unused. A
+// declared length that fits one block is allocated whole up front, so a
+// body that meets it fills exactly one block and is handed over without a
+// further copy.
 const kCollectBlockSize = 1024 * 1024;
+const kCollectCopySize = 16 * 1024;
 
 class CollectedBytes {
-  #blocks: Uint8Array[] = []; // full
+  #parts: Uint8Array[] = []; // complete, each exactly its bytes
   #block: Uint8Array | undefined = undefined; // being filled
-  #blockSize = 0; // of the most recent block
   #filled = 0; // of #block
+  #capacity = 0; // of every block so far
   #length = 0;
-  readonly #firstBlockSize: number; // 0: size to the first chunk
 
-  constructor(firstBlockSize: number) {
-    this.#firstBlockSize = firstBlockSize;
+  // A declared length sizes the first block; without one, the first chunk
+  // does.
+  constructor(declaredLength: number) {
+    if (declaredLength > 0) this.#addBlock(declaredLength);
   }
 
   get length(): number {
@@ -4756,69 +4762,79 @@ class CollectedBytes {
     byteOffset: number,
     byteLength: number
   ): void {
-    while (byteLength > 0) {
-      const block = this.#block ?? this.#addBlock(byteLength);
-      const take = MathMin(byteLength, this.#blockSize - this.#filled);
+    const source = new Uint8Array(buffer, byteOffset, byteLength);
+    let block = this.#block;
+    const room =
+      block === undefined
+        ? 0
+        : TypedArrayPrototypeGetByteLength(block) - this.#filled;
+    if (byteLength > room && byteLength >= kCollectCopySize) {
+      this.#closeBlock();
+      // Constructing from a view copies without zero-filling first.
+      ArrayPrototypePush(this.#parts, new Uint8Array(source));
+      this.#length += byteLength;
+      return;
+    }
+    let offset = 0;
+    while (offset < byteLength) {
+      block ??= this.#addBlock(byteLength - offset);
+      const size = TypedArrayPrototypeGetByteLength(block);
+      const take = MathMin(byteLength - offset, size - this.#filled);
       TypedArrayPrototypeSet(
         block,
-        new Uint8Array(buffer, byteOffset, take),
+        offset === 0 && take === byteLength
+          ? source
+          : new Uint8Array(buffer, byteOffset + offset, take),
         this.#filled
       );
       this.#filled += take;
-      this.#length += take;
-      byteOffset += take;
-      byteLength -= take;
-      if (this.#filled === this.#blockSize) {
-        ArrayPrototypePush(this.#blocks, block);
-        this.#block = undefined;
+      offset += take;
+      if (this.#filled === size) {
+        ArrayPrototypePush(this.#parts, block);
+        this.#block = block = undefined;
       }
     }
+    this.#length += byteLength;
   }
 
   #addBlock(needed: number): Uint8Array {
-    let size: number;
-    if (this.#length === 0 && this.#firstBlockSize !== 0) {
-      size = this.#firstBlockSize;
-    } else {
-      size = MathMin(kCollectBlockSize, MathMax(this.#blockSize * 2, needed));
-    }
+    const size = MathMin(kCollectBlockSize, MathMax(this.#capacity, needed));
     const block = new Uint8Array(size);
     this.#block = block;
-    this.#blockSize = size;
     this.#filled = 0;
+    this.#capacity += size;
     return block;
   }
 
-  // Every block as a view of its bytes, the partial one trimmed.
-  #views(): Uint8Array[] {
-    const blocks = this.#blocks;
-    const views: Uint8Array[] = [];
-    for (let i = 0; i < blocks.length; i++) {
-      ArrayPrototypePush(views, blocks[i] as Uint8Array);
-    }
+  // The block being filled becomes a part of the bytes it holds.
+  #closeBlock(): void {
     const block = this.#block;
-    if (block !== undefined && this.#filled > 0) {
+    if (block === undefined) return;
+    if (this.#filled > 0) {
       ArrayPrototypePush(
-        views,
+        this.#parts,
         new Uint8Array(TypedArrayPrototypeGetBuffer(block), 0, this.#filled)
       );
     }
-    return views;
+    this.#block = undefined;
   }
 
   toArrayBuffer(): ArrayBuffer {
-    const blocks = this.#blocks;
-    if (this.#block === undefined && blocks.length === 1) {
-      return TypedArrayPrototypeGetBuffer(blocks[0] as Uint8Array);
+    this.#closeBlock();
+    const parts = this.#parts;
+    if (parts.length === 1) {
+      const buffer = TypedArrayPrototypeGetBuffer(parts[0] as Uint8Array);
+      if (ArrayBufferPrototypeByteLengthGet(buffer) === this.#length) {
+        return buffer;
+      }
     }
     const result = new ArrayBuffer(this.#length);
     const out = new Uint8Array(result);
-    const views = this.#views();
     let offset = 0;
-    for (let i = 0; i < views.length; i++) {
-      const view = views[i] as Uint8Array;
-      TypedArrayPrototypeSet(out, view, offset);
-      offset += TypedArrayPrototypeGetByteLength(view);
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i] as Uint8Array;
+      TypedArrayPrototypeSet(out, part, offset);
+      offset += TypedArrayPrototypeGetByteLength(part);
     }
     return result;
   }

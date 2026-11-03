@@ -88,34 +88,75 @@ export const oddChunkSizesAssembleIntact = {
   },
 };
 
+// A body of chunks of the given sizes, every byte position-encoded, and
+// the check that it was read back whole and in order.
+function sizedBody(sizes, init = {}) {
+  sizes = [...sizes];
+  let offset = 0;
+  return new ReadableStream({
+    ...init,
+    pull(c) {
+      if (sizes.length === 0) {
+        c.close();
+        return;
+      }
+      const size = sizes.shift();
+      const chunk = new Uint8Array(size);
+      for (let i = 0; i < size; i++) chunk[i] = (offset + i) & 0xff;
+      offset += size;
+      c.enqueue(chunk);
+    },
+  });
+}
+
+function checkPositionEncoded(buffer, total) {
+  const bytes = new Uint8Array(buffer);
+  strictEqual(bytes.byteLength, total);
+  for (let i = 0; i < total; i++) {
+    if (bytes[i] !== (i & 0xff)) throw new Error(`byte ${i} is ${bytes[i]}`);
+  }
+}
+
+const sum = (sizes) => sizes.reduce((a, b) => a + b, 0);
+
 // One chunk wider than the TypeScript implementation's largest collection
-// block (1 MiB), arriving after a one-byte chunk so the block in progress
-// is small: the chunk is copied out across several blocks, and the small
-// chunk after it lands in the last, partial one.
+// block (1 MiB), between two small chunks.
 export const chunkWiderThanABlockAssemblesIntact = {
   async test() {
-    const wide = 2 * 1024 * 1024 + 5;
-    const sizes = [1, wide, 7];
-    const total = 1 + wide + 7;
-    let offset = 0;
-    const rs = new ReadableStream({
-      pull(c) {
-        if (sizes.length === 0) {
-          c.close();
-          return;
-        }
-        const size = sizes.shift();
-        const chunk = new Uint8Array(size);
-        for (let i = 0; i < size; i++) chunk[i] = (offset + i) & 0xff;
-        offset += size;
-        c.enqueue(chunk);
-      },
-    });
-    const bytes = new Uint8Array(await new Response(rs).arrayBuffer());
-    strictEqual(bytes.byteLength, total);
-    for (let i = 0; i < total; i++) {
-      if (bytes[i] !== (i & 0xff)) throw new Error(`byte ${i} is ${bytes[i]}`);
-    }
+    const sizes = [1, 2 * 1024 * 1024 + 5, 7];
+    checkPositionEncoded(
+      await new Response(sizedBody(sizes)).arrayBuffer(),
+      sum(sizes)
+    );
+  },
+};
+
+// Small and large chunks interleaved, around the TypeScript
+// implementation's 16 KiB threshold for copying a chunk out on its own: a
+// large chunk closes the block in progress and the small chunks after it
+// start another. Read undeclared, and declared so the first block is sized
+// to the whole body and every chunk, large ones included, lands in it.
+export const mixedChunkSizesAssembleIntact = {
+  async test() {
+    const sizes = [100, 20000, 30, 70000, 5, 16384, 16383, 300000, 1, 16384];
+    const total = sum(sizes);
+    checkPositionEncoded(
+      await new Response(sizedBody(sizes)).arrayBuffer(),
+      total
+    );
+    checkPositionEncoded(
+      await new Response(
+        sizedBody(sizes, { type: 'bytes', expectedLength: total })
+      ).arrayBuffer(),
+      total
+    );
+    const large = [40000, 40000, 20000];
+    checkPositionEncoded(
+      await new Response(
+        sizedBody(large, { type: 'bytes', expectedLength: sum(large) })
+      ).arrayBuffer(),
+      sum(large)
+    );
   },
 };
 
