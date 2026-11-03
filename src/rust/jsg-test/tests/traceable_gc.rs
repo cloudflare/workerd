@@ -7,7 +7,6 @@
 //! `#[jsg_resource]` now traces every field via `Traced::trace`, so nested
 //! non-resource helper structs/enums just need to implement `Traced`.
 
-use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -175,12 +174,15 @@ jsg::jsg_traced!(PlainData);
 /// and a `#[jsg_struct]` type can when a field can.
 #[test]
 fn holds_gc_references_of_jsg_types() {
+    fn holds_no_gc_references<T: jsg::HoldsNoGcReferences>() {}
     assert!(<jsg::Rc<Leaf>>::holds_gc_references());
     assert!(Leaf::holds_gc_references());
     assert!(!<jsg::Weak<Leaf>>::holds_gc_references());
+    holds_no_gc_references::<jsg::Weak<Leaf>>();
     assert!(!PlainStruct::holds_gc_references());
     assert!(Link::holds_gc_references());
     assert!(!PlainData::holds_gc_references());
+    holds_no_gc_references::<PlainData>();
 }
 
 // =============================================================================
@@ -198,7 +200,7 @@ struct Link {
 
 #[jsg_resource]
 struct Node {
-    pub link: RefCell<Option<Link>>,
+    pub link: jsg::RefCell<Option<Link>>,
 }
 
 impl Drop for Node {
@@ -213,7 +215,7 @@ impl Node {}
 /// Holds a `Node`'s wrapper, which closes a cycle through the `Node`'s `Link`.
 #[jsg_resource]
 struct Back {
-    node: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    node: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 impl Drop for Back {
@@ -236,10 +238,10 @@ fn cycle_through_struct_field_is_collected() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let back = jsg::Rc::new(Back {
-            node: std::cell::Cell::new(None),
+            node: jsg::Cell::new(None),
         });
         let node = jsg::Rc::new(Node {
-            link: RefCell::new(Some(Link {
+            link: jsg::RefCell::new(Some(Link {
                 target: back.clone(),
             })),
         });
