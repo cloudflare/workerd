@@ -23,8 +23,9 @@ through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
   is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
 - Integers of up to 32 bits describe `number`; `i64` and `u64` describe
   `number | bigint`, as C++ RTTI describes `int64_t`.
-- `v8::Promise` describes `Promise<any>`; as in C++, a promise parameter also
-  accepts a value that is not a promise.
+- `v8::Promise` describes `Promise<any>` and `jsg::Promise<T>` describes
+  `Promise<T>`; as in C++, a promise parameter also accepts a value that is not
+  a promise.
 - A `jsg_cpp::Ref<T>` refers to the C++ class's own description by the name
   `CppResource::fully_qualified_name()` gives, so the class must be in a C++
   type group of the export.

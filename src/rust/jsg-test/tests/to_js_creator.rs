@@ -30,6 +30,13 @@ impl<'s> ToJS<'s> for CreatorOf {
     }
 }
 
+/// Converts to an object or `undefined`, depending on the call.
+impl jsg::TypeInfo for CreatorOf {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
+
 #[jsg_resource]
 struct Creator;
 

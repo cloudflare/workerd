@@ -46,6 +46,7 @@ use crate::Lock;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
+use crate::TypeInfo;
 use crate::UnitType;
 use crate::opaque::unwrap_opaque;
 use crate::opaque::wrap_opaque;
@@ -688,6 +689,14 @@ fn is_thenable<'s>(lock: &mut Lock<'s>, value: Local<'s, Value>) -> crate::Resul
     match Local::<v8::Object>::try_from(value) {
         Ok(object) => object.has(lock, "then"),
         Err(_) => Ok(false),
+    }
+}
+
+/// `Promise<T>`, as C++ describes `jsg::Promise<T>`: `Promise<void>` for `()` and
+/// `Promise<any>` for [`v8::Value`].
+impl<T: PromiseValue + TypeInfo> TypeInfo for Promise<'_, T> {
+    fn describe(cx: &mut crate::rtti::Context) -> crate::rtti::Type {
+        crate::rtti::Type::Promise(Box::new(T::describe(cx)))
     }
 }
 
