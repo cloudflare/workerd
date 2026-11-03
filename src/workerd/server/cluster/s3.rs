@@ -98,7 +98,12 @@ impl S3 {
                 .map(|(_, value)| value.clone())
                 .or_else(|| std::env::var(var).ok())
         };
-        let required = |name: &str| option(name).ok_or_else(|| Error::Config(name.to_owned()));
+        let required = |name: &str| {
+            option(name).ok_or_else(|| {
+                let var = name.to_uppercase();
+                Error::Config(format!("neither {name} nor {var} is set"))
+            })
+        };
         let region = option("aws_region").unwrap_or_else(|| "us-east-1".into());
         let endpoint = option("aws_endpoint")
             .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com"))
@@ -546,6 +551,25 @@ mod tests {
             ("k", "s", Some("t="))
         );
         assert!(Credentials::parse("AWS_ACCESS_KEY_ID=k\n", None).is_none());
+    }
+
+    #[test]
+    fn a_missing_credential_names_its_variable() {
+        // Unless the environment supplies it.
+        if ["AWS_SECRET_ACCESS_KEY", "AWS_CREDENTIALS_FILE"]
+            .iter()
+            .any(|var| std::env::var_os(var).is_some())
+        {
+            return;
+        }
+        let options = [("aws_access_key_id".to_owned(), "k".to_owned())];
+        let Err(Error::Config(message)) = S3::new("s3://bucket/prefix", &options) else {
+            panic!("expected a config error");
+        };
+        assert_eq!(
+            message,
+            "neither aws_secret_access_key nor AWS_SECRET_ACCESS_KEY is set"
+        );
     }
 
     #[test]

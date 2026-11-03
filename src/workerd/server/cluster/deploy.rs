@@ -274,20 +274,29 @@ async fn write_once(
 
 /// Publishes `config`, an encoded `Config`, as deployment `name`.
 ///
-/// Checks it, uploads it, and points the catalog at it, unless the catalog does already.
-/// Refused, with the catalog unchanged, when it breaks a rule of `compose.rs` against the other
-/// deployments of the catalog it would replace, or when the bucket ignores conditional writes.
+/// Checks it, against the other deployments of the catalog as it is too, uploads it, and points
+/// the catalog at it, unless the catalog does already. Refused, with the catalog unchanged, when
+/// it breaks a rule of `compose.rs` against the other deployments of the catalog it would
+/// replace, which is checked again for each write of the catalog, or when the bucket ignores
+/// conditional writes. A deployment refused by the first check is not uploaded.
 pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Published> {
     check_name(name)?;
     let config = compose::deployment_config(name, config)?;
-    check_conditional_writes(bucket).await?;
-    let version = upload(bucket, name, &config).await?;
     let ours = Deployment {
         name: name.to_owned(),
-        version: version.clone(),
+        version: version_of(&config),
         config,
     };
+    // The other deployments' versions read so far.
     let mut others: HashMap<(String, String), Deployment> = HashMap::new();
+    // Unless the catalog names this version already, which changes nothing.
+    if let Some((current, _)) = catalog(bucket).await?
+        && current.deployments.get(name).map(|c| &c.version) != Some(&ours.version)
+    {
+        check_against(bucket, &current, &ours, &mut others).await?;
+    }
+    check_conditional_writes(bucket).await?;
+    let version = upload(bucket, name, &ours.config).await?;
     for _ in 0..PUBLISH_ATTEMPTS {
         let base = catalog(bucket).await?;
         let base_version = base.as_ref().map(|(_, version)| version.clone());
@@ -309,20 +318,7 @@ pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Publi
                 version,
             });
         }
-        for (other, entry) in current.deployments.iter().filter(|(n, _)| *n != name) {
-            let key = (other.clone(), entry.version.clone());
-            if let Entry::Vacant(vacant) = others.entry(key) {
-                vacant.insert(read(bucket, other, &entry.version).await?);
-            }
-        }
-        let mut all: Vec<_> = current
-            .deployments
-            .iter()
-            .filter(|(n, _)| *n != name)
-            .filter_map(|(n, entry)| others.get(&(n.clone(), entry.version.clone())))
-            .collect();
-        all.push(&ours);
-        compose::check_deployments(&all)?;
+        check_against(bucket, &current, &ours, &mut others).await?;
 
         let mut next = current;
         next.revision += 1;
@@ -354,6 +350,28 @@ pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Publi
         }
     }
     Err(Error::Contended(CATALOG.to_owned()))
+}
+
+/// Checks `ours` against the deployments `current` names other than it, by the rules of
+/// `compose.rs`. `others` holds the versions read so far, and gains those read now.
+async fn check_against(
+    bucket: &Bucket,
+    current: &Catalog,
+    ours: &Deployment,
+    others: &mut HashMap<(String, String), Deployment>,
+) -> Result<()> {
+    let named = || current.deployments.iter().filter(|(n, _)| **n != ours.name);
+    for (other, entry) in named() {
+        let key = (other.clone(), entry.version.clone());
+        if let Entry::Vacant(vacant) = others.entry(key) {
+            vacant.insert(read(bucket, other, &entry.version).await?);
+        }
+    }
+    let mut all: Vec<_> = named()
+        .filter_map(|(n, entry)| others.get(&(n.clone(), entry.version.clone())))
+        .collect();
+    all.push(ours);
+    compose::check_deployments(&all)
 }
 
 /// Refuses a bucket that ignores conditional writes, on an object no other deploy writes: a `.`

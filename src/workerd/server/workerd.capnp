@@ -125,6 +125,14 @@ struct ClusterConfig {
   # deployment must name a variable the instance sets. The layout of the bucket, for tools that
   # write deployments, is documented in `src/workerd/server/cluster/deploy.rs`.
   #
+  # `workerd deploy --experimental [<project>] --bucket s3://bucket/prefix` publishes a deployment
+  # (see `workerd deploy --help`): a wrangler project, whose worker is a service named after the
+  # deployment, or a Cap'n Proto config. A wrangler project's Durable Objects are stored on the
+  # disk service named `do-storage`, which the config of each instance that serves one defines.
+  # The deployment's name is part of each Durable Object class's `uniqueKey`, `<name>-<class>`, so
+  # the same project deployed under another name has Durable Objects of its own, which start
+  # empty.
+  #
   # Once it serves, an instance reads the catalog every few seconds. A new revision whose
   # deployments compose with the instance's config is adopted by restarting: the instances stop
   # one at a time, each as on SIGTERM but with its open connections closed after 30 s, and exit

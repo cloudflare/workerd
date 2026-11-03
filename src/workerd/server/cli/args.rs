@@ -154,7 +154,52 @@ pub enum Command {
         #[arg(value_name = "output-directory")]
         output_directory: String,
     },
+
+    /// publish a deployment to a cluster
+    #[command(
+        long_about = "Publishes a deployment to a cluster's bucket (experimental).",
+        after_long_help = DEPLOY_HELP,
+    )]
+    Deploy {
+        /// A wrangler project: its directory, or its `wrangler.json` / `wrangler.jsonc`. Or a Cap'n
+        /// Proto config that holds only services, which needs --name.
+        #[arg(value_name = "project", default_value = ".")]
+        project: String,
+
+        /// With a Cap'n Proto <project>, the constant that holds the config, as for `serve`.
+        #[arg(value_name = "const-name")]
+        const_name: Option<String>,
+
+        #[command(flatten)]
+        deploy: DeployArgs,
+    },
 }
+
+const DEPLOY_HELP: &str = "\
+Publishes <project> as a deployment of the cluster whose bucket is --bucket: uploads it, and \
+moves the bucket's catalog of deployments to it. A wrangler project is translated as `serve` \
+translates it, bundled with esbuild unless it sets \"no_bundle\", into a deployment that holds \
+only its worker: no socket, and its Durable Objects stored on the disk service named \
+`do-storage`, which each instance's config defines. Any other <project> file is a Cap'n Proto \
+config, which must hold only services. The deployment is named --name, else after the wrangler \
+config's `name`. A wrangler project's worker is a service of that name, and the name is part of \
+each of its Durable Object classes' `uniqueKey`, `<name>-<class>`: deployed under another \
+--name, the project is another application, whose Durable Objects start empty.
+
+The deployment is checked before it is uploaded, against the other deployments in the catalog \
+too, and checked against them again as the catalog is replaced. Each instance checks it against \
+its own config when it adopts it, and refuses a deployment it cannot serve. Publishing the \
+version that is current already changes nothing, and publishing an earlier one rolls back to \
+it. Prints the catalog's revision and the deployment's version.
+
+The bucket's credentials come from the environment, as the instances' do: AWS_ACCESS_KEY_ID, \
+AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE (see `bucketOptions` in \
+workerd.capnp). --endpoint falls back to AWS_ENDPOINT_URL, and --region to AWS_REGION, then \
+us-east-1.
+
+The instances adopt the new revision by restarting, one at a time (see `ClusterConfig` in \
+workerd.capnp).
+";
 
 const TEST_HELP: &str = "\
 Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
@@ -353,6 +398,82 @@ pub struct ServeArgs {
     /// development only.
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DeployArgs {
+    /// The deployment's name: 1 to 64 letters, digits, '-' and '_', starting with a letter or
+    /// digit. Defaults to the wrangler config's `name`.
+    #[arg(long, value_name = "name")]
+    pub name: Option<String>,
+
+    /// The cluster's bucket, as in its instances' `cluster.bucket`: s3://<bucket>[/<prefix>].
+    #[arg(long, value_name = "url", value_parser = parse_bucket)]
+    pub bucket: String,
+
+    /// The bucket's S3-compatible endpoint, as the instances' `aws_endpoint`.
+    #[arg(long, value_name = "url", value_parser = parse_endpoint)]
+    pub endpoint: Option<String>,
+
+    /// The bucket's region, as the instances' `aws_region`.
+    #[arg(long, value_name = "region")]
+    pub region: Option<String>,
+
+    /// With a Cap'n Proto <project>, add <dir> to the list of directories searched for
+    /// non-relative imports, as for `serve`.
+    #[arg(short = 'I', long = "import-path", value_name = "dir")]
+    pub import_paths: Vec<String>,
+
+    /// <project> is an encoded binary Cap'n Proto config, as `workerd compile --config-only`
+    /// writes; `-` reads it from stdin.
+    #[arg(short, long)]
+    pub binary: bool,
+
+    /// Permit the use of experimental features, which cluster mode is.
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+impl DeployArgs {
+    /// The bucket's options, as the instances' `cluster.bucketOptions`.
+    pub fn bucket_options(&self) -> Vec<String> {
+        let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
+        let region = self.region.iter().map(|r| format!("aws_region={r}"));
+        endpoint.chain(region).collect()
+    }
+}
+
+/// `--bucket`: `s3://<bucket>[/<prefix>]`, which the bucket client parses as it parses
+/// `cluster.bucket`.
+fn parse_bucket(param: &str) -> Result<String, &'static str> {
+    let rest = param
+        .strip_prefix("s3://")
+        .ok_or("expected s3://<bucket>[/<prefix>]")?;
+    let (bucket, _) = rest.split_once('/').unwrap_or((rest, ""));
+    if bucket.is_empty() || bucket.contains(char::is_whitespace) {
+        return Err("expected s3://<bucket>[/<prefix>], with a bucket name");
+    }
+    Ok(param.to_owned())
+}
+
+/// `--endpoint`: an `http://` or `https://` URL with a host and no path, since the bucket client
+/// signs requests for paths that start with the bucket's name.
+fn parse_endpoint(param: &str) -> Result<String, &'static str> {
+    const EXPECTED: &str = "expected http(s)://<host>[:<port>], with no path";
+    let rest = param
+        .strip_prefix("https://")
+        .or_else(|| param.strip_prefix("http://"))
+        .ok_or(EXPECTED)?;
+    let (authority, path) = rest
+        .find(['/', '?', '#'])
+        .map_or((rest, ""), |at| rest.split_at(at));
+    if authority.is_empty()
+        || authority.contains(|c: char| c.is_whitespace() || c == '@')
+        || !matches!(path, "" | "/")
+    {
+        return Err(EXPECTED);
+    }
+    Ok(param.to_owned())
 }
 
 #[derive(Args, Debug, Default)]
