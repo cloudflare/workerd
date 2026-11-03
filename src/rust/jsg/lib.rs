@@ -1169,6 +1169,12 @@ pub enum Member {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
     },
+    /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
+    /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
+    /// call names it. A type has at most one.
+    Callable {
+        callback: RawFunctionCallback,
+    },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.
