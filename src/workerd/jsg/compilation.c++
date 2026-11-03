@@ -7,6 +7,8 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/sentry.h>
+
 #include <algorithm>
 #include <memory>
 
@@ -29,6 +31,7 @@ kj::Maybe<v8::MaybeLocal<T>> tryCompileWithCache(Lock& js,
         embeddedCache.begin(), embeddedCache.size());
     v8::ScriptCompiler::Source compileSource(source, origin, data.release());
     auto result = compile(&compileSource, v8::ScriptCompiler::kConsumeCodeCache);
+    if (result.IsEmpty()) return result;
     if (compileSource.GetCachedData()->rejected) {
       observer.onCompileCacheRejected(js.v8Isolate);
     } else {
@@ -123,17 +126,18 @@ v8::MaybeLocal<v8::Module> SharedModuleCompilationCache::compile(Lock& js,
     const CompilationObserver& observer) const {
   v8::Local<v8::Module> module;
   bool needsCache = true;
-  const v8::ScriptCompiler::CachedData* rejected = nullptr;
+  kj::Maybe<uint64_t> rejectedGeneration;
   {
     // Retain the shared lock while V8 reads the slot's borrowed bytes. Other replicas may
     // consume the same entry concurrently, but cannot replace it until compilation finishes.
     auto lock = cachedData.lockShared();
     std::unique_ptr<v8::ScriptCompiler::CachedData> data;
-    KJ_IF_SOME(cached, *lock) {
+    KJ_IF_SOME(cached, lock->data) {
       data = std::make_unique<v8::ScriptCompiler::CachedData>(cached->data, cached->length);
       if (data->CompatibilityCheck(js.v8Isolate) != v8::ScriptCompiler::CachedData::kSuccess) {
-        rejected = cached.get();
+        rejectedGeneration = lock->generation;
         data.reset();
+        LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module failed its compatibility check");
       }
     }
     auto options = data == nullptr ? v8::ScriptCompiler::kNoCompileOptions
@@ -145,24 +149,26 @@ v8::MaybeLocal<v8::Module> SharedModuleCompilationCache::compile(Lock& js,
     }
     if (options == v8::ScriptCompiler::kConsumeCodeCache) {
       if (compileSource.GetCachedData()->rejected) {
-        rejected = KJ_ASSERT_NONNULL(*lock).get();
+        rejectedGeneration = lock->generation;
+        LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
       } else {
         needsCache = false;
         observer.onCompileCacheFound(js.v8Isolate);
       }
     }
   }
-  if (rejected != nullptr) observer.onCompileCacheRejected(js.v8Isolate);
+  if (rejectedGeneration != kj::none) observer.onCompileCacheRejected(js.v8Isolate);
   if (needsCache) {
     auto lock = cachedData.lockExclusive();
     // Another replica may already have replaced the rejected entry while we changed locks.
-    KJ_IF_SOME(cached, *lock) {
-      if (cached.get() == rejected) *lock = kj::none;
+    KJ_IF_SOME(generation, rejectedGeneration) {
+      if (lock->generation == generation) lock->data = kj::none;
     }
-    if (*lock == kj::none && !js.isPreparingSnapshot()) {
+    if (lock->data == kj::none && !js.isPreparingSnapshot()) {
       if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
-        *lock = kj::Own<v8::ScriptCompiler::CachedData>(
+        lock->data = kj::Own<v8::ScriptCompiler::CachedData>(
             ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
+        ++lock->generation;
         observer.onCompileCacheGenerated(js.v8Isolate);
       } else {
         observer.onCompileCacheGenerationFailed(js.v8Isolate);

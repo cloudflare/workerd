@@ -14,6 +14,28 @@
 
 #include <memory>
 
+namespace workerd::jsg {
+
+// Fault injection for a definition-local slot without changing the module's source identity.
+class SharedModuleCompilationCacheTestAccess {
+ public:
+  static void corrupt(SharedModuleCompilationCache& cache, size_t offset) {
+    auto lock = cache.cachedData.lockExclusive();
+    auto& data = *KJ_ASSERT_NONNULL(lock->data);
+    KJ_ASSERT(offset < data.length);
+    const_cast<kj::byte*>(data.data)[offset] ^= 1;
+  }
+
+  static auto compatibilityCheck(SharedModuleCompilationCache& cache, v8::Isolate* isolate) {
+    auto lock = cache.cachedData.lockShared();
+    auto& cached = KJ_ASSERT_NONNULL(lock->data);
+    v8::ScriptCompiler::CachedData data(cached->data, cached->length);
+    return data.CompatibilityCheck(isolate);
+  }
+};
+
+}  // namespace workerd::jsg
+
 namespace workerd::jsg::test {
 
 WD_STRONG_BOOL(Defer);
@@ -22,6 +44,9 @@ WD_STRONG_BOOL(UseNewModuleRegistry);
 namespace {
 
 using CompatibilityCheckResult = v8::ScriptCompiler::CachedData::CompatibilityCheckResult;
+
+constexpr size_t SOURCE_HASH_OFFSET = 2 * sizeof(uint32_t);
+constexpr size_t FLAGS_HASH_OFFSET = SOURCE_HASH_OFFSET + 32;
 
 V8System v8System;
 
@@ -121,12 +146,16 @@ struct CountingObserver final: public CompilationObserver {
   mutable uint generated = 0;
   mutable uint generationFailed = 0;
   mutable uint hintsConsumed = 0;
+  mutable kj::Maybe<kj::Function<void()>> onRejected;
 
   void onCompileCacheFound(v8::Isolate*) const override {
     ++found;
   }
   void onCompileCacheRejected(v8::Isolate*) const override {
     ++rejected;
+    KJ_IF_SOME(callback, onRejected) {
+      callback();
+    }
   }
   void onCompileCacheGenerated(v8::Isolate*) const override {
     ++generated;
@@ -150,8 +179,10 @@ void withIsolate(kj::Own<const CodeCacheStore> store,
     const CompilationObserver& observer,
     Defer defer,
     kj::FunctionParam<void(jsg::Lock&)> fn,
-    UseNewModuleRegistry useNewModuleRegistry = UseNewModuleRegistry::NO) {
-  CodeCacheIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
+    UseNewModuleRegistry useNewModuleRegistry = UseNewModuleRegistry::NO,
+    kj::Maybe<SnapshotConfig> snapshotConfig = kj::none) {
+  CodeCacheIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>(),
+      defaultExternalStringAllocator(), {}, true, kj::mv(snapshotConfig));
   isolate.runInLockScope([&](CodeCacheIsolate::Lock& lock) {
     auto& base = IsolateBase::from(lock.v8Isolate);
     if (useNewModuleRegistry) base.setUsingNewModuleRegistry();
@@ -303,8 +334,8 @@ KJ_TEST("Source encodings do not share builtin cache keys") {
   static constexpr uint16_t twoByte[] = {'e', 'x', 'p', 'o', 'r', 't', ' ', 'd', 'e', 'f', 'a', 'u',
     'l', 't', ' ', '\'', 0xe9, '\'', ';'};
   auto utf16 = codeCacheKeyForModule(StaticExternalStringSource(kj::arrayPtr(twoByte)));
-  auto raw = CodeCacheKey::compute(
-      CodeCacheKey::Unit::ONE_BYTE_ESM, kj::arrayPtr(twoByte).asBytes().asChars());
+  auto raw =
+      CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, kj::asBytes(twoByte).asChars());
   KJ_EXPECT(!(utf16 == raw));
 }
 
@@ -473,6 +504,116 @@ KJ_TEST("Hint production and embedded bytecode bypass runtime keys and the share
     KJ_EXPECT(observer.generated == 0);
   });
   KJ_EXPECT(store->state.lockShared()->lookups == 0);
+}
+
+KJ_TEST("Failed embedded-cache compilation does not report a cache outcome") {
+  CountingObserver observer;
+  std::unique_ptr<v8::ScriptCompiler::CachedData> data;
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) {
+    v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
+    v8::ScriptCompiler::Source source(js.str(LAZY_MODULE), origin);
+    auto module = check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+    data.reset(v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+    KJ_ASSERT(data != nullptr);
+  });
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) {
+    v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: observes an expected syntax error.
+    v8::TryCatch catcher(js.v8Isolate);
+    auto result = compileModule(js, js.str("export const = ;"_kj), origin, observer,
+        [](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> { KJ_FAIL_ASSERT("no store installed"); },
+        {.embeddedCache = kj::arrayPtr(data->data, data->length)});
+    KJ_EXPECT(result.IsEmpty());
+    KJ_EXPECT(catcher.HasCaught());
+  });
+  KJ_EXPECT(observer.found == 0);
+  KJ_EXPECT(observer.rejected == 0);
+  KJ_EXPECT(observer.generated == 0);
+}
+
+void compileSharedModule(
+    Lock& js, const SharedModuleCompilationCache& cache, const CompilationObserver& observer) {
+  v8::ScriptOrigin origin(js.str("shared"_kj), 0, 0, false, -1, {}, false, false, true);
+  auto module = check(cache.compile(js, js.str(LAZY_MODULE), origin, observer));
+  instantiateModule(js, module);
+  auto ns = module->GetModuleNamespace().As<v8::Object>();
+  KJ_EXPECT(JsValue(check(ns->Get(js.v8Context(), js.str("value"_kj)))).toString(js) == "6");
+}
+
+void expectSharedSlotRejected(size_t corruptOffset, CompatibilityCheckResult expectedCheck) {
+  SharedModuleCompilationCache cache;
+  CountingObserver observer;
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  KJ_EXPECT(observer.generated == 1);
+  SharedModuleCompilationCacheTestAccess::corrupt(cache, corruptOffset);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) {
+    KJ_EXPECT(SharedModuleCompilationCacheTestAccess::compatibilityCheck(cache, js.v8Isolate) ==
+        expectedCheck);
+    compileSharedModule(js, cache, observer);
+  });
+  KJ_EXPECT(observer.rejected == 1);
+  KJ_EXPECT(observer.generated == 2);
+  KJ_EXPECT(observer.found == 0);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 2);
+  KJ_EXPECT(observer.rejected == 1);
+}
+
+KJ_TEST("Shared slots replace bytecode rejected before or during compilation") {
+  // The header's source hash is checked only when compiling; its flags hash is checked earlier.
+  expectSharedSlotRejected(SOURCE_HASH_OFFSET, CompatibilityCheckResult::kSuccess);
+  expectSharedSlotRejected(FLAGS_HASH_OFFSET, CompatibilityCheckResult::kFlagsMismatch);
+}
+
+KJ_TEST("Shared slot rejection preserves a replacement made before taking the exclusive lock") {
+  SharedModuleCompilationCache cache;
+  CountingObserver observer;
+  CountingObserver replacementObserver;
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  SharedModuleCompilationCacheTestAccess::corrupt(cache, FLAGS_HASH_OFFSET);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) {
+    // The observer runs after the read lock is released, before the write lock is acquired.
+    // Replace the rejected entry in that interval, without relying on thread scheduling.
+    observer.onRejected = [&]() { compileSharedModule(js, cache, replacementObserver); };
+    compileSharedModule(js, cache, observer);
+    observer.onRejected = kj::none;
+  });
+  KJ_EXPECT(observer.rejected == 1);
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(replacementObserver.rejected == 1);
+  KJ_EXPECT(replacementObserver.generated == 1);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 1);
+}
+
+KJ_TEST("Snapshot preparation consumes shared slots without generating or regenerating them") {
+  SharedModuleCompilationCache cache;
+  CountingObserver observer;
+  auto snapshotCompile = [&]() {
+    withIsolate({}, observer, Defer::NO,
+        [&](Lock& js) {
+      KJ_EXPECT(js.isPreparingSnapshot());
+      compileSharedModule(js, cache, observer);
+    }, UseNewModuleRegistry::NO,
+        SnapshotConfig(MutableSnapshot{.artifact = kj::atomicRefcounted<SnapshotArtifact>()}));
+  };
+  snapshotCompile();
+  KJ_EXPECT(observer.generated == 0);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  KJ_EXPECT(observer.generated == 1);
+  snapshotCompile();
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 1);
+  SharedModuleCompilationCacheTestAccess::corrupt(cache, SOURCE_HASH_OFFSET);
+  snapshotCompile();
+  KJ_EXPECT(observer.rejected == 1);
+  KJ_EXPECT(observer.generated == 1);
+  withIsolate({}, observer, Defer::NO, [&](Lock& js) { compileSharedModule(js, cache, observer); });
+  KJ_EXPECT(observer.generated == 2);
+  KJ_EXPECT(observer.rejected == 1);
+  KJ_EXPECT(observer.generationFailed == 0);
 }
 
 KJ_TEST("Cached CommonJS functions bind the receiving isolate's context extension") {
@@ -650,9 +791,8 @@ KJ_TEST("A cache whose flags hash differs is rejected before compilation") {
   // 256-bit source hash and the 32-bit flags hash.
   expectRejected([](kj::ArrayPtr<const kj::byte> bytes) {
     auto copy = kj::heapArray(bytes);
-    constexpr size_t flagsHashOffset = 2 * sizeof(uint32_t) + 32;
-    KJ_ASSERT(copy.size() > flagsHashOffset);
-    copy[flagsHashOffset] ^= 1;
+    KJ_ASSERT(copy.size() > FLAGS_HASH_OFFSET);
+    copy[FLAGS_HASH_OFFSET] ^= 1;
     return CodeCacheStore::Bytes(kj::mv(copy));
   }, CompatibilityCheckResult::kFlagsMismatch);
 }

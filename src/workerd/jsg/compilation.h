@@ -30,7 +30,14 @@ class SharedModuleCompilationCache {
       const CompilationObserver& observer) const;
 
  private:
-  kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
+  struct State {
+    kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>> data;
+    // Distinguishes replacements even if the allocator reuses a rejected entry's address.
+    uint64_t generation = 0;
+  };
+  kj::MutexGuarded<State> cachedData;
+
+  friend class SharedModuleCompilationCacheTestAccess;
 };
 
 struct ModuleCompilationOptions {

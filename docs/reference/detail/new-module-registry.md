@@ -234,6 +234,11 @@ Second isolate compiles same module:
   2. No exclusive lock needed (cache already populated)
 ```
 
+Rejected bytecode is cleared under the exclusive lock only if the slot's
+generation has not changed, preserving replacements made by another replica.
+Snapshot preparation can consume existing bytecode but never generates or
+regenerates an entry.
+
 #### Code cache store
 
 The `sharedCompileCache` slot is per `Module`, so it is shared only by isolates that
