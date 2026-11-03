@@ -206,7 +206,7 @@ let isWritableStream: (value: unknown) => boolean;
 // unwrap runs during RPC deserialization, inside V8's no-JS-execution
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
-const kWritableStreamBrand = 'kWritableStreamBrand';
+const kWritableStreamBrand = utils.getPrivateSymbol('kWritableStreamBrand');
 
 // The Node.js stream-interop hooks (see readable.ts for the full note):
 // node:stream observes completion through `stream[kIsClosedPromise].promise`
@@ -786,7 +786,7 @@ class WritableStream<W = unknown> {
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
-    utils.setPrivate(this, kWritableStreamBrand, true);
+    (this as unknown as Record<symbol, unknown>)[kWritableStreamBrand] = true;
 
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the sink is typed `object` (null and every other primitive
@@ -808,7 +808,8 @@ class WritableStream<W = unknown> {
     // exists for pipe dispatch and extraction only.
     if (isNativeUnderlyingSink(underlyingSink)) {
       this.#nativeSink = underlyingSink;
-      utils.setPrivate(this, kExtractNativeSink, extractNativeSink);
+      (this as unknown as Record<symbol, unknown>)[kExtractNativeSink] =
+        extractNativeSink;
     }
 
     this.#controller = new WritableStreamDefaultController<W>(

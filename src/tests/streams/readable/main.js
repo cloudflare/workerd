@@ -51,6 +51,7 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  proxyArgumentsSeeOnlyMemberReads,
   strategyArgumentShapes,
   conversionErrorPrecedence,
   byteMembersOnDefaultSource,

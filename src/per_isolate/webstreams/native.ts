@@ -188,17 +188,18 @@ const { createReadResult, filledView, unfilledView } =
 // ---------------------------------------------------------------------------
 // The construction-time handshake
 
-// These labels resolve V8-private slots, not JavaScript properties or symbols.
-const kNativeSource = 'kNativeSource';
+// These keys name V8-private slots (see utils.getPrivateSymbol), which C++
+// reaches by the same names.
+const kNativeSource = utils.getPrivateSymbol('kNativeSource');
 
 // Private markers are not inherited and cannot invoke user property traps.
 // Only native code and bootstrap utilities can install them.
 function hasOwnMarker(
   object: object,
-  marker: string,
+  marker: symbol,
   kind: 'source' | 'sink'
 ): boolean {
-  const value = utils.getPrivate(object, marker);
+  const value = (object as Record<symbol, unknown>)[marker];
   if (value === undefined) return false;
   if (value !== true) {
     throw new TypeError(`Invalid native stream ${kind} marker`);
@@ -221,26 +222,26 @@ function hasOwnMarker(
 //     write in flight) when the underlying connection is taken over
 //     (e.g. Socket startTls). Returns the error the stream's pending
 //     writes reject with.
-const kNativeSink = 'kNativeSink';
+const kNativeSink = utils.getPrivateSymbol('kNativeSink');
 
 // Private extraction slot for native-backed WritableStream instances.
 // It holds a shared extractor function, one-shot via locked precondition.
 // Writable has no "disturbed" concept — locked is the only precondition.
-const kExtractNativeSink = 'kExtractNativeSink';
+const kExtractNativeSink = utils.getPrivateSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
   return hasOwnMarker(sink, kNativeSink, 'sink');
 }
 
 // The JS-to-C++ extraction slot. Installed on native-backed
-// ReadableStream instances with utils.setPrivate; its value is a shared
+// ReadableStream instances by their constructor; its value is a shared
 // extractor function. The C++ bridge detects the private slot to classify the
 // stream: present -> extract the native source for a pure C++ data
 // path; absent -> acquire a DrainingReader instead. The marker is KEPT
 // after extraction (presence means "native-backed", not "extractable");
 // the extractor's locked/disturbed preconditions make it one-shot. The
 // slot is inaccessible to user code, including symbol reflection.
-const kExtractNativeSource = 'kExtractNativeSource';
+const kExtractNativeSource = utils.getPrivateSymbol('kExtractNativeSource');
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
 // sources.

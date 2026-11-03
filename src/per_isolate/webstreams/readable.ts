@@ -281,7 +281,7 @@ let isByteStreamController: (value: unknown) => boolean;
 // unwrap runs during RPC deserialization, inside V8's no-JS-execution
 // scope. Proxies deliberately do not convey it (the C++ check rejects
 // proxies up front), matching the #-brand's no-tunneling behavior.
-const kReadableStreamBrand = 'kReadableStreamBrand';
+const kReadableStreamBrand = utils.getPrivateSymbol('kReadableStreamBrand');
 
 // The Node.js stream-interop hooks, keyed by the well-known symbols Node's
 // own web streams carry. node:stream's finished()/eos() observes a web
@@ -3954,14 +3954,12 @@ class ReadableStream<R> {
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
-        const sourceExtractor = utils.getPrivate(
-          source,
+        const sourceExtractor = (source as unknown as Record<symbol, unknown>)[
           kExtractNativeSource
-        ) as ((this: ReadableStream<R>) => object) | undefined;
-        const sinkExtractor = utils.getPrivate(
-          destination,
-          kExtractNativeSink
-        ) as ((this: object) => object) | undefined;
+        ] as ((this: ReadableStream<R>) => object) | undefined;
+        const sinkExtractor = (
+          destination as unknown as Record<symbol, unknown>
+        )[kExtractNativeSink] as ((this: object) => object) | undefined;
         if (
           sourceExtractor !== undefined &&
           sinkExtractor !== undefined &&
@@ -4434,7 +4432,7 @@ class ReadableStream<R> {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
     // shells and native-backed streams included.
-    utils.setPrivate(this, kReadableStreamBrand, true);
+    (this as unknown as Record<symbol, unknown>)[kReadableStreamBrand] = true;
 
     // Internal shell creation (makeShell: tee branches, detached copies):
     // skip controller setup entirely — the shell takes over another
@@ -4490,7 +4488,8 @@ class ReadableStream<R> {
       this.#consumer = conduit as unknown as StreamConsumerType<R>;
       // BACKEND-DISPATCH point #4: the shared, this-bound extractor is
       // accessible only to C++ and bootstrap code, not symbol reflection.
-      utils.setPrivate(this, kExtractNativeSource, extractNativeSource);
+      (this as unknown as Record<symbol, unknown>)[kExtractNativeSource] =
+        extractNativeSource;
       return;
     }
 

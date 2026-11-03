@@ -118,7 +118,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | Module | Coverage |
 | --- | --- |
 | `api-surface.js` | globals, controller not constructable, getReader modes, getReader options as a WebIDL dictionary (parity: null, a function's members, primitives rejected), locked lifecycle |
-| `construction.js` | ledger #1-#3, #31, #32, #34, default hwm 1 |
+| `construction.js` | ledger #1-#3, #31, #32, #34, default hwm 1, a Proxy source, sink or strategy sees only its members' reads by name (the native-marker checks reach no trap) |
 | `source-algorithms.js` | ledger #4-#6, #23, pull serialization, rejection identity, cancel-with-pending-pull |
 | `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue, error during a pending close (#18) |
 | `reader.js` | read ordering, releaseLock, closed replacement (#7), undefined error, reader.cancel, reader swap |
