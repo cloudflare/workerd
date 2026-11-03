@@ -226,7 +226,9 @@ impl Harness {
 }
 
 /// Run `DST_SEEDS` seeds (`default` if unset) from `DST_SEED` (0), panicking
-/// with the first failure's report.
+/// with the first failure's report. Defaults keep CI fast, sanitizers
+/// included; search wider by hand, e.g. `bazel test
+/// //src/workerd/server/cluster:cluster_test --test_env=DST_SEEDS=10000`.
 pub fn seeds(default: u64, run: impl Fn(u64) -> std::result::Result<(), String>) {
     let var = |name, or| std::env::var(name).map_or(or, |s| s.parse().unwrap());
     let first: u64 = var("DST_SEED", 0);

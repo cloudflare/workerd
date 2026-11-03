@@ -251,4 +251,8 @@ bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason) {
   }
 }
 
+void io_context_log_error(::rust::Str message) {
+  KJ_LOG(ERROR, kj::str(kj::arrayPtr(message.data(), message.size())));
+}
+
 }  // namespace workerd::io_context

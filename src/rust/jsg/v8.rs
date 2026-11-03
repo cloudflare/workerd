@@ -59,6 +59,8 @@ use crate::isolate_state::IsolateState;
 pub use crate::promise::Promise;
 pub use crate::promise::PromiseResolver;
 pub use crate::promise::VoidPromise;
+use crate::rtti::Context as RttiContext;
+use crate::rtti::new_rtti_context;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -880,13 +882,27 @@ pub mod ffi {
         Internal = 2,
     }
 
+    extern "Rust" {
+        type RttiContext;
+
+        /// Creates a context that describes resource members as registered under the
+        /// compatibility flags in `feature_flags_data`, canonical `CompatibilityFlags` bytes as
+        /// for `realm_create`.
+        fn new_rtti_context(feature_flags_data: &[u8]) -> Box<RttiContext>;
+        fn encode(self: &RttiContext, group: &str) -> Vec<u8>;
+    }
+
     unsafe extern "C++" {
         type ModuleRegistry;
 
+        /// Registers a builtin module. The registry calls `callback` to instantiate the
+        /// module, while a metadata registry (the RTTI encoder) calls `describe` instead, to
+        /// describe the module's exports without instantiating it.
         pub unsafe fn register_add_builtin_module(
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> MaybeLocal,
+            describe: fn(&mut RttiContext, &str),
             module_type: ModuleType,
         );
     }
@@ -3239,7 +3255,8 @@ impl<'s> Local<'s, String> {
     /// Writes the string as UTF-8 into `buffer`.
     ///
     /// Returns the number of bytes written. `flags` is a combination of
-    /// [`WriteFlags`] constants.
+    /// [`WriteFlags`] constants. Use [`WriteFlags::ReplaceInvalidUtf8`] to replace lone
+    /// surrogates with U+FFFD; without it, they are written as WTF-8, not valid UTF-8.
     ///
     /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
@@ -3266,19 +3283,14 @@ impl<'s> Local<'s, String> {
 
     /// Decodes the string to an owned Rust `String` via UTF-8.
     ///
-    /// Allocates a buffer using `utf8_length`, writes into it, and converts.
+    /// Replaces each lone UTF-16 surrogate with U+FFFD.
     pub fn to_string(&self, lock: &mut crate::Lock) -> std::string::String {
         let byte_len = self.utf8_length(lock);
         let mut buf = vec![0u8; byte_len];
-        let written = self.write_utf8(lock, &mut buf, WriteFlags::None);
+        let written = self.write_utf8(lock, &mut buf, WriteFlags::ReplaceInvalidUtf8);
         buf.truncate(written);
-        // V8 guarantees valid UTF-8 output when REPLACE_INVALID_UTF8 is not set and
-        // the string was originally created from valid data. Use from_utf8 to avoid a
-        // redundant allocation in the common (valid UTF-8) case; fall back to
-        // from_utf8_lossy only when the bytes are not valid UTF-8 (e.g. two-byte strings
-        // with unpaired surrogates).
         std::string::String::from_utf8(buf)
-            .unwrap_or_else(|e| std::string::String::from_utf8_lossy(e.as_bytes()).into_owned())
+            .unwrap_or_else(|_| unreachable!("V8 guarantees valid UTF-8 with ReplaceInvalidUtf8"))
     }
 
     // -------------------------------------------------------------------------

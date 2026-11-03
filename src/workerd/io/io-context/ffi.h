@@ -105,4 +105,7 @@ bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise)
 // execution.
 bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason);
 
+// Logs `message` as an error, as KJ_LOG(ERROR) does.
+void io_context_log_error(::rust::Str message);
+
 }  // namespace workerd::io_context

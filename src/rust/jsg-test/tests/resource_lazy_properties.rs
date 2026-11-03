@@ -6,7 +6,7 @@
 
 use std::cell::Cell;
 
-use jsg::Member;
+use jsg::MemberRegistry;
 use jsg::PropertyPlacement;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
@@ -225,13 +225,13 @@ impl Placed {
 }
 
 impl Resource for Placed {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         let placement = if flags.get_jsg_property_on_prototype_template() {
             PropertyPlacement::Prototype
         } else {
             PropertyPlacement::LazyInstance
         };
-        vec![Self::get_value_member(placement)]
+        registry.add(Self::get_value_member(placement));
     }
 }
 
@@ -284,8 +284,8 @@ impl Settable {
 }
 
 impl Resource for Settable {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Self::get_value_member(PropertyPlacement::LazyInstance)]
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(Self::get_value_member(PropertyPlacement::LazyInstance));
     }
 }
 

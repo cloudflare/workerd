@@ -15,15 +15,18 @@ use std::any::Any;
 use std::ffi::CStr;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
+use std::task::Poll;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
+use jsg::v8;
 use kj_rs::KjOwn;
 pub use trace::SpanBuilder;
 pub use trace::TagValue;
@@ -145,6 +148,93 @@ impl<'s> IoContext<'s> {
             Box::new(future),
             Box::new(callback),
         )?)
+    }
+
+    /// Waits for `future` as part of this request, then returns a promise for what `callback`
+    /// returns when called with its output, as C++ `IoContext::awaitIo()` does. Waiting and
+    /// running `callback` work as in [`await_io_and_run`](Self::await_io_and_run).
+    ///
+    /// The returned promise settles in a reaction, as in C++, which costs a microtask:
+    ///
+    /// - `Ok(value)` resolves it. A promise or thenable is followed.
+    /// - `Err(error)` rejects it with the exception that throwing `error` would throw, created in
+    ///   the reaction so that V8 records an async stack trace.
+    /// - An exception that JavaScript threw in `callback` rejects it.
+    /// - A panic in `future` rejects it with an internal error, as a KJ exception from the I/O
+    ///   does for C++ `awaitIo()`. Execution continues.
+    /// - A panic in `callback`, or execution terminating in it, settles nothing and fails the
+    ///   task, as for `await_io_and_run`.
+    ///
+    /// If this `IoContext` is destroyed first, the promise never settles.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one, and leaves
+    /// an exception pending if V8 fails to create the promise. Nothing is waited for then.
+    pub fn await_io<T, F, C>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+        callback: C,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
+    {
+        let resolver = v8::PromiseResolver::new(lock)?;
+        let outcome = CallbackOutcome::default();
+        let promise = resolver
+            .promise()
+            .then(lock, outcome.clone(), return_or_throw)?;
+        let resolver = resolver.to_global(lock);
+        // `catch_poll_panic()` turns a panic while polling into an output, so that it rejects the
+        // promise instead of failing the task as `io_future_wait()` would. `io_future_wait()`
+        // still catches a panic while dropping the future when the wait is cancelled.
+        self.await_io_and_run(catch_poll_panic(future), move |lock, output| {
+            let resolver = resolver.as_local(lock);
+            let result = match output {
+                Ok(output) => {
+                    // Only the exceptions that JavaScript threw are caught here. An error that
+                    // `callback` returned is thrown by the reaction instead.
+                    let result = lock.try_catch(|lock| match callback(lock, output) {
+                        Err(err) if err.is_pending() => Err(err),
+                        result => Ok(result),
+                    })?;
+                    match result {
+                        Ok(result) => result.map(|value| value.to_global(lock)),
+                        Err(exception) => return resolver.reject(lock, exception),
+                    }
+                }
+                Err(message) => Err(jsg::Error::new_internal_error(format!(
+                    "the future that IoContext::await_io() waited for panicked: {message}"
+                ))),
+            };
+            outcome.set(result);
+            let undefined = lock.undefined();
+            resolver.resolve(lock, undefined)
+        })?;
+        Ok(promise)
+    }
+
+    /// [`await_io`](Self::await_io) for a future whose output converts to the promise's value:
+    /// `Ok(value)` resolves the promise with `value` converted by [`jsg::ToJS`], and `Err(error)`
+    /// rejects it.
+    ///
+    /// # Errors
+    /// As for `await_io`.
+    pub fn await_io_value<T, E, F>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        future: F,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>>
+    where
+        T: for<'t> jsg::ToJS<'t> + Send + 'static,
+        E: Into<jsg::Error> + Send + 'static,
+        F: Future<Output = Result<T, E>> + Send + 'static,
+    {
+        self.await_io(lock, future, |lock, output| {
+            output.map_err(Into::into)?.to_js(lock)
+        })
     }
 
     /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
@@ -274,6 +364,71 @@ impl<'s> IoContext<'s> {
     pub fn make_user_trace_span(&self, name: &'static CStr) -> jsg::Result<TraceContext> {
         TraceContext::start(self.id, name)
     }
+}
+
+/// What the callback of [`IoContext::await_io`] returned, carried to the reaction that returns or
+/// throws it. As in C++, the promise the reaction is registered on resolves with no value, so that
+/// only the promise the reaction returns is resolved with the callback's value: resolving both
+/// would read a thenable's `then` twice. The callback can be dropped on its event loop and the
+/// reaction on any thread that holds the isolate lock, so the outcome is behind an `Arc` and a
+/// mutex.
+#[derive(Clone, Default)]
+struct CallbackOutcome(Arc<Mutex<Option<jsg::Result<v8::Global<v8::Value>>>>>);
+
+impl CallbackOutcome {
+    fn set(&self, outcome: jsg::Result<v8::Global<v8::Value>>) {
+        *lock_slot(&self.0) = Some(outcome);
+    }
+
+    fn take(&self) -> Option<jsg::Result<v8::Global<v8::Value>>> {
+        lock_slot(&self.0).take()
+    }
+}
+
+/// Holds no handle that GC traces: the value's `Global` is strong, and is taken by the reaction,
+/// which runs in the microtask checkpoint after the callback.
+impl jsg::Traced for CallbackOutcome {
+    fn holds_gc_references() -> bool {
+        false
+    }
+}
+
+/// The reaction to the promise that [`IoContext::await_io`] resolves once its callback has
+/// returned: returns the callback's value, or throws its error. Throwing in a reaction gives the
+/// exception an async stack trace, as C++ `throwOrReturnResult()` does.
+fn return_or_throw<'a>(
+    lock: &mut jsg::Lock<'a>,
+    outcome: &CallbackOutcome,
+    _undefined: v8::Local<'a, v8::Value>,
+) -> jsg::Result<v8::Local<'a, v8::Value>> {
+    let Some(outcome) = outcome.take() else {
+        unreachable!("the promise is resolved only once the outcome is set")
+    };
+    Ok(outcome?.as_local(lock))
+}
+
+/// Runs `future`, turning a panic while polling it into `Err` with the panic's message. `future`
+/// is dropped before this completes, so that a panic while dropping it is caught as well; that one
+/// is logged, and the output is kept.
+async fn catch_poll_panic<F: Future>(future: F) -> Result<F::Output, String> {
+    let mut future = std::pin::pin!(Some(future));
+    let output = std::future::poll_fn(|cx| {
+        let Some(inner) = future.as_mut().as_pin_mut() else {
+            unreachable!("dropped only once the output is ready")
+        };
+        match std::panic::catch_unwind(AssertUnwindSafe(|| inner.poll(cx))) {
+            Ok(poll) => poll.map(Ok),
+            Err(payload) => Poll::Ready(Err(ffi::panic_message(&*payload).to_owned())),
+        }
+    })
+    .await;
+    if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(|| future.set(None))) {
+        bridge::io_context_log_error(&format!(
+            "dropping the future that IoContext::await_io() waited for panicked: {}",
+            ffi::panic_message(&*payload)
+        ));
+    }
+    output
 }
 
 /// A value an `IoContext` owns, from [`IoContext::add_object`].

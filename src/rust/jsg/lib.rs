@@ -21,8 +21,10 @@ pub mod nullable;
 mod oneof;
 mod promise;
 pub mod resource;
+pub mod rtti;
 mod scope;
 pub mod ser;
+mod string;
 pub mod v8;
 mod wrappable;
 
@@ -48,10 +50,19 @@ pub use oneof::concat_union_names;
 pub use oneof::try_union_from_js;
 #[doc(hidden)]
 pub use oneof::validate_union_names;
+pub use resource::DescribedMember;
+pub use resource::MemberDefinition;
+pub use resource::MemberRegistry;
 pub use resource::NestedType;
+pub use resource::NestedTypeMember;
 pub use resource::Rc;
 pub use resource::Resource;
+pub use resource::Undescribed;
 pub use resource::Weak;
+pub use resource::described_member;
+pub use resource::nested_type;
+pub use resource::undescribed;
+pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
 pub use scope::Intercepted;
@@ -69,6 +80,7 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use string::JsString;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
@@ -567,7 +579,7 @@ impl<T> Deref for NonCoercible<T> {
 /// a coarse test. The trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
 pub trait Coercible: Type + coercible::Sealed {}
 
