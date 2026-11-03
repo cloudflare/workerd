@@ -102,6 +102,17 @@ static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& n
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
+kj::Rc<Wrappable> Wrappable::allocate(size_t size, size_t align, uintptr_t& storage) {
+  // Larger alignments would need the aligned forms of operator new and delete.
+  KJ_REQUIRE(align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__ && (align & (align - 1)) == 0,
+      "unsupported alignment of a Rust object", align);
+  size_t offset = (sizeof(Wrappable) + align - 1) & ~(align - 1);
+  auto* wrappable = new (Extra{offset - sizeof(Wrappable) + size}) Wrappable();
+  storage = reinterpret_cast<uintptr_t>(wrappable) + offset;
+  // A Refcounted object starts with one reference.
+  return kj::Rc<Wrappable>::reown(wrappable);
+}
+
 Wrappable::~Wrappable() {
   wrappable_invoke_drop(*this);
 }
@@ -1174,11 +1185,13 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable) {
 }
 
 // Wrappable lifecycle
-kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr) {
-  auto rc = kj::rc<Wrappable>();
-  rc->trait_object = kj::mv(ptr);
-  rc->addStrongRef();
-  return kj::mv(rc);
+kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage) {
+  return Wrappable::allocate(size, align, storage);
+}
+
+void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr) {
+  wrappable.trait_object = kj::mv(ptr);
+  wrappable.addStrongRef();
 }
 
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {

@@ -11,6 +11,7 @@
 //! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
+use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -239,6 +240,61 @@ fn weak_ref_upgrade() {
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert!(!weak.is_alive(lock));
         assert!(weak.upgrade(lock).is_none());
+        Ok(())
+    });
+}
+
+/// Tests that a `Weak` has expired when the resource's `Drop` runs, so that it can't be upgraded
+/// to an `Rc` of a resource being dropped.
+#[test]
+fn weak_ref_expired_during_drop() {
+    static UPGRADED_DURING_DROP: AtomicUsize = AtomicUsize::new(0);
+    static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    thread_local! {
+        /// The lock that the resource is dropped under, for its `Drop` to use.
+        static DROP_LOCK: Cell<*mut jsg::Lock<'static>> = const { Cell::new(std::ptr::null_mut()) };
+    }
+
+    #[jsg_resource]
+    struct SelfObserver {
+        this: Cell<jsg::Weak<Self>>,
+    }
+
+    impl Drop for SelfObserver {
+        fn drop(&mut self) {
+            // SAFETY: the test sets `DROP_LOCK` to its lock just before dropping the resource,
+            // and doesn't use the lock until the drop returns.
+            #[expect(
+                unsafe_code,
+                reason = "borrows the lock of the code dropping the resource"
+            )]
+            let lock = unsafe { &*DROP_LOCK.get() };
+            let this = self.this.take();
+            if this.is_alive(lock) || this.upgrade(lock).is_some() {
+                UPGRADED_DURING_DROP.fetch_add(1, Ordering::SeqCst);
+            }
+            DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl SelfObserver {}
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = jsg::Rc::new(
+            lock,
+            SelfObserver {
+                this: Cell::default(),
+            },
+        );
+        strong.get(lock).this.set(strong.downgrade(lock));
+        DROP_LOCK.set(std::ptr::from_mut(lock).cast());
+        std::mem::drop(strong);
+        DROP_LOCK.set(std::ptr::null_mut());
+        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(UPGRADED_DURING_DROP.load(Ordering::SeqCst), 0);
         Ok(())
     });
 }

@@ -67,11 +67,17 @@ struct TraitObjectPtr {
 // Lives on the KJ heap (via kj::Refcounted through Wrappable) and integrates
 // with cppgc via the CppgcShim bridge pattern that Wrappable provides.
 //
-// The data[] field stores a Rust fat pointer (data + vtable) to `dyn GarbageCollected`
-// from a leaked Rc<dyn GarbageCollected>. This lets us call back into Rust for tracing
-// and destruction without knowing the concrete type at compile time.
+// The Rust object that a Wrappable owns lives in the same allocation, after the Wrappable (see
+// allocate()). `trait_object` stores a Rust fat pointer (data + vtable) to it as
+// `dyn GarbageCollected`, which lets us call back into Rust for tracing and destruction without
+// knowing the concrete type at compile time.
 class Wrappable: public ::workerd::jsg::Wrappable {
  public:
+  // Allocates a Wrappable followed by `size` bytes of storage aligned to `align`, for the Rust
+  // object it will own, and sets `storage` to the storage's address. The Wrappable owns no object
+  // until Rust moves one into the storage and sets `trait_object`.
+  static kj::Rc<Wrappable> allocate(size_t size, size_t align, uintptr_t& storage);
+
   ~Wrappable();
   void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override;
   kj::StringPtr jsgGetMemoryName() const override;
@@ -83,10 +89,31 @@ class Wrappable: public ::workerd::jsg::Wrappable {
     return addRefToThis();
   }
 
-  // Rust trait object pointer + TypeId, stored by Ref::new().
+  // Frees the allocation of allocate(). Being the only usual deallocation function of the class,
+  // it is what `delete` calls, without a size, which would not cover the storage.
+  static void operator delete(void* pointer) {
+    ::operator delete(pointer);
+  }
+
+  // Rust trait object pointer + TypeId of the object in the storage, set by wrappable_init().
   // Defined as a CXX shared struct in v8.rs; contains data_ptr, vtable_ptr,
   // type_id_lo, type_id_hi.
   TraitObjectPtr trait_object = {0, 0, 0, 0};
+
+ private:
+  // The bytes allocated after the Wrappable.
+  struct Extra {
+    size_t bytes;
+  };
+
+  Wrappable() = default;
+
+  static void* operator new(size_t size, Extra extra) {
+    return ::operator new(size + extra.bytes);
+  }
+  static void operator delete(void* pointer, Extra) {
+    ::operator delete(pointer);
+  }
 };
 
 struct ResourceDescriptor;
@@ -95,7 +122,12 @@ struct ResourceDescriptor;
 // Rc::clone calls wrappable_add_strong_ref. A dropped strong Rc calls
 // wrappable_remove_strong_ref under the isolate lock (Rust's IsolateState defers it until the
 // lock otherwise), then drops its KjRc<Wrappable>, which decrements the kj::Rc refcount.
-kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
+//
+// wrappable_new() allocates a Wrappable with storage for a Rust object (Wrappable::allocate()).
+// Once Rust has moved the object into the storage, wrappable_init() records it in `trait_object`
+// and adds the first strong reference.
+kj::Rc<Wrappable> wrappable_new(size_t size, size_t align, uintptr_t& storage);
+void wrappable_init(Wrappable& wrappable, TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable);
