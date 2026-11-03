@@ -16,6 +16,7 @@
 #include <kj/table.h>
 
 #include <algorithm>
+#include <memory>
 #include <span>
 
 namespace workerd::jsg::modules {
@@ -187,15 +188,25 @@ class EsModule final: public Module {
  public:
   // Source borrowed from static process-lifetime storage, such as a
   // compiled-in builtin source.
-  explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
+  explicit EsModule(Url id,
+      Type type,
+      Flags flags,
+      kj::ArrayPtr<const char> source,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
+        staticCompileCache(compileCache),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
-  explicit EsModule(Url id, Type type, Flags flags, StaticExternalStringSource source)
+  explicit EsModule(Url id,
+      Type type,
+      Flags flags,
+      StaticExternalStringSource source,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(source)),
+        staticCompileCache(compileCache),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
@@ -238,12 +249,34 @@ class EsModule final: public Module {
           js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints);
     }
 
-    // A module with a code cache key uses the isolate's code cache if there is one, else the slot
-    // below.
-    KJ_IF_SOME(key, codeCacheKey) {
-      KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    // Build-time caches do not need a runtime store or a producer election.
+    if (staticCompileCache.size() > 0) {
+      auto data = std::make_unique<v8::ScriptCompiler::CachedData>(
+          staticCompileCache.begin(), staticCompileCache.size());
+      v8::ScriptCompiler::Source source(
+          newExternalString(js, getEncodedSource().repr), origin, data.release());
+      auto result = v8::ScriptCompiler::CompileModule(
+          js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
+      if (source.GetCachedData()->rejected) {
+        observer.onCompileCacheRejected(js.v8Isolate);
+      } else {
+        observer.onCompileCacheFound(js.v8Isolate);
+      }
+      return result;
+    }
+
+    KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+      auto key = codeCacheKey;
+      if (type() != Type::BUNDLE) {
+        // Builtins and fallback modules need no embedder-supplied key. Hash the encoded source
+        // once per shared module definition, so owned UTF-8 source can still be released.
+        key = builtinCodeCacheKey.get([this](kj::SpaceFor<CodeCacheKey>& space) {
+          return space.construct(codeCacheKeyForModule(getEncodedSource().repr));
+        });
+      }
+      KJ_IF_SOME(k, key) {
         return codeCache.compileModule(
-            js.v8Isolate, key, newExternalString(js, getEncodedSource().repr), origin, observer);
+            js.v8Isolate, k, newExternalString(js, getEncodedSource().repr), origin, observer);
       }
     }
 
@@ -422,6 +455,12 @@ class EsModule final: public Module {
   // the UTF-8 source when the registry was built. See
   // ModuleRegistry::Builder::newCodeCacheKey().
   kj::Maybe<CodeCacheKey> codeCacheKey;
+
+  // Lazily hashed from the encoded source for builtin and fallback modules.
+  kj::Lazy<CodeCacheKey> builtinCodeCacheKey;
+
+  // Borrowed with the same lifetime as compiled-in builtin source.
+  kj::ArrayPtr<const kj::byte> staticCompileCache;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
   // generated on-demand the first time the module is compiled, if possible. Modules with a
@@ -1946,7 +1985,7 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, module.getSrc().asChars());
+    builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
   });
 }
 
@@ -1956,7 +1995,7 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, getSource(module));
+    builder.addEsm(id, getSource(module), module.getCompileCache().asBytes());
   });
 }
 
@@ -2187,12 +2226,12 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& id, kj::ArrayPtr<const char> source) {
+    const Url& id, kj::ArrayPtr<const char> source, kj::ArrayPtr<const kj::byte> compileCache) {
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
-      [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
+      [url = id.clone(), source, compileCache, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source, compileCache);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2212,13 +2251,13 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& id, StaticExternalStringSource source) {
+    const Url& id, StaticExternalStringSource source, kj::ArrayPtr<const kj::byte> compileCache) {
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
-      [url = id.clone(), source = kj::mv(source), type = type()](
+      [url = id.clone(), source = kj::mv(source), compileCache, type = type()](
           const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source, compileCache);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2562,12 +2601,14 @@ kj::Own<Module> Module::newEsm(Url id,
   return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code), codeCacheKey);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
-  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
+kj::Own<Module> Module::newEsm(
+    Url id, Type type, kj::ArrayPtr<const char> code, kj::ArrayPtr<const kj::byte> compileCache) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code, compileCache);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, StaticExternalStringSource code) {
-  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code));
+kj::Own<Module> Module::newEsm(
+    Url id, Type type, StaticExternalStringSource code, kj::ArrayPtr<const kj::byte> compileCache) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code), compileCache);
 }
 
 Module::ModuleNamespace::ModuleNamespace(
@@ -2697,8 +2738,17 @@ Function<void()> Module::compileEvalFunction(Lock& js,
     const CompilationObserver& observer) {
   auto metrics = observer.onScriptCompilationStart(js.v8Isolate, name);
   v8::ScriptOrigin origin(js.str(name));
-  v8::ScriptCompiler::Source source(js.str(code), origin);
+  auto contentStr = js.str(code);
   auto fn = ([&] {
+    KJ_IF_SOME(cache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+      auto unit = compileExtensions == kj::none ? CodeCacheKey::Unit::FUNCTION
+                                                : CodeCacheKey::Unit::FUNCTION_WITH_CONTEXT;
+      auto key = cache.keyFor(unit, code);
+      return check(cache.compileFunction(js.v8Isolate, key, contentStr, origin,
+          compileExtensions.map([](JsObject ext) -> v8::Local<v8::Object> { return ext; }),
+          observer));
+    }
+    v8::ScriptCompiler::Source source(contentStr, origin);
     KJ_IF_SOME(ext, compileExtensions) {
       v8::Local<v8::Object> obj = ext;
       return check(

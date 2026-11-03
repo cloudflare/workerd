@@ -45,8 +45,9 @@ The new module registry was designed to address several limitations of the legac
    in a `kj::MutexGuarded` field on the `Module` object itself. When a second
    isolate imports the same module, the cached bytecode is consumed, skipping
    recompilation. If the embedder gives isolates a code cache store
-   (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle modules use the
-   store instead, which both registries share; see
+   (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle, builtin and fallback
+   modules use the store instead, which both registries share. Embedded builtin
+   caches take precedence over runtime caches; see
    [Code cache store](#code-cache-store). Modules compiled with `PRODUCE_COMPILE_HINTS`
    bypass both caches; see [Compile hint production](#compile-hint-production).
 
@@ -165,17 +166,20 @@ module construction time.
 
 ```
 EsModule extends Module {
-  source:        kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>> // UTF-8
+  source:        UnencodedSource                               // UTF-8 or pre-encoded static source
   encodedSource: kj::Lazy<EncodedSource>                         // V8-compatible encoding (shared)
-  codeCacheKey:  Maybe<CodeCacheKey>                             // Key in the code cache store
+  codeCacheKey:  Maybe<CodeCacheKey>                             // Worker bundle key
+  builtinCodeCacheKey: Lazy<CodeCacheKey>                        // Encoded builtin/fallback key
+  staticCompileCache: ArrayPtr<const byte>                      // Embedded builtin bytecode
   cachedData:    MutexGuarded<Maybe<Own<CachedData>>>            // Cross-isolate compile cache
 }
 ```
 
 - `getDescriptor()`: Encodes the source (see below), then compiles it via
-  `v8::ScriptCompiler::CompileModule`. A module with a `codeCacheKey`, in an
-  isolate with a code cache store, compiles through the store (see
-  [Code cache store](#code-cache-store)). Otherwise it checks the `cachedData`
+  `v8::ScriptCompiler::CompileModule`, consuming embedded bytecode first. Otherwise,
+  in an isolate with a code cache store, builtin and fallback modules and bundle
+  modules with a `codeCacheKey` compile through the store (see
+  [Code cache store](#code-cache-store)). Without that store it checks the `cachedData`
   shared cache first (shared lock for reading, exclusive lock for writing). On
   cache miss, generates and stores bytecode after compilation.
 
@@ -237,16 +241,23 @@ Second isolate compiles same module:
 The `cachedData` slot is per `Module`, so it is shared only by isolates that
 share the registry. An embedder can instead give each isolate a process-wide
 `jsg::CodeCacheStore` (`IsolateBase::setCodeCacheStore()`), keyed by a SHA-256
-of the module's UTF-8 source and its compilation unit. The legacy registry and
-service-worker scripts use the same store, through `jsg::IsolateCodeCache`.
+of the module's source representation and its compilation unit. The legacy
+registry, service-worker scripts and CommonJS evaluation functions use the same
+store, through `jsg::IsolateCodeCache`. Source encodings and function compilation
+shapes have distinct units, so identical bytes cannot alias different JavaScript.
 
 - A registry built with `ModuleRegistry::Builder::Options::CODE_CACHE_KEYS`
   computes each bundle module's key while it is built
   (`Builder::newCodeCacheKey()`) and lists the keys
   (`getBundleCodeCacheKeys()`). `Worker::Script` looks them all up before the
   startup CPU limit applies, so the limit does not cover hashing or lookups.
-- Builtins, and bundle modules in isolates without a store, keep using
-  `cachedData`.
+- Builtins consume embedded compile caches if supplied, including caches loaded
+  from Cap'n Proto bundles. Otherwise builtins and fallback modules compute their
+  keys automatically from the Latin-1 or UTF-16 source handed to V8, once per
+  shared module definition. Their store lookups and CommonJS hashing happen at
+  compilation time, inside the startup CPU limit when compiled during startup.
+- Modules in isolates without a store, and bundle modules without prepared keys,
+  keep using `cachedData`.
 - Caches are produced only for modules compiled while `Worker::Script` and
   `Worker` start the worker, after the top level has run. A module first
   imported during a request consumes a cache if the store has one, and is
@@ -854,13 +865,19 @@ returning a rejected promise with the cached exception.
 
 4. **Cross-isolate caching.** ESM compile cache and Wasm compiled modules are
    shared across isolate replicas, reducing startup time for subsequent replicas.
-   With a code cache store, bundle module caches are shared across registries.
-   Modules compiled with `PRODUCE_COMPILE_HINTS` bypass both ESM caches.
+   With a code cache store, bundle, builtin and fallback module caches are shared
+   across registries. Builtin bundles consume embedded build-time caches first.
+   Runtime cache production is deferred until startup evaluation completes;
+   modules first compiled during a request can consume entries but do not produce
+   them. CommonJS evaluation functions use the same store, with distinct keys for
+   their compilation shape. Modules compiled with `PRODUCE_COMPILE_HINTS` bypass
+   all ESM caches.
 
 5. **Compile cache is transparent.** V8 bytecode caching is handled entirely
    within `EsModule::getDescriptor()`. Callers never see compile cache details,
    except that an embedder with a code cache store builds the registry with
-   `CODE_CACHE_KEYS`.
+   `CODE_CACHE_KEYS` for Worker bundle modules. Builtin and fallback module keys
+   are computed automatically from their encoded source.
 
 6. **Evaluation callbacks are idempotent.** Synthetic module `EvaluateCallback`
    functions can be called multiple times from multiple isolates. They create

@@ -7,8 +7,11 @@
 #include "modules-new.h"
 #include "script.h"
 
+#include <capnp/message.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
+
+#include <memory>
 
 namespace workerd::jsg::test {
 
@@ -239,6 +242,227 @@ KJ_TEST("Legacy registry: a second isolate consumes the cache produced after eva
   }
   KJ_EXPECT(observer.found == 1);
   KJ_EXPECT(observer.rejected == 0);
+}
+
+// The legacy registry treats both borrowed and owned one-byte builtin source as Latin-1.
+KJ_TEST("Legacy builtins share caches across isolates and source ownership") {
+  auto store = newStore();
+  CountingObserver observer;
+  constexpr auto code = "export const value = 'caf\xe9';"_kj;
+  for (uint i = 0; i < 2; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto info = i == 0
+          ? ModuleRegistry::ModuleInfo(
+                js, "builtin", StaticExternalStringSource(code.asArray()), nullptr, observer)
+          : ModuleRegistry::ModuleInfo(js, "builtin", copyToArc(code), nullptr, observer);
+      auto module = info.module.getHandle(js);
+      instantiateModule(js, module);
+      auto ns = JsObject(check(module->GetModuleNamespace()->ToObject(js.v8Context())));
+      KJ_EXPECT(ns.get(js, "value").toString(js) == "café");
+    });
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == i + 1);
+    KJ_EXPECT(lock->hits == i);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(lock->rejects.size() == 0);
+  }
+  KJ_EXPECT(observer.found == 1);
+}
+
+KJ_TEST("Legacy UTF-16 builtins consume the shared cache") {
+  auto store = newStore();
+  CountingObserver observer;
+  static constexpr char16_t code[] = u"export const value = 'π🚀';";
+  auto source = kj::arrayPtr(reinterpret_cast<const uint16_t*>(code), kj::size(code) - 1);
+  for (uint i = 0; i < 2; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      ModuleRegistry::ModuleInfo info(
+          js, "builtin", StaticExternalStringSource(source), nullptr, observer);
+      auto module = info.module.getHandle(js);
+      instantiateModule(js, module);
+      auto ns = JsObject(check(module->GetModuleNamespace()->ToObject(js.v8Context())));
+      KJ_EXPECT(ns.get(js, "value").toString(js) == "π🚀");
+    });
+  }
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->hits == 1);
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(lock->rejects.size() == 0);
+  KJ_EXPECT(observer.found == 1);
+}
+
+KJ_TEST("Source encodings do not share builtin cache keys") {
+  constexpr auto code = "export default 'é';"_kj;
+  auto utf8 = CodeCacheKey::compute(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, code);
+  auto latin1 = codeCacheKeyForModule(StaticExternalStringSource(code.asArray()));
+  KJ_EXPECT(!(utf8 == latin1));
+  static constexpr uint16_t twoByte[] = {'e', 'x', 'p', 'o', 'r', 't', ' ', 'd', 'e', 'f', 'a', 'u',
+    'l', 't', ' ', '\'', 0xe9, '\'', ';'};
+  auto utf16 = codeCacheKeyForModule(StaticExternalStringSource(kj::arrayPtr(twoByte)));
+  auto raw = CodeCacheKey::compute(
+      CodeCacheKey::Unit::ONE_BYTE_ESM, kj::arrayPtr(twoByte).asBytes().asChars());
+  KJ_EXPECT(!(utf16 == raw));
+}
+
+KJ_TEST("New registry builtins share the store across separate registries") {
+  auto store = newStore();
+  CountingObserver observer;
+  for (uint i = 0; i < 3; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      const auto base = "file:///"_url;
+      modules::ModuleRegistry::Builder builder(base);
+      modules::ModuleBundle::BuiltinBuilder builtins;
+      constexpr auto code = "export default 'π🚀';"_kj;
+      if (i == 0) {
+        builtins.addEsm("test:builtin"_url, code.asArray());
+      } else {
+        builtins.addEsm("test:builtin"_url, copyToArc(code));
+      }
+      auto registry = builder.add(builtins.finish()).finish();
+      auto attached = registry->attachToIsolate(js, observer);
+      KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) == "π🚀");
+    }, UseNewModuleRegistry::YES);
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == i + 1);
+    KJ_EXPECT(lock->hits == i);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(lock->rejects.size() == 0);
+  }
+  KJ_EXPECT(observer.found == 2);
+}
+
+KJ_TEST("Builtin misses outside startup do not produce code caches") {
+  for (auto newRegistry: {UseNewModuleRegistry::NO, UseNewModuleRegistry::YES}) {
+    auto store = newStore();
+    CountingObserver observer;
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::NO, [&](jsg::Lock& js) {
+      if (newRegistry) {
+        const auto base = "file:///"_url;
+        modules::ModuleRegistry::Builder builder(base);
+        modules::ModuleBundle::BuiltinBuilder builtins;
+        builtins.addEsm("test:builtin"_url, LAZY_MODULE.asArray());
+        auto registry = builder.add(builtins.finish()).finish();
+        auto attached = registry->attachToIsolate(js, observer);
+        auto ns = KJ_ASSERT_NONNULL(
+            modules::ModuleRegistry::tryResolveModuleNamespace(js, "test:builtin"));
+        KJ_EXPECT(KJ_ASSERT_NONNULL(ns.tryCast<JsObject>()).get(js, "value").toString(js) == "6");
+      } else {
+        ModuleRegistry::ModuleInfo info(
+            js, "builtin", StaticExternalStringSource(LAZY_MODULE.asArray()), nullptr, observer);
+        auto module = info.module.getHandle(js);
+        instantiateModule(js, module);
+      }
+    }, newRegistry);
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 1);
+    KJ_EXPECT(lock->inserts == 0);
+    KJ_EXPECT(lock->claimed.size() == 0);
+    KJ_EXPECT(observer.generated == 0);
+  }
+}
+
+KJ_TEST("Embedded builtin caches take precedence over the store in both registries") {
+  for (auto code: {"/* cache */ export default 'ASCII';"_kj,
+         "/* cache */ export default 'café';"_kj, "/* cache */ export default 'π🚀';"_kj}) {
+    auto store = newStore();
+    CountingObserver observer;
+    std::unique_ptr<v8::ScriptCompiler::CachedData> data;
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::NO, [&](jsg::Lock& js) {
+      v8::ScriptOrigin origin(js.str("test:builtin"_kj), 0, 0, false, -1, {}, false, false, true);
+      v8::ScriptCompiler::Source source(js.str(code), origin);
+      auto module = check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+      data.reset(v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+      KJ_ASSERT(data != nullptr);
+    });
+    capnp::MallocMessageBuilder message;
+    auto bundle = message.initRoot<Bundle>();
+    auto module = bundle.initModules(1)[0];
+    module.setName("test:builtin");
+    module.setType(ModuleType::BUILTIN);
+    module.setSrc(code.asBytes());
+    module.setCompileCache(kj::arrayPtr(data->data, data->length));
+    // Invalid syntax at the same length proves that V8 consumes the embedded cache.
+    module.getSrc()[0] = ')';
+    for (auto newRegistry: {UseNewModuleRegistry::NO, UseNewModuleRegistry::YES}) {
+      withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+        if (newRegistry) {
+          modules::ModuleBundle::BuiltinBuilder builtins;
+          modules::ModuleBundle::getBuiltInBundleFromCapnp(builtins, bundle.asReader());
+          const auto base = "file:///"_url;
+          modules::ModuleRegistry::Builder builder(base);
+          auto registry = builder.add(builtins.finish()).finish();
+          auto attached = registry->attachToIsolate(js, observer);
+          KJ_EXPECT(modules::ModuleRegistry::resolve(js, "test:builtin").toString(js) != "");
+        } else {
+          ModuleRegistry::ModuleInfo info(js, "test:builtin", module.getSrc().asChars(),
+              module.getCompileCache().asBytes(), observer);
+          auto descriptor = info.module.getHandle(js);
+          instantiateModule(js, descriptor);
+        }
+      }, newRegistry);
+    }
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 0);
+    KJ_EXPECT(lock->inserts == 0);
+    KJ_EXPECT(observer.found == 1);
+    KJ_EXPECT(observer.rejected == 0);
+  }
+}
+
+KJ_TEST("Cached CommonJS functions bind the receiving isolate's context extension") {
+  auto store = newStore();
+  CountingObserver observer;
+  for (uint i = 0; i < 2; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto extension = js.obj();
+      extension.set(js, "provided", js.num(i));
+      constexpr auto code = "globalThis.value = provided;"_kj;
+      if (i == 0) {
+        struct Provider final: public ModuleRegistry::CommonJsModuleInfo::CommonJsModuleProvider {
+          JsRef<JsObject> context;
+          Provider(Lock& js, JsObject object): context(js, object) {}
+          JsObject getContext(Lock& js) override {
+            return context.getHandle(js);
+          }
+          JsValue getExports(Lock& js) override {
+            return js.global();
+          }
+        } provider(js, extension);
+        auto fn =
+            ModuleRegistry::CommonJsModuleInfo::compileEvalFunc(js, provider, "commonjs", code);
+        check(fn->Call(js.v8Context(), js.v8Context()->Global(), 0, nullptr));
+      } else {
+        auto fn =
+            modules::Module::compileEvalFunction(js, code, "commonjs"_kj, extension, observer);
+        fn(js);
+      }
+      KJ_EXPECT(js.global().get(js, "value").toString(js) == kj::str(i));
+    });
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == i + 1);
+    KJ_EXPECT(lock->hits == i);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(lock->rejects.size() == 0);
+  }
+  KJ_EXPECT(observer.found == 1);
+}
+
+KJ_TEST("Function caches distinguish context extensions") {
+  auto store = newStore();
+  CountingObserver observer;
+  for (uint i = 0; i < 4; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      kj::Maybe<JsObject> extension;
+      if (i % 2 == 1) extension = js.obj();
+      auto fn = modules::Module::compileEvalFunction(
+          js, "globalThis.value = 1;"_kj, "commonjs"_kj, extension, observer);
+      fn(js);
+    });
+  }
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 4);
+  KJ_EXPECT(lock->hits == 2);
+  KJ_EXPECT(lock->inserts == 2);
 }
 
 KJ_TEST("An installed code cache takes precedence over hints on a miss and a hit") {

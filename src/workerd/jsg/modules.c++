@@ -441,34 +441,25 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   return jsg::check(compile(origin));
 }
 
-// Compiles a module, consuming `compileCache` if it is non-empty.
-v8::MaybeLocal<v8::Module> compileWithStaticCache(jsg::Lock& js,
+// Embedded caches take precedence over the embedder's store, which takes precedence over hints.
+// `getKey` hashes the representation used to construct `contentStr`, only when a store is present.
+template <typename GetKey>
+v8::MaybeLocal<v8::Module> compileModule(jsg::Lock& js,
     v8::Local<v8::String> contentStr,
     const v8::ScriptOrigin& origin,
-    kj::ArrayPtr<const kj::byte> compileCache) {
-  if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
+    kj::ArrayPtr<const kj::byte> compileCache,
+    const CompilationObserver& observer,
+    GetKey&& getKey,
+    kj::ArrayPtr<const int> compileHints = nullptr) {
+  if (compileCache.size() > 0) {
     auto cached =
         std::make_unique<v8::ScriptCompiler::CachedData>(compileCache.begin(), compileCache.size());
     v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
     return v8::ScriptCompiler::CompileModule(
         js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
   }
-
-  v8::ScriptCompiler::Source source(contentStr, origin);
-  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
-}
-
-// Compiles a bundle module from UTF-8 source. The isolate's code cache takes precedence over
-// compile hints when it is installed.
-v8::MaybeLocal<v8::Module> compileBundleModule(jsg::Lock& js,
-    kj::ArrayPtr<const char> content,
-    const v8::ScriptOrigin& origin,
-    const CompilationObserver& observer,
-    kj::ArrayPtr<const int> compileHints) {
-  auto contentStr = jsg::v8Str(js.v8Isolate, content);
   KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-    auto key = codeCache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
-    return codeCache.compileModule(js.v8Isolate, key, contentStr, origin, observer);
+    return codeCache.compileModule(js.v8Isolate, getKey(codeCache), contentStr, origin, observer);
   }
   if (compileHints.size() > 0) {
     return compileEsmModuleWithHints(js, contentStr, origin, compileHints, observer);
@@ -536,11 +527,10 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
                   return v8::ScriptCompiler::CompileModule(
                       js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints);
                 }
-                if (compileCache.size() > 0) {
-                  return compileWithStaticCache(
-                      js, jsg::v8Str(js.v8Isolate, content), origin, compileCache);
-                }
-                return compileBundleModule(js, content, origin, observer, compileHints);
+                return compileModule(js, jsg::v8Str(js.v8Isolate, content), origin, compileCache,
+                    observer, [&](IsolateCodeCache& cache) {
+                  return cache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
+                }, compileHints);
               })) {
   producesCompileHints = produceCompileHints;
 }
@@ -556,8 +546,8 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               ModuleInfoCompileOption::BUILTIN,
               observer,
               [&](const v8::ScriptOrigin& origin) {
-                return compileWithStaticCache(
-                    js, jsg::newExternalString(js, content), origin, compileCache);
+                return compileModule(js, jsg::newExternalString(js, content), origin, compileCache,
+                    observer, [&](IsolateCodeCache&) { return codeCacheKeyForModule(content); });
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
@@ -571,8 +561,11 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
               ModuleInfoCompileOption::BUILTIN,
               observer,
               [&](const v8::ScriptOrigin& origin) {
-                return compileWithStaticCache(
-                    js, jsg::newExternalOneByteString(js, kj::mv(content)), origin, compileCache);
+                auto source = content->asPtr();
+                return compileModule(js, jsg::newExternalOneByteString(js, kj::mv(content)), origin,
+                    compileCache, observer, [&](IsolateCodeCache&) {
+                  return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, source);
+                });
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
@@ -583,6 +576,21 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
   KJ_IF_SOME(exports, maybeExports) {
     maybeNamedExports = KJ_MAP(name, exports) { return kj::str(name); };
   }
+}
+
+v8::Local<v8::Function> ModuleRegistry::CommonJsModuleInfo::compileEvalFunc(
+    Lock& js, CommonJsModuleProvider& provider, kj::StringPtr name, kj::StringPtr content) {
+  v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name));
+  auto contentStr = v8Str(js.v8Isolate, content);
+  v8::Local<v8::Object> extension = provider.getContext(js);
+  KJ_IF_SOME(cache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    auto key = cache.keyFor(CodeCacheKey::Unit::FUNCTION_WITH_CONTEXT, content);
+    return jsg::check(cache.compileFunction(js.v8Isolate, key, contentStr, origin, extension,
+        IsolateBase::from(js.v8Isolate).getObserver()));
+  }
+  v8::ScriptCompiler::Source source(contentStr, origin);
+  return jsg::check(
+      v8::ScriptCompiler::CompileFunction(js.v8Context(), &source, 0, nullptr, 1, &extension));
 }
 
 jsg::JsValue ModuleRegistry::CommonJsModuleInfo::getExports(jsg::Lock& js) {

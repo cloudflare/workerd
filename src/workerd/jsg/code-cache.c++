@@ -5,6 +5,8 @@
 #include "code-cache.h"
 
 #include <openssl/sha.h>
+#include <v8-function.h>
+#include <v8-isolate.h>
 
 #include <kj/debug.h>
 #include <kj/hash.h>
@@ -15,10 +17,10 @@
 
 namespace workerd::jsg {
 
-CodeCacheKey CodeCacheKey::compute(Unit unit, kj::ArrayPtr<const char> utf8Source) {
+CodeCacheKey CodeCacheKey::compute(Unit unit, kj::ArrayPtr<const char> source) {
   CodeCacheKey key{.unit = unit};
   static_assert(sizeof(key.sourceSha256) == SHA256_DIGEST_LENGTH);
-  SHA256(utf8Source.asBytes().begin(), utf8Source.size(), key.sourceSha256.begin());
+  SHA256(source.asBytes().begin(), source.size(), key.sourceSha256.begin());
   return key;
 }
 
@@ -93,6 +95,26 @@ v8::MaybeLocal<v8::UnboundScript> IsolateCodeCache::compileScript(v8::Isolate* i
   return compile<v8::UnboundScript>(isolate, key, source, origin, observer,
       [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
     return v8::ScriptCompiler::CompileUnboundScript(isolate, compileSource, options);
+  });
+}
+
+v8::MaybeLocal<v8::Function> IsolateCodeCache::compileFunction(v8::Isolate* isolate,
+    const CodeCacheKey& key,
+    v8::Local<v8::String> source,
+    const v8::ScriptOrigin& origin,
+    kj::Maybe<v8::Local<v8::Object>> contextExtension,
+    const CompilationObserver& observer) {
+  KJ_ASSERT(key.unit ==
+      (contextExtension == kj::none ? CodeCacheKey::Unit::FUNCTION
+                                    : CodeCacheKey::Unit::FUNCTION_WITH_CONTEXT));
+  return compile<v8::Function>(isolate, key, source, origin, observer,
+      [&](v8::ScriptCompiler::Source* compileSource, v8::ScriptCompiler::CompileOptions options) {
+    KJ_IF_SOME(extension, contextExtension) {
+      return v8::ScriptCompiler::CompileFunction(
+          isolate->GetCurrentContext(), compileSource, 0, nullptr, 1, &extension, options);
+    }
+    return v8::ScriptCompiler::CompileFunction(
+        isolate->GetCurrentContext(), compileSource, 0, nullptr, 0, nullptr, options);
   });
 }
 
@@ -194,6 +216,9 @@ void IsolateCodeCache::produce(v8::Isolate* isolate,
     }
     KJ_CASE_ONEOF(script, v8::Global<v8::UnboundScript>) {
       data.reset(v8::ScriptCompiler::CreateCodeCache(script.Get(isolate)));
+    }
+    KJ_CASE_ONEOF(function, v8::Global<v8::Function>) {
+      data.reset(v8::ScriptCompiler::CreateCodeCacheForFunction(function.Get(isolate)));
     }
   }
   if (data == nullptr || data->length <= 0) {

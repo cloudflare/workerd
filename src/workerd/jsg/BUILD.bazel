@@ -404,6 +404,7 @@ kj_test(
     deps = [
         ":jsg",
         ":script",
+        "@capnp-cpp//src/capnp",
     ],
 )
 

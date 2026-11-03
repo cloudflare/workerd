@@ -4,7 +4,7 @@
 
 #pragma once
 
-// V8 code caches for worker-supplied code, kept in a store that the embedder provides.
+// V8 code caches for JavaScript, kept in a store that the embedder provides.
 //
 // V8 validates a code cache only against its own version, its flags, its read-only snapshot and
 // the source length; it does not check the source content (see the warning on
@@ -30,8 +30,8 @@ namespace workerd::jsg {
 // source text, the way it is compiled and process-wide V8 state (version and flags), so the key is
 // independent of the name a module or script is compiled under.
 struct CodeCacheKey {
-  // How the UTF-8 source is turned into a V8 string and compiled. Units are distinct because their
-  // UTF-8 decoders may treat invalid input differently.
+  // How the source is turned into a V8 string and compiled. Distinct encodings and compilation
+  // shapes must not share an entry, even when their source bytes are identical.
   enum class Unit : uint8_t {
     // ScriptCompiler::CompileModule of the source as decoded by v8::String::NewFromUtf8 (the
     // legacy module registry).
@@ -41,12 +41,18 @@ struct CodeCacheKey {
     // ScriptCompiler::CompileUnboundScript of the source as decoded by
     // v8::String::NewFromUtf8 (a service-worker syntax main script).
     CLASSIC_SCRIPT = 3,
+    // CompileModule of external Latin-1 or UTF-16 source, in either module registry.
+    ONE_BYTE_ESM = 4,
+    TWO_BYTE_ESM = 5,
+    // CompileFunction of UTF-8 source, with no parameters and zero or one context extension.
+    FUNCTION = 6,
+    FUNCTION_WITH_CONTEXT = 7,
   };
 
   kj::FixedArray<kj::byte, 32> sourceSha256;
   Unit unit;
 
-  static CodeCacheKey compute(Unit unit, kj::ArrayPtr<const char> utf8Source);
+  static CodeCacheKey compute(Unit unit, kj::ArrayPtr<const char> source);
 
   bool operator==(const CodeCacheKey& other) const;
   kj::uint hashCode() const;
@@ -152,6 +158,15 @@ class IsolateCodeCache {
       const v8::ScriptOrigin& origin,
       const CompilationObserver& observer);
 
+  // Compiles a function with no parameters and at most one context extension. The key's unit
+  // must distinguish whether an extension is present.
+  v8::MaybeLocal<v8::Function> compileFunction(v8::Isolate* isolate,
+      const CodeCacheKey& key,
+      v8::Local<v8::String> source,
+      const v8::ScriptOrigin& origin,
+      kj::Maybe<v8::Local<v8::Object>> contextExtension,
+      const CompilationObserver& observer);
+
   // Opens a production window: until it is closed, a miss may elect this isolate to produce the
   // cache, which produceDeferred() then does. The window must not be open already.
   void deferProduction();
@@ -165,7 +180,8 @@ class IsolateCodeCache {
   void discardDeferred();
 
  private:
-  using Compiled = kj::OneOf<v8::Global<v8::Module>, v8::Global<v8::UnboundScript>>;
+  using Compiled =
+      kj::OneOf<v8::Global<v8::Module>, v8::Global<v8::UnboundScript>, v8::Global<v8::Function>>;
 
   struct Pending {
     kj::Own<CodeCacheStore::Producer> producer;
