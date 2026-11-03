@@ -1364,6 +1364,20 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
+# Only the @all-autogates variant runs the pipeline. The @all-compat-flags variant would turn
+# new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline and so would
+# quietly test only the plain-Worker half.
+wd_test(
+    src = "startup-snapshot-node-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-node-case-test.js",
+        "startup-snapshot-node-test.js",
+    ],
+    generate_all_compat_flags_variant = False,
+)
+
 wd_test(
     src = "url-searchparams-iterator-uaf-test.wd-test",
     args = ["--experimental"],

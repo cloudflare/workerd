@@ -11,6 +11,9 @@ class DiagnosticsChannelModule: public jsg::Object {
   DiagnosticsChannelModule() = default;
   DiagnosticsChannelModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   // Called by Channel.publish() after the subscribers have run. Records the message for tail
   // workers if the current request has a tracer. Throws if there is no current request.
   void publishToTracer(jsg::Lock& js, jsg::JsValue name, jsg::JsValue message);
