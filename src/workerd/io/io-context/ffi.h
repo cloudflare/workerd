@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/io-context.h>
+#include <workerd/rust/jsg/ffi.h>
 
 #include <rust/cxx.h>
 
@@ -57,5 +58,54 @@ class IoOwnedObject {
 
 // IoContext::addObject() for `slot`.
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
+
+// Span names, tag keys and literal tag values below are passed as `literal` bytes: a
+// NUL-terminated string including its NUL, which must outlive the span, as a string literal
+// does. They are not copied.
+using Literal = ::rust::Slice<const uint8_t>;
+
+// IoContext::makeTraceSpan() and makeUserTraceSpan(), in the current async context frame.
+kj::Own<SpanBuilder> io_context_make_trace_span(uint64_t id, Literal name);
+kj::Own<TraceContext> io_context_make_user_trace_span(uint64_t id, Literal name);
+
+// SpanBuilder::newChild().
+kj::Own<SpanBuilder> span_builder_new_child(SpanBuilder& span, Literal name);
+
+// SpanBuilder::setTag() and TraceContext::setTag(). On a SpanBuilder that is not observed, these
+// do nothing. Otherwise, a `::rust::Str` value is copied, since it is not NUL-terminated and may
+// not outlive the call; the key and a `Literal` value are not. A TraceContext's tag also annotates
+// its async trace operation, if it has one, whether or not its spans are observed, as
+// TraceContext::setTag() does.
+void span_builder_set_tag_bool(SpanBuilder& span, Literal key, bool value);
+void span_builder_set_tag_int(SpanBuilder& span, Literal key, int64_t value);
+void span_builder_set_tag_float(SpanBuilder& span, Literal key, double value);
+void span_builder_set_tag_str(SpanBuilder& span, Literal key, ::rust::Str value);
+void span_builder_set_tag_literal(SpanBuilder& span, Literal key, Literal value);
+void trace_context_set_tag_bool(TraceContext& context, Literal key, bool value);
+void trace_context_set_tag_int(TraceContext& context, Literal key, int64_t value);
+void trace_context_set_tag_float(TraceContext& context, Literal key, double value);
+void trace_context_set_tag_str(TraceContext& context, Literal key, ::rust::Str value);
+void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal value);
+
+// TraceContext::detachAsync().
+void trace_context_detach_async(TraceContext& context);
+
+// IoContext::setFailOpen(), for ctx.passThroughOnException().
+void io_context_set_fail_open(uint64_t id);
+
+// The two calls below use C++ JSG, as a reviewed exception; see "C++ JSG" in ffi.c++. Each takes
+// handles in the scope of the caller's lock, and returns false if JavaScript threw, leaving the
+// exception pending, which Rust turns into a jsg::Error for which is_pending() is true.
+
+// IoContext::addWaitUntil(IoContext::awaitJs(promise)), for ctx.waitUntil().
+bool io_context_add_wait_until(uint64_t id, ::workerd::rust::jsg::Local promise);
+
+// IoContext::abort() with `reason` as jsg::Lock::exceptionToKj() encodes it, or, if `reason` is
+// empty, with the error ctx.abort() aborts with when called without one. Does not terminate
+// execution.
+bool io_context_abort(uint64_t id, ::workerd::rust::jsg::MaybeLocal reason);
+
+// Logs `message` as an error, as KJ_LOG(ERROR) does.
+void io_context_log_error(::rust::Str message);
 
 }  // namespace workerd::io_context

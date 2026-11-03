@@ -18,6 +18,7 @@
 //! |-----------|-----------------|
 //! | `()` | `undefined` |
 //! | `String` | `string` |
+//! | `JsString<'s>` | `string` (coerces without copying out of the V8 heap) |
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `f64` | `number`; from any value, with `ToNumber` |
@@ -172,24 +173,7 @@ impl_traced_noop!(
     f32,
     f64,
     std::time::SystemTime,
-    crate::v8::ArrayBuffer,
-    crate::v8::ArrayBufferView,
     crate::v8::BackingStore,
-    crate::v8::BigInt64Array,
-    crate::v8::BigUint64Array,
-    crate::v8::Boolean,
-    crate::v8::Float32Array,
-    crate::v8::Float64Array,
-    crate::v8::Int8Array,
-    crate::v8::Int16Array,
-    crate::v8::Int32,
-    crate::v8::Int32Array,
-    crate::v8::Integer,
-    crate::v8::Number,
-    crate::v8::Uint8Array,
-    crate::v8::Uint16Array,
-    crate::v8::Uint32,
-    crate::v8::Uint32Array,
     &str,
 );
 
@@ -415,6 +399,21 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 pub trait ToJS<'s>: Sized {
     /// Converts this Rust value into a JavaScript value in the scope of `lock`.
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error>;
+
+    /// Converts this Rust value into a JavaScript value for `creator`, the object whose method or
+    /// property returned it, as C++ JSG's `wrap()` takes the `creator` of a value: a value that
+    /// stays pending, such as a [`Promise`](crate::Promise), keeps `creator` alive until it
+    /// settles, as C++ JSG's promises do. A `#[jsg_method]` or property of a resource passes the
+    /// resource's wrapper, and a static one `None`. A container passes `creator` on to what it
+    /// holds; any other type converts as [`ToJS::to_js`] does, which is the default.
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
+        let _ = creator;
+        self.to_js(lock)
+    }
 }
 
 // =============================================================================
@@ -1095,8 +1094,16 @@ impl<'s> ToJS<'s> for () {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Some(value) => value.to_js(lock),
+            Some(value) => value.to_js_with_creator(lock, creator),
             None => Ok(lock.undefined()),
         }
     }
@@ -1104,14 +1111,30 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
 
 impl<'s, T: Coercible + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        self.into_inner().to_js(lock)
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.into_inner().to_js_with_creator(lock, creator)
     }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
         }
     }
@@ -1119,8 +1142,16 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
             Self::Undefined => Ok(lock.undefined()),
         }
@@ -1129,8 +1160,16 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
             Self::Undefined | Self::Unconvertable(_) => Ok(lock.undefined()),
         }
@@ -1349,12 +1388,20 @@ impl<T: Type> Type for Vec<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         // As C++ JSG does, this builds the array from its elements instead of setting them
         // one by one, so no setter a script put on Array.prototype runs. Converting stops at
         // the first element that fails.
         let elements = self
             .into_iter()
-            .map(|item| item.to_js(lock))
+            .map(|item| item.to_js_with_creator(lock, creator))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(v8::Array::with_elements(lock, &elements).into())
     }
@@ -1413,9 +1460,17 @@ impl<V> Type for Dict<V> {
 
 impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         let entries = self
             .into_iter()
-            .map(|(key, value)| Ok((key, value.to_js(lock)?)))
+            .map(|(key, value)| Ok((key, value.to_js_with_creator(lock, creator)?)))
             .collect::<Result<Vec<_>, Error>>()?;
         let properties: Vec<(&str, v8::Local<'s, v8::Value>)> = entries
             .iter()

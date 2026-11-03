@@ -104,6 +104,12 @@ class FileSystemModule final: public jsg::Object {
   int open(jsg::Lock& js, FilePath path, OpenOptions options);
   void close(jsg::Lock& js, int fd);
 
+  // Whether writes to the stdio file descriptors are line-buffered and logged
+  // in TypeScript (the TS_STDIO autogate) rather than by StdioFile.
+  bool tsStdio();
+  // The logging prefix for stdout (fd 1) or stderr (fd 2).
+  kj::StringPtr stdioPrefix(jsg::Lock& js, int fd);
+
   struct WriteOptions {
     kj::Maybe<uint64_t> position;
     JSG_STRUCT(position);
@@ -205,6 +211,8 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(getFdHandle);
     JSG_METHOD(cp);
     JSG_METHOD(openAsBlob);
+    JSG_METHOD(tsStdio);
+    JSG_METHOD(stdioPrefix);
   }
 
  private:

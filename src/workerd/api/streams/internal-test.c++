@@ -9,12 +9,15 @@
 #include "transform.h"
 #include "writable.h"
 
+#include <workerd/api/system-streams.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
 #include <openssl/rand.h>
+
+#include <capnp/compat/byte-stream.h>
 
 // These tests exercise the legacy C++ streams implementation directly, so they allocate the
 // legacy ReadableStream / WritableStream rather than going through the JsReadableStream /
@@ -1189,7 +1192,11 @@ KJ_TEST("BYOB read into an offset view fills only the view's region, returns a U
       // The result is a Uint8Array over the same buffer, covering the view's region.
       v8::Local<v8::Uint8Array> u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
       auto buffer = bufferRef.getHandle(js);
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      KJ_ASSERT(u8->GetBuffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+#else
       KJ_ASSERT(u8->Buffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+#endif
       KJ_ASSERT(u8->ByteOffset() == kViewOffset);
       KJ_ASSERT(u8->ByteLength() == kViewLength);
 
@@ -1434,6 +1441,60 @@ KJ_TEST("default reader read() auto-allocates a chunk-sized buffer") {
       KJ_ASSERT(u8.size() == 4 * 1024);
     })));
   });
+}
+
+// Counts end() calls and, like a capnp ByteStream reached over RPC, rejects all but the first.
+class EndCountingOutputStream final: public capnp::ExplicitEndOutputStream {
+ public:
+  explicit EndCountingOutputStream(uint& endCount): endCount(endCount) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> end() override {
+    if (endCount++ > 0) {
+      return KJ_EXCEPTION(FAILED, "already called end()");
+    }
+    return kj::READY_NOW;
+  }
+
+ private:
+  uint& endCount;
+};
+
+// The native pump ends the destination itself, after which the pipe closes the destination's
+// controller. That close must not reach the underlying stream a second time.
+KJ_TEST("pipeTo() between system streams ends the destination stream once") {
+  TestFixture testFixture;
+  for (bool preventClose: {false, true}) {
+    uint endCount = 0;
+    testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto in = kj::newOneWayPipe();
+      auto source = js.alloc<ReadableStream>(
+          env.context, newSystemStream(kj::mv(in.in), StreamEncoding::IDENTITY, env.context));
+      auto destination = js.alloc<WritableStream>(env.context,
+          newSystemStream(
+              kj::heap<EndCountingOutputStream>(endCount), StreamEncoding::IDENTITY, env.context),
+          kj::none);
+
+      auto pipe = env.context.awaitJs(js,
+          source->pipeTo(js, destination.addRef(), PipeToOptions{.preventClose = preventClose}));
+      auto& out = *in.out;
+      auto write = out.write("foobar"_kjb).attach(kj::mv(in.out));
+      return write.then([pipe = kj::mv(pipe)]() mutable { return kj::mv(pipe); });
+    });
+    KJ_EXPECT(endCount == (preventClose ? 0 : 1), preventClose, endCount);
+  }
 }
 
 }  // namespace

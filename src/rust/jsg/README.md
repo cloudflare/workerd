@@ -2,6 +2,59 @@
 
 Rust bindings for the JSG (JavaScript Glue) layer, enabling Rust code to integrate with workerd's JavaScript runtime.
 
+## RTTI and TypeScript declarations
+
+`TypeInfo::describe()` describes a binding's JavaScript representation without
+constructing a resource or acquiring a V8 lock. `#[jsg_struct]`, `#[jsg_resource]`,
+and `#[jsg_oneof]` generate implementations that compose the descriptions of
+their fields, signatures, and variants. Rust resolves aliases and imported types
+through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
+
+- One `jsg::rtti::Context` collects all modules in an export, interning shared and
+  recursive definitions before visiting their members.
+- Rust's fully qualified type identity is separate from the declaration name,
+  which honors `name = "..."`. Explicit names must be unique among emitted Rust
+  and C++ declarations; inactive compatibility variants may reuse a name.
+- `Option<T>` describes `T | undefined` and `Nullable<T>` describes `T | null`,
+  so a `Nullable<T>` parameter is required, as at runtime. `NullOrUndefined<T>`,
+  `Option<Nullable<T>>` and `Lenient<T>` describe an optional `T | null | undefined`.
+- `Dict<V>` describes `Record<string, V>`, as C++ describes `jsg::Dict`.
+- Vectors and slices describe JavaScript arrays, numbers included; a typed array
+  is described by its `v8` handle type, such as `v8::Local<v8::Uint8Array>`.
+- Integers of up to 32 bits describe `number`; `i64` and `u64` describe
+  `number | bigint`, as C++ RTTI describes `int64_t`.
+- `v8::Promise` describes `Promise<any>`, `v8::VoidPromise` describes
+  `Promise<void>` and `jsg::Promise<T>` describes `Promise<T>`; as in C++, a
+  promise parameter also accepts a value that is not a promise.
+- A `jsg_cpp::Ref<T>` refers to the C++ class's own description by the name
+  `CppResource::fully_qualified_name()` gives, so the class must be in a C++
+  type group of the export.
+- Fallible returns describe their success type. Injected `this` and `Lock`
+  parameters and inspect-only properties are omitted.
+- A nested type is described with its whole structure, as in C++, so it is
+  declared as a class even when nesting is the only way to reach it.
+- Parameter names use camelCase, omit unused-parameter underscores, and escape
+  TypeScript reserved words. Bindings with colliding normalized parameter names
+  are rejected. Members are described in registration order, as in C++.
+
+Both C++ and Rust emit `src/workerd/jsg/rtti.capnp` for the `types/` generator.
+Resources are described with the members they register under the context's
+compatibility flags; in `workerd:rtti`, these are the flags `jsg::rtti::Builder`
+gives C++ resources.
+
+Register modules with a callback receiving `&mut Lock<'s>` and returning
+`jsg::Result<Rc<Exports>>`, for example `jsg::modules::add_builtin(registry,
+"node-internal:dns", |_lock| Ok(DnsUtil::new()), ModuleType::Internal)`. The return
+type determines both runtime wrapping and RTTI. `workerd:rtti` collects each module's
+export type and reachable definitions without invoking the callback, using the same
+context for every module. Registration-time compatibility gates also govern RTTI
+discovery.
+
+Definitions are emitted into ambient TypeScript only when reachable from a
+TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
+struct to mark such a root, analogous to C++ `JSG_TS_ROOT`. Internal module
+registration alone does not make a type an ambient declaration.
+
 ## Core Types
 
 ### `Lock`
@@ -103,6 +156,9 @@ How the code keeps the rule:
   [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
   `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
+- To terminate execution from Rust, as C++ `jsg::Lock::terminateExecutionNow()` does, return the
+  error `Lock::terminate_execution_now` returns. It delivers the termination before returning,
+  so no more JavaScript runs; `Lock::terminate_execution` only requests one.
 - An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
   overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
   with a `v8::TryCatch` in the shim and decide with `catch_exception()` (`ffi.h`).
@@ -118,7 +174,11 @@ termination and pending-exception tests in `src/rust/jsg-test/tests/coercion_saf
 
 Traced state is a `TracedGlobal`, a `jsg::Rc`, or a type that holds them. It belongs to the one
 GC owner that traces it: a resource, or a `Wrappable` such as the data of a function created with
-`Function::new`.
+`Function::new` or the value of a typed promise. A typed promise's reaction takes its value out
+of the wrapper detached, as a moved C++ `jsg::Ref` is: every `jsg::Rc` and `TracedGlobal` in it is
+strong again, with no owner, so the reaction can keep it or put it in another owner (see
+`GcVisitor::is_detaching`; `GcVisitor::as_ffi` returns `None` for such a visit, which a `Traced`
+impl that visits through it must handle).
 
 - Never put traced state inside an `std::rc::Rc`. A clone of the `Rc` held by a second GC owner
   traces the same state again. For a `jsg::Rc`, C++ asserts a single owner
@@ -162,9 +222,12 @@ leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are 
 allowlist described below, and are to be removed. The one exception is in
 `src/workerd/io/io-context/ffi.c++`, where `io_context_await_io_and_run()` throws
 `JsExceptionThrown` to pass an exception that Rust left pending to `IoContext::run()`, which
-learns of exceptions no other way. Don't extend it.
+learns of exceptions no other way, and two shims call the C++ functions that `ctx.waitUntil()` and
+`ctx.abort()` call, so that a Rust implementation matches C++ exactly; its "C++ JSG" section
+explains why that is sound. Don't extend it.
 
-Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from`),
+Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from` and
+`IoContext::getCurrentLock()`),
 `JSG_TRY`/`JSG_CATCH`/`tryCatch`, `jsg::check`/`JsExceptionThrown`, `createTunneledException`,
 `makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
@@ -450,7 +513,8 @@ scope. There is no public constructor; locks come from:
   accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`, and
   `#[jsg_property(lazy_instance)]` accessors with `jsg::getter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
-  `for<'s> Fn(&mut Lock<'s>) -> Result<Local<'s, Value>, jsg::Error>`,
+  `for<'s> Fn(&mut Lock<'s>) -> Result<Rc<Exports>, jsg::Error>`; registration wraps its
+  result in the caller's scope and derives RTTI from the resource type,
 - `v8::Function::new`, whose closure captures nothing and gets a lock per call,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
   scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
@@ -694,9 +758,79 @@ let frame = jsg::AsyncContextFrame::current(lock);
 frame.enter(lock, |lock| callback.call(lock, None, &[]))?;
 ```
 
+## Typed promises
+
+`jsg::Promise<'s, T>` is the counterpart of C++ JSG's `jsg::Promise<T>`: a promise that carries
+a Rust `T`, which need not have a JavaScript form. The JavaScript promise under it is settled
+with an opaque wrapper of the value, which JavaScript never sees, and the value is converted
+only where the promise crosses into or out of JavaScript, where C++ JSG converts it:
+
+- Returned to JavaScript (`ToJS`), it becomes the promise of a reaction that converts the value,
+  as C++ `PromiseWrapper::wrap()` does: it settles one microtask after the typed promise, and is
+  marked as handled if the typed promise was (`mark_as_handled`).
+- Taken from JavaScript (`FromJS`, as a method parameter), a promise gets one reaction that
+  converts its value, as C++ `thenUnwrap()` does. A value of the wrong type rejects it with
+  C++ JSG's `TypeError` ("Incorrect type for Promise: the Promise did not resolve to 'T'.");
+  a conversion that fails, such as of a non-integer to a `u32`, rejects it with its own error.
+  A value that is not a promise is converted at once; a thenable is followed first if
+  `unwrap_custom_thenables` is on.
+
+`T` is any `Traced` type, including ones that hold `jsg::Rc`s and `TracedGlobal`s: a
+reaction gets the value detached from the wrapper (Safety rules, rule 2). `Promise<()>` is
+`jsg::Promise<void>`: it is settled with `undefined`, and as an argument it accepts any value.
+`Promise<v8::Value>` is `jsg::Promise<jsg::Value>`: it carries the JavaScript value itself, and
+its reactions take a `Local<v8::Value>`. A marker such as `v8::Uint8Array` names a kind of
+handle, not a value, so there is no `Promise<v8::Uint8Array>`; use `Promise<v8::Value>`. The
+untyped `Local<v8::Promise>` stays the counterpart of `JsPromise`.
+
+As in C++, a typed promise is used once: `then`, `catch` and `then_or_catch` consume it, so only
+one reaction ever takes the value, and moves it out of its wrapper. `when_resolved` gives a
+`Promise<()>` without consuming it. The callbacks follow the rules of `Local<v8::Promise>::then`:
+they capture nothing, and their state is the reaction's `data`. Their return type is the
+projection `U::Value<'a>`, so the `U` of the promise they return is inferred from where that
+promise goes, such as a method's return type, or from an annotation
+(`let p: jsg::Promise<String> = ...`, or `then::<_, String, _>(...)`):
+
+```rust
+#[jsg_method]
+fn describe<'s>(
+    &self,
+    lock: &mut jsg::Lock<'s>,
+    input: jsg::Promise<'s, u32>,
+) -> Result<jsg::Promise<'s, String>, jsg::Error> {
+    let doubled: jsg::Promise<'s, u32> = input.then(lock, (), |_lock, (), n| Ok(n * 2))?;
+    doubled.then(lock, (), |_lock, (), n| Ok(format!("twice that is {n}")))
+}
+```
+
+A callback that returns a promise, for the returned promise to follow, goes to `then_promise`,
+`catch_promise` or `then_or_catch_promise`, which C++ JSG's `then()` and `catch_()` cover by
+chaining a continuation that returns a `jsg::Promise<U>`.
+
+`Promise::new_with_resolver` gives a promise and its `PromiseResolver<'s, T>`. To keep either
+beyond the current scope, as in a resource field, make it a `TracedPromise<T>` or a
+`TracedPromiseResolver<T>` with `into_traced`; the garbage collector traces both. A method that
+returns a promise reports its errors by rejecting it rather than by throwing: `Lock::eval_now`
+runs a closure that returns a promise and turns what it fails with into a rejected promise, as
+C++ JSG's `Lock::evalNow()` does; a closure that has a plain value returns
+`Promise::resolved(lock, value)`.
+
+The promise that an instance `#[jsg_method]` or property returns keeps the resource alive until
+it settles, as C++ JSG's do: the method passes its receiver to `ToJS::to_js_with_creator`, and the
+promise's conversion reaction holds it, as `PromiseWrapper::wrap()` makes `creator` the data of
+its reaction. Containers, `#[jsg_struct]` fields and `#[jsg_oneof]` variants pass the creator on,
+so a promise inside them keeps it too.
+
+A value that JavaScript settled a typed promise with, which can only happen through a
+`Promise.prototype.then` it replaced (V8 calls it when `resolve_with_promise` resolves one promise
+with another, as C++ JSG's `Resolver::resolve()` does), rejects the reaction with an internal
+error, as C++ JSG fails with a `KJ_ASSERT`.
+
 ## Errors from JavaScript
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+
+A `#[jsg_method]`, property getter or wildcard property converts its return value with `ToJS::to_js_with_creator`, passing the resource's wrapper for an instance member and `None` for a static one, as C++ JSG's `wrap()` takes a `creator`. Only a value that stays pending, a `jsg::Promise`, uses it, and a container passes it on; a `ToJS` impl that holds such values should forward it too.
 
 Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or an exception or a termination is already pending, and a container passes on the error from converting an element, whichever kind it is. A `&str` or `String` longer than `v8::String::MAX_LENGTH` fails with a `RangeError` ("Invalid string length", as V8 reports it), which is not pending; every other conversion of a single value in this crate fails only with a pending error. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
 
@@ -735,9 +869,12 @@ how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be 
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
 that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
-`String` converts from any value with `ToString`, copying it out of the V8 heap. To convert any
-value as C++ JSG's `jsg::JsString` parameter does, without the copy, take a
-`v8::Local<'s, v8::Value>` and call `to_js_string(lock)` on it.
+`String` converts from any value with `ToString`, copying it out of the V8 heap. A
+`jsg::JsString<'s>` parameter performs the same coercion without copying or decoding the string,
+like C++ JSG's `jsg::JsString`. It preserves lone UTF-16 surrogates and returns to JavaScript
+unchanged. It dereferences to `v8::Local<'s, v8::String>` for string operations, and converts to
+and from that handle with `From`/`Into`. Like the handle, it cannot outlive its scope. For an
+explicit coercion of a `v8::Local<'s, v8::Value>`, call `to_js_string(lock)`.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range; whether a fraction just past a
@@ -869,8 +1006,8 @@ exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 
 Variants can be any type that converts from JavaScript and that a `kj::OneOf` can hold:
-strings, numbers, the integer types, booleans, `SystemTime`, resources, structs,
-`Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
+strings (including `jsg::JsString<'s>`), numbers, the integer types, booleans, `SystemTime`,
+resources, structs, `Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
 handles (`v8::Local<'s, T>`). Each is tried in the passes of its C++ counterpart, so a few
 behave as they do in C++ rather than as their position suggests:
 
@@ -962,9 +1099,10 @@ It does not reproduce worker-specific initialization such as logging, inspectors
 
 ### Compatibility-dependent API surfaces
 
-`#[jsg_resource(custom_members)]` generates member factories while leaving `Resource::members(flags)`
-to the resource author. Use ordinary Rust conditionals to select members and choose property placement
-when the template is built. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
+`#[jsg_resource(custom_members)]` generates member factories while leaving
+`Resource::members(registry, flags)` to the resource author. Use ordinary Rust conditionals to select
+members and choose property placement when the template is built. RTTI export runs the same function
+with the export's flags, so TypeScript declarations follow the same choices. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
 for the factory naming conventions and a complete example.
 
 ### Key types and files

@@ -66,4 +66,8 @@ void* sqliteMemRealloc(void* ptr, int newSize);
 // sqlite3_vfs_register() call in the process. Idempotent (uses a static once-flag).
 void installSqliteCustomAllocator();
 
+// Returns the bytes SQLite currently has allocated in this process, across all databases. This is
+// what SQLite's process-wide hard heap limit (`sqliteMaxMemoryPerProcessBytes`) applies to.
+size_t getSqliteProcessMemoryUsed();
+
 }  // namespace workerd

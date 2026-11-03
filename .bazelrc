@@ -103,6 +103,9 @@ build:unix --config=perfetto
 build --@v8//:v8_enable_temporal_support=True
 build --@v8//:v8_temporal_capi=//deps/rust:temporal_capi
 
+# Room for every jsg::ContextDataSlot; V8 does not grow a context's embedder-data array.
+build --@v8//:v8_embedder_data_array_size=11
+
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
 # kept in a separate configuration to make it easy to disable.
@@ -222,7 +225,7 @@ build --@capnp-cpp//src/capnp:gen_rust=True
 build --@capnp-cpp//src/kj:kj_enable_irequire=True
 # overriden in config=opt
 build --@capnp-cpp//src/kj:debug_memory=True
-build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
+build --cxxopt="-fbracket-depth=1024" --host_cxxopt="-fbracket-depth=1024"
 
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt.
@@ -297,6 +300,8 @@ build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
 # makes detection robust to scheduling. Costs ~2.5MB of trace memory per live thread.
 build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
 build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
+# Run runtime destructors before TSan checks for thread leaks at process exit.
+build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.

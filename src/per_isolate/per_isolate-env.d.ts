@@ -125,6 +125,38 @@ declare const utils: {
   isDOMException(value: unknown): boolean;
   // Makes `prototype` the prototype of the DOMExceptions native code creates.
   setDOMExceptionPrototype(prototype: object): void;
+  // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
+  // these only through events/event-target-internals, which documents them.
+  setListenerCountHook(
+    target: EventTarget,
+    type: string,
+    hook: (type: string, count: number) => void
+  ): void;
+  getEventHandlerAttribute(target: EventTarget, type: string): unknown;
+  setEventHandlerAttribute(
+    target: EventTarget,
+    type: string,
+    value: unknown
+  ): void;
+  dispatchEvent(
+    target: EventTarget,
+    event: Event,
+    report: boolean
+  ): { readonly exception: unknown } | undefined;
+  createTrustedEvent(type: string): Event;
+  createTrustedMessageEvent(
+    type: string,
+    data: unknown,
+    source: object | null
+  ): MessageEvent;
+  // Structured-clones a MessagePort message (api/per-isolate-bootstrap.c++:
+  // CloneMessageData): serializes it, throwing on a SharedArrayBuffer, and
+  // returns the deserialized copy.
+  cloneMessageData(data: unknown): unknown;
+  // Calls fn as a reaction to an already-resolved promise, through V8's
+  // Promise::Then(), so scheduling runs no user code (no species lookup). A
+  // throw rejects the reaction's promise, reported as unhandled.
+  queueReaction(fn: () => void): void;
 };
 
 // An abort algorithm registration. Obtained only from

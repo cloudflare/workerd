@@ -107,7 +107,11 @@ Outcome transcodeOutcome(
     auto copy = kj::heapArray(source);
     return js.tryCatch([&]() -> Outcome {
       v8::Local<v8::Uint8Array> result = i18n::transcode(js, copy, from, to);
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto buffer = result->GetBuffer();
+#else
       auto buffer = result->Buffer();
+#endif
       return Outcome{
         .buffer = kj::heapArray(kj::ArrayPtr<const kj::byte>(
             static_cast<const kj::byte*>(buffer->Data()), buffer->ByteLength())),

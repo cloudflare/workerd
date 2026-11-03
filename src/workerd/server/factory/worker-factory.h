@@ -213,6 +213,8 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
+kj::Promise<void> worker_run_actor_on_hibernate(
+    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
@@ -255,6 +257,8 @@ class ActorHandle final {
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
 void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+bool actor_has_on_hibernate_handler(const ActorHandle& actor);
+bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
 bool actor_shutdown(
     const ActorHandle& actor, ::rust::Str reason, kj::Maybe<kj::Own<ActorLock>> lock);

@@ -87,6 +87,7 @@ import {
 } from 'node-internal:internal_fs_constants';
 import { Dir, Dirent } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
+import { isStdioFd, writeStdio } from 'node-internal:internal_fs_stdio';
 
 import { Buffer } from 'node-internal:internal_buffer';
 import {
@@ -819,6 +820,7 @@ export function writeFileSync(
     exclusive,
   } = validateWriteFileArgs(path, data, options);
 
+  if (isStdioFd(validatedPath)) return writeStdio(validatedPath, [actualData]);
   return cffs.writeAll(validatedPath, actualData, { append, exclusive });
 }
 
@@ -851,6 +853,7 @@ export function writevSync(
     return 0;
   }
 
+  if (isStdioFd(fd)) return writeStdio(fd, buffers);
   return cffs.write(fd, buffers, { position });
 }
 

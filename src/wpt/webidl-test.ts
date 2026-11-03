@@ -24,6 +24,11 @@ export default {
     comment: 'Window-specific test',
     omittedTests: true,
   },
+  'ecmascript-binding/es-exceptions/DOMException-audioworklet-processor.js': {
+    comment:
+      'AudioWorklet processor module loaded by an HTML test, not a test; AudioWorkletProcessor does not exist in workerd',
+    omittedTests: true,
+  },
   'ecmascript-binding/es-exceptions/DOMException-constants.any.js': {
     comment: 'DOMException constants have wrong configurable descriptor',
     expectedFailures: true,

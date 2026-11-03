@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Runs fs-stdio-test.js against the TypeScript implementation
+# (src/node/internal/internal_fs_stdio.ts, under the TS_STDIO autogate).
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fs-stdio-ts",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fs-stdio-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "enable_nodejs_fs_module"],
+        bindings = [(name = "USING_TS_IMPL", json = "true")],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-ts-stdio"],
+);
