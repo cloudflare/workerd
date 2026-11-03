@@ -585,6 +585,7 @@ pub mod ffi {
         ) -> Result<Local>;
         #[nothrow]
         pub unsafe fn local_typed_array_length(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_buffer_data(array: &Local) -> usize;
         #[nothrow]
         pub unsafe fn local_typed_array_byte_offset(array: &Local) -> usize;
