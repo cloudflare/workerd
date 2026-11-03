@@ -1812,4 +1812,8 @@ bool isolate_in_context(Isolate* isolate) {
   return isolate->InContext();
 }
 
+Local isolate_current_context_global(Isolate* isolate) {
+  return to_ffi(isolate->GetCurrentContext()->Global());
+}
+
 }  // namespace workerd::rust::jsg

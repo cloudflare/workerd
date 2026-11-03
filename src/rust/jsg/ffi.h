@@ -610,6 +610,9 @@ Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate);
 void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
+// The global object of the entered context (v8::Context::Global()). Requires a context to be
+// entered. Runs no JavaScript.
+Local isolate_current_context_global(Isolate* isolate);
 void ignore_leak(size_t ptr);
 
 }  // namespace workerd::rust::jsg

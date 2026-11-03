@@ -637,6 +637,18 @@ impl<'s> Lock<'s> {
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_null(self.isolate().as_ffi())) }
     }
 
+    /// Returns the global object of the entered context, `globalThis`.
+    ///
+    /// Corresponds to `v8::Context::Global()` and C++ JSG's `jsg::Lock::global()`.
+    pub fn global_object(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked, with a context entered.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::isolate_current_context_global(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
     pub fn new_object(&mut self) -> v8::Local<'s, v8::Object> {
         // SAFETY: Lock guarantees the isolate is valid and locked
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.isolate().as_ffi())) }

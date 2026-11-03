@@ -713,6 +713,9 @@ pub mod ffi {
         );
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
+        // The global object of the entered context (`v8::Context::Global()`). Requires a context
+        // to be entered. Runs no JavaScript.
+        pub unsafe fn isolate_current_context_global(isolate: *mut Isolate) -> Local;
 
         /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
         /// purpose, along with everything reachable from it.
