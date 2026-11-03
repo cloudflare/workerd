@@ -500,6 +500,35 @@ fn vec_from_js_parses_array() {
     });
 }
 
+/// Converting to a `Vec` reads elements through getters, holes and the prototype chain, and reads
+/// the elements that a getter appends. No conversion here runs script, so the results hold whether
+/// each element is read before or after the previous one is converted.
+#[test]
+fn vec_from_js_reads_getters_holes_and_inherited_elements() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let numbers: Vec<f64> = ctx
+            .eval(
+                lock,
+                "(() => {
+                     const arr = [0, , 2.5];
+                     Object.defineProperty(arr, 1, { get() { arr.push(3); return 1; } });
+                     return arr;
+                 })()",
+            )
+            .unwrap();
+        assert_eq!(numbers, vec![0.0, 1.0, 2.5, 3.0]);
+
+        let strings: Vec<String> = ctx.eval(lock, "[1, , 3]").unwrap();
+        assert_eq!(strings, vec!["1", "undefined", "3"]);
+        let strings: Vec<String> = ctx
+            .eval(lock, "Array.prototype[1] = 'inherited'; [1, , 3]")
+            .unwrap();
+        assert_eq!(strings, vec!["1", "inherited", "3"]);
+        Ok(())
+    });
+}
+
 #[test]
 fn vec_empty_roundtrip() {
     let harness = crate::Harness::new();

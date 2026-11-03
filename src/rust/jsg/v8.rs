@@ -520,7 +520,7 @@ pub mod ffi {
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            result: &mut Vec<Global>,
+            result: &mut Vec<Local>,
         ) -> Result<bool>;
 
         // Local<TypedArray>
@@ -930,6 +930,10 @@ pub mod ffi {
             module_type: ModuleType,
         );
     }
+
+    // `realm_take_resource_templates` in lib.rs returns one, but cxx emits the C++ side of a
+    // `Vec<T>` only in the bridge that defines `T`, and only where that bridge uses it.
+    impl Vec<Global> {}
 }
 
 impl std::fmt::Display for ffi::ExceptionType {
@@ -2249,28 +2253,28 @@ impl<'s> Local<'s, Array> {
         })
     }
 
-    /// Iterates over array elements using V8's native `Array::Iterate()`.
-    /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
+    /// Reads every element, using V8's native `Array::Iterate()`, as a handle in the current scope.
     ///
     /// # Errors
     ///
     /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or an
     /// exception or a termination is already pending, the exception stays pending and the error
     /// is one for which [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
-    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        let globals = call_into_js(lock, |lock| {
-            let mut globals = Vec::new();
+    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, Value>>> {
+        call_into_js(lock, |lock| {
+            let mut elements = Vec::new();
             // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
             let ok = unsafe {
-                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut elements)
             }?;
-            Ok(ok.then_some(globals))
-        })?;
-        let state = lock.isolate_state();
-        Ok(globals
-            .into_iter()
-            .map(|g| TracedGlobal::from_ffi_in(g, Arc::clone(state)))
-            .collect())
+            Ok(ok.then(|| {
+                elements
+                    .into_iter()
+                    // SAFETY: the shim opened the elements in the current HandleScope.
+                    .map(|element| unsafe { Local::from_ffi(element) })
+                    .collect()
+            }))
+        })
     }
 }
 

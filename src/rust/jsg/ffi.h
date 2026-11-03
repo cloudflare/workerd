@@ -336,9 +336,10 @@ Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> eleme
 // Sets element `index` to `value` and returns true, or returns false if a setter threw, leaving
 // the exception pending.
 bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
-// Appends the elements to `result` and returns true, or returns false with `result` empty if a
-// getter or Proxy trap on an element threw, leaving the exception pending.
-bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result);
+// Appends the elements, as handles in the current HandleScope, to `result` and returns true, or
+// returns false and leaves `result` unchanged if a getter or Proxy trap on an element threw,
+// leaving the exception pending.
+bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Local>& result);
 
 // Local<TypedArray>
 Local local_new_uint8_array(Isolate* isolate, const uint8_t* data, size_t length);

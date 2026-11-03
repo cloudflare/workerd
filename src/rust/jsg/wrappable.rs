@@ -1400,9 +1400,9 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        let type_name = value.type_of(lock);
-        Self::try_from_js(lock, value)?
-            .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))
+        Self::try_from_js(lock, value)?.ok_or_else(|| {
+            Error::new_type_error(format!("Expected Array but got {}", value.type_of(lock)))
+        })
     }
 
     fn try_from_js(
@@ -1413,11 +1413,10 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             return Ok(None);
         };
 
-        let globals = array.iterate(lock)?;
-        let mut result = Self::with_capacity(globals.len());
-        for global in globals {
-            let local = global.as_local(lock);
-            result.push(T::from_js(lock, local)?);
+        let elements = array.iterate(lock)?;
+        let mut result = Self::with_capacity(elements.len());
+        for element in elements {
+            result.push(T::from_js(lock, element)?);
         }
         Ok(Some(result))
     }

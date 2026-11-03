@@ -1001,9 +1001,10 @@ const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
   return &unwrapRustWrapper(isolate, local_from_ffi<v8::Object>(kj::mv(value))).trait_object;
 }
 
-// Uses V8's Array::Iterate() which is faster than indexed access.
-// Returns Global handles because Local handles get reused during iteration.
-bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result) {
+// Uses V8's Array::Iterate(), which is faster than indexed access. Iterate() opens HandleScopes of
+// its own, so the handles it passes don't outlive it; the elements are held as Globals until it
+// returns, then opened in the caller's HandleScope.
+bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Local>& result) {
   if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
@@ -1011,28 +1012,29 @@ bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& res
   KJ_REQUIRE(v8Val->IsArray(), "Value must be an array");
   auto arr = v8Val.As<v8::Array>();
 
+  // Reserves for at most MAX_RESERVED elements up front: a sparse array's length can be more than
+  // memory holds, and a getter can throw long before the end.
+  constexpr uint32_t MAX_RESERVED = 4096;
   struct Data {
     Isolate* isolate;
-    ::rust::Vec<Global>* result;
+    kj::Vector<v8::Global<v8::Value>> elements;
   };
-  Data data{isolate, &result};
+  Data data{isolate, kj::Vector<v8::Global<v8::Value>>(kj::min(arr->Length(), MAX_RESERVED))};
 
   auto iterateResult = arr->Iterate(context,
       [](uint32_t index, v8::Local<v8::Value> element,
           void* userData) -> v8::Array::CallbackResult {
     auto* d = static_cast<Data*>(userData);
-    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+    d->elements.add(d->isolate, element);
     return v8::Array::CallbackResult::kContinue;
   },
       &data);
-  if (iterateResult.IsNothing()) {
-    // A getter or Proxy trap on an element threw. ffi::Global has no destructor in Rust, so the
-    // handles collected so far would stay strong roots until the isolate is disposed.
-    for (auto& global: result) {
-      global_reset(global);
-    }
-    result.clear();
-    return false;
+  // If a getter or Proxy trap on an element threw, the Globals are reset as `data` goes.
+  if (iterateResult.IsNothing()) return false;
+
+  result.reserve(data.elements.size());
+  for (auto& element: data.elements) {
+    result.push_back(to_ffi(element.Get(isolate)));
   }
   return true;
 }
