@@ -1745,7 +1745,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # unsupported.
 
   pythonSharedStandardLibrary @198 :Bool
-      $compatEnableFlag("python_shared_standard_library");
+      $compatEnableFlag("python_shared_standard_library")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
   # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
   # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the

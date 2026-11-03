@@ -111,6 +111,29 @@ fn rust_method_rejects_another_type() {
 }
 
 #[test]
+fn rust_method_describes_a_cpp_resource_by_its_cpp_name() {
+    let mut cx = jsg::rtti::Context::default();
+    let greet_with = jsg::rtti::resource_members::<Host>(&mut cx)
+        .into_iter()
+        .find_map(|member| match member {
+            jsg::rtti::Member::Method {
+                name: "greetWith",
+                args,
+                ..
+            } => Some(args),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        greet_with[0].ty,
+        jsg::rtti::Type::CppStructure {
+            name: "TestCppGreeter",
+            fully_qualified_name: "workerd::cpp_interop_test::TestCppGreeter",
+        }
+    ));
+}
+
+#[test]
 fn rust_method_takes_a_cpp_subclass() {
     assert_eq!(eval::<String>("h.kindOf(derived)"), "derived");
 }

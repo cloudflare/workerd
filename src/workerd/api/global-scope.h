@@ -1010,7 +1010,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
     JSG_NESTED_TYPE(ErrorEvent);
 
-    if (flags.getExposeGlobalMessageChannel()) {
+    // Under the TS_MESSAGE_CHANNEL autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript MessageChannel and MessagePort instead.
+    if (flags.getExposeGlobalMessageChannel() && !useTypeScriptMessageChannel()) {
       JSG_NESTED_TYPE(MessageChannel);
       JSG_NESTED_TYPE(MessagePort);
     }

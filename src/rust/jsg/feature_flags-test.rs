@@ -62,3 +62,21 @@ fn reader_called_multiple_times() {
     assert!(ff.reader().get_node_js_compat());
     assert!(ff.reader().get_node_js_compat());
 }
+
+/// Reading the flags any number of times never exhausts a traversal limit, since one
+/// `FeatureFlags` serves every read in its isolate for as long as the isolate lives.
+#[test]
+fn reader_has_no_traversal_limit() {
+    let bytes = build_flags(|mut f| {
+        f.set_node_js_compat(true);
+    });
+    let ff = FeatureFlags::from_bytes(&bytes);
+    let default_limit = capnp::message::ReaderOptions::new()
+        .traversal_limit_in_words
+        .unwrap();
+    // Each `reader()` call reads the root struct, which is at least one word.
+    let reads = default_limit / (bytes.len() / 8) * 2;
+    for _ in 0..reads {
+        assert!(ff.reader().get_node_js_compat());
+    }
+}

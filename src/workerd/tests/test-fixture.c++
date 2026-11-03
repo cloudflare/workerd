@@ -124,9 +124,11 @@ class MockEntropySource final: public kj::EntropySource {
 
 struct MockLimitEnforcer final: public LimitEnforcer {
   MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount,
-      kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver)
+      kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver,
+      const kj::Maybe<EventOutcome>& limitsExceeded)
       : checkedSubrequestCount(checkedSubrequestCount),
-        actorCallReplayMemoryReserver(actorCallReplayMemoryReserver) {}
+        actorCallReplayMemoryReserver(actorCallReplayMemoryReserver),
+        limitsExceeded(limitsExceeded) {}
 
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
@@ -158,13 +160,15 @@ struct MockLimitEnforcer final: public LimitEnforcer {
     return kj::none;
   }
   kj::Maybe<EventOutcome> getLimitsExceeded() override {
-    return kj::none;
+    return limitsExceeded;
   }
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
   void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
-  void requireLimitsNotExceeded() override {}
+  void requireLimitsNotExceeded() override {
+    KJ_REQUIRE(limitsExceeded == kj::none, "the test exceeded its limits");
+  }
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
@@ -175,6 +179,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
 
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver;
+  const kj::Maybe<EventOutcome>& limitsExceeded;
 };
 
 // The number of startup limit scopes that the calling thread is in.
@@ -520,7 +525,8 @@ kj::Own<IoContext> TestFixture::newStatelessIoContext() {
 
 kj::Own<IoContext> TestFixture::newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor) {
   return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), maybeActor,
-      kj::heap<MockLimitEnforcer>(checkedSubrequestCount, actorCallReplayMemoryReserver));
+      kj::heap<MockLimitEnforcer>(
+          checkedSubrequestCount, actorCallReplayMemoryReserver, limitsExceeded));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
@@ -592,7 +598,8 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
   }
 
   return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), kj::none, Frankenvalue(),
-      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver),
+      kj::mv(actorRef),
+      kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver, limitsExceeded),
       kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
       kj::none, kj::none);
 }
