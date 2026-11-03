@@ -16,6 +16,7 @@ use super::*;
 fn unused_visitor() -> v8::GcVisitor {
     v8::GcVisitor {
         handle: v8::ffi::GcVisitor { ptr: 0 },
+        mode: v8::VisitMode::Visit,
     }
 }
 

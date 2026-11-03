@@ -317,3 +317,37 @@ fn held_resources_survive_gc() {
         Ok(())
     });
 }
+
+/// A C++ resource carried by a typed promise is detached from the promise's wrapper when a
+/// reaction takes it, as a moved `jsg::Ref` is, so it can go in a Rust resource and be traced
+/// there after a collection that the wrapper traced it in.
+#[test]
+fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host();
+        set_globals(lock, ctx, host.clone());
+        let holder = ctx.eval_raw(lock, "holder").unwrap();
+        let holder = <jsg_cpp::Ref<ffi::TestCppHolder> as jsg::FromJS>::from_js(lock, holder)?;
+        ctx.eval_raw(lock, "globalThis.holder = undefined;")
+            .unwrap();
+        let (promise, resolver) =
+            jsg::Promise::<jsg_cpp::Ref<ffi::TestCppHolder>>::new_with_resolver(lock)?;
+        let kept: jsg::Promise<()> = promise.then(lock, host, |lock, host, holder| {
+            host.hold(holder);
+            // Traces the host, and through it the reference, from its new owner.
+            Harness::request_gc(lock);
+            Ok(())
+        })?;
+        resolver.resolve(lock, holder)?;
+        // Only the opaque wrapper holds the reference now, and the collection makes it weak.
+        Harness::request_gc(lock);
+        Harness::run_microtasks(lock);
+        assert!(kept.try_consume_resolved(lock).is_ok());
+        Harness::request_gc(lock);
+        assert_eq!(
+            ctx.eval::<String>(lock, "h.held().which(greeter)").unwrap(),
+            "TestCppGreeter"
+        );
+        Ok(())
+    });
+}

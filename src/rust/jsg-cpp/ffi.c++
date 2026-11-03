@@ -19,4 +19,8 @@ void cpp_ref_visit(GcVisitor* visitor, const CppRef& ref) {
   ref.visitForGc(*::workerd::rust::jsg::gc_visitor_from_ffi(visitor));
 }
 
+void cpp_ref_detach(const CppRef& ref) {
+  ref.detach();
+}
+
 }  // namespace workerd::rust::jsg_cpp

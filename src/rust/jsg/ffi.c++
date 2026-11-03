@@ -633,6 +633,10 @@ void local_promise_mark_as_handled(const Local& promise) {
   local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
 }
 
+bool local_promise_has_handler(const Local& promise) {
+  return local_as_ref_from_ffi<v8::Promise>(promise)->HasHandler();
+}
+
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
@@ -880,11 +884,34 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
-MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+MaybeLocal wrappable_attach_opaque_wrapper(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing) {
   if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
-  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
+  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h), and
+  // the values wrapOpaque() carries through promises.
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
-      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true)));
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), needs_gc_tracing)));
+}
+
+namespace {
+// The Rust Wrappable that `wrappable` is, if it is one. C++ JSG has opaque wrappers of its own,
+// so the type is checked, as ::workerd::jsg::downcastWrappable() does.
+kj::Maybe<kj::Rc<Wrappable>> asRustWrappable(::workerd::jsg::Wrappable& wrappable) {
+  const auto& actualType = typeid(wrappable);
+  if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+    return kj::downcast<Wrappable>(wrappable).toRc();
+  }
+  return kj::none;
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value) {
+  KJ_IF_SOME(wrappable,
+      ::workerd::jsg::Wrappable::tryUnwrapOpaque(
+          isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    return asRustWrappable(wrappable);
+  }
+  return kj::none;
 }
 
 // Unwrappers
@@ -1174,12 +1201,8 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
-    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
-    // as ::workerd::jsg::downcastWrappable() does.
-    const auto& actualType = typeid(wrappable);
-    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
-      return kj::downcast<Wrappable>(wrappable).toRc();
-    }
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data.
+    return asRustWrappable(wrappable);
   }
   return kj::none;
 }

@@ -47,6 +47,9 @@ pub mod bridge {
         ///
         /// `visitor` is the visitor of a visit in progress.
         pub unsafe fn cpp_ref_visit(visitor: *mut GcVisitor, cpp_ref: &CppRef);
+        /// Makes the reference strong again and forgets its parent, as moving a C++ `jsg::Ref`
+        /// does; see `jsg::GcVisitor::is_detaching`. Requires the isolate lock.
+        pub fn cpp_ref_detach(cpp_ref: &CppRef);
     }
 
     impl KjOwn<CppRef> {}
@@ -208,8 +211,11 @@ impl<T: CppResource> Clone for Ref<T> {
 
 impl<T: CppResource> jsg::Traced for Ref<T> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
-        // SAFETY: the visitor's pointer is valid for the duration of the visit.
-        unsafe { bridge::cpp_ref_visit(visitor.as_ffi(), &self.inner) };
+        match visitor.as_ffi() {
+            // SAFETY: the visitor's pointer is valid for the duration of the visit.
+            Some(visitor) => unsafe { bridge::cpp_ref_visit(visitor, &self.inner) },
+            None => bridge::cpp_ref_detach(&self.inner),
+        }
     }
 }
 

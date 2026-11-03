@@ -297,8 +297,16 @@ impl<'a> Union<'a> {
                 #(#inner_types: jsg::ToJS<#s>,)*
             {
                 fn to_js(self, lock: &mut jsg::Lock<#s>) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
+                    jsg::ToJS::to_js_with_creator(self, lock, None)
+                }
+
+                fn to_js_with_creator(
+                    self,
+                    lock: &mut jsg::Lock<#s>,
+                    creator: Option<jsg::v8::Local<#s, jsg::v8::Object>>,
+                ) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
                     match self {
-                        #(Self::#variant_names(value) => jsg::ToJS::to_js(value, lock),)*
+                        #(Self::#variant_names(value) => jsg::ToJS::to_js_with_creator(value, lock, creator),)*
                     }
                 }
             }
