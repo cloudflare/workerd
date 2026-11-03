@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 
 use jsg::ToJS;
 use jsg::Traced;
+use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
 
@@ -284,7 +285,14 @@ impl Drop for Holder {
 }
 
 #[jsg_resource]
-impl Holder {}
+impl Holder {
+    #[jsg_method]
+    fn set_link<'s>(&self, lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) {
+        *self.link.borrow_mut(lock) = Some(ValueLink {
+            value: value.to_traced_global(lock),
+        });
+    }
+}
 
 /// A struct with a `TracedGlobal` field holds GC references, and a cycle through it is
 /// collected: `Holder` keeps a `ValueLink` whose value is the `Holder`'s own wrapper.
@@ -310,6 +318,34 @@ fn cycle_through_struct_js_value_field_is_collected() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// A struct taken out of a resource after a GC visit made its `TracedGlobal` weak is strong
+/// again, so a GC leaves its value alone while nothing traces it: `jsg::RefCell::borrow_mut`
+/// detaches the struct before it can leave the cell.
+#[test]
+fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let holder = jsg::Rc::new(Holder {
+            link: jsg::RefCell::new(None),
+        });
+        let wrapper = holder.clone().to_js(lock)?;
+        ctx.set_global(lock, "holder", wrapper);
+        // Only the `Holder` keeps the value alive; the script ends in `undefined` so that no
+        // `Local` of it outlives the script.
+        ctx.eval_raw(lock, "holder.setLink({ kept: 1 }); undefined")
+            .expect("should evaluate");
+        // The holder's wrapper is reachable, so the visit puts the value's handle in traced mode.
+        crate::Harness::request_gc(lock);
+
+        let link = holder.link.borrow_mut(lock).take().expect("set above");
+        crate::Harness::request_gc(lock);
+        let back = link.to_js(lock)?;
+        ctx.set_global(lock, "back", back);
+        assert!(ctx.eval::<bool>(lock, "back.value.kept === 1").unwrap());
         Ok(())
     });
 }

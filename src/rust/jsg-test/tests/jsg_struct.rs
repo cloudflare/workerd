@@ -503,7 +503,8 @@ fn struct_js_object_field_rejects_other_values() {
     });
 }
 
-/// A struct with `TracedGlobal` fields outlives the scope it was converted in.
+/// A struct with `TracedGlobal` fields outlives the scope it was converted in, and keeps its
+/// values through a GC: outside a resource, nothing has made its handles weak.
 #[test]
 fn struct_js_value_field_outlives_its_scope() {
     let harness = crate::Harness::new();
@@ -512,15 +513,16 @@ fn struct_js_value_field_outlives_its_scope() {
         *kept.borrow_mut() = Some(convert::<JsValueStruct>(
             lock,
             ctx,
-            "({ value: 'kept', object: { b: 2 } })",
+            "({ value: { a: 1 }, object: { b: 2 } })",
         )?);
         Ok(())
     });
     harness.run_in_context(|lock, ctx| {
+        crate::Harness::request_gc(lock);
         let back = kept.borrow_mut().take().unwrap().to_js(lock)?;
         ctx.set_global(lock, "back", back);
         assert!(
-            ctx.eval::<bool>(lock, "back.value === 'kept' && back.object.b === 2")
+            ctx.eval::<bool>(lock, "back.value.a === 1 && back.object.b === 2")
                 .unwrap()
         );
         Ok(())

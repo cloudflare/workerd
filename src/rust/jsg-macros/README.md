@@ -35,7 +35,11 @@ or `Undefined`, respectively. If all public fields are optional, a `null` or
 A field that holds a JavaScript value, as a C++ `jsg::JsRef<jsg::JsValue>` field does, is a
 `jsg::v8::TracedGlobal<M>`. It converts as a `Local<'s, M>` does: `TracedGlobal<Value>` takes any
 value, an absent property included, and `TracedGlobal<Object>` only an object. The struct then
-holds GC references, and a resource that keeps it traces the value.
+holds GC references, and a resource that keeps it traces the value. Once GC has visited it there,
+the handle is weak and relies on that trace, so a resource that sets or takes the struct after
+construction keeps it in a `jsg::Cell` or `jsg::RefCell`, which make the handle strong again
+before the struct can leave; a `std::cell::Cell` or `RefCell` of it doesn't compile. See "Cells"
+in `src/rust/jsg/README.md`.
 
 `ts_root` marks a TypeScript generation root; it can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
