@@ -3,12 +3,13 @@ name: Run internal build
 on:
   pull_request_target:
     # `edited` covers base branch changes: when the parent of a stacked PR merges, GitHub
-    # retargets the child onto the default branch, and the build must run then.
+    # retargets the child onto main, and the build must run then. Title and description edits
+    # also trigger it, and their runs must report the build result too: the merge box only
+    # considers the newest run of this workflow for a commit. If the merge commit is unchanged,
+    # the internal build service reuses its existing pipeline rather than starting a new one.
     types: [opened, synchronize, reopened, edited]
     # A stacked PR can't land until its parent merges and it is retargeted onto main, which
-    # triggers this workflow. Filtering here rather than in a job condition means a stacked PR
-    # has no `internal-build` check until then, rather than a skipped one that would count as
-    # passing once it targets main.
+    # triggers this workflow, so stacked PRs don't build before then.
     branches: [main]
 
 # Read-only permissions are enough
@@ -16,21 +17,11 @@ permissions: read-all
 
 concurrency:
   # Cancel existing builds for the same PR.
-  # Otherwise, all other builds will be allowed to run through.
-  # Edits that don't change the base branch (title, body) get a unique group so they don't
-  # cancel a build in progress.
-  group: internal-build-${{ (github.event.action != 'edited' || github.event.changes.base) && github.event.pull_request.number || github.run_id }}
+  group: internal-build-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  # `internal-build` is a required check, and GitHub counts a skipped required check as passing.
-  # GitHub still creates a check run for a job skipped by its `if`, so a skipped run for an edit
-  # must not be named `internal-build`: on the same commit as a build in progress, it would let
-  # the PR merge before that build finishes. Hence the job id is not `internal-build`, which
-  # GitHub could fall back to, and only runs that check the PR are given that name.
-  build:
-    name: "${{ (github.event.action != 'edited' || github.event.changes.base) && 'internal-build' || 'internal-build (skipped: PR edit only)' }}"
-    if: github.event.action != 'edited' || github.event.changes.base
+  internal-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted workflow tooling
