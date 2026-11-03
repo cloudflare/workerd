@@ -13,6 +13,7 @@ mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
+pub mod json;
 pub mod lenient;
 pub mod macros;
 pub mod modules;

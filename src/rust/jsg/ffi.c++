@@ -69,6 +69,16 @@ static v8::MaybeLocal<v8::String> newUtf8String(
   return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
+// Copies a V8 string into a Rust one. Lone surrogates become U+FFFD (rust::String::lossy), since
+// a rust::String must be valid UTF-8. Throws a KJ exception if the allocation fails.
+static ::rust::String toRustString(v8::Isolate* isolate, v8::Local<v8::String> str) {
+  v8::String::ValueView view(isolate, str);
+  if (view.is_one_byte()) {
+    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+  }
+  return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+}
+
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
 // overlong name throws. The property shims, which take a key from arbitrary Rust text, are
 // declared fallible in v8.rs for that reason. The names a resource template interns come from
@@ -927,13 +937,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
     return false;
   }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  } else {
-    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-  }
+  result = toRustString(isolate, v8Str);
   return true;
 }
 
@@ -1642,6 +1646,26 @@ void realm_detach(Isolate* isolate, const IsolateState* state) {
 bool integer_enforce_range_autogate_enabled() {
   return ::workerd::util::Autogate::isEnabled(
       ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
+}
+
+// JSON
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text) {
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(
+      v8::JSON::Parse(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::String>(text)));
+}
+
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result) {
+  if (exceptionPending(isolate)) return false;
+  v8::Local<v8::String> json;
+  if (!v8::JSON::Stringify(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value),
+          local_as_ref_from_ffi<v8::String>(gap))
+           .ToLocal(&json)) {
+    return false;
+  }
+  result = toRustString(isolate, json);
+  return true;
 }
 
 // Errors

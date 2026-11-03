@@ -562,6 +562,20 @@ bool local_serialize(Isolate* isolate,
 // exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
+// JSON
+// As jsg::Lock::parseJson() and serializeJson(), through v8::JSON.
+//
+// Parses `text`, a string, and returns the value, or none if it is not valid JSON, leaving the
+// SyntaxError pending. Runs no JavaScript.
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text);
+// Stringifies `value`, indenting by `gap`, a string (no indenting if it is empty), stores the
+// result in `result` and returns true, or returns false if stringifying threw, leaving the
+// exception pending: what a getter, toJSON() or Proxy trap threw, or a TypeError for a cycle or a
+// BigInt. A value that JSON can't represent, such as undefined or a function, gives the string
+// "undefined".
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result);
+
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
