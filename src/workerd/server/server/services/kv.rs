@@ -94,7 +94,7 @@ fn rewrite(words: &[u64]) -> capnp::Result<Option<Vec<u64>>> {
     for i in 0..n {
         services.set_with_caveats(i, old_services.get(i))?;
     }
-    add_worker(services.get(n), &disk);
+    add_worker(services.get(n), &disk, old.has_cluster());
     Ok(Some(
         capnp::serialize::write_message_to_words(&message)
             .chunks_exact(8)
@@ -107,7 +107,9 @@ fn rewrite(words: &[u64]) -> capnp::Result<Option<Vec<u64>>> {
     ))
 }
 
-fn add_worker(mut service: service::Builder<'_>, disk: &str) {
+/// `clustered` turns on the Worker's entry cache: locally the object is in
+/// the process, and another process's write must be seen at once.
+fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     service.set_name(NAME);
     let mut w = service.init_worker();
     let mut module = w.reborrow().init_modules(1).get(0);
@@ -121,21 +123,25 @@ fn add_worker(mut service: service::Builder<'_>, disk: &str) {
     w.reborrow()
         .init_durable_object_storage()
         .set_local_disk(disk);
-    let mut bindings = w.init_bindings(2);
+    let mut bindings = w.init_bindings(3);
     let mut shard = bindings.reborrow().get(0);
     shard.set_name("SHARD");
     shard
         .init_durable_object_namespace()
         .set_class_name("KVNamespace");
-    let mut blobs = bindings.get(1);
+    let mut blobs = bindings.reborrow().get(1);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(BLOBS);
+    let mut cluster = bindings.get(2);
+    cluster.set_name("CLUSTERED");
+    cluster.set_json(clustered.to_string());
 }
 
-/// `Config.builtinStorage`, if a Worker binds a `kvNamespaceId`; `None`
-/// when none does. Names starting `workerd:` are the built-ins', which the
-/// factory compiles with experimental features and their own compatibility
-/// date, so a config may not define one.
+/// `Config.builtinStorage`, which a Worker that binds a `kvNamespaceId`
+/// needs; `None` when there is none. Names starting `workerd:` are the
+/// built-ins', which the factory compiles with experimental features and
+/// their own compatibility date, so a config may not define one, though
+/// it may name one.
 fn disk(config: config::Reader<'_>) -> capnp::Result<Option<String>> {
     let fail = |m: String| Err(capnp::Error::failed(m));
     for service in config.get_services()? {

@@ -784,6 +784,23 @@ test('cluster: a node caches KV blobs on its disk', async () => {
   });
 });
 
+// A read whose reply arrives after a newer write from the same node does
+// not replace the write's entry in the node's cache.
+test('cluster: a KV read racing a write keeps the write cached', async () => {
+  await withCluster(1, async ({ nodes }) => {
+    const [a] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const size = String(2 * 1024 * 1024);
+    await fetchJson(a, `/kv/put?${q({ key: 'race', size })}`);
+    await Promise.all([
+      fetchJson(a, `/kv/get?${q({ key: 'race' })}`),
+      fetchJson(a, `/kv/put?${q({ key: 'race', value: 'new' })}`),
+    ]);
+    const now = (await fetchJson(a, `/kv/get?${q({ key: 'race' })}`)).body;
+    assert.deepStrictEqual([now.value, now.cacheStatus], ['new', 'HIT']);
+  });
+});
+
 // A node's cache keeps what it read for the read's cacheTtl; another
 // node's write does not reach it sooner.
 test('cluster: KV reads are stale for at most cacheTtl', async () => {

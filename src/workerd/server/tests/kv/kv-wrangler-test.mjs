@@ -122,4 +122,24 @@ test('kv_namespaces in a wrangler.jsonc', async () => {
   await server.stop();
   const storage = join(dir, '.wrangler/state/workerd/builtin');
   assert.ok((await stat(join(storage, 'workerd-KVNamespace'))).isDirectory());
+
+  // Two processes on the same storage, as `wrangler dev` and `wrangler kv
+  // key put --local` are: each sees the other's writes at once, misses
+  // included, since nothing is cached outside a cluster.
+  const [one, two] = [
+    await serve(dir, ['--experimental']),
+    await serve(dir, ['--experimental']),
+  ];
+  const at = (s, path) => `http://127.0.0.1:${s.port}${path}`;
+  const read = async (s, path) => {
+    const r = await fetch(at(s, path));
+    return r.status === 404 ? null : await r.text();
+  };
+  assert.strictEqual(await read(one, '/A/shared'), null);
+  await fetch(at(two, '/A/shared'), { method: 'PUT', body: 'from two' });
+  assert.strictEqual(await read(one, '/A/shared'), 'from two');
+  await fetch(at(two, '/A/shared'), { method: 'DELETE' });
+  assert.strictEqual(await read(one, '/A/shared'), null);
+  await one.stop();
+  await two.stop();
 });

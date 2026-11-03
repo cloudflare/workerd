@@ -204,28 +204,23 @@ export const listInlineAndBlobs = {
   },
 };
 
+// Locally nothing is cached: another process on the same storage, as
+// `wrangler kv key put --local` is, must be seen at once (kv-wrangler-test).
+// The cluster's cache is cluster-test's.
 export const cacheTtl = {
   async test(ctrl, env) {
     await env.KV.put('c', 'v');
     assert.strictEqual(await env.KV.get('c', { cacheTtl: 30 }), 'v');
-    await assert.rejects(env.KV.get('c', { cacheTtl: 29 }), /400/);
-    const got = await env.KV.getWithMetadata('c');
-    assert.strictEqual(got.cacheStatus, 'HIT');
-    // A row names its blob, so a large value's row is cached too.
-    const big = 'b'.repeat(2 * 1024 * 1024);
-    await env.KV.put('big', big);
-    const again = await env.KV.getWithMetadata('big');
-    assert.deepStrictEqual([again.value, again.cacheStatus], [big, 'HIT']);
-    // Another namespace shares no entries.
-    assert.strictEqual(
-      (await env.OTHER.getWithMetadata('c')).cacheStatus,
-      'MISS'
+    await assert.rejects(
+      env.KV.get('c', { cacheTtl: 29 }),
+      /400 Invalid cache_ttl of 29. Cache TTL must be at least 30./
     );
+    const got = await env.KV.getWithMetadata('c');
+    assert.deepStrictEqual([got.value, got.cacheStatus], ['v', 'MISS']);
   },
 };
 
-// A read whose blob arrives after a newer write from the same process
-// does not replace the write's entry in the cache.
+// A read racing a write from the same process.
 export const readRacesWrite = {
   async test(ctrl, env) {
     const old = 'o'.repeat(2 * 1024 * 1024);
@@ -235,8 +230,7 @@ export const readRacesWrite = {
       env.KV.put('race', 'new'),
     ]);
     assert.ok(got === old || got === 'new');
-    const now = await env.KV.getWithMetadata('race');
-    assert.deepStrictEqual([now.value, now.cacheStatus], ['new', 'HIT']);
+    assert.strictEqual(await env.KV.get('race'), 'new');
   },
 };
 

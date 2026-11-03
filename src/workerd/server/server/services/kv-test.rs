@@ -70,6 +70,40 @@ fn the_builtin_uses_builtin_storage() {
     });
 }
 
+/// The built-in's `CLUSTERED` binding, for a config with a cluster if
+/// `cluster`.
+fn clustered(cluster: bool) -> String {
+    let mut message = message::Builder::new_default();
+    let mut root = message.init_root::<config::Builder>();
+    root.set_builtin_storage("store");
+    if cluster {
+        root.reborrow().init_cluster();
+    }
+    let mut s = root.init_services(1).get(0);
+    s.set_name("a");
+    let mut b = s.init_worker().init_bindings(1).get(0);
+    b.set_name("KV");
+    b.set_kv_namespace_id("ns");
+    let mut out = String::new();
+    builtin(&words(&message), |w| {
+        for b in w.get_bindings().unwrap() {
+            if b.get_name().unwrap() == "CLUSTERED" {
+                let worker::binding::Which::Json(j) = b.which().unwrap() else {
+                    panic!("not json");
+                };
+                out = j.unwrap().to_string().unwrap();
+            }
+        }
+    });
+    out
+}
+
+#[test]
+fn the_builtin_knows_whether_it_is_clustered() {
+    assert_eq!(clustered(false), "false");
+    assert_eq!(clustered(true), "true");
+}
+
 #[test]
 fn the_builtin_prefix_is_reserved() {
     for name in [NAME, BLOBS, "workerd:x"] {

@@ -17,11 +17,13 @@
 // table and its alarm.
 //
 // This Worker reads and writes blobs itself, so large values do not pass
-// through the object, and keeps a per-process cache of rows and misses for
-// each read's `cacheTtl`, which this process's writes update and nothing
-// else invalidates. Rows name blobs rather than hold them, so entries are
-// small; blobs never change, and in a cluster `BLOBS` caches them on the
-// node's disk.
+// through the object. In a cluster (`CLUSTERED`) it keeps a per-process
+// cache of rows and misses for each read's `cacheTtl`, which this process's
+// writes update and nothing else invalidates. Locally it keeps none: the
+// object is in the process, and another process on the same storage, such
+// as `wrangler kv key put --local`, must be seen at once. Rows name blobs
+// rather than hold them, so entries are small; blobs never change, and in a
+// cluster `BLOBS` caches them on the node's disk.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -51,10 +53,17 @@ class Fail extends Error {
 const fail = (status, text) =>
   new Response(null, { status, statusText: text.replace(/[\r\n]/g, ' ') });
 
+let clustered;
+
 export default {
   async fetch(request, env, ctx) {
+    clustered ??= env.CLUSTERED;
+    const ns = ctx.props?.namespace;
+    if (typeof ns !== 'string') {
+      return fail(400, 'No namespace: props must be {"namespace": "<id>"}.');
+    }
     try {
-      return await serve(request, env, ctx.props.namespace);
+      return await serve(request, env, ns);
     } catch (e) {
       return fail(e.status ?? 500, String(e.message ?? e));
     }
@@ -283,6 +292,7 @@ function cost(k, row) {
 // unless the cache holds a later one: replies to one node's concurrent
 // reads and writes can arrive out of order.
 function remember(space, key, row, ttl, version) {
+  if (!clustered) return;
   const k = cacheKey(space, key);
   if ((cache.get(k)?.version ?? -1) > version) return;
   forget(k);
