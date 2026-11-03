@@ -1,0 +1,25 @@
+src/workerd/server/server.c++
+  s_beec2eef2fbbe5::t_33f35f11c78d6f 3505,3524,4351,4721-4723,4728-4730,6457
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_63c10de3cd6f6b 1-7
+src/workerd/server/tests/virtual-time/virtual-time-test.js
+  s_beec2eef2fbbe5::t_8c9b8be20572d8 1-23
+src/workerd/server/tests/virtual-time/virtual-time-test.wd-test
+  s_beec2eef2fbbe5::t_0eeb7302f4cbb7 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "215a5e6311ab6ad8a3eb192f65053cedf4dbcb1d",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

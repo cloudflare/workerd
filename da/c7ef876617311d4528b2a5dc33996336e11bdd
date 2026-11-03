@@ -1,0 +1,45 @@
+src/workerd/api/actor-call-retry.h
+  s_657b038fd78fad::t_857ae81c8563d5 16-19,89-91,178-180
+src/workerd/api/actor-call-retry.c++
+  s_657b038fd78fad::t_def93d2ce1f72f 9,176-183,192-198
+src/workerd/util/virtual-time-test.c++
+  s_657b038fd78fad::t_0d6aa3fdd5e529 168-169,174-178,183
+src/workerd/util/virtual-time.h
+  s_657b038fd78fad::t_509710bcd76172 183,222,232-235,250,386
+src/workerd/api/actor-call-retry-test.c++
+  s_657b038fd78fad::t_67cb96f7ead706 8,11,28-29,41-42,83-84,91,562-664
+src/workerd/server/tests/virtual-time/virtual-time-actor-retry-test.js
+  s_657b038fd78fad::t_69ea0647687875 1-147
+src/workerd/api/unsafe.c++
+  s_657b038fd78fad::t_b2e34817b7aabd 282
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_657b038fd78fad::t_02faa415c1c639 125-130
+docs/virtual-time.md
+  s_657b038fd78fad::t_f96097c6d33a8c 27-32,48,80-88,91-97
+src/workerd/server/server.c++
+  s_657b038fd78fad::t_f43041a98e263d 5552-5556,8535-8537,8562-8564
+src/workerd/server/workerd.capnp
+  s_657b038fd78fad::t_352ec949abd6f2 207-213
+src/workerd/api/http.c++
+  s_657b038fd78fad::t_ca69ed2bda2323 1587,1723
+src/workerd/api/unsafe.h
+  s_657b038fd78fad::t_467b626d197da7 133,145,506
+src/workerd/api/worker-rpc.c++
+  s_657b038fd78fad::t_5d68368cd5fe21 1008,1107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dac7ef876617311d4528b2a5dc33996336e11bdd",
+  "prompts": {},
+  "sessions": {
+    "s_657b038fd78fad": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1895b-f6c0-71b7-b40b-742c08fed49a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+src/workerd/util/runtime-trace.h
+  s_23b639c1b7d101::t_f16a784326abe3 86-90,92,95
+src/workerd/api/unsafe.c++
+  s_23b639c1b7d101::t_452ad8594f7b05 549-551,559-595,599-602,604-608,611,626-632,638-646,655,660-697
+docs/virtual-time.md
+  s_23b639c1b7d101::t_b964f436235cd4 517-518,577-607
+  s_4eddcb09fd48f2::t_c8e99e3e855b07 608
+src/workerd/server/tests/virtual-time/virtual-time-runtime-trace-test.js
+  s_23b639c1b7d101::t_9504a6fa2d0849 616-722
+  s_4eddcb09fd48f2::t_2606c9a581fa77 12-14,216
+src/workerd/api/unsafe.h
+  s_23b639c1b7d101::t_26ae722db02a11 438-439,454,457,465-467,473,553,632-633,644-645
+  s_4eddcb09fd48f2::t_2738448676841b 9,398-426,428-431
+src/workerd/util/runtime-trace-test.c++
+  s_23b639c1b7d101::t_ca3320bd68d4c3 61-132
+src/workerd/util/runtime-trace.c++
+  s_23b639c1b7d101::t_04730dcf47b2fd 16,55,69-84,87-96,98-99,105,122-124
+  s_4eddcb09fd48f2::t_8f41a27eb5d5f3 131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "539616d05307bfcb2705cc61fdeebb2e055c396b",
+  "prompts": {},
+  "sessions": {
+    "s_23b639c1b7d101": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18dd1-d250-705e-9cd8-f2f0848b6d0e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_4eddcb09fd48f2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18e14-69b7-77b5-bffd-ec00eb8715bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

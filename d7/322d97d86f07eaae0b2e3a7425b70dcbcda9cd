@@ -1,0 +1,57 @@
+docs/virtual-time.md
+  s_beec2eef2fbbe5::t_fa15e073f85683 46,159-209
+src/workerd/api/unsafe.c++
+  s_beec2eef2fbbe5::t_eccbfe26994659 400-427
+src/workerd/api/unsafe.h
+  s_beec2eef2fbbe5::t_f1574b75f6a178 295-351,391,406-409,420,456-457,464-465
+src/workerd/server/server.c++
+  s_beec2eef2fbbe5::t_fb36be456a5686 236-295,1383-1406,1411-1416,1418-1419,1421-1423,1438,7754-7772,7780-7783,7832-7868,8208-8211
+src/workerd/server/server.h
+  s_beec2eef2fbbe5::t_0bf92c2e988f1c 155
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_0eee83bc41d7bd 38-43
+src/workerd/server/tests/virtual-time/virtual-time-sql-test.js
+  s_beec2eef2fbbe5::t_4704f91761ca68 6,44-54
+src/workerd/server/tests/virtual-time/virtual-time-sql-test.wd-test
+  s_beec2eef2fbbe5::t_f532611d1eb11a 10
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_beec2eef2fbbe5::t_789a65bcb3e284 1-303
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.wd-test
+  s_beec2eef2fbbe5::t_27ee53d9fb4cab 1-34
+src/workerd/server/workerd.capnp
+  s_beec2eef2fbbe5::t_3790b8b85a9dfa 140-153
+src/workerd/util/BUILD.bazel
+  s_beec2eef2fbbe5::t_73b45abc5a715e 48-57,65,468-474
+src/workerd/util/sqlite-test.c++
+  s_beec2eef2fbbe5::t_909af6f90549f2 1529-1532,1552-1554,2024-2322
+src/workerd/util/sqlite.c++
+  s_beec2eef2fbbe5::t_531386edd1c0ec 679-842
+src/workerd/util/sqlite.h
+  s_beec2eef2fbbe5::t_bed020572b30d5 360-386,448-462
+src/workerd/util/storage-telemetry-test.c++
+  s_beec2eef2fbbe5::t_095e898bc265fc 1-184
+src/workerd/util/storage-telemetry.c++
+  s_beec2eef2fbbe5::t_5c7ddce86ff102 1-186
+src/workerd/util/storage-telemetry.h
+  s_beec2eef2fbbe5::t_7761cc4c0ee6e7 1-103
+src/workerd/util/virtual-time.c++
+  s_beec2eef2fbbe5::t_ed740e89fbb9c9 430-438
+src/workerd/util/virtual-time.h
+  s_beec2eef2fbbe5::t_261fa949be77db 8,242-249,290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d7322d97d86f07eaae0b2e3a7425b70dcbcda9cd",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}
