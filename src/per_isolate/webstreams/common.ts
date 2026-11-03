@@ -19,7 +19,7 @@ const {
   PromiseWithResolvers,
   RangeError,
   TypeError,
-  uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { isPromise, markPromiseHandled } = utils;
@@ -283,8 +283,7 @@ function extractSizeAlgorithm<T>(
 ): (chunk: T) => number {
   const { size } = strategy;
   if (size === undefined) return () => 1;
-  const callSize = uncurryThis(size);
-  return (chunk: T) => callSize(undefined, chunk);
+  return (chunk: T) => FunctionPrototypeCall(size, undefined, chunk);
 }
 
 // WebIDL's conversion of an optional callback member of a source, sink or

@@ -40,7 +40,7 @@ const {
   SymbolFor,
   SymbolToStringTag,
   TypeError,
-  uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { isArrayBuffer, isArrayBufferView, utf8Length } = utils;
@@ -461,7 +461,7 @@ class WritableStream<W = unknown> {
       if (nativeSink !== undefined) {
         const detachFn = (nativeSink as { detach: (this: object) => unknown })
           .detach;
-        reason = uncurryThis(detachFn)(nativeSink);
+        reason = FunctionPrototypeCall(detachFn, nativeSink);
         stream.#nativeSink = undefined;
       } else {
         reason = new TypeError('This WritableStream has been detached.');
@@ -926,12 +926,10 @@ class WritableStreamDefaultController<
   // closure's context can stay reachable after the closure is dropped (from
   // JIT-compiled code), and the sink with it.
   #underlyingSink: UnderlyingSink<W> | undefined;
-  #writeHook:
-    | ((sink: UnderlyingSink<W>, chunk: W, controller: this) => unknown)
-    | undefined;
-  #closeHook: ((sink: UnderlyingSink<W>) => unknown) | undefined;
-  #abortHook:
-    ((sink: UnderlyingSink<W>, reason: unknown) => unknown) | undefined;
+  // The sink's write, close and abort members, called on the sink.
+  #writeHook: Function | undefined;
+  #closeHook: Function | undefined;
+  #abortHook: Function | undefined;
   // The controller behind `signal`, created when `signal` is first read:
   // until then no code can hold the signal, listen to it, or read its
   // reason, so an abort only records that it happened. An AbortController
@@ -1103,9 +1101,9 @@ class WritableStreamDefaultController<
       write: writeFn,
     } = sinkDict;
     this.#underlyingSink = underlyingSink;
-    this.#writeHook = writeFn === undefined ? undefined : uncurryThis(writeFn);
-    this.#closeHook = closeFn === undefined ? undefined : uncurryThis(closeFn);
-    this.#abortHook = abortFn === undefined ? undefined : uncurryThis(abortFn);
+    this.#writeHook = writeFn;
+    this.#closeHook = closeFn;
+    this.#abortHook = abortFn;
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -1121,7 +1119,7 @@ class WritableStreamDefaultController<
     const startResult: unknown =
       startFn === undefined
         ? undefined
-        : uncurryThis(startFn)(underlyingSink, this);
+        : FunctionPrototypeCall(startFn, underlyingSink, this);
     PromisePrototypeThen(
       promiseResolvedWith(startResult),
       () => {
@@ -1179,7 +1177,7 @@ class WritableStreamDefaultController<
     if (hook === undefined) return PromiseResolve();
     try {
       return PromiseResolve(
-        hook(this.#underlyingSink as UnderlyingSink<W>, chunk, this)
+        FunctionPrototypeCall(hook, this.#underlyingSink, chunk, this)
       ) as Promise<void>;
     } catch (e) {
       return PromiseReject(e);
@@ -1191,7 +1189,7 @@ class WritableStreamDefaultController<
     if (hook === undefined) return PromiseResolve();
     try {
       return PromiseResolve(
-        hook(this.#underlyingSink as UnderlyingSink<W>)
+        FunctionPrototypeCall(hook, this.#underlyingSink)
       ) as Promise<void>;
     } catch (e) {
       return PromiseReject(e);
@@ -1203,7 +1201,7 @@ class WritableStreamDefaultController<
     if (hook === undefined) return PromiseResolve();
     try {
       return PromiseResolve(
-        hook(this.#underlyingSink as UnderlyingSink<W>, reason)
+        FunctionPrototypeCall(hook, this.#underlyingSink, reason)
       ) as Promise<void>;
     } catch (e) {
       return PromiseReject(e);

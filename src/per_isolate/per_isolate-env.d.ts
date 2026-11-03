@@ -68,6 +68,16 @@ declare const primordials: {
     ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
     : (...args: any[]) => any;
 
+  // fn.call(thisArg, ...args), immune to a patched Function.prototype.call.
+  // Cheaper than uncurryThis(fn) for a function called a few times, as
+  // a stream's source, sink and transformer callbacks are: uncurryThis
+  // binds a new function.
+  readonly FunctionPrototypeCall: (
+    fn: Function,
+    thisArg: unknown,
+    ...args: unknown[]
+  ) => any;
+
   // Uncurries the getter of `proto`'s own accessor `name`, typed as T; throws
   // if there is none.
   readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;

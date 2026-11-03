@@ -77,6 +77,7 @@ const WeakSetCtor = WeakSet;
 
 // Function
 const FunctionPrototypeBind = uncurryThis(FunctionPrototype.bind);
+const FunctionPrototypeCall = uncurryThis(call);
 
 // Object
 const ObjectCreate = Object.create;
@@ -702,6 +703,7 @@ module.exports = ObjectFreeze({
   // Function
   FunctionPrototype,
   FunctionPrototypeBind,
+  FunctionPrototypeCall,
 
   // Object
   ObjectPrototype,

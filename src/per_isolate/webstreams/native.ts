@@ -166,7 +166,7 @@ const {
   TypeError,
   TypedArrayPrototypeGetByteLength,
   Uint8Array,
-  uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
@@ -1077,8 +1077,8 @@ function declaresMember(source: object, key: string): boolean {
 }
 
 // Extraction follows the queued controllers' conventions: properties are
-// read ONCE, validated, and invoked thereafter only via captured
-// uncurryThis wrappers with the source as `this` (spec
+// read ONCE, validated, and invoked thereafter only via the captured
+// FunctionPrototypeCall with the source as `this` (spec
 // CreateAlgorithmFromUnderlyingMethod / PromiseCall). `start` is
 // deliberately NOT read: native sources have no start algorithm (assumed
 // no-op per the contract; its presence is simply ignored).
@@ -1126,13 +1126,14 @@ function createNativeReadableStreamParts(
 
   let pullAlgorithm: PullAlgorithm | undefined;
   if (pullFn !== undefined) {
-    const callPull = uncurryThis(pullFn);
     pullAlgorithm = (
       controller: NativeReadableStreamController,
       signal: AbortSignal
     ) => {
       try {
-        return PromiseResolve(callPull(source, controller, signal));
+        return PromiseResolve(
+          FunctionPrototypeCall(pullFn, source, controller, signal)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1140,10 +1141,9 @@ function createNativeReadableStreamParts(
   }
   let cancelAlgorithm: CancelAlgorithm | undefined;
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancelAlgorithm = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(source, reason));
+        return PromiseResolve(FunctionPrototypeCall(cancelFn, source, reason));
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1151,9 +1151,8 @@ function createNativeReadableStreamParts(
   }
   let teeAlgorithm: (() => unknown) | undefined;
   if (teeFn !== undefined) {
-    const callTee = uncurryThis(teeFn);
     // Synchronous by contract: the branches exist upon return.
-    teeAlgorithm = () => callTee(source);
+    teeAlgorithm = () => FunctionPrototypeCall(teeFn, source);
   }
 
   const conduit = new NativePullConduit(

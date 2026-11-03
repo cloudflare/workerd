@@ -87,6 +87,7 @@ const {
   TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const {
@@ -1344,7 +1345,7 @@ interface SourceAlgorithms {
 }
 
 // A queued controller's pull and cancel algorithms, calling the hooks
-// through captured uncurryThis wrappers with the source object as `this`
+// through the captured FunctionPrototypeCall with the source object as `this`
 // (spec CreateAlgorithmFromUnderlyingMethod). Built outside the controller
 // constructors so that `underlyingSource` is captured only by these
 // closures, not by the constructor's shared context (which the queue's
@@ -1360,10 +1361,11 @@ function makeSourceAlgorithms<C>(
   // promise.
   let cancel: SourceAlgorithms['cancel'];
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancel = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(underlyingSource, reason));
+        return PromiseResolve(
+          FunctionPrototypeCall(cancelFn, underlyingSource, reason)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1371,10 +1373,11 @@ function makeSourceAlgorithms<C>(
   }
   let pull: SourceAlgorithms['pull'];
   if (pullFn !== undefined) {
-    const callPull = uncurryThis(pullFn);
     pull = () => {
       try {
-        return PromiseResolve(callPull(underlyingSource, controller));
+        return PromiseResolve(
+          FunctionPrototypeCall(pullFn, underlyingSource, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1814,7 +1817,7 @@ class ReadableStreamDefaultController<
     core.start(
       startFn === undefined
         ? undefined
-        : uncurryThis(startFn)(underlyingSource, this)
+        : FunctionPrototypeCall(startFn, underlyingSource, this)
     );
   }
 
@@ -2177,7 +2180,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     core.start(
       startFn === undefined
         ? undefined
-        : uncurryThis(startFn)(underlyingSource, this)
+        : FunctionPrototypeCall(startFn, underlyingSource, this)
     );
   }
 
@@ -3337,7 +3340,7 @@ function openIterator(
   iterable: object,
   method: IteratorMethod
 ): { iterator: object; next: BoundNext } {
-  const iterator: unknown = uncurryThis(method)(iterable);
+  const iterator: unknown = FunctionPrototypeCall(method, iterable);
   if (!isObjectLike(iterator)) {
     throw new TypeError('The iterator method must return an object');
   }
@@ -3373,7 +3376,8 @@ function closeSyncIteratorAfterError(iterator: object): void {
       'return',
       'Iterator return() is not a function'
     );
-    if (returnMethod !== undefined) uncurryThis(returnMethod)(iterator);
+    if (returnMethod !== undefined)
+      FunctionPrototypeCall(returnMethod, iterator);
   } catch {
     // The original error wins.
   }
@@ -3434,7 +3438,7 @@ function closeIterator(
     if (returnMethod === undefined) {
       return PromiseResolve(undefined);
     }
-    returnResult = uncurryThis(returnMethod)(iterator, reason);
+    returnResult = FunctionPrototypeCall(returnMethod, iterator, reason);
   } catch (e) {
     return PromiseReject(e);
   }
@@ -3933,13 +3937,13 @@ class ReadableStream<R> {
           !writableInternals.writeQueuedOrInFlight(destination)
         ) {
           // Captured-call discipline: Function.prototype.call is patchable,
-          // so re-bind both extractors and the hook through uncurryThis
-          // (captured Reflect machinery) instead of .call().
-          const nativeSource = uncurryThis(sourceExtractor)(source);
-          const nativeSink = uncurryThis(sinkExtractor)(destination) as Record<
-            string,
-            unknown
-          >;
+          // so call both extractors and the hook through the captured
+          // FunctionPrototypeCall instead of .call().
+          const nativeSource = FunctionPrototypeCall(sourceExtractor, source);
+          const nativeSink = FunctionPrototypeCall(
+            sinkExtractor,
+            destination
+          ) as Record<string, unknown>;
           const pipeFrom = nativeSink.pipeFrom as
             | ((source: object, opts: ConvertedPipeOptions) => Promise<void>)
             | undefined;
@@ -3954,7 +3958,12 @@ class ReadableStream<R> {
             destination
           ) as WritableStreamDefaultWriterType<R>;
           return finishNativePipe(
-            uncurryThis(pipeFrom)(nativeSink, nativeSource, converted),
+            FunctionPrototypeCall(
+              pipeFrom,
+              nativeSink,
+              nativeSource,
+              converted
+            ),
             reader,
             destination,
             writer
