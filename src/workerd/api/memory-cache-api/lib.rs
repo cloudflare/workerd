@@ -59,10 +59,14 @@ impl MemoryCache {
         key: v8::Local<'s, v8::Value>,
         fallback: Option<v8::Local<'s, v8::Value>>,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
-        // As a C++ method that returns a promise, it rejects rather than throws.
-        match self.read_promise(lock, key, fallback) {
-            Err(err) if !err.is_pending() => v8::Promise::rejected_with_error(lock, &err),
-            result => result,
+        // As JSG calls a C++ method that returns a promise: under capture_async_api_throws, what
+        // it throws rejects the promise instead, and otherwise it is thrown.
+        if !lock.feature_flags().get_capture_throws_as_rejections() {
+            return self.read_promise(lock, key, fallback);
+        }
+        match lock.try_catch(|lock| self.read_promise(lock, key, fallback))? {
+            Ok(promise) => Ok(promise),
+            Err(exception) => v8::Promise::rejected(lock, exception),
         }
     }
 
@@ -113,8 +117,10 @@ impl MemoryCache {
                 })
             })
             .transpose()?;
+        // As memory-cache.c++, which rejects explicitly, whatever capture_async_api_throws says.
         if key.len() > MAX_KEY_SIZE {
-            return Err(jsg::Error::new_range_error("Key too large."));
+            let err = jsg::Error::new_range_error("Key too large.");
+            return v8::Promise::rejected_with_error(lock, &err);
         }
         let io_context = IoContext::current(lock)?;
         let mut spans = ReadSpans::start(&io_context)?;

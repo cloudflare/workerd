@@ -39,5 +39,29 @@ const unitTests :Workerd.Config = (
         ]
       )
     ),
+    # Whether read() throws or rejects, with capture_async_api_throws as the compatibility date
+    # sets it, and with it enabled explicitly.
+    ( name = "memory-cache-throws-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "memory-cache-throws-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "memory_cache_delete"],
+        bindings = [
+          (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
+        ]
+      )
+    ),
+    ( name = "memory-cache-throws-captured-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "memory-cache-throws-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "memory_cache_delete", "capture_async_api_throws"],
+        bindings = [
+          (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
+        ]
+      )
+    ),
   ],
 );

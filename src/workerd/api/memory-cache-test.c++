@@ -295,8 +295,8 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
 // its limits, then deletes of a cached key and of one never cached. The fallbacks of a key's
 // reads are coalesced: the second read of "b" waits for the first, and the second of "c" runs its
 // own once the first's fails.
-// TODO(test): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions (#7951).
-// Rust throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
+// TODO(#7951): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions. Rust
+// throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
 constexpr auto PARITY_SCENARIO = R"SCRIPT(
   export default {
     async fetch() {
