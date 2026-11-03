@@ -16035,7 +16035,7 @@ export interface IdentityOAuthClientMetadataDocument {
   /** Public opaque workload name. */
   client_name: string;
   token_endpoint_auth_method: "private_key_jwt";
-  token_endpoint_auth_signing_alg: "Ed25519";
+  token_endpoint_auth_signing_alg: "ES256" | "Ed25519";
   /** Active and spare public verification keys. */
   jwks: {
     keys: JsonWebKey[];
@@ -16043,10 +16043,22 @@ export interface IdentityOAuthClientMetadataDocument {
   grant_types: "client_credentials"[];
   response_types: never[];
 }
-/** Service-hosted managed HTTP identity with a fixed parent and optional label. */
+/** Select an application-supplied immutable agent ID within the parent workload. */
+export interface IdentitySelection {
+  /** Case-sensitive, non-reused ID; 1–128 ASCII letters, digits, underscores or hyphens. */
+  agentId?: string;
+}
+/** Service-hosted identity with a fixed actor and the parent binding's authority. */
 export interface IdentityFetcher extends Rpc.RpcTargetBranded {
   /** Stable opaque identity ID; await this property on its RPC stub. */
   readonly id: Promise<string>;
+  /** Fresh five-minute JWT for this actor; requires the binding's configured audience. */
+  getToken(): Promise<string>;
+  /** Fresh WAG for this actor within the binding's authorization-server and scope limits. */
+  getAuthorizationGrant(options: {
+    authorizationServer: string;
+    scope?: string[];
+  }): Promise<string>;
   /** Public Web Bot Auth identity URL; await this property on its RPC stub. */
   readonly signatureAgent: Promise<string>;
   /** Public signed key directory URL; await this property on its RPC stub. */
@@ -16068,15 +16080,20 @@ export interface IdentityFetcher extends Rpc.RpcTargetBranded {
 }
 /** A direct platform-compiled JSRPC capability. Forwarding retains its authority. */
 export interface IdentityBinding {
-  /** Returns a fresh five-minute JWT; requires a configured audience. */
+  /** Fresh five-minute JWT for the default workload principal; requires an audience. */
   getToken(): Promise<string>;
-  /** Returns a fresh WAG within the configured AS and scope limits. */
+  /** Fresh WAG for the default workload principal within the configured limits. */
   getAuthorizationGrant(options: {
     authorizationServer: string;
     scope?: string[];
   }): Promise<string>;
-  /** Returns a fixed identity RPC stub; use normal dup() and disposal rules. */
-  getIdentity(label?: string): Promise<Rpc.Stub<IdentityFetcher>>;
+  /** A string always means agentId. Omission selects the default workload principal.
+   * The returned stub fixes the actor; forwarding delegates its enabled token and fetch operations.
+   * Saved authorization uses the app/customer connector profiles below.
+   */
+  getIdentity(
+    selection?: string | IdentitySelection,
+  ): Promise<Rpc.Stub<IdentityFetcher>>;
 }
 /** Protected facts about the immediate calling Worker on an eligible direct binding. */
 export type CloudflareServiceBindingCaller = Readonly<{
@@ -16106,6 +16123,169 @@ export type CloudflareWorkloadIdentity =
       /** Signed version_id of the originating identity binding, preserved by forwarding. */
       originVersionId: string;
     }>;
+/** Saved authorization is a separate purpose; no token or assertion export. */
+export type IdentityConnectionState =
+  | "consent_required"
+  | "default_required"
+  | "pending"
+  | "ready"
+  | "disconnected"
+  | "reconnect_required"
+  | "scope_incompatible"
+  | "owner_disabled"
+  | "connector_deleted"
+  | "connection_removed"
+  | "superseded";
+export type IdentityProviderCleanup =
+  "complete" | "pending" | "unsupported" | "unknown";
+/** Local lifecycle observation, without provider account interpretation or liveness probing. */
+export interface IdentityConnectionStatus {
+  connectionId: string | null;
+  state: IdentityConnectionState;
+  observedAt: number;
+  grantedScopes: string[] | null;
+  scopeSource: "token_response" | "requested" | "unknown";
+  providerCleanup: IdentityProviderCleanup | null;
+}
+export interface IdentityConnectionCleanup {
+  revocationPending: boolean;
+  providerCleanup: IdentityProviderCleanup;
+}
+export interface IdentityConnectionCompletion {
+  sessionId: string;
+  flowId: string;
+  receipt: string;
+}
+export interface IdentityConnectionFlow {
+  connectionId: string;
+  flowId: string;
+  expiresAt: number;
+  authorizationUrl: string;
+}
+export interface IdentityPendingConnection {
+  connectionId: string;
+  flowId: string;
+  expiresAt: number;
+  scopes: string[];
+}
+export interface IdentityConnectionPage {
+  connections: IdentityConnectionStatus[];
+  defaultConnectionId: string | null;
+  defaultInitialized: boolean;
+  nextCursor: string | null;
+}
+/** Fixed actor/owner/connection generation or absence; forwarding cannot reselect. */
+export interface IdentityConnectedFetcher extends Rpc.RpcTargetBranded {
+  readonly id: Promise<string>;
+  readonly connectionId: Promise<string | null>;
+  fetch(
+    input: Request | string,
+    init?: IdentityFetchOptions,
+  ): Promise<Response>;
+  getStatus(): Promise<IdentityConnectionStatus>;
+}
+/** Temporary inspection authority; never becomes an active handle. */
+export interface IdentityPendingFetcher extends Rpc.RpcTargetBranded {
+  fetch(
+    input: Request | string,
+    init?: IdentityFetchOptions,
+  ): Promise<Response>;
+}
+export interface IdentityAppConnectionSelection {
+  agentId?: string;
+  connectionId?: string;
+}
+export interface IdentityCustomerConnectionSelection extends IdentityAppConnectionSelection {
+  customerId: string;
+}
+export type IdentityConnectionOwnerPrefix<M extends "app" | "customer"> =
+  M extends "customer" ? [customerId: string] : [];
+export interface IdentityConnectionReadOperations<
+  M extends "app" | "customer",
+> {
+  listConnections(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      options?: {
+        cursor?: string;
+        limit?: number;
+      },
+    ]
+  ): Promise<IdentityConnectionPage>;
+}
+export interface IdentityAppConnectionBinding extends IdentityConnectionReadOperations<"app"> {
+  getIdentity(): Promise<Rpc.Stub<IdentityConnectedFetcher>>;
+  getIdentity(agentId: string): Promise<Rpc.Stub<IdentityConnectedFetcher>>;
+  getIdentity(
+    selection: IdentityAppConnectionSelection,
+  ): Promise<Rpc.Stub<IdentityConnectedFetcher>>;
+}
+export interface IdentityCustomerConnectionBinding extends IdentityConnectionReadOperations<"customer"> {
+  getIdentity(
+    selection: IdentityCustomerConnectionSelection,
+  ): Promise<Rpc.Stub<IdentityConnectedFetcher>>;
+}
+/** Only roots compiled with connection_management expose these operations. */
+export interface IdentityConnectionManagement<M extends "app" | "customer"> {
+  beginConnection(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      options: {
+        sessionId: string;
+        returnTo: string;
+        connectionId?: string;
+      },
+    ]
+  ): Promise<IdentityConnectionFlow>;
+  previewConnection(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      completion: IdentityConnectionCompletion,
+    ]
+  ): Promise<IdentityPendingConnection>;
+  getPendingIdentity(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      completion: IdentityConnectionCompletion,
+    ]
+  ): Promise<Rpc.Stub<IdentityPendingFetcher>>;
+  completeConnection(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      completion: IdentityConnectionCompletion,
+    ]
+  ): Promise<{
+    connectionId: string;
+    generation: string;
+    status: "ready";
+  }>;
+  cancelConnection(
+    ...args: [
+      ...IdentityConnectionOwnerPrefix<M>,
+      completion: IdentityConnectionCompletion,
+    ]
+  ): Promise<IdentityConnectionCleanup>;
+  setDefaultConnection(
+    ...args: [...IdentityConnectionOwnerPrefix<M>, connectionId: string]
+  ): Promise<void>;
+  disconnect(
+    ...args: [...IdentityConnectionOwnerPrefix<M>, connectionId: string]
+  ): Promise<IdentityConnectionCleanup>;
+  removeConnection(
+    ...args: [...IdentityConnectionOwnerPrefix<M>, connectionId: string]
+  ): Promise<IdentityConnectionCleanup>;
+  disconnectAll(
+    ...args: IdentityConnectionOwnerPrefix<M>
+  ): Promise<IdentityConnectionCleanup>;
+  disableConnections(
+    ...args: IdentityConnectionOwnerPrefix<M>
+  ): Promise<IdentityConnectionCleanup>;
+  enableConnections(...args: IdentityConnectionOwnerPrefix<M>): Promise<void>;
+}
+export type IdentityAppManagedConnectionBinding = IdentityAppConnectionBinding &
+  IdentityConnectionManagement<"app">;
+export type IdentityCustomerManagedConnectionBinding =
+  IdentityCustomerConnectionBinding & IdentityConnectionManagement<"customer">;
 export type Params<P extends string = any> = Record<P, string | string[]>;
 export type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;

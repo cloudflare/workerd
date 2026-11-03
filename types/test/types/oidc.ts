@@ -44,7 +44,7 @@ selected.fetch('https://api.example.com', {
   body: new URLSearchParams(),
 });
 selected.fetch('https://api.example.com', {
-  // @ts-expect-error A labeled handle cannot carry routing overrides.
+  // @ts-expect-error A selected handle cannot carry routing overrides.
   cf: { resolveOverride: 'forged' },
 });
 void [selectedId, selectedResponse, synchronousId];
@@ -105,3 +105,54 @@ selected.getClientAssertion();
 // @ts-expect-error No token, key or nonce API is exposed.
 selected.getDpopProof('https://api.example');
 void [publicMetadata, explicitMetadata, assertion];
+
+const clientAlgorithm: 'ES256' | 'Ed25519' =
+  publicMetadata.token_endpoint_auth_signing_alg;
+void clientAlgorithm;
+selected.getClientAssertion({
+  clientId: 'https://client.example/client.json',
+  audience: 'https://auth.example',
+  // @ts-expect-error The service selects the algorithm.
+  algorithm: 'ES256',
+});
+
+const namedAgent: Rpc.Stub<IdentityFetcher> = await binding.getIdentity({ agentId: 'agent_17' });
+const defaultAgent: Rpc.Stub<IdentityFetcher> = await binding.getIdentity({});
+const agentToken: Promise<string> = namedAgent.getToken();
+const agentGrant: Promise<string> = namedAgent.getAuthorizationGrant({
+  authorizationServer: 'https://auth.example.com', scope: ['read'],
+});
+// @ts-expect-error Agent selection cannot be combined with a second positional argument.
+binding.getIdentity('agent_17', { customerId: 'acme' });
+// @ts-expect-error Saved connection selectors are not implemented by the workload binding.
+binding.getIdentity({ customerId: 'acme', connectionId: 'conn_42' });
+// @ts-expect-error The selected actor cannot override its subject at issuance.
+namedAgent.getToken({ agentId: 'other' });
+// @ts-expect-error Grant issuance cannot select another actor.
+namedAgent.getAuthorizationGrant({ authorizationServer: 'https://auth.example.com', agentId: 'other' });
+void [defaultAgent, agentToken, agentGrant];
+
+
+declare const appConnections: IdentityAppManagedConnectionBinding;
+declare const customerConnections: IdentityCustomerManagedConnectionBinding;
+declare const readonlyConnections: IdentityAppConnectionBinding;
+const saved = await appConnections.getIdentity('agent-17');
+const missingId: Promise<string | null> = saved.connectionId;
+const status: Promise<IdentityConnectionStatus> = saved.getStatus();
+await appConnections.listConnections({ limit: 10 });
+await appConnections.disableConnections();
+await customerConnections.disconnectAll('customer');
+await customerConnections.getIdentity({ customerId: 'customer', agentId: 'agent-17' });
+// @ts-expect-error Customer bindings require named owner selection.
+customerConnections.getIdentity('customer');
+// @ts-expect-error App bindings do not accept customer selection.
+appConnections.getIdentity({ customerId: 'customer' });
+// @ts-expect-error Saved handles do not export tokens.
+saved.getToken();
+// @ts-expect-error A saved handle cannot retarget itself.
+saved.getIdentity('other');
+// @ts-expect-error Management is only present on an explicitly authorized root.
+readonlyConnections.disconnectAll();
+// @ts-expect-error Saved fetch cannot carry transport overrides.
+saved.fetch('https://api.example', { signal: new AbortController().signal });
+void [missingId, status];
