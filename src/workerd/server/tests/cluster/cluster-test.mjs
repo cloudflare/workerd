@@ -666,16 +666,14 @@ test(
 );
 
 test(
-  'cluster: draining node refuses to claim an unowned DO',
+  'cluster: a draining node sends a request for an unowned DO to a peer',
   SIGTERM_DRAINS,
   async () => {
     await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
       // Put a request in flight on node 0 for a DO that nobody owns yet, then
       // SIGTERM node 0 while its stateless handler is still waiting. By the time
-      // the handler calls the DO, node 0 is draining: its cluster listener no
-      // longer accepts connections, so claiming the DO there would leave it
-      // unreachable from the rest of the cluster until node 0 exits. The claim
-      // must be refused instead.
+      // the handler calls the DO, node 0 is draining: claiming the DO there
+      // would only hand it off again, so its peer claims it instead.
       const requestPromise = fetchJson(
         nodes[0].httpPort,
         '/increment?name=lame-duck&delay=1000',
@@ -688,25 +686,19 @@ test(
       });
 
       const response = await requestPromise;
-      assert.strictEqual(
-        response.status,
-        500,
-        `draining node must not claim the DO: ${JSON.stringify(response.body)}`
-      );
-      // The refusal is a DISCONNECTED exception, which JS sees as a generic
-      // connection-loss error.
-      assert.match(response.body.error, /Network connection lost/);
+      assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+      assert.strictEqual(response.body.count, 1);
+      assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
 
       const exit = await exitPromise;
       assert.deepStrictEqual(exit, { code: 0, signal: null });
 
-      // The DO was never instantiated anywhere: the survivor claims it fresh.
       const survivor = await fetchJson(
         nodes[1].httpPort,
         '/increment?name=lame-duck'
       );
       assert.strictEqual(survivor.status, 200, JSON.stringify(survivor.body));
-      assert.strictEqual(survivor.body.count, 1);
+      assert.strictEqual(survivor.body.count, 2);
       assert.strictEqual(survivor.body.nodeId, nodes[1].nodeId);
       assert.strictEqual(
         await bucket.owner(survivor.body.id),
@@ -729,8 +721,8 @@ test(
       const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
       const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
 
-      // A slow request holds the owner draining for longer than a peer
-      // needs to see it leave, but within its lease.
+      // A slow request keeps the owner draining for longer than its lease
+      // would take to expire.
       const holding = fetchJson(
         owner.httpPort,
         '/increment?name=hold&delay=12000',
@@ -740,19 +732,17 @@ test(
       const drainedAt = Date.now();
       const exitPromise = owner.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
 
-      // A request waits on the owner until the peer's next listing drops
-      // it, then the peer claims. One timed out would still increment.
-      let response = null;
-      while (Date.now() < drainedAt + 10_000) {
-        response = await fetchJson(peer.httpPort, '/increment?name=handoff', {
-          timeoutMs: drainedAt + 10_000 - Date.now(),
-        }).catch(() => null);
-        if (response?.status === 200) break;
-        await sleep(200);
-      }
-      assert.strictEqual(response?.status, 200, JSON.stringify(response?.body));
+      // The owner hands the idle DO off as soon as it drains: the peer claims
+      // it at once, not once the owner left.
+      const response = await fetchJson(
+        peer.httpPort,
+        '/increment?name=handoff',
+        { timeoutMs: 5_000 }
+      );
+      assert.strictEqual(response.status, 200, JSON.stringify(response.body));
       assert.strictEqual(response.body.nodeId, peer.nodeId);
       assert.strictEqual(response.body.count, 2);
+      assert(Date.now() - drainedAt < 5_000);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
     });
@@ -831,11 +821,14 @@ test(
       }
       const exit1 = nodes[1].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
       const response = await request;
+      // Node 1 hands the DO off rather than start it, so the request either
+      // fails unsent or is sent on to the node that claims the DO next.
       assert.notStrictEqual(
-        response.status,
-        200,
+        response.body.nodeId,
+        nodes[1].nodeId,
         `the DO started on the drained node: ${JSON.stringify(response.body)}`
       );
+      const served = response.status === 200 ? 1 : 0;
       await bucket.setFaults([]);
       assert.deepStrictEqual(await exit1, { code: 0, signal: null });
 
@@ -854,7 +847,7 @@ test(
       }
       assert.strictEqual(after?.status, 200, JSON.stringify(after?.body));
       assert.strictEqual(after.body.nodeId, nodes[2].nodeId);
-      assert.strictEqual(after.body.count, 2);
+      assert.strictEqual(after.body.count, 2 + served);
     });
   }
 );

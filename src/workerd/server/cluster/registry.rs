@@ -168,6 +168,11 @@ impl Registry {
         Err(Error::Contended(key))
     }
 
+    /// Whether `deregister` ran.
+    pub fn left(&self) -> bool {
+        self.left.get()
+    }
+
     /// Whether `node` held a lease past `now_ms` at the last listing. No
     /// I/O: a route checks it on every use.
     pub fn listed_live(&self, node: &str, now_ms: u64) -> bool {

@@ -219,8 +219,10 @@ impl ActorNamespace {
     }
 
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
-    /// with the instance that owns it.
-    async fn resolve(&self, id: KjOwn<ActorIdHandle>) -> Result<Resolved> {
+    /// with the instance that owns it. For a request a peer sent (`remote`), a draining instance
+    /// is no hop to another: the peer is answered as `moved`, so that it finds the owner itself
+    /// and its route cache stops pointing here.
+    async fn resolve(&self, id: KjOwn<ActorIdHandle>, remote: bool) -> Result<Resolved> {
         if self.broken.get() {
             return Err(invalid_config_error());
         }
@@ -249,10 +251,20 @@ impl ActorNamespace {
             })
         };
         let unique_key = self.unique_key().unwrap_or_default().to_owned();
-        match cluster
-            .route(&unique_key, &self.service, &self.class_name, &key)
-            .await?
-        {
+        let route = || cluster.route(&unique_key, &self.service, &self.class_name, &key);
+        let mut found = route().await?;
+        if let Owner::Releasing(epoch) = found {
+            // Owned here but not running: this draining instance lets it go, then sends the
+            // request on to whoever claims it.
+            if cluster.release(&unique_key, &key, epoch).await {
+                self.clear_storage(&key);
+            }
+            found = route().await?;
+        }
+        let draining = || moved(&format!("{unique_key}/{key}: this node is draining"));
+        match found {
+            Owner::Releasing(_) => Err(draining()),
+            Owner::Remote(..) if remote && cluster.cluster.is_draining() => Err(draining()),
             Owner::Remote(connection, node) => Ok(Resolved::Remote(connection, node)),
             Owner::Here(epoch) => {
                 // A concurrent request may have taken it meanwhile.
@@ -297,6 +309,16 @@ impl ActorNamespace {
             .is_some_and(|c| std::ptr::eq(Rc::as_ptr(c), container))
         {
             actors.remove(&container.key);
+        }
+    }
+
+    /// Removes the databases of an object this instance handed off.
+    fn clear_storage(&self, key: &str) {
+        let cleared = self
+            .storage()
+            .and_then(|s| Ok(ffi::actor_storage_clear(s, key)?));
+        if let Err(e) = cleared {
+            tracing::warn!("removing {key}'s databases: {}", e.description());
         }
     }
 
@@ -389,11 +411,26 @@ impl ActorNamespace {
     /// The channel of the actor with `id`, started on first use. `persistent` is recorded on the
     /// channel: whether stubs to it may be stored.
     pub fn channel(&self, id: KjOwn<ActorIdHandle>, persistent: Persistent) -> Rc<dyn Channel> {
+        self.channel_for(id, persistent, false)
+    }
+
+    /// The channel of the actor with `id` for a peer's or the debug port's request.
+    pub fn peer_channel(&self, id: KjOwn<ActorIdHandle>) -> Rc<dyn Channel> {
+        self.channel_for(id, false, true)
+    }
+
+    fn channel_for(
+        &self,
+        id: KjOwn<ActorIdHandle>,
+        persistent: Persistent,
+        remote: bool,
+    ) -> Rc<dyn Channel> {
         if self.cluster().is_some() {
             return Rc::new(RoutedChannel {
                 namespace: Weak::clone(&self.this),
                 id,
                 persistent,
+                remote,
                 bound: Rc::default(),
             });
         }
@@ -604,7 +641,7 @@ impl ActorNamespaceHandle {
         // the owner has outlived that (`Index::elsewhere`).
         let key = ffi::actor_id_key(&id);
         Ok(PromisedInterface::new(async move {
-            match namespace.resolve(id).await? {
+            match namespace.resolve(id, false).await? {
                 Resolved::Here(client) => client.start_request(metadata),
                 Resolved::Remote(_, owner) => {
                     let unique_key = namespace.unique_key().unwrap_or_default();
@@ -720,6 +757,8 @@ struct RoutedChannel {
     namespace: Weak<ActorNamespace>,
     id: KjOwn<ActorIdHandle>,
     persistent: Persistent,
+    /// Whether its requests come from a peer (or the debug port).
+    remote: bool,
     bound: Rc<RefCell<Option<Rc<Resolved>>>>,
 }
 
@@ -735,6 +774,7 @@ impl Channel for RoutedChannel {
         let id = ffi::actor_id_clone(&self.id);
         let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
+        let remote = self.remote;
         Ok(PromisedInterface::new(async move {
             // A resolution over a session known to be down would fail unsent: resolve again.
             let live = bound
@@ -744,7 +784,8 @@ impl Channel for RoutedChannel {
             let resolved = if let Some(resolved) = live {
                 resolved
             } else {
-                let resolved = Rc::new(namespace.resolve(id).await.map_err(not_delivered)?);
+                let resolved = namespace.resolve(id, remote).await.map_err(not_delivered)?;
+                let resolved = Rc::new(resolved);
                 let mut bound = bound.borrow_mut();
                 match &*bound {
                     Some(other) if !other.is_down() => Rc::clone(other),
@@ -801,7 +842,10 @@ impl Channel for RoutedChannel {
                 .namespace
                 .upgrade()
                 .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
-            match namespace.resolve(ffi::actor_id_clone(&self.id)).await? {
+            match namespace
+                .resolve(ffi::actor_id_clone(&self.id), false)
+                .await?
+            {
                 Resolved::Here(container) => container.evict_for_test(hibernate).await,
                 Resolved::Remote(..) => Err(kj::failed!(
                     "jsg.Error: Cannot evict a Durable Object another instance owns."

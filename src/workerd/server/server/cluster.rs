@@ -279,6 +279,23 @@ impl ClusterNode {
         }))
     }
 
+    /// Hands off an object this draining instance owns at `epoch` but does not run, once it is
+    /// at rest here. Answers whether it was released; one that was not is abandoned
+    /// (`Cluster::abandon_actor`).
+    pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> bool {
+        let released = match self.cluster.release_actor(namespace, actor, epoch).await {
+            Ok(released) => released,
+            Err(e) => {
+                tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                false
+            }
+        };
+        if !released {
+            self.cluster.abandon_actor(namespace, actor);
+        }
+        released
+    }
+
     pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
         let hash = cluster::namespace_hash(unique_key);
         self.namespaces.borrow_mut().insert(hash, namespace);
@@ -328,6 +345,7 @@ impl ClusterNode {
             })?;
         let (node, address, stale) = match route {
             Route::Owned(epoch) => return Ok(Owner::Here(epoch)),
+            Route::Releasing(epoch) => return Ok(Owner::Releasing(epoch)),
             Route::Remote {
                 node,
                 address,
@@ -420,6 +438,9 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
 pub enum Owner {
     Here(u64),
     Remote(Rc<RpcConnection>, String),
+    /// Here at the epoch, as this instance drains: it is handed off (`ClusterNode::release`),
+    /// not served.
+    Releasing(u64),
 }
 
 /// "Moved, not started": the answer of an instance that does not serve a Durable Object.

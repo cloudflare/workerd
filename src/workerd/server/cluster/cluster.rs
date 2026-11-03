@@ -69,6 +69,9 @@ pub enum Route {
         address: String,
         stale: bool,
     },
+    /// Here at this epoch, but this instance drains: `release_actor`, then
+    /// route the request again, to whoever claims the object.
+    Releasing(u64),
 }
 
 pub struct Cluster {
@@ -192,7 +195,30 @@ impl Cluster {
                 address,
                 stale,
             },
+            Claim::Releasing(epoch) => Route::Releasing(epoch),
         })
+    }
+
+    /// Hand off an object this draining instance owns but does not serve,
+    /// once no capture, eviction or compaction of it is in flight here: the
+    /// next owner reads the files a compaction deletes. The caller bounds
+    /// the wait.
+    pub async fn release_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        while self.owners.busy(ns, actor) {
+            tokio::time::sleep(BUSY_POLL).await;
+        }
+        let released = self.ownership.release(ns, actor, epoch).await?;
+        if released {
+            self.owners.forget(ns, actor);
+            tracing::info!("cluster: {ns}/{actor} epoch {epoch} handed off");
+        }
+        Ok(released)
+    }
+
+    /// Gives up on handing off an object this draining instance failed to
+    /// release (`Ownership::abandon`).
+    pub fn abandon_actor(&self, ns: &str, actor: &str) {
+        self.ownership.abandon(ns, actor);
     }
 
     /// Take a claimed object over: recover what earlier epochs committed
@@ -421,6 +447,8 @@ impl Cluster {
 
 /// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
+/// How often a release checks whether an object's eviction ended.
+const BUSY_POLL: Duration = Duration::from_millis(10);
 
 /// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
 /// under the layout's version: what every key of the layout is relative to.
