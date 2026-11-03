@@ -2358,11 +2358,16 @@ class GcVisitor {
 //
 // Making handles strong is behind the gc-complete-tracing autogate; with the gate disabled, a
 // `TracedOwn<T>` behaves like a `kj::Own<T>`.
+//
+// `T` must not be refcounted. Another `kj::Own` from `kj::addRef()` could keep the object alive
+// after the `TracedOwn` is destroyed, with traced handles that nothing visits any more.
 template <typename T>
 class TracedOwn {
  public:
   TracedOwn(decltype(nullptr)) {}
-  TracedOwn(kj::Own<T> inner): inner(kj::mv(inner)) {}
+  TracedOwn(kj::Own<T> inner): inner(kj::mv(inner)) {
+    assertNotRefcounted();
+  }
   TracedOwn(TracedOwn&& other) noexcept
       : inner(kj::mv(other.inner)),
         visitedIn(std::exchange(other.visitedIn, nullptr)) {
@@ -2419,6 +2424,7 @@ class TracedOwn {
   }
 
   void visitForGc(GcVisitor& visitor) {
+    assertNotRefcounted();
     if (inner.get() != nullptr) {
       // A visit that leaves handles strong leaves nothing for a later move to undo.
       visitedIn = visitor.keepsHandlesStrong() ? nullptr : visitor.v8Isolate();
@@ -2427,6 +2433,14 @@ class TracedOwn {
   }
 
  private:
+  // Checked where `T` is complete, rather than in the class body, so that a `TracedOwn` of a
+  // forward-declared type can be a member.
+  static constexpr void assertNotRefcounted() {
+    static_assert(
+        !std::is_base_of_v<kj::Refcounted, T> && !std::is_base_of_v<kj::AtomicRefcounted, T>,
+        "TracedOwn cannot hold a refcounted object; see the comment on TracedOwn");
+  }
+
   kj::Own<T> inner;
   // The isolate of the last visit, or null if the handles are strong.
   v8::Isolate* visitedIn = nullptr;
