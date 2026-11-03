@@ -104,7 +104,16 @@ interface IdentityConnectionCleanup {
 }
 interface IdentityConnectionCompletion { sessionId: string; flowId: string; receipt: string }
 interface IdentityConnectionFlow { connectionId: string; flowId: string; expiresAt: number; authorizationUrl: string }
-interface IdentityPendingConnection { connectionId: string; flowId: string; expiresAt: number; scopes: string[] }
+/** Protocol facts for application validation before activating a saved connection. */
+interface IdentityPendingAuthorizationFacts {
+  /** Pinned authorization server, when present in the registration snapshot. */
+  issuer?: string;
+  /** Opaque token-response sub; this is not an OIDC identity assertion. */
+  subject?: string;
+  /** Whether effective scopes came from the response or a configured fallback. */
+  scopeSource: 'token_response' | 'requested' | 'unknown';
+}
+interface IdentityPendingConnection { connectionId: string; flowId: string; expiresAt: number; scopes: string[]; authorization: IdentityPendingAuthorizationFacts }
 interface IdentityConnectionPage {
   connections: IdentityConnectionStatus[];
   defaultConnectionId: string | null;

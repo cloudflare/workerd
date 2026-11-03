@@ -156,3 +156,13 @@ readonlyConnections.disconnectAll();
 // @ts-expect-error Saved fetch cannot carry transport overrides.
 saved.fetch('https://api.example', { signal: new AbortController().signal });
 void [missingId, status];
+
+const pendingFacts = await customerConnections.previewConnection('customer', {
+  flowId: 'flow', receipt: 'receipt', sessionId: 'session',
+});
+const pendingIssuer: string | undefined = pendingFacts.authorization.issuer;
+const pendingSubject: string | undefined = pendingFacts.authorization.subject;
+const pendingScopeSource: 'token_response' | 'requested' | 'unknown' = pendingFacts.authorization.scopeSource;
+// @ts-expect-error Pending authorization facts never expose provider credentials.
+pendingFacts.authorization.accessToken;
+void [pendingIssuer, pendingSubject, pendingScopeSource];

@@ -16162,11 +16162,21 @@ export interface IdentityConnectionFlow {
   expiresAt: number;
   authorizationUrl: string;
 }
+/** Protocol facts for application validation before activating a saved connection. */
+export interface IdentityPendingAuthorizationFacts {
+  /** Pinned authorization server, when present in the registration snapshot. */
+  issuer?: string;
+  /** Opaque token-response sub; this is not an OIDC identity assertion. */
+  subject?: string;
+  /** Whether effective scopes came from the response or a configured fallback. */
+  scopeSource: "token_response" | "requested" | "unknown";
+}
 export interface IdentityPendingConnection {
   connectionId: string;
   flowId: string;
   expiresAt: number;
   scopes: string[];
+  authorization: IdentityPendingAuthorizationFacts;
 }
 export interface IdentityConnectionPage {
   connections: IdentityConnectionStatus[];
