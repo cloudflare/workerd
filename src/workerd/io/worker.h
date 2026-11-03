@@ -920,12 +920,7 @@ class Worker::Actor final: public kj::Refcounted {
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
   static bool idsEqual(const Id& a, const Id& b);
 
-  // Why an actor is hibernating, as passed to its onHibernate handler.
-  enum class HibernationReason {
-    INACTIVE,
-    CODE_UPDATED,
-    SYSTEM,
-  };
+  using HibernationReason = rpc::Trace::OnHibernateEventInfo::Reason;
 
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
