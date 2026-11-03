@@ -15,13 +15,17 @@
 use std::time::Duration;
 
 use cluster_logic::rollout;
+pub use cluster_logic::rollout::CatalogSeen;
 use cluster_logic::rollout::Checked;
 use cluster_logic::rollout::Found;
 use cluster_logic::rollout::Node;
 use cluster_logic::rollout::Polled;
 pub use cluster_logic::rollout::Progress;
-use cluster_logic::rollout::Roll;
+pub use cluster_logic::rollout::Roll;
+pub use cluster_logic::rollout::RollSeen;
 use cluster_logic::rollout::Turn;
+pub use cluster_logic::rollout::Wait;
+pub use cluster_logic::rollout::Waited;
 use cluster_logic::rollout::Watch;
 use ring::rand::SecureRandom;
 use ring::rand::SystemRandom;
@@ -67,6 +71,18 @@ struct RollFile {
     since_ms: u64,
     #[serde(default)]
     done: bool,
+}
+
+impl From<RollFile> for Roll {
+    fn from(file: RollFile) -> Self {
+        Self {
+            revision: file.revision,
+            baseline: file.baseline,
+            holder: file.holder,
+            since_ms: file.since_ms,
+            done: file.done,
+        }
+    }
 }
 
 /// `ROLL` as last read: what it says, `None` when it is absent or does not
@@ -227,13 +243,7 @@ async fn refresh(bucket: &Bucket, cached: &mut Cached) {
         Err(_) => return tracing::debug!("cluster: reading {ROLL} timed out"),
     };
     let roll = match serde_json::from_slice::<RollFile>(&body) {
-        Ok(file) => Some(Roll {
-            revision: file.revision,
-            baseline: file.baseline,
-            holder: file.holder,
-            since_ms: file.since_ms,
-            done: file.done,
-        }),
+        Ok(file) => Some(file.into()),
         Err(e) => {
             tracing::warn!("cluster: {ROLL} does not parse; the next roll replaces it: {e}");
             None
@@ -370,10 +380,36 @@ pub fn progress(records: &[NodeRecord], revision: u64) -> Progress {
     Progress::of(&nodes(records), revision)
 }
 
-/// The records of the nodes live at `now_ms`, as the bucket holds them now.
-/// Reads only, unlike a node's own listing (`Registry::peers`).
-pub async fn live_nodes(bucket: &Bucket, now_ms: u64) -> Result<Vec<NodeRecord>> {
+/// `wait`'s step on a round of reads, with the live nodes' `records`.
+pub fn step(
+    wait: &mut Wait,
+    catalog: CatalogSeen,
+    roll: RollSeen<'_>,
+    records: Option<&[NodeRecord]>,
+) -> Waited {
+    let live = records.map(nodes);
+    wait.step(catalog, roll, live.as_deref())
+}
+
+/// `ROLL` as the bucket holds it now, `None` while there is none, or while it does not parse,
+/// which a node takes as none too. Reads only, for a deploy that waits for its roll.
+pub async fn roll(bucket: &Bucket) -> Result<Option<Roll>> {
+    let Some((body, _)) = bucket.get(ROLL).await? else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_slice::<RollFile>(&body)
+        .ok()
+        .map(Into::into))
+}
+
+/// The records of the nodes live at `now_ms()`, as the bucket holds them now.
+///
+/// The clock is read once the bucket has answered the listing, so that a clock that keeps to the
+/// bucket's has learned how far off it is. Reads only, unlike a node's own listing
+/// (`Registry::peers`).
+pub async fn live_nodes(bucket: &Bucket, now_ms: &dyn Fn() -> u64) -> Result<Vec<NodeRecord>> {
     let listed = bucket.list("nodes/").await?;
+    let now_ms = now_ms();
     // Not the `.probe` a joining node writes and deletes.
     let keys = listed
         .iter()

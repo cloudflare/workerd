@@ -198,7 +198,13 @@ workerd.capnp). --endpoint falls back to AWS_ENDPOINT_URL, and --region to AWS_R
 us-east-1.
 
 The instances adopt the new revision by restarting, one at a time (see `ClusterConfig` in \
-workerd.capnp).
+workerd.capnp). With --wait, the deploy then waits for every live instance to serve it, and \
+fails as soon as one refuses it or fails to start on it; each instance's record in the bucket \
+names the revision it serves, and the latest one it refused or failed on. It waits for as many \
+instances as served before it published, or as the roll's own count in deploy/roll.json if \
+that is more, so an instance that leaves between the two counts is waited for until --timeout. \
+A later revision that still names the deployment's version, published by another deploy \
+meanwhile, is waited for instead.
 ";
 
 const TEST_HELP: &str = "\
@@ -429,10 +435,29 @@ pub struct DeployArgs {
     #[arg(short, long)]
     pub binary: bool,
 
+    /// Then wait until every live instance serves the new catalog revision, and as many as served
+    /// before, printing progress; fail if one refuses it or fails to start on it, or --timeout
+    /// passes first.
+    #[arg(long)]
+    pub wait: bool,
+
+    /// How long --wait waits, in seconds, reads of the bucket included: at most a year.
+    #[arg(
+        long,
+        value_name = "seconds",
+        default_value_t = 600,
+        requires = "wait",
+        value_parser = clap::value_parser!(u64).range(..=MAX_TIMEOUT),
+    )]
+    pub timeout: u64,
+
     /// Permit the use of experimental features, which cluster mode is.
     #[arg(long)]
     pub experimental: bool,
 }
+
+/// The longest `--timeout`, a year: far from what a `Duration` past now can represent.
+const MAX_TIMEOUT: u64 = 365 * 24 * 60 * 60;
 
 impl DeployArgs {
     /// The bucket's options, as the instances' `cluster.bucketOptions`.

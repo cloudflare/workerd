@@ -241,6 +241,21 @@ fn bad_values_are_usage_errors() {
             "appConfig",
             "extra",
         ],
+        // --timeout is --wait's, and at most a year.
+        &["deploy", "--bucket=s3://cluster", "--timeout=30"],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--wait",
+            "--timeout=31536001",
+        ],
+        &[
+            "deploy",
+            "--bucket=s3://cluster",
+            "--wait",
+            "--timeout=18446744073709551616",
+        ],
+        &["deploy", "--bucket=s3://cluster", "--wait", "--timeout=-1"],
     ] {
         let argv = std::iter::once("workerd").chain(args.iter().copied());
         assert!(Main::try_parse_from(argv).is_err(), "{args:?}");
@@ -281,6 +296,8 @@ fn deploy_invocation() {
         "s3://cluster/prefix",
         "--endpoint=http://127.0.0.1:9000",
         "--region=auto",
+        "--wait",
+        "--timeout=30",
     ])
     .command
     else {
@@ -297,6 +314,8 @@ fn deploy_invocation() {
     );
     assert!(deploy.experimental);
     assert!(!deploy.binary);
+    assert!(deploy.wait);
+    assert_eq!(deploy.timeout, 30);
 
     // The project defaults to the working directory, and the endpoint, region and credentials
     // to the environment.
@@ -312,6 +331,19 @@ fn deploy_invocation() {
     assert_eq!(const_name, None);
     assert_eq!(deploy.name, None);
     assert!(deploy.bucket_options().is_empty());
+    assert!(!deploy.wait);
+    assert_eq!(deploy.timeout, 600);
+    let Command::Deploy { deploy, .. } = parse(&[
+        "deploy",
+        "--bucket=s3://cluster",
+        "--wait",
+        "--timeout=31536000",
+    ])
+    .command
+    else {
+        panic!("expected deploy")
+    };
+    assert_eq!(deploy.timeout, 31_536_000);
 }
 
 #[test]

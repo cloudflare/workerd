@@ -149,9 +149,14 @@ struct ClusterConfig {
   # process remembers a refusal: an instance that restarts for another reason starts on the
   # catalog as it is. An instance whose config fails with the deployments merged in (a binding to
   # a service no one defines, JavaScript that does not load) names that revision as failed in its
-  # record and exits, also under `--watch`; the other instances then stop the roll to it for good.
-  # To recover, publish a fix or the previous version: the failing instance starts on it at its
-  # next restart, and the roll to it proceeds.
+  # record and exits, also under `--watch`; the other instances then stop the roll to it for good,
+  # and `workerd deploy --wait` fails. To recover, publish a fix or the previous version: the
+  # failing instance starts on it at its next restart, and the roll to it proceeds.
+  #
+  # `workerd deploy --wait` waits for every live instance to serve the new revision, as many as
+  # served when it published or as the roll's `baseline`, whichever is more: an instance that
+  # leaves in between is waited for until `--timeout`. It fails as soon as an instance refuses the
+  # revision or fails to start on it.
   #
   # Every instance must run with `--experimental`, and a workerd with rollouts: an instance that
   # never names a revision in its record, as one without either does not, holds every roll.
