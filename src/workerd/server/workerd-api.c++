@@ -468,9 +468,11 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 // placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
 WD_STRONG_BOOL(IsInternalBinding);
 
-// Bindings that cannot be baked into the zygote snapshot.
-// They are skipped during PREPARE_SNAPSHOT and added to the snapshot-restored env
-// when the real START_FROM_SNAPSHOT Worker is built.
+// Bindings that cannot be baked into the zygote snapshot. In PREPARE_SNAPSHOT mode
+// compileGlobals() gives each of them an `undefined` placeholder on env, so that the keys keep
+// the config's order, and the START_FROM_SNAPSHOT Worker overwrites the placeholder with the
+// real value. Hyperdrive is among them for one more reason: its constructor records connect and
+// DNS overrides on the global scope, which newContext() rebuilds afresh on restore.
 static bool isDeferredForSnapshot(Global::Reader global) {
   switch (global.which()) {
     case Global::TEXT:
@@ -509,8 +511,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   auto context = lock.v8Context();
 
-  // Deferred bindings are filtered out by compileGlobals during PREPARE_SNAPSHOT and only
-  // materialized when the real START_FROM_SNAPSHOT Worker adds them to the restored env.
+  // compileGlobals() gives deferred bindings a placeholder during PREPARE_SNAPSHOT and only
+  // materializes them when the real START_FROM_SNAPSHOT Worker fills the restored env in.
   const bool inSnapshot = jsg::IsolateBase::from(lock.v8Isolate).isPreparingSnapshot();
   KJ_REQUIRE(!inSnapshot || !isDeferredForSnapshot(global),
       "deferred binding reached createBindingValue during snapshot prep", global.getName());
@@ -710,15 +712,21 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
   const bool starting = applySnapshotFilter && isolateBase.isStartingFromSnapshot();
   lockParam.withinHandleScope([&] {
     auto& featureFlags = *impl->features;
+    auto context = lock.v8Context();
 
     for (auto global: globals) {
       const bool deferred = isDeferredForSnapshot(global);
 
-      // Zygote worker - defer this binding to the Real Worker.
-      if (preparing && deferred) continue;
+      // Zygote: the real Worker supplies this binding's value. A placeholder holds its key at
+      // the config's position, so that Object.keys(env) comes out in the same order as without
+      // a snapshot.
+      if (preparing && deferred) {
+        lockParam.v8Set(target, global.getName(), v8::Undefined(lock.v8Isolate));
+        continue;
+      }
 
       // Real Worker from snapshot: env already has every non-deferred binding restored from the
-      // snapshot; only the deferred ones still need to be added here.
+      // snapshot; only the deferred ones still need their value.
       if (starting && !deferred) continue;
 
       lockParam.withinHandleScope([&] {
@@ -726,7 +734,18 @@ void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
         auto value = createBindingValue(
             lock, global, featureFlags, impl->memoryCacheProvider, IsInternalBinding::NO);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
-        lockParam.v8Set(target, global.getName(), value);
+        if (starting) {
+          // Redefines the placeholder in place, keeping its position. Unlike Set(), which
+          // reports success on a sloppy-mode silent failure, this says whether the top level
+          // left the placeholder redefinable at all.
+          auto name = jsg::v8StrIntern(lock.v8Isolate, global.getName());
+          KJ_REQUIRE(jsg::check(target->CreateDataProperty(context, name, value)),
+              "a Worker started from a startup snapshot could not fill a binding in: top-level "
+              "code made env non-extensible or redefined the binding's placeholder",
+              global.getName());
+        } else {
+          lockParam.v8Set(target, global.getName(), value);
+        }
       });
     }
   });

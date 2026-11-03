@@ -17,9 +17,10 @@ import { DurableObject, WorkerEntrypoint, env } from 'cloudflare:workers';
 const MODE = env.MODE;
 
 // Whether this Worker was started from a startup snapshot rather than running its top level
-// itself. The zygote's env carries no service bindings (they are deferred to the started Worker:
-// isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF is undefined exactly
-// when this code runs in the zygote, and the constant is baked into the snapshot.
+// itself. In the zygote's env a service binding is an `undefined` placeholder (the started Worker
+// supplies the value: isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF
+// is undefined exactly when this code runs in the zygote, and the constant is baked into the
+// snapshot.
 const snapshotUsed = typeof env.SELF === 'undefined';
 
 // Top-level state every case creates. Each object is a JSG resource whose C++ side the snapshot
@@ -197,10 +198,11 @@ async function test(ctrl, env) {
   for (const name of transferable) {
     const r = await run(name, pipelineOn);
     if (name === 'bindings') {
-      // Every binding of the config is present, deferred or not.
+      // Every binding of the config is present, deferred or not, in the config's order: the
+      // zygote keeps a placeholder for each deferred one.
       deepStrictEqual(
-        [...r.envKeys].sort(),
-        ['DATA', 'JSON', 'MODE', 'NS', 'RPC', 'SELF', 'TEXT'],
+        r.envKeys,
+        ['MODE', 'SELF', 'TEXT', 'RPC', 'JSON', 'NS', 'DATA'],
         'bindings: envKeys'
       );
     }

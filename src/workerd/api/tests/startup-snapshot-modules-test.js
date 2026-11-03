@@ -20,9 +20,10 @@ import data from './data.json';
 const MODE = env.MODE;
 
 // Whether this Worker was started from a startup snapshot rather than running its top level
-// itself. The zygote's env carries no service bindings (they are deferred to the started Worker:
-// isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF is undefined exactly
-// when this code runs in the zygote, and the constant is baked into the snapshot.
+// itself. In the zygote's env a service binding is an `undefined` placeholder (the started Worker
+// supplies the value: isDeferredForSnapshot in server/workerd-api.c++), so at module scope SELF
+// is undefined exactly when this code runs in the zygote, and the constant is baked into the
+// snapshot.
 const snapshotUsed = typeof env.SELF === 'undefined';
 
 // Top-level state the request-time lookups are compared against.

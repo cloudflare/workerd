@@ -59,9 +59,10 @@ all of these hold:
    wrong feature test in. See the comment block above `RESTORE_TIME_GLOBALS` in `setup.h`.
 3. The zygote `Worker::Script` and `Worker` are built exactly as the real ones would be, with an
    `ErrorReporter` of their own, except that bindings go through `WorkerdApi::compileGlobals()`
-   with the snapshot filter on: only text, data and JSON bindings exist in the zygote's `env`.
-   Every capability-carrying binding (`isDeferredForSnapshot()` in `workerd-api.c++`) is added by
-   the real Worker.
+   with the snapshot filter on: text, data and JSON bindings get their values in the zygote's
+   `env`, every capability-carrying binding (`isDeferredForSnapshot()` in `workerd-api.c++`) an
+   `undefined` placeholder that keeps its key in the config's position; the real Worker fills
+   the placeholders in.
 4. The module graph is evaluated: this is where top-level code runs. Console output it produces
    is held back (`Worker::Isolate::deferConsoleLine()`); see [Console output](#console-output).
 5. Still in the `Worker` constructor, before the context's handle scope closes:
