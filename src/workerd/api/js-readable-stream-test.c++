@@ -2612,6 +2612,41 @@ KJ_TEST("TypeScript native stream waits out a pull its reader abandoned") {
   });
 }
 
+KJ_TEST("TypeScript native stream starts every pull with an unaborted signal") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // A pull whose signal settles unaborted hands it on to the next pull; a pull after an
+    // aborted one gets a new signal.
+    return runConduitScript(env, R"js(
+      const { source, pulls } = scriptedSource();
+      const stream = new ReadableStream(source);
+      let reader = stream.getReader();
+      for (let i = 0; i < 2; i++) {
+        const read = reader.read();
+        pulls[i].controller.enqueue(new Uint8Array([i]));
+        pulls[i].resolve();
+        assert((await read).value[0] === i, `read ${i} missed its chunk`);
+      }
+      assert(pulls[1].signal === pulls[0].signal, 'a settled pull did not hand on its signal');
+      const abandoned = reader.read().then(() => undefined, () => undefined);
+      reader.releaseLock();
+      await abandoned;
+      assert(pulls[2].signal === pulls[1].signal && pulls[2].signal.aborted,
+        'releasing the reader did not abort the reused signal');
+      reader = stream.getReader();
+      const read = reader.read();
+      pulls[2].resolve();
+      await microtasks();
+      assert(pulls.length === 4, 'the new read did not pull');
+      assert(pulls[3].signal !== pulls[2].signal && !pulls[3].signal.aborted,
+        'the pull after an abort did not get a new signal');
+      pulls[3].controller.enqueue(new Uint8Array([3]));
+      pulls[3].resolve();
+      assert((await read).value[0] === 3, 'the new read missed its chunk');
+    )js"_kj);
+  });
+}
+
 KJ_TEST("TypeScript native stream errors when a pull its reader abandoned fails") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
