@@ -44,6 +44,7 @@ use crate::listen::ListenContext;
 use crate::listen::StreamListener;
 use crate::listen::TcpTls;
 use crate::log;
+use crate::rollout;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
 
@@ -66,6 +67,12 @@ pub struct RunOptions {
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
+    /// In cluster mode, the deployments `serve` merged into the config: the server watches the
+    /// catalog for another revision once it serves.
+    pub deployments: Option<rollout::Deployments>,
+    /// Requested when the server is to stop for a restart; whoever passes `run` its `drain`
+    /// waits for it too.
+    pub stop: rollout::Stop,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -196,7 +203,8 @@ async fn start(
         }
     }
     // Every config error is reported by now; a config that is refused gets no `listen` event.
-    if server.report().refuses() {
+    let failed = rollout::record_failure(&server, options.deployments.as_ref()).await;
+    if failed || server.report().refuses() {
         return Ok(None);
     }
     for (name, port) in ports {
@@ -204,6 +212,9 @@ async fn start(
     }
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener);
+        if let Some(deployments) = options.deployments.take() {
+            rollout::start(&factory, node, deployments, options.stop.clone());
+        }
     }
 
     if let Some(address) = &options.debug_port {
@@ -383,14 +394,16 @@ async fn serve_listeners(
     Ok(())
 }
 
-/// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
-/// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
-/// error returned.
+/// `workerd serve`: serves until `drain` resolves, then stops.
+///
+/// It stops accepting connections, lets the open ones finish, for at most as long as `drain`
+/// resolved to if anything, and stops the actors' containers. A listener failing is fatal and is
+/// the error returned.
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
     report: Reporter,
-    drain: impl Future<Output = ()>,
+    drain: impl Future<Output = Option<Duration>>,
 ) -> Result<()> {
     let Some(Running {
         server,
@@ -406,7 +419,7 @@ pub async fn run(
     // Draining stops the accept loops; the listeners then end once their connections have.
     match futures::future::select(serving, drain).await {
         Either::Left((result, _)) => result?,
-        Either::Right(((), serving)) => {
+        Either::Right((bound, serving)) => {
             // A draining instance claims nothing more, lets its clustered objects go,
             // `preventEviction` or not, and leaves the cluster, so peers take them over at their
             // next listing while its connections finish. A request in flight on one could not
@@ -425,7 +438,17 @@ pub async fn run(
                 }
             }
             draining.send_replace(true);
-            serving.await?;
+            match bound {
+                None => serving.await?,
+                Some(bound) => {
+                    if let Ok(result) = tokio::time::timeout(bound, serving).await {
+                        result?;
+                    } else {
+                        let secs = bound.as_secs();
+                        tracing::warn!("closing connections still open after {secs}s of draining");
+                    }
+                }
+            }
         }
     }
 

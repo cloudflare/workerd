@@ -6,8 +6,8 @@
 //! fall back to the same environment variables (`cluster::open_bucket`). Nothing here reads an
 //! instance's config: what can be checked without one is checked before anything is uploaded
 //! ([`check`]), and against the catalog's other deployments as the catalog is written
-//! (`deploy::publish`). Each instance checks the catalog's deployments against its own config
-//! when it starts, and refuses to start with one it cannot serve (`deployments.rs`).
+//! (`deploy::publish`). Each instance checks the new catalog revision against its own config,
+//! refuses one it cannot serve, and adopts one it can by restarting (`workerd_server::rollout`).
 
 use std::fmt::Display;
 use std::path::Path;

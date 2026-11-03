@@ -199,9 +199,9 @@ to the class name and stays the same after a rename. Publishing the project unde
 creates a separate application with empty Durable Objects.
 
 The command checks the deployment before uploading it. The check includes the other deployments \
-in the catalog. The command repeats this check when it updates the catalog. Each instance also \
-checks the deployment against its own config at startup. An instance refuses to start if it \
-cannot serve the deployment.
+in the catalog. The command repeats this check when it updates the catalog. Each instance checks \
+the deployment against its own config before adopting it. An instance refuses a deployment it \
+cannot serve.
 
 Publishing the version already selected by the catalog leaves the catalog unchanged. Publishing \
 an earlier version rolls the deployment back to that version. The command prints the deployment \
@@ -214,8 +214,8 @@ Bucket credentials use the same environment variables as the instances:
 See `bucketOptions` in workerd.capnp for credential details. --endpoint uses AWS_ENDPOINT_URL \
 when the flag is absent. --region uses AWS_REGION, then defaults to us-east-1.
 
-Instances read the catalog only at startup. Restart each instance to serve a published catalog \
-revision. See `ClusterConfig` in workerd.capnp.
+The instances adopt the new revision by restarting, one at a time (see `ClusterConfig` in \
+workerd.capnp).
 ";
 
 const TEST_HELP: &str = "\

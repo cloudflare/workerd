@@ -34,7 +34,9 @@ fn node(endpoint: Option<&str>) -> Config {
 fn without_a_cluster_the_config_is_unchanged() {
     let config = node(None);
     let bytes = config.to_bytes();
-    assert_eq!(add(config).unwrap().to_bytes(), bytes);
+    let (config, deployments) = add(config).unwrap();
+    assert_eq!(config.to_bytes(), bytes);
+    assert!(deployments.is_none());
 }
 
 #[test]
@@ -52,7 +54,12 @@ fn without_a_catalog_the_config_is_unchanged() {
     });
     let config = node(Some(&endpoint));
     let bytes = config.to_bytes();
-    assert_eq!(add(config).unwrap().to_bytes(), bytes);
+    let (config, deployments) = add(config).unwrap();
+    assert_eq!(config.to_bytes(), bytes);
+    // The server watches for a first catalog.
+    let deployments = deployments.unwrap();
+    assert_eq!(deployments.revision, 0);
+    assert_eq!(deployments.node_config, bytes);
     let request = bucket.join().unwrap();
     assert!(
         request.starts_with("GET ") && request.contains("/prefix/v1/deploy/catalog.json "),
