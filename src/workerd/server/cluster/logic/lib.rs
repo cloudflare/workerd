@@ -14,3 +14,4 @@
 )]
 
 pub mod lease;
+pub mod rollout;

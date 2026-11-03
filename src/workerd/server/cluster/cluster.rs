@@ -399,6 +399,28 @@ impl Cluster {
     pub fn lease_holds(&self) -> bool {
         self.lease.borrow().holds(now_ms())
     }
+
+    /// From the next renewal, this node's record says it serves catalog
+    /// revision `revision`, 0 for none.
+    pub fn serve_revision(&self, revision: u64) {
+        self.registry.serve(revision);
+    }
+
+    /// Says in this node's record that it failed to start on catalog
+    /// revision `revision`, so that peers stop rolling it out; the record
+    /// stays until its lease runs out.
+    pub async fn record_failure(&self, revision: u64) -> Result<()> {
+        self.registry.fail(revision);
+        self.renew(now_ms()).await.map(drop)
+    }
+
+    /// Watches the deployment catalog until this node, which serves
+    /// revision `serving`, is to stop for a restart on another: answers it
+    /// (`rollout.rs`). `check` says whether this node can serve a
+    /// revision's deployments.
+    pub async fn watch_catalog(&self, serving: u64, check: &crate::rollout::Check<'_>) -> u64 {
+        crate::rollout::watch(&self.bucket, &self.registry, serving, check).await
+    }
 }
 
 /// How often owned objects' logs are checked for compaction.
