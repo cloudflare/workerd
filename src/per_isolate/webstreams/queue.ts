@@ -665,11 +665,13 @@ class StreamQueue<T, V = T> {
     }
   }
 
-  // Called by the QueueCursor constructor (cursors self-register). `owner`
-  // is the stream object — registered as the FinalizationRegistry's weak
-  // target and also held weakly by the cursor. When forking (tee), the new
-  // cursor's constructor receives the source cursor's position AND byteOffset
-  // so the branch resumes exactly where the original left off.
+  // Called by the QueueCursor constructor (cursors self-register): a
+  // forked cursor (tee, detach) joins through addCursor, and the
+  // controller's own cursor through addAnchorCursor. A forked cursor's
+  // `owner` is the stream object — registered as the FinalizationRegistry's
+  // weak target and also held weakly by the cursor — and the cursor resumes
+  // at the source cursor's position AND byteOffset, exactly where the
+  // original left off.
   //
   // A cursor joins a queue that already has one only through tee or detach,
   // which then remove the parent's. The controllers rely on that: while the
@@ -683,8 +685,11 @@ class StreamQueue<T, V = T> {
     registerCursorCleanup(owner, cursor);
   }
 
-  // Marks the controller's own cursor (see #anchor).
-  anchorCursor(cursor: QueueCursor<T, V>): void {
+  // Adds the controller's own cursor (see #anchor). It cannot be orphaned,
+  // so it is not registered for cleanup.
+  addAnchorCursor(cursor: QueueCursor<T, V>): void {
+    this.#hadCursors = true;
+    ArrayPrototypePush(this.#cursors, cursor);
     this.#anchor = cursor;
   }
 
@@ -696,8 +701,11 @@ class StreamQueue<T, V = T> {
         break;
       }
     }
-    if (cursor === this.#anchor) this.#anchor = undefined;
-    unregisterCursorCleanup(cursor);
+    if (cursor === this.#anchor) {
+      this.#anchor = undefined;
+    } else {
+      unregisterCursorCleanup(cursor);
+    }
     this.#gc();
   }
 
@@ -753,11 +761,16 @@ function unregisterCursorCleanup(cursor: object): void {
 
 class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #queue: StreamQueue<T, V>;
-  // Weak back-reference to the owning ReadableStream. A cursor whose owner
-  // has been GC'd is an orphan and gets pruned by the queue. Note pending
-  // reads pin the owner (pending.reader → reader → stream), so orphaned
-  // implies no pending reads from any live reader.
-  #owner: unknown;
+  // Weak back-reference to the owning ReadableStream of a forked cursor. A
+  // cursor whose owner has been GC'd is an orphan and gets pruned by the
+  // queue. Note pending reads pin the owner (pending.reader → reader →
+  // stream), so orphaned implies no pending reads from any live reader.
+  #owner: WeakRef<object> | undefined;
+  // The owner of the controller's own cursor (the queue's anchor): the
+  // controller's stream, which the controller holds anyway, so holding it
+  // weakly would cost a WeakRef and a cleanup registration per stream for
+  // nothing.
+  #anchorOwner: object | undefined;
   #position: number;
   #byteOffset: number; // partial consumption of the entry at #position
   readonly #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
@@ -767,19 +780,29 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   // whole-entry consume clamps a negative total to 0 (advancePastEntry).
   #queueTotalSize: number = 0;
 
+  // Without `from`, the controller's own cursor, starting at the end of
+  // the queue; with it, a cursor forked from `from` (tee, detach), resuming
+  // where it is.
   constructor(
     queue: StreamQueue<T, V>,
     owner: object,
-    startPosition: number = queue.length,
-    byteOffset: number = 0,
-    initialTotalSize: number = 0
+    from?: QueueCursor<T, V>
   ) {
     this.#queue = queue;
-    this.#owner = new WeakRef(owner);
-    this.#position = startPosition;
-    this.#byteOffset = byteOffset;
-    this.#queueTotalSize = initialTotalSize;
-    queue.addCursor(this, owner);
+    if (from === undefined) {
+      this.#owner = undefined;
+      this.#anchorOwner = owner;
+      this.#position = queue.length;
+      this.#byteOffset = 0;
+      queue.addAnchorCursor(this);
+    } else {
+      this.#owner = new WeakRef(owner);
+      this.#anchorOwner = undefined;
+      this.#position = from.#position;
+      this.#byteOffset = from.#byteOffset;
+      this.#queueTotalSize = from.#queueTotalSize;
+      queue.addCursor(this, owner);
+    }
   }
 
   get queue(): StreamQueue<T, V> {
@@ -812,14 +835,16 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   isOrphaned(): boolean {
-    return WeakRefPrototypeDeref(this.#owner) === undefined;
+    return this.ownerDeref() === undefined;
   }
 
   // The owning stream, if it is still alive. Used by the controller to
   // propagate error transitions to every consumer stream (tee branches)
   // without holding strong references to them.
   ownerDeref(): object | undefined {
-    return WeakRefPrototypeDeref(this.#owner) as object | undefined;
+    const owner = this.#owner;
+    if (owner === undefined) return this.#anchorOwner;
+    return WeakRefPrototypeDeref(owner) as object | undefined;
   }
 
   // Spec [[queueTotalSize]]: running total of unconsumed entry sizes.

@@ -1806,7 +1806,6 @@ class ReadableStreamDefaultController<
 
     // --- The stream's own cursor ---
     const cursor = new QueueCursor(core.queue, stream) as QueueCursorType<R, R>;
-    core.queue.anchorCursor(cursor);
     setReadableStreamConsumer(stream, cursor);
 
     // --- Start ---
@@ -2166,7 +2165,6 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     // --- The stream's own (byte) cursor ---
     const cursor = new ByteStreamCursor(core.queue, stream);
-    core.queue.anchorCursor(cursor);
     // Wire up the fractional-element-at-close error callback so the
     // cursor can error the stream when a BYOB read lands at the close
     // sentinel with a non-element-aligned partial fill.
@@ -3596,7 +3594,6 @@ function forkQueuedCursors<R>(
   const queue = from.queue;
   const isBytes =
     controller !== undefined && isByteStreamController(controller);
-  const totalSize = from.remainingSize;
   const wasSole = queue.singleCursor === from;
   const cursors: QueueCursorType<R, R>[] = [];
   for (let i = 0; i < owners.length; i++) {
@@ -3607,17 +3604,9 @@ function forkQueuedCursors<R>(
         ? new ByteStreamCursor(
             queue,
             owner,
-            from.position,
-            from.byteOffset,
-            totalSize
+            from as unknown as ByteStreamCursorType
           )
-        : new QueueCursor(
-            queue,
-            owner,
-            from.position,
-            from.byteOffset,
-            totalSize
-          )
+        : new QueueCursor(queue, owner, from)
     );
   }
   if (isBytes) {
