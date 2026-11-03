@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde_json::Value;
 use workerd_capnp::config;
+use workerd_capnp::worker;
 
 use crate::config::Config;
 use crate::config::words_from_bytes;
@@ -164,7 +165,8 @@ pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config,
             .watch_file(p.as_os_str().as_encoded_bytes())
             .map_err(|e| e.description().to_owned())
     };
-    let file = fs::canonicalize(path).map_err(|e| e.to_string())?;
+    // Not `canonicalize`, whose `\\?\` paths on Windows kj cannot parse.
+    let file = std::path::absolute(path).map_err(|e| e.to_string())?;
     watch(&file)?;
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let wrangler: Wrangler =
@@ -220,48 +222,8 @@ pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config,
         .set_compatibility_flags(&wrangler.compatibility_flags[..])
         .map_err(|e| e.to_string())?;
 
-    let mut ms = worker.reborrow().init_modules(sources.len() as u32);
-    for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
-        let mut m = ms.reborrow().get(i as u32);
-        m.set_name(module_name);
-        let text = || std::str::from_utf8(bytes).map_err(|_| format!("{module_name}: not UTF-8"));
-        match kind {
-            Kind::EsModule => m.set_es_module(text()?),
-            Kind::CommonJs => m.set_common_js_module(text()?),
-            Kind::Text => m.set_text(text()?),
-            Kind::Wasm => m.set_wasm(bytes),
-            Kind::Data => m.set_data(bytes),
-        }
-    }
-
-    let do_bindings = wrangler
-        .durable_objects
-        .as_ref()
-        .map_or(&[][..], |d| &d.bindings);
-    let mut bs = worker
-        .reborrow()
-        .init_bindings((wrangler.vars.len() + do_bindings.len() + kv.len()) as u32);
-    for (i, (k, v)) in wrangler.vars.iter().enumerate() {
-        let mut b = bs.reborrow().get(i as u32);
-        b.set_name(k);
-        match v {
-            Value::String(s) => b.set_text(s),
-            other => b.set_json(other.to_string()),
-        }
-    }
-    for (i, d) in do_bindings.iter().enumerate() {
-        let mut b = bs.reborrow().get((wrangler.vars.len() + i) as u32);
-        b.set_name(&d.name);
-        b.init_durable_object_namespace()
-            .set_class_name(&d.class_name);
-    }
-    for (i, k) in kv.iter().enumerate() {
-        let mut b = bs
-            .reborrow()
-            .get((wrangler.vars.len() + do_bindings.len() + i) as u32);
-        b.set_name(&k.binding);
-        b.set_kv_namespace_id(&k.id);
-    }
+    set_modules(worker.reborrow(), &sources)?;
+    set_bindings(worker.reborrow(), &wrangler);
 
     if !classes.is_empty() {
         let mut ns = worker
@@ -295,6 +257,53 @@ pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config,
         &capnp::serialize::write_message_to_words(&message),
     ))
     .map_err(|e| e.to_string())
+}
+
+fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), String> {
+    let mut ms = worker.init_modules(sources.len() as u32);
+    for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
+        let mut m = ms.reborrow().get(i as u32);
+        m.set_name(module_name);
+        let text = || std::str::from_utf8(bytes).map_err(|_| format!("{module_name}: not UTF-8"));
+        match kind {
+            Kind::EsModule => m.set_es_module(text()?),
+            Kind::CommonJs => m.set_common_js_module(text()?),
+            Kind::Text => m.set_text(text()?),
+            Kind::Wasm => m.set_wasm(bytes),
+            Kind::Data => m.set_data(bytes),
+        }
+    }
+    Ok(())
+}
+
+fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler) {
+    let kv = &wrangler.kv_namespaces;
+    let do_bindings = wrangler
+        .durable_objects
+        .as_ref()
+        .map_or(&[][..], |d| &d.bindings);
+    let mut bs = worker.init_bindings((wrangler.vars.len() + do_bindings.len() + kv.len()) as u32);
+    for (i, (k, v)) in wrangler.vars.iter().enumerate() {
+        let mut b = bs.reborrow().get(i as u32);
+        b.set_name(k);
+        match v {
+            Value::String(s) => b.set_text(s),
+            other => b.set_json(other.to_string()),
+        }
+    }
+    for (i, d) in do_bindings.iter().enumerate() {
+        let mut b = bs.reborrow().get((wrangler.vars.len() + i) as u32);
+        b.set_name(&d.name);
+        b.init_durable_object_namespace()
+            .set_class_name(&d.class_name);
+    }
+    for (i, k) in kv.iter().enumerate() {
+        let mut b = bs
+            .reborrow()
+            .get((wrangler.vars.len() + do_bindings.len() + i) as u32);
+        b.set_name(&k.binding);
+        b.set_kv_namespace_id(&k.id);
+    }
 }
 
 type Source = (String, Kind, Vec<u8>);
