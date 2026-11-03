@@ -4,6 +4,8 @@
 
 //! Tests for `ArrayBuffer`, `ArrayBufferView`, and `BackingStore`.
 
+#![cfg(test)]
+
 use jsg::ToJsTypedArray;
 use jsg::v8;
 
@@ -13,7 +15,7 @@ use jsg::v8;
 
 #[test]
 fn array_buffer_new_copies_data() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Create from a mutable source, then mutate the source afterwards.
         // The ArrayBuffer must retain the original values (copy semantics).
@@ -40,7 +42,7 @@ fn array_buffer_new_copies_data() {
 
 #[test]
 fn array_buffer_new_zeroed_is_zeroed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 8);
         ctx.set_global(lock, "buf", buf);
@@ -59,7 +61,7 @@ fn array_buffer_new_zeroed_is_zeroed() {
 
 #[test]
 fn array_buffer_new_zeroed_with_fills_before_js_sees_it() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let (buf, result) = v8::ArrayBuffer::new_zeroed_with(lock, 4, |bytes| {
             assert_eq!(bytes, &[0, 0, 0, 0], "must be zeroed before fill runs");
@@ -81,7 +83,7 @@ fn array_buffer_new_zeroed_with_fills_before_js_sees_it() {
 
 #[test]
 fn array_buffer_new_zeroed_with_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let (buf, len) = v8::ArrayBuffer::new_zeroed_with(lock, 0, |bytes| bytes.len()).unwrap();
         assert_eq!(len, 0);
@@ -92,7 +94,7 @@ fn array_buffer_new_zeroed_with_empty() {
 
 #[test]
 fn array_buffer_new_zeroed_with_allocation_failure_skips_fill() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let mut called = false;
         let result = v8::ArrayBuffer::new_zeroed_with(lock, usize::MAX, |_| called = true);
@@ -104,7 +106,7 @@ fn array_buffer_new_zeroed_with_allocation_failure_skips_fill() {
 
 #[test]
 fn uint8_array_from_buffer_views_a_range() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
         let view = v8::Uint8Array::from_buffer(lock, &buf, 1, 2).unwrap();
@@ -119,7 +121,7 @@ fn uint8_array_from_buffer_views_a_range() {
 
 #[test]
 fn uint8_array_from_buffer_out_of_bounds_is_an_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
         assert!(v8::Uint8Array::from_buffer(lock, &buf, 0, 5).is_err());
@@ -132,7 +134,7 @@ fn uint8_array_from_buffer_out_of_bounds_is_an_error() {
 
 #[test]
 fn array_buffer_is_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 0);
         assert!(buf.is_empty());
@@ -143,7 +145,7 @@ fn array_buffer_is_empty() {
 
 #[test]
 fn array_buffer_byte_length() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert_eq!(buf.byte_length(), 3);
@@ -158,7 +160,7 @@ fn array_buffer_byte_length() {
 
 #[test]
 fn array_buffer_as_slice_reads_data() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]);
         assert_eq!(buf.as_slice(lock), &[1u8, 2, 3, 4]);
@@ -168,7 +170,7 @@ fn array_buffer_as_slice_reads_data() {
 
 #[test]
 fn array_buffer_as_slice_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 0);
         assert_eq!(buf.as_slice(lock), &[] as &[u8]);
@@ -178,7 +180,7 @@ fn array_buffer_as_slice_empty() {
 
 #[test]
 fn array_buffer_as_mut_slice_mutations_visible_in_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let mut buf = v8::ArrayBuffer::new(lock, &[0u8, 0, 0]);
         // SAFETY: no other reference into this buffer is live during this call.
@@ -193,7 +195,7 @@ fn array_buffer_as_mut_slice_mutations_visible_in_js() {
 
 #[test]
 fn array_buffer_to_vec() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[5u8, 6, 7]);
         assert_eq!(buf.to_vec(), vec![5u8, 6, 7]);
@@ -207,7 +209,7 @@ fn array_buffer_to_vec() {
 
 #[test]
 fn array_buffer_detach() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert!(buf.is_detachable());
@@ -224,7 +226,7 @@ fn array_buffer_detach() {
 
 #[test]
 fn array_buffer_is_shared() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8]);
         assert!(!buf.is_shared());
@@ -238,7 +240,7 @@ fn array_buffer_is_shared() {
 
 #[test]
 fn array_buffer_into_value_and_back() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2]);
         let val: v8::Local<v8::Value> = buf.into();
@@ -253,7 +255,7 @@ fn array_buffer_into_value_and_back() {
 
 #[test]
 fn array_buffer_try_from_from_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new ArrayBuffer(4)").unwrap();
         let buf: v8::Local<v8::ArrayBuffer> = val.try_into().expect("should cast to ArrayBuffer");
@@ -264,7 +266,7 @@ fn array_buffer_try_from_from_value() {
 
 #[test]
 fn array_buffer_try_from_fails_for_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([1,2,3])").unwrap();
         let result = v8::Local::<v8::ArrayBuffer>::try_from(val);
@@ -275,7 +277,7 @@ fn array_buffer_try_from_fails_for_typed_array() {
 
 #[test]
 fn array_buffer_into_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[42u8]);
         let obj: v8::Local<v8::Object> = buf.into();
@@ -305,7 +307,7 @@ fn array_buffer_from_js_rejects_typed_array() {
         }
     }
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(AbResource);
         ctx.set_global(lock, "r", res);
@@ -329,7 +331,7 @@ fn array_buffer_from_js_rejects_typed_array() {
 
 #[test]
 fn backing_store_data_and_byte_length() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[11u8, 22, 33]);
         let bs = buf.backing_store();
@@ -343,7 +345,7 @@ fn backing_store_data_and_byte_length() {
 
 #[test]
 fn backing_store_max_byte_length_equals_byte_length_for_fixed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[0u8; 16]);
         let bs = buf.backing_store();
@@ -354,7 +356,7 @@ fn backing_store_max_byte_length_equals_byte_length_for_fixed() {
 
 #[test]
 fn backing_store_is_not_resizable_for_regular_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2]);
         let bs = buf.backing_store();
@@ -365,7 +367,7 @@ fn backing_store_is_not_resizable_for_regular_buffer() {
 
 #[test]
 fn backing_store_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 0);
         let bs = buf.backing_store();
@@ -379,7 +381,7 @@ fn backing_store_empty() {
 
 #[test]
 fn backing_store_as_mut_slice_mutations_visible_via_local() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[0u8, 0, 0]);
         let mut bs = buf.backing_store();
@@ -394,7 +396,7 @@ fn backing_store_as_mut_slice_mutations_visible_via_local() {
 
 #[test]
 fn backing_store_outlives_local() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // BackingStore keeps backing memory alive even after the Local is dropped
         let bs = {
@@ -417,7 +419,7 @@ fn backing_store_outlives_local() {
 
 #[test]
 fn array_buffer_view_from_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([10, 20, 30])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> =
@@ -431,7 +433,7 @@ fn array_buffer_view_from_typed_array() {
 
 #[test]
 fn array_buffer_view_with_byte_offset() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx
             .eval_raw(
@@ -454,7 +456,7 @@ fn array_buffer_view_with_byte_offset() {
 
 #[test]
 fn array_buffer_view_as_mut_slice() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([1, 2, 3])").unwrap();
         let mut view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -468,7 +470,7 @@ fn array_buffer_view_as_mut_slice() {
 
 #[test]
 fn array_buffer_view_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint16Array([100, 200])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -481,7 +483,7 @@ fn array_buffer_view_buffer() {
 
 #[test]
 fn array_buffer_view_to_vec() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([7, 8, 9])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -492,7 +494,7 @@ fn array_buffer_view_to_vec() {
 
 #[test]
 fn array_buffer_view_is_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -504,7 +506,7 @@ fn array_buffer_view_is_empty() {
 
 #[test]
 fn array_buffer_view_into_value_and_back() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Int32Array([1, 2, 3])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -516,7 +518,7 @@ fn array_buffer_view_into_value_and_back() {
 
 #[test]
 fn array_buffer_view_into_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([1])").unwrap();
         let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
@@ -529,7 +531,7 @@ fn array_buffer_view_into_object() {
 
 #[test]
 fn array_buffer_view_try_from_fails_for_array_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new ArrayBuffer(4)").unwrap();
         assert!(v8::Local::<v8::ArrayBufferView>::try_from(val).is_err());
@@ -552,7 +554,7 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
         }
     }
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(ViewResource);
         ctx.set_global(lock, "r", res);
@@ -577,7 +579,7 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
 
 #[test]
 fn array_buffer_view_element_size_uint8() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint8Array([1, 2])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -588,7 +590,7 @@ fn array_buffer_view_element_size_uint8() {
 
 #[test]
 fn array_buffer_view_element_size_uint16() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Uint16Array([1])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -599,7 +601,7 @@ fn array_buffer_view_element_size_uint16() {
 
 #[test]
 fn array_buffer_view_element_size_int32() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Int32Array([1])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -610,7 +612,7 @@ fn array_buffer_view_element_size_int32() {
 
 #[test]
 fn array_buffer_view_element_size_float32() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Float32Array([1.0])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -621,7 +623,7 @@ fn array_buffer_view_element_size_float32() {
 
 #[test]
 fn array_buffer_view_element_size_float64() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Float64Array([1.0])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -632,7 +634,7 @@ fn array_buffer_view_element_size_float64() {
 
 #[test]
 fn array_buffer_view_element_size_bigint64() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new BigInt64Array([1n])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -643,7 +645,7 @@ fn array_buffer_view_element_size_bigint64() {
 
 #[test]
 fn array_buffer_view_element_size_data_view() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx
             .eval_raw(lock, "new DataView(new ArrayBuffer(8))")
@@ -660,7 +662,7 @@ fn array_buffer_view_element_size_data_view() {
 
 #[test]
 fn array_buffer_detach_zeroes_slices() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert_eq!(buf.as_slice(lock), &[1, 2, 3]);
@@ -677,7 +679,7 @@ fn array_buffer_detach_zeroes_slices() {
 
 #[test]
 fn array_buffer_view_to_vec_uint32() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Uint32Array([1]) is 4 bytes: 0x01 0x00 0x00 0x00 on little-endian
         let val = ctx.eval_raw(lock, "new Uint32Array([1])").unwrap();
@@ -695,7 +697,7 @@ fn array_buffer_view_to_vec_uint32() {
 
 #[test]
 fn array_buffer_view_to_vec_float64() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw(lock, "new Float64Array([1.5])").unwrap();
         let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
@@ -713,7 +715,7 @@ fn array_buffer_view_to_vec_float64() {
 
 #[test]
 fn typed_arrays_cast_to_array_buffer_view() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // Uint8Array -> ArrayBufferView
         let typed = [1u8, 2, 3].to_js_typed_array(lock);
@@ -731,7 +733,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
 
 #[test]
 fn array_buffer_view_back_to_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [10u8, 20, 30].to_js_typed_array(lock);
         let view: v8::Local<v8::ArrayBufferView> = typed.into();

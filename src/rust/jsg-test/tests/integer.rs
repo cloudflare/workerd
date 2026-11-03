@@ -7,6 +7,8 @@
 //! fractions truncate. `Integer`, `Int32` and `Uint32` handles are the counterparts of the V8
 //! classes, and `int32_value()` and the like convert as `v8::Value::Int32Value()` does.
 
+#![cfg(test)]
+
 use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::NonCoercible;
@@ -19,7 +21,7 @@ use jsg_macros::jsg_struct;
 /// Evaluates `expr` and converts it to `T`, as an argument would be.
 fn convert<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, jsg::Error> {
     let value = ctx
@@ -31,7 +33,7 @@ fn convert<'s, T: FromJS<'s>>(
 /// Asserts that converting `expr` to `T` is a `TypeError` with `message`.
 fn assert_type_error<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
     message: &str,
 ) {
@@ -44,7 +46,7 @@ fn assert_type_error<'s, T: FromJS<'s>>(
 
 #[test]
 fn integers_truncate_toward_zero() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(convert::<u8>(lock, ctx, "3.7").unwrap(), 3);
         assert_eq!(convert::<i8>(lock, ctx, "-2.9").unwrap(), -2);
@@ -57,8 +59,8 @@ fn integers_truncate_toward_zero() {
 #[test]
 fn integers_out_of_range_are_type_errors() {
     // Without the JSG_INTEGER_ENFORCE_RANGE autogate, a fraction past a limit is out of range.
-    let _autogates = crate::set_autogates(&[]);
-    let harness = crate::Harness::new();
+    let _autogates = jsg_test::set_autogates(&[]);
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let below = "Value out of range. Must be less than or equal to";
         assert_type_error::<u8>(lock, ctx, "256", &format!("{below} 255."));
@@ -93,8 +95,8 @@ fn integers_out_of_range_are_type_errors() {
 #[test]
 fn unsigned_integers_reject_negatives() {
     // Without the JSG_INTEGER_ENFORCE_RANGE autogate, `-0.5` is negative, not `0`.
-    let _autogates = crate::set_autogates(&[]);
-    let harness = crate::Harness::new();
+    let _autogates = jsg_test::set_autogates(&[]);
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let message = "The value cannot be converted because it is negative and this API \
                        expects a positive number.";
@@ -116,10 +118,10 @@ fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
     let between = |min: i32, max: i32| {
         format!("Value out of range. Must be between {min} and {max} (inclusive).")
     };
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
 
     {
-        let _autogates = crate::set_autogates(&[]);
+        let _autogates = jsg_test::set_autogates(&[]);
         harness.run_in_context(|lock, ctx| {
             assert_type_error::<u8>(lock, ctx, "255.5", &at_most(255));
             assert_type_error::<u8>(lock, ctx, "-0.5", negative);
@@ -138,7 +140,7 @@ fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
     }
 
     {
-        let _autogates = crate::set_autogates(&["jsg-integer-enforce-range"]);
+        let _autogates = jsg_test::set_autogates(&["jsg-integer-enforce-range"]);
         harness.run_in_context(|lock, ctx| {
             assert_eq!(convert::<u8>(lock, ctx, "255.5").unwrap(), 255);
             assert_eq!(convert::<u8>(lock, ctx, "-0.5").unwrap(), 0);
@@ -190,7 +192,7 @@ fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
 
 #[test]
 fn non_finite_integers() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let message = "The value cannot be converted because it is not an integer.";
         assert_type_error::<u8>(lock, ctx, "NaN", message);
@@ -206,7 +208,7 @@ fn non_finite_integers() {
 /// Converts `value` to JavaScript, stores it as the global `v` and evaluates `expr`.
 fn eval_with<'s, T: FromJS<'s, ResultType = T>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     value: impl ToJS<'s>,
     expr: &str,
 ) -> T {
@@ -216,7 +218,7 @@ fn eval_with<'s, T: FromJS<'s, ResultType = T>>(
 
 #[test]
 fn integers_convert_to_numbers() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert!(eval_with::<bool>(
             lock,
@@ -238,7 +240,7 @@ fn integers_convert_to_numbers() {
 /// number too.
 #[test]
 fn integers_in_containers_convert_to_numbers() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert!(ctx.eval::<bool>(lock, "r.first([7, 8]) === 7").unwrap());
@@ -268,7 +270,7 @@ fn integers_in_containers_convert_to_numbers() {
 /// typed array, which is a `Local<Uint8Array>` and the like.
 #[test]
 fn vec_of_integers_converts_from_an_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(
             convert::<Vec<u8>>(lock, ctx, "[1, 2.9, '255']").unwrap(),
@@ -306,7 +308,7 @@ fn vec_of_integers_converts_from_an_array() {
 /// A `Vec` of integers converts to an `Array` of numbers, or of `BigInt`s for `i64` and `u64`.
 #[test]
 fn vec_of_integers_converts_to_an_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert!(eval_with::<bool>(
             lock,
@@ -340,7 +342,7 @@ fn vec_of_integers_converts_to_an_array() {
 /// `NonCoercible<u64>` only a `BigInt`. (C++ JSG has no `NonCoercible` integers.)
 #[test]
 fn non_coercible_integers_require_a_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(*convert::<NonCoercible<u32>>(lock, ctx, "7").unwrap(), 7);
         assert_type_error::<NonCoercible<u32>>(
@@ -423,7 +425,7 @@ impl Integers {
     }
 }
 
-fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let resource = jsg::Rc::new(Integers).to_js(lock).unwrap();
     ctx.set_global(lock, "r", resource);
 }
@@ -432,7 +434,7 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 /// they are in range, and the checks for all three match V8's.
 #[test]
 fn integer_handles() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let signed = v8::Integer::new(lock, -7);
         assert_eq!(signed.value(), -7);
@@ -498,7 +500,7 @@ fn integer_handles() {
 /// A handle parameter takes a number in range as it is, without `ToNumber` or truncation.
 #[test]
 fn integer_handle_parameters_do_not_coerce() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert_eq!(
@@ -547,7 +549,7 @@ fn integer_handle_parameters_do_not_coerce() {
 /// `ToInt32`, `ToUint32` and `ToInteger` do, running `valueOf` where there is one.
 #[test]
 fn integer_coercions() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value_of = "({ valueOf() { return -2.5; } })";
         for (expr, expected) in [
@@ -616,7 +618,7 @@ enum Coercion {
 /// that a method passing the error on throws it to its caller.
 #[test]
 fn integer_coercions_pass_on_what_to_number_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let thrower = "({ valueOf() { throw new RangeError('boom'); } })";
         for (expr, name, message) in [

@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::Error;
 use jsg::ExceptionType;
 use jsg::FromJS;
@@ -91,7 +93,7 @@ struct JsValueStruct {
 
 #[test]
 fn objects_can_be_wrapped_and_unwrapped() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let instance = TestStruct {
             str: "test".to_owned(),
@@ -112,7 +114,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
 
 #[test]
 fn struct_with_multiple_properties() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let instance = MultiPropertyStruct {
             name: "Alice".to_owned(),
@@ -143,7 +145,7 @@ fn struct_with_multiple_properties() {
 
 #[test]
 fn number_type_conversions() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let byte_val: u8 = 42;
         let byte_local = byte_val.to_js(lock)?;
@@ -158,7 +160,7 @@ fn number_type_conversions() {
 
 #[test]
 fn empty_object_and_property_setting() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let obj = lock.new_object();
 
@@ -185,7 +187,7 @@ fn empty_object_and_property_setting() {
 
 #[test]
 fn global_handle_conversion() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let local_str = "global test".to_js(lock)?;
         assert!(local_str.is_string());
@@ -199,7 +201,7 @@ fn global_handle_conversion() {
 
 #[test]
 fn nested_object_properties() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let outer = lock.new_object();
 
@@ -248,7 +250,7 @@ fn error_from_parse_int_error() {
 
 #[test]
 fn type_of_returns_correct_js_types() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let str_val = "hello".to_js(lock)?;
         assert_eq!(str_val.type_of(lock), "string");
@@ -275,7 +277,7 @@ fn type_of_returns_correct_js_types() {
 /// Converts the JS expression `expr` with `T`'s `FromJS`.
 fn convert<'s, T: jsg::FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, Error> {
     let value = ctx
@@ -288,7 +290,7 @@ fn convert<'s, T: jsg::FromJS<'s>>(
 /// optional, and absent properties read as undefined.
 #[test]
 fn optional_struct_from_null_undefined_and_partial_objects() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let empty = OptionalStruct {
             label: None,
@@ -312,7 +314,7 @@ fn optional_struct_from_null_undefined_and_partial_objects() {
 /// absent required property converts from undefined.
 #[test]
 fn required_struct_from_null_and_absent_property() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let err = convert::<RequiredStruct>(lock, ctx, "null").unwrap_err();
         assert_eq!(err.name, ExceptionType::TypeError);
@@ -333,7 +335,7 @@ fn required_struct_from_null_and_absent_property() {
 /// A throwing getter fails the conversion, leaving what it threw pending.
 #[test]
 fn struct_from_throwing_getter_propagates_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
             .eval_raw(
@@ -357,7 +359,7 @@ fn struct_from_throwing_getter_propagates_error() {
 /// JSG's `Set()` path omits it.
 #[test]
 fn struct_without_fast_jsg_struct_omits_absent_optional_fields() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let value = OptionalStruct {
             label: None,
@@ -375,7 +377,7 @@ fn struct_without_fast_jsg_struct_omits_absent_optional_fields() {
 /// as C++ JSG's `DictionaryTemplate` gives every field a value.
 #[test]
 fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
-    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
     harness.run_in_context(|lock, ctx| {
         let value = OptionalStruct {
             label: None,
@@ -400,7 +402,7 @@ fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
 #[test]
 fn struct_to_js_fails_with_a_fields_error() {
     for fast in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         harness.run_in_context(|lock, _ctx| {
             let instance = FailingFieldStruct {
                 name: "ok".to_owned(),
@@ -417,7 +419,7 @@ fn struct_to_js_fails_with_a_fields_error() {
 #[test]
 fn nullish_struct_fields_use_consuming_fallible_conversion() {
     for fast in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         harness.run_in_context(|lock, _ctx| {
             let err = FailingNullishFieldStruct {
                 bad: jsg::NullOrUndefined::Some(Unconvertible),
@@ -444,7 +446,7 @@ fn nullish_struct_fields_use_consuming_fallible_conversion() {
 #[test]
 fn struct_js_value_fields_keep_identity() {
     for fast in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         harness.run_in_context(|lock, ctx| {
             let result = convert::<JsValueStruct>(
                 lock,
@@ -467,7 +469,7 @@ fn struct_js_value_fields_keep_identity() {
 /// absent property as `undefined`; an optional field is absent then.
 #[test]
 fn struct_js_value_field_takes_any_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result = convert::<JsValueStruct>(lock, ctx, "({})")?;
         assert!(result.value.as_local(lock).is_undefined());
@@ -492,7 +494,7 @@ fn struct_js_value_field_takes_any_value() {
 /// A `TracedGlobal<Object>` field takes only an object, as a `Local<Object>` does.
 #[test]
 fn struct_js_object_field_rejects_other_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let Err(err) = convert::<JsValueStruct>(lock, ctx, "({ value: 1, object: 2 })") else {
             panic!("2 is not an object");
@@ -507,7 +509,7 @@ fn struct_js_object_field_rejects_other_values() {
 /// values through a GC: outside a resource, nothing has made its handles weak.
 #[test]
 fn struct_js_value_field_outlives_its_scope() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let kept = std::cell::RefCell::new(None);
     harness.run_in_context(|lock, ctx| {
         *kept.borrow_mut() = Some(convert::<JsValueStruct>(
@@ -518,7 +520,7 @@ fn struct_js_value_field_outlives_its_scope() {
         Ok(())
     });
     harness.run_in_context(|lock, ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let back = kept.borrow_mut().take().unwrap().to_js(lock)?;
         ctx.set_global(lock, "back", back);
         assert!(
@@ -534,7 +536,7 @@ fn struct_js_value_field_outlives_its_scope() {
 #[test]
 fn struct_vec_of_bytes_field_is_an_array() {
     for fast in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         harness.run_in_context(|lock, ctx| {
             let value = BytesStruct {
                 bytes: vec![1, 2, 255],

@@ -5,6 +5,7 @@
 //! `Number` handles, the counterpart of `v8::Number`, and the `f64` conversion, which matches
 //! C++ JSG's `double` (`jsg/value.h`).
 
+#![cfg(test)]
 #![expect(
     clippy::float_cmp,
     reason = "every compared value is exactly representable"
@@ -49,13 +50,13 @@ impl Numbers {
     }
 }
 
-fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let resource = jsg::Rc::new(Numbers).to_js(lock).unwrap();
     ctx.set_global(lock, "r", resource);
 }
 
 /// Evaluates `expr` and converts it to an `f64`, as an argument would be.
-fn convert(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, expr: &str) -> f64 {
+fn convert(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>, expr: &str) -> f64 {
     let value = ctx.eval_raw(lock, expr).unwrap();
     f64::from_js(lock, value).unwrap_or_else(|err| panic!("{expr} should convert: {err}"))
 }
@@ -64,7 +65,7 @@ fn convert(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, expr: &str) -
 /// the conversion fails with, or what V8 threw during the coercion, which stays pending.
 fn assert_type_error<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
     message: &str,
 ) {
@@ -82,7 +83,7 @@ fn assert_type_error<'s, T: FromJS<'s>>(
 
 #[test]
 fn number_handles() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let number = v8::Number::new(lock, 2.5);
         assert_eq!(number.value(), 2.5);
@@ -133,7 +134,7 @@ fn number_handles() {
 /// A `Local<Number>` parameter takes a number as it is, without `ToNumber`.
 #[test]
 fn number_handle_parameter_does_not_coerce() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(Numbers).to_js(lock)?;
         ctx.set_global(lock, "r", resource);
@@ -155,7 +156,7 @@ fn number_handle_parameter_does_not_coerce() {
 /// An `f64` converts with `ToNumber`, like C++ JSG's `double`.
 #[test]
 fn f64_converts_with_to_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(convert(lock, ctx, "42"), 42.0);
         assert_eq!(convert(lock, ctx, "-2.5"), -2.5);
@@ -191,7 +192,7 @@ fn f64_converts_with_to_number() {
 /// An `f64` parameter and return value pass a number through unchanged, including `-0` and NaN.
 #[test]
 fn f64_parameters_and_return_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert_eq!(ctx.eval::<f64>(lock, "r.id(1.5)").unwrap(), 1.5);
@@ -226,7 +227,7 @@ fn f64_parameters_and_return_values() {
 /// `NonCoercible<f64>` accepts only a number, including `-0` and NaN.
 #[test]
 fn non_coercible_f64_accepts_only_numbers() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert_eq!(ctx.eval::<f64>(lock, "r.strict(1.5)").unwrap(), 1.5);

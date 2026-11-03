@@ -6,6 +6,8 @@
 //! the value, and from the return value of a method or a wildcard property to the JavaScript
 //! caller, which catches what JavaScript threw during the conversion.
 
+#![cfg(test)]
+
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -118,7 +120,7 @@ impl WildcardConverter {
     }
 }
 
-fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     ctx.set_global(lock, "converter", jsg::Rc::new(Converter));
     ctx.set_global(
         lock,
@@ -131,7 +133,7 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 
 #[test]
 fn converting_a_return_value_runs_javascript() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert_eq!(
             ctx.eval::<String>(lock, "converter.one(() => 'one')")
@@ -172,7 +174,7 @@ fn converting_a_return_value_runs_javascript() {
 /// converted reaches the caller unchanged, whichever container holds the value.
 #[test]
 fn what_a_return_value_conversion_throws_reaches_the_caller() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         for call in [
             "converter.one(thrower)",
@@ -200,7 +202,7 @@ fn what_a_return_value_conversion_throws_reaches_the_caller() {
 /// Converting a `Vec` stops at the first element whose conversion fails.
 #[test]
 fn converting_a_vec_stops_at_the_first_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let script = "
             const calls = [];

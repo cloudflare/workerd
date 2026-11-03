@@ -3,16 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! Tests for `jsg_cpp`: a Rust resource that takes, returns and holds C++ resources, and C++
-//! resources that take, return and hold it (`crate::cpp_interop`).
+//! resources that take, return and hold it (`jsg_test::cpp_interop`).
+
+#![cfg(test)]
 
 use std::cell::Cell;
 
 use jsg::v8;
-
-use crate::Harness;
-use crate::cpp_interop::HOST_DROPS;
-use crate::cpp_interop::Host;
-use crate::cpp_interop::ffi;
+use jsg_test::Harness;
+use jsg_test::cpp_interop::HOST_DROPS;
+use jsg_test::cpp_interop::Host;
+use jsg_test::cpp_interop::ffi;
 
 /// Sets the simulated request for the duration of a test.
 struct InRequest;
@@ -48,7 +49,7 @@ fn new_cpp<'s>(
 }
 
 /// Sets the globals `h` (a `Host`), `greeter`, `derived` and `holder`.
-fn set_globals(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, host: jsg::Rc<Host>) {
+fn set_globals(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>, host: jsg::Rc<Host>) {
     ctx.set_global(lock, "h", host);
     // SAFETY: the constructors are called with the lock's isolate, in its scope.
     let greeter = new_cpp(lock, |isolate| unsafe {

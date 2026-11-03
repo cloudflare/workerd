@@ -4,11 +4,13 @@
 
 //! An internal error reaches JavaScript without its message.
 
+#![cfg(test)]
+
 use jsg::FromJS;
 
 #[test]
 fn internal_error_is_redacted_when_thrown() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let thrown =
             lock.try_catch(|_lock| Err::<(), _>(jsg::Error::new_internal_error("secret detail")))?;
         let Err(exception) = thrown else {

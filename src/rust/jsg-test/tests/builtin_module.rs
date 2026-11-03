@@ -5,6 +5,8 @@
 //! A builtin module's callback produces its exports resource when JavaScript imports it, and
 //! an error it returns is thrown to the importer.
 
+#![cfg(test)]
+
 use std::pin::Pin;
 
 use jsg::modules::ModuleType;
@@ -42,7 +44,7 @@ fn register(mut registry: Pin<&mut v8::ffi::ModuleRegistry>) {
 
 #[test]
 fn importing_a_builtin_gives_its_exports() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let exports = ctx.import_builtin(lock, register, "test:exports").unwrap();
         ctx.set_global(lock, "exports", exports);
         assert_eq!(
@@ -55,8 +57,8 @@ fn importing_a_builtin_gives_its_exports() {
 
 #[test]
 fn importing_a_builtin_throws_what_its_callback_returns() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
-        let Err(crate::EvalError::Exception(exception)) =
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
+        let Err(jsg_test::EvalError::Exception(exception)) =
             ctx.import_builtin(lock, register, "test:fails")
         else {
             panic!("importing the module did not throw");

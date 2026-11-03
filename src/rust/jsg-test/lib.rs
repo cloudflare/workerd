@@ -12,8 +12,6 @@ use jsg::v8;
 use kj_rs::KjOwn;
 
 pub mod cpp_interop;
-#[cfg(test)]
-mod tests;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg_test")]
 mod ffi {
@@ -133,13 +131,9 @@ mod ffi {
         pub unsafe fn cpp_wrapped_function_data_is_rust_wrappable(isolate: *mut Isolate) -> bool;
 
         /// Returns an empty `v8::MaybeLocal`.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
         pub fn empty_maybe_local() -> MaybeLocal;
 
         /// Returns whether C++ sees `value` as an empty `v8::MaybeLocal`.
-        #[expect(clippy::allow_attributes)]
-        #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
         /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
@@ -719,6 +713,18 @@ impl Harness {
         // SAFETY: the lock keeps the isolate locked with a scope open, which the value belongs
         // to.
         unsafe { v8::Local::from_ffi_maybe(ffi::async_context_value(lock.isolate().as_ffi())) }
+    }
+
+    /// An empty `v8::MaybeLocal` that C++ made, as it hands one to Rust.
+    #[must_use]
+    pub fn cpp_empty_maybe_local() -> v8::ffi::MaybeLocal {
+        ffi::empty_maybe_local()
+    }
+
+    /// Whether C++ sees `value` as an empty `v8::MaybeLocal`.
+    #[must_use]
+    pub fn cpp_sees_empty_maybe_local(value: v8::ffi::MaybeLocal) -> bool {
+        ffi::cpp_sees_empty_maybe_local(value)
     }
 
     /// Whether C++ `jsg::AsyncContextFrame::current()` sees the root frame, to compare with

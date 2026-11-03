@@ -11,6 +11,8 @@
 //! Note: Circular references through `Rc<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -69,7 +71,7 @@ impl ParentResource {}
 fn supports_gc_via_ref_drop() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let resource = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
@@ -93,7 +95,7 @@ fn supports_gc_via_ref_drop() {
 fn supports_gc_via_weak_callback() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let resource = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
@@ -107,7 +109,7 @@ fn supports_gc_via_weak_callback() {
 
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -118,7 +120,7 @@ fn resource_with_traced_ref_field() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let child = jsg::Rc::new(SimpleResource {
             name: "child".to_owned(),
@@ -144,7 +146,7 @@ fn resource_with_traced_ref_field() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -156,7 +158,7 @@ fn child_traced_ref_kept_alive_by_parent() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let child = jsg::Rc::new(SimpleResource {
             name: "child".to_owned(),
@@ -173,7 +175,7 @@ fn child_traced_ref_kept_alive_by_parent() {
 
         // Child not collected because parent still holds an `Rc` (which holds a kj::Own)
         std::mem::drop(child);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
 
         // Drop the Rust strong ref. The parent still has a wrapper, but with no
@@ -184,7 +186,7 @@ fn child_traced_ref_kept_alive_by_parent() {
 
     // GC in a separate context so the Local handle from wrap() is gone
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -195,7 +197,7 @@ fn child_traced_ref_kept_alive_by_parent() {
 fn weak_ref_upgrade() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
@@ -224,7 +226,7 @@ fn weak_ref_upgrade() {
 fn wrapped_resource_kept_alive_by_js() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
@@ -237,7 +239,7 @@ fn wrapped_resource_kept_alive_by_js() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -248,7 +250,7 @@ fn wrapped_resource_kept_alive_by_js() {
 fn weak_ref_with_wrapped_resource() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "test".to_owned(),
@@ -264,7 +266,7 @@ fn weak_ref_with_wrapped_resource() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -276,7 +278,7 @@ fn traced_ref_in_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let child = jsg::Rc::new(SimpleResource {
             name: "child".to_owned(),
@@ -298,9 +300,9 @@ fn traced_ref_in_gc() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -313,7 +315,7 @@ fn traced_ref_in_gc() {
 /// Tests that `WeakRef::get()` returns the resource data while the resource is alive.
 #[test]
 fn weak_ref_get_returns_resource_data() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "hello".to_owned(),
@@ -332,7 +334,7 @@ fn weak_ref_get_returns_resource_data() {
 fn weak_ref_get_returns_none_after_drop() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "ephemeral".to_owned(),
@@ -355,7 +357,7 @@ fn weak_ref_get_returns_none_after_drop() {
 /// All operations must be safe: `get()` -> `None`, `upgrade()` -> `None`, `is_alive()` -> `false`.
 #[test]
 fn weak_ref_default_is_dead() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let weak: jsg::Weak<SimpleResource> = jsg::Weak::default();
 
@@ -373,7 +375,7 @@ fn weak_ref_default_is_dead() {
 fn weak_ref_clone_shares_alive_marker() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "shared".to_owned(),
@@ -405,7 +407,7 @@ fn weak_ref_clone_shares_alive_marker() {
 fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let strong = jsg::Rc::new(SimpleResource {
             name: "persistent".to_owned(),
@@ -425,7 +427,7 @@ fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -455,7 +457,7 @@ fn weak_ref_trace_does_not_prevent_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     HOLDER_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let target = jsg::Rc::new(SimpleResource {
             name: "target".to_owned(),
@@ -479,10 +481,10 @@ fn weak_ref_trace_does_not_prevent_gc() {
 
     // GC should collect the target — the WeakRef in holder doesn't keep it alive
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         // Both should be collected (holder's WeakRef doesn't prevent target's collection)
         assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -497,7 +499,7 @@ fn weak_ref_trace_does_not_prevent_gc() {
 fn ref_clone_keeps_resource_alive() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let original = jsg::Rc::new(SimpleResource {
             name: "cloned".to_owned(),
@@ -525,7 +527,7 @@ fn ref_clone_keeps_resource_alive() {
 fn multiple_ref_drops_only_last_triggers_destruction() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let original = jsg::Rc::new(SimpleResource {
             name: "multi".to_owned(),
@@ -552,7 +554,7 @@ fn multiple_ref_drops_only_last_triggers_destruction() {
 /// Tests that `Rc::deref()` returns the correct resource data.
 #[test]
 fn ref_deref_returns_correct_resource_data() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let r = jsg::Rc::new(SimpleResource {
             name: "deref-test".to_owned(),
@@ -580,7 +582,7 @@ fn ref_deref_returns_correct_resource_data() {
 fn from_js_creates_strong_reference_from_js_wrapper() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(SimpleResource {
             name: "unwrap-me".to_owned(),
@@ -610,7 +612,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 
     // GC the JS wrapper — now the resource can be collected
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -622,7 +624,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 /// `FromJS::from_js` must return `Err` without crashing.
 #[test]
 fn from_js_returns_err_for_plain_js_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
         let result = <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, plain_obj);
@@ -646,7 +648,7 @@ fn from_js_returns_err_for_plain_js_object() {
 fn wrap_multiple_instances_of_same_type() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r1 = jsg::Rc::new(SimpleResource {
             name: "first".to_owned(),
@@ -683,7 +685,7 @@ fn wrap_multiple_instances_of_same_type() {
 /// `Wrappable::tryGetHandle()` should detect an existing wrapper and return it.
 #[test]
 fn wrap_same_resource_twice_returns_same_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(SimpleResource {
             name: "singleton".to_owned(),
@@ -708,7 +710,7 @@ fn wrap_same_resource_twice_returns_same_object() {
 /// Tests that resource data survives a GC cycle when held by a JS global.
 #[test]
 fn resource_data_survives_gc_via_js_global() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(SimpleResource {
             name: "survivor".to_owned(),
@@ -717,7 +719,7 @@ fn resource_data_survives_gc_via_js_global() {
         ctx.set_global(lock, "obj", wrapped);
 
         // Force GC — the global reference should keep it alive
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
 
         // Data should still be correct
         let name: String = ctx.eval(lock, "obj.getName()").unwrap();
@@ -735,7 +737,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(SimpleResource {
             name: "child".to_owned(),
@@ -752,7 +754,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
         std::mem::drop(parent);
 
         // GC should NOT collect the parent (held by global) or child (held by parent's Rc)
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
@@ -760,7 +762,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
 
     // New context — global is gone
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -774,7 +776,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
 fn instance_drop_invalidates_all_weak_refs() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|_lock, _ctx| {
         let original = jsg::Rc::new(SimpleResource {
             name: "shared-target".to_owned(),
@@ -836,7 +838,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
     SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(SimpleResource {
             name: "nullable_child".to_owned(),
@@ -852,7 +854,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
         std::mem::drop(parent);
 
         // GC should NOT collect the parent (held by global) or child (traced via Nullable::Some)
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
@@ -860,7 +862,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
 
     // New context — global is gone
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -872,7 +874,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
 fn nullable_ref_null_does_not_crash_during_gc() {
     NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(NullableParent {
             child: jsg::Nullable::Null,
@@ -883,13 +885,13 @@ fn nullable_ref_null_does_not_crash_during_gc() {
         std::mem::drop(parent);
 
         // GC with Nullable::Null should not crash
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -946,7 +948,7 @@ impl NativeOwnerResource {
 #[test]
 #[cfg(debug_assertions)]
 fn traced_ref_drop_respects_strong_flag() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut child_holder: Option<jsg::Rc<SimpleResource>> = None;
 
     harness.run_in_context(|lock, _ctx| {
@@ -971,7 +973,7 @@ fn traced_ref_drop_respects_strong_flag() {
         // GC traces parent wrapper → visitRef on child → parent's ref
         // transitions strong→weak, removeStrongRef() called once.
         // strongRefcount = 1 (only our direct ref remains strong).
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(child.strong_refcount(), 1);
 
         // Drop parent Rust ref. JS wrapper keeps parent alive.
@@ -994,7 +996,7 @@ fn traced_ref_drop_respects_strong_flag() {
     // With the fix: strong=false is threaded through → no removeStrongRef
     // call → strongRefcount stays at 1 (correct).
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             child.strong_refcount(),
             1,
@@ -1013,7 +1015,7 @@ fn traced_ref_drop_respects_strong_flag() {
 fn rc_native_object_dropped_on_minor_gc() {
     NATIVE_STATE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let state = std::rc::Rc::new(NativeState { value: 99 });
     let state_clone = state.clone();
 
@@ -1038,7 +1040,7 @@ fn rc_native_object_dropped_on_minor_gc() {
     // which detaches the CppgcShim → drops kj::Own<Wrappable> → drops the
     // resource → drops Rc<NativeState> → NativeState is dropped.
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_minor_gc(lock);
+        jsg_test::Harness::request_minor_gc(lock);
         assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -1093,7 +1095,7 @@ impl CyclicResource {}
 fn global_value_back_ref_is_collected_by_gc() {
     CYCLIC_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let resource = jsg::Rc::new(CyclicResource {
             callback: jsg::Cell::new(None),
@@ -1121,7 +1123,7 @@ fn global_value_back_ref_is_collected_by_gc() {
     // Full GC can now detect and collect the cycle because visit_traced_global
     // downgrades the TracedGlobal to a TracedReference during tracing.
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst),
             1,
@@ -1202,7 +1204,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellParent {
@@ -1216,14 +1218,14 @@ fn cell_ref_keeps_child_alive_through_gc() {
         std::mem::drop(parent);
 
         // Parent is JS-global-held; child is kept alive via Cell<Rc<T>> tracing.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -1236,7 +1238,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellOptionParent {
@@ -1248,14 +1250,14 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -1267,7 +1269,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
 fn cell_option_ref_none_does_not_crash_during_gc() {
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(CellOptionParent {
             child: jsg::Cell::new(None),
@@ -1277,13 +1279,13 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
 
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -1295,7 +1297,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
     CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(CellChild);
         let parent = jsg::Rc::new(CellNullableParent {
@@ -1307,14 +1309,14 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -1326,7 +1328,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
 fn cell_nullable_ref_null_does_not_crash_during_gc() {
     CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(CellNullableParent {
             child: jsg::Cell::new(jsg::Nullable::Null),
@@ -1336,13 +1338,13 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
 
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });

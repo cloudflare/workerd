@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::NullOrUndefined;
 use jsg::ToJS;
@@ -56,7 +58,7 @@ impl Parent {}
 
 #[test]
 fn gc_traces_the_contained_resource() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut weak_child = None;
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(Child {});
@@ -66,18 +68,18 @@ fn gc_traces_the_contained_resource() {
         });
         let wrapped = parent.to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert!(weak_child.as_ref().unwrap().is_alive());
         Ok(())
     });
     // The parent global is scoped to its context; it and its child can now be collected.
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert!(!weak_child.as_ref().unwrap().is_alive());
         for child in [NullOrUndefined::Null, NullOrUndefined::Undefined] {
             let parent = jsg::Rc::new(Parent { child });
             let _wrapped = parent.to_js(lock)?;
-            crate::Harness::request_gc(lock);
+            jsg_test::Harness::request_gc(lock);
         }
         Ok(())
     });
@@ -85,7 +87,7 @@ fn gc_traces_the_contained_resource() {
 
 #[test]
 fn conversion_preserves_all_states() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for (expr, expected) in [
             ("'x'", NullOrUndefined::Some("x".to_owned())),
@@ -118,7 +120,7 @@ fn conversion_preserves_all_states() {
 
 #[test]
 fn methods_accept_omission_and_report_inner_type_errors() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
@@ -132,7 +134,7 @@ fn methods_accept_omission_and_report_inner_type_errors() {
 #[test]
 fn optional_arguments_do_not_count_toward_web_idl_length() {
     for enabled in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| {
+        let harness = jsg_test::Harness::with_flags(|mut flags| {
             flags.set_spec_compliant_property_attributes(enabled);
         });
         harness.run_in_context(|lock, ctx| {
@@ -155,7 +157,7 @@ fn optional_arguments_do_not_count_toward_web_idl_length() {
 #[test]
 fn struct_fields_preserve_states_with_both_wrapping_modes() {
     for fast in [false, true] {
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         harness.run_in_context(|lock, ctx| {
             for (expr, expected) in [
                 ("({value: 'x'})", NullOrUndefined::Some("x".to_owned())),
@@ -191,7 +193,7 @@ fn struct_fields_preserve_states_with_both_wrapping_modes() {
 
 #[test]
 fn lenient_conversion_only_swallows_shallow_mismatches() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         type Strict = NullOrUndefined<jsg::NonCoercible<String>>;
         let input = ctx.eval_raw(lock, "123").unwrap();

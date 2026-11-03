@@ -2,11 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::ToJS;
 
 #[test]
 fn v8_is_string_returns_true_for_strings() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let str_val = "hello".to_js(lock)?;
         assert!(str_val.is_string());
@@ -16,7 +18,7 @@ fn v8_is_string_returns_true_for_strings() {
 
 #[test]
 fn v8_is_boolean_returns_true_for_booleans() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let bool_true = true.to_js(lock)?;
         assert!(bool_true.is_boolean());
@@ -29,7 +31,7 @@ fn v8_is_boolean_returns_true_for_booleans() {
 
 #[test]
 fn v8_is_number_returns_true_for_numbers() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let float_val = 2.5_f64.to_js(lock)?;
         assert!(float_val.is_number());
@@ -45,7 +47,7 @@ fn v8_is_number_returns_true_for_numbers() {
 
 #[test]
 fn v8_type_checks_are_mutually_exclusive() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // String is only string
         let s = "test".to_js(lock)?;
@@ -64,7 +66,7 @@ fn v8_type_checks_are_mutually_exclusive() {
 
 #[test]
 fn v8_unwrap_boolean_returns_correct_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let bool_true = true.to_js(lock)?;
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
@@ -83,7 +85,7 @@ fn v8_unwrap_boolean_returns_correct_values() {
 
 #[test]
 fn v8_unwrap_number_returns_correct_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         for expected in [2.5_f64, 0.0, -42.5] {
             let num = expected.to_js(lock)?;
@@ -101,7 +103,7 @@ fn v8_unwrap_number_returns_correct_values() {
 
 #[test]
 fn v8_unwrap_string_returns_correct_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         for expected in ["hello world", "", "こんにちは"] {
             let s = expected.to_js(lock)?;
@@ -125,9 +127,9 @@ fn v8_unwrap_string_returns_correct_values() {
 /// must return None to prevent reading garbage from non-existent `data[2]` fields.
 #[test]
 fn unwrap_resource_rejects_cpp_tagged_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+        let cpp_obj = jsg_test::Harness::create_cpp_tagged_object(lock);
 
         // unwrap_resource returns None because the object has the C++ tag, not the Rust tag.
         let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
@@ -149,7 +151,7 @@ fn unwrap_resource_rejects_cpp_tagged_object() {
 /// objects that were never wrapped by either the C++ or Rust JSG layer.
 #[test]
 fn unwrap_resource_rejects_plain_js_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
 

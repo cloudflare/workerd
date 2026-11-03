@@ -4,6 +4,8 @@
 
 //! Tests that keep handles of one isolate out of another.
 
+#![cfg(test)]
+
 use std::panic::AssertUnwindSafe;
 
 use jsg::FromJS;
@@ -22,7 +24,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 
 #[test]
 fn lock_derefs_to_its_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let ptr = lock.isolate().as_ffi();
         let shared: &jsg::Isolate = lock;
@@ -39,8 +41,8 @@ fn lock_derefs_to_its_isolate() {
 
 #[test]
 fn scope_of_another_isolate_panics() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|_lock_a, _ctx| {
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             b.run_in_context(|_lock_b, _ctx| Ok(()));
@@ -63,8 +65,8 @@ fn scope_of_another_isolate_panics() {
 
 #[test]
 fn scope_of_another_isolate_is_allowed_when_set_aside() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         // SAFETY: no handle crosses between the isolates.
         unsafe {
@@ -92,8 +94,8 @@ fn scope_of_another_isolate_is_allowed_when_set_aside() {
 
 #[test]
 fn set_aside_scopes_count_as_open_again_after_a_panic() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let unwind = std::panic::catch_unwind(AssertUnwindSafe(|| {
             // SAFETY: no handle crosses between the isolates.
@@ -118,8 +120,8 @@ fn set_aside_scopes_count_as_open_again_after_a_panic() {
 
 #[test]
 fn global_of_another_isolate_panics() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let value = "from a".to_js(lock)?;
@@ -159,8 +161,8 @@ fn global_of_another_isolate_panics() {
 
 #[test]
 fn taking_a_global_of_another_isolate_out_of_a_cell_panics() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let value = "from a".to_js(lock)?;
@@ -184,8 +186,8 @@ fn taking_a_global_of_another_isolate_out_of_a_cell_panics() {
 
 #[test]
 fn callback_entered_while_another_isolate_has_scopes_throws() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     b.run_in_context(|lock_b, ctx_b| {
         let thing = jsg::Rc::new(Thing).to_js(lock_b)?;
         ctx_b.set_global(lock_b, "thing", thing);
@@ -225,8 +227,8 @@ impl Thing {
 
 #[test]
 fn resource_wrapped_in_another_isolate_panics() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let thing = jsg::Rc::new(Thing);
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
@@ -263,8 +265,8 @@ fn resource_wrapped_in_another_isolate_panics() {
 /// closure, so that it doesn't unwind through V8.
 #[test]
 fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let thing = jsg::Rc::new(Thing);
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
@@ -319,8 +321,8 @@ impl TracedGlobalHolder {}
 #[test]
 #[cfg(not(debug_assertions))]
 fn gc_of_another_isolate_leaves_a_global_alone() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         // The `TracedGlobal` is the object's only handle once the scope closes.
@@ -335,12 +337,12 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
     b.run_in_context(|lock, ctx| {
         // Wrapping the holder in B visits the `TracedGlobal`, and so does every GC of B.
         ctx.set_global(lock, "holder", holder.clone());
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         Ok(())
     });
 
     a.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let global = holder.handle.take(lock).expect("set above");
         assert!(global.as_local(lock).is_object());
         drop(global);
@@ -364,8 +366,8 @@ fn assert_isolate_check_panics(what: &str, f: impl FnOnce()) {
     ignore = "the isolate check is a debug assertion"
 )]
 fn local_of_another_isolate_panics_in_debug_builds() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
         let number = 1_u32.to_js(lock_a)?;
@@ -395,8 +397,8 @@ fn local_of_another_isolate_panics_in_debug_builds() {
     ignore = "the isolate check is a debug assertion"
 )]
 fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
         // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
@@ -428,8 +430,8 @@ fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
     ignore = "the isolate check is a debug assertion"
 )]
 fn object_set_with_value_of_another_isolate_panics_in_debug_builds() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
         // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
@@ -457,8 +459,8 @@ fn object_set_with_value_of_another_isolate_panics_in_debug_builds() {
     ignore = "the isolate check is a debug assertion"
 )]
 fn read_only_value_of_another_isolate_is_accepted_only_in_its_group() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let values = [lock_a.undefined(), true.to_js(lock_a)?, "".to_js(lock_a)?];
         let isolate_a: &jsg::Isolate = lock_a;
@@ -468,7 +470,7 @@ fn read_only_value_of_another_isolate_is_accepted_only_in_its_group() {
         unsafe {
             jsg::allow_scopes_of_another_isolate(|| {
                 b.run_in_context(|lock_b, _ctx| {
-                    if crate::isolates_share_group(isolate_a, lock_b) {
+                    if jsg_test::isolates_share_group(isolate_a, lock_b) {
                         for value in values {
                             v8::TracedGlobal::new(lock_b, value);
                         }

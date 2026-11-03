@@ -5,6 +5,8 @@
 //! Tests for `this: jsg::Rc<Self>` parameters, which give a method or accessor a `jsg::Rc` of
 //! the resource it was called on, in place of `&self`.
 
+#![cfg(test)]
+
 use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -141,7 +143,7 @@ impl Queue {
 /// Sets `task` and `other`, two tasks, and `queue` as globals. JavaScript creates them, so that no
 /// `Local` in the test's handle scope keeps a wrapper alive; the tests' scripts likewise end in
 /// `undefined` where their completion value would be one.
-fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let task = jsg::resource::function_template_of::<Task>(lock).unwrap();
     ctx.set_global(lock, "Task", task);
     let queue = jsg::resource::function_template_of::<Queue>(lock).unwrap();
@@ -162,7 +164,7 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 /// to a `jsg::Rc` made from that object, and reads its fields.
 #[test]
 fn this_is_the_resource_the_method_was_called_on() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert!(ctx.eval::<bool>(lock, "task.itself() === task").unwrap());
         assert!(ctx.eval::<bool>(lock, "other.itself() === other").unwrap());
@@ -181,7 +183,7 @@ fn this_is_the_resource_the_method_was_called_on() {
 #[test]
 fn function_lengths_exclude_this_and_lock() {
     for (enabled, expected) in [(false, "0,0,0,0"), (true, "0,1,0,1")] {
-        crate::Harness::with_flags(|mut flags| {
+        jsg_test::Harness::with_flags(|mut flags| {
             flags.set_spec_compliant_property_attributes(enabled);
         })
         .run_in_context(|lock, ctx| {
@@ -202,7 +204,7 @@ fn function_lengths_exclude_this_and_lock() {
 /// Accessors take `this` too, on the prototype, as own properties and as inspect properties.
 #[test]
 fn accessors_take_this() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         assert_eq!(ctx.eval::<String>(lock, "task.label").unwrap(), "");
         assert_eq!(
@@ -236,17 +238,17 @@ fn accessors_take_this() {
 #[test]
 fn dropping_this_leaves_the_resource_to_its_wrapper() {
     TASK_DROPS.store(0, Ordering::SeqCst);
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         ctx.eval_raw(lock, "task.dropThis(); task.dropThis()")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(ctx.eval::<String>(lock, "task.name()").unwrap(), "first");
 
         ctx.eval_raw(lock, "globalThis.task = undefined")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -257,14 +259,14 @@ fn dropping_this_leaves_the_resource_to_its_wrapper() {
 #[test]
 fn this_handed_off_keeps_the_resource_alive() {
     TASK_DROPS.store(0, Ordering::SeqCst);
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         ctx.eval_raw(
             lock,
             "task.schedule(queue); globalThis.task = undefined; globalThis.other = undefined",
         )
         .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             TASK_DROPS.load(Ordering::SeqCst),
             1,
@@ -274,7 +276,7 @@ fn this_handed_off_keeps_the_resource_alive() {
 
         ctx.eval_raw(lock, "queue.clear()")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
     });
@@ -285,27 +287,31 @@ fn this_handed_off_keeps_the_resource_alive() {
 #[test]
 fn cycle_through_this_and_a_traced_global_is_collected() {
     TASK_DROPS.store(0, Ordering::SeqCst);
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         ctx.eval_raw(lock, "task.schedule(queue); other.schedule(queue)")
             .expect("should evaluate");
         // The tasks' and the queue's references to each other are strong at first; a GC puts
         // them in traced mode, and the next one can collect the cycle.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 0);
         ctx.eval_raw(
             lock,
             "globalThis.task = undefined; globalThis.other = undefined; globalThis.queue = undefined",
         )
         .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
     });
 }
 
 /// Asserts that `code` throws a `TypeError` about an illegal invocation.
-fn assert_illegal_invocation(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) {
+fn assert_illegal_invocation(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) {
     let err = ctx
         .eval::<String>(lock, code)
         .unwrap_err()
@@ -322,7 +328,7 @@ fn assert_illegal_invocation(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<
 /// `TypeError` and never runs.
 #[test]
 fn wrong_this_throws_a_type_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         ctx.eval_raw(
             lock,

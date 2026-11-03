@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::ToJS;
 use jsg::ToJsArrayBuffer;
 use jsg::ToJsTypedArray;
@@ -145,7 +147,7 @@ impl ArrayResource {
 
 #[test]
 fn resource_accepts_array_parameter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -166,7 +168,7 @@ fn resource_accepts_array_parameter() {
 
 #[test]
 fn resource_accepts_slice_parameter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -188,7 +190,7 @@ fn resource_accepts_slice_parameter() {
 
 #[test]
 fn resource_returns_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -210,7 +212,7 @@ fn resource_returns_array() {
 
 #[test]
 fn resource_accepts_typed_array_parameter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -236,7 +238,7 @@ fn resource_accepts_typed_array_parameter() {
 
 #[test]
 fn resource_returns_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -257,7 +259,7 @@ fn resource_returns_typed_array() {
 /// `Array`.
 #[test]
 fn typed_array_parameter_rejects_wrong_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -289,7 +291,7 @@ fn typed_array_parameter_rejects_wrong_type() {
 
 #[test]
 fn resource_accepts_and_returns_struct_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -310,7 +312,7 @@ fn resource_accepts_and_returns_struct_array() {
 
 #[test]
 fn vec_to_js_creates_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec = vec!["hello".to_owned(), "world".to_owned()];
         let js_val = vec.to_js(lock)?;
@@ -335,7 +337,7 @@ fn vec_to_js_creates_array() {
 /// `Array` of the converted elements.
 #[test]
 fn vec_of_bool_and_number_converts_to_an_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let bools = vec![true, false, true].to_js(lock)?;
         ctx.set_global(lock, "bools", bools);
@@ -381,7 +383,7 @@ fn vec_of_bool_and_number_converts_to_an_array() {
 /// to a typed array, as does one that a method returns.
 #[test]
 fn vec_of_numbers_converts_to_an_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let bytes = vec![0u8, 7, 255].to_js(lock)?;
         ctx.set_global(lock, "bytes", bytes);
@@ -430,7 +432,7 @@ fn vec_of_numbers_converts_to_an_array() {
 /// A `Vec` of resource references becomes an `Array` of their wrappers.
 #[test]
 fn vec_of_resource_references_converts_to_an_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resources = vec![jsg::Rc::new(ArrayResource), jsg::Rc::new(ArrayResource)];
         let js_val = resources.to_js(lock)?;
@@ -453,7 +455,7 @@ fn vec_of_resource_references_converts_to_an_array() {
 /// setter on `Array.prototype` doesn't run, and one that throws doesn't fail the conversion.
 #[test]
 fn array_conversion_runs_no_prototype_setter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval::<bool>(
             lock,
@@ -489,7 +491,7 @@ fn array_conversion_runs_no_prototype_setter() {
 
 #[test]
 fn vec_from_js_parses_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let strings: Vec<String> = ctx.eval(lock, "['a', 'b', 'c']").unwrap();
         assert_eq!(strings, vec!["a", "b", "c"]);
@@ -502,7 +504,7 @@ fn vec_from_js_parses_array() {
 
 #[test]
 fn vec_empty_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<String> = vec![];
         let js_val = vec.to_js(lock)?;
@@ -518,7 +520,7 @@ fn vec_empty_roundtrip() {
 
 #[test]
 fn vec_nested_arrays() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let nested = vec![vec![1_u32, 2], vec![3, 4]];
         let js_val = nested.to_js(lock)?;
@@ -540,7 +542,7 @@ fn vec_nested_arrays() {
 
 #[test]
 fn vec_from_non_array_returns_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: Result<Vec<String>, _> = ctx.eval(lock, "'not an array'");
         assert!(result.is_err());
@@ -551,7 +553,7 @@ fn vec_from_non_array_returns_error() {
 /// `to_js_typed_array` creates the typed array of each element type, holding the slice's elements.
 #[test]
 fn to_js_typed_array_creates_each_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         macro_rules! check {
             ($name:literal, [$($elem:expr),*]) => {{
@@ -601,7 +603,7 @@ const DESCRIBE_BUFFER: &str = concat!(
 /// `to_js_array_buffer` creates an `ArrayBuffer`, not a view, holding the slice's bytes.
 #[test]
 fn to_js_array_buffer_creates_array_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let data = [10u8, 20, 0, 255];
         let buffer = data.to_js_array_buffer(lock);
@@ -627,7 +629,7 @@ fn to_js_array_buffer_creates_array_buffer() {
 /// A method that returns `to_js_array_buffer`'s handle returns an `ArrayBuffer` to JavaScript.
 #[test]
 fn resource_returns_array_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -655,7 +657,7 @@ fn resource_returns_array_buffer() {
 /// `Local<T>` converts from a typed array of exactly its type.
 #[test]
 fn typed_array_from_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let u8_arr: v8::Local<v8::Uint8Array> =
             ctx.eval(lock, "new Uint8Array([10, 20, 255])").unwrap();
@@ -706,7 +708,7 @@ fn typed_array_from_js() {
 
 #[test]
 fn typed_array_empty_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let typed = [0u8; 0].to_js_typed_array(lock);
         assert!(typed.is_empty());
@@ -723,7 +725,7 @@ fn typed_array_empty_roundtrip() {
 /// `Local<T>` rejects a typed array of another element type, an `Array` and a primitive.
 #[test]
 fn typed_array_type_mismatch_returns_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: Result<v8::Local<v8::Uint8Array>, _> =
             ctx.eval(lock, "new Int8Array([1, 2, 3])");
@@ -752,7 +754,7 @@ fn typed_array_type_mismatch_returns_error() {
 
 #[test]
 fn large_typed_array_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let data: Vec<u8> = (0_u32..65536).map(|i| (i % 256) as u8).collect();
         let typed = data.to_js_typed_array(lock);
@@ -768,7 +770,7 @@ fn large_typed_array_roundtrip() {
 
 #[test]
 fn typed_array_iter_uint8() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [10u8, 20, 30].to_js_typed_array(lock);
 
@@ -791,7 +793,7 @@ fn typed_array_iter_uint8() {
 
 #[test]
 fn typed_array_into_iter_uint8() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1u8, 2, 3, 4, 5].to_js_typed_array(lock);
 
@@ -804,7 +806,7 @@ fn typed_array_into_iter_uint8() {
 
 #[test]
 fn typed_array_iter_int32() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [-100i32, 0, 100].to_js_typed_array(lock);
 
@@ -822,7 +824,7 @@ fn typed_array_iter_int32() {
 
 #[test]
 fn typed_array_iter_reverse() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1u8, 2, 3, 4].to_js_typed_array(lock);
 
@@ -835,7 +837,7 @@ fn typed_array_iter_reverse() {
 
 #[test]
 fn typed_array_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [0u8; 0].to_js_typed_array(lock);
 
@@ -853,7 +855,7 @@ fn typed_array_empty() {
 
 #[test]
 fn float32_array_parameter_and_return() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -891,7 +893,7 @@ fn float32_array_parameter_and_return() {
 
 #[test]
 fn float64_array_parameter_and_return() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -924,7 +926,7 @@ fn float64_array_parameter_and_return() {
 
 #[test]
 fn bigint64_array_parameter_and_return() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -957,7 +959,7 @@ fn bigint64_array_parameter_and_return() {
 
 #[test]
 fn biguint64_array_parameter_and_return() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -1044,7 +1046,7 @@ impl SliceResource {
 
 #[test]
 fn typed_array_as_slice_zero_copy_sum() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
         ctx.set_global(lock, "r", res);
@@ -1073,7 +1075,7 @@ fn typed_array_as_slice_zero_copy_sum() {
 
 #[test]
 fn typed_array_as_slice_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [0u8; 0].to_js_typed_array(lock);
 
@@ -1084,7 +1086,7 @@ fn typed_array_as_slice_empty() {
 
 #[test]
 fn typed_array_as_mut_slice_mutations_visible_in_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
         ctx.set_global(lock, "r", res);
@@ -1116,7 +1118,7 @@ fn typed_array_as_mut_slice_mutations_visible_in_js() {
 
 #[test]
 fn typed_array_byte_offset_non_zero() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Create a view that starts 4 bytes into an 8-byte buffer.
         // byte_offset() must return 4, len() must return 1.
@@ -1143,7 +1145,7 @@ fn typed_array_byte_offset_non_zero() {
 
 #[test]
 fn typed_array_as_slice_with_byte_offset() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Build a 12-byte buffer [0,1,2,...,11], create a Uint8Array view
         // starting at offset 4 covering 4 bytes: [4, 5, 6, 7].
@@ -1171,7 +1173,7 @@ fn typed_array_as_slice_with_byte_offset() {
 
 #[test]
 fn typed_array_data_pointer_and_byte_offset() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [10u8, 20, 30, 40].to_js_typed_array(lock);
 
@@ -1196,7 +1198,7 @@ fn typed_array_data_pointer_and_byte_offset() {
 
 #[test]
 fn typed_array_from_js_local_rejects_wrong_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
         ctx.set_global(lock, "r", res);
@@ -1219,7 +1221,7 @@ fn typed_array_from_js_local_rejects_wrong_type() {
 
 #[test]
 fn typed_array_element_size_and_is_integer_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // u8 / Uint8Array: 1 byte per element, integer type.
         let arr = [0u8, 0].to_js_typed_array(lock);
@@ -1247,7 +1249,7 @@ fn typed_array_element_size_and_is_integer_type() {
 
 #[test]
 fn uint8clamped_array_from_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         use jsg::v8::Local;
         use jsg::v8::Uint8ClampedArray;
@@ -1275,7 +1277,7 @@ fn uint8clamped_array_from_js() {
 
 #[test]
 fn uint8clamped_array_rejects_wrong_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         use jsg::FromJS;
         use jsg::v8::Local;
@@ -1291,7 +1293,7 @@ fn uint8clamped_array_rejects_wrong_type() {
 
 #[test]
 fn is_float16_array_check() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let f16_val = ctx.eval_raw(lock, "new Float16Array([1.0, 2.0])").unwrap();
         assert!(f16_val.is_float16_array());
@@ -1310,7 +1312,7 @@ fn is_float16_array_check() {
 /// throws.
 #[test]
 fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
-    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -1378,7 +1380,7 @@ fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
 #[test]
 fn struct_to_js_without_fast_jsg_struct_runs_object_prototype_setters() {
     // `Harness::new()` starts with every flag off, `fast_jsg_struct` included.
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(
             lock,
@@ -1428,7 +1430,7 @@ fn struct_to_js_without_fast_jsg_struct_runs_object_prototype_setters() {
 /// is converted reaches the caller unchanged, from Rust and from a method's return value.
 #[test]
 fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock)?;
@@ -1475,7 +1477,7 @@ fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
 /// `fast_jsg_struct`, a struct after the one whose setter threw is not converted.
 #[test]
 fn vec_to_js_stops_at_the_first_element_that_fails() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(
             lock,

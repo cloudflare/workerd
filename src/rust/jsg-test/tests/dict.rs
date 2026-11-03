@@ -5,6 +5,8 @@
 //! `jsg::Dict<V>` converts like C++ JSG's `jsg::Dict<V>` (`DictWrapper` in `jsg/value.h`), which
 //! is Web IDL's `record<DOMString, V>`.
 
+#![cfg(test)]
+
 use jsg::Dict;
 use jsg::FromJS;
 use jsg::v8;
@@ -71,7 +73,7 @@ impl Records {
     /// Is terminated and then returns a `Dict`, which is converted after the termination.
     #[jsg_method]
     pub fn terminate_then_make(&self, lock: &mut jsg::Lock<'_>) -> Dict<u32> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         self.make(vec!["a".to_owned()])
     }
 
@@ -81,8 +83,8 @@ impl Records {
     }
 }
 
-fn with_records(f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'_>)) {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+fn with_records(f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, &jsg_test::EvalContext<'_>)) {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let records = jsg::Rc::new(Records {
             headers: Dict::from(vec![
                 ("content-type".to_owned(), "text/plain".to_owned()),
@@ -95,13 +97,18 @@ fn with_records(f: impl for<'s> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'
     });
 }
 
-fn expect_eval(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str, expected: &str) {
+fn expect_eval(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+    expected: &str,
+) {
     let result: String = ctx.eval(lock, code).unwrap();
     assert_eq!(result, expected, "{code}");
 }
 
 /// Evaluates `code`, which calls a method, and returns what it threw as `name: message`.
-fn thrown(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn thrown(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>, code: &str) -> String {
     let result: String = ctx
         .eval(
             lock,

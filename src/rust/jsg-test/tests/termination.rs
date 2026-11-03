@@ -10,6 +10,8 @@
 //! out of CPU time would, so that the termination exception is pending when the method goes on.
 //! The `terminate_now` methods terminate with `Lock::terminate_execution_now()` instead.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 
 use jsg_macros::jsg_method;
@@ -47,7 +49,7 @@ impl Terminator {
     #[jsg_method]
     fn terminate(&self, lock: &mut jsg::Lock) {
         assert!(!lock.is_execution_terminating());
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         assert!(lock.is_execution_terminating());
     }
 
@@ -55,13 +57,13 @@ impl Terminator {
     /// terminated call into JavaScript with `?`.
     #[jsg_method]
     fn terminate_then_fail(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         Err(jsg::Error::new_type_error("thrown while terminating"))
     }
 
     #[jsg_method]
     fn terminate_then_throw_error(&self, lock: &mut jsg::Lock) {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         lock.throw_error("thrown while terminating");
     }
 
@@ -69,7 +71,7 @@ impl Terminator {
     /// termination.
     #[jsg_method]
     fn terminate_then_return_date(&self, lock: &mut jsg::Lock) -> std::time::SystemTime {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         std::time::UNIX_EPOCH
     }
 
@@ -80,7 +82,7 @@ impl Terminator {
         &self,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(vec![std::time::UNIX_EPOCH], lock);
         DATES_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
@@ -92,7 +94,7 @@ impl Terminator {
         &self,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(Point { x: 1 }, lock);
         STRUCT_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
@@ -104,7 +106,7 @@ impl Terminator {
         &self,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
         RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
@@ -117,7 +119,7 @@ impl Terminator {
         this: jsg::Rc<Self>,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(this, lock);
         THIS_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
@@ -130,13 +132,13 @@ impl Terminator {
         &self,
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::v8::Local<'s, jsg::v8::BigInt> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         jsg::v8::BigInt::new(lock, 1)
     }
 
     #[jsg_method]
     fn terminate_then_throw_internal_error(&self, lock: &mut jsg::Lock) {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         lock.throw_internal_error("thrown while terminating");
     }
 
@@ -194,11 +196,11 @@ thread_local! {
 /// termination reaches the harness: the script fails without a catchable exception, and neither
 /// the `catch` block nor the code after it runs.
 fn termination_survives(method: &str) {
-    termination_survives_in(&crate::Harness::new(), method);
+    termination_survives_in(&jsg_test::Harness::new(), method);
 }
 
 /// [`termination_survives`] in `harness`.
-fn termination_survives_in(harness: &crate::Harness, method: &str) {
+fn termination_survives_in(harness: &jsg_test::Harness, method: &str) {
     termination_survives_call(
         harness,
         jsg::Rc::new(Terminator),
@@ -212,10 +214,10 @@ fn termination_survives_in(harness: &crate::Harness, method: &str) {
 /// the `catch` block nor the code after it runs. Then runs `check`, once V8 has cleared the
 /// termination.
 fn termination_survives_call<R: jsg::Resource + 'static>(
-    harness: &crate::Harness,
+    harness: &jsg_test::Harness,
     obj: jsg::Rc<R>,
     call: &str,
-    check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
+    check: impl FnOnce(&mut jsg::Lock<'_>, &jsg_test::EvalContext<'_>),
 ) {
     harness.run_in_context(|lock, ctx| {
         ctx.set_global(lock, "obj", obj);
@@ -225,8 +227,8 @@ fn termination_survives_call<R: jsg::Resource + 'static>(
              globalThis.after = true;"
         );
         match ctx.eval_raw(lock, &script) {
-            Err(crate::EvalError::EvalFailed) => {}
-            Err(crate::EvalError::Exception(exception)) => {
+            Err(jsg_test::EvalError::EvalFailed) => {}
+            Err(jsg_test::EvalError::Exception(exception)) => {
                 assert!(
                     exception.is_null(),
                     "{call}: the termination was replaced by a catchable exception"
@@ -289,7 +291,7 @@ fn returning_dates_while_terminating_keeps_the_termination() {
 fn returning_a_struct_while_terminating_keeps_the_termination() {
     for fast in [false, true] {
         STRUCT_CONVERSION_PENDING.set(None);
-        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        let harness = jsg_test::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
         termination_survives_in(&harness, "terminateThenReturnStruct");
         assert_eq!(
             STRUCT_CONVERSION_PENDING.get(),
@@ -373,7 +375,7 @@ impl Guarded {
     /// `FunctionTemplate::GetFunction` prepares to run JavaScript).
     #[jsg_method]
     fn terminate_then_get_constructor(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::resource::function_template_of::<Fresh>(lock).map(drop);
         self.record(&result);
         result
@@ -386,7 +388,7 @@ impl Guarded {
         lock: &mut jsg::Lock<'s>,
         value: jsg::v8::Local<'s, jsg::v8::Value>,
     ) {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let result = jsg::v8::Utf8Value::new(lock, &value);
         self.record(&result);
     }
@@ -396,7 +398,7 @@ impl Guarded {
     /// execution is terminating.
     #[jsg_method]
     fn terminate_then_detach(&self, lock: &mut jsg::Lock) -> Result<(), jsg::Error> {
-        crate::Harness::terminate_and_deliver(lock);
+        jsg_test::Harness::terminate_and_deliver(lock);
         let buffer = jsg::v8::ArrayBuffer::new(lock, &[1u8]);
         let result = buffer.detach(lock);
         assert!(!buffer.was_detached());
@@ -409,12 +411,12 @@ impl Guarded {
 /// saw a pending error and that `check` holds afterwards.
 fn guarded_termination_survives(
     call: &str,
-    check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
+    check: impl FnOnce(&mut jsg::Lock<'_>, &jsg_test::EvalContext<'_>),
 ) {
     let guarded = jsg::Rc::new(Guarded {
         saw_pending: Cell::new(None),
     });
-    termination_survives_call(&crate::Harness::new(), guarded.clone(), call, check);
+    termination_survives_call(&jsg_test::Harness::new(), guarded.clone(), call, check);
     assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
 }
 

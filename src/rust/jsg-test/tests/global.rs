@@ -5,6 +5,8 @@
 //! Tests for `Global`: its layout, dropping it under the isolate lock, without it, on
 //! another thread or after its isolate is gone, and turning it into a `TracedGlobal`.
 
+#![cfg(test)]
+
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -70,7 +72,7 @@ fn global_is_two_words() {
 fn global_dropped_under_the_lock_is_reset_at_once() {
     GLOBAL_COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut wrapper = None;
     harness.run_in_context(|lock, _ctx| {
         wrapper = Some(counted_wrapper(lock));
@@ -79,18 +81,18 @@ fn global_dropped_under_the_lock_is_reset_at_once() {
     let wrapper = wrapper.expect("created in the context");
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst),
             0,
             "the Global roots the wrapper"
         );
-        let with_wrapper = crate::Harness::used_global_handles_size(lock);
+        let with_wrapper = jsg_test::Harness::used_global_handles_size(lock);
 
         drop(wrapper);
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        assert!(crate::Harness::used_global_handles_size(lock) < with_wrapper);
-        crate::Harness::request_gc(lock);
+        assert!(jsg_test::Harness::used_global_handles_size(lock) < with_wrapper);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -102,41 +104,44 @@ fn global_dropped_under_the_lock_is_reset_at_once() {
 fn global_dropped_without_the_lock_is_reset_at_the_next_lock() {
     GLOBAL_COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut baseline = 0;
     let mut wrapper = None;
     harness.run_in_context(|lock, _ctx| {
         // Created ahead of the measurements below, so that they only see the wrapper's handle.
         jsg::resource::function_template_of::<GlobalCounted>(lock).unwrap();
-        baseline = crate::Harness::used_global_handles_size(lock);
+        baseline = jsg_test::Harness::used_global_handles_size(lock);
         wrapper = Some(counted_wrapper(lock));
         Ok(())
     });
     let wrapper = wrapper.expect("created in the context");
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
-        let with_wrapper = crate::Harness::used_global_handles_size(lock);
+        jsg_test::Harness::request_gc(lock);
+        let with_wrapper = jsg_test::Harness::used_global_handles_size(lock);
         assert!(with_wrapper > baseline);
 
-        crate::Harness::with_isolate_unlocked(lock, || drop(wrapper));
+        jsg_test::Harness::with_isolate_unlocked(lock, || drop(wrapper));
         assert_eq!(lock.globals_awaiting_lock(), 1);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst),
             0,
             "the queued handle still roots the wrapper"
         );
-        assert_eq!(crate::Harness::used_global_handles_size(lock), with_wrapper);
+        assert_eq!(
+            jsg_test::Harness::used_global_handles_size(lock),
+            with_wrapper
+        );
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst), 1);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -147,7 +152,7 @@ fn global_dropped_without_the_lock_is_reset_at_the_next_lock() {
 fn global_dropped_on_another_thread_is_reset_at_the_next_lock() {
     GLOBAL_COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut wrapper = None;
     harness.run_in_context(|lock, _ctx| {
         wrapper = Some(counted_wrapper(lock));
@@ -172,14 +177,14 @@ fn global_dropped_on_another_thread_is_reset_at_the_next_lock() {
         }
         dropper.join().expect("the drop does not panic");
         assert_eq!(lock.globals_awaiting_lock(), 1);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(GLOBAL_COUNTED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -190,7 +195,7 @@ fn global_dropped_on_another_thread_is_reset_at_the_next_lock() {
 /// isolate, and a reset would touch freed memory, which a memory checker reports.
 #[test]
 fn global_dropped_after_its_isolate_is_disposed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut global = None;
     harness.run_in_context(|lock, _ctx| {
         let value = "escaped".to_js(lock)?;
@@ -205,7 +210,7 @@ fn global_dropped_after_its_isolate_is_disposed() {
 /// still run; the drop must neither reset the handle nor keep anything for V8 to write into.
 #[test]
 fn global_dropped_after_its_realm_is_left_to_dispose() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut global = None;
     harness.run_in_context(|lock, _ctx| {
         let value = lock.new_object();
@@ -219,8 +224,8 @@ fn global_dropped_after_its_realm_is_left_to_dispose() {
 /// Opening or cloning a `Global` in another isolate panics; it still works in its own.
 #[test]
 fn global_of_another_isolate_panics() {
-    let a = crate::Harness::new();
-    let b = crate::Harness::new();
+    let a = jsg_test::Harness::new();
+    let b = jsg_test::Harness::new();
     let mut global = None;
     a.run_in_context(|lock, _ctx| {
         let value = "from a".to_js(lock)?;
@@ -259,7 +264,7 @@ fn global_of_another_isolate_panics() {
 fn global_into_traced_global_is_traced() {
     TRACED_HOLDER_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let resource = jsg::Rc::new(TracedHolder {
             handle: jsg::Cell::new(None),
@@ -274,7 +279,7 @@ fn global_into_traced_global_is_traced() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             TRACED_HOLDER_DROPS.load(Ordering::SeqCst),
             1,

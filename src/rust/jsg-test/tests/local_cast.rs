@@ -5,6 +5,8 @@
 //! Tests for `impl_local_cast!` conversions added for Float/BigInt typed arrays,
 //! and upcasts to Object (Function -> Object, Array -> Object, `TypedArray` -> Object).
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::ToJsTypedArray;
 use jsg::v8;
@@ -16,7 +18,7 @@ use jsg::v8;
 /// `Local<Float32Array>` → `Local<Value>` via `Into`, preserving the type tag.
 #[test]
 fn float32_array_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.0f32, 2.0, 3.0].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -31,7 +33,7 @@ fn float32_array_into_value() {
 /// `Local<Float64Array>` → `Local<Value>` via `Into`, preserving the type tag.
 #[test]
 fn float64_array_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.0f64, 2.0, 3.0].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -46,7 +48,7 @@ fn float64_array_into_value() {
 /// `Local<BigInt64Array>` → `Local<Value>` via `Into`, preserving the type tag.
 #[test]
 fn bigint64_array_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1i64, 2, 3].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -61,7 +63,7 @@ fn bigint64_array_into_value() {
 /// `Local<BigUint64Array>` → `Local<Value>` via `Into`, preserving the type tag.
 #[test]
 fn biguint64_array_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1u64, 2, 3].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -80,7 +82,7 @@ fn biguint64_array_into_value() {
 /// `Local<Float32Array>` → `Local<TypedArray>` preserves length.
 #[test]
 fn float32_array_into_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.5f32, 2.5].to_js_typed_array(lock);
         assert_eq!(typed.len(), 2);
@@ -98,7 +100,7 @@ fn float32_array_into_typed_array() {
 /// `Local<Float64Array>` → `Local<TypedArray>` preserves length.
 #[test]
 fn float64_array_into_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.5f64, 2.5].to_js_typed_array(lock);
         assert_eq!(typed.len(), 2);
@@ -116,7 +118,7 @@ fn float64_array_into_typed_array() {
 /// `Local<BigInt64Array>` → `Local<TypedArray>` preserves length.
 #[test]
 fn bigint64_array_into_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [10i64, -20].to_js_typed_array(lock);
         assert_eq!(typed.len(), 2);
@@ -134,7 +136,7 @@ fn bigint64_array_into_typed_array() {
 /// `Local<BigUint64Array>` → `Local<TypedArray>` preserves length.
 #[test]
 fn biguint64_array_into_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [10u64, 20].to_js_typed_array(lock);
         assert_eq!(typed.len(), 2);
@@ -156,7 +158,7 @@ fn biguint64_array_into_typed_array() {
 /// `Local<Function>` → `Local<Object>` via `Into`; verify `has()` sees `name` property.
 #[test]
 fn function_into_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx.eval_raw(lock, "(function myFunc() {})").unwrap();
         assert!(func_val.is_function());
@@ -174,7 +176,7 @@ fn function_into_object() {
 /// `Local<Array>` → `Local<Object>` via `Into`; verify `length` property preserved.
 #[test]
 fn array_into_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let arr_val = ctx.eval_raw(lock, "[1, 2, 3]").unwrap();
         assert!(arr_val.is_array());
@@ -191,7 +193,7 @@ fn array_into_object() {
 /// `Local<TypedArray>` → `Local<Object>` via `Into`; verify `byteLength` property.
 #[test]
 fn typed_array_into_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1u8, 2, 3].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -214,7 +216,7 @@ fn typed_array_into_object() {
 /// Functions are objects in JS, so custom properties can be set on them.
 #[test]
 fn function_as_object_property_access() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx
             .eval_raw(lock, "var f = () => {}; f.custom = 'hello'; f")
@@ -233,7 +235,7 @@ fn function_as_object_property_access() {
 /// Upcast `Array` to `Object`, then read `length` via `.get()`.
 #[test]
 fn array_as_object_property_access() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let arr_val = ctx.eval_raw(lock, "[10, 20, 30]").unwrap();
         let arr = v8::Local::<v8::Array>::try_from(arr_val).unwrap();
@@ -249,7 +251,7 @@ fn array_as_object_property_access() {
 /// Upcast `TypedArray` (via `Uint8Array`) to `Object`, then read `byteLength`.
 #[test]
 fn typed_array_as_object_property_access() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1u8, 2, 3, 4, 5].to_js_typed_array(lock);
         let ta: v8::Local<v8::TypedArray> = typed.into();
@@ -272,7 +274,7 @@ fn typed_array_as_object_property_access() {
 /// Round-trip: `Float32Array` → `Value` → `Float32Array`; verify elements preserved.
 #[test]
 fn float32_array_value_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.5f32, 2.5, 3.5].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -290,7 +292,7 @@ fn float32_array_value_roundtrip() {
 /// Round-trip: `Float64Array` → `Value` → `Float64Array`; verify elements preserved.
 #[test]
 fn float64_array_value_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [1.1f64, 2.2, 3.3].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -308,7 +310,7 @@ fn float64_array_value_roundtrip() {
 /// Round-trip: `BigInt64Array` → `Value` → `BigInt64Array`; verify elements preserved.
 #[test]
 fn bigint64_array_value_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [-100i64, 0, 100].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -326,7 +328,7 @@ fn bigint64_array_value_roundtrip() {
 /// Round-trip: `BigUint64Array` → `Value` → `BigUint64Array`; verify elements preserved.
 #[test]
 fn biguint64_array_value_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let typed = [0u64, 42, 999].to_js_typed_array(lock);
         assert_eq!(typed.len(), 3);
@@ -344,7 +346,7 @@ fn biguint64_array_value_roundtrip() {
 /// Round-trip: `Function` → `Object` → `Function`; verify callable after roundtrip.
 #[test]
 fn function_object_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx
             .eval_raw(lock, "(function namedFn() { return 42; })")
@@ -368,7 +370,7 @@ fn function_object_roundtrip() {
 /// Round-trip: `Array` → `Object` → `Array`; verify length preserved.
 #[test]
 fn array_object_roundtrip() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let arr_val = ctx.eval_raw(lock, "[10, 20, 30]").unwrap();
         assert!(arr_val.is_array());
@@ -390,7 +392,7 @@ fn array_object_roundtrip() {
 /// `TryFrom<Local<Value>> for Local<TypedArray>` rejects it.
 #[test]
 fn data_view_cannot_cast_to_typed_array() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx
             .eval_raw(lock, "new DataView(new ArrayBuffer(8))")
@@ -415,7 +417,7 @@ fn data_view_cannot_cast_to_typed_array() {
 /// Downcasts check the value whatever supertype they start from, not just from `Value`.
 #[test]
 fn downcasts_from_other_supertypes_check_the_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let object: v8::Local<v8::Object> = ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
         assert!(v8::Local::<v8::Function>::try_from(object).is_err());
@@ -443,7 +445,7 @@ fn downcasts_from_other_supertypes_check_the_value() {
 /// although `IsArrayBuffer()` is false for it, so upcasting it must not check the value.
 #[test]
 fn shared_buffer_of_a_view_upcasts() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let view: v8::Local<v8::ArrayBufferView> = ctx
             .eval_raw(lock, "new Uint8Array(new SharedArrayBuffer(4))")

@@ -2,7 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use crate::Harness;
+#![cfg(test)]
+
+use jsg_test::Harness;
 
 #[test]
 fn compatibility_flags_reach_the_rust_realm() {
@@ -46,13 +48,13 @@ fn python_workers_makes_the_cpp_global_prototype_read_only() {
 #[test]
 #[should_panic(expected = "an Autogates guard is already alive")]
 fn autogate_guards_do_not_nest() {
-    let _outer = crate::set_autogates(&[]);
-    let _inner = crate::set_autogates(&["jsg-integer-enforce-range"]);
+    let _outer = jsg_test::set_autogates(&[]);
+    let _inner = jsg_test::set_autogates(&["jsg-integer-enforce-range"]);
 }
 
 /// Dropping the guard lets the next one be made.
 #[test]
 fn autogate_guards_follow_each_other() {
-    drop(crate::set_autogates(&["jsg-integer-enforce-range"]));
-    let _again = crate::set_autogates(&[]);
+    drop(jsg_test::set_autogates(&["jsg-integer-enforce-range"]));
+    let _again = jsg_test::set_autogates(&[]);
 }

@@ -5,6 +5,8 @@
 //! `#[jsg_wildcard_property]` behaves as C++ JSG's `JSG_WILDCARD_PROPERTY`. The first test
 //! mirrors the "Named interceptor" test in `src/workerd/jsg/jsg-test.c++` case for case.
 
+#![cfg(test)]
+
 use jsg::ExceptionType;
 use jsg::MemberRegistry;
 use jsg::Resource;
@@ -151,8 +153,8 @@ impl Resource for Versioned {
     }
 }
 
-fn with_proxy(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
-    let harness = crate::Harness::new();
+fn with_proxy(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &jsg_test::EvalContext<'c>)) {
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.set_global(
             lock,
@@ -173,12 +175,21 @@ fn with_proxy(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext
     });
 }
 
-fn expect_eval(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str, expected: &str) {
+fn expect_eval(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+    expected: &str,
+) {
     let result: String = ctx.eval(lock, code).unwrap();
     assert_eq!(result, expected, "{code}");
 }
 
-fn expect_type_error(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn expect_type_error(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     let err = ctx
         .eval::<String>(lock, code)
         .unwrap_err()
@@ -331,7 +342,7 @@ fn then_is_a_wildcard_property_too() {
 fn custom_members_choose_the_wildcard_property() {
     for (enabled, expected) in [(false, "old x"), (true, "new x")] {
         let harness =
-            crate::Harness::with_flags(|mut flags| flags.set_cache_option_enabled(enabled));
+            jsg_test::Harness::with_flags(|mut flags| flags.set_cache_option_enabled(enabled));
         harness.run_in_context(|lock, ctx| {
             ctx.set_global(lock, "v", jsg::Rc::new(Versioned));
             expect_eval(lock, ctx, "v.x", expected);
@@ -402,7 +413,7 @@ const TERMINATE: &str = "() => { try { panicker.panicNow(); } catch (e) {} while
 #[test]
 fn error_does_not_replace_termination() {
     for read in ["caller.call", "'call' in caller"] {
-        let harness = crate::Harness::new();
+        let harness = jsg_test::Harness::new();
         harness.run_in_context(|lock, ctx| {
             ctx.set_global(
                 lock,
@@ -431,7 +442,7 @@ fn error_does_not_replace_termination() {
 #[test]
 fn panic_is_an_internal_error() {
     for read in ["panicker.panic", "'panic' in panicker"] {
-        let harness = crate::Harness::new();
+        let harness = jsg_test::Harness::new();
         harness.run_in_context(|lock, ctx| {
             ctx.set_global(lock, "panicker", panicker());
             let err = ctx

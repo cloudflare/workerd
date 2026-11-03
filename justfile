@@ -237,7 +237,7 @@ test-gc-stress-alloc-asan *args="//src/workerd/api/tests:abortsignal-test@":
 #     until an explicit gc()", or "a *minor* GC collects X"). Forcing a full GC before every
 #     allocation collects/tenures objects early, which is exactly what these tests check against.
 #       - //src/workerd/jsg:tracing-test           (asserts !siblingCollected, minor-GC specifics)
-#       - //src/rust/jsg-test:jsg-test_test        (asserts no collection before explicit request_gc)
+#       - //src/rust/jsg-test:jsg-test_test_*      (asserts no collection before explicit request_gc)
 #   * Timing-sensitive behavior the aggressive GC perturbs (no UAF; abort/trace-span/connection
 #     ordering shifts). js-rpc's portAbortCall is already marked TODO(bug) for abort-reason
 #     propagation upstream.

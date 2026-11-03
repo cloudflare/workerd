@@ -10,6 +10,8 @@
 //! and property access are tested in `coercion_safety.rs`, a call in `resource_callback.rs`, and
 //! `Function::new` in `function_new.rs`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 
 use jsg::ToJS;
@@ -127,7 +129,7 @@ impl Thrower {
 /// `Utf8Value` case passes JavaScript that would set `secondRan`; for the others, the pending
 /// error and the caught exception are what tell a guarded shim from one that isn't.
 fn exception_survives(call: &str) {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let thrower = jsg::Rc::new(Thrower {
             saw_pending: Cell::new(None),
         });
@@ -205,14 +207,14 @@ impl Callee {
 #[cfg(debug_assertions)]
 #[test]
 fn callback_entered_while_try_catch_holds_exception_panics() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let callee = jsg::Rc::new(Callee {
             ran: Cell::new(false),
         });
         ctx.set_global(lock, "callee", callee.clone());
         match ctx.eval_with_caught_exception(lock, "callee.run()") {
-            Err(crate::EvalError::EvalFailed) => {}
-            Err(crate::EvalError::Exception(exception)) => assert!(exception.is_null()),
+            Err(jsg_test::EvalError::EvalFailed) => {}
+            Err(jsg_test::EvalError::Exception(exception)) => assert!(exception.is_null()),
             other => panic!("the callback was entered: {other:?}"),
         }
         assert!(!callee.ran.get());

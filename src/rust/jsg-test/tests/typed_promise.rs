@@ -5,6 +5,8 @@
 //! Typed promises, `jsg::Promise<'s, T>`: carrying Rust values, reacting to them, and converting
 //! them where they cross into and out of JavaScript as C++ JSG's `jsg::Promise<T>` does.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -17,10 +19,14 @@ use jsg_macros::jsg_resource;
 
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
 /// and returns the log joined with `|`.
-fn log_after_microtasks(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn log_after_microtasks(
+    lock: &mut jsg::Lock,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     ctx.eval_raw(lock, &format!("globalThis.log = []; {code}"))
         .unwrap();
-    crate::Harness::run_microtasks(lock);
+    jsg_test::Harness::run_microtasks(lock);
     ctx.eval(lock, "log.join('|')").unwrap()
 }
 
@@ -43,7 +49,7 @@ impl jsg::Traced for Token {}
 
 #[test]
 fn resolved_promise_carries_a_rust_value_to_its_reaction() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let token = Token {
             id: 7,
             name: "seven".to_owned(),
@@ -55,7 +61,7 @@ fn resolved_promise_carries_a_rust_value_to_its_reaction() {
         let Err(described) = described.try_consume_resolved(lock) else {
             panic!("reactions never run synchronously");
         };
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         let Ok(value) = described.try_consume_resolved(lock) else {
             panic!("the reaction did not run");
         };
@@ -66,7 +72,7 @@ fn resolved_promise_carries_a_rust_value_to_its_reaction() {
 
 #[test]
 fn resolver_settles_a_typed_promise() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let (promise, resolver) = jsg::Promise::<Token>::new_with_resolver(lock)?;
         let ids: jsg::Promise<u64> =
             promise.then(lock, 100_u64, |_lock, offset, token| Ok(token.id + offset))?;
@@ -77,7 +83,7 @@ fn resolver_settles_a_typed_promise() {
                 name: String::new(),
             },
         )?;
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         let Ok(id) = ids.try_consume_resolved(lock) else {
             panic!("the reaction did not run");
         };
@@ -88,7 +94,7 @@ fn resolver_settles_a_typed_promise() {
 
 #[test]
 fn then_chains_change_the_carried_type() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = jsg::Promise::<u32>::resolved(lock, 20)?;
         let doubled: jsg::Promise<u64> =
             promise.then(lock, (), |_lock, (), n| Ok(u64::from(n) * 2))?;
@@ -112,7 +118,7 @@ fn then_chains_change_the_carried_type() {
 
 #[test]
 fn callback_errors_reject_and_catch_recovers() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = jsg::Promise::<u32>::resolved(lock, 1)?;
         let failed: jsg::Promise<u32> = promise.then(lock, (), |_lock, (), _n| {
             Err(jsg::Error::new_range_error("out of range"))
@@ -132,7 +138,7 @@ fn callback_errors_reject_and_catch_recovers() {
 
 #[test]
 fn then_or_catch_runs_the_callback_for_the_outcome() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = jsg::Promise::<u32>::resolved(lock, 3)?;
         let rejected =
             jsg::Promise::<u32>::rejected_with_error(lock, &jsg::Error::new_type_error("nope"))?;
@@ -162,7 +168,7 @@ fn then_or_catch_runs_the_callback_for_the_outcome() {
 
 #[test]
 fn resolver_follows_a_typed_promise() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let (inner, inner_resolver) = jsg::Promise::<String>::new_with_resolver(lock)?;
         let (outer, outer_resolver) = jsg::Promise::<String>::new_with_resolver(lock)?;
         outer_resolver.resolve_with_promise(lock, inner)?;
@@ -193,7 +199,7 @@ impl jsg::Traced for Carried {}
 /// done with it, and the wrapper, which the garbage collector frees later, holds nothing.
 #[test]
 fn carried_value_is_moved_into_the_reaction() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let promise = jsg::Promise::<Carried>::resolved(lock, Carried)?;
         let _: jsg::Promise<()> = promise.then(lock, (), |_lock, (), carried| {
@@ -201,12 +207,12 @@ fn carried_value_is_moved_into_the_reaction() {
             drop(carried);
             Ok(())
         })?;
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         assert_eq!(CARRIED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CARRIED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -228,13 +234,13 @@ impl jsg::Traced for Untaken {}
 /// A value that no reaction takes is dropped with its wrapper, by the garbage collector.
 #[test]
 fn untaken_value_is_dropped_with_its_promise() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let _promise = jsg::Promise::<Untaken>::resolved(lock, Untaken)?;
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(UNTAKEN_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -275,7 +281,7 @@ impl Keeper {
 /// `jsg::Ref` does, so it can go in another resource and survive collections there.
 #[test]
 fn carried_resource_can_be_kept_after_garbage_collection() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let keeper = jsg::Rc::new(Keeper {
             kept: jsg::RefCell::new(None),
         });
@@ -290,12 +296,12 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
         let kept: jsg::Promise<()> = promise.then(lock, keeper, |lock, keeper, holder| {
             *keeper.kept.borrow_mut(lock) = Some(holder);
             // Traces the keeper, and through it the `jsg::Rc`, from its new owner.
-            crate::Harness::request_gc(lock);
+            jsg_test::Harness::request_gc(lock);
             Ok(())
         })?;
         resolver.resolve(lock, holder)?;
         // Only the opaque wrapper holds the resource now, and the collection makes it weak.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         ctx.set_global(lock, "kept", kept);
         assert_eq!(
             log_after_microtasks(
@@ -305,7 +311,7 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
             ),
             "fulfilled: alive"
         );
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ctx.eval::<String>(lock, "keeper.state()").unwrap(), "alive");
         Ok(())
     });
@@ -315,7 +321,7 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
 /// its value survives a collection while the reaction holds it.
 #[test]
 fn carried_traced_global_survives_garbage_collection_after_it_is_taken() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let value = lock.undefined();
         let outer = v8::Promise::resolved(lock, value)?;
         // The object is created in a reaction, whose handles go once it returns, so that only the
@@ -327,13 +333,13 @@ fn carried_traced_global_survives_garbage_collection_after_it_is_taken() {
             let global = object.to_traced_global(lock);
             let carried = jsg::Promise::<v8::TracedGlobal<v8::Object>>::resolved(lock, global)?;
             let state: jsg::Promise<String> = carried.then(lock, (), |lock, (), global| {
-                crate::Harness::request_gc(lock);
+                jsg_test::Harness::request_gc(lock);
                 let object = global.as_local(lock);
                 let state = object.get(lock, "state")?;
                 String::from_js(lock, state)
             })?;
             // Makes the handle weak, for the wrapper to trace.
-            crate::Harness::request_gc(lock);
+            jsg_test::Harness::request_gc(lock);
             state.to_js(lock)
         })?;
         ctx.set_global(lock, "read", read);
@@ -350,7 +356,7 @@ fn carried_traced_global_survives_garbage_collection_after_it_is_taken() {
 /// promise's own then rejects the reaction with an internal error, as in C++ JSG.
 #[test]
 fn value_settled_from_javascript_rejects_with_an_internal_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.eval_raw(
             lock,
             "globalThis.originalThen = Promise.prototype.then;
@@ -366,7 +372,7 @@ fn value_settled_from_javascript_rejects_with_an_internal_error() {
         let name: jsg::Promise<String> = outer.then(lock, (), |_lock, (), token| Ok(token.name))?;
         ctx.set_global(lock, "name", name);
         // V8 calls the replaced `then` from a microtask.
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         let restored = ctx
             .eval::<bool>(lock, "Promise.prototype.then === originalThen")
             .unwrap();
@@ -379,7 +385,7 @@ fn value_settled_from_javascript_rejects_with_an_internal_error() {
 
 #[test]
 fn catch_passes_the_value_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = jsg::Promise::<Token>::resolved(
             lock,
             Token {
@@ -404,7 +410,7 @@ fn catch_passes_the_value_through() {
 
 #[test]
 fn try_consume_resolved_returns_pending_and_rejected_promises() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let (pending, _resolver) = jsg::Promise::<u32>::new_with_resolver(lock)?;
         assert!(pending.try_consume_resolved(lock).is_err());
         let mut rejected =
@@ -429,7 +435,7 @@ impl<'s> ToJS<'s> for Unconvertible {
 /// The conversion runs in a reaction, so its failure rejects the promise JavaScript gets.
 #[test]
 fn to_js_rejects_with_a_failed_conversion() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = jsg::Promise::<Unconvertible>::resolved(lock, Unconvertible)?;
         ctx.set_global(lock, "p", promise);
         assert_eq!(
@@ -442,7 +448,7 @@ fn to_js_rejects_with_a_failed_conversion() {
 
 #[test]
 fn when_resolved_keeps_the_promise() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = jsg::Promise::<u32>::resolved(lock, 5)?;
         let settled = promise.when_resolved();
         let value: jsg::Promise<u32> = promise.then(lock, (), |_lock, (), n| Ok(n + 1))?;
@@ -469,7 +475,7 @@ fn when_resolved_keeps_the_promise() {
 /// promise that was already settled runs after one to an untyped promise registered later.
 #[test]
 fn to_js_converts_in_a_reaction() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let typed = jsg::Promise::<String>::resolved(lock, "typed".to_owned())?;
         ctx.set_global(lock, "typed", typed);
         let typed = ctx.eval_raw(lock, "typed").unwrap();
@@ -491,7 +497,7 @@ fn to_js_converts_in_a_reaction() {
 
 #[test]
 fn to_js_never_exposes_the_carried_wrapper() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let typed = jsg::Promise::<u32>::resolved(lock, 9)?;
         ctx.set_global(lock, "typed", typed);
         assert_eq!(
@@ -508,7 +514,7 @@ fn to_js_never_exposes_the_carried_wrapper() {
 
 #[test]
 fn to_js_passes_a_rejection_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let rejected = jsg::Promise::<u32>::rejected_with_error(
             lock,
             &jsg::Error::new_type_error("rejected"),
@@ -525,7 +531,7 @@ fn to_js_passes_a_rejection_through() {
 /// Marking a typed promise as handled marks the promise JavaScript gets too, as in C++.
 #[test]
 fn to_js_propagates_handled() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let mut handled =
             jsg::Promise::<u32>::rejected_with_error(lock, &jsg::Error::new_type_error("handled"))?;
         handled.mark_as_handled();
@@ -601,7 +607,7 @@ struct Leaf {
 #[jsg_resource]
 impl Leaf {}
 
-fn install_doubler(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install_doubler(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     ctx.set_global(lock, "doubler", jsg::Rc::new(Doubler));
     let leaf = jsg::Rc::new(Leaf {
         name: "leaf".to_owned(),
@@ -611,7 +617,7 @@ fn install_doubler(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 
 #[test]
 fn from_js_converts_the_resolution() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -628,7 +634,7 @@ fn from_js_converts_the_resolution() {
 /// A promise that resolves to a value of the wrong type rejects with C++ JSG's error.
 #[test]
 fn from_js_rejects_a_resolution_of_the_wrong_type() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -650,7 +656,7 @@ fn from_js_rejects_a_resolution_of_the_wrong_type() {
 /// C++ JSG, whose conversions throw too.
 #[test]
 fn from_js_rejects_with_a_failed_conversion() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -666,7 +672,7 @@ fn from_js_rejects_with_a_failed_conversion() {
 
 #[test]
 fn from_js_passes_a_rejection_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -687,7 +693,7 @@ fn from_js_passes_a_rejection_through() {
 /// A value that is not a promise is converted at once, so that one of the wrong type throws.
 #[test]
 fn from_js_converts_a_plain_value_at_once() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(lock, ctx, &format!("{RECORD} record(doubler.double(4))")),
@@ -707,7 +713,7 @@ fn from_js_converts_a_plain_value_at_once() {
 /// Without `unwrap_custom_thenables`, a thenable is a plain value, as in C++ JSG.
 #[test]
 fn from_js_does_not_follow_thenables_by_default() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -729,7 +735,8 @@ fn from_js_does_not_follow_thenables_by_default() {
 
 #[test]
 fn from_js_follows_thenables_with_unwrap_custom_thenables() {
-    let harness = crate::Harness::with_flags(|mut flags| flags.set_unwrap_custom_thenables(true));
+    let harness =
+        jsg_test::Harness::with_flags(|mut flags| flags.set_unwrap_custom_thenables(true));
     harness.run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
@@ -748,7 +755,8 @@ fn from_js_follows_thenables_with_unwrap_custom_thenables() {
 /// throws rejects the promise.
 #[test]
 fn from_js_passes_on_what_a_thenable_throws() {
-    let harness = crate::Harness::with_flags(|mut flags| flags.set_unwrap_custom_thenables(true));
+    let harness =
+        jsg_test::Harness::with_flags(|mut flags| flags.set_unwrap_custom_thenables(true));
     harness.run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
@@ -779,7 +787,7 @@ fn from_js_passes_on_what_a_thenable_throws() {
 /// As for `jsg::Promise<void>`, any value is accepted, and the promise resolves to `undefined`.
 #[test]
 fn void_promise_accepts_any_value() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -799,7 +807,7 @@ fn void_promise_accepts_any_value() {
 /// As for `jsg::Promise<jsg::Value>`, the value is carried as it is.
 #[test]
 fn value_promise_carries_javascript_values() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_doubler(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -817,7 +825,7 @@ fn value_promise_carries_javascript_values() {
 
 #[test]
 fn from_js_names_promise_and_rejects_other_values() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         assert_eq!(<jsg::Promise<u32> as FromJS>::type_name(), "Promise");
         let value = "not a leaf".to_js(lock)?;
         let Err(err) = jsg::Promise::<jsg::Rc<Leaf>>::from_js(lock, value) else {
@@ -831,7 +839,7 @@ fn from_js_names_promise_and_rejects_other_values() {
 /// The garbage collector traces what a typed promise carries, through its wrapper.
 #[test]
 fn carried_resource_survives_garbage_collection() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let leaf = jsg::Rc::new(Leaf {
             name: "kept".to_owned(),
         });
@@ -839,7 +847,7 @@ fn carried_resource_survives_garbage_collection() {
         let name: jsg::Promise<String> =
             promise.then(lock, (), |_lock, (), leaf| Ok(leaf.name.clone()))?;
         ctx.set_global(lock, "name", name);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             log_after_microtasks(lock, ctx, &format!("{RECORD} record(name)")),
             "fulfilled: kept"
@@ -890,7 +898,7 @@ impl Deferred {
 
 #[test]
 fn resource_keeps_typed_promise_and_resolver() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let deferred = jsg::Rc::new(Deferred {
             resolver: jsg::RefCell::new(None),
             promise: jsg::RefCell::new(None),
@@ -898,7 +906,7 @@ fn resource_keeps_typed_promise_and_resolver() {
         ctx.set_global(lock, "deferred", deferred);
         ctx.eval_raw(lock, "deferred.start()").unwrap();
         // The resource's fields alone keep the promise and its resolver.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             log_after_microtasks(
                 lock,
@@ -958,7 +966,7 @@ impl Evaluator {
 /// While execution is terminating, `eval_now` creates no promise and passes on the termination.
 #[test]
 fn eval_now_keeps_the_termination() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "evaluator", jsg::Rc::new(Evaluator));
         let result = ctx.eval_raw(
             lock,
@@ -974,7 +982,7 @@ fn eval_now_keeps_the_termination() {
 
 #[test]
 fn eval_now_rejects_with_what_fails() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "evaluator", jsg::Rc::new(Evaluator));
         assert_eq!(
             log_after_microtasks(
@@ -1034,7 +1042,7 @@ impl Later {
     }
 }
 
-fn install_later(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Later> {
+fn install_later(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) -> jsg::Rc<Later> {
     let later = jsg::Rc::new(Later {
         resolver: jsg::RefCell::new(None),
     });
@@ -1046,7 +1054,7 @@ fn install_later(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg:
 /// `then_promise` returns follows the callback's, which carries a Rust value through.
 #[test]
 fn then_promise_follows_the_callback_promise() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let later = install_later(lock, ctx);
         let start = jsg::Promise::<u32>::resolved(lock, 1)?;
         let waited: jsg::Promise<Token> =
@@ -1071,7 +1079,7 @@ fn then_promise_follows_the_callback_promise() {
 
 #[test]
 fn then_promise_passes_on_the_callback_promise_rejection() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let later = install_later(lock, ctx);
         let start = jsg::Promise::<u32>::resolved(lock, 1)?;
         let waited: jsg::Promise<Token> =
@@ -1096,7 +1104,7 @@ fn then_promise_passes_on_the_callback_promise_rejection() {
 
 #[test]
 fn catch_promise_recovers_with_a_promise() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let later = install_later(lock, ctx);
         let failed =
             jsg::Promise::<Token>::rejected_with_error(lock, &jsg::Error::new_type_error("no"))?;
@@ -1122,7 +1130,7 @@ fn catch_promise_recovers_with_a_promise() {
 
 #[test]
 fn then_or_catch_promise_runs_the_callback_for_the_outcome() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = jsg::Promise::<u32>::resolved(lock, 2)?;
         let rejected =
             jsg::Promise::<u32>::rejected_with_error(lock, &jsg::Error::new_type_error("nope"))?;
@@ -1221,7 +1229,7 @@ impl Waiter {
 /// the waiter is created by a function, so that no handle of the test's scope refers to it.
 fn returned_promise_keeps_its_creator_alive(method: &str) {
     WAITER_DROPS.store(0, Ordering::SeqCst);
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let source = jsg::Rc::new(Source {
             resolver: jsg::RefCell::new(None),
         });
@@ -1238,13 +1246,13 @@ fn returned_promise_keeps_its_creator_alive(method: &str) {
             &format!("globalThis.p = makeWaiter().{method}(source); undefined"),
         )
         .unwrap();
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(WAITER_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(
             log_after_microtasks(lock, ctx, &format!("{RECORD} record(p); source.finish(7);")),
             "fulfilled: 7"
         );
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(WAITER_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });

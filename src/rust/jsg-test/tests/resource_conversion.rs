@@ -11,6 +11,8 @@
 //! - `FromJS`: unwraps a JS object back to a `Rc<R>`, returning a `TypeError`
 //!   for non-matching values
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
@@ -49,7 +51,7 @@ impl Counter {
 /// `ToJS` creates a JS object that has the resource's methods.
 #[test]
 fn to_js_creates_object_with_methods() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let greeter = Greeter {
             greeting: "Hello".to_owned(),
@@ -66,7 +68,7 @@ fn to_js_creates_object_with_methods() {
 /// `ToJS` produces a valid object for different resource types.
 #[test]
 fn to_js_works_for_different_resource_types() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Counter { value: 42 };
         let js_val = counter.to_js(lock)?;
@@ -81,7 +83,7 @@ fn to_js_works_for_different_resource_types() {
 /// `ToJS` called twice on different values creates distinct JS objects.
 #[test]
 fn to_js_creates_distinct_objects() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let g1 = Greeter {
             greeting: "Hi".to_owned(),
@@ -113,7 +115,7 @@ fn to_js_creates_distinct_objects() {
 /// `FromJS` unwraps a JS-wrapped resource back to a `Rc<R>`.
 #[test]
 fn from_js_unwraps_resource() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let greeter = Greeter {
             greeting: "Howdy".to_owned(),
@@ -152,7 +154,7 @@ fn from_js_ref_keeps_resource_alive() {
 
     DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let tracked = Tracked {
             tag: "alive".to_owned(),
@@ -164,7 +166,7 @@ fn from_js_ref_keeps_resource_alive() {
         assert_eq!(r.tag, "alive");
 
         // The Ref from FromJS keeps the resource alive even after GC.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(r.tag, "alive");
 
@@ -176,7 +178,7 @@ fn from_js_ref_keeps_resource_alive() {
 /// `FromJS` returns a `TypeError` for a plain JS object.
 #[test]
 fn from_js_rejects_plain_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "({})").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -189,7 +191,7 @@ fn from_js_rejects_plain_object() {
 /// `FromJS` returns a `TypeError` for a string.
 #[test]
 fn from_js_rejects_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "'not a resource'").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -202,7 +204,7 @@ fn from_js_rejects_string() {
 /// `FromJS` returns a `TypeError` for a number.
 #[test]
 fn from_js_rejects_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -215,7 +217,7 @@ fn from_js_rejects_number() {
 /// `FromJS` returns a `TypeError` for null.
 #[test]
 fn from_js_rejects_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "null").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -229,7 +231,7 @@ fn from_js_rejects_null() {
 /// `FromJS` returns a `TypeError` for undefined.
 #[test]
 fn from_js_rejects_undefined() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "undefined").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -246,7 +248,7 @@ fn from_js_rejects_undefined() {
 /// `ToJS` followed by `FromJS` preserves the resource data.
 #[test]
 fn round_trip_preserves_data() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let original = Greeter {
             greeting: "Bonjour".to_owned(),
@@ -263,7 +265,7 @@ fn round_trip_preserves_data() {
 /// Round-trip through JavaScript — resource passes through JS code and comes back.
 #[test]
 fn round_trip_through_js_identity_function() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let greeter = Greeter {
             greeting: "Hola".to_owned(),
@@ -281,7 +283,7 @@ fn round_trip_through_js_identity_function() {
 /// Round-trip preserves object identity — same wrapper object.
 #[test]
 fn round_trip_preserves_js_identity() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let greeter = Greeter {
             greeting: "Ciao".to_owned(),
@@ -304,7 +306,7 @@ fn round_trip_preserves_js_identity() {
 /// Evaluating a global that holds a resource and calling `FromJS` returns a `Rc<R>`.
 #[test]
 fn eval_raw_returns_ref_via_from_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let greeter = Greeter {
             greeting: "Salut".to_owned(),
@@ -321,7 +323,7 @@ fn eval_raw_returns_ref_via_from_js() {
 /// `FromJS` on a non-resource value returns a `TypeError`.
 #[test]
 fn eval_raw_with_wrong_type_gives_type_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let js_val = ctx.eval_raw(lock, "42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
@@ -334,7 +336,7 @@ fn eval_raw_with_wrong_type_gives_type_error() {
 /// Resources stored in a JS array can be retrieved individually via `FromJS`.
 #[test]
 fn resource_stored_in_js_array_and_retrieved() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let g1 = Greeter {
             greeting: "One".to_owned(),

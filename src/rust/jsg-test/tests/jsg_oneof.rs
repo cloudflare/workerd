@@ -8,6 +8,8 @@
 //! since a Rust enum can't be empty. Later ones port the unions in other tests
 //! there.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -355,8 +357,8 @@ fn describe_string_or_bool(value: &StringOrBool) -> String {
 
 /// Runs `f` with a `OneOfContext` installed as the global `cx` and a
 /// `OneOfBox` holding 321 as the global `box321`.
-fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
-    let harness = crate::Harness::new();
+fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &jsg_test::EvalContext<'c>)) {
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let cx = jsg::Rc::new(OneOfContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
@@ -367,12 +369,21 @@ fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalConte
     });
 }
 
-fn expect_eval(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str, expected: &str) {
+fn expect_eval(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+    expected: &str,
+) {
     let result: String = ctx.eval(lock, code).unwrap();
     assert_eq!(result, expected, "{code}");
 }
 
-fn expect_type_error(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn expect_type_error(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     let err = ctx
         .eval::<String>(lock, code)
         .unwrap_err()
@@ -674,7 +685,7 @@ impl HoldsUnion {}
 #[test]
 fn union_field_traces_its_resource_variant() {
     TRACED_BOX_DROPS.store(0, Ordering::SeqCst);
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let held = jsg::Rc::new(TracedBox);
         let parent = jsg::Rc::new(HoldsUnion {
@@ -687,13 +698,13 @@ fn union_field_traces_its_resource_variant() {
         std::mem::drop(held);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TRACED_BOX_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TRACED_BOX_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });

@@ -4,14 +4,15 @@
 
 //! Tests for `#[jsg_resource(nested_types(...))]`.
 
+#![cfg(test)]
+
 use std::panic::AssertUnwindSafe;
 
 use jsg::ToJS;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::EvalContext;
+use jsg_test::EvalContext;
 
 #[jsg_resource]
 struct Inner {}
@@ -64,7 +65,7 @@ fn set_outer(lock: &mut jsg::Lock, ctx: &EvalContext) {
 /// A nested type is reachable from instances, named after its class name.
 #[test]
 fn nested_type_is_reachable_from_instance() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let result: String = ctx
@@ -79,7 +80,7 @@ fn nested_type_is_reachable_from_instance() {
 /// instance.
 #[test]
 fn nested_type_is_prototype_property() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let result: String = ctx
@@ -98,7 +99,7 @@ fn nested_type_is_prototype_property() {
 /// `instanceof` works with instances created from Rust.
 #[test]
 fn nested_type_is_type_constructor() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let inner = jsg::resource::function_template_of::<Inner>(lock).unwrap();
@@ -117,7 +118,7 @@ fn nested_type_is_type_constructor() {
 /// A nested type without a constructor throws "Illegal constructor".
 #[test]
 fn nested_type_without_constructor_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let result: String = ctx
@@ -134,7 +135,7 @@ fn nested_type_without_constructor_throws() {
 /// A nested type with a constructor can be constructed.
 #[test]
 fn nested_type_with_constructor_constructs() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let result: String = ctx
@@ -148,7 +149,7 @@ fn nested_type_with_constructor_constructs() {
 /// A nested type can be given a property name other than its class name.
 #[test]
 fn nested_type_with_name() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let renamed = jsg::resource::function_template_of::<Renamed>(lock).unwrap();
@@ -170,7 +171,7 @@ fn nested_type_with_name() {
 /// the constructor is first reached through that property.
 #[test]
 fn nested_type_with_name_first_reached_by_name() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         set_outer(lock, ctx);
         let result: String = ctx
@@ -185,7 +186,7 @@ fn nested_type_with_name_first_reached_by_name() {
 /// template was created before the template of the type nesting it.
 #[test]
 fn nested_type_created_before_outer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let inner = jsg::resource::function_template_of::<Inner>(lock).unwrap();
         ctx.set_global(lock, "Inner", inner);
@@ -231,12 +232,12 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// time.
 #[test]
 fn nested_type_cycle_panics() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let path = |names: &[&str]| {
             names
                 .iter()
-                .map(|name| format!("jsg_test::tests::nested_type::{name}"))
+                .map(|name| format!("{}::{name}", module_path!()))
                 .collect::<Vec<_>>()
                 .join(" -> ")
         };

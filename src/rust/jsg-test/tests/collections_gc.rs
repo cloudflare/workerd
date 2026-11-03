@@ -21,6 +21,8 @@
 //!    makes the references traced.
 //! 4. Move to a fresh context (global is gone) → GC must collect parent and all children.
 
+#![cfg(test)]
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -104,7 +106,7 @@ fn vec_rc_children_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let c1 = leaf(1);
         let c2 = leaf(2);
@@ -124,7 +126,7 @@ fn vec_rc_children_kept_alive_through_gc() {
         std::mem::drop(parent);
 
         // GC while global is reachable — parent and all children must survive.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(VEC_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
@@ -132,7 +134,7 @@ fn vec_rc_children_kept_alive_through_gc() {
 
     // Fresh context — global is gone, everything should be collected.
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(VEC_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 3);
         Ok(())
@@ -144,20 +146,20 @@ fn vec_rc_children_kept_alive_through_gc() {
 fn vec_rc_empty_does_not_crash_during_gc() {
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(VecParent { children: vec![] });
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(VEC_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(VEC_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -189,7 +191,7 @@ fn hashmap_rc_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     HASHMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let a = leaf(10);
         let b = leaf(20);
@@ -207,14 +209,14 @@ fn hashmap_rc_values_kept_alive_through_gc() {
         std::mem::drop(b);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHMAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHMAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -226,7 +228,7 @@ fn hashmap_rc_values_kept_alive_through_gc() {
 fn hashmap_rc_empty_does_not_crash_during_gc() {
     HASHMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(HashMapParent {
             children: HashMap::new(),
@@ -235,13 +237,13 @@ fn hashmap_rc_empty_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHMAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHMAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -273,7 +275,7 @@ fn btreemap_rc_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     BTREEMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let x = leaf(100);
         let y = leaf(200);
@@ -291,14 +293,14 @@ fn btreemap_rc_values_kept_alive_through_gc() {
         std::mem::drop(y);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREEMAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREEMAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -310,7 +312,7 @@ fn btreemap_rc_values_kept_alive_through_gc() {
 fn btreemap_rc_empty_does_not_crash_during_gc() {
     BTREEMAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(BTreeMapParent {
             children: BTreeMap::new(),
@@ -319,13 +321,13 @@ fn btreemap_rc_empty_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREEMAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREEMAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -364,7 +366,7 @@ fn hashset_rc_elements_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     HASHSET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let p = leaf(1);
         let q = leaf(2);
@@ -382,14 +384,14 @@ fn hashset_rc_elements_kept_alive_through_gc() {
         std::mem::drop(q);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHSET_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHSET_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -401,7 +403,7 @@ fn hashset_rc_elements_kept_alive_through_gc() {
 fn hashset_rc_empty_does_not_crash_during_gc() {
     HASHSET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(HashSetParent {
             children: HashSet::new(),
@@ -410,13 +412,13 @@ fn hashset_rc_empty_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHSET_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HASHSET_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -453,7 +455,7 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     BTREESET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = leaf(7);
         let s = leaf(8);
@@ -471,14 +473,14 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
         std::mem::drop(s);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREESET_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREESET_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -490,7 +492,7 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
 fn btreeset_rc_empty_does_not_crash_during_gc() {
     BTREESET_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(BTreeSetParent {
             children: BTreeSet::new(),
@@ -499,13 +501,13 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREESET_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(BTREESET_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -537,7 +539,7 @@ fn dict_rc_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     DICT_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let a = leaf(1);
         let b = leaf(2);
@@ -556,14 +558,14 @@ fn dict_rc_values_kept_alive_through_gc() {
         std::mem::drop(b);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(DICT_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(DICT_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -596,7 +598,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     CELL_VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let c1 = leaf(11);
         let c2 = leaf(22);
@@ -612,14 +614,14 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
         std::mem::drop(c2);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_VEC_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_VEC_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
@@ -631,7 +633,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
 fn cell_vec_rc_empty_does_not_crash_during_gc() {
     CELL_VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(CellVecParent {
             children: jsg::Cell::new(vec![]),
@@ -640,13 +642,13 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_VEC_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_VEC_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -678,7 +680,7 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     CELL_MAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let m = leaf(99);
 
@@ -695,14 +697,14 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
         std::mem::drop(m);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_MAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CELL_MAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -737,7 +739,7 @@ fn mixed_collection_fields_all_traced() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     MIXED_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec_child = leaf(1);
         let map_child = leaf(2);
@@ -761,14 +763,14 @@ fn mixed_collection_fields_all_traced() {
         std::mem::drop(parent);
 
         // All 3 children must survive (1 from vec, 1 from map, 1 direct).
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(MIXED_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(MIXED_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 3);
         Ok(())
@@ -786,7 +788,7 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     VEC_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let child = leaf(42);
 
@@ -803,7 +805,7 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
 
         // Force a GC: parent wrapper is unreachable (no global), but the local
         // handle keeps it alive in this scope.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         // Child must NOT have been collected yet — the parent's vec still holds it.
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
 
@@ -812,7 +814,7 @@ fn vec_rc_child_kept_alive_by_parent_after_rust_ref_dropped() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(VEC_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -845,7 +847,7 @@ fn hashmap_integer_key_rc_values_traced() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     INT_KEY_MAP_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let v = leaf(55);
 
@@ -861,14 +863,14 @@ fn hashmap_integer_key_rc_values_traced() {
         std::mem::drop(v);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(INT_KEY_MAP_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(INT_KEY_MAP_PARENT_DROPS.load(Ordering::SeqCst), 1);
         // One unique Leaf despite two map entries (both were clones of the same Rc).
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
@@ -921,7 +923,7 @@ fn trace_delegation_child_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     TRACE_DELEGATION_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = leaf(77);
 
@@ -938,14 +940,14 @@ fn trace_delegation_child_kept_alive_through_gc() {
         std::mem::drop(parent);
 
         // GC while global reachable — child inside PrivateData must survive.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TRACE_DELEGATION_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TRACE_DELEGATION_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -988,7 +990,7 @@ fn custom_trace_child_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     CUSTOM_TRACE_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = leaf(88);
 
@@ -1002,14 +1004,14 @@ fn custom_trace_child_kept_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CUSTOM_TRACE_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CUSTOM_TRACE_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())

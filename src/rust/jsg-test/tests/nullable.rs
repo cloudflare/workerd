@@ -5,6 +5,8 @@
 //! `Nullable<T>` is `T | null`, with Web IDL's `undefined`-to-`null` coercion.
 //! `NullOrUndefined<T>` is `T | null | undefined`, and keeps the three apart.
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::Nullable;
 use jsg::ToJS;
@@ -15,7 +17,7 @@ use jsg_macros::jsg_struct;
 
 fn convert<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, jsg::Error> {
     let value = ctx
@@ -34,7 +36,7 @@ fn describe(value: Option<Nullable<String>>) -> String {
 }
 
 /// Evaluates `expr` and returns its string, or `"Name: message"` for what it throws.
-fn call(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, expr: &str) -> String {
+fn call(lock: &mut jsg::Lock, ctx: &jsg_test::EvalContext<'_>, expr: &str) -> String {
     let code = format!("try {{ {expr} }} catch (e) {{ `${{e.name}}: ${{e.message}}` }}");
     ctx.eval(lock, &code).unwrap()
 }
@@ -42,7 +44,7 @@ fn call(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, expr: &str) -> Strin
 /// Converts `expr` through a `Lenient` to an `Option<Nullable<String>>`.
 fn lenient_to_optional_nullable(
     lock: &mut jsg::Lock,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> Option<Nullable<String>> {
     let lenient = convert::<jsg::Lenient<jsg::NonCoercible<String>>>(lock, ctx, expr).unwrap();
@@ -84,7 +86,7 @@ struct Fields {
 
 #[test]
 fn nullable_reads_null_and_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(
             convert::<Nullable<String>>(lock, ctx, "null")?,
@@ -100,7 +102,7 @@ fn nullable_reads_null_and_values() {
 
 #[test]
 fn nullable_coerces_undefined_to_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = convert::<Nullable<String>>(lock, ctx, "undefined")?;
         assert_eq!(value, Nullable::Null);
@@ -119,7 +121,7 @@ fn nullable_coerces_undefined_to_null() {
 
 #[test]
 fn optional_nullable_keeps_null_and_undefined_apart() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(
             convert::<Option<Nullable<String>>>(lock, ctx, "undefined")?,
@@ -139,7 +141,7 @@ fn optional_nullable_keeps_null_and_undefined_apart() {
 
 #[test]
 fn nullable_to_js() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         assert!(Nullable::<String>::Null.to_js(lock)?.is_null());
         assert!(Nullable::Some("x".to_owned()).to_js(lock)?.is_string());
@@ -151,7 +153,7 @@ fn nullable_to_js() {
 
 #[test]
 fn nullable_argument_is_required_but_accepts_undefined() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
@@ -183,7 +185,7 @@ fn nullable_argument_is_required_but_accepts_undefined() {
 
 #[test]
 fn nullable_struct_fields() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(
             convert::<Fields>(lock, ctx, "({ required: null })")?,
@@ -231,7 +233,7 @@ fn nullable_struct_fields() {
 
 #[test]
 fn lenient_converts_to_optional_nullable() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(lenient_to_optional_nullable(lock, ctx, "undefined"), None);
         assert_eq!(

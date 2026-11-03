@@ -4,6 +4,8 @@
 
 //! Tests for compatibility-dependent resource template shape and constructor call checks.
 
+#![cfg(test)]
+
 use std::cell::RefCell;
 
 use jsg::MemberRegistry;
@@ -16,8 +18,7 @@ use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_static_constant;
-
-use crate::Harness;
+use jsg_test::Harness;
 
 type OptionalNumber = Option<u32>;
 

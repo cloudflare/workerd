@@ -6,6 +6,8 @@
 //! isolate is gone, and for taking one that GC has visited out of the resource that traces it,
 //! and putting it back.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -104,7 +106,7 @@ impl Drop for Counted {
 /// it then must leave the handle alone: `v8::Isolate::Dispose` freed it with the isolate.
 #[test]
 fn global_dropped_after_its_isolate_is_disposed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     harness.run_in_context(|lock, _ctx| {
         global = Some("escaped".to_js(lock).unwrap().to_traced_global(lock));
@@ -121,7 +123,7 @@ fn global_dropped_after_its_isolate_is_disposed() {
 fn wrapped_resource_dropped_after_its_isolate_is_disposed() {
     HANDLE_HOLDER_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut holder: Option<jsg::Rc<HandleHolder>> = None;
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(HandleHolder {
@@ -150,7 +152,7 @@ fn wrapped_resource_dropped_after_its_isolate_is_disposed() {
 fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
     HANDLE_HOLDER_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(HandleHolder {
             handle: jsg::Cell::new(None),
@@ -163,7 +165,7 @@ fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
 
         // Tracing the wrapper puts the handle in traced mode; the wrapper is reachable from
         // the global object, so the cycle survives.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HANDLE_HOLDER_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
@@ -179,7 +181,7 @@ fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
 /// Returns the resource and the size of the handles in use before the `TracedGlobal` was created.
 fn holder_in_traced_mode(
     lock: &mut jsg::Lock<'_>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
 ) -> (jsg::Rc<HandleHolder>, usize) {
     let resource = jsg::Rc::new(HandleHolder {
         handle: jsg::Cell::new(None),
@@ -190,12 +192,12 @@ fn holder_in_traced_mode(
     ctx.eval_raw(lock, "globalThis.value = {}; undefined")
         .expect("should evaluate");
     // Collects whatever the setup left behind, so that only the `TracedGlobal` changes the count.
-    crate::Harness::request_gc(lock);
-    let baseline = crate::Harness::used_global_handles_size(lock);
+    jsg_test::Harness::request_gc(lock);
+    let baseline = jsg_test::Harness::used_global_handles_size(lock);
 
     ctx.eval_raw(lock, "holder.set(globalThis.value); undefined")
         .expect("should evaluate");
-    crate::Harness::request_gc(lock);
+    jsg_test::Harness::request_gc(lock);
     (resource, baseline)
 }
 
@@ -203,16 +205,16 @@ fn holder_in_traced_mode(
 /// node, which the next full GC frees.
 #[test]
 fn traced_global_dropped_frees_its_traced_node_at_the_next_gc() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
         resource.handle.set(None);
         assert!(
-            crate::Harness::used_global_handles_size(lock) > baseline,
+            jsg_test::Harness::used_global_handles_size(lock) > baseline,
             "dropping leaves the traced node for the next full GC",
         );
-        crate::Harness::request_gc(lock);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        jsg_test::Harness::request_gc(lock);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -223,22 +225,22 @@ fn traced_global_dropped_frees_its_traced_node_at_the_next_gc() {
 /// would corrupt V8's accounting of traced nodes, if not its free list.
 #[test]
 fn global_taken_out_of_a_traced_resource_outlives_its_traced_node() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
-        let with_global = crate::Harness::used_global_handles_size(lock);
+        let with_global = jsg_test::Harness::used_global_handles_size(lock);
 
         let taken = resource.handle.take(lock).expect("set above");
         // Nothing traces the node now; the value stays reachable through the global object.
-        crate::Harness::request_gc(lock);
-        let without_node = crate::Harness::used_global_handles_size(lock);
+        jsg_test::Harness::request_gc(lock);
+        let without_node = jsg_test::Harness::used_global_handles_size(lock);
         assert!(without_node < with_global, "the GC frees the traced node");
         assert!(taken.as_local(lock).is_object());
 
         drop(taken);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
-        crate::Harness::request_gc(lock);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
+        jsg_test::Harness::request_gc(lock);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -248,17 +250,17 @@ fn global_taken_out_of_a_traced_resource_outlives_its_traced_node() {
 /// once nothing else does.
 #[test]
 fn global_put_back_after_its_traced_node_was_freed_is_traced_again() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
-        let with_global = crate::Harness::used_global_handles_size(lock);
+        let with_global = jsg_test::Harness::used_global_handles_size(lock);
 
         let taken = resource.handle.take(lock).expect("set above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         resource.handle.set(Some(taken));
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
-            crate::Harness::used_global_handles_size(lock),
+            jsg_test::Harness::used_global_handles_size(lock),
             with_global,
             "the visit installs one traced node in place of the freed one"
         );
@@ -266,13 +268,13 @@ fn global_put_back_after_its_traced_node_was_freed_is_traced_again() {
         // The resource's trace alone keeps the value alive now.
         ctx.eval_raw(lock, "globalThis.value = undefined")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let taken = resource.handle.take(lock).expect("set above");
         assert!(taken.as_local(lock).is_object());
 
         drop(taken);
-        crate::Harness::request_gc(lock);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        jsg_test::Harness::request_gc(lock);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -282,7 +284,7 @@ fn global_put_back_after_its_traced_node_was_freed_is_traced_again() {
 /// in traced mode strong again, or the value dies once nothing else holds it.
 #[test]
 fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(HandleHolder {
             handle: jsg::Cell::new(None),
@@ -296,7 +298,7 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
         .expect("should evaluate");
         // The parent's trace reaches the child, which has no strong reference: its `TracedGlobal`
         // goes to traced mode.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
 
         // The child's first strong reference visits the `TracedGlobal`.
         let child = parent.child.clone();
@@ -304,7 +306,7 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
         // The `TracedGlobal` alone keeps the value alive now.
         ctx.eval_raw(lock, "globalThis.value = undefined; undefined")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let taken = child.handle.take(lock).expect("set above");
         assert!(taken.as_local(lock).is_object());
         Ok(())
@@ -317,13 +319,13 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
 fn unlocked_drop_is_deferred_until_the_next_lock() {
     COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     let mut baseline = 0;
     harness.run_in_context(|lock, _ctx| {
         // Created ahead of the measurements below, so that they only see the wrapper's handle.
         jsg::resource::function_template_of::<Counted>(lock).unwrap();
-        baseline = crate::Harness::used_global_handles_size(lock);
+        baseline = jsg_test::Harness::used_global_handles_size(lock);
 
         let resource = jsg::Rc::new(Counted);
         wrapper = Some(resource.clone().to_js(lock).unwrap().to_traced_global(lock));
@@ -334,35 +336,38 @@ fn unlocked_drop_is_deferred_until_the_next_lock() {
     let wrapper = wrapper.expect("created in the context");
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             COUNTED_DROPS.load(Ordering::SeqCst),
             0,
             "the TracedGlobal roots the wrapper"
         );
-        let with_wrapper = crate::Harness::used_global_handles_size(lock);
+        let with_wrapper = jsg_test::Harness::used_global_handles_size(lock);
         assert!(with_wrapper > baseline);
         assert_eq!(lock.globals_awaiting_lock(), 0);
 
-        crate::Harness::with_isolate_unlocked(lock, || drop(wrapper));
+        jsg_test::Harness::with_isolate_unlocked(lock, || drop(wrapper));
         assert_eq!(lock.globals_awaiting_lock(), 1);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             COUNTED_DROPS.load(Ordering::SeqCst),
             0,
             "the queued handle still roots the wrapper"
         );
-        assert_eq!(crate::Harness::used_global_handles_size(lock), with_wrapper);
+        assert_eq!(
+            jsg_test::Harness::used_global_handles_size(lock),
+            with_wrapper
+        );
         Ok(())
     });
 
     // Locking the isolate again resets the queued handle.
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(COUNTED_DROPS.load(Ordering::SeqCst), 1);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -372,16 +377,16 @@ fn unlocked_drop_is_deferred_until_the_next_lock() {
 /// `run_in_context` call leaves a handle of its context in use until the next full GC, which
 /// this measures from the call after. Like the count itself, that encodes V8's handle
 /// accounting; see `Harness::used_global_handles_size`.
-fn used_global_handles_size_at_next_lock(harness: &crate::Harness) -> usize {
+fn used_global_handles_size_at_next_lock(harness: &jsg_test::Harness) -> usize {
     let mut at_next_lock = 0;
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        at_next_lock = crate::Harness::used_global_handles_size(lock);
+        at_next_lock = jsg_test::Harness::used_global_handles_size(lock);
         Ok(())
     });
     let mut at_lock_after = 0;
     harness.run_in_context(|lock, _ctx| {
-        at_lock_after = crate::Harness::used_global_handles_size(lock);
+        at_lock_after = jsg_test::Harness::used_global_handles_size(lock);
         Ok(())
     });
     at_next_lock - (at_lock_after - at_next_lock)
@@ -392,19 +397,19 @@ fn used_global_handles_size_at_next_lock(harness: &crate::Harness) -> usize {
 /// resets the handle and leaves the freed node alone.
 #[test]
 fn traced_global_dropped_without_the_lock_is_released_at_the_next_lock() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut baseline = 0;
     let mut holder = None;
     harness.run_in_context(|lock, ctx| {
         let (resource, b) = holder_in_traced_mode(lock, ctx);
         baseline = b;
-        let with_global = crate::Harness::used_global_handles_size(lock);
+        let with_global = jsg_test::Harness::used_global_handles_size(lock);
         let taken = resource.handle.take(lock).expect("set above");
-        crate::Harness::with_isolate_unlocked(lock, || drop(taken));
+        jsg_test::Harness::with_isolate_unlocked(lock, || drop(taken));
         assert_eq!(lock.globals_awaiting_lock(), 1);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert!(
-            crate::Harness::used_global_handles_size(lock) < with_global,
+            jsg_test::Harness::used_global_handles_size(lock) < with_global,
             "the GC frees the traced node"
         );
         // Kept, so that the release of its own handles does not change the count.
@@ -418,14 +423,14 @@ fn traced_global_dropped_without_the_lock_is_released_at_the_next_lock() {
 /// Wraps a new `HandleList` that collects a value, then GCs, which makes the first `TracedGlobal`'s
 /// strong handle weak, then has the list grow, which makes it strong again, and leaves the list
 /// unreachable.
-fn fill_and_abandon_handle_list(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn fill_and_abandon_handle_list(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let list = jsg::Rc::new(HandleList {
         handles: jsg::RefCell::new(Vec::new()),
     });
     ctx.set_global(lock, "list", list);
     ctx.eval_raw(lock, "list.push({})")
         .expect("should evaluate");
-    crate::Harness::request_gc(lock);
+    jsg_test::Harness::request_gc(lock);
     // Growing the `Vec` moves the first `TracedGlobal`, and frees the buffer it was in. The
     // `jsg::RefCell` makes it strong before the push.
     ctx.eval_raw(lock, "for (let i = 0; i < 64; i++) list.push({})")
@@ -444,7 +449,7 @@ fn fill_and_abandon_handle_list(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalConte
 fn visited_globals_moved_by_a_growing_vec_are_released_with_it() {
     HANDLE_LIST_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     // A first run leaves behind what V8 and the realm keep for the scripts and the type,
     // ahead of the measurement, so that the measurement only sees the second run's handles.
     harness.run_in_context(|lock, ctx| {
@@ -453,18 +458,18 @@ fn visited_globals_moved_by_a_growing_vec_are_released_with_it() {
     });
     let mut baseline = 0;
     harness.run_in_context(|lock, ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HANDLE_LIST_DROPS.load(Ordering::SeqCst), 1);
-        baseline = crate::Harness::used_global_handles_size(lock);
+        baseline = jsg_test::Harness::used_global_handles_size(lock);
         fill_and_abandon_handle_list(lock, ctx);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
         // The first value dies with the list, and V8 nulls its weak slot; the list's drop
         // then resets every handle.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HANDLE_LIST_DROPS.load(Ordering::SeqCst), 2);
-        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        assert_eq!(jsg_test::Harness::used_global_handles_size(lock), baseline);
         Ok(())
     });
 }
@@ -477,7 +482,7 @@ fn visited_globals_moved_by_a_growing_vec_are_released_with_it() {
 /// impl can do; no test covers that.
 #[test]
 fn visited_global_dropped_after_its_realm_keeps_its_slot_through_a_gc() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(HandleHolder {
             handle: jsg::Cell::new(None),
@@ -486,7 +491,7 @@ fn visited_global_dropped_after_its_realm_keeps_its_slot_through_a_gc() {
         ctx.eval_raw(lock, "holder.set({}); undefined")
             .expect("should evaluate");
         // Tracing the wrapper makes the handle weak.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         Ok(())
     });
     harness.drop_realm_then_gc(|| {});
@@ -500,7 +505,7 @@ fn visited_global_dropped_after_its_realm_keeps_its_slot_through_a_gc() {
 fn drop_on_another_thread_is_deferred_until_the_next_lock() {
     COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     let mut visited: Option<v8::TracedGlobal<v8::Value>> = None;
     let mut holder = None;
@@ -534,14 +539,14 @@ fn drop_on_another_thread_is_deferred_until_the_next_lock() {
         }
         dropper.join().expect("the drops do not panic");
         assert_eq!(lock.globals_awaiting_lock(), 2);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(COUNTED_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(COUNTED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -558,7 +563,7 @@ fn drop_on_another_thread_is_deferred_until_the_next_lock() {
 fn visit_on_another_thread_leaves_a_global_alone() {
     COUNTED_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(HandleHolder {
             handle: jsg::Cell::new(None),
@@ -571,7 +576,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
         .expect("should evaluate");
         // Tracing the wrapper puts the `TracedGlobal` in traced mode; taking it out makes it
         // strong.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let taken = resource.handle.take(lock).expect("set above");
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -594,7 +599,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
 
         ctx.eval_raw(lock, "globalThis.value = undefined; undefined")
             .expect("should evaluate");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(
             COUNTED_DROPS.load(Ordering::SeqCst),
             0,
@@ -605,7 +610,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
 
     harness.run_in_context(|lock, _ctx| {
         assert_eq!(lock.globals_awaiting_lock(), 0);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(COUNTED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });

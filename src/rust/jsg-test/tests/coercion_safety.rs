@@ -21,6 +21,8 @@
 //! that "arbitrary JS during coercion" path specifically, as opposed to the
 //! simple throw/reject cases above.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 
 use jsg::ExceptionType;
@@ -49,7 +51,7 @@ fn thrown_by<'s, T: std::fmt::Debug>(
 /// Converts the value of `expr` to `T`, which must throw, and returns what JavaScript threw.
 fn conversion_throws<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> v8::Local<'s, v8::Value>
 where
@@ -64,7 +66,7 @@ where
 /// Returns whether `value` is the value of the global `thrown`, by `Object.is()`.
 fn is_thrown<'s>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     value: v8::Local<'s, v8::Value>,
 ) -> bool {
     ctx.set_global(lock, "caught", value);
@@ -75,7 +77,7 @@ fn is_thrown<'s>(
 /// Coercion failures must surface as an error, never abort.
 #[test]
 fn string_from_hostile_values_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Values with no primitive representation / that throw during coercion.
         let hostile = [
@@ -97,7 +99,7 @@ fn string_from_hostile_values_returns_err() {
 /// whether or not it is an `Error`.
 #[test]
 fn coercion_throws_thrown_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for setup in ["new RangeError('boom')", "({ code: 7 })", "42"] {
             ctx.eval_raw(lock, &format!("globalThis.thrown = {setup}"))
@@ -127,7 +129,7 @@ fn coercion_throws_thrown_value() {
 /// A coercion that V8 itself rejects throws V8's `TypeError`.
 #[test]
 fn coercion_throws_v8_type_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let caught = conversion_throws::<String>(lock, ctx, "Symbol('s')");
         let err = jsg::Error::from_js(lock, caught)?;
@@ -140,7 +142,7 @@ fn coercion_throws_v8_type_error() {
 /// A lone UTF-16 surrogate must not abort; it decodes lossily to U+FFFD.
 #[test]
 fn string_from_lone_surrogate_is_lossy_not_abort() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
             .eval_raw(lock, "'\\uD800'")
@@ -162,7 +164,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
 /// `ToNumber` on a `Symbol`/`BigInt` throws in JS.
 #[test]
 fn number_from_hostile_values_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let hostile = [
             "Symbol('s')",
@@ -179,7 +181,7 @@ fn number_from_hostile_values_returns_err() {
 /// Integer conversions go through the same `unwrap_number`.
 #[test]
 fn integer_from_symbol_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         conversion_throws::<u32>(lock, ctx, "Symbol('s')");
         Ok(())
@@ -190,7 +192,7 @@ fn integer_from_symbol_returns_err() {
 /// the error is not pending.
 #[test]
 fn typed_array_from_wrong_type_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Not a Uint8Array: a plain array, a number, and a Symbol.
         for expr in ["[1, 2, 3]", "42", "Symbol('s')"] {
@@ -210,7 +212,7 @@ fn typed_array_from_wrong_type_returns_err() {
 /// isolate stays usable.
 #[test]
 fn array_iterate_throwing_element_getter_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new RangeError('trap')")
             .expect("setup should evaluate");
@@ -236,7 +238,7 @@ fn array_iterate_throwing_element_getter_returns_err() {
 /// A coercion failure must leave the isolate usable for later evaluations.
 #[test]
 fn coercion_failure_does_not_poison_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         conversion_throws::<String>(lock, ctx, "Symbol('s')");
 
@@ -299,7 +301,7 @@ impl ReentrantResource {
 /// must be used for the coercion.
 #[test]
 fn string_from_tostring_side_effects_are_observed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.__sideEffect = 0;")
             .expect("should evaluate");
@@ -324,7 +326,7 @@ fn string_from_tostring_side_effects_are_observed() {
 /// Same as above, but for `ToNumber`/`valueOf`.
 #[test]
 fn number_from_valueof_side_effects_are_observed() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.__sideEffect = 0;")
             .expect("should evaluate");
@@ -352,7 +354,7 @@ fn number_from_valueof_side_effects_are_observed() {
 /// must observe exactly one call.
 #[test]
 fn string_coercion_reentrant_into_rust_resource_method() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -380,7 +382,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
 /// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_into_rust_resource_method() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -410,7 +412,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
 /// isolate.
 #[test]
 fn string_coercion_handles_deeply_nested_reentrancy() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -444,7 +446,7 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
 /// internal error or fails because execution is terminating.
 #[test]
 fn string_coercion_reentrant_panic_is_err_not_abort() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -471,7 +473,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
 /// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_panic_is_err_not_abort() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -498,7 +500,7 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
 /// re-entrant-panic path specifically.
 #[test]
 fn reentrant_panic_during_coercion_does_not_poison_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -532,7 +534,7 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
 /// `Object::get` throws what a getter or Proxy trap threw; an absent property is `undefined`.
 #[test]
 fn object_get_from_throwing_getter_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new RangeError('getter')")
             .expect("setup should evaluate");
@@ -557,7 +559,7 @@ fn object_get_from_throwing_getter_returns_err() {
 /// `Object::has` throws what a Proxy `has` trap threw.
 #[test]
 fn object_has_from_throwing_proxy_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new TypeError('trap')")
             .expect("setup should evaluate");
@@ -575,7 +577,7 @@ fn object_has_from_throwing_proxy_returns_err() {
 /// trap threw.
 #[test]
 fn object_set_from_throwing_setter_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
             .expect("setup should evaluate");
@@ -605,7 +607,7 @@ fn object_set_from_throwing_setter_returns_err() {
 /// `Array::set` throws what an element's setter, on the array or `Array.prototype`, threw.
 #[test]
 fn array_set_from_throwing_setter_returns_err() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new RangeError('setter')")
             .expect("setup should evaluate");
@@ -633,7 +635,7 @@ fn array_set_from_throwing_setter_returns_err() {
 /// What an argument's coercion throws reaches the JavaScript caller of a method unchanged.
 #[test]
 fn coercion_exception_propagates_through_method() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
@@ -824,7 +826,7 @@ const TERMINATE: &str = "() => { try { panicker.panicNow(); } catch (e) {} while
 
 fn converting_resource(
     lock: &mut jsg::Lock,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     conversion: Conversion,
 ) -> jsg::Rc<ConvertingResource> {
     let resource = jsg::Rc::new(ConvertingResource {
@@ -847,7 +849,7 @@ fn converting_resource(
 #[test]
 fn termination_during_conversion_propagates() {
     for conversion in Conversion::ALL {
-        let harness = crate::Harness::new();
+        let harness = jsg_test::Harness::new();
         harness.run_in_context(|lock, ctx| {
             let resource = converting_resource(lock, ctx, conversion);
             let value = conversion.value_calling(TERMINATE);
@@ -870,7 +872,7 @@ fn termination_during_conversion_propagates() {
 #[test]
 fn conversion_while_terminating_runs_nothing() {
     for conversion in Conversion::ALL {
-        let harness = crate::Harness::new();
+        let harness = jsg_test::Harness::new();
         harness.run_in_context(|lock, ctx| {
             let resource = converting_resource(lock, ctx, conversion);
             let value =
@@ -904,7 +906,7 @@ fn conversion_while_terminating_runs_nothing() {
 #[test]
 fn conversion_while_exception_pending_runs_nothing() {
     for conversion in Conversion::ALL {
-        let harness = crate::Harness::new();
+        let harness = jsg_test::Harness::new();
         harness.run_in_context(|lock, ctx| {
             let resource = converting_resource(lock, ctx, conversion);
             let value =
@@ -936,7 +938,7 @@ fn conversion_while_exception_pending_runs_nothing() {
 /// it and running more JavaScript with an exception pending.
 #[test]
 fn error_from_js_passes_on_what_reading_it_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.eval_raw(lock, "globalThis.thrown = new RangeError('getter')")
             .expect("setup should evaluate");

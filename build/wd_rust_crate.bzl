@@ -1,7 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
-load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_integration_tests", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -66,6 +66,7 @@ def wd_rust_crate(
         test_proc_macro_deps = [],
         test_compile_data = [],
         test_size = "medium",
+        integration_test_srcs = [],
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
@@ -96,8 +97,15 @@ def wd_rust_crate(
         test_proc_macro_deps: test-only proc_macro dependencies.
         test_compile_data: files the unit tests read at compile time (include_str!, include_bytes!),
             such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
-        test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
-            crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
+        test_size: Bazel test size (default "medium") of each test target; affects its timeout.
+            RUST_TEST_THREADS=1 runs a target's tests serially, so a crate with many of them
+            splits them into integration_test_srcs rather than raising the size.
+        integration_test_srcs: Cargo-style integration tests, typically glob(["tests/*.rs"]).
+            They make one test binary, which uses the crate through its public API, and each
+            file runs as a test target of its own, <name>_test_<file> (see
+            wd_rust_integration_tests). They are
+            taken out of srcs, and <name>_test becomes a test_suite of them and of the unit
+            tests (<name>_unit_test, generated only if there are *-test.rs files).
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
@@ -108,6 +116,7 @@ def wd_rust_crate(
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs = [src for src in srcs if src not in integration_test_srcs]
     srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
@@ -180,18 +189,42 @@ def wd_rust_crate(
         **library_kwargs
     )
 
-    wd_rust_test(
-        name = name + "_test",
-        compile_data = test_srcs + test_compile_data,
-        crate = ":" + name,
-        env = test_env,
-        size = test_size,
-        tags = test_tags,
-        crate_features = crate_features,
-        rustc_env = rustc_env,
-        deps = test_deps,
-        proc_macro_deps = test_proc_macro_deps,
-    )
+    unit_test_name = name + "_unit_test" if integration_test_srcs else name + "_test"
+    unit_tests = []
+    if test_srcs or not integration_test_srcs:
+        wd_rust_test(
+            name = unit_test_name,
+            compile_data = test_srcs + test_compile_data,
+            crate = ":" + name,
+            env = test_env,
+            size = test_size,
+            tags = test_tags,
+            crate_features = crate_features,
+            rustc_env = rustc_env,
+            deps = test_deps,
+            proc_macro_deps = test_proc_macro_deps,
+        )
+        unit_tests = [":" + unit_test_name]
+
+    if integration_test_srcs:
+        integration_tests = wd_rust_integration_tests(
+            name = name + "_test",
+            srcs = integration_test_srcs,
+            crate = ":" + name,
+            compile_data = test_compile_data,
+            env = test_env,
+            size = test_size,
+            tags = test_tags,
+            crate_features = crate_features,
+            rustc_env = rustc_env,
+            deps = test_deps,
+            proc_macro_deps = test_proc_macro_deps,
+        )
+        native.test_suite(
+            name = name + "_test",
+            tests = unit_tests + integration_tests,
+            tags = test_tags,
+        )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:
         rust_unpretty(
@@ -201,10 +234,10 @@ def wd_rust_crate(
             testonly = testonly,
         )
 
-    if len(test_proc_macro_deps) > 0:
+    if len(test_proc_macro_deps) > 0 and unit_tests:
         rust_unpretty(
-            name = name + "_test@expand",
-            deps = [":" + name + "_test"],
+            name = unit_test_name + "@expand",
+            deps = unit_tests,
             tags = ["manual", "off-by-default"],
             testonly = True,
         )

@@ -6,6 +6,8 @@
 //! resources from C++ describes: C++ calls an `extern "Rust"` constructor, keeps the wrapper in a
 //! `v8::Global`, and checks its type with `jsg::resource::ffi_is`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 use std::cell::RefCell;
 
@@ -13,8 +15,7 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::Harness;
+use jsg_test::Harness;
 
 #[jsg_resource]
 struct Held {

@@ -6,6 +6,8 @@
 //! resource's wrapper for an instance member, none for a static one. Containers pass the creator
 //! on to what they hold.
 
+#![cfg(test)]
+
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -91,7 +93,7 @@ impl Creator {
 
 #[test]
 fn instance_members_convert_for_their_receiver() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "creator", jsg::Rc::new(Creator));
         for expression in [
             "creator.direct() === creator",
@@ -110,7 +112,7 @@ fn instance_members_convert_for_their_receiver() {
 
 #[test]
 fn static_methods_convert_for_no_creator() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Creator>(lock).unwrap();
         ctx.set_global(lock, "Creator", constructor);
         assert!(

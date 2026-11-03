@@ -5,6 +5,8 @@
 //! `Local<Value>` converts like C++ JSG's `v8::Local<v8::Value>`: any value passes through
 //! unchanged in both directions.
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
@@ -47,7 +49,7 @@ impl Values {
     }
 }
 
-fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let values = jsg::Rc::new(Values {
         stored: jsg::RefCell::new(None),
     })
@@ -58,7 +60,7 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 
 #[test]
 fn conversions_return_the_same_handle() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let object = ctx.eval_raw(lock, "({})").unwrap();
         assert_eq!(
             v8::Local::<v8::Value>::from_js(lock, object).unwrap(),
@@ -71,7 +73,7 @@ fn conversions_return_the_same_handle() {
 
 #[test]
 fn method_passes_any_value_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let code = "
             const object = {};
@@ -87,7 +89,7 @@ fn method_passes_any_value_through() {
 
 #[test]
 fn method_does_not_coerce() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let code = "
             const hostile = {
@@ -104,7 +106,7 @@ fn method_does_not_coerce() {
 
 #[test]
 fn missing_argument_matches_cpp_jsg() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let code = "try { values.identity(); 'ok' } catch (e) { `${e.name}: ${e.message}` }";
         assert_eq!(
@@ -118,7 +120,7 @@ fn missing_argument_matches_cpp_jsg() {
 
 #[test]
 fn option_reads_undefined_as_none() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let code = "[values.optional(), values.optional(undefined), values.optional(null), \
                     values.optional(0)].join()";
@@ -132,7 +134,7 @@ fn option_reads_undefined_as_none() {
 
 #[test]
 fn stored_value_round_trips_through_traced_global() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install(lock, ctx);
         let code = "
             const stored = { key: 1 };

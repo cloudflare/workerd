@@ -45,13 +45,17 @@ wd_rust_crate(
         "cpp_interop.rs",
         "lib.rs",
     ],
+    integration_test_srcs = glob(["tests/*.rs"]),
     link_deps = [
         ":ffi-impl",
     ],
     proc_macro_deps = ["//src/rust/jsg-macros"],
-    # The crate has hundreds of subtests and uses RUST_TEST_THREADS=1 (serial),
-    # so the default "medium" (15s) timeout is too tight under CI load.
-    test_size = "large",
+    test_deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/jsg",
+        "//src/rust/jsg-cpp",
+    ],
+    test_proc_macro_deps = ["//src/rust/jsg-macros"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",

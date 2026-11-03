@@ -5,6 +5,8 @@
 //! `v8::Function::new` creates a JavaScript function from a Rust closure and the data it owns,
 //! like C++ JSG's `Lock::wrapReturningFunction()`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
@@ -17,7 +19,7 @@ use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 /// Creates a function whose data is `greeting` and stores it as the global `greet`.
-fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greeting: &str) {
+fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>, greeting: &str) {
     let greet = v8::Function::new(lock, greeting.to_owned(), |lock, greeting, args| {
         let name = String::from_js(lock, args.get(0))?;
         format!("{greeting}, {name}").to_js(lock)
@@ -27,14 +29,14 @@ fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greetin
 }
 
 /// Returns `"Name: message"` for what `code` throws, or `"ok"`.
-fn error(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn error(lock: &mut jsg::Lock, ctx: &jsg_test::EvalContext<'_>, code: &str) -> String {
     let code = format!("try {{ {code}; 'ok' }} catch (e) {{ `${{e.name}}: ${{e.message}}` }}");
     ctx.eval(lock, &code).unwrap()
 }
 
 #[test]
 fn function_calls_closure_with_its_data_and_arguments() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_greet(lock, ctx, "hello");
         assert_eq!(
             ctx.eval::<String>(lock, "greet('world')").unwrap(),
@@ -46,7 +48,7 @@ fn function_calls_closure_with_its_data_and_arguments() {
 
 #[test]
 fn functions_keep_their_own_data() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let hello = v8::Function::new(lock, "hello".to_owned(), |lock, data, _args| {
             data.clone().to_js(lock)
         })
@@ -69,7 +71,7 @@ fn functions_keep_their_own_data() {
 
 #[test]
 fn function_sees_its_receiver() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let this = v8::Function::new(lock, (), |_lock, (), args| Ok(args.this())).unwrap();
         ctx.set_global(lock, "getThis", v8::Local::<v8::Value>::from(this));
         assert!(
@@ -82,7 +84,7 @@ fn function_sees_its_receiver() {
 
 #[test]
 fn function_throws_closure_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_greet(lock, ctx, "hello");
         let fail = v8::Function::new(lock, (), |_lock, (), _args| {
             Err(jsg::Error::new_range_error("out of range"))
@@ -105,7 +107,7 @@ fn function_throws_closure_error() {
 
 #[test]
 fn panic_in_closure_is_an_internal_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let panics = v8::Function::new(lock, (), |_lock, (), _args| -> Result<_, jsg::Error> {
             panic!("intentional panic in a function closure");
         })
@@ -127,7 +129,7 @@ fn panic_in_closure_is_an_internal_error() {
 
 #[test]
 fn function_shape_matches_cpp_jsg() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_greet(lock, ctx, "hello");
         let code = "[typeof greet, JSON.stringify(greet.name), greet.length, \
                     typeof new greet('x')].join()";
@@ -141,10 +143,10 @@ fn function_shape_matches_cpp_jsg() {
 
 #[test]
 fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         // Functions that C++ JSG wraps also have an opaque wrapper as their data, holding a C++
         // Wrappable that must not be read as a Rust one.
-        assert!(!crate::Harness::cpp_wrapped_function_data_is_rust_wrappable(lock));
+        assert!(!jsg_test::Harness::cpp_wrapped_function_data_is_rust_wrappable(lock));
         Ok(())
     });
 }
@@ -168,19 +170,19 @@ static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn data_is_dropped_once_function_is_unreachable() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let function = v8::Function::new(lock, DropCounter(&UNREACHABLE_DROPS), |lock, _, _| {
             Ok(lock.undefined())
         })
         .unwrap();
         ctx.set_global(lock, "f", v8::Local::<v8::Value>::from(function));
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(UNREACHABLE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(UNREACHABLE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -216,7 +218,7 @@ impl TerminatingCreator {
 /// and returning it keeps the termination: JavaScript cannot catch it or run on.
 #[test]
 fn function_new_while_terminating_keeps_the_termination() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let creator = jsg::Rc::new(TerminatingCreator {
             saw_pending: Cell::new(false),
         });
@@ -265,7 +267,7 @@ impl ThrowingCreator {
 /// and returning it keeps the exception, which JavaScript then catches unchanged.
 #[test]
 fn function_new_while_exception_pending_keeps_the_exception() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let creator = jsg::Rc::new(ThrowingCreator {
             saw_pending: Cell::new(false),
         });
@@ -299,7 +301,7 @@ impl Leaf {}
 
 #[test]
 fn data_keeps_traced_resources_alive() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let leaf = jsg::Rc::new(Leaf {
             _drops: DropCounter(&LEAF_DROPS),
@@ -308,13 +310,13 @@ fn data_keeps_traced_resources_alive() {
             v8::Function::new(lock, leaf, |lock, leaf, _| leaf.clone().to_js(lock)).unwrap();
         ctx.set_global(lock, "getLeaf", v8::Local::<v8::Value>::from(function));
         // Only the function's data holds the resource now.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         assert!(ctx.eval::<bool>(lock, "getLeaf() === getLeaf()").unwrap());
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -336,7 +338,7 @@ impl jsg::Traced for CycleData {
 
 #[test]
 fn cycle_through_data_is_collected() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let data = CycleData {
             _drops: DropCounter(&CYCLE_DROPS),
@@ -350,12 +352,12 @@ fn cycle_through_data_is_collected() {
         ctx.set_global(lock, "store", v8::Local::<v8::Value>::from(function));
         // The data now holds the function that owns it.
         ctx.eval_raw(lock, "store(store)").unwrap();
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CYCLE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(CYCLE_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -363,7 +365,7 @@ fn cycle_through_data_is_collected() {
 
 #[test]
 fn reentrant_call_sees_its_own_data() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         // Each call logs its depth on entry and exit, and calls `again` in between, which calls
         // the same function again. No `RefCell` borrow is held across the call into JavaScript.
         let f = v8::Function::new(lock, RefCell::new(Vec::new()), |lock, log, args| {
@@ -409,7 +411,7 @@ impl jsg::Traced for TeardownData {
 /// the teardown, together with the resource and the `TracedGlobal` it owns.
 #[test]
 fn data_of_reachable_function_is_dropped_with_its_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let data = TeardownData {
             _drops: DropCounter(&TEARDOWN_DATA_DROPS),
@@ -426,7 +428,7 @@ fn data_of_reachable_function_is_dropped_with_its_isolate() {
         ctx.set_global(lock, "store", v8::Local::<v8::Value>::from(function));
         ctx.eval_raw(lock, "store(store)").unwrap();
         // Tracing puts the `TracedGlobal` in traced mode; the global object keeps the function.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TEARDOWN_DATA_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(TEARDOWN_LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())

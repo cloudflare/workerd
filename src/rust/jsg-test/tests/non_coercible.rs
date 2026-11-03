@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::ExceptionType;
 use jsg::NonCoercible;
 use jsg::ToJS;
@@ -124,7 +126,7 @@ fn non_coercible_debug() {
 
 #[test]
 fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(MyResource);
         let wrapped = resource.to_js(lock)?;

@@ -7,6 +7,8 @@
 //! "Failed to execute 'm' on 'T': parameter n is not of type 'X'.", and errors
 //! from deeper in the conversion are kept.
 
+#![cfg(test)]
+
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_oneof;
@@ -74,14 +76,14 @@ impl Args {
 
 /// Runs `call` on a global `args` and returns `"Name: message"` for what it
 /// throws, or `"ok"`.
-fn error(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, call: &str) -> String {
+fn error(lock: &mut jsg::Lock, ctx: &jsg_test::EvalContext<'_>, call: &str) -> String {
     let code = format!("try {{ {call}; 'ok' }} catch (e) {{ `${{e.name}}: ${{e.message}}` }}");
     ctx.eval(lock, &code).unwrap()
 }
 
 #[test]
 fn missing_required_argument() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
@@ -109,7 +111,7 @@ fn missing_required_argument() {
 
 #[test]
 fn top_level_type_mismatch() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);
@@ -129,7 +131,7 @@ fn top_level_type_mismatch() {
 
 #[test]
 fn deeper_errors_are_kept() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
         ctx.set_global(lock, "args", args);

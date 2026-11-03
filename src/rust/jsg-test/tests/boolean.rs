@@ -4,6 +4,8 @@
 
 //! `Boolean` handles, the counterpart of `v8::Boolean`.
 
+#![cfg(test)]
+
 use jsg::ExceptionType;
 use jsg::ToJS;
 use jsg::v8;
@@ -23,7 +25,7 @@ impl Booleans {
 
 #[test]
 fn boolean_handles() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let yes = v8::Boolean::new(lock, true);
         assert!(yes.value());
@@ -54,7 +56,7 @@ fn boolean_handles() {
 /// A `Local<Boolean>` parameter takes a boolean as it is, without `ToBoolean`.
 #[test]
 fn boolean_handle_parameter_does_not_coerce() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(Booleans).to_js(lock)?;
         ctx.set_global(lock, "r", resource);

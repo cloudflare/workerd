@@ -7,6 +7,8 @@
 //! `#[jsg_resource]` now traces every field via `Traced::trace`, so nested
 //! non-resource helper structs/enums just need to implement `Traced`.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -76,7 +78,7 @@ impl StreamController {}
 fn enum_unit_variant_does_not_crash_during_gc() {
     ENUM_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Closed,
@@ -85,13 +87,13 @@ fn enum_unit_variant_does_not_crash_during_gc() {
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -102,7 +104,7 @@ fn enum_variant_child_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     ENUM_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(Leaf { value: 10 });
 
@@ -115,14 +117,14 @@ fn enum_variant_child_kept_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -134,7 +136,7 @@ fn enum_named_variant_child_kept_alive_through_gc() {
     LEAF_DROPS.store(0, Ordering::SeqCst);
     ENUM_PARENT_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let child = jsg::Rc::new(Leaf { value: 11 });
 
@@ -149,14 +151,14 @@ fn enum_named_variant_child_kept_alive_through_gc() {
         std::mem::drop(child);
         std::mem::drop(parent);
 
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(ENUM_PARENT_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -236,7 +238,7 @@ fn cycle_through_struct_field_is_collected() {
     NODE_DROPS.store(0, Ordering::SeqCst);
     BACK_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let back = jsg::Rc::new(Back {
             node: jsg::Cell::new(None),
@@ -258,7 +260,7 @@ fn cycle_through_struct_field_is_collected() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(NODE_DROPS.load(Ordering::SeqCst), 1);
         assert_eq!(BACK_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
@@ -301,7 +303,7 @@ fn cycle_through_struct_js_value_field_is_collected() {
     assert!(ValueLink::holds_gc_references());
     HOLDER_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let holder = jsg::Rc::new(Holder {
             link: jsg::RefCell::new(None),
@@ -316,7 +318,7 @@ fn cycle_through_struct_js_value_field_is_collected() {
     });
 
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -327,7 +329,7 @@ fn cycle_through_struct_js_value_field_is_collected() {
 /// detaches the struct before it can leave the cell.
 #[test]
 fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let holder = jsg::Rc::new(Holder {
             link: jsg::RefCell::new(None),
@@ -339,10 +341,10 @@ fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
         ctx.eval_raw(lock, "holder.setLink({ kept: 1 }); undefined")
             .expect("should evaluate");
         // The holder's wrapper is reachable, so the visit puts the value's handle in traced mode.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
 
         let link = holder.link.borrow_mut(lock).take().expect("set above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let back = link.to_js(lock)?;
         ctx.set_global(lock, "back", back);
         assert!(ctx.eval::<bool>(lock, "back.value.kept === 1").unwrap());

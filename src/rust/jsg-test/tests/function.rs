@@ -4,6 +4,8 @@
 
 //! Tests for `Local<Function>::call()` and the casts between `Local` handle types.
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
@@ -11,7 +13,7 @@ use jsg::v8;
 /// `Local<Function>::try_from` succeeds for a JS function value.
 #[test]
 fn try_from_function_succeeds() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(x => x * 2)").unwrap();
         assert!(v8::Local::<v8::Function>::try_from(value).is_ok());
@@ -22,7 +24,7 @@ fn try_from_function_succeeds() {
 /// `Local<Function>::try_from` fails for a non-function value.
 #[test]
 fn try_from_function_fails_for_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "42").unwrap();
         assert!(v8::Local::<v8::Function>::try_from(value).is_err());
@@ -33,7 +35,7 @@ fn try_from_function_fails_for_number() {
 /// `Local<Object>::try_from` succeeds for a plain object.
 #[test]
 fn try_from_object_succeeds() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "({a: 1})").unwrap();
         assert!(v8::Local::<v8::Object>::try_from(value).is_ok());
@@ -44,7 +46,7 @@ fn try_from_object_succeeds() {
 /// `Local<Object>::try_from` fails for a primitive.
 #[test]
 fn try_from_object_fails_for_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "'hello'").unwrap();
         assert!(v8::Local::<v8::Object>::try_from(value).is_err());
@@ -55,7 +57,7 @@ fn try_from_object_fails_for_string() {
 /// `Local<Array>::try_from` succeeds for an array.
 #[test]
 fn try_from_array_succeeds() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "[1, 2, 3]").unwrap();
         assert!(v8::Local::<v8::Array>::try_from(value).is_ok());
@@ -66,7 +68,7 @@ fn try_from_array_succeeds() {
 /// `Local<Array>::try_from` fails for a non-array object.
 #[test]
 fn try_from_array_fails_for_object() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "({length: 3})").unwrap();
         assert!(v8::Local::<v8::Array>::try_from(value).is_err());
@@ -77,7 +79,7 @@ fn try_from_array_fails_for_object() {
 /// `Local<Function>::call` with zero args returns the correct value via `FromJS`.
 #[test]
 fn call_zero_args() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(() => 42)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
@@ -90,7 +92,7 @@ fn call_zero_args() {
 /// `Local<Function>::call` with arguments.
 #[test]
 fn call_with_args() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "((a, b) => a - b)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
@@ -106,7 +108,7 @@ fn call_with_args() {
 /// `Local<Function>::call` returning a string via `FromJS`.
 #[test]
 fn call_returns_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(s => s.toUpperCase())").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
@@ -122,7 +124,7 @@ fn call_returns_string() {
 /// `Local<Function>::call` with an object receiver (`this`).
 #[test]
 fn call_with_receiver() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Create an object with a property and a function that reads `this.x`
         let obj = ctx.eval_raw(lock, "({x: 100})").unwrap();
@@ -140,7 +142,7 @@ fn call_with_receiver() {
 /// `Local<Function>::call` with a `Local<Object>` receiver via `.into()`.
 #[test]
 fn call_with_object_receiver_via_into() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let obj_val = ctx.eval_raw(lock, "({name: 'world'})").unwrap();
         let obj = v8::Local::<v8::Object>::try_from(obj_val).unwrap();
@@ -161,7 +163,7 @@ fn call_with_object_receiver_via_into() {
 /// `Local<Function>::call` leaves what the function threw pending, which `try_catch` catches.
 #[test]
 fn call_leaves_thrown_exception_pending() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let thrown = ctx
             .eval_raw(lock, "globalThis.thrown = new RangeError('boom')")
@@ -182,7 +184,7 @@ fn call_leaves_thrown_exception_pending() {
 /// A thrown value that is not an `Error` is caught as is.
 #[test]
 fn try_catch_catches_thrown_non_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
@@ -200,7 +202,7 @@ fn try_catch_catches_thrown_non_error() {
 /// Catching a thrown value runs no JavaScript: neither its getters nor proxy traps.
 #[test]
 fn try_catch_does_not_run_thrown_value_accessors() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for thrown in [
             "({ get overloaded() { reads++; }, get retryable() { reads++; }, \
@@ -229,7 +231,7 @@ fn try_catch_does_not_run_thrown_value_accessors() {
 /// `try_catch` returns what the closure returns when it succeeds.
 #[test]
 fn try_catch_returns_result_on_success() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func = ctx.eval_raw(lock, "(() => 7)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
@@ -246,7 +248,7 @@ fn try_catch_returns_result_on_success() {
 /// An error the closure returns itself is caught as the exception that throwing it creates.
 #[test]
 fn try_catch_catches_returned_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let caught = lock.try_catch(|_lock| Err::<(), _>(jsg::Error::new_range_error("nope")))?;
         let err = jsg::Error::from_js(lock, caught.unwrap_err())?;
@@ -260,7 +262,7 @@ fn try_catch_catches_returned_error() {
 /// A panic in the closure unwinds past `try_catch`, which leaves the isolate usable.
 #[test]
 fn try_catch_resumes_panic() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = lock.try_catch(|_lock| -> jsg::Result<()> { panic!("intentional panic") });
@@ -280,7 +282,7 @@ fn constructed_error_is_not_pending() {
 /// `impl_local_cast!` conversions: `Local<Object>` → `Local<Value>` via `Into`.
 #[test]
 fn local_object_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let obj_val = ctx.eval_raw(lock, "({})").unwrap();
         let obj = v8::Local::<v8::Object>::try_from(obj_val).unwrap();
@@ -293,7 +295,7 @@ fn local_object_into_value() {
 /// `impl_local_cast!` conversions: `Local<Function>` → `Local<Value>` via `Into`.
 #[test]
 fn local_function_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx.eval_raw(lock, "(() => {})").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
@@ -306,7 +308,7 @@ fn local_function_into_value() {
 /// `impl_local_cast!` conversions: `Local<Array>` → `Local<Value>` via `Into`.
 #[test]
 fn local_array_into_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let arr_val = ctx.eval_raw(lock, "[1, 2]").unwrap();
         let arr = v8::Local::<v8::Array>::try_from(arr_val).unwrap();

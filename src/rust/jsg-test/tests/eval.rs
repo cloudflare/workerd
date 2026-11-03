@@ -2,18 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::EvalError;
+use jsg_test::EvalError;
 
 /// A panic in a `run_in_context` callback reaches the caller without unwinding through C++,
 /// and the harness stays usable.
 #[test]
 fn run_in_context_resumes_panic_and_stays_usable() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         harness.run_in_context(|_lock, _ctx| -> Result<(), jsg::Error> {
             panic!("intentional panic in run_in_context");
@@ -32,7 +33,7 @@ fn run_in_context_resumes_panic_and_stays_usable() {
 
 #[test]
 fn eval_returns_correct_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "'Hello, World!'").unwrap();
         assert_eq!(result, "Hello, World!");
@@ -42,7 +43,7 @@ fn eval_returns_correct_type() {
 
 #[test]
 fn eval_string_concatenation() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "'Hello' + ', ' + 'World!'").unwrap();
         assert_eq!(result, "Hello, World!");
@@ -52,7 +53,7 @@ fn eval_string_concatenation() {
 
 #[test]
 fn eval_number_returns_number_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(ctx.eval::<u32>(lock, "42").unwrap(), 42);
         Ok(())
@@ -61,7 +62,7 @@ fn eval_number_returns_number_type() {
 
 #[test]
 fn eval_arithmetic_expression() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(ctx.eval::<u32>(lock, "1 + 2 + 3").unwrap(), 6);
         Ok(())
@@ -70,7 +71,7 @@ fn eval_arithmetic_expression() {
 
 #[test]
 fn eval_boolean_true() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: bool = ctx.eval(lock, "true").unwrap();
         assert!(result);
@@ -80,7 +81,7 @@ fn eval_boolean_true() {
 
 #[test]
 fn eval_boolean_false() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: bool = ctx.eval(lock, "false").unwrap();
         assert!(!result);
@@ -90,7 +91,7 @@ fn eval_boolean_false() {
 
 #[test]
 fn eval_comparison_expression() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: bool = ctx.eval(lock, "5 > 3").unwrap();
         assert!(result);
@@ -100,7 +101,7 @@ fn eval_comparison_expression() {
 
 #[test]
 fn eval_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Nullable<bool> = ctx.eval(lock, "null").unwrap();
         assert!(result.is_null());
@@ -110,7 +111,7 @@ fn eval_null() {
 
 #[test]
 fn eval_undefined() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: Option<jsg::Nullable<bool>> = ctx.eval(lock, "undefined").unwrap();
         assert!(result.is_none());
@@ -122,7 +123,7 @@ fn eval_undefined() {
 
 #[test]
 fn eval_some() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Nullable<bool> = ctx.eval(lock, "true").unwrap();
         assert!(result.is_some());
@@ -133,7 +134,7 @@ fn eval_some() {
 
 #[test]
 fn eval_throws_on_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result = ctx.eval::<bool>(lock, "throw new Error('test error')");
         match result.unwrap_err() {
@@ -148,7 +149,7 @@ fn eval_throws_on_error() {
 
 #[test]
 fn eval_throws_string_preserves_message() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result = ctx.eval::<bool>(lock, "throw 'custom string error'");
         match result.unwrap_err() {
@@ -163,7 +164,7 @@ fn eval_throws_string_preserves_message() {
 
 #[test]
 fn eval_function_call() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx
             .eval(lock, "(function() { return 'from function'; })()")
@@ -175,7 +176,7 @@ fn eval_function_call() {
 
 #[test]
 fn eval_typeof_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "typeof 'hello'").unwrap();
         assert_eq!(result, "string");
@@ -185,7 +186,7 @@ fn eval_typeof_string() {
 
 #[test]
 fn eval_typeof_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "typeof 42").unwrap();
         assert_eq!(result, "number");
@@ -195,7 +196,7 @@ fn eval_typeof_number() {
 
 #[test]
 fn eval_typeof_boolean() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "typeof true").unwrap();
         assert_eq!(result, "boolean");
@@ -205,7 +206,7 @@ fn eval_typeof_boolean() {
 
 #[test]
 fn eval_unicode_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "'こんにちは'").unwrap();
         assert_eq!(result, "こんにちは");
@@ -215,7 +216,7 @@ fn eval_unicode_string() {
 
 #[test]
 fn eval_emoji_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "'😀🎉'").unwrap();
         assert_eq!(result, "😀🎉");
@@ -225,7 +226,7 @@ fn eval_emoji_string() {
 
 #[test]
 fn eval_number_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "42").unwrap();
         assert_eq!(result, "42");
@@ -235,7 +236,7 @@ fn eval_number_string() {
 
 #[test]
 fn eval_function_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: String = ctx.eval(lock, "(() => {})").unwrap();
         assert_eq!(result, r"() => {}");
@@ -273,7 +274,7 @@ impl NumberBox {
 
 #[test]
 fn lenient_string_some() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<String> = ctx.eval(lock, "'hello'").unwrap();
         assert!(matches!(result, jsg::Lenient::Some(ref s) if s == "hello"));
@@ -283,7 +284,7 @@ fn lenient_string_some() {
 
 #[test]
 fn lenient_string_undefined() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<String> = ctx.eval(lock, "undefined").unwrap();
         assert!(matches!(result, jsg::Lenient::Undefined));
@@ -293,7 +294,7 @@ fn lenient_string_undefined() {
 
 #[test]
 fn lenient_string_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<String> = ctx.eval(lock, "null").unwrap();
         assert!(matches!(result, jsg::Lenient::Null));
@@ -303,7 +304,7 @@ fn lenient_string_null() {
 
 #[test]
 fn lenient_string_number() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<String> = ctx.eval(lock, "42").unwrap();
         let result: Option<jsg::Nullable<String>> = result.into();
@@ -314,7 +315,7 @@ fn lenient_string_number() {
 
 #[test]
 fn lenient_array_top_level_mismatch_is_unconvertable() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<Vec<u32>> = ctx.eval(lock, "42").unwrap();
         assert!(matches!(result, jsg::Lenient::Unconvertable(_)));
@@ -324,7 +325,7 @@ fn lenient_array_top_level_mismatch_is_unconvertable() {
 
 #[test]
 fn lenient_array_nested_conversion_error_propagates() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result = ctx.eval::<jsg::Lenient<Vec<u32>>>(lock, "[Symbol()]");
         assert!(result.is_err());
@@ -334,7 +335,7 @@ fn lenient_array_nested_conversion_error_propagates() {
 
 #[test]
 fn lenient_resource_some() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
@@ -346,7 +347,7 @@ fn lenient_resource_some() {
 
 #[test]
 fn lenient_resource_undefined() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
@@ -358,7 +359,7 @@ fn lenient_resource_undefined() {
 
 #[test]
 fn lenient_resource_undefined_explicit() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
@@ -370,7 +371,7 @@ fn lenient_resource_undefined_explicit() {
 
 #[test]
 fn lenient_resource_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
@@ -382,7 +383,7 @@ fn lenient_resource_null() {
 
 #[test]
 fn lenient_resource_wrong_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);

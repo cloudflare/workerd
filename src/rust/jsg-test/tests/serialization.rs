@@ -5,6 +5,8 @@
 //! `jsg::ser`, checked against C++ JSG's `jsg::Serializer` and `jsg::Deserializer`: the bytes
 //! are the same, and each reads what the other writes.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -12,9 +14,8 @@ use jsg::FromJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::EvalContext;
-use crate::Harness;
+use jsg_test::EvalContext;
+use jsg_test::Harness;
 
 #[jsg_resource]
 struct Unserializable;
@@ -413,8 +414,8 @@ fn nothing_runs_while_execution_is_terminating() {
         ctx.set_global(lock, "terminator", jsg::Rc::new(Terminator));
         // The harness reports a termination as a failure or as a null exception.
         match ctx.eval_raw(lock, "terminator.serializeWhileTerminating()") {
-            Err(crate::EvalError::EvalFailed) => {}
-            Err(crate::EvalError::Exception(exception)) => assert!(exception.is_null()),
+            Err(jsg_test::EvalError::EvalFailed) => {}
+            Err(jsg_test::EvalError::Exception(exception)) => assert!(exception.is_null()),
             other => panic!("the script was not terminated: {other:?}"),
         }
         assert!(CHECKED_WHILE_TERMINATING.load(Ordering::SeqCst));

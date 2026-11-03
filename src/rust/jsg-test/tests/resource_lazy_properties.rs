@@ -4,6 +4,8 @@
 
 //! Tests for `#[jsg_property(lazy_instance)]` and `PropertyPlacement::LazyInstance`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 
 use jsg::MemberRegistry;
@@ -12,8 +14,7 @@ use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
 use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
-
-use crate::Harness;
+use jsg_test::Harness;
 
 /// Counts how often each lazy getter runs.
 #[jsg_resource]

@@ -5,6 +5,8 @@
 //! The errors a `Lock` creates and throws reach JavaScript as errors of their type, with their
 //! message.
 
+#![cfg(test)]
+
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
@@ -33,7 +35,12 @@ impl Thrower {
     }
 }
 
-fn caught(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, call: &str, check: &str) -> bool {
+fn caught(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    call: &str,
+    check: &str,
+) -> bool {
     ctx.eval::<bool>(
         lock,
         &format!(
@@ -47,7 +54,7 @@ fn caught(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, call: &str, ch
 
 #[test]
 fn throw_error_throws_an_error_with_the_message() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
         assert!(caught(
             lock,
@@ -68,7 +75,7 @@ fn throw_error_throws_an_error_with_the_message() {
 
 #[test]
 fn invalid_string_length_is_v8s_range_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
         assert!(caught(
             lock,
@@ -89,7 +96,7 @@ fn invalid_string_length_is_v8s_range_error() {
 
 #[test]
 fn range_error_is_a_range_error_object() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
         assert!(
             ctx.eval::<bool>(

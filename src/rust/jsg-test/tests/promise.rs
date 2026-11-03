@@ -5,6 +5,8 @@
 //! JavaScript promises in Rust: creating and settling them through `v8::PromiseResolver`, and
 //! reacting to them with `Local<Promise>::then`, `catch` and `then_or_catch`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -20,10 +22,14 @@ use jsg_macros::jsg_resource;
 
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
 /// and returns the log joined with `|`.
-fn log_after_microtasks(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn log_after_microtasks(
+    lock: &mut jsg::Lock,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     ctx.eval_raw(lock, &format!("globalThis.log = []; {code}"))
         .unwrap();
-    crate::Harness::run_microtasks(lock);
+    jsg_test::Harness::run_microtasks(lock);
     ctx.eval(lock, "log.join('|')").unwrap()
 }
 
@@ -38,7 +44,7 @@ const RECORD: &str = "globalThis.record = (p) => p.then(
 
 #[test]
 fn resolver_settles_its_promise_once() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let promise = resolver.promise();
         assert_eq!(promise.state(), PromiseState::Pending);
@@ -59,7 +65,7 @@ fn resolver_settles_its_promise_once() {
 
 #[test]
 fn rejected_promise_holds_its_reason() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let reason = lock.range_error("too far");
         let promise = v8::Promise::rejected(lock, reason.into()).unwrap();
         promise.mark_as_handled();
@@ -71,7 +77,7 @@ fn rejected_promise_holds_its_reason() {
 
 #[test]
 fn has_handler_reports_reactions_and_marks() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let reacted = v8::PromiseResolver::new(lock)?.promise();
         assert!(!reacted.has_handler());
         reacted.then(lock, (), |_lock, (), value| Ok(value))?;
@@ -86,7 +92,7 @@ fn has_handler_reports_reactions_and_marks() {
 
 #[test]
 fn resolved_returns_promises_unchanged_and_follows_thenables() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let existing = ctx
             .eval_raw(lock, "globalThis.p = Promise.resolve(1); p")
             .unwrap();
@@ -118,7 +124,7 @@ fn resolved_returns_promises_unchanged_and_follows_thenables() {
 
 #[test]
 fn rejecting_with_an_error_creates_its_exception() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let err = jsg::Error::new_type_error("bad input");
         let promise = v8::Promise::rejected_with_error(lock, &err).unwrap();
         ctx.set_global(lock, "p", promise);
@@ -132,7 +138,7 @@ fn rejecting_with_an_error_creates_its_exception() {
 
 #[test]
 fn promise_argument_accepts_any_value() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let value = "plain".to_js(lock)?;
         let promise = v8::Local::<v8::Promise>::from_js(lock, value)?;
         ctx.set_global(lock, "p", promise);
@@ -145,20 +151,24 @@ fn promise_argument_accepts_any_value() {
 }
 
 /// A harness whose `unwrap_custom_thenables` flag is `unwrap_custom_thenables`.
-fn thenables_harness(unwrap_custom_thenables: bool) -> crate::Harness {
-    crate::Harness::with_flags(|mut f| f.set_unwrap_custom_thenables(unwrap_custom_thenables))
+fn thenables_harness(unwrap_custom_thenables: bool) -> jsg_test::Harness {
+    jsg_test::Harness::with_flags(|mut f| f.set_unwrap_custom_thenables(unwrap_custom_thenables))
 }
 
 /// What `VoidPromise` makes of the value `code` evaluates to: how the promise settles,
 /// as `RECORD` logs it, after anything else `code` logs.
-fn void_promise_outcome(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn void_promise_outcome(
+    lock: &mut jsg::Lock,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     ctx.eval_raw(lock, &format!("globalThis.log = []; {RECORD}"))
         .unwrap();
     let value = ctx.eval_raw(lock, code).unwrap();
     let promise: v8::Local<v8::Promise> = v8::VoidPromise::from_js(lock, value).unwrap().into();
     ctx.set_global(lock, "p", promise);
     ctx.eval_raw(lock, "record(p)").unwrap();
-    crate::Harness::run_microtasks(lock);
+    jsg_test::Harness::run_microtasks(lock);
     ctx.eval(lock, "log.join('|')").unwrap()
 }
 
@@ -297,7 +307,7 @@ impl VoidPromiseTaker {
 /// not omitted, and is a `Promise` in the error.
 #[test]
 fn void_promise_argument_is_required() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "taker", jsg::Rc::new(VoidPromiseTaker));
         assert_eq!(
             log_after_microtasks(
@@ -325,7 +335,7 @@ fn void_promise_argument_is_required() {
 /// (for the species) is read, so getters that throw don't stop any of the three.
 #[test]
 fn promise_reactions_bypass_user_properties() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx
             .eval_raw(
                 lock,
@@ -352,7 +362,7 @@ fn promise_reactions_bypass_user_properties() {
                 |lock, (), _reason| Ok(lock.undefined()),
             )
             .unwrap();
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         for reaction in [fulfilled, caught, either] {
             assert_eq!(reaction.state(), PromiseState::Fulfilled);
             let result = reaction.result(lock).unwrap();
@@ -364,7 +374,7 @@ fn promise_reactions_bypass_user_properties() {
 
 #[test]
 fn then_runs_callbacks_as_microtasks_with_their_data() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve('world')").unwrap();
         let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let greeted = promise
@@ -375,7 +385,7 @@ fn then_runs_callbacks_as_microtasks_with_their_data() {
             .unwrap();
         // Reactions never run synchronously.
         assert_eq!(greeted.state(), PromiseState::Pending);
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         let result = greeted.result(lock).unwrap();
         assert_eq!(String::from_js(lock, result)?, "hello, world");
         Ok(())
@@ -384,7 +394,7 @@ fn then_runs_callbacks_as_microtasks_with_their_data() {
 
 #[test]
 fn then_rejects_with_callback_error_and_handles_rejections() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
         let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
         let failed = fulfilled
@@ -422,7 +432,7 @@ fn then_rejects_with_callback_error_and_handles_rejections() {
 /// own: the value arrives unchanged.
 #[test]
 fn then_and_catch_pass_the_other_outcome_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let rejected = ctx
             .eval_raw(
                 lock,
@@ -466,7 +476,7 @@ fn then_and_catch_pass_the_other_outcome_through() {
 /// and a thenable is followed.
 #[test]
 fn catch_resolves_with_the_fulfillment_it_passes_through() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = ctx
             .eval_raw(
                 lock,
@@ -509,7 +519,7 @@ fn catch_resolves_with_the_fulfillment_it_passes_through() {
 /// Reacts to the promise that `code` evaluates to with both callbacks of `then_or_catch`.
 fn react_to_outcome<'s>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     code: &str,
 ) -> v8::Local<'s, v8::Promise> {
     let promise = ctx.eval_raw(lock, code).unwrap();
@@ -532,10 +542,10 @@ fn react_to_outcome<'s>(
 
 #[test]
 fn then_or_catch_runs_the_callback_for_the_outcome() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = react_to_outcome(lock, ctx, "Promise.resolve('yes')");
         let rejected = react_to_outcome(lock, ctx, "Promise.reject(new Error('no'))");
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         let result = fulfilled.result(lock).unwrap();
         assert_eq!(
             String::from_js(lock, result)?,
@@ -549,7 +559,7 @@ fn then_or_catch_runs_the_callback_for_the_outcome() {
 
 #[test]
 fn panic_in_then_callback_is_an_internal_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
         let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let panicked = promise
@@ -562,7 +572,7 @@ fn panic_in_then_callback_is_an_internal_error() {
             )
             .unwrap();
         panicked.mark_as_handled();
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         assert_eq!(panicked.state(), PromiseState::Rejected);
         let reason = panicked.result(lock).unwrap();
         let err = jsg::Error::from_js(lock, reason)?;
@@ -588,7 +598,7 @@ static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// garbage collector. It is kept while the callback runs.
 #[test]
 fn then_data_is_dropped_once_the_promise_settles() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let settled = resolver
@@ -606,17 +616,17 @@ fn then_data_is_dropped_once_the_promise_settles() {
             .unwrap();
         // The pending promise keeps its reactions, and with them the data, which they share.
         ctx.set_global(lock, "resolver", resolver.promise());
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 0);
         let value = lock.undefined();
         resolver.resolve(lock, value)?;
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         assert_eq!(settled.state(), PromiseState::Fulfilled);
         assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SETTLED_DATA_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -629,7 +639,7 @@ static PASSED_THROUGH_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// of a callback that fails once it has returned.
 #[test]
 fn reaction_data_is_dropped_whichever_way_the_promise_settles() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let reason = lock.undefined();
         let rejected = v8::Promise::rejected(lock, reason)?;
         let passed = rejected.then(lock, DropCounter(&PASSED_THROUGH_DROPS), |lock, _, _| {
@@ -653,7 +663,7 @@ fn reaction_data_is_dropped_whichever_way_the_promise_settles() {
         failed.mark_as_handled();
         // No garbage collection runs before the assertion, so only the reactions can have
         // dropped the data.
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         assert_eq!(PASSED_THROUGH_DROPS.load(Ordering::SeqCst), 4);
         Ok(())
     });
@@ -677,7 +687,7 @@ impl jsg::Traced for ObjectData {
 /// survives a collection that the callback triggers.
 #[test]
 fn reaction_data_is_traced_while_the_callback_runs() {
-    crate::Harness::new().run_in_context(|lock, _ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, _ctx| {
         let value = lock.undefined();
         let outer = v8::Promise::resolved(lock, value)?;
         // The object is created in a reaction, whose handles go once it returns, so that only
@@ -692,17 +702,17 @@ fn reaction_data_is_traced_while_the_callback_runs() {
             };
             let value = lock.undefined();
             let inner = v8::Promise::resolved(lock, value)?.then(lock, data, |lock, data, _| {
-                crate::Harness::request_gc(lock);
+                jsg_test::Harness::request_gc(lock);
                 assert_eq!(IN_CALLBACK_GC_DROPS.load(Ordering::SeqCst), 0);
                 let object = data.object.as_local(lock);
                 object.get(lock, "state")
             })?;
             // A collection while the inner reaction is pending traces the data, which makes its
             // handle weak; from then on only tracing keeps the object alive.
-            crate::Harness::request_gc(lock);
+            jsg_test::Harness::request_gc(lock);
             Ok(inner.into())
         })?;
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         assert_eq!(read.state(), PromiseState::Fulfilled);
         let result = read.result(lock).unwrap();
         assert_eq!(String::from_js(lock, result)?, "alive");
@@ -726,7 +736,7 @@ impl Leaf {}
 /// reaction was created, and again whenever the garbage collector traced them.
 #[test]
 fn then_or_catch_data_holds_a_resource() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let leaf = jsg::Rc::new(Leaf {
             _drops: DropCounter(&SHARED_LEAF_DROPS),
@@ -742,18 +752,18 @@ fn then_or_catch_data_holds_a_resource() {
             )
             .unwrap();
         ctx.set_global(lock, "resolver", resolver.promise());
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SHARED_LEAF_DROPS.load(Ordering::SeqCst), 0);
         let value = lock.undefined();
         resolver.resolve(lock, value)?;
-        crate::Harness::run_microtasks(lock);
+        jsg_test::Harness::run_microtasks(lock);
         // The reaction returned the resource, which the settled promise now holds.
         let result = settled.result(lock).unwrap();
         assert!(jsg::Rc::<Leaf>::from_js(lock, result).is_ok());
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(SHARED_LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -780,7 +790,7 @@ impl jsg::Traced for TeardownData {
 /// isolate is torn down is dropped by the teardown, with what it owns.
 #[test]
 fn reaction_data_of_pending_promise_is_dropped_with_its_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let promise = resolver.promise();
@@ -800,7 +810,7 @@ fn reaction_data_of_pending_promise_is_dropped_with_its_isolate() {
             )
             .unwrap();
         ctx.set_global(lock, "pending", promise);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TEARDOWN_DATA_DROPS.load(Ordering::SeqCst), 0);
         assert_eq!(TEARDOWN_LEAF_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
@@ -871,7 +881,7 @@ impl Watcher {
 
 #[test]
 fn reaction_calls_back_into_the_resource_that_registered_it() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let watcher = jsg::Rc::new(Watcher {
             state: jsg::Rc::new(WatcherState {
                 seen: RefCell::new(Vec::new()),
@@ -985,7 +995,7 @@ impl TerminatingPromises {
 /// exception for an error.
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let promises = jsg::Rc::new(TerminatingPromises {
             pending: RefCell::new(Vec::new()),
             still_pending: Cell::new(false),
@@ -1072,7 +1082,7 @@ impl Deferred {
 
 #[test]
 fn resource_settles_promise_from_later_call() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let deferred = jsg::Rc::new(Deferred {
             resolver: jsg::RefCell::new(None),
         });
@@ -1115,7 +1125,7 @@ impl DroppedDeferred {
 
 #[test]
 fn cycle_through_held_resolver_is_collected() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let deferred = jsg::Rc::new(DroppedDeferred {
             _drops: DropCounter(&DEFERRED_DROPS),
@@ -1131,7 +1141,7 @@ fn cycle_through_held_resolver_is_collected() {
         Ok(())
     });
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(DEFERRED_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
@@ -1261,7 +1271,7 @@ impl ReadThroughCache {
     }
 }
 
-fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) {
     let cache = jsg::Rc::new(ReadThroughCache {
         store: jsg::Rc::new(CacheStore {
             entries: jsg::RefCell::new(HashMap::new()),
@@ -1273,7 +1283,7 @@ fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
 
 #[test]
 fn cache_coalesces_reads_and_caches_fulfillment() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let code = format!(
             "{RECORD}
@@ -1294,7 +1304,7 @@ fn cache_coalesces_reads_and_caches_fulfillment() {
             "same promise: true|calls: 1|fulfilled: A|fulfilled: A"
         );
         // The store has no wrapper of its own: the cache traces it, and with it the cached value.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         // Served from the cache: the fallback does not run again.
         assert_eq!(
             log_after_microtasks(
@@ -1310,7 +1320,7 @@ fn cache_coalesces_reads_and_caches_fulfillment() {
 
 #[test]
 fn cache_accepts_plain_values_from_fallback() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         assert_eq!(
             log_after_microtasks(
@@ -1326,7 +1336,7 @@ fn cache_accepts_plain_values_from_fallback() {
 
 #[test]
 fn cache_passes_rejection_through_without_caching_it() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let code = format!(
             "{RECORD}
@@ -1349,7 +1359,7 @@ fn cache_passes_rejection_through_without_caching_it() {
 /// whose rejection would otherwise forget the first fill.
 #[test]
 fn cache_fallback_that_reads_the_same_key() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let code = format!(
             "{RECORD}
@@ -1380,7 +1390,7 @@ fn cache_fallback_that_reads_the_same_key() {
 /// with what it threw, and is not cached.
 #[test]
 fn cache_fallback_that_throws_rejects_the_read() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let code = format!(
             "{RECORD}
@@ -1407,7 +1417,7 @@ fn cache_fallback_that_throws_rejects_the_read() {
 /// fallback rather than waiting for one that never settles.
 #[test]
 fn cache_removes_in_flight_fill_when_fallback_terminates() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let promises = jsg::Rc::new(TerminatingPromises {
             pending: RefCell::new(Vec::new()),
@@ -1433,7 +1443,7 @@ fn cache_removes_in_flight_fill_when_fallback_terminates() {
 
 #[test]
 fn cache_rejects_non_function_fallback() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
         let code =
             "try { cache.read('k', 42); 'no error' } catch (e) { `${e.name}: ${e.message}` }";

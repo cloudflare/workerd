@@ -90,6 +90,15 @@ mod tests;
 - `wd_rust_crate`, `wd_rust_binary` and `wd_rust_proc_macro` take the `*-test.rs` files out of the crate's `srcs` and compile them only into its `<name>_test` target (`split_rust_test_srcs` in `build/wd_rust_test.bzl`). A crate defined with `rust_library` directly does the same by hand: `exclude = ["*-test.rs"]` in the library's `srcs` glob, and `compile_data = glob(["*-test.rs"])` on its `wd_rust_test` (a `rust_test` built from a `crate` rejects `srcs`). An unconditional `mod` declaration of a test file therefore fails the production build.
 - Crates that are test code throughout are exempt: a test-support crate in a `tests/` directory (e.g. `cxx/kj-rs/tests/`), and a `wd_rust_test` built from its own `srcs` (e.g. `tsan/`).
 
+### Integration tests
+
+A target's tests run serially (`RUST_TEST_THREADS=1`) within its timeout, and they cannot run in parallel within a process: autogates and the tests' drop counters are process-wide. So a crate with many tests through its public API splits them into Cargo-style integration tests rather than raising `test_size`: `wd_rust_crate(integration_test_srcs = glob(["tests/*.rs"]))` (`wd_rust_integration_tests` in `build/wd_rust_test.bzl`) compiles them into one test binary, `<name>_test_bin`, whose generated crate root declares each file as `tests::<file>`, and runs each file as a test target of its own, `<name>_test_<file>`, which passes the binary the filter `tests::<file>::`. The test code reaches the crate as `<crate_name>::`. One binary keeps V8 linked once; a target per file gives each its own process and timeout. `<name>_test` is a `test_suite` of them and, if the crate has `*-test.rs` files, of its unit tests, `<name>_unit_test`.
+
+- Each file starts with `#![cfg(test)]`, after its `//!` docs: clippy's `allow-unwrap-in-tests` exempts only `#[test]` functions and `#[cfg(test)]` items, so without it `--config=lint` rejects an `unwrap()` in a helper function.
+- The binary is `manual`, so the file targets carry its clippy and rustfmt checks for `--config=lint`.
+- libtest ORs filters, so `--test_arg` widens a file target rather than narrowing it. To run single tests, run the binary: `bazel run //src/rust/jsg-test:jsg-test_test_bin -- tests::typed_promise::`.
+- `jsg-test` runs its tests this way: `bazel test //src/rust/jsg-test:jsg-test_test` runs them all, and `//src/rust/jsg-test:jsg-test_test_typed_promise` runs `tests/typed_promise.rs`.
+
 ## CXX BRIDGE: ASYNC AND ERROR HANDLING
 
 ### C++ calling async Rust (`extern "Rust"`)

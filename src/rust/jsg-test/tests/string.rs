@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::ToJS;
@@ -24,7 +26,7 @@ fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
 
 #[test]
 fn string_empty_has_zero_length() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = JsString::empty(lock);
         assert_eq!(s.length(), 0);
@@ -35,7 +37,7 @@ fn string_empty_has_zero_length() {
 
 #[test]
 fn string_new_from_utf8_roundtrips_ascii() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_utf8(lock, b"hello");
         assert!(maybe.is_some());
@@ -48,7 +50,7 @@ fn string_new_from_utf8_roundtrips_ascii() {
 
 #[test]
 fn string_new_from_utf8_roundtrips_unicode() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "こんにちは";
         let s = from_utf8(lock, input);
@@ -59,7 +61,7 @@ fn string_new_from_utf8_roundtrips_unicode() {
 
 #[test]
 fn string_new_from_utf8_empty_slice() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_utf8(lock, b"");
         assert!(maybe.is_some());
@@ -71,7 +73,7 @@ fn string_new_from_utf8_empty_slice() {
 
 #[test]
 fn string_new_from_one_byte_roundtrips() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_one_byte(lock, b"latin1");
         assert!(maybe.is_some());
@@ -85,7 +87,7 @@ fn string_new_from_one_byte_roundtrips() {
 
 #[test]
 fn string_new_from_two_byte_roundtrips() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "hello".encode_utf16().collect();
         let maybe = JsString::new_from_two_byte(lock, &utf16);
@@ -99,7 +101,7 @@ fn string_new_from_two_byte_roundtrips() {
 
 #[test]
 fn string_new_from_two_byte_unicode() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "日本語";
         let utf16: Vec<u16> = input.encode_utf16().collect();
@@ -111,7 +113,7 @@ fn string_new_from_two_byte_unicode() {
 
 #[test]
 fn string_new_from_utf8_internalized_roundtrips() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s1 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap();
         let s2 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap();
@@ -126,7 +128,7 @@ fn string_new_from_utf8_internalized_roundtrips() {
 
 #[test]
 fn string_new_from_one_byte_internalized_roundtrips() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = JsString::new_internalized_from_one_byte(lock, b"latin1_intern").unwrap();
         assert_eq!(s.to_string(lock), "latin1_intern");
@@ -137,7 +139,7 @@ fn string_new_from_one_byte_internalized_roundtrips() {
 
 #[test]
 fn string_new_from_two_byte_internalized_roundtrips() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "two_byte_intern".encode_utf16().collect();
         let s = JsString::new_internalized_from_two_byte(lock, &utf16).unwrap();
@@ -152,7 +154,7 @@ fn string_new_from_two_byte_internalized_roundtrips() {
 
 #[test]
 fn string_length_matches_utf16_code_units() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // ASCII: 1 byte per char = 1 UTF-16 code unit
         assert_eq!(from_utf8(lock, "hello").length(), 5);
@@ -164,7 +166,7 @@ fn string_length_matches_utf16_code_units() {
 
 #[test]
 fn string_is_one_byte_for_ascii() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "ascii only");
         assert!(s.is_one_byte());
@@ -175,7 +177,7 @@ fn string_is_one_byte_for_ascii() {
 
 #[test]
 fn string_is_not_one_byte_for_multibyte() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "こんにちは");
         assert!(!s.is_one_byte());
@@ -186,7 +188,7 @@ fn string_is_not_one_byte_for_multibyte() {
 
 #[test]
 fn string_utf8_length_matches_byte_count() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let ascii = "hello";
         assert_eq!(from_utf8(lock, ascii).utf8_length(lock), ascii.len());
@@ -203,7 +205,7 @@ fn string_utf8_length_matches_byte_count() {
 
 #[test]
 fn string_write_utf16_into_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "hi");
         let mut buf = vec![0u16; 2];
@@ -215,7 +217,7 @@ fn string_write_utf16_into_buffer() {
 
 #[test]
 fn string_write_utf16_with_offset() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "hello");
         let mut buf = vec![0u16; 3];
@@ -227,7 +229,7 @@ fn string_write_utf16_with_offset() {
 
 #[test]
 fn string_write_one_byte_into_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "abc");
         let mut buf = vec![0u8; 3];
@@ -239,7 +241,7 @@ fn string_write_one_byte_into_buffer() {
 
 #[test]
 fn string_write_utf8_into_buffer() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "hello";
         let s = from_utf8(lock, input);
@@ -253,7 +255,7 @@ fn string_write_utf8_into_buffer() {
 
 #[test]
 fn string_write_utf8_null_terminate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "hi";
         let s = from_utf8(lock, input);
@@ -267,7 +269,7 @@ fn string_write_utf8_null_terminate() {
 
 #[test]
 fn string_to_string_roundtrips_ascii() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "Hello, world!";
         assert_eq!(from_utf8(lock, input).to_string(lock), input);
@@ -277,7 +279,7 @@ fn string_to_string_roundtrips_ascii() {
 
 #[test]
 fn string_to_string_roundtrips_unicode() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "🦀 Rust";
         assert_eq!(from_utf8(lock, input).to_string(lock), input);
@@ -291,7 +293,7 @@ fn string_to_string_roundtrips_unicode() {
 
 #[test]
 fn string_eq_same_content() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let a = from_utf8(lock, "equal");
         let b = from_utf8(lock, "equal");
@@ -302,7 +304,7 @@ fn string_eq_same_content() {
 
 #[test]
 fn string_ne_different_content() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let a = from_utf8(lock, "foo");
         let b = from_utf8(lock, "bar");
@@ -313,7 +315,7 @@ fn string_ne_different_content() {
 
 #[test]
 fn string_empty_eq_empty() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let a = JsString::empty(lock);
         let b = JsString::empty(lock);
@@ -362,7 +364,7 @@ fn write_flags_combined_variant_equals_bitor() {
 
 #[test]
 fn utf8_value_length_matches_byte_count() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello".to_js(lock)?;
         let utf8 = Utf8Value::new(lock, &val)?;
@@ -373,7 +375,7 @@ fn utf8_value_length_matches_byte_count() {
 
 #[test]
 fn utf8_value_as_str_returns_correct_content() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello world".to_js(lock)?;
         let utf8 = Utf8Value::new(lock, &val)?;
@@ -384,7 +386,7 @@ fn utf8_value_as_str_returns_correct_content() {
 
 #[test]
 fn utf8_value_as_bytes_matches_utf8_encoding() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "Rust 🦀";
         let val: Local<'_, Value> = input.to_js(lock)?;
@@ -396,7 +398,7 @@ fn utf8_value_as_bytes_matches_utf8_encoding() {
 
 #[test]
 fn utf8_value_from_unicode_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let input = "こんにちは";
         let val: Local<'_, Value> = input.to_js(lock)?;
@@ -409,7 +411,7 @@ fn utf8_value_from_unicode_string() {
 
 #[test]
 fn utf8_value_from_empty_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "".to_js(lock)?;
         let utf8 = Utf8Value::new(lock, &val)?;
@@ -421,7 +423,7 @@ fn utf8_value_from_empty_string() {
 
 #[test]
 fn utf8_value_as_ptr_is_non_null() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "test".to_js(lock)?;
         let utf8 = Utf8Value::new(lock, &val)?;
@@ -432,7 +434,7 @@ fn utf8_value_as_ptr_is_non_null() {
 
 #[test]
 fn utf8_value_coerces_number_to_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx
             .eval_raw(lock, "42")
@@ -445,7 +447,7 @@ fn utf8_value_coerces_number_to_string() {
 
 /// Converts the value of `expression` with `Utf8Value`, and returns what the conversion threw.
 fn utf8_value_throws(expression: &str) -> std::string::String {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     let mut thrown = None;
     harness.run_in_context(|lock, ctx| {
         let val = ctx
@@ -492,7 +494,7 @@ fn utf8_value_passes_on_what_to_string_throws() {
 
 #[test]
 fn string_try_from_from_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "cast me".to_js(lock)?;
         let s = Local::<JsString>::try_from(val).expect("should cast to String");
@@ -503,7 +505,7 @@ fn string_try_from_from_value() {
 
 #[test]
 fn string_try_from_fails_for_non_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = 42_u32.to_js(lock)?;
         assert!(Local::<JsString>::try_from(val).is_err());
@@ -513,7 +515,7 @@ fn string_try_from_fails_for_non_string() {
 
 #[test]
 fn string_upcast_to_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "upcast");
         let val: Local<'_, Value> = s.into();
@@ -545,7 +547,7 @@ impl Strings {
 /// there is one, like C++ JSG's `jsg::JsString` parameter.
 #[test]
 fn value_to_js_string_coerces() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for (expr, expected) in [
             ("'s'", "s"),
@@ -575,7 +577,7 @@ fn value_to_js_string_coerces() {
 /// passing the error on throws it to its caller.
 #[test]
 fn value_to_js_string_passes_on_what_to_string_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let thrower = "({ toString() { throw new RangeError('boom'); } })";
         for (expr, name, message) in [
@@ -621,7 +623,7 @@ fn value_to_js_string_passes_on_what_to_string_throws() {
 
 #[test]
 fn string_concat_produces_concatenated_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let left = from_utf8(lock, "hello, ");
         let right = from_utf8(lock, "world");
@@ -633,7 +635,7 @@ fn string_concat_produces_concatenated_string() {
 
 #[test]
 fn string_concat_with_empty_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "abc");
         let empty = JsString::empty(lock);
@@ -645,7 +647,7 @@ fn string_concat_with_empty_string() {
 
 #[test]
 fn string_concat_over_max_length_is_none() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // `repeat` builds a cons string, so this allocates little.
         let value = ctx.eval_raw(lock, "'x'.repeat(2 ** 28 + 1)").unwrap();
@@ -658,7 +660,7 @@ fn string_concat_over_max_length_is_none() {
 
 #[test]
 fn string_internalize_returns_equal_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "intern-me");
         let interned = s.internalize(lock);
@@ -669,7 +671,7 @@ fn string_internalize_returns_equal_string() {
 
 #[test]
 fn string_internalize_twice_returns_equal_content() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "dedup");
         let a = s.internalize(lock);
@@ -681,7 +683,7 @@ fn string_internalize_twice_returns_equal_content() {
 
 #[test]
 fn string_is_flat_for_simple_string() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "flat");
         assert!(s.is_flat());
@@ -723,7 +725,7 @@ impl Overlong {
 
 #[test]
 fn string_constructors_refuse_an_overlong_string() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let s = overlong_string();
         assert!(JsString::new_from_str(lock, &s).is_none());
         assert!(JsString::new_from_utf8(lock, s.as_bytes()).is_none());
@@ -737,7 +739,7 @@ fn string_constructors_refuse_an_overlong_string() {
 
 #[test]
 fn to_js_of_an_overlong_string_is_a_range_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         let s = overlong_string();
         for err in [
             s.as_str().to_js(lock).unwrap_err(),
@@ -756,7 +758,7 @@ fn to_js_of_an_overlong_string_is_a_range_error() {
 /// JavaScript catches the `RangeError` that V8 itself throws for such a string.
 #[test]
 fn method_returning_an_overlong_string_throws_a_range_error() {
-    crate::Harness::new().run_in_context(|lock, ctx| {
+    jsg_test::Harness::new().run_in_context(|lock, ctx| {
         ctx.set_global(lock, "overlong", jsg::Rc::new(Overlong));
         assert!(
             ctx.eval::<bool>(

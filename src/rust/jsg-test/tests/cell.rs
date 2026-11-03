@@ -12,6 +12,8 @@
 //! references out through the cells after such a visit, run a GC, and check that nothing was
 //! lost.
 
+#![cfg(test)]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -86,7 +88,7 @@ impl Scheduler {
 /// The scheduler's wrapper is reachable, so the visit makes the `jsg::Rc`s in its fields weak,
 /// and the tasks' `TracedGlobal`s traced. The scripts end in `undefined` so that no `Local` of a
 /// task outlives them.
-fn setup(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Scheduler> {
+fn setup(lock: &mut jsg::Lock<'_>, ctx: &jsg_test::EvalContext<'_>) -> jsg::Rc<Scheduler> {
     let task = jsg::resource::function_template_of::<Task>(lock).unwrap();
     ctx.set_global(lock, "Task", task);
     let scheduler = jsg::resource::function_template_of::<Scheduler>(lock).unwrap();
@@ -106,7 +108,7 @@ fn setup(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Sche
     )
     .expect("should evaluate");
     let scheduler: jsg::Rc<Scheduler> = ctx.eval(lock, "scheduler").expect("should evaluate");
-    crate::Harness::request_gc(lock);
+    jsg_test::Harness::request_gc(lock);
     scheduler
 }
 
@@ -127,11 +129,11 @@ fn assert_marked(lock: &mut jsg::Lock<'_>, task: &jsg::Rc<Task>, expected: &str)
 /// its resource's wrapper alone.
 #[test]
 fn rc_taken_from_a_cell_keeps_its_wrapper() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler.pending.take(lock).expect("scheduled above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_marked(lock, &task, "scheduled");
         Ok(())
     });
@@ -140,14 +142,14 @@ fn rc_taken_from_a_cell_keeps_its_wrapper() {
 /// `replace` makes the old value strong as `take` does.
 #[test]
 fn rc_replaced_in_a_cell_keeps_its_wrapper() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler
             .pending
             .replace(lock, None)
             .expect("scheduled above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_marked(lock, &task, "scheduled");
         Ok(())
     });
@@ -157,7 +159,7 @@ fn rc_replaced_in_a_cell_keeps_its_wrapper() {
 /// is strong.
 #[test]
 fn rc_popped_from_a_ref_cell_keeps_its_wrapper() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler
@@ -165,7 +167,7 @@ fn rc_popped_from_a_ref_cell_keeps_its_wrapper() {
             .borrow_mut(lock)
             .pop()
             .expect("queued above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_marked(lock, &task, "queued");
         Ok(())
     });
@@ -174,7 +176,7 @@ fn rc_popped_from_a_ref_cell_keeps_its_wrapper() {
 /// `jsg::RefCell::try_borrow_mut` makes everything in the cell strong too.
 #[test]
 fn rc_popped_from_a_ref_cell_through_try_borrow_mut_keeps_its_wrapper() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler
@@ -183,7 +185,7 @@ fn rc_popped_from_a_ref_cell_through_try_borrow_mut_keeps_its_wrapper() {
             .expect("not borrowed")
             .pop()
             .expect("queued above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_marked(lock, &task, "queued");
         Ok(())
     });
@@ -193,11 +195,11 @@ fn rc_popped_from_a_ref_cell_through_try_borrow_mut_keeps_its_wrapper() {
 /// value.
 #[test]
 fn rc_taken_from_a_cell_keeps_the_values_its_resource_traces() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler.pending.take(lock).expect("scheduled above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let payload = task.payload.take(lock).expect("set above");
         let payload = v8::Local::<v8::Object>::try_from(payload.as_local(lock)).unwrap();
         let of = payload.get(lock, "of").unwrap();
@@ -210,7 +212,7 @@ fn rc_taken_from_a_cell_keeps_the_values_its_resource_traces() {
 /// again, so a GC leaves its value alone even though nothing traces the handle.
 #[test]
 fn traced_global_taken_from_a_cell_keeps_its_value() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         // Taken from the task while the scheduler still holds and traces the task.
@@ -218,7 +220,7 @@ fn traced_global_taken_from_a_cell_keeps_its_value() {
             .payload
             .take(lock)
             .expect("set above");
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let payload = v8::Local::<v8::Object>::try_from(payload.as_local(lock)).unwrap();
         let of = payload.get(lock, "of").unwrap();
         assert_eq!(String::from_js(lock, of).unwrap(), "queued");
@@ -231,7 +233,7 @@ fn traced_global_taken_from_a_cell_keeps_its_value() {
 /// aborts the process otherwise.)
 #[test]
 fn rc_taken_from_one_resource_is_traced_by_another() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let other: jsg::Rc<Scheduler> = ctx
@@ -239,9 +241,9 @@ fn rc_taken_from_one_resource_is_traced_by_another() {
             .expect("should evaluate");
         let task = scheduler.pending.take(lock).expect("scheduled above");
         other.pending.set(Some(task));
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         // The second visit finds the reference with its new parent recorded.
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let task = other.pending.take(lock).expect("set above");
         assert_marked(lock, &task, "scheduled");
         Ok(())
@@ -254,7 +256,7 @@ fn rc_taken_from_one_resource_is_traced_by_another() {
 fn rc_put_back_into_a_cell_is_collected_with_its_owner() {
     TASK_DROPS.store(0, Ordering::SeqCst);
 
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         let task = scheduler.pending.take(lock).expect("scheduled above");
@@ -265,7 +267,7 @@ fn rc_put_back_into_a_cell_is_collected_with_its_owner() {
             .pop()
             .expect("queued above");
         scheduler.queue.borrow_mut(lock).push(task);
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 0);
 
         ctx.eval_raw(lock, "globalThis.scheduler = undefined")
@@ -275,7 +277,7 @@ fn rc_put_back_into_a_cell_is_collected_with_its_owner() {
     });
     // GC in a separate context so no `Local` of the scheduler's wrapper is left.
     harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         assert_eq!(TASK_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
     });
@@ -285,16 +287,16 @@ fn rc_put_back_into_a_cell_is_collected_with_its_owner() {
 /// borrow, which cannot visit the cell, loses nothing.
 #[test]
 fn gc_during_a_mutable_borrow_loses_nothing() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let scheduler = setup(lock, ctx);
         {
             let mut queue = scheduler.queue.borrow_mut(lock);
-            crate::Harness::request_gc(lock);
+            jsg_test::Harness::request_gc(lock);
             let task = queue.pop().expect("queued above");
             queue.push(task);
         }
-        crate::Harness::request_gc(lock);
+        jsg_test::Harness::request_gc(lock);
         let task = scheduler.queue.borrow()[0].clone();
         assert_marked(lock, &task, "queued");
         let payload = task.payload.take(lock).expect("set above");

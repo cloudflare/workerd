@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![cfg(test)]
+
 use jsg::FromJS;
 use jsg::JsString;
 use jsg::ToJS;
@@ -29,7 +31,7 @@ impl Strings {
 
 #[test]
 fn coerces_method_arguments() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.set_global(lock, "strings", jsg::Rc::new(Strings));
         for (expr, expected) in [
@@ -59,7 +61,7 @@ fn coerces_method_arguments() {
 
 #[test]
 fn preserves_utf16_and_exposes_string_operations() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let units = [0x61, 0, 0xd800, 0xdc00, 0xdfff];
         let handle = v8::String::new_from_two_byte(lock, &units).unwrap();
@@ -93,7 +95,7 @@ fn preserves_utf16_and_exposes_string_operations() {
 
 #[test]
 fn to_string_replaces_lone_surrogates() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for (expr, expected) in [
             ("''", ""),
@@ -116,7 +118,7 @@ fn to_string_replaces_lone_surrogates() {
 
 #[test]
 fn propagates_coercion_exceptions() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         ctx.set_global(lock, "strings", jsg::Rc::new(Strings));
         assert!(
@@ -153,7 +155,7 @@ enum StringOrNumber<'s> {
 
 #[test]
 fn converts_in_the_string_union_pass() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for (expr, expected) in [("true", "true"), ("null", "null"), ("'hello'", "hello")] {
             let value = ctx.eval_raw(lock, expr).unwrap();

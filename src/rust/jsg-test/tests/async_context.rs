@@ -10,6 +10,8 @@
 //! reads the current frame's value with `Harness::async_context_value`, and JavaScript with
 //! `probe.value()`.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicUsize;
@@ -22,8 +24,7 @@ use jsg::TracedAsyncContextFrame;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::Harness;
+use jsg_test::Harness;
 
 /// The value the current frame stores, or `None` in the root frame.
 fn current(lock: &mut jsg::Lock) -> Option<String> {
@@ -107,7 +108,7 @@ impl Probe {
     }
 }
 
-fn install_probe(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Probe> {
+fn install_probe(lock: &mut jsg::Lock, ctx: &jsg_test::EvalContext<'_>) -> jsg::Rc<Probe> {
     let probe = jsg::Rc::new(Probe {
         frame: jsg::Cell::new(None),
         restored: Cell::new(false),

@@ -9,6 +9,8 @@
 //! V8's internal field embedder data type tags are used correctly when getting
 //! aligned pointers from internal fields.
 
+#![cfg(test)]
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -78,7 +80,7 @@ impl DirectReturnResource {
 /// unwrapping resource pointers from V8 internal fields.
 #[test]
 fn resource_method_callback_receives_correct_self() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
@@ -96,7 +98,7 @@ fn resource_method_callback_receives_correct_self() {
 /// Validates that multiple method calls work correctly on the same resource.
 #[test]
 fn resource_method_can_be_called_multiple_times() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: ">> ".to_owned(),
@@ -118,7 +120,7 @@ fn resource_method_can_be_called_multiple_times() {
 /// Validates that methods can accept &str parameters.
 #[test]
 fn resource_method_accepts_str_ref_parameter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
@@ -135,7 +137,7 @@ fn resource_method_accepts_str_ref_parameter() {
 /// Validates that methods can return values directly without Result wrapper.
 #[test]
 fn resource_method_returns_non_result_values() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Rc::new(Cell::new(42));
         let resource = jsg::Rc::new(DirectReturnResource {
@@ -199,7 +201,7 @@ impl MathResource {
 /// Validates that methods without &self are registered as static methods on the class.
 #[test]
 fn static_method_callable_on_class() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock).unwrap();
         ctx.set_global(lock, "MathResource", constructor);
@@ -215,7 +217,7 @@ fn static_method_callable_on_class() {
 /// Validates that instance methods still work when static methods are present.
 #[test]
 fn instance_and_static_methods_coexist() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Expose the class constructor as a global
         let constructor = jsg::resource::function_template_of::<MathResource>(lock).unwrap();
@@ -246,7 +248,7 @@ fn instance_and_static_methods_coexist() {
 /// Validates that static methods with Result return type work on the success path.
 #[test]
 fn static_method_result_return_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock).unwrap();
         ctx.set_global(lock, "MathResource", constructor);
@@ -260,7 +262,7 @@ fn static_method_result_return_type() {
 /// Validates that static methods propagate JS exceptions from `Result::Err`.
 #[test]
 fn static_method_throws_exception() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock).unwrap();
         ctx.set_global(lock, "MathResource", constructor);
@@ -283,7 +285,7 @@ fn static_method_throws_exception() {
 /// Validates that Option<T> returns null for None.
 #[test]
 fn resource_method_returns_null_for_none() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(DirectReturnResource {
             name: String::new(),
@@ -328,7 +330,7 @@ impl ConstantResource {
 /// Validates that static constants are accessible on the constructor.
 #[test]
 fn static_constant_accessible_on_constructor() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock).unwrap();
         ctx.set_global(lock, "ConstantResource", constructor);
@@ -356,7 +358,7 @@ fn static_constant_accessible_on_constructor() {
 /// Validates that static constants are also accessible on instances (via prototype).
 #[test]
 fn static_constant_accessible_on_instance() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ConstantResource {});
         let wrapped = resource.to_js(lock)?;
@@ -371,7 +373,7 @@ fn static_constant_accessible_on_instance() {
 /// Validates that static constants are read-only (not writable).
 #[test]
 fn static_constant_is_read_only() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock).unwrap();
         ctx.set_global(lock, "ConstantResource", constructor);
@@ -392,7 +394,7 @@ fn static_constant_is_read_only() {
 /// Validates that static constants coexist with methods.
 #[test]
 fn static_constant_coexists_with_methods() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ConstantResource {});
 
@@ -448,7 +450,7 @@ impl PanicResource {
 /// binding: the panic must error the request cleanly and terminate the isolate.
 #[test]
 fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(PanicResource);
         let wrapped = resource.to_js(lock)?;
@@ -515,7 +517,7 @@ impl CatchPanicResource {
 /// reaches JavaScript once the method returns.
 #[test]
 fn catch_panic_returns_none_and_leaves_exception_pending() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let wrapped = jsg::Rc::new(CatchPanicResource).to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
@@ -568,7 +570,7 @@ impl ReentrantResource {
 /// methods share their resource instead of borrowing it exclusively.
 #[test]
 fn method_can_be_reentered() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
             depth: Cell::new(0),
@@ -696,7 +698,7 @@ impl CallingResource {
 
 fn calling_resource(
     lock: &mut jsg::Lock,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
 ) -> jsg::Rc<CallingResource> {
     let resource = jsg::Rc::new(CallingResource {
         saw_pending: Cell::new(false),
@@ -714,7 +716,7 @@ const TERMINATE: &str = "() => { try { panicker.panicNow(); } catch (e) {} while
 /// An exception thrown by a callback propagates unchanged through the method that called it.
 #[test]
 fn exception_from_callback_propagates_through_method() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let caught = ctx.eval::<bool>(
@@ -740,7 +742,7 @@ fn exception_from_callback_propagates_through_method() {
 /// catches and rethrows it.
 #[test]
 fn exception_propagates_through_nested_methods() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         calling_resource(lock, ctx);
         let caught = ctx.eval::<bool>(
@@ -768,7 +770,7 @@ fn exception_propagates_through_nested_methods() {
 /// past the method.
 #[test]
 fn termination_in_callback_propagates_through_method() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let result = ctx.eval::<bool>(
@@ -784,7 +786,7 @@ fn termination_in_callback_propagates_through_method() {
 /// A call made while execution is terminating runs no JavaScript and fails.
 #[test]
 fn call_while_terminating_runs_nothing() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let result = ctx.eval::<bool>(
@@ -807,7 +809,7 @@ fn call_while_terminating_runs_nothing() {
 /// and the exception reaches JavaScript unchanged.
 #[test]
 fn call_while_exception_pending_runs_nothing() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let caught = ctx
@@ -832,7 +834,7 @@ fn call_while_exception_pending_runs_nothing() {
 /// with a pending error and keeps propagating past the method.
 #[test]
 fn try_catch_does_not_catch_termination() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let caught = ctx.eval::<bool>(lock, "obj.callCatching(() => { throw new Error('boom'); })");
@@ -853,7 +855,7 @@ fn try_catch_does_not_catch_termination() {
 /// termination keeps propagating.
 #[test]
 fn error_does_not_replace_termination() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         calling_resource(lock, ctx);
         let result = ctx.eval::<bool>(
@@ -869,7 +871,7 @@ fn error_does_not_replace_termination() {
 /// throws while a `JsExceptionThrown` unwinds.
 #[test]
 fn error_replaces_pending_exception() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         calling_resource(lock, ctx);
         let message = ctx.eval::<String>(
@@ -886,7 +888,7 @@ fn error_replaces_pending_exception() {
 /// as an internal error rather than as nothing.
 #[test]
 fn pending_error_kept_after_exception_was_caught_throws_internal_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = calling_resource(lock, ctx);
         let message = ctx.eval::<String>(
@@ -920,7 +922,7 @@ fn pending_error_kept_after_exception_was_caught_throws_internal_error() {
 /// `#[jsg_method]` callback generated by `jsg-macros`.
 #[test]
 fn instance_method_throws_on_missing_receiver() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
@@ -950,7 +952,7 @@ fn instance_method_throws_on_missing_receiver() {
 /// `TypeError: Illegal invocation`.
 #[test]
 fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
@@ -977,7 +979,7 @@ fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
 /// the above receiver-guard checks, confirming normal dispatch is unaffected.
 #[test]
 fn instance_method_works_on_correct_receiver() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hi, ".to_owned(),
@@ -997,7 +999,7 @@ fn instance_method_works_on_correct_receiver() {
 /// so the signature is what rejects it.
 #[test]
 fn instance_method_throws_on_other_resource_receiver() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let echo = jsg::Rc::new(EchoResource {
             prefix: "Hi, ".to_owned(),
@@ -1029,7 +1031,7 @@ fn instance_method_throws_on_other_resource_receiver() {
 /// wrapper itself, so the callback never sees an object without a wrapper.
 #[test]
 fn instance_method_throws_on_object_inheriting_from_resource() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let echo = jsg::Rc::new(EchoResource {
             prefix: "Hi, ".to_owned(),
@@ -1055,7 +1057,7 @@ fn instance_method_throws_on_object_inheriting_from_resource() {
 /// finds only a wrapper of the requested resource type.
 #[test]
 fn resolve_receiver_rejects_everything_but_the_resource_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let echo = jsg::Rc::new(EchoResource {
             prefix: "Hi, ".to_owned(),
@@ -1075,7 +1077,7 @@ fn resolve_receiver_rejects_everything_but_the_resource_type() {
                 "resolved {source}"
             );
         }
-        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+        let cpp_obj = jsg_test::Harness::create_cpp_tagged_object(lock);
         assert!(v8::WrappableRc::resolve_receiver::<EchoResource>(lock, cpp_obj).is_none());
 
         let value = ctx.eval_raw(lock, "obj").unwrap();
@@ -1111,7 +1113,7 @@ impl Greeting {
 /// Resources without `#[jsg_constructor]` should throw when called with `new`.
 #[test]
 fn resource_without_constructor_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<EchoResource>(lock).unwrap();
         ctx.set_global(lock, "EchoResource", constructor);
@@ -1129,7 +1131,7 @@ fn resource_without_constructor_throws() {
 /// A `#[jsg_constructor]` method is callable from JavaScript via `new`.
 #[test]
 fn constructor_creates_instance() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock).unwrap();
         ctx.set_global(lock, "Greeting", constructor);
@@ -1145,7 +1147,7 @@ fn constructor_creates_instance() {
 /// Constructor arguments are converted from JS types via `FromJS`.
 #[test]
 fn constructor_converts_arguments() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock).unwrap();
         ctx.set_global(lock, "Greeting", constructor);
@@ -1162,7 +1164,7 @@ fn constructor_converts_arguments() {
 /// Multiple `new` calls create distinct JS objects.
 #[test]
 fn constructor_creates_distinct_objects() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock).unwrap();
         ctx.set_global(lock, "Greeting", constructor);
@@ -1182,7 +1184,7 @@ fn constructor_creates_distinct_objects() {
 /// `instanceof` works correctly for constructor-created instances.
 #[test]
 fn constructor_instanceof_works() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock).unwrap();
         ctx.set_global(lock, "Greeting", constructor);
@@ -1222,7 +1224,7 @@ impl Counter {
 /// `#[jsg_constructor]` with a `Lock` parameter works.
 #[test]
 fn constructor_with_lock_parameter() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Counter>(lock).unwrap();
         ctx.set_global(lock, "Counter", constructor);
@@ -1255,7 +1257,7 @@ impl Wrapper {
 /// `#[jsg_constructor]` with a wrong-typed resource argument throws `TypeError` (not a plain `Error`).
 #[test]
 fn constructor_with_wrong_resource_type_throws_type_error() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let wrapper_ctor = jsg::resource::function_template_of::<Wrapper>(lock).unwrap();
         ctx.set_global(lock, "Wrapper", wrapper_ctor);
@@ -1329,7 +1331,7 @@ impl Label {
 /// A constructor returning `Ok` creates an instance.
 #[test]
 fn fallible_constructor_ok_creates_instance() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let positive = jsg::resource::function_template_of::<Positive>(lock).unwrap();
         ctx.set_global(lock, "Positive", positive);
@@ -1352,7 +1354,7 @@ fn fallible_constructor_ok_creates_instance() {
 /// `Into<jsg::Error>`.
 #[test]
 fn fallible_constructor_err_throws() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let positive = jsg::resource::function_template_of::<Positive>(lock).unwrap();
         ctx.set_global(lock, "Positive", positive);

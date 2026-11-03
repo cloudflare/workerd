@@ -9,6 +9,8 @@
 //! What a union may not contain is checked at compile time, by the snippets in
 //! `src/rust/jsg-compile-tests/oneof-*.rs`.
 
+#![cfg(test)]
+
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -343,8 +345,8 @@ fn describe_string_handle_or_bool<'s>(
     })
 }
 
-fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalContext<'c>)) {
-    let harness = crate::Harness::new();
+fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &jsg_test::EvalContext<'c>)) {
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let cx = jsg::Rc::new(VariantContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
@@ -353,12 +355,21 @@ fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalConte
     });
 }
 
-fn expect_eval(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str, expected: &str) {
+fn expect_eval(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+    expected: &str,
+) {
     let result: String = ctx.eval(lock, code).unwrap();
     assert_eq!(result, expected, "{code}");
 }
 
-fn expect_type_error(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+fn expect_type_error(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
+    code: &str,
+) -> String {
     let err = ctx
         .eval::<String>(lock, code)
         .unwrap_err()

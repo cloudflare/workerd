@@ -5,11 +5,13 @@
 //! `Option<T>` conversion from JS matches C++ `jsg::Optional<T>`: only
 //! `undefined` is `None`, and `null` goes to `T`.
 
+#![cfg(test)]
+
 use jsg::FromJS;
 
 fn convert<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
+    ctx: &jsg_test::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, jsg::Error> {
     let value = ctx
@@ -20,7 +22,7 @@ fn convert<'s, T: FromJS<'s>>(
 
 #[test]
 fn option_reads_only_undefined_as_none() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(convert::<Option<String>>(lock, ctx, "undefined")?, None);
         assert_eq!(
@@ -33,7 +35,7 @@ fn option_reads_only_undefined_as_none() {
 
 #[test]
 fn option_passes_null_to_inner_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         assert_eq!(
             convert::<Option<String>>(lock, ctx, "null")?,
@@ -47,7 +49,7 @@ fn option_passes_null_to_inner_type() {
 
 #[test]
 fn option_try_from_js_passes_null_to_inner_type() {
-    let harness = crate::Harness::new();
+    let harness = jsg_test::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let null = ctx
             .eval_raw(lock, "null")
