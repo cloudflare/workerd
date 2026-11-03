@@ -4597,8 +4597,9 @@ pub struct GcVisitor {
 pub(crate) enum VisitMode {
     /// For the C++ `jsg::GcVisitor` of its owner's visit.
     Visit,
-    /// To detach the value from its owner; see [`GcVisitor::is_detaching`].
-    Detach,
+    /// To detach the value from its owner, under the lock of the given isolate; see
+    /// [`GcVisitor::is_detaching`].
+    Detach(*mut ffi::Isolate),
 }
 
 impl GcVisitor {
@@ -4622,10 +4623,13 @@ impl GcVisitor {
     /// forgets its parent, and every `TracedGlobal` it traces lets go of its traced reference and
     /// makes its strong handle strong. The value is then safe to use and to put in another owner,
     /// however the garbage collector last visited it.
-    pub(crate) fn detach<T: crate::Traced>(_lock: &mut Lock<'_>, value: &T) {
+    ///
+    /// # Panics
+    /// Panics if `value` holds a `TracedGlobal` of an isolate other than the lock's.
+    pub(crate) fn detach<T: crate::Traced>(lock: &Lock<'_>, value: &T) {
         let mut visitor = Self {
             handle: ffi::GcVisitor { ptr: 0 },
-            mode: VisitMode::Detach,
+            mode: VisitMode::Detach(lock.isolate().as_ffi()),
         };
         value.trace(&mut visitor);
     }
@@ -4635,7 +4639,7 @@ impl GcVisitor {
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        self.mode == VisitMode::Detach
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -4670,7 +4674,7 @@ impl GcVisitor {
     /// # Traced nodes
     ///
     /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (`Cell::take`, `mem::replace`) is traced by nothing until it is put back, and nothing
+    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -4689,9 +4693,10 @@ impl GcVisitor {
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
     ///
-    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a visit
-    /// on behalf of another isolate, which debug builds assert against: a `TracedGlobal` belongs in
-    /// resources of its own isolate. A visit has no isolate when its resource has neither been
+    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
+    /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
+    /// under another isolate's lock panics. A `TracedGlobal` belongs in resources of its own
+    /// isolate. A visit has no isolate when its resource has neither been
     /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
     /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
     /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
@@ -4710,13 +4715,21 @@ impl GcVisitor {
     /// last visit wins, and the value can be collected while the other owner still uses it. So
     /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
     /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    ///
+    /// # Panics
+    /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
+    /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
             // of a dropped `TracedGlobal` are.
             return;
         }
-        if self.is_detaching() {
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                global.state.belongs_to(isolate),
+                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+            );
             // SAFETY: see below, and `GlobalSlot`.
             let (strong, traced) = unsafe {
                 (
@@ -4726,7 +4739,8 @@ impl GcVisitor {
             };
             if traced.ptr != 0 {
                 traced.ptr = 0;
-                // SAFETY: the strong handle is valid, and `detach` runs under the isolate lock.
+                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
+                // isolate, as checked above.
                 unsafe { ffi::global_clear_weak(strong) };
             }
             return;

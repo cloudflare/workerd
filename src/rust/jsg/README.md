@@ -178,41 +178,52 @@ GC owner that traces it: a resource, or a `Wrappable` such as the data of a func
 of the wrapper detached, as a moved C++ `jsg::Ref` is: every `jsg::Rc` and `TracedGlobal` in it is
 strong again, with no owner, so the reaction can keep it or put it in another owner (see
 `GcVisitor::is_detaching`; `GcVisitor::as_ffi` returns `None` for such a visit, which a `Traced`
-impl that visits through it must handle).
+impl that visits through it must handle). The `jsg::` cells below detach a value the same way.
 
 - Never put traced state inside an `std::rc::Rc`. A clone of the `Rc` held by a second GC owner
-  traces the same state again. For a `jsg::Rc`, C++ asserts a single owner
+  would trace the same state again, so `std::rc::Rc` is `Traced` only for types that hold no GC
+  references (`jsg::HoldsNoGcReferences`). For a `jsg::Rc`, C++ asserts a single owner
   (`Wrappable::visitRef` in `src/workerd/jsg/wrappable.c++`), so the process aborts. For a
   `TracedGlobal`, nothing asserts, but whichever owner traces it last decides whether its handle
   is strong or weak. The value can then be collected while the other owner still uses it. To give
   a callback or another party access to the state, give it a `jsg::Rc` or `jsg::Weak` to the
   resource that owns the state. A method gets one with a `this: jsg::Rc<Self>` parameter; see
   [Reaching the resource from a callback](#reaching-the-resource-from-a-callback).
-- Clone a `jsg::Rc` that you move out of a traced field (with `Cell::take`, `Option::take` or
-  `mem::replace`, or by popping it from a traced `Vec`), and use the clone. Once GC has visited a
-  `jsg::Rc` in a field, the `jsg::Rc` gives up its strong reference and relies on the field's
-  owner to trace it. Moved out of the field, it is neither strong nor traced, so GC can collect
-  the resource's JavaScript wrapper while Rust still holds it. The resource then gets a new
-  wrapper the next time it reaches JavaScript, and nothing traces the `TracedGlobal`s it holds,
-  so they can lose their values. C++ `jsg::Ref` doesn't have this problem because its move
-  constructor makes the reference strong again, but Rust has no hook on moves. A clone always
-  starts strong. Clone it right away, or at least before anything that can run JavaScript or
-  allocate on the V8 heap. See [#7976](https://github.com/cloudflare/workerd/issues/7976).
+- Keep a `jsg::Rc` or a `TracedGlobal` that a resource moves out of a field in a `jsg::Cell` or
+  a `jsg::RefCell`, not in a `std::cell::Cell` or `RefCell`. Once GC has visited a `jsg::Rc` in
+  a field, the `jsg::Rc` gives up its strong reference and relies on the field's owner to trace
+  it; a `TracedGlobal` makes its handle weak the same way. Moved out of the field by a bitwise
+  move, the reference is neither strong nor traced, so GC can collect the resource's JavaScript
+  wrapper, or the `TracedGlobal`'s value, while Rust still holds it. The resource then gets a
+  new wrapper the next time it reaches JavaScript, and nothing traces the `TracedGlobal`s it
+  holds, so they can lose their values. C++ `jsg::Ref` doesn't have this problem because its
+  move constructor makes the reference strong again, but Rust has no hook on moves.
+  `jsg::Cell::take`, `jsg::Cell::replace` and `jsg::RefCell::borrow_mut` detach everything in
+  the cell before it can leave, which makes it strong; see [Cells](#cells). A resource is
+  reached only through `&self`, so a cell is the only way to move a reference out of a field,
+  and the std cells are `Traced` only for types that hold no GC references
+  (`jsg::HoldsNoGcReferences`). The exception is a resource's `Drop` impl, which has
+  `&mut self`: a reference it moves out of a field and keeps must be cloned or dropped there.
+  See [#7976](https://github.com/cloudflare/workerd/issues/7976).
 - Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
   points back at its owner (for example function data that holds the function itself), neither
   is ever collected. Use a `TracedGlobal`. The compiler rejects a `Global` field in a resource,
   but not inside a type with a hand-written `impl Traced`, so check those by hand.
 
 Bad: two `Function::new` callbacks whose data are clones of one `std::rc::Rc<State>`, where
-`State` holds a `TracedGlobal`. Fix: a resource holds `State`, and each callback holds a
-`jsg::Rc` or `jsg::Weak` to that resource.
+`State` holds a `TracedGlobal`, which doesn't compile. Fix: a resource holds `State`, and each
+callback holds a `jsg::Rc` or `jsg::Weak` to that resource.
 
-Bad: `let task = self.pending.take().unwrap();`, then a call into JavaScript before `task` is
-used. Fix: `let task = self.pending.take().unwrap().clone();`.
+Bad: `pending: Cell<Option<jsg::Rc<Task>>>` or
+`callback: Cell<Option<TracedGlobal<Value>>>`, which don't compile. Fix:
+`pending: jsg::Cell<Option<jsg::Rc<Task>>>`, taken out with `self.pending.take(lock)`.
 
-Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource. No test
-checks for traced state behind an `std::rc::Rc`, or for a `jsg::Rc` used after it was moved out
-of a field; reviewers check those.
+Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource, and the
+`gc-reference-in-std-cell-is-not-traced` and `gc-reference-in-std-rc-is-not-traced` compile
+tests, for a `jsg::Rc` or a `TracedGlobal` in a std cell or a std `Rc`. No test checks a
+hand-written `impl Traced` that shares traced state some other way or reaches it through
+another kind of cell, a std cell included, or a hand-written `impl HoldsNoGcReferences` on a type
+whose `trace` visits something; reviewers check those.
 
 ### 3. Don't build on C++ JSG
 
@@ -293,7 +304,6 @@ Rust resources integrate with V8's garbage collector through the existing C++ `W
 
 ```rust
 use jsg_macros::{jsg_resource, jsg_method};
-use std::cell::Cell;
 
 #[jsg_resource]
 struct MyResource {
@@ -311,8 +321,8 @@ struct MyResource {
     // jsg::v8::TracedGlobal<T> fields — JS value traced with strong↔weak dual-mode switching.
     // Allows GC to detect and collect back-reference cycles (e.g. a stored callback
     // that closes over the resource's own JS wrapper).
-    // Must be wrapped in Cell<_> for interior mutability (trace takes &self).
-    callback: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    // Must be wrapped in jsg::Cell<_> for interior mutability (trace takes &self).
+    callback: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -355,17 +365,18 @@ struct Task {
 impl Task {
     /// Runs the task later: `scheduler` keeps a `jsg::Rc` of it until then.
     #[jsg_method]
-    fn schedule(this: jsg::Rc<Self>, scheduler: jsg::Rc<Scheduler>) {
+    fn schedule(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, scheduler: jsg::Rc<Scheduler>) {
         // `this` dereferences to the resource, like `&self`.
         this.scheduled.set(true);
-        scheduler.tasks.borrow_mut().push(this);
+        scheduler.tasks.borrow_mut(lock).push(this);
     }
 }
 ```
 
 Whatever holds the `jsg::Rc` must visit it in its `Traced::trace`, just as a resource visits
-its `jsg::Rc` fields. When it later moves the `jsg::Rc` out of that field, for example to run
-the task, it must clone it before use.
+its `jsg::Rc` fields. A field it later moves the `jsg::Rc` out of, for example to run the
+task, is a `jsg::Cell` or `jsg::RefCell` (here `tasks: jsg::RefCell<Vec<jsg::Rc<Task>>>`),
+which make the `jsg::Rc` strong on the way out; see [Cells](#cells).
 
 Don't give the callback the resource's state through an `std::rc::Rc` instead. Both rules are
 explained in [Safety rules](#safety-rules), rule 2.
@@ -378,6 +389,57 @@ it a `jsg::Weak<Self>` (`this.downgrade()`) instead.
 
 Calling the method on something that isn't a resource of this type throws a `TypeError`, as it
 does for `&self` methods. A method that takes `this` has no Fast API callback.
+
+### Cells
+
+A resource's methods take `&self`, so state that changes after construction lives in a cell.
+For traced state, that is a `jsg::Cell` or a `jsg::RefCell`:
+
+- `jsg::Cell<T>` moves its value in and out whole, like `std::cell::Cell`: `set(value)`,
+  `take(lock)` and `replace(lock, value)`.
+- `jsg::RefCell<T>` hands out borrows, like `std::cell::RefCell`: `borrow()` and
+  `borrow_mut(lock)`.
+
+`take`, `replace` and `borrow_mut` take the lock and detach what leaves the cell from its owner, as
+a typed promise's reaction does with its value: every `jsg::Rc` and `TracedGlobal` in it is strong
+again and forgets its owner. `borrow_mut` detaches the whole value, since the borrower can move any
+of it out. GC visits a `jsg::Rc` or a `TracedGlobal` where it finds it, and once the owner is
+reachable only through its wrapper the visit makes the reference weak and leaves it to the owner's
+trace. Moved out of the owner by a plain Rust move, the reference would be neither strong nor
+traced. The cells make it strong before it can leave, so whatever a method takes out, or pops from a
+borrowed `Vec`, stays valid for as long as the method holds it. A reference that stays in the cell
+is made weak again by the next GC visit. Everything in a mutably borrowed `jsg::RefCell` is strong,
+so a GC that runs during the borrow, which cannot look inside, loses nothing.
+
+```rust
+#[jsg_resource]
+struct Scheduler {
+    pending: jsg::Cell<Option<jsg::Rc<Task>>>,
+    queue: jsg::RefCell<Vec<jsg::Rc<Task>>>,
+}
+
+#[jsg_resource]
+impl Scheduler {
+    #[jsg_method]
+    fn run(&self, lock: &mut jsg::Lock<'_>) {
+        if let Some(task) = self.pending.take(lock) {
+            task.run(lock); // `task` is strong, whatever ran in between
+        }
+        // Moved out of the borrow first, so that `run`, which can run JavaScript, doesn't find
+        // the queue borrowed.
+        let tasks = std::mem::take(&mut *self.queue.borrow_mut(lock));
+        for task in tasks {
+            task.run(lock);
+        }
+    }
+}
+```
+
+`std::cell::Cell` and `std::cell::RefCell` are `Traced` only for types that hold no GC
+references, which the marker trait `jsg::HoldsNoGcReferences` marks; a `jsg::Rc` or a
+`TracedGlobal` in one is a compile error. So a `jsg::Rc` or `TracedGlobal` that leaves a traced
+field of a live resource is strong, unless a hand-written `impl Traced` reaches it through a std
+cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 
 ### GC Behavior
 
@@ -392,33 +454,34 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::NullOrUndefined<jsg::Rc<T>>` | Yes — when `Some` | |
 | `jsg::Lenient<jsg::Rc<T>>` | Yes — when `Some` or `Unconvertable` | |
-| `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
-| `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
-| `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
-| `Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `jsg::Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | Use `jsg::Cell` when the field is set after construction; `take` and `replace` make the `Rc` strong |
+| `jsg::Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `jsg::Cell<jsg::NullOrUndefined<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `jsg::RefCell<Vec<jsg::Rc<T>>>` | Yes — each element | Use `jsg::RefCell` when the field is changed in place; `borrow_mut` makes every `Rc` strong |
+| `Cell<T>` / `RefCell<T>` where `T` holds a `jsg::Rc` or a `TracedGlobal` | Compile error — no `Traced` impl | Use `jsg::Cell` / `jsg::RefCell` ([Cells](#cells)) |
 | `Vec<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` in the vec |
 | `HashMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
 | `BTreeMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
 | `jsg::Dict<jsg::Rc<T>>` | Yes — each value | Visits the value of every entry |
 | `HashSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `BTreeSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
-| `Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `Cell` variant of above |
-| `Cell<HashMap<K, jsg::Rc<T>>>` | Yes — each value | `Cell` variant of above |
-| Same patterns with `jsg::v8::TracedGlobal<T>` | Yes | All collection forms work with `TracedGlobal<T>` too |
+| `jsg::Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `jsg::Cell` variant of above |
+| `jsg::Cell<HashMap<K, jsg::Rc<T>>>` | Yes — each value | `jsg::Cell` variant of above |
+| Same patterns with `jsg::v8::TracedGlobal<T>` | Yes | All collection forms work with `TracedGlobal<T>` too, in `jsg::` cells |
 | `jsg::v8::TracedGlobal<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
 | `Option<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
 | `jsg::NullOrUndefined<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
-| `Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction |
-| `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
+| `jsg::Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction; `replace` makes the handle strong again |
+| `jsg::Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
 | `jsg::v8::Global<T>` | Compile error — no `Traced` impl | Use `TracedGlobal<T>` in resource fields |
 | `jsg::TracedAsyncContextFrame` | Yes — like `TracedGlobal<T>` | Nothing to trace for the root frame |
 | `jsg::AsyncContextFrame` | Compile error — no `Traced` impl | Use `TracedAsyncContextFrame` in resource fields |
-| `std::rc::Rc<T>` | Depends on `T` | Only for plain data; never around a `TracedGlobal` or `jsg::Rc` (Safety rules, rule 2) |
+| `std::rc::Rc<T>` where `T` holds a `jsg::Rc` or a `TracedGlobal` | Compile error — no `Traced` impl | Share a resource through a `jsg::Rc` or `jsg::Weak` instead (Safety rules, rule 2) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
-- **`Cell<T>` for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) can use `Cell<T>`. `Cell<T>` implements `Traced` by reading through `as_ptr()` during single-threaded GC tracing.
+- **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls; wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
@@ -613,35 +676,36 @@ and it is dropped like a `Global`. A `TracedGlobal` is `Send`, and not `Sync`: e
 both leave its handles alone on a thread that does not hold the isolate lock.
 
 A `TracedGlobal` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A
-`TracedGlobal` taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so
-the next full GC may free its node, and nothing tells the `TracedGlobal` that it moved, the way C++
-JSG's `jsg::Data` move constructor re-strengthens its handle. So each GC visit lets go of the old
-node and makes the strong handle strong again before C++ decides afresh whether to install a new
-node, and a drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
-`GcVisitor::visit_traced_global` for the cost of this and how to avoid it.
+`TracedGlobal` taken out of its resource is traced by nothing, so the next full GC may free its
+node, and nothing tells the `TracedGlobal` that it moved, the way C++ JSG's `jsg::Data` move
+constructor re-strengthens its handle. So each GC visit lets go of the old node and makes the
+strong handle strong again before C++ decides afresh whether to install a new node, and a drop
+just lets go of it. A detaching visit, which `jsg::Cell::take` and the other ways out of a
+`jsg::` cell run, does the same, so a `TracedGlobal` leaves its resource strong. V8 frees nodes
+that nothing traces at the next full GC; see `GcVisitor::visit_traced_global` for the cost of
+this and how to avoid it.
 
 Bitwise moves are also why a `TracedGlobal` keeps its handles in a box. In traced mode the strong
-handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box
-keeps that address valid however the `TracedGlobal` itself moves, for example when the `Vec` holding
-it grows. The box lives until the strong handle has been reset. GC can still run after the
-`Realm` is dropped, so the box of a `TracedGlobal` dropped then is kept until the isolate is
-disposed.
+handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box keeps
+that address valid however the `TracedGlobal` itself moves. A `TracedGlobal` leaves a `jsg::` cell
+strong, and a `std::cell::Cell` or `RefCell` cannot hold one, so a weak `TracedGlobal` moves only on
+its way to being dropped (`jsg::Cell::set`) or in a resource's `Drop` impl, which has `&mut self`.
+The box lives until the strong handle has been reset. GC can still run after the `Realm` is dropped,
+so the box of a `TracedGlobal` dropped then is kept until the isolate is disposed.
 
-A `TracedGlobal` taken out of its resource is still weak, and nothing traces its value: unless
-something else keeps the value alive, any GC from then on may free it, which leaves the
-`TracedGlobal` empty, and `as_local` on it panics. Put the `TracedGlobal` back, or hold the value
-through another handle, before a GC can run. Tracing likewise skips a `RefCell` while it is
-mutably borrowed, so the `TracedGlobal`s in it are untraced for as long as the borrow lasts; debug
-builds abort when that happens.
+A `TracedGlobal` taken out of a `jsg::Cell` with `take(lock)` or `replace(lock, ..)`, or moved
+out of a mutably borrowed `jsg::RefCell`, is strong and keeps its value; see [Cells](#cells).
+Tracing skips a `jsg::RefCell` while it is mutably borrowed, which is safe because `borrow_mut`
+made everything in it strong.
 
 `TracedGlobal<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_traced_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
 ```rust
 #[jsg_resource]
 struct EventEmitter {
-    // Cell<Option<_>> for interior mutability: the callback is set after
+    // jsg::Cell<Option<_>> for interior mutability: the callback is set after
     // construction, and trace() receives &self.
-    on_event: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    on_event: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -748,9 +812,9 @@ As with `Global` and `TracedGlobal`, there are two types:
   so that GC collects a cycle through the frame's values. It is `Send`, not `Sync`, and must have
   exactly one owner that GC traces. `TracedAsyncContextFrame::from` converts an
   `AsyncContextFrame`, and `to_async_context_frame(lock)` goes the other way, for example to pass
-  a resource's frame to async I/O. Like a `TracedGlobal` taken out of its resource, a
-  `TracedAsyncContextFrame` taken out of its field is traced by nothing: enter, clone or convert
-  it before anything can run JavaScript or allocate on the V8 heap, and put it back.
+  a resource's frame to async I/O. Like a `TracedGlobal`, a `TracedAsyncContextFrame` that a
+  resource changes after construction lives in a `jsg::Cell` or `jsg::RefCell`, which make it
+  strong as it leaves; see [Cells](#cells).
 
 ```rust
 let frame = jsg::AsyncContextFrame::current(lock);

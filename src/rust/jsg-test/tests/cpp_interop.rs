@@ -6,7 +6,6 @@
 //! resources that take, return and hold it (`crate::cpp_interop`).
 
 use std::cell::Cell;
-use std::cell::RefCell;
 
 use jsg::v8;
 
@@ -34,7 +33,7 @@ impl Drop for InRequest {
 fn new_host() -> jsg::Rc<Host> {
     jsg::Rc::new(Host {
         label: "test".to_owned(),
-        held: RefCell::new(None),
+        held: jsg::RefCell::new(None),
     })
 }
 
@@ -333,7 +332,7 @@ fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
         let (promise, resolver) =
             jsg::Promise::<jsg_cpp::Ref<ffi::TestCppHolder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, host, |lock, host, holder| {
-            host.hold(holder);
+            host.hold(lock, holder);
             // Traces the host, and through it the reference, from its new owner.
             Harness::request_gc(lock);
             Ok(())

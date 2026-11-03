@@ -17,13 +17,12 @@
 )]
 
 use std::any::TypeId;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::GarbageCollected;
 use crate::Lock;
+use crate::RefCell;
 use crate::Traced;
-use crate::v8::GcVisitor;
 use crate::v8::Local;
 use crate::v8::Value;
 use crate::v8::WrappableRc;
@@ -87,7 +86,6 @@ pub fn unwrap_opaque<'s, T: Traced + 'static>(
     // SAFETY: `wrappable` keeps the Wrappable, and with it the `Opaque`, alive while the reference
     // is used. Only shared references to the `Opaque` are ever created.
     let opaque = unsafe { opaque.as_ref() };
-    let value = opaque.0.try_borrow_mut().ok()?.take()?;
-    GcVisitor::detach(lock, &value);
-    Some(value)
+    // The borrow detaches the value before it is taken.
+    opaque.0.try_borrow_mut(lock).ok()?.take()
 }

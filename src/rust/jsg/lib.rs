@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 mod async_context;
 mod buffer;
+mod cell;
 mod dict;
 pub mod fast_api;
 pub mod feature_flags;
@@ -35,6 +36,8 @@ pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
+pub use cell::Cell;
+pub use cell::RefCell;
 pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
@@ -94,6 +97,7 @@ pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
+pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
 
