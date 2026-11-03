@@ -4744,11 +4744,13 @@ function acquireReadableStreamDrainingReader<R>(
 // nothing is retained per chunk. Small chunks are packed into blocks, each
 // as large as the blocks before it together (from the first chunk's size,
 // up to kCollectBlockSize); a chunk of kCollectCopySize or more that the
-// current block can't hold is copied out on its own instead, closing that
-// block, so a large chunk never lands in a block mostly left unused. A
-// declared length that fits one block is allocated whole up front, so a
-// body that meets it fills exactly one block and is handed over without a
-// further copy.
+// current block can't hold is taken on its own instead, closing that
+// block, so a large chunk never lands in a block mostly left unused. Such
+// a chunk is copied, unless the collector owns it (see collectChunks), in
+// which case it is kept as it is. A declared length that fits one block is
+// allocated whole up front, so a body that meets it fills exactly one
+// block and is handed over without a further copy, as is a body of one
+// owned chunk that spans its whole buffer.
 const kCollectBlockSize = 1024 * 1024;
 const kCollectCopySize = 16 * 1024;
 
@@ -4769,10 +4771,12 @@ class CollectedBytes {
     return this.#length;
   }
 
+  // `owned`: no other code can reach the chunk's buffer or change it.
   append(
     buffer: ArrayBufferLike,
     byteOffset: number,
-    byteLength: number
+    byteLength: number,
+    owned: boolean
   ): void {
     const source = new Uint8Array(buffer, byteOffset, byteLength);
     let block = this.#block;
@@ -4783,7 +4787,7 @@ class CollectedBytes {
     if (byteLength > room && byteLength >= kCollectCopySize) {
       this.#closeBlock();
       // Constructing from a view copies without zero-filling first.
-      ArrayPrototypePush(this.#parts, new Uint8Array(source));
+      ArrayPrototypePush(this.#parts, owned ? source : new Uint8Array(source));
       this.#length += byteLength;
       return;
     }
@@ -4886,6 +4890,12 @@ async function collectChunks<R>(
   const collected = new CollectedBytes(
     declaredBinds && bound <= kCollectBlockSize ? bound : 0
   );
+  // A queued byte stream's chunks belong to the consumer that drains them:
+  // enqueue() transfers each chunk's buffer, the identity streams enqueue
+  // copies of their own, and a tee hands every other branch a copy.
+  const controller = getReadableStreamController(stream);
+  const ownsChunks =
+    controller !== undefined && isByteStreamController(controller);
   while (true) {
     const result = await drainingReaderReadInternal<R>(reader, stream);
     const drained = result.chunks as unknown[];
@@ -4925,7 +4935,7 @@ async function collectChunks<R>(
             : new TypeError('Memory limit exceeded before EOF.')
         );
       }
-      collected.append(buffer, byteOffset, byteLength);
+      collected.append(buffer, byteOffset, byteLength, ownsChunks);
     }
     if (result.done) {
       if (declaredBinds && collected.length < bound) {
