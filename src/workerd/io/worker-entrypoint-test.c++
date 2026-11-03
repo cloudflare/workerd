@@ -11,8 +11,10 @@
 #include <workerd/util/exception.h>
 
 #include <kj/async-io.h>
+#include <kj/compat/http.h>
 #include <kj/sticky-flag.h>
 #include <kj/test.h>
+#include <kj/timer.h>
 
 namespace workerd {
 namespace {
@@ -1204,6 +1206,122 @@ KJ_TEST("local WebSocket transport failure ends the request without waiting for 
   KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
 }
 
+// Returns the client end of a WebSocketPair in a 101. Once globalThis.sent is set, the next
+// microtask calls ctx.abort(). The check is repeated in a chain of microtasks, one at a time, so a
+// check is always queued ahead of whatever the send queues.
+constexpr kj::StringPtr ABORT_AFTER_SEND_SOURCE = R"(
+  globalThis.sent = false;
+  export default {
+    fetch(request, env, ctx) {
+      const [client, server] = Object.values(new WebSocketPair());
+      server.accept();
+      let checks = 0;
+      const abortOnceSent = () => {
+        if (globalThis.sent || ++checks > 100) {
+          ctx.abort(new Error("test abort"));
+        } else {
+          queueMicrotask(abortOnceSent);
+        }
+      };
+      queueMicrotask(abortOnceSent);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+  };
+)"_kj;
+
+// Accepts `webSocket` and sets globalThis.sent, while the response is being sent from JavaScript.
+class SendSignalingResponse final: public kj::HttpService::Response {
+ public:
+  explicit SendSignalingResponse(kj::Own<kj::WebSocket> webSocket): webSocket(kj::mv(webSocket)) {}
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize) override {
+    KJ_FAIL_ASSERT("request unexpectedly returned a non-WebSocket response", statusCode);
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+    auto& js = jsg::Lock::current();
+    js.global().set(js, "sent"_kj, js.boolean(true));
+    return kj::mv(KJ_ASSERT_NONNULL(webSocket, "WebSocket accepted twice"));
+  }
+
+  bool wasSent() {
+    return webSocket == kj::none;
+  }
+
+ private:
+  kj::Maybe<kj::Own<kj::WebSocket>> webSocket;
+};
+
+KJ_TEST("a response sent just before ctx.abort() is destroyed before the request completes") {
+  // The promise that sends the response owns the accepted WebSocket, which must not outlive the
+  // request's `response`. Here the IoContext aborts after the JavaScript continuation starts the
+  // send, but before awaitJs() takes that promise from JavaScript. ctx.abort() terminates
+  // execution, so awaitJs() never takes it.
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ABORT_AFTER_SEND_SOURCE,
+    .useRealTimers = false,
+  });
+  bool transportDestroyed = false;
+  SendSignalingResponse response(kj::heap<ControlledWebSocket>(transportDestroyed));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  kj::NullStream requestBody;
+
+  entrypoint->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+      .wait(fixture.getWaitScope());
+
+  KJ_ASSERT(response.wasSent());
+  KJ_EXPECT(transportDestroyed);
+}
+
+// Streams a page through an HTMLRewriter whose comment handler calls ctx.abort(). The rewriter
+// buffers the output that precedes the comment and writes it to the response body only after the
+// handler returns, so the write starts while the IoContext is aborting.
+constexpr kj::StringPtr ABORT_IN_REWRITER_HANDLER_SOURCE = R"(
+  export default {
+    fetch(request, env, ctx) {
+      const page = new Response("<html><body><!--abort--></body></html>",
+          { headers: { "Content-Type": "text/html" } });
+      return new HTMLRewriter()
+          .onDocument({ comments() { ctx.abort(new Error("test abort")); } })
+          .transform(page);
+    }
+  };
+)"_kj;
+
+KJ_TEST("aborting a request while its response body is being written leaves the body incomplete") {
+  // A client can tell that a chunked response failed only if the body doesn't end with the
+  // terminal chunk. KJ writes the terminal chunk when the body stream is destroyed between writes
+  // (EW-812), so the abort must cancel the response only after the write has started.
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ABORT_IN_REWRITER_HANDLER_SOURCE,
+    .useRealTimers = false,
+  });
+  auto& waitScope = fixture.getWaitScope();
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+  kj::HttpHeaderTable headerTable;
+  kj::HttpServer server(timer, headerTable, *entrypoint);
+  auto pipe = kj::newTwoWayPipe();
+  auto listen = server.listenHttp(kj::mv(pipe.ends[0])).eagerlyEvaluate(nullptr);
+  auto& client = *pipe.ends[1];
+
+  client.write("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"_kjb).wait(waitScope);
+  // Lets the server close the connection after a response that completes.
+  client.shutdownWrite();
+  auto received = client.readAllText().wait(waitScope);
+
+  KJ_EXPECT(received.startsWith("HTTP/1.1 200 OK\r\n"), received);
+  KJ_EXPECT(received.contains("Transfer-Encoding: chunked\r\n"), received);
+  KJ_EXPECT(!received.endsWith("0\r\n\r\n"), received);
+  listen.wait(waitScope);
+}
+
 // When the peer transport is dropped relative to the abort. Both happen before the event loop
 // runs again.
 enum class PeerDrop { BEFORE_ABORT, AFTER_ABORT };
@@ -1237,6 +1355,22 @@ KJ_TEST("aborting a coupled local WebSocket request reports the abort") {
       EventOutcome::EXCEPTION);
   KJ_EXPECT(abortCoupledRequest(cpuLimitException(), PeerDrop::AFTER_ABORT) ==
       EventOutcome::EXCEEDED_CPU);
+}
+
+KJ_TEST("aborting a coupled local WebSocket request ends it without waiting for the peer") {
+  // The transport never receives a message or disconnects, so only the abort can end the session.
+  bool transportDestroyed = false;
+  LocalWebSocketRequest test(kj::heap<ControlledWebSocket>(transportDestroyed));
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  KJ_ASSERT_NONNULL(test.observer->coupledContext).abort(cpuLimitException());
+  test.fixture.pollEventLoop();
+  KJ_ASSERT(test.request.poll(test.fixture.getWaitScope()));
+  KJ_EXPECT(transportDestroyed);
+  test.finish();
+
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEEDED_CPU);
 }
 
 KJ_TEST("an abort pending with a peer disconnect reports the abort") {

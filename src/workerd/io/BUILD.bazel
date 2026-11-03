@@ -733,6 +733,7 @@ kj_test(
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
         "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 

@@ -505,35 +505,74 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
     auto body2 = kj::addRef(*ownRequestBody);
 
-    // HACK: If the client disconnects, the `response` reference is no longer valid. But our
-    //   promise resolves in JavaScript space, so won't be canceled. So we need to track
-    //   cancellation separately. We use a refcounted boolean.
-    // TODO(cleanup): Is there something less ugly we can do here?
-    auto canceled = kj::rc<bool>(false);
+    // Receives the promise returned by `Response::send()`. That promise owns the response body
+    // stream or the accepted WebSocket, neither of which may outlive `response`, so it must be
+    // destroyed by the time this request's promise settles or is canceled.
+    //
+    // The JavaScript continuation below stores the promise here instead of returning it through
+    // the JavaScript promise. Returned through JavaScript, it would be owned by the IoContext until
+    // awaitJs() picks it up in a later microtask. If the IoContext is aborted in between, awaitJs()
+    // fails with the abort reason and its microtask may never run, leaving the promise with the
+    // IoContext after this request completes.
+    //
+    // The only strong reference is captured by the KJ `.then()` chained on awaitJs(), so the slot
+    // and anything still in it are destroyed with that promise node:
+    // - On success, that continuation moves the promise into this request's promise chain,
+    //   leaving the slot empty. It is joined with the IoContext's abort there, which cancels a
+    //   response still being sent, such as a WebSocket session still being pumped.
+    // - If awaitJs() fails, such as when the IoContext is aborted, that continuation is skipped.
+    //   Its node is destroyed when the failure reaches the next KJ `.then()`, which drops its
+    //   dependency before running its error handler. So, the response is destroyed before this
+    //   request fails.
+    // - If this request is canceled, the node is destroyed with the rest of the chain.
+    //
+    // The JavaScript continuation is not canceled along with this request, so it holds a weak
+    // reference. Once that expires, this request no longer waits for the response, and `response`
+    // is a dangling reference.
+    auto sendPromise = kj::rc<kj::Maybe<kj::Promise<DeferredProxy<void>>>>();
 
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = canceled.addRef(), &headers, span = kj::mv(span)](
-                        jsg::Lock& js, IoContext& context, jsg::Ref<Response> innerResponse) mutable
-                    -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+                        weakSendPromise = sendPromise.downgrade(), &headers, span = kj::mv(span)](
+                        jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
-      if (*canceled) {
-        // Oops, the client disconnected before the response was ready to send. `response` is
-        // a dangling reference, let's not use it.
-        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
-      } else {
-        return context.addObject(kj::heap(
-            innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
+      // Send only if this request is still waiting for the response.
+      KJ_IF_SOME(slot, weakSendPromise.tryGet()) {
+        slot = innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
       }
     })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { *canceled = true; }))
+        .then([contextRef = ioContext.getWeakRef(),
+                  sendPromise = kj::mv(sendPromise)]() mutable -> kj::Promise<DeferredProxy<void>> {
+      // The JavaScript promise resolves only after the continuation has run. This request was
+      // still waiting then, since this node holds the strong reference, so the continuation sent
+      // the response.
+      auto send = KJ_ASSERT_NONNULL(kj::mv(*sendPromise), "response was not sent");
+
+      KJ_IF_SOME(ioContext, contextRef->tryGet()) {
+        // On abort, the response is canceled only after the events already queued have run. Work
+        // that failed along with the IoContext, such as an HTMLRewriter whose handler exceeded the
+        // CPU limit, may still be flushing output into the response body. Canceling a body write in
+        // progress leaves the body incomplete, so the client sees a disconnect. Canceling the body
+        // while it is idle ends it as if the response had succeeded (EW-812).
+        auto abortAfterQueuedEvents = ioContext.onAbort().catch_([](kj::Exception&& e) {
+          return kj::evalLater([e = kj::mv(e)]() mutable { kj::throwException(kj::mv(e)); });
+        });
+        return send.exclusiveJoin(
+            abortAfterQueuedEvents.then([]() -> DeferredProxy<void> { KJ_UNREACHABLE; }));
+      }
+
+      // The request keeps the IoContext alive until it settles, so this is not expected. If the
+      // IoContext is gone anyway, the send can't continue, since it depends on the IoContext, and
+      // can no longer be aborted. Returning destroys it before the request fails.
+      return KJ_EXCEPTION(FAILED, "IoContext was destroyed while the response was being sent");
+    })
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
