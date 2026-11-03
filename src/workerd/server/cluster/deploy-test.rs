@@ -267,6 +267,8 @@ fn deployments_compose_and_conflicts_are_refused() {
              deployment \"b\"."
         );
         assert_eq!(catalog_of(&bucket).await, before);
+        // Refused before it was uploaded.
+        assert!(bucket.list("deploy/c/").await.unwrap().is_empty());
 
         let names: Vec<_> = load(&bucket)
             .await

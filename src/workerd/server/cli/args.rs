@@ -154,7 +154,69 @@ pub enum Command {
         #[arg(value_name = "output-directory")]
         output_directory: String,
     },
+
+    /// publish an application to a cluster
+    #[command(
+        long_about = "Publishes an application as a deployment in a cluster bucket (experimental).",
+        after_long_help = DEPLOY_HELP,
+    )]
+    Deploy {
+        /// A wrangler project directory, a `wrangler.json` or `wrangler.jsonc` file, or a Cap'n
+        /// Proto config that contains only services. A Cap'n Proto config requires --name.
+        #[arg(value_name = "project", default_value = ".")]
+        project: String,
+
+        /// For a Cap'n Proto <project>, the constant that contains the config. This works like the
+        /// value for `serve`.
+        #[arg(value_name = "const-name")]
+        const_name: Option<String>,
+
+        #[command(flatten)]
+        deploy: DeployArgs,
+    },
 }
+
+const DEPLOY_HELP: &str = "\
+Publishes <project> to the cluster bucket given by --bucket. A deployment is a named application \
+stored in that bucket. The catalog is the bucket record that selects the current version of \
+every deployment. This command uploads the deployment and updates the catalog.
+
+<project> can be:
+    - A wrangler project directory or a `wrangler.json` or `wrangler.jsonc` file. Translation \
+      works like `serve`. Esbuild bundles the project unless it sets \"no_bundle\".
+    - A Cap'n Proto config that contains only services. This form requires --name.
+
+--name names the deployment. For a wrangler project, it defaults to the config's `name`. The \
+wrangler worker becomes a service with the deployment's name. The deployment contains no \
+socket. Its Durable Objects use the disk service named `do-storage`.
+
+An instance is one workerd process in the cluster. Every instance that serves a wrangler \
+deployment with Durable Objects must define the `do-storage` service in its own config.
+
+Each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here, `<name>` is the deployment \
+name. `<key>` is the class's storage key from the project's migrations. The storage key defaults \
+to the class name and stays the same after a rename. Publishing the project under another name \
+creates a separate application with empty Durable Objects.
+
+The command checks the deployment before uploading it. The check includes the other deployments \
+in the catalog. The command repeats this check when it updates the catalog. Each instance also \
+checks the deployment against its own config at startup. An instance refuses to start if it \
+cannot serve the deployment.
+
+Publishing the version already selected by the catalog leaves the catalog unchanged. Publishing \
+an earlier version rolls the deployment back to that version. The command prints the deployment \
+version and catalog revision.
+
+Bucket credentials use the same environment variables as the instances:
+    - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_SESSION_TOKEN; or
+    - AWS_CREDENTIALS_FILE.
+
+See `bucketOptions` in workerd.capnp for credential details. --endpoint uses AWS_ENDPOINT_URL \
+when the flag is absent. --region uses AWS_REGION, then defaults to us-east-1.
+
+Instances read the catalog only at startup. Restart each instance to serve a published catalog \
+revision. See `ClusterConfig` in workerd.capnp.
+";
 
 const TEST_HELP: &str = "\
 Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
@@ -353,6 +415,85 @@ pub struct ServeArgs {
     /// development only.
     #[arg(long, value_name = "addr")]
     pub debug_port: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DeployArgs {
+    /// Name the deployment. Use 1 to 64 ASCII letters, digits, hyphens, or underscores. The first
+    /// character must be a letter or digit. The name defaults to the wrangler config's `name`.
+    #[arg(long, value_name = "name")]
+    pub name: Option<String>,
+
+    /// Store the deployment in this cluster bucket: s3://<bucket>[/<prefix>]. This value matches
+    /// `cluster.bucket` in each instance's config.
+    #[arg(long, value_name = "url", value_parser = parse_bucket)]
+    pub bucket: String,
+
+    /// Use this S3-compatible endpoint for the bucket. This value matches the instances'
+    /// `aws_endpoint` setting.
+    #[arg(long, value_name = "url", value_parser = parse_endpoint)]
+    pub endpoint: Option<String>,
+
+    /// Use this region for the bucket. This value matches the instances' `aws_region` setting.
+    #[arg(long, value_name = "region")]
+    pub region: Option<String>,
+
+    /// For a Cap'n Proto <project>, search <dir> for non-relative imports. This works like the
+    /// option for `serve`.
+    #[arg(short = 'I', long = "import-path", value_name = "dir")]
+    pub import_paths: Vec<String>,
+
+    /// Read <project> as an encoded binary Cap'n Proto config. `workerd compile --config-only`
+    /// writes this format. Use `-` to read it from stdin.
+    #[arg(short, long)]
+    pub binary: bool,
+
+    /// Enable experimental features. Cluster mode requires this flag.
+    #[arg(long)]
+    pub experimental: bool,
+}
+
+impl DeployArgs {
+    /// Build the bucket options used by the instances' `cluster.bucketOptions` setting.
+    pub fn bucket_options(&self) -> Vec<String> {
+        let endpoint = self.endpoint.iter().map(|e| format!("aws_endpoint={e}"));
+        let region = self.region.iter().map(|r| format!("aws_region={r}"));
+        endpoint.chain(region).collect()
+    }
+}
+
+/// Parse `--bucket` as `s3://<bucket>[/<prefix>]`. The bucket client uses the same format for
+/// `cluster.bucket`.
+fn parse_bucket(param: &str) -> Result<String, &'static str> {
+    let rest = param
+        .strip_prefix("s3://")
+        .ok_or("expected s3://<bucket>[/<prefix>]")?;
+    let (bucket, _) = rest.split_once('/').unwrap_or((rest, ""));
+    if bucket.is_empty() || bucket.contains(char::is_whitespace) {
+        return Err("expected a bucket name in s3://<bucket>[/<prefix>]");
+    }
+    Ok(param.to_owned())
+}
+
+/// Parse `--endpoint` as an HTTP or HTTPS URL with a host and no path. The bucket client signs
+/// request paths that start with the bucket name.
+fn parse_endpoint(param: &str) -> Result<String, &'static str> {
+    const EXPECTED: &str =
+        "expected http://<host>[:<port>] or https://<host>[:<port>], with no path";
+    let rest = param
+        .strip_prefix("https://")
+        .or_else(|| param.strip_prefix("http://"))
+        .ok_or(EXPECTED)?;
+    let (authority, path) = rest
+        .find(['/', '?', '#'])
+        .map_or((rest, ""), |at| rest.split_at(at));
+    if authority.is_empty()
+        || authority.contains(|c: char| c.is_whitespace() || c == '@')
+        || !matches!(path, "" | "/")
+    {
+        return Err(EXPECTED);
+    }
+    Ok(param.to_owned())
 }
 
 #[derive(Args, Debug, Default)]

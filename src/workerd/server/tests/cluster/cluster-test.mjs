@@ -22,6 +22,9 @@
 //  10. Draining cancels a running onHibernate handler.
 //  11. A fresh cluster serves the deployment its bucket holds, Durable Objects
 //      included, and a node refuses a deployment that holds more than services.
+//      `workerd deploy` publishes a Cap'n Proto config or a wrangler project for
+//      the nodes to start on, and refuses a deployment that holds more than
+//      services or conflicts with another.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -80,9 +83,20 @@ class ClusterNode {
   #closed = null;
   #stderrBuffer = '';
   #extraArgs;
+  #disk;
 
-  constructor({ binary, config, localPath, s3Port, nodeId, extraArgs = [] }) {
+  // `localPath` is the directory of the config's disk service `disk`.
+  constructor({
+    binary,
+    config,
+    localPath,
+    disk = 'local',
+    s3Port,
+    nodeId,
+    extraArgs = [],
+  }) {
     this.#extraArgs = extraArgs;
+    this.#disk = disk;
     this.#binary = binary;
     this.#config = config;
     this.#localPath = localPath;
@@ -120,7 +134,7 @@ class ClusterNode {
       `--socket-addr=http=127.0.0.1:0`,
     ];
     if (this.#localPath !== undefined) {
-      args.push(`--directory-path=local=${this.#localPath}`);
+      args.push(`--directory-path=${this.#disk}=${this.#localPath}`);
     }
     args.push(...this.#extraArgs);
 
@@ -337,13 +351,15 @@ class FakeS3 {
 //   bucket     the FakeS3
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
-// The nodes run `config`, once `before` has prepared the bucket.
+// The nodes run `config`, whose disk service `disk` is a directory of each
+// node's own, once `before` has prepared the bucket.
 async function withCluster(
   numNodes,
   fn,
   {
     extraArgs = () => [],
     config = env.WD_TEST_CONFIG,
+    disk = 'local',
     before = async () => {},
   } = {}
 ) {
@@ -363,6 +379,7 @@ async function withCluster(
         binary: env.WORKERD_BINARY,
         config,
         localPath,
+        disk,
         s3Port: bucket.port,
         nodeId: `node${i}`,
         extraArgs: await extraArgs(i),
@@ -1331,10 +1348,16 @@ test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO a
   });
 });
 
+// The config of a node that serves the deployments in its bucket, and its disk,
+// on which a deployment's Durable Objects are stored (`workerd deploy --help`).
+const DEPLOYMENT_NODE = { config: env.NODE_CONFIG, disk: 'do-storage' };
+
 // The encoded message `workerd compile --config-only` writes for the config
-// at `path`.
-async function compileConfig(path) {
-  const child = spawn(env.WORKERD_BINARY, ['compile', '--config-only', path], {
+// at `path`, constant `constName` if given.
+async function compileConfig(path, constName) {
+  const args = ['compile', '--config-only', path];
+  if (constName !== undefined) args.push(constName);
+  const child = spawn(env.WORKERD_BINARY, args, {
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   const chunks = [];
@@ -1366,7 +1389,7 @@ async function deploy(bucket, name, config) {
 }
 
 test('cluster: a fresh cluster serves the deployment in its bucket', async () => {
-  const deployment = await compileConfig(env.DEPLOYMENT_CONFIG);
+  const deployment = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
   await withCluster(
     2,
     async ({ nodes, bucket, nodeKeys }) => {
@@ -1399,7 +1422,7 @@ test('cluster: a fresh cluster serves the deployment in its bucket', async () =>
       assert.strictEqual(JSON.parse(record).node, nodeKeys.get(owner));
     },
     {
-      config: env.NODE_CONFIG,
+      ...DEPLOYMENT_NODE,
       before: (bucket) => deploy(bucket, 'app', deployment),
     }
   );
@@ -1415,7 +1438,7 @@ test('cluster: a node refuses a deployment that holds more than services', async
     await deploy(bucket, 'app', deployment);
     const node = new ClusterNode({
       binary: env.WORKERD_BINARY,
-      config: env.NODE_CONFIG,
+      ...DEPLOYMENT_NODE,
       localPath: root,
       s3Port: bucket.port,
       nodeId: 'node0',
@@ -1432,5 +1455,213 @@ test('cluster: a node refuses a deployment that holds more than services', async
   } finally {
     await bucket.stop();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+// Runs `workerd deploy --experimental` with `args` against `bucket`, named by
+// flags, with the credentials the nodes' config gives in the environment.
+// Answers the exit code and what it wrote.
+async function workerdDeploy(bucket, args) {
+  const child = spawn(
+    env.WORKERD_BINARY,
+    [
+      'deploy',
+      '--experimental',
+      ...args,
+      '--bucket=s3://wdtest/cluster',
+      `--endpoint=http://127.0.0.1:${bucket.port}`,
+      '--region=us-east-1',
+    ],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...env,
+        AWS_ENDPOINT_URL: undefined,
+        AWS_ACCESS_KEY_ID: 'wdtest',
+        AWS_SECRET_ACCESS_KEY: 'wdtest-secret',
+      },
+    }
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+    process.stderr.write(`[deploy] ${chunk}`);
+  });
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject).once('close', resolve);
+  });
+  return { code, stdout, stderr };
+}
+
+test("cluster: `workerd deploy` publishes a Cap'n Proto config, and refuses one that conflicts", async () => {
+  const args = [env.DEPLOYMENT_CONFIG, 'deployment'];
+  await withCluster(
+    1,
+    async ({ nodes, bucket }) => {
+      const { status, body } = await fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=deployed'
+      );
+      assert.strictEqual(status, 200, JSON.stringify(body));
+      assert.strictEqual(body.count, 1);
+
+      // Publishing the current version again changes nothing.
+      const again = await workerdDeploy(bucket, [...args, '--name=app']);
+      assert.strictEqual(again.code, 0, again.stderr);
+      assert.match(
+        again.stdout,
+        /catalog revision 1 selects deployment "app" version [0-9a-f]{64}\b/
+      );
+
+      // Under another name its service and Durable Object namespace are
+      // defined twice: refused before anything is uploaded.
+      const other = await workerdDeploy(bucket, [...args, '--name=other']);
+      assert.strictEqual(other.code, 1, other.stderr);
+      assert.match(
+        other.stderr,
+        /deployment "other" defines service "main"\. The same service is already defined by deployment "app"/
+      );
+      assert.strictEqual(
+        JSON.parse(await bucket.get('deploy/catalog.json')).revision,
+        1
+      );
+      assert.deepStrictEqual(await bucket.list('deploy/other/'), []);
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      // Published before any node runs: the node starts on it.
+      before: async (bucket) => {
+        const deployed = await workerdDeploy(bucket, [...args, '--name=app']);
+        assert.strictEqual(deployed.code, 0, deployed.stderr);
+        assert.match(
+          deployed.stdout,
+          /catalog revision 1 selects deployment "app" version [0-9a-f]{64}\b/
+        );
+      },
+    }
+  );
+});
+
+test('cluster: `workerd deploy` refuses a deployment that holds more than services', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    1,
+    async ({ bucket }) => {
+      const deployed = await workerdDeploy(bucket, [
+        env.NODE_CONFIG,
+        '--name=app',
+      ]);
+      assert.strictEqual(deployed.code, 1, deployed.stderr);
+      assert.match(deployed.stderr, /A deployment may contain only `services`/);
+      assert.strictEqual(
+        JSON.parse(await bucket.get('deploy/catalog.json')).revision,
+        1
+      );
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+// A wrangler project's worker: a Counter Durable Object that `/increment`
+// reaches, and `/version`, its VERSION var.
+const WRANGLER_WORKER = `
+export class Counter {
+  constructor(state) {
+    this.state = state;
+  }
+  async fetch() {
+    const count = ((await this.state.storage.get('count')) ?? 0) + 1;
+    await this.state.storage.put('count', count);
+    return Response.json({ count, id: this.state.id.toString() });
+  }
+}
+export default {
+  async fetch(request, env) {
+    if (new URL(request.url).pathname === '/version') {
+      return Response.json({ version: env.VERSION });
+    }
+    return env.COUNTER.get(env.COUNTER.idFromName('wrangler')).fetch(request);
+  },
+};
+`;
+
+// Writes a wrangler project of WRANGLER_WORKER to `dir`, a no_bundle one with
+// the Counter class and `fields`.
+async function writeWranglerProject(dir, fields) {
+  await writeFile(join(dir, 'index.js'), WRANGLER_WORKER);
+  await writeFile(
+    join(dir, 'wrangler.jsonc'),
+    JSON.stringify({
+      main: 'index.js',
+      compatibility_date: '2026-01-01',
+      no_bundle: true,
+      durable_objects: {
+        bindings: [{ name: 'COUNTER', class_name: 'Counter' }],
+      },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }],
+      ...fields,
+    })
+  );
+}
+
+test('cluster: `workerd deploy` publishes a wrangler project', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  // Named "main", the service the nodes' socket serves.
+  const configure = (version) =>
+    writeWranglerProject(project, { name: 'main', vars: { VERSION: version } });
+  try {
+    await configure('1');
+    await withCluster(
+      2,
+      async ({ nodes, bucket, nodeKeys }) => {
+        // Translated as a deployment: no socket, and no disk of its own.
+        assert.deepStrictEqual((await readdir(project)).sort(), [
+          'index.js',
+          'wrangler.jsonc',
+        ]);
+        const counts = [];
+        let id;
+        for (const node of nodes) {
+          assert.strictEqual(
+            (await fetchJson(node.httpPort, '/version')).body.version,
+            '1'
+          );
+          const { status, body } = await fetchJson(node.httpPort, '/increment');
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.count);
+          id = body.id;
+        }
+        assert.deepStrictEqual(counts, [1, 2]);
+        // The object is clustered, under the storage key the deployment's name
+        // gives its class.
+        const record = await bucket.get(
+          `${objectPrefix(id, 'main-Counter')}/own.json`
+        );
+        assert.notStrictEqual(record, null);
+        assert(
+          [...nodeKeys.values()].includes(JSON.parse(record).node),
+          record
+        );
+      },
+      {
+        ...DEPLOYMENT_NODE,
+        // Published before any node runs: the nodes start on it.
+        before: async (bucket) => {
+          const deployed = await workerdDeploy(bucket, [project]);
+          assert.strictEqual(deployed.code, 0, deployed.stderr);
+          assert.match(
+            deployed.stdout,
+            /catalog revision 1 selects deployment "main" version [0-9a-f]{64}\b/
+          );
+        },
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
   }
 });

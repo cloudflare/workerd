@@ -23,7 +23,7 @@ const deployment :Workerd.Config = (
         durableObjectNamespaces = [
           ( className = "Counter", uniqueKey = "deployed-counter-namespace" ),
         ],
-        durableObjectStorage = ( localDisk = "local" ),
+        durableObjectStorage = ( localDisk = "do-storage" ),
       )
     ),
   ],
