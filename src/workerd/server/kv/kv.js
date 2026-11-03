@@ -25,9 +25,9 @@
 // rather than hold them, so entries are small; blobs never change, and in a
 // cluster `BLOBS` caches them on the node's disk.
 //
-// With `TEST_CLOCK` (`WORKERD_KV_TEST_CLOCK` set, outside a cluster), POST
-// /clock?advance=<ms> moves this process's expiration clock, for tests of
-// expiry; it moves nothing else.
+// With `TEST_CLOCK` (`WORKERD_KV_TEST_CLOCK` set), POST /clock?advance=<ms>
+// moves this process's clock for expiry and the entry cache, for tests; blob
+// collection keeps the real clock.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -45,8 +45,9 @@ const CACHE_BYTES = 64 * 1024 * 1024;
 // A reserved blob unclaimed this long is deleted.
 const RESERVE_MS = 600_000;
 // A blob no row names is deleted this much later, which spares readers
-// that read the row a moment before a retry.
+// that read the row a moment before a retry; less under `TEST_CLOCK`.
 const GRACE_MS = 2_000;
+const TEST_GRACE_MS = 100;
 const READS = 3;
 
 class Fail extends Error {
@@ -93,7 +94,11 @@ async function serve(request, env, ns) {
     case 'POST':
       if (path === '/bulk/get') return bulk(request, env, space);
       if (path === '/clock' && env.TEST_CLOCK) {
-        skew += Number(params.get('advance'));
+        const advance = Number(params.get('advance'));
+        if (!Number.isFinite(advance)) {
+          return fail(400, 'advance must be a number of milliseconds.');
+        }
+        skew += advance;
         return new Response(null);
       }
       break;
@@ -294,15 +299,7 @@ async function bulk(request, env, space) {
   }
   for (const key of keys) validate(String(key));
   const ttl = cacheTtl(body.cacheTtl);
-  const got = await read(env, space, keys, ttl);
-  const total = got.reduce((n, g) => n + (g.entry?.value.byteLength ?? 0), 0);
-  if (total > MAX_BULK_BYTES) {
-    throw new Fail(
-      413,
-      `Total size of request exceeds the limit of ` +
-        `${MAX_BULK_BYTES / 1024 / 1024}MB`
-    );
-  }
+  const got = await read(env, space, keys, ttl, MAX_BULK_BYTES);
   const out = {};
   keys.forEach((key, i) => {
     const { entry } = got[i];
@@ -361,7 +358,7 @@ function remember(space, key, row, ttl, version) {
   if ((cache.get(k)?.version ?? -1) > version) return;
   forget(k);
   const size = cost(k, row);
-  const at = Date.now();
+  const at = clock();
   cache.set(k, { row, at, until: at + ttl * 1000, size, version });
   cached += size;
   for (const old of cache.keys()) {
@@ -375,7 +372,7 @@ function recall(space, key, ttl) {
   const k = cacheKey(space, key);
   const c = cache.get(k);
   if (c === undefined) return undefined;
-  const now = Date.now();
+  const now = clock();
   const old = c.until <= now || now - c.at >= ttl * 1000;
   if (old || (c.row?.expiration ?? Infinity) <= now) {
     forget(k);
@@ -388,7 +385,9 @@ function recall(space, key, ttl) {
 
 // Each key's entry (`{value, expiration, metadata}` or null) and whether
 // its row came from the cache.
-async function read(env, space, keys, ttl) {
+// Each key's entry and whether it was cached, refused with a 413 once
+// their values pass `cap` bytes, before any further blob is read.
+async function read(env, space, keys, ttl, cap = Infinity) {
   const rows = keys.map((key) => recall(space, key, ttl));
   const hits = rows.map((row) => row !== undefined);
   const misses = keys.filter((_, i) => !hits[i]);
@@ -401,10 +400,20 @@ async function read(env, space, keys, ttl) {
       remember(space, key, rows[i], ttl, got.version);
     });
   }
-  const entries = await Promise.all(
-    keys.map((key, i) => load(env, space, key, rows[i], ttl))
-  );
-  return entries.map((entry, i) => ({ entry, hit: hits[i] }));
+  const out = [];
+  let total = 0;
+  for (const [i, key] of keys.entries()) {
+    const entry = await load(env, space, key, rows[i], ttl);
+    total += entry?.value.byteLength ?? 0;
+    if (total > cap) {
+      throw new Fail(
+        413,
+        `Total size of request exceeds the limit of ${cap / 1024 / 1024}MB`
+      );
+    }
+    out.push({ entry, hit: hits[i] });
+  }
+  return out;
 }
 
 // A row as an entry, reading its blob. A blob that is gone was replaced
@@ -542,7 +551,7 @@ export class KVNamespace extends DurableObject {
       key
     );
     for (const { blob } of removed) {
-      if (blob !== null) this.#collect(blob, Date.now() + GRACE_MS);
+      if (blob !== null) this.#collect(blob, Date.now() + this.#grace());
     }
   }
 
@@ -582,7 +591,7 @@ export class KVNamespace extends DurableObject {
     const due = this.sql
       .exec('SELECT blob FROM garbage WHERE due <= ? LIMIT 100', now)
       .toArray();
-    for (const { blob } of due) this.#collect(blob, now + GRACE_MS);
+    for (const { blob } of due) this.#collect(blob, now + this.#grace());
     await Promise.all(
       due.map(async ({ blob }) => {
         const r = await this.env.BLOBS.fetch(`http://blobs/${blob}`, {
@@ -604,6 +613,10 @@ export class KVNamespace extends DurableObject {
       )
       .toArray();
     if (next !== null) this.#wake(Math.max(next, Date.now() + 100));
+  }
+
+  #grace() {
+    return this.env.TEST_CLOCK ? TEST_GRACE_MS : GRACE_MS;
   }
 
   #collect(blob, due, key = null) {

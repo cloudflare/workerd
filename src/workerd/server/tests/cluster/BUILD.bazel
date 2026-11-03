@@ -2,9 +2,8 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 # Two takeovers wait out a dead owner's 20 s lease. Downstream caps
 # "eternal" at 240 s; add takeovers to the simulations instead.
-# The KV cache test waits out a 30 s cacheTtl, so it runs on its own.
-[js_test(
-    name = name,
+js_test(
+    name = "cluster-test",
     size = "large",
     timeout = "eternal",
     data = [
@@ -21,9 +20,5 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
         "WD_TEST_CONFIG": "$(rootpath :cluster-test.wd-test)",
         "FAKE_S3_CONFIG": "$(rootpath :fake-s3.wd-test)",
     },
-    node_options = [option + "=cacheTtl"],
     tags = ["js-test"],
-) for name, option in [
-    ("cluster-test", "--test-skip-pattern"),
-    ("cluster-kv-cache-test", "--test-name-pattern"),
-]]
+)

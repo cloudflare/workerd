@@ -109,9 +109,9 @@ fn rewrite(words: &[u64]) -> capnp::Result<Option<Vec<u64>>> {
 }
 
 /// `clustered` turns on the Worker's entry cache: locally the object is in
-/// the process, and another process's write must be seen at once. Outside a
-/// cluster, `WORKERD_KV_TEST_CLOCK` in the environment lets tests advance
-/// the expiration clock.
+/// the process, and another process's write must be seen at once.
+/// `WORKERD_KV_TEST_CLOCK` in the environment lets tests advance the clock
+/// of expiry and the cache.
 fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     service.set_name(NAME);
     let mut w = service.init_worker();
@@ -138,7 +138,7 @@ fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     let mut cluster = bindings.reborrow().get(2);
     cluster.set_name("CLUSTERED");
     cluster.set_json(clustered.to_string());
-    let clock = !clustered && std::env::var_os("WORKERD_KV_TEST_CLOCK").is_some();
+    let clock = std::env::var_os("WORKERD_KV_TEST_CLOCK").is_some();
     let mut test_clock = bindings.get(3);
     test_clock.set_name("TEST_CLOCK");
     test_clock.set_json(clock.to_string());

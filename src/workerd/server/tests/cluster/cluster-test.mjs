@@ -129,6 +129,7 @@ class ClusterNode {
         // Drop the runtime on exit, joining its threads, which TSan reports
         // as leaked otherwise.
         KJ_CLEAN_SHUTDOWN: '1',
+        WORKERD_KV_TEST_CLOCK: '1',
         NODE_ID: this.#nodeId,
         AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
       },
@@ -870,13 +871,12 @@ test('cluster: KV reads are stale for at most cacheTtl', async () => {
       (await fetchJson(port, `/kv/get?${q({ key: 's', cacheTtl: '30' })}`))
         .body;
     await fetchJson(b, `/kv/put?${q({ key: 's', value: 'old' })}`);
-    const start = Date.now();
     assert.strictEqual((await read(a)).value, 'old');
     await fetchJson(b, `/kv/put?${q({ key: 's', value: 'new' })}`);
     assert.strictEqual((await read(b)).value, 'new');
     const stale = await read(a);
     assert.deepStrictEqual([stale.value, stale.cacheStatus], ['old', 'HIT']);
-    await sleep(start + 31_000 - Date.now());
+    await fetchJson(a, `/kv/clock?${q({ advance: '31000' })}`);
     assert.strictEqual((await read(a)).value, 'new');
   });
 });

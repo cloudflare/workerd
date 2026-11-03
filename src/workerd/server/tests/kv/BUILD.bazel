@@ -1,7 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("//:build/wd_test.bzl", "wd_test")
 
-# Waits out the real blob grace period, seconds at a time.
+# Moves 25 MiB values, which takes most of 15 s on ASan and debug builds.
 wd_test(
     size = "large",
     src = "kv-test.wd-test",

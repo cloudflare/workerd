@@ -29,6 +29,10 @@ const config :Workerd.Config = (
           ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
           ( name = "ON_HIBERNATE", service = "on-hibernate" ),
           ( name = "KV", kvNamespaceId = "cluster-kv" ),
+          ( name = "KV_BUILTIN",
+            service = (
+              name = "workerd:kv",
+              props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
         ],
         durableObjectNamespaces = [
           ( className = "Counter", uniqueKey = "counter-test-namespace" ),

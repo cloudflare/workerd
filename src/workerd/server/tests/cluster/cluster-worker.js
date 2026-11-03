@@ -89,6 +89,12 @@ export default {
     }
 
     if (url.pathname.startsWith('/kv/')) {
+      if (url.pathname === '/kv/clock') {
+        await env.KV_BUILTIN.fetch(`http://kv/clock${url.search}`, {
+          method: 'POST',
+        });
+        return Response.json({});
+      }
       return kv(url, env.KV);
     }
 
