@@ -922,6 +922,7 @@ impl ActorClass for ActorClassImpl {
 
     fn run_on_hibernate<'a>(
         &'a self,
+        metadata: KjOwn<RequestMetadata>,
         actor: &'a ffi::ActorHandle,
     ) -> LocalBoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -933,6 +934,7 @@ impl ActorClass for ActorClassImpl {
                 &self.class_name,
                 Box::new(ChannelFactory(channels)),
                 WorkerInterfaceList::new(tails),
+                metadata,
             )
             .await?)
         })
