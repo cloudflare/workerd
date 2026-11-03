@@ -915,15 +915,10 @@ MaybeLocal wrap_resource(
     return MaybeLocal{.ptr = 0};
   }
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
@@ -941,15 +936,10 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   KJ_REQUIRE(::workerd::jsg::Wrappable::unwrapFromShimAnyType(isolate, object) == nullptr,
       "`this` already wraps a resource");
 
-  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc. For this tag, it
+  // marks the object as a Rust resource, which tryUnwrapRustWrappable() checks.
   wrappable->attachWrapper(isolate, object, true,
       static_cast<v8::CppHeapPointerTag>(::workerd::jsg::kRustResourceWrappableTag));
-
-  // Override tag to identify as Rust object for unwrapping
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
 MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
