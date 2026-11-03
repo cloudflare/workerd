@@ -73,6 +73,9 @@
 // to the DO's owner.
 //
 // Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
+//
+// The top-level fetch() answers /version itself, without a DO: `version`, the
+// VERSION binding of the deployment the node serves, and `nodeId`.
 
 import {
   DurableObject,
@@ -86,6 +89,12 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/on-hibernate/')) {
       return env.ON_HIBERNATE.fetch(request);
+    }
+    if (url.pathname === '/version') {
+      return Response.json({
+        version: env.VERSION ?? null,
+        nodeId: env.NODE_ID ?? '<unknown>',
+      });
     }
 
     // The DO name to act on is given via the `name` query parameter (defaults
