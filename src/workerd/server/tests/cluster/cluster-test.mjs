@@ -25,6 +25,11 @@
 //  12. Nodes adopt a new revision of the deployment catalog by restarting, one
 //      at a time, as a supervisor restarts them, and the Durable Objects' state
 //      survives.
+//  13. `workerd deploy --wait` rolls a new version of the deployment out to a
+//      cluster under load. A version that fails to start holds the roll, and
+//      `--wait` fails, until a rollback; so does a node's refusal of one.
+//      Publishing the version the nodes started on is waited for at once.
+//      A wrangler project deploys too.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -104,9 +109,20 @@ class ClusterNode {
   #stderrBuffer = '';
   #stopsAt = [];
   #extraArgs;
+  #disk;
 
-  constructor({ binary, config, localPath, s3Port, nodeId, extraArgs = [] }) {
+  // `localPath` is the directory of the config's disk service `disk`.
+  constructor({
+    binary,
+    config,
+    localPath,
+    disk = 'local',
+    s3Port,
+    nodeId,
+    extraArgs = [],
+  }) {
     this.#extraArgs = extraArgs;
+    this.#disk = disk;
     this.#binary = binary;
     this.#config = config;
     this.#localPath = localPath;
@@ -167,7 +183,7 @@ class ClusterNode {
       `--socket-addr=http=127.0.0.1:0`,
     ];
     if (this.#localPath !== undefined) {
-      args.push(`--directory-path=local=${this.#localPath}`);
+      args.push(`--directory-path=${this.#disk}=${this.#localPath}`);
     }
     args.push(...this.#extraArgs);
 
@@ -386,13 +402,15 @@ class FakeS3 {
 //   bucket     the FakeS3
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
-// The nodes run `config`, once `before` has prepared the bucket.
+// The nodes run `config`, whose disk service `disk` is a directory of each
+// node's own, once `before` has prepared the bucket.
 async function withCluster(
   numNodes,
   fn,
   {
     extraArgs = () => [],
     config = env.WD_TEST_CONFIG,
+    disk = 'local',
     before = async () => {},
   } = {}
 ) {
@@ -412,6 +430,7 @@ async function withCluster(
         binary: env.WORKERD_BINARY,
         config,
         localPath,
+        disk,
         s3Port: bucket.port,
         nodeId: `node${i}`,
         extraArgs: await extraArgs(i),
@@ -1380,6 +1399,10 @@ test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO a
   });
 });
 
+// The config of a node that serves the deployments in its bucket, and its disk,
+// on which a deployment's Durable Objects are stored (`workerd deploy --help`).
+const DEPLOYMENT_NODE = { config: env.NODE_CONFIG, disk: 'do-storage' };
+
 // The encoded message `workerd compile --config-only` writes for the config
 // at `path`, constant `constName` if given.
 async function compileConfig(path, constName) {
@@ -1450,7 +1473,7 @@ test('cluster: a fresh cluster serves the deployment in its bucket', async () =>
       assert.strictEqual(JSON.parse(record).node, nodeKeys.get(owner));
     },
     {
-      config: env.NODE_CONFIG,
+      ...DEPLOYMENT_NODE,
       before: (bucket) => deploy(bucket, 'app', deployment),
     }
   );
@@ -1466,7 +1489,7 @@ test('cluster: a node refuses a deployment that holds more than services', async
     await deploy(bucket, 'app', deployment);
     const node = new ClusterNode({
       binary: env.WORKERD_BINARY,
-      config: env.NODE_CONFIG,
+      ...DEPLOYMENT_NODE,
       localPath: root,
       s3Port: bucket.port,
       nodeId: 'node0',
@@ -1594,8 +1617,374 @@ test('cluster: nodes restart one at a time onto a new deployment catalog revisio
       });
     },
     {
-      config: env.NODE_CONFIG,
+      ...DEPLOYMENT_NODE,
       before: (bucket) => deploy(bucket, 'app', v1),
     }
   );
+});
+
+// Runs `workerd deploy --experimental` with `args` against `bucket`, named by
+// flags, with the credentials the nodes' config gives in the environment.
+// Answers the exit code and what it wrote.
+async function workerdDeploy(bucket, args) {
+  const child = spawn(
+    env.WORKERD_BINARY,
+    [
+      'deploy',
+      '--experimental',
+      ...args,
+      '--bucket=s3://wdtest/cluster',
+      `--endpoint=http://127.0.0.1:${bucket.port}`,
+      '--region=us-east-1',
+    ],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...env,
+        AWS_ENDPOINT_URL: undefined,
+        AWS_ACCESS_KEY_ID: 'wdtest',
+        AWS_SECRET_ACCESS_KEY: 'wdtest-secret',
+      },
+    }
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+    process.stderr.write(`[deploy] ${chunk}`);
+  });
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject).once('close', resolve);
+  });
+  return { code, stdout, stderr };
+}
+
+test('cluster: `workerd deploy --wait` rolls a new version out under load', async (t) => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    3,
+    async ({ nodes, bucket }) => {
+      for (const node of nodes) {
+        const { body } = await fetchJson(node.httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+      }
+      await withSupervision(nodes, async (supervised) => {
+        // Increments one Durable Object through each node in turn until told to
+        // stop, skipping a node while it restarts.
+        const acked = [];
+        let failed = 0;
+        let stopping = false;
+        const load = (async () => {
+          for (let i = 0; !stopping; i++) {
+            const port = nodes[i % nodes.length].port;
+            if (port !== null) {
+              try {
+                const { status, body } = await fetchJson(
+                  port,
+                  '/increment?name=rolled',
+                  { timeoutMs: 10_000 * SLOW }
+                );
+                if (status === 200) acked.push(body.count);
+                else failed++;
+              } catch {
+                failed++;
+              }
+            }
+            await sleep(20);
+          }
+        })();
+
+        const deployed = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deploymentV2',
+          '--name=app',
+          '--wait',
+          `--timeout=${150 * SLOW}`,
+        ]);
+        stopping = true;
+        await load;
+        t.diagnostic(
+          `${acked.length} increments acknowledged, ${failed} failed`
+        );
+        assert.strictEqual(deployed.code, 0, deployed.stderr);
+        assert.match(deployed.stdout, /is in catalog revision 2\b/);
+        assert.match(
+          deployed.stderr,
+          /every live node serves catalog revision 2/
+        );
+
+        await assertRestartedInTurn(nodes, supervised, '2');
+
+        // The object's state survived: no acknowledged increment was lost or
+        // given twice, and the object counts on from there.
+        // TODO(cluster): with nodes handing their objects off as they drain,
+        // assert that no request failed.
+        assert(acked.length > 0, `no increment succeeded (${failed} failed)`);
+        assert.strictEqual(new Set(acked).size, acked.length, `${acked}`);
+        const last = Math.max(...acked);
+        const { status, body } = await fetchJson(
+          nodes[0].httpPort,
+          '/increment?name=rolled'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        assert(body.count > last, `count ${body.count} after ${last}`);
+      });
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+test('cluster: a deployed version that fails to start holds the roll until a rollback', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    2,
+    async ({ nodes, bucket }) => {
+      await withSupervision(nodes, async (supervised) => {
+        // It composes with the nodes' config, so the deploy and the nodes
+        // accept it, and the first node to restart on it fails to start.
+        const broken = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deploymentBroken',
+          '--name=app',
+          '--wait',
+          `--timeout=${120 * SLOW}`,
+        ]);
+        assert.strictEqual(broken.code, 1, broken.stderr);
+        assert.match(broken.stderr, /failed to start on catalog revision 2/);
+        const failing = supervised.findIndex((s) => s.exits.includes(1));
+        assert.notStrictEqual(failing, -1, JSON.stringify(supervised));
+        const other = nodes[1 - failing];
+        assert.deepStrictEqual(supervised[1 - failing].exits, []);
+        const { body } = await fetchJson(other.httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+
+        // The previous version, published again, is what the failing node
+        // starts on next, and then the roll goes on.
+        const back = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deployment',
+          '--name=app',
+          '--wait',
+          `--timeout=${120 * SLOW}`,
+        ]);
+        assert.strictEqual(back.code, 0, back.stderr);
+        assert.match(back.stdout, /is in catalog revision 3\b/);
+        assert.deepStrictEqual(supervised[1 - failing].exits, [75]);
+        for (const node of nodes) {
+          const { body } = await fetchJson(node.httpPort, '/version');
+          assert.strictEqual(body.version, '1', node.nodeId);
+        }
+      });
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+test('cluster: `workerd deploy --wait` of the version the nodes started on is done at once', async () => {
+  const args = [env.DEPLOYMENT_CONFIG, 'deployment', '--name=app'];
+  await withCluster(
+    2,
+    async ({ bucket }) => {
+      // No roll names the revision, so none will be marked done: the nodes
+      // serving it is enough.
+      assert.strictEqual(await bucket.get('deploy/roll.json'), null);
+      const again = await workerdDeploy(bucket, [
+        ...args,
+        '--wait',
+        `--timeout=${30 * SLOW}`,
+      ]);
+      assert.strictEqual(again.code, 0, again.stderr);
+      assert.match(again.stdout, /is in catalog revision 1\b/);
+      assert.match(
+        again.stderr,
+        /every live node serves catalog revision 1 \(2\)/
+      );
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: async (bucket) => {
+        const deployed = await workerdDeploy(bucket, args);
+        assert.strictEqual(deployed.code, 0, deployed.stderr);
+      },
+    }
+  );
+});
+
+test('cluster: `workerd deploy` refuses a deployment that holds more than services', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    1,
+    async ({ bucket }) => {
+      const deployed = await workerdDeploy(bucket, [
+        env.NODE_CONFIG,
+        '--name=app',
+      ]);
+      assert.strictEqual(deployed.code, 1, deployed.stderr);
+      assert.match(deployed.stderr, /a deployment may contain only services/);
+      assert.strictEqual(
+        JSON.parse(await bucket.get('deploy/catalog.json')).revision,
+        1
+      );
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+// A wrangler project's worker: a Counter Durable Object that `/increment`
+// reaches, and `/version`, its VERSION var.
+const WRANGLER_WORKER = `
+export class Counter {
+  constructor(state) {
+    this.state = state;
+  }
+  async fetch() {
+    const count = ((await this.state.storage.get('count')) ?? 0) + 1;
+    await this.state.storage.put('count', count);
+    return Response.json({ count, id: this.state.id.toString() });
+  }
+}
+export default {
+  async fetch(request, env) {
+    if (new URL(request.url).pathname === '/version') {
+      return Response.json({ version: env.VERSION });
+    }
+    return env.COUNTER.get(env.COUNTER.idFromName('wrangler')).fetch(request);
+  },
+};
+`;
+
+// Writes a wrangler project of WRANGLER_WORKER to `dir`, a no_bundle one with
+// the Counter class and `fields`.
+async function writeWranglerProject(dir, fields) {
+  await writeFile(join(dir, 'index.js'), WRANGLER_WORKER);
+  await writeFile(
+    join(dir, 'wrangler.jsonc'),
+    JSON.stringify({
+      main: 'index.js',
+      compatibility_date: '2026-01-01',
+      no_bundle: true,
+      durable_objects: {
+        bindings: [{ name: 'COUNTER', class_name: 'Counter' }],
+      },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }],
+      ...fields,
+    })
+  );
+}
+
+test('cluster: `workerd deploy` publishes a wrangler project', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  // Named "main", the service the nodes' socket serves.
+  const configure = (version) =>
+    writeWranglerProject(project, { name: 'main', vars: { VERSION: version } });
+  try {
+    await configure('1');
+    await withCluster(
+      2,
+      async ({ nodes, bucket, nodeKeys }) => {
+        // Translated as a deployment: no socket, and no disk of its own.
+        assert.deepStrictEqual((await readdir(project)).sort(), [
+          'index.js',
+          'wrangler.jsonc',
+        ]);
+        const counts = [];
+        let id;
+        for (const node of nodes) {
+          assert.strictEqual(
+            (await fetchJson(node.httpPort, '/version')).body.version,
+            '1'
+          );
+          const { status, body } = await fetchJson(node.httpPort, '/increment');
+          assert.strictEqual(status, 200, JSON.stringify(body));
+          counts.push(body.count);
+          id = body.id;
+        }
+        assert.deepStrictEqual(counts, [1, 2]);
+        // The object is clustered, under the storage key the deployment's name
+        // gives its class.
+        const record = await bucket.get(
+          `${objectPrefix(id, 'main-Counter')}/own.json`
+        );
+        assert.notStrictEqual(record, null);
+        assert(
+          [...nodeKeys.values()].includes(JSON.parse(record).node),
+          record
+        );
+
+        await configure('2');
+        await withSupervision(nodes, async (supervised) => {
+          const deployed = await workerdDeploy(bucket, [
+            project,
+            '--wait',
+            `--timeout=${120 * SLOW}`,
+          ]);
+          assert.strictEqual(deployed.code, 0, deployed.stderr);
+          assert.match(
+            deployed.stdout,
+            /deployment "main" version [0-9a-f]{64} is in catalog revision 2\b/
+          );
+          await assertRestartedInTurn(nodes, supervised, '2');
+          const { body } = await fetchJson(nodes[0].httpPort, '/increment');
+          assert.strictEqual(body.count, 3);
+        });
+      },
+      {
+        ...DEPLOYMENT_NODE,
+        // Published before any node runs: the nodes start on it.
+        before: async (bucket) => {
+          const deployed = await workerdDeploy(bucket, [project]);
+          assert.strictEqual(deployed.code, 0, deployed.stderr);
+          assert.match(
+            deployed.stdout,
+            /deployment "main" version [0-9a-f]{64} is in catalog revision 1\b/
+          );
+        },
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('cluster: `workerd deploy --wait` fails as soon as a node refuses the deployment', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  try {
+    await writeWranglerProject(project, { vars: { VERSION: 'refused' } });
+    await withCluster(
+      1,
+      async ({ nodes, bucket }) => {
+        // Its service is named as the node's disk is: the deploy cannot tell,
+        // since it does not read the node's config, but the node can.
+        const refused = await workerdDeploy(bucket, [
+          project,
+          '--name=do-storage',
+          '--wait',
+          `--timeout=${60 * SLOW}`,
+        ]);
+        assert.strictEqual(refused.code, 1, refused.stderr);
+        assert.match(refused.stdout, /is in catalog revision 2\b/);
+        assert.match(refused.stderr, /refused catalog revision 2\b/);
+        // The node serves on.
+        const { body } = await fetchJson(nodes[0].httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+      },
+      {
+        ...DEPLOYMENT_NODE,
+        before: (bucket) => deploy(bucket, 'app', v1),
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
 });

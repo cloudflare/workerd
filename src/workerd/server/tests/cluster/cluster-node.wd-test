@@ -4,13 +4,14 @@
 
 # A node whose application is a deployment in the bucket (cluster-deployment.wd-test): its own
 # config holds only what is the node's, its disk, its socket and the cluster block. The socket
-# serves "main", which the deployment defines.
+# serves "main", which the deployment defines. The disk is named `do-storage`, where
+# `workerd deploy` stores a wrangler project's Durable Objects.
 
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [
-    ( name = "local",
+    ( name = "do-storage",
       disk = (
         writable = true,
         allowDotfiles = true,
