@@ -27,6 +27,10 @@ pub struct NodeRecord {
     /// The process that wrote it.
     #[serde(default)]
     pub instance: u64,
+    /// The instance is stopping: it hands its objects off, and peers
+    /// choose it for none.
+    #[serde(default)]
+    pub draining: bool,
 }
 
 /// This instance's membership: it publishes its own record and reads its
@@ -48,6 +52,8 @@ pub struct Registry {
     dead: RefCell<Vec<String>>,
     /// This instance left the cluster: it renews its record no more.
     left: Cell<bool>,
+    /// This instance drains, which its record says from its next renewal.
+    draining: Cell<bool>,
 }
 
 fn node_key(node: &str) -> String {
@@ -69,6 +75,7 @@ impl Registry {
             listed: RefCell::new(HashMap::new()),
             dead: RefCell::new(Vec::new()),
             left: Cell::new(false),
+            draining: Cell::new(false),
         }
     }
 
@@ -91,14 +98,8 @@ impl Registry {
     /// process), and every later one requires our last version, so a record
     /// someone else wrote fences this process instead of being overwritten.
     pub async fn renew(&self, now_ms: u64) -> Result<u64> {
-        let record = NodeRecord {
-            node: self.node.clone(),
-            address: self.address.clone(),
-            expires_ms: now_ms + self.ttl_ms,
-            instance: self.instance,
-        };
+        let expires_ms = now_ms + self.ttl_ms;
         let key = node_key(&self.node);
-        let body = serde_json::to_vec(&record)?;
         let mut guard = self
             .own
             .borrow()
@@ -110,9 +111,18 @@ impl Registry {
             if self.left.get() {
                 return Err(Error::NotHere(format!("{} left the cluster", self.node)));
             }
-            if let Some(version) = self.bucket.put_if(&key, body.clone(), guard).await? {
+            // Built for each attempt, so that a renewal that races
+            // `start_draining` retries with the flag set.
+            let body = serde_json::to_vec(&NodeRecord {
+                node: self.node.clone(),
+                address: self.address.clone(),
+                expires_ms,
+                instance: self.instance,
+                draining: self.draining.get(),
+            })?;
+            if let Some(version) = self.bucket.put_if(&key, body, guard).await? {
                 self.own.replace(Some(version));
-                return Ok(record.expires_ms);
+                return Ok(expires_ms);
             }
             // Not the version we know. If this process wrote it, earlier
             // renewals landed and only their answers were lost (timed-out
@@ -143,6 +153,7 @@ impl Registry {
             address: self.address.clone(),
             expires_ms: 0,
             instance: self.instance,
+            draining: true,
         };
         let body = serde_json::to_vec(&record)?;
         let key = node_key(&self.node);
@@ -166,6 +177,11 @@ impl Registry {
             version = current_version;
         }
         Err(Error::Contended(key))
+    }
+
+    /// Marks this instance's record as draining from its next renewal.
+    pub fn start_draining(&self) {
+        self.draining.set(true);
     }
 
     /// Whether `deregister` ran.
@@ -266,6 +282,16 @@ impl Registry {
     pub fn listed_nodes(&self, now_ms: u64) -> Vec<String> {
         let listed = self.listed.borrow();
         let live = listed.values().filter(|r| r.expires_ms > now_ms);
+        live.map(|r| r.node.clone()).collect()
+    }
+
+    /// The live nodes that are not draining, as of the last listing: those
+    /// that may take objects and alarms on.
+    pub fn serving_nodes(&self, now_ms: u64) -> Vec<String> {
+        let listed = self.listed.borrow();
+        let live = listed
+            .values()
+            .filter(|r| r.expires_ms > now_ms && !r.draining);
         live.map(|r| r.node.clone()).collect()
     }
 

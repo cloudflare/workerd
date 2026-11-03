@@ -239,7 +239,7 @@ impl Ownership {
             // No live instance owns it, and a draining one claims nothing:
             // a peer does.
             if !self.may_claim.get() {
-                return self.successor(&key, now_ms).await;
+                return self.successor(&key, refused, now_ms).await;
             }
             let record = previous.successor(me);
             // A new object opens at its claim, where a loser still routes
@@ -268,15 +268,23 @@ impl Ownership {
     }
 
     /// Where a draining instance sends a request for an object no live
-    /// instance owns: the listed peer that `handoff::successor` picks, which
-    /// claims it. Not cached: the peer may lose the claim to another. A
-    /// listing that names no peer is read again, as it may predate them.
-    async fn successor(&self, key: &str, now_ms: u64) -> Result<Claim> {
-        let mut pick = self.pick_successor(key, now_ms);
+    /// instance owns: the serving peer that `handoff::successor` picks,
+    /// which claims it. Not cached: the peer may lose the claim to another.
+    /// A peer that `refused` it, or could not be reached, is passed over
+    /// while there is another, and its own record read, which drops it from
+    /// the listing if it died. A listing that names no peer is read again,
+    /// as it may predate them.
+    async fn successor(&self, key: &str, refused: Option<&str>, now_ms: u64) -> Result<Claim> {
+        if let Some(node) = refused {
+            self.registry.live_now(node, now_ms).await?;
+        }
+        let mut pick = self.pick_successor(key, refused, now_ms);
         if pick.is_none() {
             self.registry.peers(now_ms).await?;
-            pick = self.pick_successor(key, now_ms);
+            pick = self.pick_successor(key, refused, now_ms);
         }
+        // The only peer left may have refused for what it knew then.
+        let pick = pick.or_else(|| self.pick_successor(key, None, now_ms));
         let (node, address) = pick.ok_or_else(|| draining(key))?;
         Ok(Claim::Route {
             node,
@@ -285,10 +293,18 @@ impl Ownership {
         })
     }
 
-    fn pick_successor(&self, key: &str, now_ms: u64) -> Option<(String, String)> {
+    fn pick_successor(
+        &self,
+        key: &str,
+        refused: Option<&str>,
+        now_ms: u64,
+    ) -> Option<(String, String)> {
         let me = self.registry.node();
-        let listed = self.registry.listed_nodes(now_ms);
-        let peers = listed.iter().map(String::as_str).filter(|node| *node != me);
+        let serving = self.registry.serving_nodes(now_ms);
+        let peers = serving
+            .iter()
+            .map(String::as_str)
+            .filter(|node| *node != me && Some(*node) != refused);
         let node = cluster_logic::handoff::successor(key, peers)?;
         Some((node.to_owned(), self.registry.address(node)?))
     }

@@ -433,6 +433,18 @@ impl Cluster {
     /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
         self.ownership.may_claim.set(false);
+        self.registry.start_draining();
+    }
+
+    /// Publishes that this instance drains, so that peers choose it for no
+    /// object or alarm, and lists the peers, so that it chooses none that
+    /// drains too. Peers that list it before learn of it from its answers.
+    pub async fn announce_draining(&self) {
+        let renew = timeout(ms(lease::RENEW_TIMEOUT_MS), self.renew(now_ms()));
+        if !matches!(renew.await, Ok(Ok(_))) {
+            tracing::warn!("cluster: publishing the drain failed");
+        }
+        let _ = timeout(ms(lease::LIST_TIMEOUT_MS), self.peers(now_ms())).await;
     }
 
     /// Whether `start_draining` ran: this node claims nothing more.

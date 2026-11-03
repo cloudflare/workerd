@@ -29,11 +29,11 @@
 //      `workerd deploy` publishes a Cap'n Proto config or a wrangler project for
 //      the nodes to start on, and refuses a deployment that holds more than
 //      services or conflicts with another.
-//  12. A node stopping under load hands its DOs to its peers: requests that
-//      arrive meanwhile wait for a DO's handoff and follow it, JS RPC calls
-//      and other DOs' calls included, the calls of a handoff's work are not
-//      held, and a DO whose handoff outlasts its deadline moves once the node
-//      left.
+//  12. A node stopping under load hands its DOs to its peers, two at once
+//      too: requests that arrive meanwhile wait for a DO's handoff and follow
+//      it, JS RPC calls and other DOs' calls included, the calls of a
+//      handoff's work are not held, and a DO whose handoff outlasts its
+//      deadline moves once the node left.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -1858,6 +1858,44 @@ test(
       assert.strictEqual(called.body.nodeId, nodes[1].nodeId);
       assert.strictEqual((await held).status, 200);
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  'cluster: two nodes stopping at once under load hand their DOs to the third',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(3, async ({ nodes, bucket, nodeKeys }) => {
+      const names = Array.from({ length: 8 }, (_, i) => `paired-${i}`);
+      for (const [i, name] of names.entries()) {
+        const first = await fetchJson(
+          nodes[i % 2].httpPort,
+          `/increment?name=${name}`
+        );
+        assert.strictEqual(first.body.nodeId, nodes[i % 2].nodeId);
+      }
+      let serving = [0, 1, 2];
+      const finish = load(nodes, names, () => serving);
+      await sleep(500);
+      const exits = [0, 1].map((i) =>
+        nodes[i].stop({ signal: 'SIGTERM', timeoutMs: 20_000 })
+      );
+      // The stopping nodes keep accepting requests for a while.
+      await sleep(1000);
+      serving = [2];
+      for (const exit of exits) {
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      }
+      await assertLoadServed(await finish(), nodes.slice(2), 1);
+      const third = nodeKeys.get(nodes[2].nodeId);
+      for (const name of names) {
+        const { body } = await fetchJson(
+          nodes[2].httpPort,
+          `/get?name=${name}`
+        );
+        assert.strictEqual(await bucket.owner(body.id), third, name);
+      }
     });
   }
 );

@@ -25,6 +25,7 @@ fn a_renewal_whose_answer_was_lost_is_not_a_fence() {
             address: "a:1".into(),
             expires_ms: 11_000,
             instance: a.instance,
+            draining: false,
         };
         let body = serde_json::to_vec(&landed).unwrap();
         bucket.put(&node_key("a"), body, &[]).await.unwrap();
@@ -96,6 +97,7 @@ fn two_late_renewals_of_ours_are_not_a_fence() {
                 address: "a:1".into(),
                 expires_ms,
                 instance: a.instance,
+                draining: false,
             };
             serde_json::to_vec(&record).unwrap()
         };
@@ -139,6 +141,7 @@ fn a_deregistration_outlasts_a_renewal_of_ours_that_landed_first() {
             address: "a:1".into(),
             expires_ms: 11_000,
             instance: a.instance,
+            draining: false,
         };
         let body = serde_json::to_vec(&landed).unwrap();
         bucket.put(&node_key("a"), body, &[]).await.unwrap();
@@ -150,5 +153,26 @@ fn a_deregistration_outlasts_a_renewal_of_ours_that_landed_first() {
         assert!(matches!(a.renew(2).await, Err(Error::NotHere(_))));
         let live = b.peers(2).await.unwrap();
         assert_eq!(live.iter().map(|p| &*p.node).collect::<Vec<_>>(), ["b"]);
+    });
+}
+
+#[test]
+fn a_draining_node_serves_no_more_in_its_peers_listings() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
+        let b = Registry::new(bucket.clone(), "b", "b:1", 10_000);
+        a.renew(0).await.unwrap();
+        b.renew(0).await.unwrap();
+        b.peers(1).await.unwrap();
+        let mut serving = b.serving_nodes(1);
+        serving.sort();
+        assert_eq!(serving, ["a", "b"]);
+        a.start_draining();
+        a.renew(2).await.unwrap();
+        b.peers(3).await.unwrap();
+        // Still live, so what it owns routes there, but chosen for nothing.
+        assert!(b.listed_live("a", 3));
+        assert_eq!(b.serving_nodes(3), ["b"]);
     });
 }

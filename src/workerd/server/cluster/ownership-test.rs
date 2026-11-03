@@ -462,6 +462,32 @@ fn route_to(node: &str) -> Claim {
 }
 
 #[test]
+fn a_draining_node_routes_past_draining_and_refusing_peers() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, _) = node(&store, "b");
+        let (c, _) = node(&store, "c");
+        for registry in [&a, &b, &c] {
+            registry.renew(0).await.unwrap();
+        }
+        c.start_draining();
+        c.renew(0).await.unwrap();
+        a.peers(1).await.unwrap();
+        a_own.may_claim.set(false);
+        // c drains too: every object goes to b.
+        for i in 0..8 {
+            let claim = a_own.acquire_or_route("ns", &format!("x{i}"), 2).await;
+            assert_eq!(claim.unwrap(), route_to("b"));
+        }
+        // b refused x0; with no other peer, it is asked again.
+        a_own.forget_route("ns", "x0", "b");
+        let claim = a_own.acquire_or_route("ns", "x0", 3).await;
+        assert_eq!(claim.unwrap(), route_to("b"));
+    });
+}
+
+#[test]
 fn a_draining_node_sends_what_it_cannot_release_to_a_peer() {
     block_on(async {
         let store = Bucket::memory("");

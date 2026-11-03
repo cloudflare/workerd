@@ -336,6 +336,9 @@ impl ClusterNode {
         };
         self.deadlines.set(Some(deadlines));
         self.cluster.start_draining();
+        let cluster = Rc::clone(&self.cluster);
+        self.factory
+            .spawn_detached(async move { cluster.announce_draining().await });
         deadlines
     }
 
@@ -398,6 +401,10 @@ impl ClusterNode {
     pub async fn alarms_loop(&self) {
         loop {
             tokio::time::sleep(ALARMS_INTERVAL).await;
+            // A draining instance takes on no alarms; its own go to its peers as it leaves.
+            if self.cluster.is_draining() {
+                continue;
+            }
             let schedule = |alarm: cluster::Adopted| {
                 let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
                 let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
