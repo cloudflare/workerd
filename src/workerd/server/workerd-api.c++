@@ -29,7 +29,6 @@
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 
 using namespace kj_rs;
@@ -41,7 +40,6 @@ using api::pyodide::PythonConfig;
 namespace {
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
