@@ -34,7 +34,12 @@ impl FeatureFlags {
             data.len()
         );
         let segments = vec![data.to_vec()];
-        let message = capnp::message::Reader::new(segments, ReaderOptions::new());
+        // A Reader charges every read against one traversal limit for as long as it lives, and
+        // this one lives as long as the Realm, with every `reader()` call reading the root. The
+        // bytes are C++'s own canonical encoding rather than untrusted input, so there is no limit.
+        let mut options = ReaderOptions::new();
+        options.traversal_limit_in_words(None);
+        let message = capnp::message::Reader::new(segments, options);
         Self { message }
     }
 
