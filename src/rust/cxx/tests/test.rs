@@ -385,6 +385,28 @@ fn test_c_try_return() {
 }
 
 #[test]
+fn test_c_nothrow() {
+    let shared = ffi::Shared { z: 2020 };
+    assert_eq!(2020, ffi::c_return_primitive_nothrow());
+    assert_eq!(2020, ffi::c_return_shared_nothrow().z);
+    assert_eq!(2020, ffi::c_return_box_nothrow().0);
+    assert_eq!("2020", ffi::c_return_rust_string_nothrow());
+    // SAFETY: The returned borrows are bounded by their live input values.
+    unsafe {
+        assert_eq!(2020, *ffi::c_return_ref_nothrow(&shared));
+        assert_eq!("2020", ffi::c_return_str_nothrow(&shared));
+    }
+    check!(ffi::c_take_primitive_nothrow(2020));
+
+    let ptr = ffi::c_return_mut_ptr_nothrow(2023);
+    // SAFETY: `c_return_mut_ptr` returns a new, owned `C`, which `UniquePtr` then deletes.
+    let mut unique_ptr = unsafe { cxx::UniquePtr::from_raw(ptr) };
+    assert_eq!(2023, unique_ptr.get_nothrow());
+    assert_eq!(2024, unique_ptr.pin_mut().set_nothrow(2024));
+    assert_eq!(2024, unique_ptr.get());
+}
+
+#[test]
 fn test_c_take() {
     let unique_ptr = ffi::c_return_unique_ptr();
     let unique_ptr_ns = ffi2::c_return_ns_unique_ptr();
