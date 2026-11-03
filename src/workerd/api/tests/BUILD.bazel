@@ -1352,6 +1352,17 @@ wd_test(
     generate_all_compat_flags_variant = False,
 )
 
+# Module identity and import.meta across a startup snapshot with the new module registry. Only
+# the @all-autogates variant runs the pipeline.
+wd_test(
+    src = "startup-snapshot-new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "startup-snapshot-new-module-registry-case-test.js",
+        "startup-snapshot-new-module-registry-test.js",
+    ],
+)
+
 # Node.js API objects (AsyncLocalStorage, node:diagnostics_channel) across a startup snapshot.
 # Only the @all-autogates variant runs the pipeline. The @all-compat-flags variant would turn
 # new_module_registry on, which keeps the Worker out of the startup-snapshot pipeline and so would
