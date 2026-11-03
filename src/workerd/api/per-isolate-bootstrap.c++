@@ -314,6 +314,37 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// Creates the DOMException that the TypeScript DOMException constructor returns, without a stack
+// (jsg::createDOMException()). The caller passes its prototype and the converted strings.
+static void CreateDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto isolate = args.GetIsolate();
+  jsg::liftKj(isolate, [&] {
+    KJ_ASSERT(args[0]->IsObject() && args[1]->IsString() && args[2]->IsString());
+    v8::Local<v8::Object> exception;
+    // A failure leaves its exception pending, which propagates to the constructor's caller.
+    if (jsg::createDOMException(isolate, isolate->GetCurrentContext(), args[0].As<v8::Object>(),
+            args[1].As<v8::String>(), args[2].As<v8::String>())
+            .ToLocal(&exception)) {
+      args.GetReturnValue().Set(exception);
+    }
+  });
+}
+
+// Returns whether a value is a DOMException, by its brand.
+static void IsDOMException(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  args.GetReturnValue().Set(jsg::tryGetDOMExceptionFields(args.GetIsolate(), args[0]) != kj::none);
+}
+
+// Hands native code the prototype of the TypeScript DOMException, for the DOMExceptions it
+// creates (jsg::setDOMExceptionPrototype()).
+static void SetDOMExceptionPrototype(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto isolate = args.GetIsolate();
+  jsg::liftKj(isolate, [&] {
+    KJ_ASSERT(args[0]->IsObject());
+    jsg::setDOMExceptionPrototype(isolate->GetCurrentContext(), args[0].As<v8::Object>());
+  });
+}
+
 static void SetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     // Argument 0 is an object.
@@ -371,6 +402,10 @@ v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
   return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect);
 }
 
+v8::Local<v8::Value> getMethodNoSideEffect(jsg::Lock& js, v8::FunctionCallback callback) {
+  return makeMethod(js, callback, v8::SideEffectType::kHasNoSideEffect);
+}
+
 // Creates an object with methods for performing fast type checks on JS values.
 // Because we are not fully bootstrapped at this point, we don't want to rely
 // on jsg::Object and the type wrapper system, etc. Instead, just use a plain
@@ -392,6 +427,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "createDOMException",
+    "isDOMException",
+    "setDOMExceptionPrototype",
     "setPrivate",
     "getPrivate",
     "setListenerCountHook",
@@ -416,6 +454,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    getMethod(js, CreateDOMException),
+    getMethodNoSideEffect(js, IsDOMException),
+    getMethod(js, SetDOMExceptionPrototype),
     getMethod(js, SetPrivate),
     getMethod(js, GetPrivate),
     getMethod(js, SetListenerCountHook),

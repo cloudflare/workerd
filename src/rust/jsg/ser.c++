@@ -116,7 +116,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   }
 
   bool HasCustomHostObject(v8::Isolate*) override {
-    // V8 already treats objects with internal fields, such as API objects, as host objects.
+    // V8 already treats objects with internal fields, such as API objects and DOMExceptions, as
+    // host objects.
     return errorsAreHostObjects;
   }
 

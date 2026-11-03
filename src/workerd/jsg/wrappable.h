@@ -81,8 +81,11 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO = CONSOLE_ORIGINAL_DEBUG + 2,
   CONSOLE_ORIGINAL_LOG = CONSOLE_ORIGINAL_DEBUG + 3,
   CONSOLE_ORIGINAL_WARN = CONSOLE_ORIGINAL_DEBUG + 4,
+  // The prototype of the DOMExceptions that native code creates; see setDOMExceptionPrototype()
+  // in jsg.h. Rust JSG reads it too (src/rust/jsg/ffi.c++).
+  DOM_EXCEPTION_PROTOTYPE = CONSOLE_ORIGINAL_DEBUG + 5,
   // The highest ContextDataSlot; update it when adding a slot.
-  MAX_DATA_SLOT = CONSOLE_ORIGINAL_WARN,
+  MAX_DATA_SLOT = DOM_EXCEPTION_PROTOTYPE,
 };
 
 #if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8

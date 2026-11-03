@@ -59,8 +59,10 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
 - **Always** ensure that library crates (e.g., `dns`, `net`, `transpiler`) use `thiserror` for
   domain-specific error types. These should implement `Display` and have descriptive error messages.
 - **Always** ensure that JSG-facing crates (e.g., `api`, `jsg`) use `jsg::Error` with an
-  `ExceptionType` variant (e.g., `TypeError`, `RangeError`). Domain errors should implement
-  `From<DomainError> for jsg::Error` for ergonomic `?` usage.
+  `ExceptionType` variant. `TypeError`, `RangeError` and the other unprefixed variants throw
+  the JS built-in error; a `DOM`-prefixed variant throws a `DOMException` with the unprefixed
+  name (`DOMSyntaxError` throws `DOMException` named `SyntaxError`), as in C++ `JSG_REQUIRE`.
+  Domain errors should implement `From<DomainError> for jsg::Error` for ergonomic `?` usage.
 - **Never** use `panic!` for expected errors. Panics across FFI are undefined behavior. Use
   `Result` and propagate errors through the CXX bridge. The build denies `unwrap()`, `expect()`,
   `panic!`, `todo!` and `unimplemented!` in production code. `unreachable!` is allowed: a panic is

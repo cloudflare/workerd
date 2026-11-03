@@ -118,6 +118,13 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // Creates a DOMException with `prototype`, its brand and its own `code`, `name` and `message`
+  // properties, but no stack (jsg::createDOMException()). Consumed by dom-exception.
+  createDOMException(prototype: object, name: string, message: string): object;
+  // Whether `value` is a DOMException, by its brand. Runs no JavaScript.
+  isDOMException(value: unknown): boolean;
+  // Makes `prototype` the prototype of the DOMExceptions native code creates.
+  setDOMExceptionPrototype(prototype: object): void;
   // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
   // these only through events/event-target-internals, which documents them.
   setListenerCountHook(

@@ -2622,6 +2622,66 @@ class JsRef;
 
 class DOMException;
 class ExternalMemoryAdjustment;
+class Serializer;
+
+// A DOMException that native code or the TypeScript class that the per-isolate bootstrap
+// installs as the global DOMException (under the TS_DOM_EXCEPTION autogate) creates is an API
+// object with internal fields, which JavaScript cannot read or change: a brand, and the name and
+// message it was created with. Native code recognizes a DOMException by them and reads them
+// without the context, so also while an exception or a termination is pending. Having internal
+// fields, a DOMException is a host object to a v8::ValueSerializer without a delegate that
+// overrides IsHostObject(). An instance of the C++ class (dom-exception.h), which is the global
+// DOMException otherwise, is recognized as the C++ object it wraps.
+//
+// These functions use only V8, not jsg::Lock, so that Rust JSG's shims can call them.
+
+struct DOMExceptionFields {
+  v8::Local<v8::String> name;
+  v8::Local<v8::String> message;
+};
+
+// Returns the legacy `code` of a DOMException named `name`, or 0 for a name without one.
+int getDOMExceptionCode(kj::ArrayPtr<const char> name);
+
+// Creates a DOMException named `name` with `message` that inherits from `prototype`, with its own
+// read-only `code`, `name` and `message` properties, in that order. Captures no stack. Runs no
+// JavaScript. Returns nothing with an exception pending if creating it failed.
+v8::MaybeLocal<v8::Object> createDOMException(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> prototype,
+    v8::Local<v8::String> name,
+    v8::Local<v8::String> message);
+
+// Creates a DOMException as createDOMException() does, inheriting from the DOMException
+// prototype of `context` (see setDOMExceptionPrototype()). Its own `stack` property is `stack` if
+// given, otherwise the current stack trace. Returns nothing with an exception pending if creating
+// it failed.
+v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::String> name,
+    v8::Local<v8::String> message,
+    v8::MaybeLocal<v8::String> stack = {});
+
+// Returns the name and message of `value` if it is a DOMException, kj::none otherwise. Runs no
+// JavaScript and takes no context. Only the object itself counts, not its prototype chain.
+kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
+    v8::Isolate* isolate, v8::Local<v8::Value> value);
+
+// Sets the prototype that newDOMException() gives the DOMExceptions it creates in `context`.
+// JSG sets the C++ class's prototype when it creates a context, and the per-isolate bootstrap
+// replaces it with the TypeScript class's under the TS_DOM_EXCEPTION autogate.
+void setDOMExceptionPrototype(v8::Local<v8::Context> context, v8::Local<v8::Object> prototype);
+
+// The callback that every v8::Context::New() passes as `internal_fields_deserializer`. In an
+// isolate started from a snapshot, every new context is deserialized from the snapshot's default
+// context, and V8 requires a callback to restore the internal fields that the snapshot keeps
+// (IsolateBase::setSnapshotDefaultContext()), such as DOMExceptions' brands.
+v8::DeserializeInternalFieldsCallback newContextInternalFieldsDeserializer();
+
+// Writes `object`, a DOMException with `fields`, as DOMException::SERIALIZATION_TAG_V2 (without
+// the tag). Reads its `stack` property, which can run JavaScript.
+void serializeDOMException(
+    Lock& js, Serializer& serializer, v8::Local<v8::Object> object, DOMExceptionFields fields);
 
 // Used to save a reference to an isolate that is responsible for external memory usage.
 // getAdjustment() can be invoked at any time to create a new RAII adjustment object
@@ -3177,7 +3237,8 @@ class Lock {
     }
   }
 
-  virtual Ref<DOMException> domException(
+  // Creates a DOMException with the given name and message. Runs no JavaScript.
+  virtual JsObject domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).

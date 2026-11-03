@@ -933,6 +933,20 @@ wd_test(
     data = ["global-scope-test.js"],
 )
 
+# The C++ cell disables the @all-autogates variant: enabling every autogate enables
+# TS_DOM_EXCEPTION, which swaps in the TypeScript class under a cell whose USING_TS_IMPL binding
+# says C++.
+wd_test(
+    src = "dom-exception-test.wd-test",
+    data = ["dom-exception-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "dom-exception-ts-test.wd-test",
+    data = ["dom-exception-test.js"],
+)
+
 wd_test(
     src = "queue-microtask-gc-test.wd-test",
     data = ["queue-microtask-gc-test.js"],

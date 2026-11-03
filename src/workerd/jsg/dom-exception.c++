@@ -6,14 +6,226 @@
 
 #include "jsvalue.h"
 #include "ser.h"
+#include "setup.h"
 
 #include <workerd/jsg/memory.h>
 
 #include <kj/string.h>
 
-#include <map>
-
 namespace workerd::jsg {
+
+namespace {
+
+// The internal fields of a DOMException that createDOMException() creates.
+enum DOMExceptionField : int {
+  // The brand: an aligned pointer to BRAND_TAG. A context snapshot keeps it through
+  // serializeDOMExceptionBrand() and restoreDOMExceptionBrand().
+  BRAND,
+  NAME,
+  MESSAGE,
+  FIELD_COUNT,
+};
+
+// The value the brand points to, chosen next to Wrappable::WORKERD_WRAPPABLE_TAG and
+// WORKERD_RUST_WRAPPABLE_TAG. Only its address matters.
+const uint16_t BRAND_TAG = 0xeb06;
+
+constexpr auto BRAND_TYPE_TAG = static_cast<v8::EmbedderDataTypeTag>(DOMExceptionField::BRAND);
+
+void setBrand(v8::Local<v8::Object> object) {
+  object->SetAlignedPointerInInternalField(
+      DOMExceptionField::BRAND, const_cast<uint16_t*>(&BRAND_TAG), BRAND_TYPE_TAG);
+}
+
+// Whether `object` has the brand, without reading a field that may not hold a V8 value.
+bool hasBrand(v8::Local<v8::Object> object) {
+  return object->InternalFieldCount() == DOMExceptionField::FIELD_COUNT &&
+      object->GetAlignedPointerFromInternalField(DOMExceptionField::BRAND, BRAND_TYPE_TAG) ==
+      &BRAND_TAG;
+}
+
+int getCode(v8::Isolate* isolate, v8::Local<v8::String> name) {
+  // Every name with a code is ASCII and shorter than this.
+  char buffer[32];
+  if (name->Length() >= sizeof(buffer)) return 0;
+  size_t length = name->WriteUtf8V2(isolate, buffer, sizeof(buffer));
+  return getDOMExceptionCode(kj::arrayPtr(buffer, length));
+}
+
+v8::Maybe<void> defineReadOnly(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> object,
+    v8::Local<v8::String> key,
+    v8::Local<v8::Value> value) {
+  bool defined;
+  if (!object->DefineOwnProperty(context, key, value, v8::PropertyAttribute::ReadOnly)
+           .To(&defined)) {
+    return v8::Nothing<void>();
+  }
+  KJ_ASSERT(defined, "could not define a DOMException property");
+  return v8::JustVoid();
+}
+
+}  // namespace
+
+int getDOMExceptionCode(kj::ArrayPtr<const char> name) {
+  static constexpr struct {
+    kj::StringPtr name;
+    int code;
+  } LEGACY_CODES[] = {
+#define TABLE_ENTRY(name, code, friendlyName) {friendlyName##_kj, code},
+    JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(TABLE_ENTRY)
+#undef TABLE_ENTRY
+  };
+  for (auto& entry: LEGACY_CODES) {
+    if (entry.name.asArray() == name) return entry.code;
+  }
+  return 0;
+}
+
+v8::Local<v8::ObjectTemplate> newDOMExceptionTemplate(v8::Isolate* isolate) {
+  auto result = v8::ObjectTemplate::New(isolate);
+  result->SetInternalFieldCount(DOMExceptionField::FIELD_COUNT);
+  return result;
+}
+
+v8::MaybeLocal<v8::Object> createDOMException(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> prototype,
+    v8::Local<v8::String> name,
+    v8::Local<v8::String> message) {
+  v8::Local<v8::Object> object;
+  if (!IsolateBase::getDOMExceptionTemplate(isolate)->NewInstance(context).ToLocal(&object)) {
+    return {};
+  }
+  setBrand(object);
+  object->SetInternalField(DOMExceptionField::NAME, name);
+  object->SetInternalField(DOMExceptionField::MESSAGE, message);
+  bool prototypeSet;
+  if (!object->SetPrototype(context, prototype).To(&prototypeSet)) return {};
+  KJ_ASSERT(prototypeSet, "could not set a DOMException's prototype");
+
+  // The order of `code`, `name` and `message` is the order in which they have always been own
+  // properties of a DOMException, from JSG's lazy instance properties.
+  auto code = v8::Integer::New(isolate, getCode(isolate, name));
+  if (defineReadOnly(isolate, context, object,
+          v8::String::NewFromUtf8Literal(isolate, "code", v8::NewStringType::kInternalized), code)
+          .IsNothing() ||
+      defineReadOnly(isolate, context, object,
+          v8::String::NewFromUtf8Literal(isolate, "name", v8::NewStringType::kInternalized), name)
+          .IsNothing() ||
+      defineReadOnly(isolate, context, object,
+          v8::String::NewFromUtf8Literal(isolate, "message", v8::NewStringType::kInternalized),
+          message)
+          .IsNothing()) {
+    return {};
+  }
+  return object;
+}
+
+v8::MaybeLocal<v8::Object> newDOMException(v8::Isolate* isolate,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::String> name,
+    v8::Local<v8::String> message,
+    v8::MaybeLocal<v8::String> stack) {
+  auto prototype = getContextDataSlot(context, ContextDataSlot::DOM_EXCEPTION_PROTOTYPE);
+  KJ_ASSERT(prototype->IsValue() && prototype.As<v8::Value>()->IsObject(),
+      "the context has no DOMException prototype");
+  v8::Local<v8::Object> object;
+  if (!createDOMException(
+          isolate, context, prototype.As<v8::Value>().As<v8::Object>(), name, message)
+           .ToLocal(&object)) {
+    return {};
+  }
+
+  auto stackName =
+      v8::String::NewFromUtf8Literal(isolate, "stack", v8::NewStringType::kInternalized);
+  v8::Local<v8::String> stackValue;
+  if (stack.ToLocal(&stackValue)) {
+    // Writable and enumerable, but, as JSG has always defined it, not configurable.
+    v8::PropertyDescriptor prop(stackValue, true);
+    prop.set_enumerable(true);
+    if (object->DefineProperty(context, stackName, prop).IsNothing()) return {};
+  } else {
+    if (v8::Exception::CaptureStackTrace(context, object).IsNothing()) return {};
+    // Error properties are not enumerable, but a DOMException's always have been.
+    v8::PropertyDescriptor prop;
+    prop.set_enumerable(true);
+    if (object->DefineProperty(context, stackName, prop).IsNothing()) return {};
+  }
+  return object;
+}
+
+kj::Maybe<DOMExceptionFields> tryGetDOMExceptionFields(
+    v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  if (!value->IsObject()) return kj::none;
+  auto object = value.As<v8::Object>();
+
+  if (hasBrand(object)) {
+    return DOMExceptionFields{
+      object->GetInternalField(DOMExceptionField::NAME).As<v8::Value>().As<v8::String>(),
+      object->GetInternalField(DOMExceptionField::MESSAGE).As<v8::Value>().As<v8::String>(),
+    };
+  }
+
+  // An instance of the C++ class.
+  if (object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT &&
+      Wrappable::isWorkerdApiObject(object)) {
+    auto wrappable = Wrappable::unwrapFromShimAnyType(isolate, object);
+    if (wrappable == nullptr) return kj::none;
+    auto resource = wrappable->jsgTryGetObject();
+    if (resource == nullptr) return kj::none;
+    auto exception = dynamic_cast<DOMException*>(resource);
+    if (exception == nullptr) return kj::none;
+    // The constructor converted both from JavaScript strings, so they fit in one.
+    auto newString = [&](kj::StringPtr str) {
+      return v8::String::NewFromUtf8(
+          isolate, str.begin(), v8::NewStringType::kNormal, static_cast<int>(str.size()))
+          .ToLocalChecked();
+    };
+    return DOMExceptionFields{
+      newString(exception->getName()),
+      newString(exception->getMessage()),
+    };
+  }
+
+  return kj::none;
+}
+
+bool isDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
+  return index == DOMExceptionField::BRAND && hasBrand(holder);
+}
+
+void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
+  // Anything else is a corrupt snapshot. Abort rather than throw: V8 is deserializing.
+  if (index != DOMExceptionField::BRAND ||
+      holder->InternalFieldCount() != DOMExceptionField::FIELD_COUNT) {
+    KJ_LOG(FATAL, "DOMException brand in an unexpected internal field of a context snapshot", index,
+        holder->InternalFieldCount());
+    abort();
+  }
+  setBrand(holder);
+}
+
+void setDOMExceptionPrototype(v8::Local<v8::Context> context, v8::Local<v8::Object> prototype) {
+  setContextDataSlot(context, ContextDataSlot::DOM_EXCEPTION_PROTOTYPE, prototype);
+}
+
+void serializeDOMException(
+    Lock& js, Serializer& serializer, v8::Local<v8::Object> object, DOMExceptionFields fields) {
+  serializer.writeLengthDelimited(JsString(fields.name).toString(js));
+  serializer.writeLengthDelimited(JsString(fields.message).toString(js));
+
+  // It's a bit unfortunate that the stack here ends up also including the name and message
+  // so we end up duplicating some of the information here, but that's OK. It's better to
+  // keep this implementation simple rather than to implement any kind of deduplication.
+  auto stack = JsObject(object).get(js, "stack"_kj);
+  if (stack.isUndefined()) {
+    serializer.writeLengthDelimited(""_kj);
+  } else {
+    serializer.writeLengthDelimited(stack.toString(js));
+  }
+}
 
 Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
     Optional<kj::String> message,
@@ -50,38 +262,16 @@ kj::StringPtr DOMException::getMessage() const {
 }
 
 int DOMException::getCode() const {
-  static const std::map<kj::StringPtr, int> legacyCodes{
-#define MAP_ENTRY(name, code, friendlyName) {friendlyName, code},
-    JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(MAP_ENTRY)
-#undef MAP_ENTRY
-  };
-  auto code = legacyCodes.find(name);
-  if (code != legacyCodes.end()) {
-    return code->second;
-  }
-  return 0;
+  return getDOMExceptionCode(name.asArray());
 }
 
 void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  serializer.writeLengthDelimited(name);
-  serializer.writeLengthDelimited(message);
-
-  // It's a bit unfortunate that the stack here ends up also including the name and message
-  // so we end up duplicating some of the information here, but that's OK. It's better to
-  // keep this implementation simple rather than to implement any kind of deduplication.
-  KJ_IF_SOME(stack, this->stack.get(js, "stack")) {
-    serializer.writeLengthDelimited(stack);
-  } else {
-    // This branch shouldn't really be taken in the typical case. It's only here
-    // to handle the case where the stack property could not be unwrapped for some
-    // reason. We don't need to treat it as an error case, just set the stack to
-    // the empty string and move on.
-    serializer.writeLengthDelimited(""_kj);
-  }
+  // Serializer::writeApiObject() writes every DOMException itself, by its brand, without calling
+  // this.
+  KJ_UNREACHABLE;
 }
 
-jsg::Ref<DOMException> DOMException::deserialize(
-    jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+jsg::JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
   switch (tag) {
     case SERIALIZATION_TAG_V2: {
       kj::String name = deserializer.readLengthDelimitedString();

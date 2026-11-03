@@ -9,6 +9,7 @@
 
 #include "setup.h"
 
+#include "dom-exception.h"
 #include "libplatform/libplatform.h"
 
 #include <v8-cppgc.h>
@@ -544,13 +545,57 @@ IsolateBase::IsolateBase(V8System& system,
       opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
+
+      domExceptionTemplate.Reset(ptr, newDOMExceptionTemplate(ptr));
     }
   });
 }
 
+namespace {
+
+// A context snapshot writes an internal field that holds a V8 value as it writes any value. One
+// that holds an aligned pointer it writes only as data that serializeInternalField() returns, and
+// deserializes as null unless deserializeInternalField() restores it. These are the kinds of such
+// field that a snapshot keeps; the data of each is its kind, one byte. Other aligned pointers,
+// such as the marker of a JSG wrapper, whose C++ object createSnapshotBlob() destroys, deserialize
+// as null.
+enum class SnapshotInternalField : uint8_t {
+  DOM_EXCEPTION_BRAND = 1,
+};
+
+v8::StartupData serializeInternalField(v8::Local<v8::Object> holder, int index, void*) {
+  if (isDOMExceptionBrand(holder, index)) {
+    // V8 frees the data with delete[].
+    return {new char[1]{static_cast<char>(SnapshotInternalField::DOM_EXCEPTION_BRAND)}, 1};
+  }
+  return {nullptr, 0};
+}
+
+void deserializeInternalField(
+    v8::Local<v8::Object> holder, int index, v8::StartupData payload, void*) {
+  // The data is what serializeInternalField() wrote, so anything else is a corrupt snapshot. Abort
+  // rather than throw: V8 is deserializing.
+  if (payload.raw_size == 1 &&
+      static_cast<SnapshotInternalField>(payload.data[0]) ==
+          SnapshotInternalField::DOM_EXCEPTION_BRAND) {
+    restoreDOMExceptionBrand(holder, index);
+    return;
+  }
+  KJ_LOG(FATAL, "unknown internal field in a context snapshot", payload.raw_size);
+  abort();
+}
+
+}  // namespace
+
 void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
   KJ_REQUIRE(isPreparingSnapshot());
-  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+  KJ_ASSERT_NONNULL(snapshotCreator)
+      ->SetDefaultContext(
+          defaultContext, v8::SerializeInternalFieldsCallback(&serializeInternalField, nullptr));
+}
+
+v8::DeserializeInternalFieldsCallback newContextInternalFieldsDeserializer() {
+  return v8::DeserializeInternalFieldsCallback(&deserializeInternalField, nullptr);
 }
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
@@ -586,6 +631,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // 2. Reset isolate level handles.
   opaqueTemplate.Reset();
+  domExceptionTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -639,6 +685,11 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
+v8::Local<v8::ObjectTemplate> IsolateBase::getDOMExceptionTemplate(v8::Isolate* isolate) {
+  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
+      ->domExceptionTemplate.Get(isolate);
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -662,6 +713,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
 

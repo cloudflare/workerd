@@ -271,8 +271,7 @@ DecodedException decodeTunneledException(
         auto& js = Lock::from(isolate);
         auto errorName = kj::str(errorType.first(closeParen));
         auto message = appMessage(errorType.slice(1 + closeParen));
-        auto exception = js.domException(kj::mv(errorName), kj::mv(message));
-        result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+        result.handle = js.domException(kj::mv(errorName), kj::mv(message));
         addAdditionalInfo();
         return result;
       }

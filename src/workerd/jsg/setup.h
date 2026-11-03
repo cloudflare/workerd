@@ -505,6 +505,9 @@ class IsolateBase {
   // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
 
+  // Every v8::Context::New() passes newContextInternalFieldsDeserializer() (jsg.h) to restore the
+  // internal fields that this has the snapshot keep.
+
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
@@ -532,6 +535,9 @@ class IsolateBase {
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
+  // Returns the template of the DOMExceptions that createDOMException() creates.
+  static v8::Local<v8::ObjectTemplate> getDOMExceptionTemplate(v8::Isolate* isolate);
 
  private:
   template <typename TypeWrapper>
@@ -653,6 +659,9 @@ class IsolateBase {
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
+
+  // The template of the DOMExceptions that createDOMException() creates.
+  v8::Global<v8::ObjectTemplate> domExceptionTemplate;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
@@ -1068,31 +1077,15 @@ class Isolate: public IsolateBase {
           *this, context, handle, jsg::TypeErrorContext::other());
     }
 
-    Ref<DOMException> domException(
+    JsObject domException(
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
-      return withinHandleScope([&] {
-        v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
-            v8Isolate, static_cast<DOMException*>(nullptr));
-        KJ_DASSERT(!tmpl.IsEmpty());
-        v8::Local<v8::Object> obj = check(tmpl->InstanceTemplate()->NewInstance(v8Context()));
-        v8::Local<v8::String> stackName = str("stack"_kjc);
-
-        KJ_IF_SOME(stack, maybeStack) {
-          v8::PropertyDescriptor prop(str(stack), true);
-          prop.set_enumerable(true);
-          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
-        } else {
-          v8::Exception::CaptureStackTrace(v8Context(), obj);
-          v8::PropertyDescriptor prop;
-          prop.set_enumerable(true);
-          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
+      return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
+        v8::MaybeLocal<v8::String> stack;
+        KJ_IF_SOME(s, maybeStack) {
+          stack = v8::Local<v8::String>(str(s));
         }
-
-        auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
-        de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
-
-        return kj::mv(de);
-      });
+        return check(newDOMException(v8Isolate, v8Context(), str(name), str(message), stack));
+      }));
     }
 
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
@@ -1169,8 +1162,17 @@ class Isolate: public IsolateBase {
       //   a Ref.
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      auto handle = context.getHandle(v8Isolate);
       jsg::setAlignedPointerInEmbedderData(
-          context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
+          handle, jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
+      withinHandleScope([&] {
+        // Reading the function's `prototype` data property runs no JavaScript.
+        auto constructor =
+            check(wrapper->getTemplate(v8Isolate, static_cast<DOMException*>(nullptr))
+                      ->GetFunction(handle));
+        auto prototype = check(constructor->Get(handle, strIntern("prototype"_kj)));
+        setDOMExceptionPrototype(handle, prototype.template As<v8::Object>());
+      });
       return context;
     }
 
@@ -1204,11 +1206,9 @@ class Isolate: public IsolateBase {
 
     void reportError(const JsValue& value) override {
       auto& js = Lock::from(v8Isolate);
-      KJ_IF_SOME(domException,
-          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
-              js, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
-        auto desc =
-            kj::str("DOMException(", domException.getName(), "): ", domException.getMessage());
+      KJ_IF_SOME(domException, tryGetDOMExceptionFields(v8Isolate, value)) {
+        auto desc = kj::str("DOMException(", JsString(domException.name).toString(js),
+            "): ", JsString(domException.message).toString(js));
         jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));
       } else {
         jsgIsolate.reportError(

@@ -327,6 +327,11 @@ bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }
 
+void throw_kj_exception(::rust::Str description) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::heapString(description.data(), description.size())));
+}
+
 void set_autogates_for_test(::rust::Slice<const ::rust::Str> names) {
   auto owned = KJ_MAP(name, names) { return kj::str(name); };
   auto ptrs = KJ_MAP(name, owned) -> kj::StringPtr { return name; };

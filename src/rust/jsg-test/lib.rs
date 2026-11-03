@@ -156,6 +156,12 @@ mod ffi {
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
+        /// Throws a `kj::Exception` with `description`, such as a tunneled
+        /// `jsg-internal.DOMException(OperationError): ...`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn throw_kj_exception(description: &str) -> Result<()>;
+
         /// Configures the process's autogates to exactly `names`, each in kebab-case without
         /// the `workerd-autogate-` prefix, whatever `WORKERD_ALL_AUTOGATES` says. See
         /// `set_autogates`.

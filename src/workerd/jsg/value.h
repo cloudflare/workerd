@@ -1480,7 +1480,6 @@ class ExceptionWrapper {
     // we need to drop down to the C++ interface and generate the kj::Exception
     // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
     // introduced, they'll need to be handled explicitly here also.
-    auto& wrapper = TypeWrapper::from(js.v8Isolate);
     kj::Exception result = [&]() {
       kj::Exception::Type excType = [&]() {
         // Use .retryable and .overloaded properties as hints for what kj exception type to use.
@@ -1497,11 +1496,10 @@ class ExceptionWrapper {
         return kj::Exception::Type::FAILED;
       }();
 
-      KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(
-              js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
+      KJ_IF_SOME(domException, tryGetDOMExceptionFields(js.v8Isolate, handle)) {
         return KJ_EXCEPTION(FAILED,
-            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+            kj::str("jsg.DOMException(", JsString(domException.name).toString(js),
+                "): ", JsString(domException.message).toString(js)));
       } else {
 
         static const constexpr kj::StringPtr PREFIXES[] = {

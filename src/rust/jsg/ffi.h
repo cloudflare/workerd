@@ -563,12 +563,22 @@ bool local_serialize(Isolate* isolate,
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
 // Errors
-// Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
-// UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
-// than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
-// A message longer than V8's string limit is cut to fit, so this never fails.
+// Builds a JS built-in error whose message is raw bytes interpreted as UTF-8.
+// Invalid UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8
+// rather than rejected, so this accepts arbitrary byte input (e.g. filesystem
+// paths). A message longer than V8's string limit is cut to fit, so this never
+// fails. Rust creates the DOM-prefixed exception types with dom_exception_create()
+// instead.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
+// Creates a DOMException without running JavaScript (jsg::newDOMException()), or returns none
+// with an exception pending.
+MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message);
+// Stores the name and message of a DOMException, by its brand (jsg::tryGetDOMExceptionFields()),
+// and returns true; returns false for any other value. Runs no JavaScript and takes no context,
+// so it works while an exception or a termination is pending.
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -588,6 +598,7 @@ void isolate_try_catch(
 // never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
+::rust::String log_internal_error(::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 // Terminates execution and has V8 deliver the termination before returning, so that it is
 // pending, as jsg::Lock::terminateExecutionNow() does. Requires a context to be entered. Returns

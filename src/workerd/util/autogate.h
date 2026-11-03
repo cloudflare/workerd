@@ -131,6 +131,11 @@ namespace workerd::util {
      api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
      cloudflare-internal:messagechannel. */                                                        \
   V(TS_MESSAGE_CHANNEL)                                                                            \
+  /* The global DOMException is the TypeScript class from the per-isolate bootstrap                \
+     (src/per_isolate/dom-exception.ts) rather than the C++ class in jsg/dom-exception.h, and      \
+     the DOMExceptions native code creates are instances of it. Both are recognized by the brand   \
+     in their internal fields either way. */                                                       \
+  V(TS_DOM_EXCEPTION)                                                                              \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \

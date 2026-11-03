@@ -119,6 +119,9 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 
+// Throws a kj::Exception with `description`.
+void throw_kj_exception(::rust::Str description);
+
 // Configures the process's autogates to exactly `names`, each without the `workerd-autogate-`
 // prefix, ignoring WORKERD_ALL_AUTOGATES.
 void set_autogates_for_test(::rust::Slice<const ::rust::Str> names);
