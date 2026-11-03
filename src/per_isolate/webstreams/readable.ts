@@ -132,6 +132,7 @@ const {
   slotPromise,
   slotResolved,
   slotRejected,
+  kInternalReleaseError,
   requireObject,
   toDictionary,
   convertQueuingStrategy,
@@ -242,7 +243,12 @@ let detachReadableStream: <R>(
   stream: ReadableStream<R>,
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
-let readableStreamReaderGenericRelease: (reader: object) => void;
+// `releaseError` defaults to a new TypeError, as the spec's; an internal
+// reader passes kInternalReleaseError.
+let readableStreamReaderGenericRelease: (
+  reader: object,
+  releaseError?: TypeError
+) => void;
 
 // Closes a stream whose data has moved to another stream (extraction, and
 // the tee or detach of a native stream, or of a queued one other than its
@@ -495,7 +501,7 @@ function iteratorNextSteps(s: IteratorInternalState) {
       s.current = undefined;
       if (result.done) {
         s.done = true;
-        readableStreamReaderGenericRelease(s.reader);
+        readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
         promise.resolve(userReadResult(undefined, true));
       } else {
         promise.resolve(userReadResult(result.value, false));
@@ -504,7 +510,7 @@ function iteratorNextSteps(s: IteratorInternalState) {
     (e: unknown) => {
       s.current = undefined;
       s.done = true;
-      readableStreamReaderGenericRelease(s.reader);
+      readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
       promise.reject(e);
     }
   );
@@ -531,11 +537,11 @@ function iteratorReturnSteps(
 
   if (!s.preventCancel) {
     const result = cancelReadableStreamGenericReader(s.reader, value);
-    readableStreamReaderGenericRelease(s.reader);
+    readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
     return result as Promise<undefined>;
   }
 
-  readableStreamReaderGenericRelease(s.reader);
+  readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
   return PromiseResolve(undefined);
 }
 
@@ -666,11 +672,13 @@ class ReadableStreamReaderBase<R> {
       return readableStreamCancel(stream, reason);
     };
 
-    readableStreamReaderGenericRelease = (reader: object) => {
+    readableStreamReaderGenericRelease = (
+      reader: object,
+      releaseError = new TypeError('This reader has been released')
+    ) => {
       const base = getReaderBase(reader);
       const stream = base.#stream;
       if (stream === undefined) return;
-      const releaseError = new TypeError('This reader has been released');
       // Per spec: on a readable stream the pending closedPromise is
       // rejected; otherwise it is replaced with a fresh rejected promise.
       // The slot is pending exactly while the stream is readable, so
@@ -2851,8 +2859,8 @@ function finishNativePipe<R>(
   writer: WritableStreamDefaultWriterType<R>
 ): Promise<void> {
   const finalize = (): void => {
-    writableInternals.writerRelease(writer);
-    readableStreamReaderGenericRelease(reader);
+    writableInternals.writerRelease(writer, kInternalReleaseError);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
   };
   return PromisePrototypeThen(
     piped,
@@ -2907,7 +2915,7 @@ function pipeToInternal<R>(
   } catch (e) {
     // The catch here is purely defensive. The acquireWriter
     // should not actually throw.
-    readableStreamReaderGenericRelease(reader);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
     throw e;
   }
   setReadableStreamDisturbed(source);
@@ -2920,8 +2928,8 @@ function pipeToInternal<R>(
 
   const finalize = (error?: { reason: unknown }): void => {
     writableInternals.setReadyHook(destination, undefined);
-    writableInternals.writerRelease(writer);
-    readableStreamReaderGenericRelease(reader);
+    writableInternals.writerRelease(writer, kInternalReleaseError);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
     abortRegistration?.remove();
     if (error !== undefined) {
       reject(error.reason);
