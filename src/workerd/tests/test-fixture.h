@@ -93,6 +93,9 @@ struct TestFixture {
     // If set, passed to the Script. The feature flags must enable the new module registry,
     // and the registry must contain the fixture's main module, named "main".
     kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
+    // If set, returned by the Api's getEmbedderBootstrap(), so that the per-isolate bootstrap runs
+    // these scripts after workerd's. Must outlive the fixture.
+    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
