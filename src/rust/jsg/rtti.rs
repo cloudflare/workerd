@@ -562,6 +562,8 @@ primitive!(v8::Array, Type::Array(Box::new(Type::Unknown)));
 primitive!(v8::Function, Type::Builtin(Builtin::V8Function));
 // As in C++, an untyped promise resolves to an unknown value.
 primitive!(v8::Promise, Type::Promise(Box::new(Type::Unknown)));
+// As C++ describes `jsg::Promise<void>`.
+primitive!(v8::VoidPromise<'_>, Type::Promise(Box::new(Type::Void)));
 primitive!(v8::ArrayBuffer, Type::Builtin(Builtin::V8ArrayBuffer));
 // As C++ describes `jsg::JsDate`.
 primitive!(v8::Date, Type::Builtin(Builtin::KjDate));

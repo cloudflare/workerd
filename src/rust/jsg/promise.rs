@@ -20,6 +20,7 @@ use crate::UnitType;
 use crate::v8::Function;
 use crate::v8::FunctionCallbackInfo;
 use crate::v8::Local;
+use crate::v8::Object;
 use crate::v8::PromiseState;
 use crate::v8::Value;
 use crate::v8::ffi;
@@ -396,6 +397,57 @@ impl<'s> FromJS<'s> for Local<'s, Promise> {
     /// a promise resolved with it; see [`Promise::resolved`].
     fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
         Promise::resolved(lock, value)
+    }
+
+    fn type_name() -> String {
+        "Promise".to_owned()
+    }
+}
+
+/// A promise for nothing, which converts from JavaScript as C++ JSG converts a
+/// `jsg::Promise<void>` argument. A `kj::Promise<void>` argument, such as `ctx.waitUntil()`
+/// takes, converts the same way.
+///
+/// A promise is taken as is. A thenable (an object with a `then` property) is followed, as
+/// [`Promise::resolved`] follows it, only if the `unwrap_custom_thenables` compatibility flag is
+/// on. Any other value, including a thenable when the flag is off, becomes a promise resolved
+/// with `undefined`; the value is ignored.
+///
+/// [`FromJS`] for `Local<Promise>` instead follows every thenable, whatever the flag, keeping
+/// the value, as C++ JSG does for other promise types. As in C++ JSG, a `VoidPromise` argument
+/// may not be omitted, but may be `undefined`, and is called `Promise` in argument errors.
+#[derive(Clone, Copy)]
+pub struct VoidPromise<'s>(Local<'s, Promise>);
+
+impl<'s> From<VoidPromise<'s>> for Local<'s, Promise> {
+    fn from(promise: VoidPromise<'s>) -> Self {
+        promise.0
+    }
+}
+
+impl<'s> FromJS<'s> for VoidPromise<'s> {
+    type ResultType = Self;
+
+    /// Checks for a thenable's `then` with `in` before following it, as C++ JSG does, which a
+    /// Proxy's `has` trap can observe.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy's `has` trap throws, or V8 fails (see [`Promise`]), the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true. A `then` getter
+    /// that throws rejects the promise instead, as for [`Local::resolve`].
+    fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
+        if let Ok(promise) = Local::<Promise>::try_from(value) {
+            return Ok(Self(promise));
+        }
+        if lock.feature_flags().get_unwrap_custom_thenables()
+            && let Ok(object) = Local::<Object>::try_from(value)
+            && object.has(lock, "then")?
+        {
+            return Promise::resolved(lock, value).map(Self);
+        }
+        let undefined = lock.undefined();
+        Promise::resolved(lock, undefined).map(Self)
     }
 
     fn type_name() -> String {

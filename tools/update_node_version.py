@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """
-Script to update Node.js version in node-version.h based on GitHub releases.
+Script to update Node.js versions in node-version.h based on GitHub releases.
 
+node-version.h has one `nodeVersion<major>` constant per reported major version.
 This script:
 1. Fetches Node.js version tags from GitHub
-2. Finds the maximum even major version
-3. Looks for the latest version in the (max-2) series
-4. Updates the node-version.h file if needed
+2. Finds the latest release in each major series named by a constant
+3. Updates those constants in the node-version.h file if needed
+
+Pass --major to update only one major version. Adding a new major version is a
+manual change, since reporting it requires a compatibility flag.
 """
 
+import argparse
 import json
 import re
 import sys
 import urllib.request
 from pathlib import Path
+
+CONSTANT_PATTERN = re.compile(
+    r'static constexpr kj::StringPtr nodeVersion(\d+) = "([^"]+)"_kj;'
+)
 
 
 def fetch_nodejs_tags():
@@ -51,55 +59,35 @@ def parse_version(version_str):
     return None
 
 
-def find_target_version(tags):
-    """Find the target Node.js version based on the algorithm."""
-    # Extract valid versions
-    versions = []
-    for tag in tags:
-        version = parse_version(tag["name"])
-        if version:
-            versions.append((version, tag["name"]))
+def find_latest_version(tags, major):
+    """Find the latest Node.js release in the given major series."""
+    versions = [
+        version
+        for version in (parse_version(tag["name"]) for tag in tags)
+        if version and version[0] == major
+    ]
 
     if not versions:
-        print("No valid versions found", file=sys.stderr)
+        print(f"No version found for major version {major}", file=sys.stderr)
         sys.exit(1)
 
-    # Sort versions
-    versions.sort(reverse=True)
-
-    # Find maximum even major version
-    max_even_major = None
-    for (major, _minor, _patch), _ in versions:
-        if major % 2 == 0:
-            max_even_major = major
-            break
-
-    if max_even_major is None:
-        print("No even major version found", file=sys.stderr)
-        sys.exit(1)
-
-    # Calculate target major version (max_even - 2)
-    target_major = max_even_major - 2
-
-    # Find latest version in target major series
-    for (major, _minor, _patch), tag_name in versions:
-        if major == target_major:
-            return tag_name[1:]  # Remove 'v' prefix
-
-    print(f"No version found for major version {target_major}", file=sys.stderr)
-    sys.exit(1)
+    return "{}.{}.{}".format(*max(versions))
 
 
-def update_header_file(file_path, new_version):
-    """Update the node-version.h file with the new version."""
+def read_majors(file_path):
+    """Return the major versions that have a constant in the header file."""
+    content = Path(file_path).read_text()
+    return [int(major) for major, _ in CONSTANT_PATTERN.findall(content)]
+
+
+def update_header_file(file_path, major, new_version):
+    """Update the constant for the given major version in the header file."""
     path = Path(file_path)
     content = path.read_text()
 
-    # Replace the version string
-    # Match: static constexpr kj::StringPtr nodeVersion = "X.Y.Z"_kj;
-    pattern = r'static constexpr kj::StringPtr nodeVersion = "[^"]+"_kj;'
-    replacement = f'static constexpr kj::StringPtr nodeVersion = "{new_version}"_kj;'
-    new_content = re.sub(pattern, replacement, content)
+    # Match: static constexpr kj::StringPtr nodeVersion<major> = "X.Y.Z"_kj;
+    pattern = rf'(static constexpr kj::StringPtr nodeVersion{major} = )"[^"]+"(_kj;)'
+    new_content = re.sub(pattern, rf'\g<1>"{new_version}"\g<2>', content)
 
     if new_content != content:
         path.write_text(new_content)
@@ -108,24 +96,42 @@ def update_header_file(file_path, new_version):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: update_node_version.py <output_file>", file=sys.stderr)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output_file", help="path to node-version.h")
+    parser.add_argument(
+        "--major",
+        type=int,
+        help="update only this major version (default: every major in the file)",
+    )
+    args = parser.parse_args()
+
+    majors = read_majors(args.output_file)
+    if not majors:
+        print(f"No nodeVersion constants found in {args.output_file}", file=sys.stderr)
         sys.exit(1)
 
-    output_file = sys.argv[1]
+    if args.major is not None:
+        if args.major not in majors:
+            print(
+                f"{args.output_file} has no nodeVersion{args.major} constant. "
+                "Reporting a new major version requires a compatibility flag, "
+                "so add the constant by hand.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        majors = [args.major]
 
     print("Fetching Node.js versions from GitHub...")
     tags = fetch_nodejs_tags()
 
-    print("Finding target version...")
-    target_version = find_target_version(tags)
-    print(f"Target version: {target_version}")
+    for major in majors:
+        target_version = find_latest_version(tags, major)
+        print(f"Target version for Node.js {major}: {target_version}")
 
-    # Update the header file
-    if update_header_file(output_file, target_version):
-        print(f"Updated {output_file} with version {target_version}")
-    else:
-        print(f"No changes needed - already at version {target_version}")
+        if update_header_file(args.output_file, major, target_version):
+            print(f"Updated {args.output_file} with version {target_version}")
+        else:
+            print(f"No changes needed - already at version {target_version}")
 
 
 if __name__ == "__main__":
