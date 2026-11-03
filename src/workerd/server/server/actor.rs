@@ -90,6 +90,8 @@ const EVICT_RETRY_DELAY: Duration = Duration::from_millis(1);
 const HANDOFF_POLL: Duration = Duration::from_millis(10);
 /// How many objects a draining instance releases at once.
 const HANDOFFS_AT_ONCE: usize = 32;
+/// How many actors a stopping instance stops between turns of its event loop.
+const STOPS_AT_ONCE: usize = 64;
 
 const EVICT_TIMEOUT_MESSAGE: &str =
     "jsg.Error: Timed out waiting to evict Durable Object: it still has active references.";
@@ -125,6 +127,8 @@ pub struct ActorNamespace {
     resolving: RefCell<HashMap<String, Rc<Notify>>>,
     /// Set for the namespace of a worker that cannot handle requests (`set_broken`).
     broken: Cell<bool>,
+    /// Actors a stop left as they were at its deadline: they end as the process exits.
+    left_behind: RefCell<Vec<Rc<ActorContainer>>>,
 }
 
 /// The first resolution of an actor: its end, however it ends, wakes the requests that waited.
@@ -170,6 +174,7 @@ impl ActorNamespace {
             directory: OnceCell::new(),
             resolving: RefCell::new(HashMap::new()),
             broken: Cell::new(false),
+            left_behind: RefCell::new(Vec::new()),
         })
     }
 
@@ -478,12 +483,34 @@ impl ActorNamespace {
     /// once it left the cluster. Any request still in flight is cancelled, as it could not
     /// commit once a peer owns the object. A later request that still reaches one here, through
     /// a stub or a peer that found it here, started nothing: it is answered as `moved`, so that
-    /// it can follow the actor to its next owner.
-    pub fn release_all(&self) {
-        let actors = std::mem::take(&mut *self.actors.borrow_mut());
-        for (key, container) in &actors {
+    /// it can follow the actor to its next owner. Those left at `until` are left as they are
+    /// (`stop_all`).
+    pub async fn release_all(&self, until: Instant) {
+        self.stop_all(Some(until), |key, container| {
             let left = moved(&format!("{key}: this node is draining"));
             container.abort_then(container.cancelled(), Some(left));
+        })
+        .await;
+    }
+
+    /// Stops each actor with `stop`, a few at a time, letting the event loop run between them,
+    /// as stopping one aborts it and closes its databases. The actors left once `until` passed
+    /// are left as they are, for the process's exit to end.
+    async fn stop_all(&self, until: Option<Instant>, stop: impl Fn(&str, &ActorContainer)) {
+        let actors = std::mem::take(&mut *self.actors.borrow_mut());
+        let mut actors = actors.into_iter().collect::<Vec<_>>().into_iter();
+        loop {
+            for (key, container) in actors.by_ref().take(STOPS_AT_ONCE) {
+                stop(&key, &container);
+            }
+            if actors.len() == 0 {
+                return;
+            }
+            tokio::task::yield_now().await;
+            if until.is_some_and(|until| Instant::now() >= until) {
+                let left = actors.map(|(_, container)| container);
+                return self.left_behind.borrow_mut().extend(left);
+            }
         }
     }
 
@@ -625,9 +652,12 @@ impl ActorNamespace {
 
     /// Stops the namespace's actors ahead of shutdown so that none can race its containers'
     /// Docker cleanup. Nothing for a class without `container` options.
-    pub fn begin_container_cleanup(&self) {
+    /// Those left at `until` are left as they are (`stop_all`).
+    pub async fn begin_container_cleanup(&self, until: Option<Instant>) {
         if self.container().is_some() {
-            self.abort_all(Some(&kj::disconnected!("Server shutting down.")));
+            let reason = kj::disconnected!("Server shutting down.");
+            self.stop_all(until, |_, container| container.abort(Some(reason.clone())))
+                .await;
         }
     }
 }
@@ -2319,6 +2349,6 @@ pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadline
     let all = futures::future::join_all(ordered);
     let _ = tokio::time::timeout_at(deadlines.handoff, all).await;
     for ns in namespaces {
-        ns.release_all();
+        ns.release_all(deadlines.connections).await;
     }
 }

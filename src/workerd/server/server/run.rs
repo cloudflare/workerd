@@ -508,8 +508,9 @@ pub async fn run(
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
+    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
-        namespace.begin_container_cleanup();
+        namespace.begin_container_cleanup(until).await;
     }
     let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
     let Some((_, deadlines)) = stop else {
