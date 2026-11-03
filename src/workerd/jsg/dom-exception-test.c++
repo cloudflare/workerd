@@ -65,5 +65,26 @@ KJ_TEST("jsg::Lock domException") {
   });
 }
 
+KJ_TEST("newDOMException") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      v8::Local<v8::Object> handle;
+      KJ_ASSERT(
+          newDOMException(js.v8Isolate, "AbortError"_kj, js.str("aborted"_kj)).ToLocal(&handle));
+      auto exception = JsObject(handle);
+      auto domException =
+          KJ_ASSERT_NONNULL(js.global().get(js, "DOMException"_kj).tryCast<JsObject>());
+      KJ_ASSERT(exception.getPrototype(js) == domException.get(js, "prototype"_kj));
+      KJ_ASSERT(exception.get(js, "name"_kj).toString(js) == "AbortError"_kj);
+      KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "aborted"_kj);
+      KJ_ASSERT(exception.get(js, "code"_kj).toString(js) == "20"_kj);
+      KJ_ASSERT(exception.has(js, "stack"_kj));
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

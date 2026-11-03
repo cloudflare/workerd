@@ -116,4 +116,21 @@ jsg::Ref<DOMException> DOMException::deserialize(
   }
 }
 
+v8::MaybeLocal<v8::Object> newDOMException(
+    v8::Isolate* isolate, kj::StringPtr name, v8::Local<v8::String> message) {
+  try {
+    KJ_REQUIRE(isolate->InContext(), "creating a DOMException requires an entered context");
+    auto& js = Lock::from(isolate);
+    auto exception = js.domException(kj::str(name), kj::str(message));
+    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+  } catch (JsExceptionThrown&) {
+    // Creating the DOMException threw, most likely because execution is terminating; that
+    // exception stays pending.
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
+}
+
 }  // namespace workerd::jsg
