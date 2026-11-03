@@ -54,7 +54,10 @@ macro_rules! jsg_traced {
 ///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
 ///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
 ///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`. The variants from
+///   `OperationError` on are thrown as a `DOMException` with that name (see
+///   [`ExceptionType::is_dom_exception`](crate::v8::ffi::ExceptionType::is_dom_exception));
+///   `SyntaxError` is the JavaScript class.
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_REQUIRE` which concatenates via `kj::str()`, this macro uses
 ///   Rust's standard `format!()` for string interpolation.
@@ -120,7 +123,10 @@ macro_rules! jsg_require {
 ///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
 ///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
 ///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`. The variants from
+///   `OperationError` on are thrown as a `DOMException` with that name (see
+///   [`ExceptionType::is_dom_exception`](crate::v8::ffi::ExceptionType::is_dom_exception));
+///   `SyntaxError` is the JavaScript class.
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_FAIL_REQUIRE` which concatenates via `kj::str()`, this macro
 ///   uses Rust's standard `format!()` for string interpolation.

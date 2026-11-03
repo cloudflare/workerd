@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -1657,15 +1658,15 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
     default:
-      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
-      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      // Error, and the DOMException names, which Rust creates with
+      // dom_exception_create_from_bytes() instead. Only a fast callback could pass one here, and
+      // it throws only TypeErrors.
       return to_ffi(v8::Exception::Error(message));
   }
 }
-}  // namespace
 
-Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+v8::Local<v8::String> errorMessageFromBytes(
+    Isolate* isolate, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
@@ -1677,10 +1678,24 @@ Local exception_create_from_bytes(
   // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
   // after it NewFromUtf8 cannot refuse the string.
   auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
-  auto v8Message = newUtf8String(
+  return newUtf8String(
       isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
-                       .ToLocalChecked();
-  return exceptionCreateFromMessage(exception_type, v8Message);
+      .ToLocalChecked();
+}
+}  // namespace
+
+Local exception_create_from_bytes(
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+  return exceptionCreateFromMessage(exception_type, errorMessageFromBytes(isolate, message));
+}
+
+MaybeLocal dom_exception_create_from_bytes(
+    Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message) {
+  // Creating a DOMException instantiates a template in the current context.
+  if (exceptionPending(isolate)) return {};
+  // kj::heapString() copies `name` and adds the NUL that a rust::Str lacks.
+  return maybe_local_to_ffi(::workerd::jsg::newDOMException(
+      isolate, kj::heapString(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
 }
 
 namespace {

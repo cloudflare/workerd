@@ -14,6 +14,7 @@ mod collections_gc;
 mod cpp_interop;
 mod date_bigint;
 mod dict;
+mod dom_exception;
 mod eval;
 mod fast_api;
 mod function;

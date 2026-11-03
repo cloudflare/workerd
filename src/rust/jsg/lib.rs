@@ -360,15 +360,27 @@ impl Error {
         self.pending
     }
 
-    /// Creates a V8 exception from this error.
+    /// Creates a V8 exception from this error: a `DOMException` for a type for which
+    /// [`ExceptionType::is_dom_exception`] is true, as [`Lock::dom_exception`] creates it, and
+    /// otherwise an instance of the JavaScript error class.
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
     /// which does perform that check before falling back to this method. A message longer
     /// than V8's string limit is cut to fit; see [`Lock::error`].
-    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        lock.create_error_from_bytes(self.name, self.message.as_bytes())
-            .into()
+    ///
+    /// # Errors
+    ///
+    /// Only creating a `DOMException` can fail; see [`Lock::dom_exception`].
+    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
+        if self.name.is_dom_exception() {
+            return lock
+                .create_dom_exception_from_bytes(&self.name.to_string(), self.message.as_bytes())
+                .map(Into::into);
+        }
+        Ok(lock
+            .create_error_from_bytes(self.name, self.message.as_bytes())
+            .into())
     }
 }
 
@@ -708,6 +720,44 @@ impl<'s> Lock<'s> {
         error
     }
 
+    /// Creates a `DOMException` with the given name and message.
+    ///
+    /// Mirrors C++ `jsg::Lock::domException()`, and accepts any name, as it does. Errors with
+    /// the `DOMException` names of [`ExceptionType`] are thrown as `DOMException`s already (see
+    /// [`Error::to_local`]); use this for another name, or to attach properties before throwing.
+    /// A message longer than V8's string limit is cut to fit; see [`Lock::error`].
+    ///
+    /// # Errors
+    ///
+    /// Unlike creating an `Error`, this needs the current context, so it fails with an error for
+    /// which [`Error::is_pending`] is true if an exception or a termination is pending, or if
+    /// creating the `DOMException` throws (as it does when the stack is exhausted).
+    pub fn dom_exception(
+        &mut self,
+        name: &str,
+        message: &str,
+    ) -> Result<v8::Local<'s, v8::Object>> {
+        self.create_dom_exception_from_bytes(name, message.as_bytes())
+    }
+
+    fn create_dom_exception_from_bytes(
+        &mut self,
+        name: &str,
+        message: &[u8],
+    ) -> Result<v8::Local<'s, v8::Object>> {
+        let message = error_message_for_v8(message);
+        // SAFETY: Lock guarantees the isolate is valid and locked; the result belongs to the
+        // lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(v8::ffi::dom_exception_create_from_bytes(
+                self.isolate().as_ffi(),
+                name,
+                message,
+            ))
+        }
+        .ok_or_else(Error::pending)
+    }
+
     /// Throws a JavaScript `Error` with the given message, as [`Lock::error`] creates it.
     ///
     /// Throws nothing while execution is terminating; see [`Lock::throw_exception`].
@@ -783,12 +833,14 @@ impl<'s> Lock<'s> {
             // the exception.
             return;
         }
+        // Creating a DOMException that fails leaves its exception pending, which then propagates
+        // in place of `err`.
+        let Ok(exception) = err.to_local(self) else {
+            return;
+        };
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_throw_exception(
-                self.isolate().as_ffi(),
-                err.to_local(self).into_ffi(),
-            );
+            v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), exception.into_ffi());
         }
     }
 
@@ -896,14 +948,14 @@ impl<'s> Lock<'s> {
     /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
     /// pending in V8, and returning the error propagates it. While execution is terminating,
     /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
-    /// termination; an internal error's message is still logged.
+    /// termination; an internal error's message is still logged. Creating a `DOMException` can
+    /// fail too; see [`Lock::dom_exception`].
     pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
         if err.is_pending() {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Nothing could be rejected with the exception, so it is not created. (Creating it
-            // would be safe: creating an error object takes no context.)
+            // Nothing could be rejected with the exception, so it is not created.
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);
@@ -920,7 +972,7 @@ impl<'s> Lock<'s> {
                 ))
             });
         }
-        Ok(err.to_local(self))
+        err.to_local(self)
     }
 
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.

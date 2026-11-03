@@ -59,6 +59,22 @@ impl Terminator {
         Err(jsg::Error::new_type_error("thrown while terminating"))
     }
 
+    /// Is terminated and then fails with an `Error` of a DOMException type.
+    #[jsg_method]
+    fn terminate_then_fail_with_dom_error(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        crate::Harness::terminate_and_deliver(lock);
+        Err(jsg::Error::new_abort_error("thrown while terminating"))
+    }
+
+    /// Is terminated and then creates a `DOMException`, which creates nothing.
+    #[jsg_method]
+    fn terminate_then_create_dom_exception(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = lock.dom_exception("AbortError", "created while terminating");
+        assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+        result.map(drop)
+    }
+
     #[jsg_method]
     fn terminate_then_throw_error(&self, lock: &mut jsg::Lock) {
         crate::Harness::terminate_and_deliver(lock);
@@ -259,6 +275,16 @@ fn termination_is_not_catchable() {
 #[test]
 fn failing_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenFail");
+}
+
+#[test]
+fn failing_with_a_dom_error_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenFailWithDomError");
+}
+
+#[test]
+fn creating_a_dom_exception_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenCreateDomException");
 }
 
 #[test]

@@ -677,6 +677,12 @@ pub mod ffi {
             exception_type: ExceptionType,
             message: &[u8],
         ) -> Local;
+        // Leaves what creating the DOMException throws pending (see ffi.h).
+        pub unsafe fn dom_exception_create_from_bytes(
+            isolate: *mut Isolate,
+            name: &str,
+            message: &[u8],
+        ) -> MaybeLocal;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
@@ -936,6 +942,30 @@ impl std::fmt::Display for ffi::ExceptionType {
             _ => "Error",
         };
         write!(f, "{name}")
+    }
+}
+
+impl ffi::ExceptionType {
+    /// Whether an error of this type is thrown as a `DOMException` with this name, rather than
+    /// as a JavaScript error class.
+    ///
+    /// `SyntaxError` is the JavaScript `SyntaxError`, never `DOMException(SyntaxError)`.
+    #[must_use]
+    pub fn is_dom_exception(self) -> bool {
+        matches!(
+            self,
+            Self::OperationError
+                | Self::DataError
+                | Self::DataCloneError
+                | Self::InvalidAccessError
+                | Self::InvalidStateError
+                | Self::InvalidCharacterError
+                | Self::NotSupportedError
+                | Self::TimeoutError
+                | Self::TypeMismatchError
+                | Self::AbortError
+                | Self::NotFoundError
+        )
     }
 }
 

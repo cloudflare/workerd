@@ -127,7 +127,9 @@ Two things break this:
   termination with the new exception, which JavaScript can catch. The Worker then keeps running.
 
 Creating strings, numbers, BigInts, symbols, plain objects and arrays, typed arrays, error objects
-and templates takes no context. It is fine at any time, also while execution is terminating.
+and templates takes no context. It is fine at any time, also while execution is terminating. A
+`DOMException` is not an error object in this sense: creating one instantiates a template in the
+current context.
 
 How the code keeps the rule:
 
@@ -246,7 +248,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG.
+workerd's API objects serialize, since their serializers are written against C++ JSG, and
+`newDOMException` in `workerd/jsg/dom-exception.h`, through which Rust creates DOMExceptions
+whatever implements them. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -911,6 +915,19 @@ match lock.try_catch(|lock| {
     Err(exception) => { /* handle what the callback threw */ }
 }
 ```
+
+## Errors thrown from Rust
+
+An `Error` is thrown as the JavaScript error class its `ExceptionType` names (`TypeError`,
+`RangeError`, `ReferenceError`, `SyntaxError`, `Error`), or, for the DOMException names
+(`OperationError`, `DataCloneError`, `AbortError` and the rest, for which
+`ExceptionType::is_dom_exception()` is true), as a `DOMException` with that name, as C++
+`JSG_REQUIRE(..., DOMAbortError, ...)` throws. `Lock::dom_exception` creates a `DOMException` with
+any name, as C++ `jsg::Lock::domException()` does. Both create it through `jsg::newDOMException()`
+(Safety rules, rule 3), which needs the current context: while an exception or a termination is
+pending, or if creating it throws, `Lock::dom_exception` and `Lock::exception` fail with a pending
+error, and `Lock::throw_exception` throws nothing, so the pending exception propagates. A fast
+callback never throws a `DOMException`, since only a method that returns no `Result` has one.
 
 ## Serialization
 
