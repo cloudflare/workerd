@@ -414,11 +414,6 @@ pub enum Owner {
     Remote(Rc<RpcConnection>, String),
 }
 
-/// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
-/// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
-const NOT_DELIVERED: u64 = 0x1a07_d0b6_559b_aea6;
-const PREDECESSOR_REJECTED: u64 = 0xaef1_c0c9_72f2_1fe7;
-
 /// "Moved, not started": the answer of an instance that does not serve a Durable Object.
 ///
 /// It is given before anything runs. It is a disconnect, which the application sees as
@@ -426,18 +421,21 @@ const PREDECESSOR_REJECTED: u64 = 0xaef1_c0c9_72f2_1fe7;
 /// whichever instance serves the object now.
 pub fn moved(description: &str) -> crate::Error {
     kj::disconnected!("{description}").with_details(vec![
-        (NOT_DELIVERED, vec![]),
-        (PREDECESSOR_REJECTED, vec![]),
+        (ffi::request_not_delivered_detail_id(), vec![]),
+        (ffi::actor_predecessor_rejected_detail_id(), vec![]),
     ])
 }
 
 /// `error`, marked as a failure before the request reached the object: it may be sent again.
 pub fn not_delivered(error: crate::Error) -> crate::Error {
     let mut details = error.details().cloned().unwrap_or_default();
-    if details.iter().any(|(id, _)| *id == NOT_DELIVERED) {
+    if details
+        .iter()
+        .any(|(id, _)| *id == ffi::request_not_delivered_detail_id())
+    {
         return error;
     }
-    details.push((NOT_DELIVERED, vec![]));
+    details.push((ffi::request_not_delivered_detail_id(), vec![]));
     error.with_details(details)
 }
 
@@ -448,7 +446,7 @@ pub fn is_moved(error: &crate::Error) -> bool {
             .details()
             .is_some_and(|d| d.iter().any(|(k, _)| *k == id))
     };
-    has(NOT_DELIVERED) && has(PREDECESSOR_REJECTED)
+    has(ffi::request_not_delivered_detail_id()) && has(ffi::actor_predecessor_rejected_detail_id())
 }
 
 impl RpcConnection {

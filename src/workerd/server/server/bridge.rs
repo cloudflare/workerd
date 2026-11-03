@@ -639,6 +639,11 @@ pub mod ffi {
             hook: Box<MovedHook>,
         ) -> KjOwn<WorkerInterface>;
 
+        /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+        /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+        fn request_not_delivered_detail_id() -> u64;
+        fn actor_predecessor_rejected_detail_id() -> u64;
+
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
         fn factory_start_inspector(factory: &WorkerFactory, address: &str) -> Result<u16>;
