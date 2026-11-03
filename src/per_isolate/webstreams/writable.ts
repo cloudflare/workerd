@@ -932,7 +932,14 @@ class WritableStreamDefaultController<
   #closeHook: ((sink: UnderlyingSink<W>) => unknown) | undefined;
   #abortHook:
     ((sink: UnderlyingSink<W>, reason: unknown) => unknown) | undefined;
-  #abortController = new AbortController();
+  // The controller behind `signal`, created when `signal` is first read:
+  // until then no code can hold the signal, listen to it, or read its
+  // reason, so an abort only records that it happened. An AbortController
+  // costs an allocation per stream, and aborting one with no reason
+  // builds an AbortError, with its stack trace, and dispatches an event.
+  #abortController: AbortController | undefined = undefined;
+  #signalAborted = false;
+  #signalAbortReason: unknown = undefined;
 
   static {
     assertIsWritableStreamDefaultController = function <W>(
@@ -948,7 +955,14 @@ class WritableStreamDefaultController<
     };
 
     controllerSignalAbort = (controller, reason) => {
-      AbortControllerAbort(controller.#abortController, reason);
+      const ac = controller.#abortController;
+      if (ac !== undefined) {
+        AbortControllerAbort(ac, reason);
+      } else if (!controller.#signalAborted) {
+        // Signaling abort a second time is a no-op, as for the signal.
+        controller.#signalAborted = true;
+        controller.#signalAbortReason = reason;
+      }
     };
 
     // Drops the queue, rejecting any queued flush requests with `reason`:
@@ -1123,7 +1137,16 @@ class WritableStreamDefaultController<
 
   get signal(): AbortSignal {
     assertIsWritableStreamDefaultController(this);
-    return AbortControllerSignalGet(this.#abortController);
+    let ac = this.#abortController;
+    if (ac === undefined) {
+      ac = new AbortController();
+      this.#abortController = ac;
+      if (this.#signalAborted) {
+        AbortControllerAbort(ac, this.#signalAbortReason);
+        this.#signalAbortReason = undefined;
+      }
+    }
+    return AbortControllerSignalGet(ac);
   }
 
   error(reason: unknown = undefined): void {
