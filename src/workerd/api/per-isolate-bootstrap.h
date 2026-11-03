@@ -39,4 +39,11 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);
 // The caller is responsible for checking the type.
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier);
 
+// Returns the function property `name` of the named bootstrap module export, which
+// must be a frozen object, or kj::none if the module was not required or the property
+// is not a function. The function is cached per context, so later lookups of the same
+// name skip the property get.
+kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
+    jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name);
+
 }  // namespace workerd
