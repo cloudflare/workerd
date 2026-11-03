@@ -1,0 +1,21 @@
+src/workerd/server/tests/cluster/BUILD.bazel
+  s_2468263fb7681a::t_851bf6af3d7b0b 3-5,24
+src/workerd/server/tests/cluster/cluster-test.mjs
+  s_2468263fb7681a::t_2adcaaf8aba644 30,49-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9750c81def47cac8ee6bd2c9e6d4cd0b1de9fbeb",
+  "prompts": {},
+  "sessions": {
+    "s_2468263fb7681a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19374f82-d7ae-4d1a-b695-d56c5f117712",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

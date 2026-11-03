@@ -1,0 +1,39 @@
+src/workerd/api/unsafe.c++
+  s_2dfe3889216c4d::t_709e0eada05666 400-475
+src/workerd/api/unsafe.h
+  s_2dfe3889216c4d::t_2db594dcbbb953 295-391,431,446-449,460,496-499,506-508
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_2dfe3889216c4d::t_54db0924f5cf41 38-43
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_2dfe3889216c4d::t_375153f5c9b663 1-222
+src/workerd/util/BUILD.bazel
+  s_2dfe3889216c4d::t_d7669a8c0e958e 34-43,51,433-439
+src/workerd/util/sqlite-test.c++
+  s_2dfe3889216c4d::t_83de2677f8d028 1858-2085
+src/workerd/util/sqlite.c++
+  s_2dfe3889216c4d::t_e202ec668b128b 641-772
+src/workerd/util/sqlite.h
+  s_2dfe3889216c4d::t_0199f0e2042d40 349-371,432-445
+src/workerd/util/storage-telemetry.c++
+  s_2dfe3889216c4d::t_37f9fb6434a550 1-120
+src/workerd/util/virtual-time.c++
+  s_2dfe3889216c4d::t_0937e55eb256ba 430-433
+src/workerd/util/virtual-time.h
+  s_2dfe3889216c4d::t_ba99773a901d15 8,242-245,286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4faef23310522a1691eacc89fdf618b98edce411",
+  "prompts": {},
+  "sessions": {
+    "s_2dfe3889216c4d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ecb8-bdfb-706a-b701-bd5fdc9b167f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

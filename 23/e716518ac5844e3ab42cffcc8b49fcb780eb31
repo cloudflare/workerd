@@ -1,0 +1,59 @@
+src/workerd/server/server.c++
+  s_beec2eef2fbbe5::t_fb36be456a5686 297-298,317-329,356,523-549,609-611,615-616,621-622,750,756,889-907,911,1256,1328,1399,1542-1543,1561-1565,1613,1705,7962,7966-7975,8019-8022,8101-8108
+  s_beec2eef2fbbe5::t_656921c8bece2e 8119
+  s_beec2eef2fbbe5::t_3390149be4ef48 242-281,8110-8113,8117,8123-8124,8127,8133-8134,8136-8137,8139-8154
+src/workerd/util/virtual-time.h
+  s_beec2eef2fbbe5::t_261fa949be77db 285
+  s_beec2eef2fbbe5::t_b19ffd0edc83f4 8,281-284,345
+src/workerd/util/BUILD.bazel
+  s_beec2eef2fbbe5::t_73b45abc5a715e 65,75,490
+  s_beec2eef2fbbe5::t_aa04df5c6ec127 58-64,66-67,486-489,491-492
+docs/virtual-time.md
+  s_beec2eef2fbbe5::t_f0d799ae08f3e5 50,259-294
+src/workerd/api/unsafe.c++
+  s_beec2eef2fbbe5::t_e946d56a94b962 428-482
+src/workerd/api/unsafe.h
+  s_beec2eef2fbbe5::t_ba3786d69de38e 352-390,430,449-452,464,501-503,511-513
+src/workerd/api/worker-rpc.c++
+  s_beec2eef2fbbe5::t_6739d714b7fad9 1228-1269,1288-1302,1310-1317,1461-1475,1580-1581,1585-1586,1590-1592,1597-1599
+src/workerd/server/BUILD.bazel
+  s_beec2eef2fbbe5::t_b9cf59017cf13c 205,274-276
+src/workerd/server/alarm-scheduler.c++
+  s_beec2eef2fbbe5::t_649cd16e35f08c 40-41,45,125-140,142,177,232-233,237-238,243-244,313-315,340-341
+src/workerd/server/alarm-scheduler.h
+  s_beec2eef2fbbe5::t_01ab256e382c8c 8,75-81,87-88,102-108
+src/workerd/server/server.h
+  s_beec2eef2fbbe5::t_1734198a5cae91 156-159
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_359ed4e7534c8d 56-61
+src/workerd/server/tests/virtual-time/virtual-time-runtime-trace-test.js
+  s_beec2eef2fbbe5::t_f8b9c749b5ff9c 1-295
+src/workerd/server/tests/virtual-time/virtual-time-runtime-trace-test.wd-test
+  s_beec2eef2fbbe5::t_2d22d32f30784c 1-31
+src/workerd/server/workerd.capnp
+  s_beec2eef2fbbe5::t_e710becdeb8354 181-186
+src/workerd/util/runtime-trace-test.c++
+  s_beec2eef2fbbe5::t_a3d6b11c303ab1 1-92
+src/workerd/util/runtime-trace.c++
+  s_beec2eef2fbbe5::t_ae6bda779276d5 1-111
+src/workerd/util/runtime-trace.h
+  s_beec2eef2fbbe5::t_67a70a0a9d92ff 1-80
+src/workerd/util/virtual-time.c++
+  s_beec2eef2fbbe5::t_2adc053c08cc5b 476-484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "23e716518ac5844e3ab42cffcc8b49fcb780eb31",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

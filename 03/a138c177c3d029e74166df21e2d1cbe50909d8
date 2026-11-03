@@ -1,0 +1,37 @@
+docs/virtual-time.md
+  s_e8649f84301c62::t_7b986c601aaba0 49,204-206,215-216,264-267,269-273,276-281,329,334-358,396-399
+src/workerd/api/unsafe.h
+  s_e8649f84301c62::t_24d81b98968d66 434
+src/workerd/server/server.c++
+  s_e8649f84301c62::t_1b92d00fef0ed5 61,614,745-746,842-856,917-919,951,968-969,1167-1191,1203-1211,1428,1465,1467,1470,1523,1531,1540-1543,1726-1731,1736-1740,1747-1774,1814,2226-2228,2242,2251,2268-2272,2295-2329,7869-7872
+src/workerd/server/tests/virtual-time/virtual-time-eviction-test.js
+  s_e8649f84301c62::t_05c7d05716e7c7 90-91,137,163,193,212,240
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_e8649f84301c62::t_ca15bf7895a014 11-12,34-49,141,222,249,276,290,296-400
+src/workerd/server/tests/virtual-time/virtual-time-runtime-trace-test.js
+  s_e8649f84301c62::t_147e339e2700b3 394,396,398
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_e8649f84301c62::t_c4b285a2c5ddb7 212,214
+src/workerd/util/storage-telemetry-test.c++
+  s_e8649f84301c62::t_03b5838691a667 33,52,94-95,124,148,151-152,184-220
+src/workerd/util/storage-telemetry.c++
+  s_e8649f84301c62::t_be459cbe4210e4 56-57,74-77,94-98,116,125,177,184-201
+src/workerd/util/storage-telemetry.h
+  s_e8649f84301c62::t_5f464b78126447 36-39,76,91-93,100-103,112-116,120-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03a138c177c3d029e74166df21e2d1cbe50909d8",
+  "prompts": {},
+  "sessions": {
+    "s_e8649f84301c62": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a172bb-abc8-7139-97d7-80c4e38678a4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}
