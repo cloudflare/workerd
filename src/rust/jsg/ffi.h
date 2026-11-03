@@ -302,6 +302,13 @@ MaybeLocal local_object_get_property_by_name(
 // local_object_set_property() for a `v8::Name` key.
 bool local_object_set_property_by_name(
     Isolate* isolate, const Local& object, const Local& name, const Local& value);
+// Local<DictionaryTemplate>
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> names);
+// Returns an object of `tmpl` with `values` as its properties' values, which must be one for each
+// of its names, or none if an exception is pending. Runs no JavaScript.
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<const Local> values);
+
 // Appends the names of the own enumerable string-keyed properties, converted to strings, to
 // `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
 // the exception pending.

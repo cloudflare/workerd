@@ -113,7 +113,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         all_optional &= present.is_some();
 
         let index = js_names.len();
-        to_js_fields.push((field_name, field_name_str.clone(), present));
+        to_js_fields.push((field_name, present));
         // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
             let prop = obj.get_by_name(lock, jsg_field_names[#index].into())?;
@@ -286,28 +286,29 @@ fn struct_traced_impl(
     }
 }
 
-/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
-/// JavaScript name and the condition for its present state, if optional, and the statement that
-/// binds `jsg_field_names` to the handles of the JavaScript names. Like C++ JSG's `JSG_STRUCT`,
-/// it follows the `fast_jsg_struct` flag.
+/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name and the
+/// condition for its present state, if optional, and the statement that binds `jsg_field_names`
+/// to the handles of their JavaScript names. Like C++ JSG's `JSG_STRUCT`, it follows the
+/// `fast_jsg_struct` flag.
 fn to_js_fn_body(
-    fields: &[(&syn::Ident, String, Option<proc_macro2::TokenStream>)],
+    fields: &[(&syn::Ident, Option<proc_macro2::TokenStream>)],
     names: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
-    let data_properties = fields.iter().map(|(field_name, js_name, _)| {
-        quote! {
-            properties.push((
-                #js_name,
-                jsg::ToJS::to_js_with_creator(this.#field_name, lock, creator)?,
-            ));
-        }
-    });
+    let field_names = fields.iter().map(|(field_name, _)| field_name);
+    let new_object = if fields.is_empty() {
+        quote! { jsg::v8::Object::with_data_properties(lock, &[])? }
+    } else {
+        quote! {{
+            let values = [#(jsg::ToJS::to_js_with_creator(this.#field_names, lock, creator)?),*];
+            lock.new_struct_object(&FIELDS, &values)?
+        }}
+    };
     // Set() skips an absent optional field rather than setting it to undefined.
     let field_sets = fields
         .iter()
         .enumerate()
-        .map(|(index, (field_name, _, present))| {
+        .map(|(index, (field_name, present))| {
             let set = quote! {
                 let value = jsg::ToJS::to_js_with_creator(value, lock, creator)?;
                 obj.set_by_name(lock, jsg_field_names[#index].into(), value)?;
@@ -328,14 +329,9 @@ fn to_js_fn_body(
         // Unused by a struct without public fields.
         let _ = creator;
         if lock.fast_jsg_struct() {
-            // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
-            // no setter a script put on Object.prototype runs.
-            // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather
-            // than recreating its shape on every conversion.
-            #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
-            let mut properties = ::std::vec::Vec::new();
-            #(#data_properties)*
-            Ok(jsg::v8::Object::with_data_properties(lock, &properties)?.into())
+            // The fields are defined as data properties, from a DictionaryTemplate as in C++ JSG,
+            // so no setter a script put on Object.prototype runs.
+            Ok(#new_object.into())
         } else {
             // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
             // Object.prototype; what it throws is passed on.

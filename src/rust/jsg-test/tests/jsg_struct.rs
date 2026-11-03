@@ -395,6 +395,55 @@ fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
     });
 }
 
+/// With `fast_jsg_struct`, each struct type's objects have its fields as own data properties in
+/// declaration order, writable, enumerable and configurable, and no setter on `Object.prototype`
+/// runs, however many objects of however many types are made.
+#[test]
+fn struct_with_fast_jsg_struct_defines_data_properties() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.setterRan = false;
+             Object.defineProperty(Object.prototype, 'age', {
+               set(v) { globalThis.setterRan = true; },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        for i in 0..3 {
+            let multi = MultiPropertyStruct {
+                name: format!("n{i}"),
+                age: i,
+                active: "yes".to_owned(),
+            }
+            .to_js(lock)?;
+            ctx.set_global(lock, "multi", multi);
+            let nested = NestedStruct {
+                inner: format!("i{i}"),
+            }
+            .to_js(lock)?;
+            ctx.set_global(lock, "nested", nested);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    &format!(
+                        "var all = (o) => Object.values(Object.getOwnPropertyDescriptors(o))
+                             .every((d) => d.writable && d.enumerable && d.configurable);
+                         Object.getPrototypeOf(multi) === Object.prototype &&
+                         Object.keys(multi).join() === 'name,age,active' && all(multi) &&
+                         multi.name === 'n{i}' && multi.age === {i} && multi.active === 'yes' &&
+                         Object.keys(nested).join() === 'inner' && all(nested) &&
+                         nested.inner === 'i{i}' && !setterRan"
+                    ),
+                )
+                .unwrap();
+            assert!(ok, "conversion {i}");
+        }
+        Ok(())
+    });
+}
+
 /// A field whose conversion fails fails the struct's conversion with that error, with and without
 /// `fast_jsg_struct`.
 #[test]

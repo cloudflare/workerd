@@ -21,6 +21,7 @@
 #include <kj/string.h>
 
 #include <memory>
+#include <span>
 
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/lsan_interface.h>
@@ -607,6 +608,30 @@ bool local_object_set_property_by_name(
   return v8_obj
       ->Set(context, local_as_ref_from_ffi<v8::Name>(name), local_as_ref_from_ffi<v8::Value>(value))
       .IsJust();
+}
+
+// Local<DictionaryTemplate>
+Global dictionary_template_new(Isolate* isolate, ::rust::Slice<const ::rust::Str> names) {
+  kj::Vector<std::string_view> views(names.size());
+  for (auto name: names) {
+    KJ_REQUIRE(name.size() <= MAX_UTF8_STRING_SIZE, "name exceeds V8's string length limit", name);
+    views.add(name.data(), name.size());
+  }
+  return to_ffi(v8::Global<v8::DictionaryTemplate>(isolate,
+      v8::DictionaryTemplate::New(
+          isolate, std::span<const std::string_view>(views.begin(), views.size()))));
+}
+
+MaybeLocal dictionary_template_new_instance(
+    Isolate* isolate, const Global& tmpl, ::rust::Slice<const Local> values) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
+  // ffi::Local has the layout of a v8::MaybeLocal that is not empty. NewInstance() only reads the
+  // values.
+  auto v8Values = const_cast<v8::MaybeLocal<v8::Value>*>(
+      reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(values.data()));
+  auto v8Tmpl = global_as_ref_from_ffi<v8::DictionaryTemplate>(tmpl).Get(isolate);
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(
+      v8Tmpl->NewInstance(isolate->GetCurrentContext(), {v8Values, values.size()})));
 }
 
 bool local_object_get_own_property_names(

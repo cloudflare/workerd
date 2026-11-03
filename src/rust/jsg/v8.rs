@@ -479,6 +479,18 @@ pub mod ffi {
             name: &Local,
             value: &Local,
         ) -> bool;
+        // Local<DictionaryTemplate>
+        // Fallible: KJ_REQUIREs each name is within V8's string length limit.
+        pub unsafe fn dictionary_template_new(
+            isolate: *mut Isolate,
+            names: &[&str],
+        ) -> Result<Global> /* v8::Global<DictionaryTemplate> */;
+        pub unsafe fn dictionary_template_new_instance(
+            isolate: *mut Isolate,
+            tmpl: &Global, /* v8::Global<DictionaryTemplate> */
+            values: &[Local],
+        ) -> MaybeLocal;
+
         pub unsafe fn local_object_get_own_property_names(
             isolate: *mut Isolate,
             object: &Local,
@@ -1233,6 +1245,9 @@ impl String {
 pub struct Object;
 pub struct Function;
 pub struct FunctionTemplate;
+/// Marker for `v8::DictionaryTemplate` handles, which describe objects with the same data
+/// properties.
+pub(crate) struct DictionaryTemplate;
 pub struct Array;
 pub struct TypedArray;
 pub struct Uint8Array;
@@ -3733,6 +3748,55 @@ impl Object {
             }?;
             // SAFETY: as above.
             Ok(unsafe { Local::from_ffi_maybe(object) })
+        })
+    }
+}
+
+impl DictionaryTemplate {
+    /// Creates a template of objects with data properties named `names`, in that order.
+    ///
+    /// # Errors
+    ///
+    /// If a name is longer than [`String::MAX_LENGTH`].
+    pub(crate) fn new(lock: &mut Lock<'_>, names: &[&str]) -> crate::Result<Global<Self>> {
+        // SAFETY: lock guarantees the isolate is locked; the handle is of its isolate.
+        unsafe {
+            let template = ffi::dictionary_template_new(lock.isolate().as_ffi(), names)?;
+            Ok(Global::from_ffi(lock, template))
+        }
+    }
+
+    /// Creates an object of `template` with `values` as the values of its properties, in order,
+    /// like [`Object::with_data_properties`], and as fast as `v8::DictionaryTemplate` makes it.
+    ///
+    /// # Errors
+    ///
+    /// While an exception or a termination is pending, it creates nothing, and the error is one
+    /// for which [`Error::is_pending`] is true, as for [`Object::with_data_properties`].
+    ///
+    /// # Safety
+    ///
+    /// `template` must be a valid `v8::Global<v8::DictionaryTemplate>` of the isolate of `lock`,
+    /// with a name for each of `values`.
+    pub(crate) unsafe fn new_instance<'s>(
+        lock: &mut Lock<'s>,
+        template: &ffi::Global,
+        values: &[Local<'s, Value>],
+    ) -> crate::Result<Local<'s, Object>> {
+        for value in values {
+            value.debug_assert_isolate(lock);
+        }
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked, a context is entered and a
+            // HandleScope is active; the template is of the isolate and has a name for each
+            // value (guaranteed by the caller). The result belongs to the lock's scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::dictionary_template_new_instance(
+                    lock.isolate().as_ffi(),
+                    template,
+                    Local::raw_slice(values),
+                ))
+            })
         })
     }
 }

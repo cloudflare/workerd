@@ -52,6 +52,7 @@ pub struct StructCache(Vec<StructHandles>);
 #[derive(Default)]
 struct StructHandles {
     names: Option<Box<[v8::Global<v8::String>]>>,
+    template: Option<v8::Global<v8::DictionaryTemplate>>,
 }
 
 impl StructCache {
@@ -114,5 +115,40 @@ impl<'s> Lock<'s> {
             })
             .collect::<Result<Box<[_]>, Error>>()?;
         Ok(self.structs().entry(index).names.insert(names))
+    }
+
+    /// Creates an object with the names of `fields` as data properties whose values are `values`,
+    /// from a template that this isolate creates the first time, as C++ JSG's `StructWrapper`
+    /// does with `fast_jsg_struct`. Runs no JavaScript.
+    ///
+    /// # Errors
+    ///
+    /// While an exception or a termination is pending, it creates nothing, and the error is one
+    /// for which [`Error::is_pending`] is true.
+    #[doc(hidden)]
+    pub fn new_struct_object<const N: usize>(
+        &mut self,
+        fields: &'static StructFields<N>,
+        values: &[v8::Local<'s, v8::Value>; N],
+    ) -> Result<v8::Local<'s, v8::Object>, Error> {
+        let index = fields.index();
+        let template = match self.structs().get(index).and_then(|h| h.template.as_ref()) {
+            Some(template) => template.as_ffi(),
+            None => self.create_struct_template(index, &fields.names)?,
+        };
+        // SAFETY: the template belongs to this lock's isolate, whose realm keeps it for longer
+        // than this call, and has the N names of `fields`, one for each value.
+        unsafe { v8::DictionaryTemplate::new_instance(self, &template, values) }
+    }
+
+    #[cold]
+    fn create_struct_template(
+        &mut self,
+        index: usize,
+        names: &[&'static str],
+    ) -> Result<v8::ffi::Global, Error> {
+        let template = v8::DictionaryTemplate::new(self, names)?;
+        let template = self.structs().entry(index).template.insert(template);
+        Ok(template.as_ffi())
     }
 }
