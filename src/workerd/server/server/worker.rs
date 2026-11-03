@@ -16,6 +16,7 @@ use std::ptr;
 use std::rc::Rc;
 use std::rc::Weak;
 
+use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
@@ -915,6 +916,20 @@ impl ActorClass for ActorClassImpl {
     ) -> Result<KjOwn<WorkerInterface>> {
         self.worker
             .start_request(Some(&self.class_name), None, Some(actor), metadata, false)
+    }
+
+    fn run_on_hibernate<'a>(
+        &'a self,
+        actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(ffi::worker_run_actor_on_hibernate(
+                &self.worker.worker,
+                actor,
+                Box::new(ChannelFactory(self.worker.channels()?)),
+            )
+            .await?)
+        })
     }
 
     fn require_allows_transfer(&self) -> Result<()> {
