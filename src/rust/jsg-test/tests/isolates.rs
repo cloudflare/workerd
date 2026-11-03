@@ -4,8 +4,6 @@
 
 //! Tests that keep handles of one isolate out of another.
 
-#[cfg(not(debug_assertions))]
-use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 
 use jsg::FromJS;
@@ -160,6 +158,31 @@ fn global_of_another_isolate_panics() {
 }
 
 #[test]
+fn taking_a_global_of_another_isolate_out_of_a_cell_panics() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
+    a.run_in_context(|lock, _ctx| {
+        let value = "from a".to_js(lock)?;
+        global = Some(v8::TracedGlobal::new(lock, value));
+        Ok(())
+    });
+    let cell = jsg::Cell::new(global);
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        b.run_in_context(|lock, _ctx| {
+            let _taken = cell.take(lock);
+            Ok(())
+        });
+    }));
+    let payload = result.expect_err("taking A's TracedGlobal out of a cell in B must panic");
+    assert_eq!(
+        panic_message(&*payload),
+        "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+    );
+}
+
+#[test]
 fn callback_entered_while_another_isolate_has_scopes_throws() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
@@ -283,7 +306,7 @@ fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
 #[cfg(not(debug_assertions))]
 #[jsg_resource]
 struct TracedGlobalHolder {
-    handle: Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    handle: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 #[cfg(not(debug_assertions))]
@@ -306,7 +329,7 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
         Ok(())
     });
     let holder = jsg::Rc::new(TracedGlobalHolder {
-        handle: Cell::new(global),
+        handle: jsg::Cell::new(global),
     });
 
     b.run_in_context(|lock, ctx| {
@@ -318,7 +341,7 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
 
     a.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
-        let global = holder.handle.take().expect("set above");
+        let global = holder.handle.take(lock).expect("set above");
         assert!(global.as_local(lock).is_object());
         drop(global);
         Ok(())
