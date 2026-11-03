@@ -306,6 +306,7 @@ LegacyWebSocketAdapter::LegacyWebSocketAdapter(jsg::Lock& js,
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
       serializedAttachment(kj::mv(package.serializedAttachment)),
+      closedOutgoingForHib(package.closedOutgoingConnection),
       allowHalfOpen(package.allowHalfOpen),
       farNative(initNative(ioContext,
           kj::mv(ws),
