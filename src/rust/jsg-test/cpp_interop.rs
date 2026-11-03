@@ -123,6 +123,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppGreeter {
     fn class_name() -> &'static str {
         "TestCppGreeter"
     }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppGreeter"
+    }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
         value: v8::ffi::Local,
@@ -144,6 +147,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppBase {
     fn class_name() -> &'static str {
         "TestCppBase"
     }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppBase"
+    }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
         value: v8::ffi::Local,
@@ -164,6 +170,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppBase {
 unsafe impl jsg_cpp::CppResource for ffi::TestCppHolder {
     fn class_name() -> &'static str {
         "TestCppHolder"
+    }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppHolder"
     }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,

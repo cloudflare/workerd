@@ -824,6 +824,7 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        ":rtti",
         ":streams",
         ":urlpattern",
         ":urlpattern-standard",
