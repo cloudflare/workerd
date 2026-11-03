@@ -1258,6 +1258,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
     }
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
+    jsg::isolateRegisterExternalReference(
+        lock->v8Isolate, jsg::modules::getSyntheticModuleEvaluationStepsRef());
 
     configureJsgIsolate(*lock, features);
 

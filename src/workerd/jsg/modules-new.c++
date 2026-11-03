@@ -463,6 +463,11 @@ class SyntheticModule final: public Module {
         std::span<const v8::Local<v8::String>>(exports.data(), exports.size()), evaluationSteps);
   }
 
+  // See getSyntheticModuleEvaluationStepsRef().
+  static intptr_t evaluationStepsRef() {
+    return reinterpret_cast<intptr_t>(&evaluationSteps);
+  }
+
  private:
   static v8::MaybeLocal<v8::Promise> evaluationSteps(
       v8::Local<v8::Context> context, v8::Local<v8::Module> module);
@@ -1183,6 +1188,87 @@ class IsolateModuleRegistry final {
       });
     }
     return result.releaseAsArray();
+  }
+
+  // See recordIsolateModuleRegistryForSnapshot().
+  kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordForSnapshot(
+      v8::Local<v8::Context> context, v8::SnapshotCreator& creator) {
+    auto isolate = v8::Isolate::GetCurrent();
+    kj::HashMap<const Entry*, size_t> dataIndices;
+    kj::Vector<SnapshotArtifact::NewModuleRegistryRecord> records(resolutions.size());
+    for (auto& resolution: resolutions) {
+      // Every resolution has its instantiation row (see resolveWithCaching).
+      Entry& entry = KJ_ASSERT_NONNULL(instantiations.find<kj::HashIndex<InstanceCallbacks>>(
+          resolution.key.id, resolution.value));
+      size_t dataIndex = dataIndices.findOrCreate(&entry, [&]() {
+        return kj::HashMap<const Entry*, size_t>::Entry{
+          &entry, creator.AddData(context, entry.key.getHandle(isolate))};
+      });
+      records.add(SnapshotArtifact::NewModuleRegistryRecord{
+        .contextType = static_cast<uint8_t>(resolution.key.type),
+        .specifier = kj::str(resolution.key.id.getHref()),
+        .moduleDataIndex = dataIndex,
+      });
+    }
+    // The v8::Globals of the modules, which CreateBlob() refuses. Nothing resolves in the zygote
+    // after this.
+    instantiations.clear();
+    return records.releaseAsArray();
+  }
+
+  // The inverse of recordForSnapshot(), for a registry attached to an isolate restored from the
+  // snapshot: takes each recorded v8::Module out of the blob and re-creates the resolution and
+  // instantiation rows it had in the zygote, so import.meta, the dynamic-import referrer lookup
+  // and repeated imports find the module the heap already holds rather than a fresh compilation.
+  void restoreFromSnapshot(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::ArrayPtr<const SnapshotArtifact::NewModuleRegistryRecord> records) {
+    kj::HashMap<size_t, v8::Local<v8::Module>> taken;
+    for (auto& record: records) {
+      Url id = KJ_ASSERT_NONNULL(Url::tryParse(record.specifier.asPtr()),
+          "snapshot records an unparseable module specifier", record.specifier);
+      Url definitionId = id.clone(
+          Url::EquivalenceOption::IGNORE_FRAGMENTS | Url::EquivalenceOption::IGNORE_SEARCH);
+      ResolveContext resolveContext{
+        .type = static_cast<ResolveContext::Type>(record.contextType),
+        .source = ResolveContext::Source::INTERNAL,
+        .normalizedSpecifier = id,
+        .referrerNormalizedSpecifier = id,
+      };
+      ResolveContext definitionContext{
+        .type = resolveContext.type,
+        .source = resolveContext.source,
+        .normalizedSpecifier = definitionId,
+        .referrerNormalizedSpecifier = definitionId,
+      };
+      const Module& definition =
+          KJ_ASSERT_NONNULL(inner.lookup(definitionContext, noopResolveObserver),
+              "snapshot records a module the registry does not define", record.specifier);
+
+      v8::Local<v8::Module> module = taken.findOrCreate(record.moduleDataIndex, [&]() {
+        v8::Local<v8::Module> module;
+        KJ_REQUIRE(
+            context->GetDataFromSnapshotOnce<v8::Module>(record.moduleDataIndex).ToLocal(&module),
+            "snapshot does not hold the module it was recorded to hold", record.specifier);
+        return kj::HashMap<size_t, v8::Local<v8::Module>>::Entry{record.moduleDataIndex, module};
+      });
+
+      if (instantiations.find<kj::HashIndex<InstanceCallbacks>>(id, &definition) == kj::none) {
+        instantiations.insert(Entry{
+          .key = HashableV8Ref<v8::Module>(js.v8Isolate, module),
+          .id = id.clone(),
+          .module = definition,
+        });
+      }
+      resolutions.upsert(SpecifierContext(resolveContext), &definition,
+          [](const Module*& existing, const Module* replacement) {
+        KJ_ASSERT(existing == replacement);
+      });
+      if (id != definition.id()) {
+        redirectedCanonicalIds.upsert(
+            definition.id().clone(), id.clone(), [](Url& existing, Url&& replacement) {});
+      }
+    }
   }
 
  private:
@@ -2283,11 +2369,29 @@ kj::Maybe<jsg::JsPromise> ModuleRegistry::evaluateImpl(jsg::Lock& js,
   return kj::none;
 }
 
+intptr_t getSyntheticModuleEvaluationStepsRef() {
+  return SyntheticModule::evaluationStepsRef();
+}
+
+kj::Array<SnapshotArtifact::NewModuleRegistryRecord> recordIsolateModuleRegistryForSnapshot(
+    v8::Local<v8::Context> context, v8::SnapshotCreator& creator) {
+  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<IsolateModuleRegistry>(
+                               context, jsg::ContextPointerSlot::MODULE_REGISTRY))
+      .recordForSnapshot(context, creator);
+}
+
 kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserver& observer) const {
   // The IsolateModuleRegistry is attached to the isolate as an embedder data slot.
   // We have to keep it alive for the duration of the v8::Context so we return a
   // kj::Own and store that in the jsg::JsContext
-  return kj::heap<IsolateModuleRegistry>(js, *this, observer);
+  auto registry = kj::heap<IsolateModuleRegistry>(js, *this, observer);
+  if (js.isStartingFromSnapshot()) {
+    // The context holds the zygote's evaluated module graph; the registry must know those modules
+    // (see SnapshotArtifact::newModuleRegistryRecords) rather than compile the bundle a second time.
+    registry->restoreFromSnapshot(js, js.v8Context(),
+        IsolateBase::from(js.v8Isolate).finalizedSnapshotArtifact().newModuleRegistryRecords);
+  }
+  return kj::mv(registry);
 }
 
 kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundle(

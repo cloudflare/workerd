@@ -705,6 +705,10 @@ class IsolateBase {
   // including paired TracedReferences. Entries never instantiated in the zygote leaked no identity into the
   // baked heap, so they are not pinned and are recompiled fresh at LOAD. The registry is owned
   // by the context global's Wrappable.
+  //
+  // With the new module registry, records its resolutions in
+  // SnapshotArtifact::newModuleRegistryRecords instead (see
+  // modules::recordIsolateModuleRegistryForSnapshot()).
   void bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle);
 
   // Bakes every materialized JSG_RESOURCE-type constructor template

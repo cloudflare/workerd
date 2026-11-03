@@ -1524,8 +1524,7 @@ bool hasWasmModules(const WorkerSource& source) {
 // JavaScript, so a pending pull transfers with the context.
 bool supportsStartupSnapshot(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
   return featureFlags.getTypeScriptImplementedStreams() && !featureFlags.getPythonWorkers() &&
-      !featureFlags.getNewModuleRegistry() && !source.variant.is<WorkerSource::ScriptSource>() &&
-      !hasWasmModules(source);
+      !source.variant.is<WorkerSource::ScriptSource>() && !hasWasmModules(source);
 }
 
 }  // namespace
@@ -1669,7 +1668,11 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
       auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
           IsolateObserver::StartType::COLD, SpanParent(nullptr),
           newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
-          zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
+          zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler(),
+          // The registry only holds the bundle's definitions; each isolate attaches its own
+          // instances (jsg::modules::ModuleRegistry::attachToIsolate()).
+          newModuleRegistry.map(
+              [](kj::Arc<jsg::modules::ModuleRegistry>& registry) { return registry.addRef(); }));
       // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
       // zygote isolate breaks snapshot creation.
       zygote =

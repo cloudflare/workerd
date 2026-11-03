@@ -63,7 +63,14 @@ class Wrappable;
 //   compiling them again (preserving identity between the baked main-module graph and runtime
 //   import()/require()). Field types are raw ints to avoid coupling this header to modules.h:
 //   `moduleType` is a jsg::ModuleRegistry::Type (capnp ModuleType), `handleKind` a
-//   jsg::ModuleRegistry::SnapshotHandleKind.
+//   jsg::ModuleRegistry::SnapshotHandleKind. Only the legacy module registry's.
+// * `newModuleRegistryRecords` are the new module registry's resolutions
+//   (modules::IsolateModuleRegistry): one (context type, specifier) the zygote resolved ->
+//   context-level AddData index of the v8::Module it resolved to; several specifiers may name one
+//   module. A restored isolate rebuilds its registry from these (ModuleRegistry::attachToIsolate);
+//   without them the registry starts empty, so a later import compiles and evaluates a second
+//   instance of a module the baked graph holds, and V8's import.meta callback, which looks the
+//   module up in the registry, leaves import.meta.url and import.meta.main unset.
 // * `listenerRecords` are the global scope's event listeners the zygote's top level registered
 //   via addEventListener(), one (type, once) -> context-level AddData index of the listener's
 //   identity object per listener, in per-type registration order. The fresh
@@ -99,6 +106,13 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     size_t dataIndex;
   };
   kj::Vector<ModuleRecord> moduleRecords;
+
+  struct NewModuleRegistryRecord {
+    uint8_t contextType;   // A modules::ResolveContext::Type.
+    kj::String specifier;  // The normalized specifier URL, query and fragment included.
+    size_t moduleDataIndex;
+  };
+  kj::Array<NewModuleRegistryRecord> newModuleRegistryRecords;
 
   struct ListenerRecord {
     kj::String type;
