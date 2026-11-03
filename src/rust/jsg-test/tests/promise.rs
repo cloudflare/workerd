@@ -129,6 +129,179 @@ fn promise_argument_accepts_any_value() {
     });
 }
 
+/// A harness whose `unwrap_custom_thenables` flag is `unwrap_custom_thenables`.
+fn thenables_harness(unwrap_custom_thenables: bool) -> crate::Harness {
+    crate::Harness::with_flags(|mut f| f.set_unwrap_custom_thenables(unwrap_custom_thenables))
+}
+
+/// What `VoidPromise` makes of the value `code` evaluates to: how the promise settles,
+/// as `RECORD` logs it, after anything else `code` logs.
+fn void_promise_outcome(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, code: &str) -> String {
+    ctx.eval_raw(lock, &format!("globalThis.log = []; {RECORD}"))
+        .unwrap();
+    let value = ctx.eval_raw(lock, code).unwrap();
+    let promise: v8::Local<v8::Promise> = v8::VoidPromise::from_js(lock, value).unwrap().into();
+    ctx.set_global(lock, "p", promise);
+    ctx.eval_raw(lock, "record(p)").unwrap();
+    crate::Harness::run_microtasks(lock);
+    ctx.eval(lock, "log.join('|')").unwrap()
+}
+
+#[test]
+fn void_promise_returns_promises_unchanged() {
+    for unwrap_custom_thenables in [false, true] {
+        thenables_harness(unwrap_custom_thenables).run_in_context(|lock, ctx| {
+            let existing = ctx
+                .eval_raw(
+                    lock,
+                    "class PromiseSubclass extends Promise {}; new PromiseSubclass(() => {})",
+                )
+                .unwrap();
+            let same: v8::Local<v8::Promise> =
+                v8::VoidPromise::from_js(lock, existing).unwrap().into();
+            assert_eq!(v8::Local::<v8::Value>::from(same), existing);
+            Ok(())
+        });
+    }
+}
+
+/// As C++ JSG treats any value as an immediately resolved `jsg::Promise<void>`, the value itself
+/// is dropped.
+#[test]
+fn void_promise_resolves_other_values_with_undefined() {
+    for unwrap_custom_thenables in [false, true] {
+        thenables_harness(unwrap_custom_thenables).run_in_context(|lock, ctx| {
+            for code in [
+                "42",
+                "'plain'",
+                "null",
+                "undefined",
+                "({ value: 1 })",
+                "() => 1",
+            ] {
+                assert_eq!(
+                    void_promise_outcome(lock, ctx, code),
+                    "fulfilled: undefined",
+                    "{code}"
+                );
+            }
+            Ok(())
+        });
+    }
+}
+
+const THENABLE: &str = "({ then(resolve) { log.push('then called'); resolve('from thenable'); } })";
+
+#[test]
+fn void_promise_follows_thenables_only_with_the_flag() {
+    thenables_harness(false).run_in_context(|lock, ctx| {
+        assert_eq!(
+            void_promise_outcome(lock, ctx, THENABLE),
+            "fulfilled: undefined"
+        );
+        Ok(())
+    });
+    thenables_harness(true).run_in_context(|lock, ctx| {
+        assert_eq!(
+            void_promise_outcome(lock, ctx, THENABLE),
+            "then called|fulfilled: from thenable"
+        );
+        Ok(())
+    });
+}
+
+/// C++ JSG checks for `then` with `in`, before resolving reads it, so a Proxy sees `has` and then
+/// `get`; with the flag off, it sees neither.
+#[test]
+fn void_promise_checks_for_then_as_cpp_jsg_does() {
+    const PROXY: &str = "new Proxy({ then(resolve) { resolve('proxied'); } }, {
+        has(target, key) { log.push(`has ${String(key)}`); return key in target; },
+        get(target, key) { log.push(`get ${String(key)}`); return target[key]; },
+    })";
+    thenables_harness(false).run_in_context(|lock, ctx| {
+        assert_eq!(
+            void_promise_outcome(lock, ctx, PROXY),
+            "fulfilled: undefined"
+        );
+        Ok(())
+    });
+    thenables_harness(true).run_in_context(|lock, ctx| {
+        assert_eq!(
+            void_promise_outcome(lock, ctx, PROXY),
+            "has then|get then|fulfilled: proxied"
+        );
+        Ok(())
+    });
+}
+
+/// A `has` trap that throws leaves its exception pending, for the caller to propagate, and a
+/// `then` getter that throws rejects the promise.
+#[test]
+fn void_promise_passes_on_what_a_thenable_throws() {
+    thenables_harness(true).run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw(
+                lock,
+                "new Proxy({}, { has() { throw new RangeError('from has'); } })",
+            )
+            .unwrap();
+        let caught = lock.try_catch(|lock| {
+            v8::VoidPromise::from_js(lock, value).map(v8::Local::<v8::Promise>::from)
+        })?;
+        let Err(exception) = caught else {
+            panic!("the has trap's exception should have been pending");
+        };
+        let exception = jsg::Error::from_js(lock, exception)?;
+        assert_eq!(exception.name, jsg::ExceptionType::RangeError);
+        assert_eq!(exception.message, "from has");
+
+        assert_eq!(
+            void_promise_outcome(
+                lock,
+                ctx,
+                "({ get then() { throw new TypeError('from then'); } })"
+            ),
+            "rejected: TypeError: from then"
+        );
+        Ok(())
+    });
+}
+
+#[jsg_resource]
+struct VoidPromiseTaker;
+
+#[jsg_resource]
+impl VoidPromiseTaker {
+    #[jsg_method]
+    fn take<'s>(&self, promise: v8::VoidPromise<'s>) -> v8::Local<'s, v8::Promise> {
+        promise.into()
+    }
+}
+
+/// As a C++ JSG `jsg::Promise<void>` argument, a `VoidPromise` argument may be `undefined` but
+/// not omitted, and is a `Promise` in the error.
+#[test]
+fn void_promise_argument_is_required() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "taker", jsg::Rc::new(VoidPromiseTaker));
+        assert_eq!(
+            log_after_microtasks(
+                lock,
+                ctx,
+                &format!("{RECORD} record(taker.take(undefined))")
+            ),
+            "fulfilled: undefined"
+        );
+        assert_eq!(
+            ctx.eval::<String>(lock, "try { taker.take(); } catch (e) { String(e) }")
+                .unwrap(),
+            "TypeError: Failed to execute 'take' on 'VoidPromiseTaker': parameter 1 is not of \
+             type 'Promise'."
+        );
+        Ok(())
+    });
+}
+
 // =============================================================================
 // then
 // =============================================================================

@@ -58,6 +58,7 @@ use crate::UnitType;
 use crate::isolate_state::IsolateState;
 pub use crate::promise::Promise;
 pub use crate::promise::PromiseResolver;
+pub use crate::promise::VoidPromise;
 use crate::rtti::Context as RttiContext;
 use crate::rtti::new_rtti_context;
 #[expect(
@@ -692,6 +693,7 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
+        pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
