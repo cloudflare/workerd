@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The trace spans of a read, with the names and tags memory-cache.c++ records.
+//! The trace spans of a read or a delete, with the names and tags memory-cache.c++ records.
 
 use io_context::IoContext;
 use io_context::SpanBuilder;
@@ -123,6 +123,13 @@ pub fn record_write(io_context: &IoContext<'_>, key: &str, trace: &WriteTrace) -
         span.set_tag(c"cache_entries_before", count(eviction.entries_before));
     }
     Ok(())
+}
+
+/// Starts the span of a delete of `key`, which ends when the returned span is dropped.
+pub fn start_delete(io_context: &IoContext<'_>, key: &[u8]) -> jsg::Result<SpanBuilder> {
+    let mut span = io_context.make_trace_span(c"memory_cache_delete")?;
+    span.set_tag(c"key", &*String::from_utf8_lossy(key));
+    Ok(span)
 }
 
 /// The time a read waited for the cache's lock, which is 0 in tests, so that traces are

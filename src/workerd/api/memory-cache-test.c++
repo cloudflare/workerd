@@ -223,8 +223,12 @@ using MakeCache = kj::Function<v8::Local<v8::Value>(const TestFixture::Environme
 // logs only the first overwrite in the process, so no test here may overwrite one.
 kj::Array<kj::String> recordSpans(kj::StringPtr script, MakeCache makeCache) {
   setPredictableModeForTest();
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setMemoryCacheDelete(true);
   auto records = kj::rc<RecordedSpans>();
   TestFixture fixture({
+    .featureFlags = flags.asReader(),
     .mainModuleSource = script,
     .requestObserverFactory = records->requestObserverFactory(),
   });
@@ -288,10 +292,11 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
 }
 
 // Reads that take every path of read(), with and without a fallback, and fill the cache past
-// its limits. The fallbacks of a key's reads are coalesced: the second read of "b" waits for the
-// first, and the second of "c" runs its own once the first's fails.
-// TODO(#7951): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions. Rust
-// throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
+// its limits, then deletes of a cached key and of one never cached. The fallbacks of a key's
+// reads are coalesced: the second read of "b" waits for the first, and the second of "c" runs its
+// own once the first's fails.
+// TODO(test): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions (#7951).
+// Rust throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
 constexpr auto PARITY_SCENARIO = R"SCRIPT(
   export default {
     async fetch() {
@@ -318,6 +323,10 @@ constexpr auto PARITY_SCENARIO = R"SCRIPT(
       await settle(cache.read("g", () => ({ value: "y".repeat(100) })));
       await settle(cache.read("h", () => ({ value: 1, expiration: 0 })));
       await cache.read("i", () => ({ value: "evicts a" }));
+
+      cache.delete("i");
+      cache.delete("never cached");
+      await cache.read("i");
       return new Response("ok");
     }
   };
@@ -364,6 +373,8 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
       describe());
   KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:Error: boom "
                      "fallback_success=bool:false key=str:c"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_delete <- request: delete_completed=bool:true key=str:i"_kj),
       describe());
 }
 

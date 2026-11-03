@@ -73,12 +73,14 @@ impl MemoryCache {
         lock: &mut jsg::Lock<'s>,
         key: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        let key = key_bytes(lock, key)?;
+        let key = key_bytes(lock, key, "delete")?;
         // Keys that are too large are never cached.
         if key.len() > MAX_KEY_SIZE {
             return Err(jsg::Error::new_range_error("Key too large."));
         }
+        let mut span = trace::start_delete(&IoContext::current(lock)?, &key)?;
         self.binding.0.delete(&key);
+        span.set_tag(c"delete_completed", true);
         Ok(())
     }
 }
@@ -99,14 +101,14 @@ impl MemoryCache {
         key: v8::Local<'s, v8::Value>,
         fallback: Option<v8::Local<'s, v8::Value>>,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
-        let key = key_bytes(lock, key)?;
+        let key = key_bytes(lock, key, "read")?;
         // JSG checks the parameters of C++'s read() before it runs, and starts any span.
         let fallback = fallback
             .map(|fallback| {
                 v8::Local::<v8::Function>::try_from(fallback).map_err(|_| {
                     jsg::Error::new_type_error(
                         "Failed to execute 'read' on 'MemoryCache': parameter 2 is not of type \
-                         'Function'.",
+                         'function'.",
                     )
                 })
             })
@@ -227,12 +229,17 @@ impl Drop for CacheBinding {
 }
 
 /// `key` as UTF-8, with lone surrogates encoded as such, as C++ `kj::String` holds them, so that
-/// keys differing only in them are distinct.
-fn key_bytes<'s>(lock: &mut jsg::Lock<'s>, key: v8::Local<'s, v8::Value>) -> jsg::Result<Vec<u8>> {
+/// keys differing only in them are distinct. `method` names the method in the error for a key
+/// that is not a string.
+fn key_bytes<'s>(
+    lock: &mut jsg::Lock<'s>,
+    key: v8::Local<'s, v8::Value>,
+    method: &str,
+) -> jsg::Result<Vec<u8>> {
     let key = v8::Local::<v8::String>::try_from(key).map_err(|_| {
-        jsg::Error::new_type_error(
-            "Failed to execute 'read' on 'MemoryCache': parameter 1 is not of type 'string'.",
-        )
+        jsg::Error::new_type_error(format!(
+            "Failed to execute '{method}' on 'MemoryCache': parameter 1 is not of type 'string'."
+        ))
     })?;
     let mut bytes = vec![0; key.utf8_length(lock)];
     let written = key.write_utf8(lock, &mut bytes, v8::WriteFlags::None);

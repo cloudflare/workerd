@@ -1,10 +1,29 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { rejects, strictEqual } from 'node:assert';
-import { DurableObject } from 'cloudflare:workers';
+import { match, ok, rejects, strictEqual } from 'node:assert';
+import { DurableObject, env as importedEnv } from 'cloudflare:workers';
 import unsafe from 'workerd:unsafe';
 import { AsyncLocalStorage } from 'node:async_hooks';
+
+// What deleting from the cache in the global scope, outside any request, throws.
+let deleteInGlobalScopeError;
+try {
+  importedEnv.CACHE.delete('global scope');
+} catch (err) {
+  deleteInGlobalScopeError = err;
+}
+
+// What `fn` throws or rejects with. Whether an invalid argument throws or rejects depends on the
+// compatibility date (capture_async_api_throws).
+async function errorOf(fn) {
+  try {
+    await fn();
+  } catch (err) {
+    return err;
+  }
+  throw new Error('should have failed');
+}
 
 export const basic = {
   async test(ctrl, env) {
@@ -402,6 +421,50 @@ export const nanExpirationRejected = {
       'next'
     );
     env.CACHE.delete('nanExpiration');
+  },
+};
+
+export const fallbackCalledWithGlobalThis = {
+  async test(ctrl, env) {
+    // Modules are strict, so a function called without a receiver gets `this === undefined`.
+    const value = await env.CACHE.read('receiver', function () {
+      return { value: this === globalThis };
+    });
+    strictEqual(value, true);
+    env.CACHE.delete('receiver');
+  },
+};
+
+export const invalidArgumentsAreTypeErrors = {
+  async test(ctrl, env) {
+    const notString = "parameter 1 is not of type 'string'.";
+    let err = await errorOf(() => env.CACHE.read(123));
+    strictEqual(err.name, 'TypeError');
+    strictEqual(
+      err.message,
+      `Failed to execute 'read' on 'MemoryCache': ${notString}`
+    );
+
+    err = await errorOf(() => env.CACHE.read('key', 'not a function'));
+    strictEqual(err.name, 'TypeError');
+    strictEqual(
+      err.message,
+      "Failed to execute 'read' on 'MemoryCache': parameter 2 is not of type 'function'."
+    );
+
+    err = await errorOf(() => env.CACHE.delete(123));
+    strictEqual(err.name, 'TypeError');
+    strictEqual(
+      err.message,
+      `Failed to execute 'delete' on 'MemoryCache': ${notString}`
+    );
+  },
+};
+
+export const deleteNeedsRequest = {
+  async test() {
+    ok(deleteInGlobalScopeError instanceof Error);
+    match(deleteInGlobalScopeError.message, /global scope/);
   },
 };
 

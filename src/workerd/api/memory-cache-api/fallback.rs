@@ -104,7 +104,9 @@ impl PendingRead {
             Err(err) => return reject(lock, resolver, &err),
         };
         let fallback = fallback.as_local(lock);
-        match lock.try_catch(|lock| fallback.call(lock, None, &[key_js.into()])) {
+        // With `globalThis` as `this`, as C++ JSG calls a `jsg::Function`.
+        let global = lock.global_object();
+        match lock.try_catch(|lock| fallback.call(lock, Some(global.into()), &[key_js.into()])) {
             Ok(Ok(produced)) => fill.attach(lock, resolver, produced),
             // A fallback that throws rejects the read, as one whose promise rejects does.
             Ok(Err(exception)) => fill.reject_now(lock, resolver, exception),
