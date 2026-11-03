@@ -689,8 +689,6 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
   });
 });
 
-// Where a Durable Object's records are in the bucket: a hash of its
-// namespace's uniqueKey, then its ID.
 test('cluster: a KV namespace is an object, seen from every node', async () => {
   await withCluster(2, async ({ nodes, bucket }) => {
     const [a, b] = nodes.map((n) => n.httpPort);
@@ -807,6 +805,8 @@ test('cluster: KV reads are stale for at most cacheTtl', async () => {
   });
 });
 
+// Where a Durable Object's records are in the bucket: a hash of its
+// namespace's uniqueKey, then its ID.
 function objectPrefix(id, uniqueKey = 'counter-test-namespace') {
   const hash = createHash('sha256');
   for (const part of ['workerd cluster namespace v1', '', uniqueKey]) {

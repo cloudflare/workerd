@@ -237,10 +237,11 @@ async function bulk(request, env, space) {
       out[key] = null;
       return;
     }
-    let value = utf8(entry.value);
+    // Text decodes as a single get does; JSON must be valid UTF-8.
+    let value = new TextDecoder().decode(entry.value);
     if (type === 'json') {
       try {
-        value = JSON.parse(value);
+        value = JSON.parse(utf8(entry.value));
       } catch {
         throw new Fail(
           400,
@@ -286,7 +287,8 @@ function remember(space, key, row, ttl, version) {
   if ((cache.get(k)?.version ?? -1) > version) return;
   forget(k);
   const size = cost(k, row);
-  cache.set(k, { row, until: Date.now() + ttl * 1000, size, version });
+  const at = Date.now();
+  cache.set(k, { row, at, until: at + ttl * 1000, size, version });
   cached += size;
   for (const old of cache.keys()) {
     if (cached <= CACHE_BYTES) break;
@@ -294,12 +296,14 @@ function remember(space, key, row, ttl, version) {
   }
 }
 
-function recall(space, key) {
+// The cached row, if no older than the reader's `ttl` seconds.
+function recall(space, key, ttl) {
   const k = cacheKey(space, key);
   const c = cache.get(k);
   if (c === undefined) return undefined;
   const now = Date.now();
-  if (c.until <= now || (c.row?.expiration ?? Infinity) <= now) {
+  const old = c.until <= now || now - c.at >= ttl * 1000;
+  if (old || (c.row?.expiration ?? Infinity) <= now) {
     forget(k);
     return undefined;
   }
@@ -311,7 +315,7 @@ function recall(space, key) {
 // Each key's entry (`{value, expiration, metadata}` or null) and whether
 // its row came from the cache.
 async function read(env, space, keys, ttl) {
-  const rows = keys.map((key) => recall(space, key));
+  const rows = keys.map((key) => recall(space, key, ttl));
   const hits = rows.map((row) => row !== undefined);
   const misses = keys.filter((_, i) => !hits[i]);
   if (misses.length > 0) {

@@ -139,6 +139,10 @@ export const bulk = {
     const json = await env.KV.getWithMetadata(['b1', 'b2'], 'json');
     assert.deepStrictEqual(json.get('b1'), { value: 'one', metadata: 1 });
     assert.deepStrictEqual(json.get('b2'), { value: 2, metadata: null });
+    // Bytes that are not UTF-8 read as text, as a single get does.
+    await env.KV.put('b3', new Uint8Array([0xff, 0x61]));
+    assert.strictEqual((await env.KV.get(['b3'])).get('b3'), '\ufffda');
+    await assert.rejects(env.KV.get(['b3'], 'json'), /non-json/);
   },
 };
 
