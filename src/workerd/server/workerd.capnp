@@ -125,6 +125,29 @@ struct ClusterConfig {
   # deployment must name a variable the instance sets. The layout of the bucket, for tools that
   # write deployments, is documented in `src/workerd/server/cluster/deploy.rs`.
   #
+  # Once it serves, an instance reads the catalog every few seconds. A new revision whose
+  # deployments compose with the instance's config is adopted by restarting: the instances stop
+  # one at a time, each as on SIGTERM but with its open connections closed after 30 s, and exit
+  # with status 75 for their supervisor to start them again on it. The turn to stop is taken in
+  # `deploy/roll.json` in the bucket, and one stops only once as many instances serve as when the
+  # roll began, so a replacement that does not come up holds the roll there. If an instance is
+  # gone for good, deleting `deploy/roll.json` (or lowering its `baseline`) lets the roll go on.
+  # The supervisor must restart a process that exits with 75: systemd's `Restart=on-failure` and
+  # `Restart=always` do, and so do Kubernetes and Docker's `--restart on-failure`. Kubernetes
+  # counts these exits towards its CrashLoopBackOff delay like any other.
+  #
+  # An instance that cannot serve a revision, or cannot read the catalog, logs why and serves on;
+  # its lease record names the revision it serves and the latest one it refused. Only the running
+  # process remembers a refusal: an instance that restarts for another reason starts on the
+  # catalog as it is. An instance whose config fails with the deployments merged in (a binding to
+  # a service no one defines, JavaScript that does not load) names that revision as failed in its
+  # record and exits, also under `--watch`; the other instances then stop the roll to it for good.
+  # To recover, publish a fix or the previous version: the failing instance starts on it at its
+  # next restart, and the roll to it proceeds.
+  #
+  # Every instance must run with `--experimental`, and a workerd with rollouts: an instance that
+  # never names a revision in its record, as one without either does not, holds every roll.
+  #
   # A deployment runs with the authority of each instance's config: its services reach the
   # instance's network, environment variables, container engine and named services. Whoever may
   # write deployments to the bucket has that authority on every instance; limiting a writer to the

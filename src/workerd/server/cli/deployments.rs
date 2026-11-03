@@ -1,11 +1,13 @@
 //! Cluster mode's deployments (`cluster::deploy`): a node serves, beside its own config, the
 //! deployments its bucket's catalog names. `serve` reads them once, before the server starts,
 //! and hands the server one config, the node's with their services appended
-//! (`cluster::compose`). Without `--experimental`, without `Config.cluster`, or with no catalog
-//! in the bucket, the config is left exactly as it is.
+//! (`cluster::compose`), and the catalog's revision, which the server watches for a change
+//! (`workerd_server::rollout`). Without `--experimental`, without `Config.cluster`, or with no
+//! catalog in the bucket, the config is left exactly as it is.
 
 use capnp::message::ReaderOptions;
 use workerd_capnp::config;
+use workerd_server::rollout::Deployments;
 
 use crate::config::Config;
 
@@ -20,12 +22,13 @@ pub enum Failure {
     Remote(Vec<String>),
 }
 
-/// `config` with the deployments of its cluster's bucket merged in.
-pub fn add(config: Config) -> Result<Config, Failure> {
+/// `config` with the deployments of its cluster's bucket merged in, and what the server needs to
+/// know of them; `None` without a cluster.
+pub fn add(config: Config) -> Result<(Config, Option<Deployments>), Failure> {
     let bytes = config.to_bytes();
     let (url, options) = match cluster_bucket(&bytes) {
         Ok(Some(bucket)) => bucket,
-        Ok(None) => return Ok(config),
+        Ok(None) => return Ok((config, None)),
         Err(e) => return Err(Failure::Config(vec![format!("cluster: {e}")])),
     };
     let lines = |e: &dyn std::fmt::Display| {
@@ -44,7 +47,11 @@ pub fn add(config: Config) -> Result<Config, Failure> {
         .block_on(cluster::deploy::load(&bucket))
         .map_err(|e| Failure::Remote(lines(&e)))?;
     let Some(loaded) = loaded else {
-        return Ok(config);
+        let deployments = Deployments {
+            revision: 0,
+            node_config: bytes,
+        };
+        return Ok((config, Some(deployments)));
     };
     eprintln!("cluster: serving catalog revision {}", loaded.revision);
     for deployment in &loaded.deployments {
@@ -63,11 +70,16 @@ pub fn add(config: Config) -> Result<Config, Failure> {
                 .collect(),
         )
     })?;
-    Config::from_message_bytes(&merged).map_err(|e| Failure::Config(lines(&e)))
+    let merged = Config::from_message_bytes(&merged).map_err(|e| Failure::Config(lines(&e)))?;
+    let deployments = Deployments {
+        revision: loaded.revision,
+        node_config: bytes,
+    };
+    Ok((merged, Some(deployments)))
 }
 
 /// The bucket URL and options of the config's cluster, if it has one.
-fn cluster_bucket(bytes: &[u8]) -> capnp::Result<Option<(String, Vec<String>)>> {
+pub fn cluster_bucket(bytes: &[u8]) -> capnp::Result<Option<(String, Vec<String>)>> {
     let mut bytes = bytes;
     let options = *ReaderOptions::new().traversal_limit_in_words(None);
     let message = capnp::serialize::read_message(&mut bytes, options)?;
