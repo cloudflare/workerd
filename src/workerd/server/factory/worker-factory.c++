@@ -1266,6 +1266,23 @@ void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str no
   metadata.forwardedBy = kj::str(node);
 }
 
+bool request_metadata_from_handoff(const RequestMetadata& metadata) {
+  return metadata.fromHandoff.toBool();
+}
+
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata) {
+  ::rust::Vec<::rust::String> result;
+  result.reserve(metadata.causedBy.size());
+  for (auto& object: metadata.causedBy) result.push_back(toRustString(object));
+  return result;
+}
+
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy) {
+  metadata.fromHandoff = FromHandoff(fromHandoff);
+  metadata.causedBy = KJ_MAP(object, causedBy) { return kj::str(object); };
+}
+
 namespace {
 
 // The self-token of a root actor, for `ctx.restore()`: only the namespace and id, so that

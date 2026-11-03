@@ -410,6 +410,10 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
  public:
   explicit ActorHooksImpl(::rust::Box<ActorHooks> hooks): hooks(kj::mv(hooks)) {}
 
+  const ActorHooks& getHooks() const {
+    return *hooks;
+  }
+
   kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return hooks->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
   }
@@ -639,6 +643,16 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
 }
 
 }  // namespace
+
+void stamp_current_actor_cause(RequestMetadata& metadata) {
+  if (!IoContext::hasCurrent()) return;
+  KJ_IF_SOME(actor, IoContext::current().getActor()) {
+    auto loopback = actor.getLoopback();
+    KJ_IF_SOME(hooks, kj::dynamicDowncastIfAvailable<ActorHooksImpl>(*loopback)) {
+      hooks.getHooks().stamp_cause(metadata);
+    }
+  }
+}
 
 ActorHandle::ActorHandle(kj::Own<Worker::Actor::FacetManager> hooks,
     kj::Own<RequestTracker> tracker,

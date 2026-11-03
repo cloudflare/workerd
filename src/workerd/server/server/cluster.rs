@@ -384,6 +384,15 @@ impl ClusterNode {
         self.namespaces.borrow_mut().insert(hash, namespace);
     }
 
+    /// Whether this instance is handing off `object`, named `<namespace hash>/<root key>`.
+    pub fn hands_off(&self, object: &str) -> bool {
+        let Some((hash, key)) = object.split_once('/') else {
+            return false;
+        };
+        let namespace = self.namespaces.borrow().get(hash).and_then(Weak::upgrade);
+        namespace.is_some_and(|namespace| namespace.hands_off(key))
+    }
+
     /// Keeps this instance's alarm index tidy and schedules its share of dead peers' alarms.
     /// Never returns.
     pub async fn alarms_loop(&self) {

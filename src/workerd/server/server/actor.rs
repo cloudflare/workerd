@@ -22,6 +22,8 @@ use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::rc::Weak;
 use std::time::Duration;
@@ -486,7 +488,7 @@ impl ActorNamespace {
     }
 
     /// The handoffs of this namespace's objects as this instance drains, each with its heat.
-    /// Each object takes no new request from now on (`RoutedChannel`).
+    /// Each object takes no new request but those of a handoff's work from now on (`Cause`).
     fn handoffs(
         &self,
         in_flight: Instant,
@@ -581,6 +583,14 @@ impl ActorNamespace {
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
+    }
+
+    /// Whether this instance is handing off root actor `key`.
+    pub fn hands_off(&self, key: &str) -> bool {
+        self.actors
+            .borrow()
+            .get(key)
+            .is_some_and(|container| container.is_handed_off())
     }
 
     /// The `uniqueKey` of a durable namespace; none for an ephemeral one.
@@ -814,6 +824,12 @@ impl Channel for RoutedChannel {
         {
             node.cluster.forget_route(unique_key, &key, &by);
         }
+        // What made the request (`Cause`): as the peer says, or the work of the actor making it
+        // here.
+        if !remote {
+            ffi::stamp_current_actor_cause(metadata.as_mut());
+        }
+        let cause = Cause::of_request(&metadata);
         let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
         Ok(PromisedInterface::new(async move {
             // A peer's request that waited for a handoff is sent on to where the object went, so
@@ -842,8 +858,10 @@ impl Channel for RoutedChannel {
                 let Resolved::Here(container) = &*resolved else {
                     break resolved;
                 };
-                // An object being handed off takes no new request: it waits for it to be gone.
-                let Some(mut handoff) = container.handoff() else {
+                let Some(mut handoff) = container
+                    .handoff()
+                    .filter(|_| !cause.admitted_by(&namespace))
+                else {
                     let mut heat = container.heat.get();
                     heat.hit(cluster::now_ms());
                     container.heat.set(heat);
@@ -869,6 +887,7 @@ impl Channel for RoutedChannel {
             match &*resolved {
                 Resolved::Here(container) => match container.start_request(metadata) {
                     Ok(interface) => {
+                        let interface = attach(interface, container.count_cause(cause));
                         Ok(ffi::worker_interface_watch_moved(interface, Box::new(hook)))
                     }
                     Err(e) => {
@@ -1020,6 +1039,9 @@ pub struct ActorContainer {
     handoff: RefCell<Option<watch::Sender<bool>>>,
     /// How busy a clustered root has been: a draining instance hands off the busiest first.
     heat: Cell<Heat>,
+    /// What made a clustered root's requests in flight through its stubs, which the requests its
+    /// work makes carry on (`Cause`).
+    causes: RefCell<Causes>,
 }
 
 impl ActorContainer {
@@ -1086,6 +1108,7 @@ impl ActorContainer {
             owned: RefCell::new(None),
             handoff: RefCell::new(None),
             heat: Cell::new(Heat::default()),
+            causes: RefCell::new(Causes::default()),
         }
     }
 }
@@ -1110,6 +1133,63 @@ impl ActorContainer {
 
     fn is_root(&self) -> bool {
         self.parent.is_none()
+    }
+
+    /// The root of the facet tree; a facet whose parent is gone stands for it.
+    fn root(self: &Rc<Self>) -> Rc<Self> {
+        let mut container = Rc::clone(self);
+        while let Ok(Some(parent)) = container.parent() {
+            container = parent;
+        }
+        container
+    }
+
+    /// The object's name in a `Cause`: its namespace's hash and its root's key. None outside a
+    /// durable namespace.
+    fn cause_name(&self) -> Option<String> {
+        let ns = self.namespace.upgrade()?;
+        let unique_key = ns.unique_key()?;
+        Some(format!(
+            "{}/{}",
+            cluster::namespace_hash(unique_key),
+            self.root_key
+        ))
+    }
+
+    /// What made the requests a root's work makes: the root itself, being handed off or not,
+    /// and what made its requests in flight.
+    fn cause(&self) -> Cause {
+        let causes = self.causes.borrow();
+        let own = self.cause_name();
+        let mut objects: Vec<String> = own.iter().cloned().collect();
+        let others = causes
+            .objects
+            .keys()
+            .filter(|object| Some(*object) != own.as_ref());
+        objects.extend(others.take(MAX_CAUSES - objects.len()).cloned());
+        Cause {
+            from_handoff: self.handoff.borrow().is_some() || causes.from_handoff > 0,
+            objects,
+        }
+    }
+
+    /// Counts `cause` among those of the root's requests in flight while the returned guard
+    /// lives.
+    fn count_cause(self: &Rc<Self>, cause: Cause) -> CountedCause {
+        let mut causes = self.causes.borrow_mut();
+        causes.from_handoff += usize::from(cause.from_handoff);
+        for object in &cause.objects {
+            *causes.objects.entry(object.clone()).or_default() += 1;
+        }
+        CountedCause {
+            container: Rc::downgrade(self),
+            cause,
+        }
+    }
+
+    /// Whether the object is being handed off.
+    fn is_handed_off(&self) -> bool {
+        self.handoff.borrow().is_some()
     }
 
     fn require_not_broken(&self) -> Result<()> {
@@ -1762,6 +1842,81 @@ async fn retire_actor(
     result
 }
 
+/// What made a request, for the handoffs it may reach: whether the work of an object being
+/// handed off made it, directly or through other objects' requests, and the objects whose work
+/// made it. An object being handed off admits a request that may be part of a handoff's work
+/// (`admitted_by`), so that no object's work waits on another's handoff, nor on its own; the
+/// others wait for it to be gone, so that new work does not keep it from leaving.
+///
+/// The requests an actor makes share its context, and so cannot tell which of its requests in
+/// flight they serve: each carries what made any of them. While an object serves a request of a
+/// handoff's work, every request it makes is admitted.
+#[derive(Clone, Default)]
+struct Cause {
+    from_handoff: bool,
+    /// Named `<namespace hash>/<root key>` (`ActorContainer::cause_name`); at most `MAX_CAUSES`.
+    objects: Vec<String>,
+}
+
+/// The most objects a request names as having made it. A request made through more names only
+/// some, and waits for the handoff of an object that only the others lead back to.
+const MAX_CAUSES: usize = 32;
+
+impl Cause {
+    fn of_request(metadata: &RequestMetadata) -> Self {
+        let mut objects = ffi::request_metadata_caused_by(metadata);
+        objects.truncate(MAX_CAUSES);
+        Self {
+            from_handoff: ffi::request_metadata_from_handoff(metadata),
+            objects,
+        }
+    }
+
+    fn stamp(&self, metadata: Pin<&mut RequestMetadata>) {
+        ffi::request_metadata_set_cause(metadata, self.from_handoff, self.objects.clone());
+    }
+
+    /// Whether an object `namespace` hands off takes the request: the work of an object being
+    /// handed off made it, on this instance or, as the request says, on another.
+    fn admitted_by(&self, namespace: &ActorNamespace) -> bool {
+        self.from_handoff
+            || namespace
+                .cluster()
+                .is_some_and(|node| self.objects.iter().any(|object| node.hands_off(object)))
+    }
+}
+
+/// The causes of a root's requests in flight, each counted once per request.
+#[derive(Default)]
+struct Causes {
+    from_handoff: usize,
+    objects: HashMap<String, usize>,
+}
+
+/// Counts a request's `Cause` among its object's until the request ends.
+struct CountedCause {
+    container: Weak<ActorContainer>,
+    cause: Cause,
+}
+
+impl Drop for CountedCause {
+    fn drop(&mut self) {
+        let Some(container) = self.container.upgrade() else {
+            return;
+        };
+        let mut causes = container.causes.borrow_mut();
+        causes.from_handoff -= usize::from(self.cause.from_handoff);
+        for object in &self.cause.objects {
+            if let Entry::Occupied(mut count) = causes.objects.entry(object.clone()) {
+                *count.get_mut() -= 1;
+                if *count.get() == 0 {
+                    count.remove();
+                }
+            }
+        }
+    }
+}
+
 /// Wakes the requests waiting for a handoff once it ends.
 struct HandedOff<'a>(&'a ActorContainer);
 
@@ -2015,6 +2170,12 @@ impl ActorHooks {
         self.0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the actor is gone"))
+    }
+
+    pub(crate) fn stamp_cause(&self, metadata: Pin<&mut RequestMetadata>) {
+        if let Ok(container) = self.container() {
+            container.root().cause().stamp(metadata);
+        }
     }
 
     /// Starts a request the actor raises for itself (an alarm, a hibernated WebSocket's event),

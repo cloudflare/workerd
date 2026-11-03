@@ -234,18 +234,24 @@ struct ClusterConfig {
   stopTimeoutMs @6 :UInt32 = 8000;
   # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
   # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
-  # while it keeps serving the rest: each object takes no new requests, its requests in flight
-  # finish, and it is released for the next request anywhere to claim. Requests that arrive
-  # meanwhile wait for the object and then go where it runs next. Then the instance leaves the
-  # cluster, keeps accepting requests until at least five seconds after SIGTERM (or until the
-  # handoff deadline, if that comes sooner), as load balancers take a while to stop sending them,
-  # lets its connections finish, and stops its containers' Docker containers.
+  # while it keeps serving the rest: each object takes no new requests but those that the work of
+  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
+  # its requests in flight finish, and it is released for the next request anywhere to claim.
+  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
+  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
+  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
+  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
+  # stops its containers' Docker containers.
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
   # again; at three quarters, the handoff ends, and an object not yet released is taken over by a
   # peer once the instance has left; at nine tenths, the instance stops waiting for its connections,
-  # whose requests end as it exits; the rest is for the containers.
+  # whose requests end as it exits; the rest is for the containers. A call that reaches an object
+  # being handed off through a stateless worker, rather than from a Durable Object, waits like any
+  # other request, so a call from the object back to itself that way ends only with the requests
+  # in flight.
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,

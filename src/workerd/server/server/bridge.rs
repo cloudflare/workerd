@@ -528,6 +528,9 @@ pub mod ffi {
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
+        /// Gives `metadata` what made it when an actor's work makes it: the actor's
+        /// `ActorHooks::stamp_cause`.
+        fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);
 
         /// The source of a dynamic worker, as the worker that loads it supplies it; handed
         /// straight to `factory_new_worker`.
@@ -551,6 +554,16 @@ pub mod ffi {
         fn request_metadata_forwarded_by(metadata: &RequestMetadata) -> KjMaybe<String>;
         /// Names this node as the one that sent the request on after letting its object go.
         fn request_metadata_set_forwarded_by(metadata: Pin<&mut RequestMetadata>, node: &str);
+        /// Whether the work of an object being handed off made the request, as its maker said.
+        fn request_metadata_from_handoff(metadata: &RequestMetadata) -> bool;
+        /// The objects whose work made the request, as its maker said.
+        fn request_metadata_caused_by(metadata: &RequestMetadata) -> Vec<String>;
+        /// Sets what made the request, also for a peer it is sent to.
+        fn request_metadata_set_cause(
+            metadata: Pin<&mut RequestMetadata>,
+            from_handoff: bool,
+            caused_by: Vec<String>,
+        );
         /// Makes stubs the request creates for the actor itself restorable: they encode the
         /// actor's namespace and id.
         fn request_metadata_set_actor_self_token(
@@ -969,6 +982,8 @@ pub mod ffi {
         fn inactive(self: &ActorHooks);
         /// What makes the actor's commits durable, when the cluster replicates it.
         fn committer(self: &ActorHooks) -> Result<Box<Committer>>;
+        /// Gives a request the actor's work makes what made it (`Cause`).
+        fn stamp_cause(self: &ActorHooks, metadata: Pin<&mut RequestMetadata>);
 
         type Committer;
         /// Makes the commits captured so far durable.

@@ -31,8 +31,9 @@
 //      services or conflicts with another.
 //  12. A node stopping under load hands its DOs to its peers: requests that
 //      arrive meanwhile wait for a DO's handoff and follow it, JS RPC calls
-//      included, and a DO whose handoff outlasts its deadline moves once the
-//      node left.
+//      and other DOs' calls included, the calls of a handoff's work are not
+//      held, and a DO whose handoff outlasts its deadline moves once the node
+//      left.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -1712,6 +1713,115 @@ test(
         [3, 4]
       );
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  "cluster: a stopping node's DOs finish calls to themselves and across nodes",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      for (const [name, i] of [
+        ['self', 0],
+        ['cycle-a', 0],
+        ['cycle-b', 1],
+        ['early-a', 0],
+        ['early-b', 1],
+      ]) {
+        const first = await fetchJson(
+          nodes[i].httpPort,
+          `/increment?name=${name}`
+        );
+        assert.strictEqual(first.body.nodeId, nodes[i].nodeId);
+      }
+      // Each call comes back to a DO of node 0 once node 0 drains: one from
+      // the DO itself, one from a DO on node 1 that the first called, and one
+      // from a DO on node 1 that the first called before node 0 drained.
+      const startedAt = Date.now();
+      const calls = [
+        'self&targets=self&ms=1500',
+        'cycle-a&targets=cycle-b,cycle-a&ms=1500',
+        'early-a&targets=early-b:1500,early-a',
+      ].map((query) =>
+        fetchJson(nodes[0].httpPort, `/chain?name=${query}`, {
+          timeoutMs: 20_000,
+        })
+      );
+      await sleep(500);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      for (const response of await Promise.all(calls)) {
+        assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+        assert.strictEqual(response.body.nodeId, nodes[0].nodeId);
+      }
+      // Not held until the requests in flight are cancelled, 10 s in.
+      assert(Date.now() - startedAt < 6_000, 'a call waited on the handoff');
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      for (const [name, count] of [
+        ['self', 3],
+        ['cycle-a', 3],
+        ['cycle-b', 2],
+        ['early-a', 3],
+        ['early-b', 2],
+      ]) {
+        const { body } = await fetchJson(
+          nodes[1].httpPort,
+          `/get?name=${name}`
+        );
+        assert.strictEqual(body.count, count, name);
+      }
+    });
+  }
+);
+
+test(
+  "cluster: other DOs' calls to a DO of a stopping node wait for its handoff",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      for (const [name, i] of [
+        ['poked', 0],
+        ['poker', 1],
+      ]) {
+        const first = await fetchJson(
+          nodes[i].httpPort,
+          `/increment?name=${name}`
+        );
+        assert.strictEqual(first.body.nodeId, nodes[i].nodeId);
+      }
+      const held = fetchJson(
+        nodes[0].httpPort,
+        '/hold-increment?name=poked&ms=2000',
+        { timeoutMs: 20_000 }
+      );
+      await sleep(300);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      await sleep(200);
+      // A DO on node 1 keeps calling the DO, several calls at once, while its
+      // handoff waits for the request in flight. No handoff's work made the
+      // calls: each waits for the DO and runs where it went, rather than
+      // keeping it busy on node 0.
+      const poke = await fetchJson(
+        nodes[1].httpPort,
+        '/poke?name=poker&target=poked&ms=4000&parallel=4',
+        { timeoutMs: 20_000 }
+      );
+      assert.strictEqual(poke.status, 200, JSON.stringify(poke.body));
+      const { calls } = poke.body;
+      assert(calls.length > 0, 'no call ran');
+      for (const call of calls) {
+        assert.strictEqual(call.status, 200, JSON.stringify(call));
+        assert.strictEqual(call.nodeId, nodes[1].nodeId, JSON.stringify(call));
+      }
+      const first = await held;
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.deepStrictEqual(
+        [first.body.nodeId, first.body.count],
+        [nodes[0].nodeId, 2]
+      );
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+      const { body } = await fetchJson(nodes[1].httpPort, '/get?name=poked');
+      assert.strictEqual(body.count, 2 + calls.length);
     });
   }
 );
