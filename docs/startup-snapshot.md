@@ -220,6 +220,7 @@ once.
 | `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator` |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot, `signal` fallback      |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
+| `src/workerd/api/tests/startup-snapshot-wrappables-test`             | live objects (Headers, URL, TextEncoder, crypto, navigator, bindings) and GC across the snapshot; unclonable, `URLSearchParams`, `node:fs` and ineligible cases fall back |
 | `src/workerd/server/tests/startup-snapshot-console`                  | console output printed once; no zygote under an inspector                  |
 
 Each `wd_test` runs the pipeline in its `@all-autogates` variant and the plain Worker in the `@`
