@@ -5,6 +5,7 @@ wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
     data = ["kv-test.js"],
+    env = {"WORKERD_KV_TEST_CLOCK": "1"},
 )
 
 # `workerd serve` of a wrangler.jsonc's kv_namespaces.

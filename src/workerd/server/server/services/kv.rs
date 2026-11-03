@@ -109,7 +109,9 @@ fn rewrite(words: &[u64]) -> capnp::Result<Option<Vec<u64>>> {
 }
 
 /// `clustered` turns on the Worker's entry cache: locally the object is in
-/// the process, and another process's write must be seen at once.
+/// the process, and another process's write must be seen at once. Outside a
+/// cluster, `WORKERD_KV_TEST_CLOCK` in the environment lets tests advance
+/// the expiration clock.
 fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     service.set_name(NAME);
     let mut w = service.init_worker();
@@ -124,7 +126,7 @@ fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     w.reborrow()
         .init_durable_object_storage()
         .set_local_disk(disk);
-    let mut bindings = w.init_bindings(3);
+    let mut bindings = w.init_bindings(4);
     let mut shard = bindings.reborrow().get(0);
     shard.set_name("SHARD");
     shard
@@ -133,9 +135,13 @@ fn add_worker(mut service: service::Builder<'_>, disk: &str, clustered: bool) {
     let mut blobs = bindings.reborrow().get(1);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(BLOBS);
-    let mut cluster = bindings.get(2);
+    let mut cluster = bindings.reborrow().get(2);
     cluster.set_name("CLUSTERED");
     cluster.set_json(clustered.to_string());
+    let clock = !clustered && std::env::var_os("WORKERD_KV_TEST_CLOCK").is_some();
+    let mut test_clock = bindings.get(3);
+    test_clock.set_name("TEST_CLOCK");
+    test_clock.set_json(clock.to_string());
 }
 
 /// `Config.builtinStorage`, which a Worker that binds a `kvNamespaceId`

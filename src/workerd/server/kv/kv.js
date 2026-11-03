@@ -25,8 +25,9 @@
 // rather than hold them, so entries are small; blobs never change, and in a
 // cluster `BLOBS` caches them on the node's disk.
 //
-// Outside a cluster, POST /clock?advance=<ms> moves this process's
-// expiration clock forward, for tests of expiry; it moves nothing else.
+// With `TEST_CLOCK` (`WORKERD_KV_TEST_CLOCK` set, outside a cluster), POST
+// /clock?advance=<ms> moves this process's expiration clock, for tests of
+// expiry; it moves nothing else.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -91,7 +92,7 @@ async function serve(request, env, ns) {
   switch (request.method) {
     case 'POST':
       if (path === '/bulk/get') return bulk(request, env, space);
-      if (path === '/clock' && !clustered) {
+      if (path === '/clock' && env.TEST_CLOCK) {
         skew += Number(params.get('advance'));
         return new Response(null);
       }
