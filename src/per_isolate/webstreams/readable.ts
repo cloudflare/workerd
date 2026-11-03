@@ -420,7 +420,7 @@ let getControllerExpectedLength: (
 ) => bigint | undefined;
 let byteControllerEnqueueBatch: (
   controller: ReadableByteStreamController,
-  chunks: ArrayBufferView[]
+  chunks: Uint8Array[]
 ) => void;
 let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
@@ -2055,12 +2055,28 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // Enqueues several chunks, in order, notifying the consumers once after
     // the last, so a pending BYOB read on any cursor fills across all of
     // them before it is answered (a per-chunk notify would answer it with
-    // the first). Only for internal sources (the identity streams); each
-    // chunk is validated and accounted as by enqueue().
+    // the first). Only for internal sources (the identity streams), whose
+    // chunks are non-empty views over fixed-length buffers that they copied
+    // and hand over: no other code holds the buffers, so they are queued
+    // as they are, without enqueue()'s validation and transfer. Each chunk
+    // is accounted as by enqueue().
     byteControllerEnqueueBatch = (controller, chunks) => {
+      if (!controller.#core.canCloseOrEnqueue()) {
+        throw new TypeError(
+          'Cannot enqueue a chunk into a stream that is closed or closing'
+        );
+      }
       const last = chunks.length - 1;
       for (let i = 0; i <= last; i++) {
-        controller.#enqueueChunk(chunks[i] as ArrayBufferView, i === last);
+        const chunk = chunks[i] as Uint8Array;
+        controller.#enqueueEntry(
+          {
+            buffer: TypedArrayPrototypeGetBuffer(chunk) as ArrayBuffer,
+            byteOffset: TypedArrayPrototypeGetByteOffset(chunk) as number,
+            byteLength: TypedArrayPrototypeGetByteLength(chunk) as number,
+          },
+          i === last
+        );
       }
     };
 
@@ -2258,11 +2274,19 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // byteLength} triple; queue internals never touch the user's view,
     // which is now detached. The transfer is to fixed length (spec
     // TransferArrayBuffer), so a source cannot shrink a buffer we hold.
-    const entry: ByteQueueEntry = {
-      buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
-      byteOffset: info.byteOffset,
-      byteLength: info.byteLength,
-    };
+    this.#enqueueEntry(
+      {
+        buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
+        byteOffset: info.byteOffset,
+        byteLength: info.byteLength,
+      },
+      notify
+    );
+  }
+
+  // enqueue()'s steps from the queue entry on: the chunk is validated and
+  // the entry holds a buffer no other code can reach.
+  #enqueueEntry(entry: ByteQueueEntry, notify: boolean): void {
     // EXPECTED-LENGTH CONTRACT: overflow check before the entry reaches
     // the queue. (The buffer was already transferred above — a refused
     // overflow chunk's buffer is detached. Contract violators lose the
@@ -5121,7 +5145,7 @@ module.exports = {
       ),
     // The identity streams' delivery (see identity.ts): a batched enqueue
     // with one notification, and the queue's consumption notification.
-    enqueueBytesBatch: (controller: object, chunks: ArrayBufferView[]) =>
+    enqueueBytesBatch: (controller: object, chunks: Uint8Array[]) =>
       byteControllerEnqueueBatch(
         controller as ReadableByteStreamController,
         chunks
