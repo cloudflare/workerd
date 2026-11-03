@@ -80,3 +80,15 @@ fn reader_has_no_traversal_limit() {
         assert!(ff.reader().get_node_js_compat());
     }
 }
+
+#[test]
+fn fast_jsg_struct_matches_reader() {
+    for enabled in [false, true] {
+        let bytes = build_flags(|mut f| {
+            f.set_fast_jsg_struct(enabled);
+        });
+        let ff = FeatureFlags::from_bytes(&bytes);
+        assert_eq!(ff.fast_jsg_struct(), enabled);
+        assert_eq!(ff.reader().get_fast_jsg_struct(), enabled);
+    }
+}

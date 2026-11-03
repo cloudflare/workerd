@@ -272,7 +272,7 @@ fn to_js_fn_body(
         let this = self;
         // Unused by a struct without public fields.
         let _ = creator;
-        if lock.feature_flags().get_fast_jsg_struct() {
+        if lock.fast_jsg_struct() {
             // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
             // no setter a script put on Object.prototype runs.
             // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather

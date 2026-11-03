@@ -16,6 +16,9 @@ pub use compatibility_date_capnp::compatibility_flags;
 /// [`Lock::feature_flags()`](crate::Lock::feature_flags).
 pub struct FeatureFlags {
     message: capnp::message::Reader<Vec<Vec<u8>>>,
+    /// Read once, like the flags C++ JSG copies into `IsolateBase`, as every `#[jsg_struct]`
+    /// conversion to JavaScript checks it and `reader()` validates the root on each call.
+    fast_jsg_struct: bool,
 }
 
 impl FeatureFlags {
@@ -39,8 +42,7 @@ impl FeatureFlags {
         // bytes are C++'s own canonical encoding rather than untrusted input, so there is no limit.
         let mut options = ReaderOptions::new();
         options.traversal_limit_in_words(None);
-        let message = capnp::message::Reader::new(segments, options);
-        Self { message }
+        Self::new(capnp::message::Reader::new(segments, options))
     }
 
     /// Creates flags from a message built in Rust, such as for an RTTI export.
@@ -52,9 +54,16 @@ impl FeatureFlags {
             .iter()
             .map(|segment| segment.to_vec())
             .collect();
-        Self {
-            message: capnp::message::Reader::new(segments, ReaderOptions::new()),
-        }
+        Self::new(capnp::message::Reader::new(segments, ReaderOptions::new()))
+    }
+
+    fn new(message: capnp::message::Reader<Vec<Vec<u8>>>) -> Self {
+        let mut flags = Self {
+            message,
+            fast_jsg_struct: false,
+        };
+        flags.fast_jsg_struct = flags.reader().get_fast_jsg_struct();
+        flags
     }
 
     /// Returns the `CompatibilityFlags` reader.
@@ -74,6 +83,11 @@ impl FeatureFlags {
         self.message
             .get_root::<compatibility_flags::Reader<'_>>()
             .expect("Invalid FeatureFlags capnp root")
+    }
+
+    /// Returns the `fast_jsg_struct` flag without reading the message.
+    pub fn fast_jsg_struct(&self) -> bool {
+        self.fast_jsg_struct
     }
 }
 

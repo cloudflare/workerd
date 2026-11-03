@@ -741,6 +741,12 @@ impl<'s> Lock<'s> {
         self.realm().feature_flags.reader()
     }
 
+    /// Returns the `fast_jsg_struct` flag, which `#[jsg_struct]` conversions check.
+    #[doc(hidden)]
+    pub fn fast_jsg_struct(&mut self) -> bool {
+        self.realm().feature_flags.fast_jsg_struct()
+    }
+
     /// The number of `Global`s and `TracedGlobal`s that were dropped without the isolate lock
     /// and whose handles wait for the next lock to be reset; see [`v8::Global`]. For tests.
     #[doc(hidden)]
