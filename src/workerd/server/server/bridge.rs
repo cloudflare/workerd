@@ -34,6 +34,7 @@ pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 
@@ -740,6 +741,18 @@ pub mod ffi {
         /// `task_run` is the promise the task set holds.
         type SpawnedTask;
         async fn task_run(task: Box<SpawnedTask>) -> Result<()>;
+
+        /// The bytes of Pyodide bundle `version` (pyodide.rs): read from the disk cache in
+        /// `cache_dir`, else downloaded and written to the cache. Empty when there is no bundle
+        /// to be had; a bundle is never empty.
+        // TODO(cleanup): Return `KjMaybe<Vec<u8>>` rather than an empty `Vec` for no bundle, once
+        // the cxx fork's `KjMaybe` supports `Vec` (`check_type_kj_maybe` in
+        // src/rust/cxx/syntax/check.rs).
+        async unsafe fn pyodide_bundle_fetch<'a>(
+            cache_dir: KjMaybe<&'a str>,
+            version: &'a str,
+            integrity: &'a str,
+        ) -> Result<Vec<u8>>;
 
         /// The server, for the factory's callbacks: resolving channel tokens and debug-port
         /// requests to channels. A weak handle: the server owns the factory, and every call

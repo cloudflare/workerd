@@ -85,6 +85,7 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
 | `listen/loopback.rs`    | The `loopback:` registry: queues by name behind a mutex (kj-hyper's dialers are `Send + Sync`), `tokio::io::duplex` pipes, `LoopbackStream` with its hang-up signal                                                                                                                      |
 | `tasks.rs`              | `Factory::spawn` / `spawn_detached` / `settle_tasks`, `TaskHandle` (drop cancels at the next poll), `SpawnedTask` (the future the C++ task set polls)                                                                                                                                  |
 | `in_process.rs`         | `InProcessServer`: the server run inside a test process on a factory the test built, for `server-test.c++` (see TEST INFRASTRUCTURE) |
+| `pyodide.rs`            | The Pyodide bundle a Python worker needs, fetched before it compiles (`preloadPython` awaits `pyodide_bundle_fetch` and stores the bytes in its `PyodideBundleManager`): from `--pyodide-bundle-disk-cache-dir`, else downloaded (hyper, kj-hyper's TLS over the platform's trust store) and cached; verified against the release's checksum |
 | `log.rs`                | `install()`: the `tracing` subscriber that renders events the way `KJ_LOG` does and forwards them to `kj_log`                                                                                                                                                                           |
 
 ### `factory/` (C++)
