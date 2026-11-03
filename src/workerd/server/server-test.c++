@@ -3913,6 +3913,69 @@ KJ_TEST("Server: a failed onHibernate retirement leaves the replacement actor in
   test.connect("test-addr").httpGet200("/", "2:0");
 }
 
+KJ_TEST("Server: a tail worker gets the outcome of an onHibernate handler that runs out of time") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `export class Actor extends DurableObject {
+          `  fetch() {
+          `    return new Response("OK");
+          `  }
+          `  async [onHibernate]() {
+          `    await this.env.GATE.fetch("http://hook/");
+          `  }
+          `}
+          `export default {
+          `  fetch(request, env) {
+          `    return env.NS.getByName("test").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "Actor"),
+          (name = "GATE", service = "gate"),
+        ],
+        durableObjectNamespaces = [(className = "Actor", uniqueKey = "on-hibernate")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["tail"],
+      )),
+      (name = "tail", worker = (
+        compatibilityDate = "2026-01-01",
+        modules = [(name = "main.js", esModule =
+          `export default {
+          `  async tail(traces, env) {
+          `    for (const trace of traces.filter((trace) => trace.event.reason)) {
+          `      await env.OUT.fetch(`http://tail/${trace.event.reason}/${trace.outcome}`);
+          `    }
+          `  }
+          `};
+        )],
+        bindings = [(name = "OUT", service = "tail-out")],
+      )),
+      (name = "gate", external = (address = "hook-addr")),
+      (name = "tail-out", external = (address = "tail-addr")),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  // Never answered, so the handler runs until its budget is spent.
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET / HTTP/1.1\n[\\s\\S]*\n\n");
+  test.wait(10);
+  auto tail = test.receiveSubrequest("tail-addr");
+  tail.recvRegex("GET /inactive/exceededWallTime HTTP/1.1\n[\\s\\S]*\n\n");
+  tail.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+}
+
 KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   TestServer test(R"((
     services = [
