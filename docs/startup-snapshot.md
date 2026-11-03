@@ -216,7 +216,7 @@ once.
 
 | Test                                                                 | Covers                                                                     |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases                    |
+| `src/workerd/jsg/snapshot-test.c++`                                  | restore-time globals: install, removal, rejection cases; live-wrappable round trip (stateless, cloned, dropped and untransferable types), `verify()` and `releaseSlotsWithChecks()` findings |
 | `src/workerd/api/tests/startup-snapshot-globals-test`                | top-level code touching `Error.stackTraceLimit`, `WebAssembly`, `Iterator` |
 | `src/workerd/api/tests/startup-snapshot-listeners-test`              | top-level `addEventListener()` across the snapshot, `signal` fallback      |
 | `src/workerd/api/tests/startup-snapshot-modules-test`                | module identity across the snapshot (ESM, JSON, CJS, `node:buffer`)        |
