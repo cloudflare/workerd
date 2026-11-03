@@ -38,6 +38,12 @@ kj::Maybe<const jsg::CompiledWasmModuleHolder&> PyodideBundleManager::getPyodide
   });
 }
 
+kj::Maybe<kj::ArrayPtr<const kj::Maybe<jsg::CodeCacheKey>>> PyodideBundleManager::
+    getPyodideBundleCodeCacheKeys(kj::StringPtr version) const {
+  return bundles.lockShared()->find(version).map(
+      [](const MessageBundlePair& t) { return t.codeCacheKeys.asPtr(); });
+}
+
 void PyodideBundleManager::setPyodideBundleData(
     kj::String version, kj::Array<unsigned char> data) const {
   auto wordArray = kj::arrayPtr(
@@ -48,10 +54,16 @@ void PyodideBundleManager::setPyodideBundleData(
       wordArray, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue})
                            .attach(kj::mv(data));
   auto bundle = messageReader->getRoot<jsg::Bundle>();
+  auto codeCacheKeys = KJ_MAP(module, bundle.getModules()) -> kj::Maybe<jsg::CodeCacheKey> {
+    if (module.which() != jsg::Module::SRC) return kj::none;
+    return jsg::CodeCacheKey::compute(
+        jsg::CodeCacheKey::Unit::LEGACY_REGISTRY_BUILTIN_ESM, module.getSrc().asChars());
+  };
   bundles.lockExclusive()->insert(kj::mv(version),
       {.messageReader = kj::mv(messageReader),
         .bundle = bundle,
-        .wasmModuleHolder = kj::heap<jsg::CompiledWasmModuleHolder>()});
+        .wasmModuleHolder = kj::heap<jsg::CompiledWasmModuleHolder>(),
+        .codeCacheKeys = kj::mv(codeCacheKeys)});
 }
 
 static uint32_t readToTarget(

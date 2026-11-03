@@ -500,6 +500,10 @@ jsg::Bundle::Reader retrievePyodideBundle(
 // `pyodideWasmModuleHolder`, if given, must outlive the registry. Pyodide's pyodide.asm.wasm is
 // then instantiated from it: once a Python isolate has stored a compilation there, later Python
 // isolates with the same Wasm compile setting reuse it instead of compiling again.
+//
+// `pyodideCodeCacheKeys`, if not empty, are the code cache keys of `pyodideBundle` and must outlive the registry.
+// They let the isolate's code cache store, if it has one, serve the bundle's ES modules. They are used only
+// together with `pyodideWasmModuleHolder`.
 template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
@@ -515,7 +519,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
     kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
-    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none,
+    kj::ArrayPtr<const kj::Maybe<jsg::CodeCacheKey>> pyodideCodeCacheKeys = nullptr) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
@@ -527,7 +532,7 @@ void registerPythonCommonModules(jsg::Lock& lock,
 
   // Inject pyodide bundle.
   KJ_IF_SOME(holder, pyodideWasmModuleHolder) {
-    modules.addBuiltinBundle(pyodideBundle, holder);
+    modules.addBuiltinBundle(pyodideBundle, holder, pyodideCodeCacheKeys);
   } else {
     modules.addBuiltinBundle(pyodideBundle);
   }

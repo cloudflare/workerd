@@ -41,6 +41,13 @@ class PyodideBundleManager {
   kj::Maybe<const jsg::CompiledWasmModuleHolder&> getPyodideWasmModuleHolder(
       kj::StringPtr version) const KJ_LIFETIMEBOUND;
 
+  // Returns the code cache keys of bundle `version`, or kj::none if that bundle is not loaded:
+  // one entry per module of the bundle, set for each source module, for
+  // jsg::ModuleRegistry::addBuiltinBundle(). The keys are computed once, when the bundle is
+  // loaded, so that Python isolates do not hash the sources at startup.
+  kj::Maybe<kj::ArrayPtr<const kj::Maybe<jsg::CodeCacheKey>>> getPyodideBundleCodeCacheKeys(
+      kj::StringPtr version) const KJ_LIFETIMEBOUND;
+
  private:
   struct MessageBundlePair {
     kj::Own<capnp::FlatArrayMessageReader> messageReader;
@@ -52,6 +59,8 @@ class PyodideBundleManager {
     // for them, once per Wasm ESM integration builtins setting that Python workers use. An Own,
     // because registries refer to the holder while the map may relocate its entries.
     kj::Own<jsg::CompiledWasmModuleHolder> wasmModuleHolder;
+
+    kj::Array<kj::Maybe<jsg::CodeCacheKey>> codeCacheKeys;
   };
   const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
 };

@@ -41,6 +41,9 @@ struct CodeCacheKey {
     // ScriptCompiler::CompileUnboundScript of the source as decoded by
     // v8::String::NewFromUtf8 (a service-worker syntax main script).
     CLASSIC_SCRIPT = 3,
+    // ScriptCompiler::CompileModule of the source bytes as a one-byte (Latin-1) string, without
+    // UTF-8 decoding.
+    LEGACY_REGISTRY_BUILTIN_ESM = 4,
   };
 
   kj::FixedArray<kj::byte, 32> sourceSha256;
