@@ -270,9 +270,9 @@ class IdentityTransformStream {
   // the slowest consumer has read past its last byte, rejected when the
   // stream errors.
   #current: InFlightWrite | undefined;
-  // A pull that found nothing written; settled once data arrives or the
-  // stream ends.
-  #parkedPull: PromiseWithResolversType<void> | undefined;
+  // Whether a pull found nothing written; it is settled once data arrives
+  // or the stream ends.
+  #parkedPull: boolean = false;
   // Bytes handed to the readable side so far.
   #deliveredTotal: number = 0;
   #settlementCheckScheduled: boolean = false;
@@ -376,10 +376,9 @@ class IdentityTransformStream {
 
   // Settles a parked pull: data has arrived, or the stream has ended.
   #releaseParkedPull(): void {
-    const parked = this.#parkedPull;
-    if (parked !== undefined) {
-      this.#parkedPull = undefined;
-      parked.resolve();
+    if (this.#parkedPull) {
+      this.#parkedPull = false;
+      readableInternals.pullSettled(this.#readableController as object);
     }
   }
 
@@ -519,11 +518,11 @@ class IdentityTransformStream {
   // size() callback is where it arrives, inside writer.write() and before
   // the write is queued, so the delivery waits a microtask.
   #scheduleDelivery(): void {
-    if (this.#parkedPull === undefined || this.#deliveryScheduled) return;
+    if (!this.#parkedPull || this.#deliveryScheduled) return;
     this.#deliveryScheduled = true;
     PromisePrototypeThen(PromiseResolve(), () => {
       this.#deliveryScheduled = false;
-      if (this.#parkedPull !== undefined && this.#deliver()) {
+      if (this.#parkedPull && this.#deliver()) {
         this.#releaseParkedPull();
       }
     });
@@ -676,9 +675,9 @@ class IdentityTransformStream {
         const err = new RangeError(
           'Attempt to write too many bytes through a FixedLengthStream.'
         );
-        this.#discardPending();
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
+        this.#discardPending();
         throw err;
       }
 
@@ -690,14 +689,13 @@ class IdentityTransformStream {
       // or if a consumer is starved (a pull is parked).
       if (
         entry.end >= 0 &&
-        (this.#parkedPull !== undefined ||
-          entry.end <= this.#consumedBySlowest())
+        (this.#parkedPull || entry.end <= this.#consumedBySlowest())
       ) {
         return;
       }
       const pending = PromiseWithResolvers() as PromiseWithResolversType<void>;
       this.#current = new InFlightWrite(entry, pending);
-      if (this.#parkedPull !== undefined && this.#deliver()) {
+      if (this.#parkedPull && this.#deliver()) {
         this.#releaseParkedPull();
       }
       return pending.promise;
@@ -711,9 +709,9 @@ class IdentityTransformStream {
         const err = new RangeError(
           'FixedLengthStream did not see all expected bytes before close().'
         );
-        this.#discardPending();
         const rc = this.#readableController;
         if (rc !== undefined) byteControllerError(rc, err);
+        this.#discardPending();
         throw err;
       }
       const rc = this.#readableController;
@@ -721,9 +719,9 @@ class IdentityTransformStream {
       this.#releaseParkedPull();
     };
     const sinkAbort = (reason: unknown): void => {
-      this.#discardPending();
       const rc = this.#readableController;
       if (rc !== undefined) byteControllerError(rc, reason);
+      this.#discardPending();
     };
 
     this.#writable = new WritableStream(
@@ -750,12 +748,11 @@ class IdentityTransformStream {
     // --- Readable side (byte stream, BYOB capable) ---
     // RENDEZVOUS: pull is called when a reader.read() needs data. It hands
     // over everything already written, or parks until a write arrives.
-    const sourcePull = (): Promise<void> | undefined => {
-      if (this.#deliver()) return undefined;
+    const sourcePull = (): symbol => {
+      if (this.#deliver()) return readableInternals.kPullDone;
       this.#releaseForStarvedConsumer();
-      const parked = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      this.#parkedPull = parked;
-      return parked.promise;
+      this.#parkedPull = true;
+      return readableInternals.kPullParked;
     };
     const sourceCancel = (reason: unknown): void => {
       this.#errorWritableAndUnblockWrite(reason);
@@ -765,7 +762,8 @@ class IdentityTransformStream {
       undefined, // autoAllocateChunkSize
       sourceCancel, // cancel
       expectedLength, // expectedLength
-      sourcePull, // pull
+      // An internal pull result (see internalsForTransform in readable.ts).
+      sourcePull as unknown as () => undefined, // pull
       (c: object) => {
         this.#readableController = c;
       }, // start

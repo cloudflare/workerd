@@ -430,6 +430,9 @@ let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
   hook: (() => void) | undefined
 ) => void;
+let byteControllerPullSettled: (
+  controller: ReadableByteStreamController
+) => void;
 let defaultControllerCanCloseOrEnqueue: <R>(
   controller: ReadableStreamDefaultController<R>
 ) => boolean;
@@ -1345,8 +1348,15 @@ function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
   return info;
 }
 
+// What an internal source's pull returns instead of a promise (see
+// internalsForTransform): it completed synchronously, or it is parked until
+// the source calls pullSettled.
+const kPullDone: unique symbol = Symbol('pullDone');
+const kPullParked: unique symbol = Symbol('pullParked');
+type PullResult = Promise<void> | typeof kPullDone | typeof kPullParked;
+
 interface SourceAlgorithms {
-  pull: (() => Promise<void>) | undefined;
+  pull: (() => PullResult) | undefined;
   cancel: ((reason: unknown) => Promise<void>) | undefined;
 }
 
@@ -1379,11 +1389,15 @@ function makeSourceAlgorithms<C>(
   }
   let pull: SourceAlgorithms['pull'];
   if (pullFn !== undefined) {
-    pull = () => {
+    pull = (): PullResult => {
       try {
-        return PromiseResolve(
-          FunctionPrototypeCall(pullFn, underlyingSource, controller)
+        const result: unknown = FunctionPrototypeCall(
+          pullFn,
+          underlyingSource,
+          controller
         );
+        if (result === kPullDone || result === kPullParked) return result;
+        return PromiseResolve(result) as Promise<void>;
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1405,7 +1419,7 @@ class QueuedControllerCore<T, R> {
   // cancel, per spec ClearAlgorithms. Only a default controller sizes its
   // chunks.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
-  #pullAlgorithm: (() => Promise<void>) | undefined;
+  #pullAlgorithm: (() => PullResult) | undefined;
   #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
   #started: boolean = false;
   #pulling: boolean = false;
@@ -1646,19 +1660,29 @@ class QueuedControllerCore<T, R> {
     const pullAlgorithm = this.#pullAlgorithm;
     const result =
       pullAlgorithm === undefined ? PromiseResolve() : pullAlgorithm();
+    if (result === kPullParked) return;
+    if (result === kPullDone) {
+      this.pullSettled();
+      return;
+    }
     PromisePrototypeThen(
       result,
       () => {
-        this.#pulling = false;
-        if (this.#pullAgain) {
-          this.#pullAgain = false;
-          this.callPullIfNeeded();
-        }
+        this.pullSettled();
       },
       (e: unknown) => {
         this.error(e);
       }
     );
+  }
+
+  // The pull in flight has completed.
+  pullSettled(): void {
+    this.#pulling = false;
+    if (this.#pullAgain) {
+      this.#pullAgain = false;
+      this.callPullIfNeeded();
+    }
   }
 
   // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
@@ -2095,6 +2119,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     byteControllerSetConsumptionHook = (controller, hook) => {
       controller.#core.queue.setConsumptionHook(hook);
+    };
+    byteControllerPullSettled = (controller) => {
+      controller.#core.pullSettled();
     };
 
     assertIsReadableByteStreamController = function (
@@ -5197,6 +5224,13 @@ module.exports = {
         controller as ReadableByteStreamController,
         hook
       ),
+    // An internal source's pull returns kPullDone when it has completed
+    // synchronously, or kPullParked, and later calls pullSettled once it
+    // completes, instead of returning a promise.
+    kPullDone,
+    kPullParked,
+    pullSettled: (controller: object) =>
+      byteControllerPullSettled(controller as ReadableByteStreamController),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the
     // only external error path that bypasses the source's cancel steps).
