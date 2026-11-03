@@ -327,7 +327,16 @@ export const errors = {
 
 // A kvNamespace designator may name workerd:kv with the namespace in its
 // props, for a namespace chosen at runtime.
+export const byDesignator = {
+  async test(ctrl, env) {
+    await env.KV.put('d', 'shared');
+    assert.strictEqual(await env.BY_DESIGNATOR.get('d'), 'shared');
+    await env.BY_DESIGNATOR.put('d2', 'back');
+    assert.strictEqual(await env.KV.get('d2'), 'back');
+  },
+};
 
+// A key whose name is a URL's special characters.
 export const keyNames = {
   async test(ctrl, env) {
     for (const key of ['a/../b', '.a', '?', '#', '%', ' ', 'bulk/get']) {

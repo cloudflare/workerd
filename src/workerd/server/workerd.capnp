@@ -102,7 +102,13 @@ struct Config {
   # The writable disk service (`Service.disk`) where workerd's built-in products keep their
   # state, each in directories of its own: built-in KV's Durable Objects, and its values over
   # 64 KiB, or in a cluster its cache of those values. Required when a Worker binds a
-  # `kvNamespaceId`. Experimental.
+  # `kvNamespaceId`. Experimental: requires `--experimental`.
+  #
+  # When set, the config has the built-in service `workerd:kv`. A config may not define a
+  # service named `workerd:*`, but may name one: a `kvNamespace` (or `service`) designator
+  # `(name = "workerd:kv", props = (json = "{\"namespace\": \"<id>\"}"))` reaches the
+  # namespace `<id>`, as a `kvNamespaceId = "<id>"` binding does. That is the supported way to
+  # reach a namespace chosen at runtime.
 }
 
 struct ClusterConfig {
@@ -609,10 +615,10 @@ struct Worker {
 
       kvNamespaceId @29 :Text;
       # A KV namespace kept by workerd itself, named by its id (wrangler's `id`). Bindings with
-      # the same id share a namespace. It lives in `Config.builtinStorage`, which it requires; in a cluster it
-      # replicates as any Durable Object, and its values over 64 KiB live in the cluster's
-      # bucket.
-      # Experimental: requires `--experimental`.
+      # the same id share a namespace. It lives in `Config.builtinStorage`, which it requires;
+      # in a cluster it replicates as any Durable Object, and its values over 64 KiB live in the
+      # cluster's bucket. A namespace chosen at runtime is reached through `workerd:kv` instead;
+      # see `Config.builtinStorage`. Experimental: requires `--experimental`.
 
       # TODO(someday): dispatch, other new features
     }

@@ -1095,6 +1095,11 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
+        if services.0.contains_key(crate::services::kv::NAME) && !factory.experimental() {
+            report.error(
+                "Config.builtinStorage is experimental; it requires --experimental.".to_owned(),
+            );
+        }
         let blobs = make_blob_service(config, &services.0, cluster.as_ref(), &factory)?;
         services.0.extend(blobs);
 

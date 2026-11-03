@@ -70,6 +70,11 @@ fn the_builtin_uses_builtin_storage() {
     });
 }
 
+#[test]
+fn builtin_storage_alone_adds_the_builtin() {
+    builtin(&config("a", false, Some("store")), |_| {});
+}
+
 /// The built-in's `CLUSTERED` binding, for a config with a cluster if
 /// `cluster`.
 fn clustered(cluster: bool) -> String {

@@ -5,11 +5,12 @@
 //! Built-in KV behind `kvNamespaceId` bindings (`kv/kv.js`).
 //!
 //! The rewrite runs on the serialized config before anything reads it. A
-//! config that binds a `kvNamespaceId` gets the Worker `workerd:kv`, whose
-//! `KVNamespace` objects hold each namespace's index in the disk
-//! `Config.builtinStorage` names, so in a cluster they replicate and fail
-//! over as any object. A `kvNamespaceId = id` binding is a KV binding to
-//! that Worker with props `{"namespace": id}` (bindings.rs).
+//! config with `Config.builtinStorage` gets the Worker `workerd:kv`, whose
+//! `KVNamespace` objects hold each namespace's index in that disk, so in a
+//! cluster they replicate and fail over as any object. A `kvNamespaceId =
+//! id` binding is a KV binding to that Worker with props
+//! `{"namespace": id}` (bindings.rs); a `kvNamespace` designator may name
+//! it with the same props, for a namespace chosen at runtime.
 //!
 //! Values over the inline limit are blobs in `workerd:kv-blobs`, which takes
 //! GET, PUT and DELETE on `/<dir>/b/<id>`: a directory beside the objects'
@@ -69,8 +70,8 @@ const UNIQUE_KEY: &str = "workerd-KVNamespace";
 const BLOB_CACHE: &str = "workerd-KVNamespace-blob-cache";
 const BLOB_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 
-/// `config` with `workerd:kv` if a Worker binds a `kvNamespaceId`;
-/// unchanged when none does.
+/// `config` with `workerd:kv` if it has `Config.builtinStorage`; unchanged
+/// when it has none.
 pub fn with_builtin(config: Vec<u64>) -> Result<Vec<u64>> {
     rewrite(&config)
         .map_err(capnp_error)
@@ -153,22 +154,21 @@ fn disk(config: config::Reader<'_>) -> capnp::Result<Option<String>> {
             ));
         }
     }
+    if config.has_builtin_storage() {
+        return Ok(Some(config.get_builtin_storage()?.to_string()?));
+    }
     for service in config.get_services()? {
         let service::Which::Worker(w) = service.which()? else {
             continue;
         };
         for b in w?.get_bindings()? {
-            if !matches!(b.which()?, binding::Which::KvNamespaceId(_)) {
-                continue;
-            }
-            if !config.has_builtin_storage() {
+            if matches!(b.which()?, binding::Which::KvNamespaceId(_)) {
                 let name = service.get_name()?.to_str()?;
                 return fail(format!(
                     "Worker \"{name}\" binds a kvNamespaceId, which needs \
                      Config.builtinStorage."
                 ));
             }
-            return Ok(Some(config.get_builtin_storage()?.to_string()?));
         }
     }
     Ok(None)

@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
           ( name = "SAME", kvNamespaceId = "test" ),
           ( name = "OTHER", kvNamespaceId = "other" ),
           ( name = "DISK", service = "TEST_TMPDIR" ),
+          ( name = "BY_DESIGNATOR",
+            kvNamespace = (
+              name = "workerd:kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
         ],
       )
     ),
