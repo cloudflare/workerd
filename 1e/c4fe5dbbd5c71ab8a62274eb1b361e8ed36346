@@ -1,0 +1,25 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_05e933b5e37a83 385-386,586-587,592-594,634-635
+.github/actions/setup-bazelflare/action.yml
+  s_1b9ab9fb100cf8::t_4b3dfcfc7c982d 2,26-31,60-65
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_e44e8a91a88d96 85-88
+build/wpt_test.bzl
+  s_1b9ab9fb100cf8::t_d8fd76032bbb44 11-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ec4fe5dbbd5c71ab8a62274eb1b361e8ed36346",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

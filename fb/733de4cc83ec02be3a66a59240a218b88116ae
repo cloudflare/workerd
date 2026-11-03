@@ -1,0 +1,23 @@
+src/workerd/io/incoming-request-test.c++
+  s_8477a641ffe5eb::t_962e89131fbd79 126-137,141-149,153-158,160-162
+  s_8477a641ffe5eb::t_ceececd4ef2d10 138-140
+  s_8477a641ffe5eb::t_ddcf95927c0ba1 150-152,159
+src/workerd/server/server.c++
+  s_8477a641ffe5eb::t_de101414cbc7ca 1257-1259,1291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fb733de4cc83ec02be3a66a59240a218b88116ae",
+  "prompts": {},
+  "sessions": {
+    "s_8477a641ffe5eb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_008d9ca05ffeQi15m42VuWDJj7",
+        "model": "grok-4.6"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

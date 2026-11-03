@@ -1,0 +1,41 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_037c5274ccddc3 578-652
+AGENTS.md
+  s_1b9ab9fb100cf8::t_413cc84dda950e 26
+BUILD.bazel
+  s_1b9ab9fb100cf8::t_0fcb064b935109 3,32-40
+build/bazelflare/BUILD.bazel
+  s_1b9ab9fb100cf8::t_04b6fb6073e9ab 1-48
+build/bazelflare/ca.pem
+  s_1b9ab9fb100cf8::t_18eaa7dcdbaba6 1-11
+build/bazelflare/credential-helper
+  s_1b9ab9fb100cf8::t_6175fce483ec21 1-39
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_8e6f002b94afdf 54
+build/deps/python.MODULE.bazel
+  s_1b9ab9fb100cf8::t_79ca79bca40bb2 5-12,20,26
+docs/development.md
+  s_1b9ab9fb100cf8::t_446f32cf08bfc1 35-43
+images/BUILD.bazel
+  s_1b9ab9fb100cf8::t_dd11fcf05c99dd 3-8,18,26
+images/container-client-test/BUILD.bazel
+  s_1b9ab9fb100cf8::t_f720fe7c417e2c 51-55,63-66
+src/workerd/api/tests/opennextjs/src/BUILD.bazel
+  s_1b9ab9fb100cf8::t_5ba3df5197f934 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ce2b9797dd71ddcbe34597ecf2b127746531ff78",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

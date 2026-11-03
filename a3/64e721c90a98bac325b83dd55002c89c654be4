@@ -1,0 +1,29 @@
+src/workerd/api/actor.h
+  s_80fd8e845a3525::t_e5f67a8f7d848e 354-356,396-398,428-430
+src/workerd/api/http.c++
+  s_80fd8e845a3525::t_ac1f8d6d34f837 2807-2813
+src/workerd/api/http.h
+  s_80fd8e845a3525::t_8cbca1f45fa523 261-266,346
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_80fd8e845a3525::t_5af4458510f398 29,72-75,85-87,109-111,117,147-148,206,210,215-228
+src/workerd/api/worker-rpc.c++
+  s_80fd8e845a3525::t_82cc50ad26824f 757,762-763
+src/workerd/api/worker-rpc.h
+  s_80fd8e845a3525::t_ae4864684262bc 328-332,467-469
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a364e721c90a98bac325b83dd55002c89c654be4",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

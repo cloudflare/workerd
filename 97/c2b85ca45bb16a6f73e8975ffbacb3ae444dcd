@@ -1,0 +1,27 @@
+types/generated-snapshot/index.ts
+  s_b554ffcd7ba695::t_88438dc80b5ce8 16456-16457
+types/defines/workflows.d.ts
+  s_b554ffcd7ba695::t_96ed8f8a3ce3af 40-41
+types/generated-snapshot/index.d.ts
+  s_b554ffcd7ba695::t_7967ee27d5b8d7 16497-16498
+types/generated-snapshot/experimental/index.d.ts
+  s_b554ffcd7ba695::t_30aa2d968a90ed 506,17146-17147
+types/generated-snapshot/experimental/index.ts
+  s_b554ffcd7ba695::t_308bf55cc48e12 508,17105-17106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "97c2b85ca45bb16a6f73e8975ffbacb3ae444dcd",
+  "prompts": {},
+  "sessions": {
+    "s_b554ffcd7ba695": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f74df-f5c8-71b4-88d3-30b0c9e17ab0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    }
+  }
+}

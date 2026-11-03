@@ -1,0 +1,33 @@
+src/workerd/server/BUILD.bazel
+  s_beec2eef2fbbe5::t_8da0ebf90e36aa 363
+src/workerd/server/server.c++
+  s_beec2eef2fbbe5::t_656921c8bece2e 48,7574-7579,7588-7605
+src/workerd/server/server.h
+  s_beec2eef2fbbe5::t_2b4a0adcd50572 28-31,149-152,171-172
+src/workerd/server/workerd.capnp
+  s_beec2eef2fbbe5::t_02f4f57c155157 97-139
+src/workerd/util/BUILD.bazel
+  s_beec2eef2fbbe5::t_c1512c7e428436 38-48,432-438
+src/workerd/util/virtual-time-test.c++
+  s_beec2eef2fbbe5::t_20724aefa5deca 1-153
+src/workerd/util/virtual-time.c++
+  s_beec2eef2fbbe5::t_606d1ad4e9ec37 1-184
+src/workerd/util/virtual-time.h
+  s_beec2eef2fbbe5::t_1a71bbd21a7a84 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0155d6ed19c1b2acae5e32c41fd44a7a8e7206f7",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

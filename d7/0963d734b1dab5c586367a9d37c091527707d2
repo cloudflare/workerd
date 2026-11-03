@@ -1,0 +1,30 @@
+src/workerd/api/tests/BUILD.bazel
+  s_0f868da28cf400::t_88e1c2df2ee1ff 568
+  s_0f868da28cf400::t_45084ea593a96e 569-576
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_67bc285c55ce90 193
+src/workerd/api/global-scope.h
+  s_0f868da28cf400::t_8ac0c417572457 494,498
+  s_0f868da28cf400::t_256dfffad72bbf 508
+  s_0f868da28cf400::t_52b868e706714f 490-493,495-497,499-507,511-519
+  s_0f868da28cf400::t_cf96fd25a1efea 509-510
+  s_0f868da28cf400::t_50178626f39f03 520-522
+src/workerd/io/worker.c++
+  s_0f868da28cf400::t_e417e2c4d93b5b 2617-2621
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d70963d734b1dab5c586367a9d37c091527707d2",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

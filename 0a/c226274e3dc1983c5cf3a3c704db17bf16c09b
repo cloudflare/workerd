@@ -1,0 +1,39 @@
+docs/virtual-time.md
+  s_beec2eef2fbbe5::t_1f911776dce39f 177-178,219-226
+src/workerd/api/unsafe.c++
+  s_beec2eef2fbbe5::t_1d623dc29aa993 375-380,405-408
+src/workerd/api/unsafe.h
+  s_beec2eef2fbbe5::t_158101be7c8a0c 245,257-260,277-278,439
+src/workerd/io/BUILD.bazel
+  s_beec2eef2fbbe5::t_28104f19a36767 376
+src/workerd/io/worker-entrypoint.c++
+  s_beec2eef2fbbe5::t_009db69c379206 22,142-147,416-442,448-451,823-829,838,843,856,860-861,928,1193-1195,1200-1201
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_88f954d1554604 48-53
+src/workerd/server/tests/virtual-time/virtual-time-disconnect-test.js
+  s_beec2eef2fbbe5::t_48f90723d10591 1-222
+src/workerd/server/tests/virtual-time/virtual-time-disconnect-test.wd-test
+  s_beec2eef2fbbe5::t_98a9e5f169f29b 1-19
+src/workerd/util/fault-injector-test.c++
+  s_beec2eef2fbbe5::t_9bd96abbee0c42 446-536
+src/workerd/util/fault-injector.c++
+  s_beec2eef2fbbe5::t_620bda5783141e 90-98,122-124,164-172,177-178,253-256,279-282
+src/workerd/util/fault-injector.h
+  s_beec2eef2fbbe5::t_c749569741470a 38-48,78-86,123-128,144,178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0ac226274e3dc1983c5cf3a3c704db17bf16c09b",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

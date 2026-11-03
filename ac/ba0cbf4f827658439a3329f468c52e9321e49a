@@ -1,0 +1,31 @@
+src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
+  s_dadaf0660bfcbe::t_528343094f275d 9,16-18,115-116,122,130
+src/workerd/api/web-socket.c++
+  s_dadaf0660bfcbe::t_8a7d66a29b8bdb 1400,1422-1423
+src/workerd/io/async-lock-scheduler.h
+  s_dadaf0660bfcbe::t_c29d867d34135d 22-29,247-248,257
+src/workerd/io/io-context.c++
+  s_dadaf0660bfcbe::t_5d5ff1f9590827 909,911,975-977,1022
+src/workerd/io/io-context.h
+  s_dadaf0660bfcbe::t_7788bdf1e7f7e4 1415,1424,1433,1910,1934
+src/workerd/io/io-gate.c++
+  s_dadaf0660bfcbe::t_4380662a36412e 52-53,87-88,109-110,226-227,236,287
+src/workerd/io/io-gate.h
+  s_dadaf0660bfcbe::t_df0c87fe043978 29-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "acba0cbf4f827658439a3329f468c52e9321e49a",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

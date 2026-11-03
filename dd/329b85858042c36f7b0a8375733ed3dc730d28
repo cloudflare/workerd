@@ -1,0 +1,19 @@
+src/workerd/io/worker.c++
+  s_c77095033a1105::t_f927786ee0f97b 4939-4941,4980-4982
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dd329b85858042c36f7b0a8375733ed3dc730d28",
+  "prompts": {},
+  "sessions": {
+    "s_c77095033a1105": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a984a51ffeLxK55Db4aJKHDK",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

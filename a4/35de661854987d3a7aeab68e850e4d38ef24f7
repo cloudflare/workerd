@@ -1,0 +1,67 @@
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_7a1faf1f28bdc7 1155,1169,1266
+  s_e6ef9db3485b14::t_a3c1c72183cf31 354-357,379,392-396,401-404,419-420,422,424-427,431-432,461-470,1110,1116-1118,1126-1154,1158,1160
+  s_743b470a41e52c::t_fdf62458587938 338-340,1156-1157,1159,1161-1168,1170-1171,1263-1264
+src/workerd/server/workerd.capnp
+  s_e6ef9db3485b14::t_bfd31f4ebe1812 516-518
+src/workerd/api/actor-call-retry.h
+  s_e6ef9db3485b14::t_1755cd9f661a71 22-52
+  s_e6ef9db3485b14::t_c3a7ae5f8bdcf3 53-55
+src/workerd/util/autogate.h
+  s_e6ef9db3485b14::t_ac6bd9f70e075f 96-97
+src/workerd/api/http.c++
+  s_e6ef9db3485b14::t_a4e1d874cca964 1481-1519,2831
+  s_756328791ab730::t_d62e390e64cfb7 1663-1664,2830,2832-2838
+src/workerd/api/actor-call-retry-test.c++
+  s_e6ef9db3485b14::t_e073241e59eb49 69-70,179,191-192,201-231,276
+  s_756328791ab730::t_76df292aba9e68 59-62
+  s_756328791ab730::t_df022465fe169b 277
+src/workerd/api/actor.c++
+  s_e6ef9db3485b14::t_08246fb2c59ece 278,283,302-303,308
+src/workerd/api/actor-call-retry.c++
+  s_e6ef9db3485b14::t_6d35bf72e79dc9 15,18-20,22-23,36-40,46,55-59,96
+  s_756328791ab730::t_f6fdac4945d19b 21
+  s_e6ef9db3485b14::t_82d498d49e5f87 97-99
+src/workerd/api/actor.h
+  s_e6ef9db3485b14::t_6cf71724205988 185-186,190-191,195-196,200-201,205-206,333-334,353-354,363-364,371-373,397-398
+src/workerd/api/http.h
+  s_e6ef9db3485b14::t_e21be0b29b2cf7 265-268,344
+src/workerd/server/server.c++
+  s_e6ef9db3485b14::t_59be428e08bdb4 493,2073,4829-4839,4872-4875,5822,6710-6711
+src/workerd/server/workerd-api.c++
+  s_e6ef9db3485b14::t_e69c7bc9b0a359 671-672
+src/workerd/server/workerd-api.h
+  s_e6ef9db3485b14::t_9e2af84a3c7c10 7,204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a435de661854987d3a7aeab68e850e4d38ef24f7",
+  "prompts": {},
+  "sessions": {
+    "s_743b470a41e52c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f50f060bcffe55Wgwx5jgoES6s",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_756328791ab730": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f516141b5ffeNlCjrhcr3GDBl3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

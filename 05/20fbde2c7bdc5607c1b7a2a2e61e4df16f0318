@@ -1,0 +1,74 @@
+src/rust/jsg/ffi.h
+  s_a55c0a90d37cb7::t_b20074b5b9fdf2 326-328
+src/rust/jsg/v8.rs
+  s_a55c0a90d37cb7::t_6756662008ff2c 539-543
+src/rust/jsg-compile-tests/BUILD.bazel
+  s_a55c0a90d37cb7::t_e0ce587d841f75 8
+src/rust/jsg/fast_api.rs
+  s_995e39f7985b59::t_77a7557abcc6bd 422
+  s_995e39f7985b59::t_efef19833ed85f 455-464
+  s_995e39f7985b59::t_03f437bf47107c 407
+  s_995e39f7985b59::t_6f39355391022f 7-11,18,27,29,44-47,55-58,130-219,226,233-237,242-243,248-250,253,256-257,261,265,268-269,272,275-280,284-317,319,323,325-326,330,334,336-337,346,350-379,381,405-406,423
+  s_995e39f7985b59::t_e5e32dc927f3f7 424-436
+  s_995e39f7985b59::t_80b527f0a82be0 443-452
+  s_995e39f7985b59::t_ef8893ac420d3f 402-404
+  s_995e39f7985b59::t_13679fec969cad 399-401
+  s_995e39f7985b59::t_b1eb74e3aa4912 437-442
+  s_995e39f7985b59::t_31dc2da0cdb847 453-454
+  s_995e39f7985b59::t_4e05d8cfc1e99e 465-467
+src/rust/jsg-macros/utils-test.rs
+  s_995e39f7985b59::t_bb944670e39050 89-90,92,94-113,116-117,120,122-123,126-140,142-143
+src/rust/jsg-test/tests/fast_api.rs
+  s_995e39f7985b59::t_a5e121ceb329c9 98-101
+  s_995e39f7985b59::t_19e7a55a3e4b2f 112
+  s_995e39f7985b59::t_83fe6094830280 119
+  s_995e39f7985b59::t_9d3e588f53c0ff 69-71
+  s_995e39f7985b59::t_5d6a1b72a76aeb 81
+  s_995e39f7985b59::t_8706ddd07099b2 107-110
+  s_995e39f7985b59::t_f3f3d86dedf473 105
+  s_995e39f7985b59::t_3194d244a6a42c 83
+  s_995e39f7985b59::t_0243be969dee2d 103
+  s_995e39f7985b59::t_09eecacf4a7231 85-86
+  s_995e39f7985b59::t_7a4e41f06dce9b 68,72,74,76,80,82,84,87,90,95,97,102,104,106,111,113,118,120-121,123-191,333-346,440-677
+  s_995e39f7985b59::t_1d3da96c3c65b0 73
+  s_995e39f7985b59::t_740f8e21bbf1ec 96
+  s_995e39f7985b59::t_ee0647ab7043ea 75
+  s_995e39f7985b59::t_c30f51a3d43f18 122
+  s_995e39f7985b59::t_633cc75b141d4d 67
+  s_995e39f7985b59::t_9308f3c1fa8038 91-94
+  s_995e39f7985b59::t_c6518e2b0dd172 114-117
+  s_995e39f7985b59::t_5e0d3e09ed6837 88-89
+  s_995e39f7985b59::t_1744072cce8105 77-79
+src/rust/jsg-macros/utils.rs
+  s_995e39f7985b59::t_d915baafd6ce6a 191,193-211,213,215,219,223-229,234,237-266,268
+src/rust/jsg-macros/lib.rs
+  s_995e39f7985b59::t_619bb881132438 39,44-45,202,404-405,408-417,420-421,423-430,432-461,463-464
+src/rust/jsg-compile-tests/fast-method-needs-fast-types.rs
+  s_995e39f7985b59::t_5b4845e5cbd885 1-20
+src/rust/jsg/ffi.c++
+  s_a55c0a90d37cb7::t_731db657e91578 987-994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0520fbde2c7bdc5607c1b7a2a2e61e4df16f0318",
+  "prompts": {},
+  "sessions": {
+    "s_995e39f7985b59": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07e74e1e-67a2-423a-9ae1-b6cd2b18c8d0",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_a55c0a90d37cb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621b9b26-6a6e-418b-a29a-f76846865eaf",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+docs/jsg.md
+  s_2468263fb7681a::t_2f8737f61e832a 1321-1323,1327,1330,1333,1336-1343
+src/workerd/jsg/AGENTS.md
+  s_2468263fb7681a::t_9b7ca8f3c09bc1 28
+src/workerd/jsg/resource.h
+  s_2468263fb7681a::t_452eee1a8a8576 1831,1954-1956,2062
+src/workerd/jsg/split-isolate-test.c++
+  s_2468263fb7681a::t_ad9b71188e9eb5 12-14,19,25,27-30,32
+src/workerd/jsg/type-wrapper.h
+  s_2468263fb7681a::t_064ba4a308bf10 692-697,720-723,725,727,730-734,996-1005,1058-1062,1069-1072,1085-1095
+src/workerd/server/workerd-api-isolate.h
+  s_2468263fb7681a::t_70052f44302227 141-144
+src/workerd/server/workerd-api-templates-0.c++
+  s_2468263fb7681a::t_3647ef90762b81 9
+src/workerd/server/workerd-api-templates-1.c++
+  s_2468263fb7681a::t_6e3912add04756 9
+src/workerd/server/workerd-api-templates-2.c++
+  s_2468263fb7681a::t_7ca09a23dc3692 9
+src/workerd/server/workerd-api-templates-3.c++
+  s_2468263fb7681a::t_ded4968e98b8f8 9
+src/workerd/server/workerd-api-templates-4.c++
+  s_2468263fb7681a::t_db05de7c3e49b8 9
+src/workerd/server/workerd-api-templates-5.c++
+  s_2468263fb7681a::t_aa3bc840ad394f 9
+src/workerd/server/workerd-api-templates-6.c++
+  s_2468263fb7681a::t_72943710ddf4a0 9
+src/workerd/server/workerd-api-templates-7.c++
+  s_2468263fb7681a::t_ef4d0470069a8c 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "561c7ff9a8b94eadc88176109eeea39c2f0c1a26",
+  "prompts": {},
+  "sessions": {
+    "s_2468263fb7681a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19374f82-d7ae-4d1a-b695-d56c5f117712",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

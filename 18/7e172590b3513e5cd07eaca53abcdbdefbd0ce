@@ -1,0 +1,53 @@
+src/rust/worker/ffi.c++
+  s_dadaf0660bfcbe::t_f6d996b06098f9 7-8,52-69
+src/rust/worker/ffi.h
+  s_dadaf0660bfcbe::t_5a5a93a402f832 33-36,76-85,92-93
+  s_dadaf0660bfcbe::t_bfcb4166af493b 11-12,26
+src/rust/worker/ffi.rs
+  s_dadaf0660bfcbe::t_a2b640a1be1103 154-156,205-210,218-225
+  s_dadaf0660bfcbe::t_4b873a1befe706 91-104,137-143,226-234,252-277,337-342
+src/rust/worker/BUILD
+  s_dadaf0660bfcbe::t_ac75073539b0d2 36,46
+src/rust/worker/bridge.h
+  s_dadaf0660bfcbe::t_ce1cad6ea56736 46-80,148,171
+  s_dadaf0660bfcbe::t_c5456670d2ee04 145-147
+  s_dadaf0660bfcbe::t_66d0643cd58481 149
+  s_dadaf0660bfcbe::t_ef2a4f7ecabba0 168-170
+  s_dadaf0660bfcbe::t_97ca3edfd93e10 172
+  s_bc1ce62da9d11e::t_5700d5fabbd8fb 167
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_2b15188db47a9e 24
+src/rust/worker/test.c++
+  s_dadaf0660bfcbe::t_f409234cfc4d71 64-112,611,619,624-625,638,641-642,657,660-661,684,687-688,690,692
+  s_dadaf0660bfcbe::t_684e5905434800 430-439,478-482,560-610,612-618,620-623,626-637,639-640,643-656,658-659,662-683,685-686,689,691,693
+src/rust/worker/pending.rs
+  s_dadaf0660bfcbe::t_f171549c9f7601 1-146
+src/rust/worker/lib.rs
+  s_dadaf0660bfcbe::t_be8f1e06ace85d 22,44,77-86,108-113,124-140
+src/rust/worker/cxx_worker.rs
+  s_dadaf0660bfcbe::t_25529801d64389 128-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "187e172590b3513e5cd07eaca53abcdbdefbd0ce",
+  "prompts": {},
+  "sessions": {
+    "s_bc1ce62da9d11e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad5470e1322dfd218",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

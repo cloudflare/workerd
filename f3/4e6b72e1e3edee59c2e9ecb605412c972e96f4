@@ -1,0 +1,93 @@
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_7f77215ce3b76f 61-99
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_0a8728c8903e41 14-21
+deps/rust/Cargo.lock
+  s_dadaf0660bfcbe::t_fb1276dda186eb 89-94,117-122,327-336,364-385,459-481,520,535-538,547,550-552,557,565-566,569,671-676,846-857,866,925-998,1166-1214,1469-1474,1544,1655-1660,1680-1691,1701-1711,1723-1731,1761-1774,1852-1924,1946-1954,1973-1995,2112-2121,2162-2171,2195-2200,2630-2645,2687-2692,2745,2748-2753,2804-2812,2819-2827,2873-2881,2897-2905,2912,2924-2939,2947-2954,2957-2962,2969-2974,2981-2986,2993-2998,3005-3010,3017-3022,3029-3034,3041-3046,3053-3058,3074-3084,3149-3154
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_5953a38315efeb 35-37,50-55,63-66,69-74,79,84-85
+patches/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_37be5b8cba0b50 1-3
+patches/rust/crates/http-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_8909c81f619f18 1-17
+patches/rust/crates/httparse-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_f992c81c48d469 1-29
+patches/rust/crates/hyper-client-lazy-response-body.patch
+  s_dadaf0660bfcbe::t_87ae493d9dbca5 1-16
+patches/rust/crates/hyper-graceful-shutdown-partial-request.patch
+  s_dadaf0660bfcbe::t_696c0bcf1ec8c4 1-13
+patches/rust/crates/hyper-parse-error-explanation.patch
+  s_dadaf0660bfcbe::t_dafabbd9ab7178 1-54
+patches/rust/crates/hyper-public-header-case-map.patch
+  s_dadaf0660bfcbe::t_8f3ca6209c7991 1-43
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_720dcb900ae0a7 24
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_7159f1ecbe86d6 44-48,116-221
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_dadaf0660bfcbe::t_7d219a188ecb26 1-87
+src/rust/cxx/kj-hyper/body.rs
+  s_dadaf0660bfcbe::t_bc0b7e50e01a24 1-512
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_921153a3fb35d0 1-967
+src/rust/cxx/kj-hyper/ffi.rs
+  s_dadaf0660bfcbe::t_3574fd92f145bd 1-397
+src/rust/cxx/kj-hyper/handshake.rs
+  s_dadaf0660bfcbe::t_04b783cde9b619 1-56
+src/rust/cxx/kj-hyper/io.rs
+  s_dadaf0660bfcbe::t_47c0ac3d0de87c 1-536
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_dadaf0660bfcbe::t_0e6ea10c8d2e27 1-411
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_dadaf0660bfcbe::t_6a8437ab1790ce 1-72
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_4f9dfc0e56fcec 1-51
+src/rust/cxx/kj-hyper/server.rs
+  s_dadaf0660bfcbe::t_0ad6684db47d94 1-993
+src/rust/cxx/kj-hyper/starttls.rs
+  s_dadaf0660bfcbe::t_a69b0dd93fca8d 1-245
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_a1990b205407b8 1-60
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_ea081fd9aa8be6 1-427
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_dadaf0660bfcbe::t_2ac302f678f1e7 1-1321
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_dadaf0660bfcbe::t_c9ef63132a1d7a 1-120
+src/rust/cxx/kj-hyper/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_f665fb2d1e8fee 1-17
+src/rust/cxx/kj-hyper/tls.rs
+  s_dadaf0660bfcbe::t_387deb83cb74c5 1-880
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_9eb1cd636bdc0c 283-284,288-289,302,306,310,314,318,322,329,335
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_a227d58e453b7c 40,85-94,98-102
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_c4a231f09ff5e5 51-53,231-237
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_959b7d31fcdde9 137,139,141
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_05209f5d8eb213 59,97-100,370,382-422,424-429,447-476,839-865
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_8f485002d8f9c6 31-39,47-50,151,161-165
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_9fd5c6aed0a83b 99,134-135,145-149,212,220-227,383-391
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_8f85f4e8a8a948 25-32,45-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f34e6b72e1e3edee59c2e9ecb605412c972e96f4",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-odango-eap"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

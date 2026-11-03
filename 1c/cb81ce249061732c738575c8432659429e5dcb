@@ -1,0 +1,131 @@
+src/workerd/server/server.c++
+  s_4bcd2f07aa5d0a::t_b0ebe66605717f 221-226,235,236,238,242,243,245,246,286,468,629,685-692,784,954-956,1135,1157,1188,1244,1252,1365,1377-1378,1767-1769,1783-1794,1823-1828,7162-7164,7191-7200,7208,7218-7221,7249,7279-7289
+  s_710093cfa2d5fb::t_339b222b85ce92 251-253,254,290-305,1410,1413,1434-1437,1434,1442-1446,1449-1453,7162,7181-7190,7182-7190,7207,7214-7217,7248,7268-7278
+  s_2dfe3889216c4d::t_9958500ff3c955 227-234,227-231,233-235,239-240,239,243-244,244,246-250,247-250,254-272,255-285,274-285,287-289,1404-1409,1404,1407-1409,1411-1412,1411,1414-1420,1420,1424-1430,1425,1426-1430,1438-1441,1447,1454-1456,1471,7297,7307,7322,7326,7328
+  s_4bcd2f07aa5d0a::t_fe60c9ef6324b8 1454-1456,1471,7165-7180,7210-7213,7294-7296,7298-7306,7308-7321,7323-7325,7327,7329-7330,7448-7451
+  s_4bcd2f07aa5d0a::t_7069ff0ae408b8 251-253,290-305,1410,1413,7268-7278
+  s_e2c48765393779::t_1eb1e45f16a775 237,241,1421-1423
+src/workerd/util/storage-telemetry-test.c++
+  s_2dfe3889216c4d::t_af9bb98b61465f 1-40,1-15,18,19-24,26-28,36-40,43-50,43-46,52,54,56-69,59,61-62,64-68,71,72,73-91,75-79,81,82,93-95,97-101,103-108,110-111,111,116-118,121,124-150,125-127,132,134-136,138-139,147,149,152-159,152,158-159,184-185
+  s_4bcd2f07aa5d0a::t_7cc90f6482abf6 96,112-113
+  s_4bcd2f07aa5d0a::t_8fa0c5e0ce6df3 42,55,92,115,119-120,123
+  s_e2c48765393779::t_a5054394c7294f 41,53,70,114,122,160-163,166-183
+src/workerd/util/sqlite-test.c++
+  s_2dfe3889216c4d::t_83de2677f8d028 1474,1865-1997,2090-2255
+  s_2dfe3889216c4d::t_7867919598ed50 1449-1452,1472-1473
+  s_4bcd2f07aa5d0a::t_03c45ff615ae00 1998-2089
+src/workerd/util/storage-telemetry.h
+  s_2dfe3889216c4d::t_345a8b16e07dc8 1-29,1-7,9,10-18,20-29,34,39-50,51-53,53-55,55-56,57-64,59-70,66-67,71-77,80,82-84,82,89-91,91,93-115,93,96-99,100,102-104,107-108,113-115
+  s_4bcd2f07aa5d0a::t_1853ef01c67f08 71-77,92
+  s_710093cfa2d5fb::t_15bbb101acc10d 51-52,54,56,81
+  s_4bcd2f07aa5d0a::t_155376aaa6b267 57-58,81
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_2dfe3889216c4d::t_375153f5c9b663 1-9,11-42,12-42,47-56,59-120,70-71,81-111,113-114,116-120,121,122-133,135,137-154,137-145,171,174-197,177-211,199-208,210-211,213-305,213-238,240-244,246-269,271-276,278-294,296-300,302-305,310-314
+  s_4bcd2f07aa5d0a::t_f3296b91ef7a44 43-46,155-176
+  s_4bcd2f07aa5d0a::t_6e5cdded515067 212,306-309
+  s_e2c48765393779::t_309e327a446cd8 10,57-58,134,136,315-335
+src/workerd/util/BUILD.bazel
+  s_2dfe3889216c4d::t_d7669a8c0e958e 34-43,51,433-439
+src/workerd/util/virtual-time.h
+  s_2dfe3889216c4d::t_ba99773a901d15 8,264-265,273
+  s_4bcd2f07aa5d0a::t_86ad9595501449 264-270,273,331
+  s_4bcd2f07aa5d0a::t_c896710ebdb9e9 146-149,169-170,271
+  s_4bcd2f07aa5d0a::t_ee258fe4c43afe 28-30,56-58,72-73,129-130,132,138-139,150-153,171,188-190,272,310-326
+src/workerd/api/unsafe.h
+  s_710093cfa2d5fb::t_54326fc6c3fe29 343
+  s_2dfe3889216c4d::t_2db594dcbbb953 295-298,297,300-309,311,313-327,329,331-342,345-351,345,346-348,349-351,406-409,420,456,464
+  s_4bcd2f07aa5d0a::t_5c9785f330e0d2 344,391
+  s_4bcd2f07aa5d0a::t_2bd15ec412ffc5 406-409,420,456-457,464-465
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_2dfe3889216c4d::t_54db0924f5cf41 38-43
+  s_710093cfa2d5fb::t_ba6b29dff6a264 44-49
+  s_4bcd2f07aa5d0a::t_527eb7ed093c86 50-55
+src/workerd/util/sqlite.c++
+  s_710093cfa2d5fb::t_cf291689281a37 690,759-769,770-778
+  s_2dfe3889216c4d::t_e202ec668b128b 641,645-689,645-697,691-697,709-713,715-733,734-758,770-824,779-824
+  s_4bcd2f07aa5d0a::t_9e58c38a231957 642-644,698-708,714,759-769
+src/workerd/util/storage-telemetry.c++
+  s_4bcd2f07aa5d0a::t_cc31a7e7f7722a 93,100,159
+  s_710093cfa2d5fb::t_e32f0262613bca 38,42-43,102,109
+  s_2dfe3889216c4d::t_37f9fb6434a550 1-37,1-10,39-41,44-53,70-71,72-79,77-79,82-89,91-92,91-101,94-99,101,103,107-108,110-111,115-155,116-123,125-130,146-151,153-158,160-165,170-175,192,195-196,205,206-208
+  s_4bcd2f07aa5d0a::t_1cb7b2bfe2f3f1 156-158,160-165,170-208
+  s_4bcd2f07aa5d0a::t_ba644c30bfee07 102,109,112-114
+src/workerd/util/sqlite.h
+  s_2dfe3889216c4d::t_0199f0e2042d40 349-372,374-375,444-452,454-455,459-462
+  s_4bcd2f07aa5d0a::t_051c161aa910a6 373,376-383,453,456-458
+docs/virtual-time.md
+  s_4bcd2f07aa5d0a::t_0a9bd3ff5b1265 48,204-207,237-253,253
+  s_710093cfa2d5fb::t_4c5b165aa61b25 46,47,190-196,197-203,218-233,253
+  s_2dfe3889216c4d::t_5c299227dc876a 161-181,161-162,164,167,170-171,187-189,188-196,208-212,253
+  s_4bcd2f07aa5d0a::t_7b2b279e7d5af2 47,218-236
+src/workerd/api/unsafe.c++
+  s_4bcd2f07aa5d0a::t_c09eff96c34a22 400-410,412,414-427
+  s_2dfe3889216c4d::t_709e0eada05666 400,405-410,412,414-427
+src/workerd/server/server.h
+  s_4bcd2f07aa5d0a::t_40c33f44dbe7c2 149
+src/workerd/server/tests/virtual-time/virtual-time-sql-test.js
+  s_4bcd2f07aa5d0a::t_28b5eb8af80315 6,44-54
+src/workerd/server/tests/virtual-time/virtual-time-sql-test.wd-test
+  s_4bcd2f07aa5d0a::t_ddbfed6d7700f6 10
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.wd-test
+  s_4bcd2f07aa5d0a::t_ebae50094c9c37 1-14,19-22,24-34
+  s_e2c48765393779::t_c16bd53f764ebd 15-18,23
+src/workerd/server/workerd.capnp
+  s_4bcd2f07aa5d0a::t_ca695e540121b9 140-153
+  s_4bcd2f07aa5d0a::t_a28688da13f69f 154-167
+  s_4bcd2f07aa5d0a::t_e7b5e902989786 168,170-181
+src/workerd/util/virtual-time.c++
+  s_4bcd2f07aa5d0a::t_cdbb35b7b070fd 459-467
+  s_4bcd2f07aa5d0a::t_0815bed3e66655 468-471
+  s_2dfe3889216c4d::t_0937e55eb256ba 474-475
+  s_4bcd2f07aa5d0a::t_3a1b34ac2ba709 44-47,51,57-58,64,70,147-148,153,157-161,176-183,186,204-205,212-216,218,233,254-258,265-268,291-293,304-305,326-329,472-475
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.wd-test
+  s_710093cfa2d5fb::t_356e7bfec3c1fe 1-25,1-18,20-24,30
+  s_4bcd2f07aa5d0a::t_0b6942abf1290b 26-30
+src/workerd/server/tests/virtual-time/virtual-time-storage-srs-test.js
+  s_4bcd2f07aa5d0a::t_c9f48a65e4f27e 1-181
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_4bcd2f07aa5d0a::t_a618e9bcbf2ded 1-212
+src/workerd/util/virtual-time-test.c++
+  s_4bcd2f07aa5d0a::t_7bd37ff8a590a8 232-341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ccb81ce249061732c738575c8432659429e5dcb",
+  "prompts": {},
+  "sessions": {
+    "s_2dfe3889216c4d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ecb8-bdfb-706a-b701-bd5fdc9b167f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_4bcd2f07aa5d0a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f80b-b3fd-718f-a242-352c049eed26",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_710093cfa2d5fb": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ed11-9617-7551-bfea-22d824e1f190",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_e2c48765393779": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f896-3960-708a-9649-5bdcbe58e9cc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

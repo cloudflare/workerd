@@ -1,0 +1,33 @@
+src/workerd/api/BUILD.bazel
+  s_756328791ab730::t_391b7acb8e0717 861-869
+src/workerd/api/http.h
+  s_756328791ab730::t_044443837b0aa4 352
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_756328791ab730::t_250070feb4eef3 47,66-68,359-360
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_756328791ab730::t_5cfe903b8a5e01 677-695
+src/workerd/api/worker-rpc.h
+  s_756328791ab730::t_e0acbb9e77e156 180-188,332-335,346-347,366-368,386,389-390,394,448,451,498-500,786-792
+src/workerd/io/observer.h
+  s_756328791ab730::t_fdaa89e5eb0a82 86,89-94,196-202
+src/workerd/util/autogate.h
+  s_756328791ab730::t_17347d9a713e0b 97,99-101
+src/workerd/util/completion-membrane.h
+  s_756328791ab730::t_ff87b40b7c3110 48-53,73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "20e7df49ed747f2c1f604de54508fb2a96244497",
+  "prompts": {},
+  "sessions": {
+    "s_756328791ab730": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f516141b5ffeNlCjrhcr3GDBl3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

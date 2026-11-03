@@ -1,0 +1,43 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_e6ef9db3485b14::t_c587100abe31ab 16141-16152
+types/generated-snapshot/experimental/index.ts
+  s_e6ef9db3485b14::t_c6e5e3231392e9 16109-16120
+types/generated-snapshot/index.d.ts
+  s_e6ef9db3485b14::t_724bc6e96a21b6 15864-15875
+types/generated-snapshot/index.ts
+  s_e6ef9db3485b14::t_48a5d005d15d65 15832-15843
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_4f5642a115ef80 114-115,157-161,226-234,242-243,245-251,755,757-759,764-766,773-774,777-779,786,791,794,798-802,813-814,816,823-825,827,830-836,839,842,844,849-922,926,1003-1006,1009-1010
+src/workerd/server/server.c++
+  s_e6ef9db3485b14::t_c23496f2664b33 4808,4810-4811,4813-4814
+src/cloudflare/internal/workers.d.ts
+  s_bf1ef2329fbd5a::t_cfc3b5afea591b 67-71
+src/cloudflare/workers.ts
+  s_bf1ef2329fbd5a::t_798704988d5d4a 23-27
+src/workerd/api/fetch-retry-claim-hook-test.c++
+  s_bf1ef2329fbd5a::t_8ac706d1445a79 188-203,206,219-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ad789469b45f6c9e59d0638b62ce3ae9572f60d3",
+  "prompts": {},
+  "sessions": {
+    "s_bf1ef2329fbd5a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f853bc28bffe5fdudebM6gGEQz",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

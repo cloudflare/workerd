@@ -1,0 +1,55 @@
+types/generated-snapshot/experimental/index.ts
+  s_c170f47e0c11df::t_4ac6e0d2fdf2c9 525
+types/generated-snapshot/index.d.ts
+  s_c170f47e0c11df::t_4ac6e0d2fdf2c9 499
+src/workerd/api/tests/connect-handler-delegate-test.wd-test
+  s_c170f47e0c11df::t_1dbc609b1b770f 32-35
+  s_c170f47e0c11df::t_a1dc0a196e9924 1-24,26-29,36
+  s_c170f47e0c11df::t_c1a5e19c4f33d1 25
+  s_c170f47e0c11df::t_e505cb6252894e 30
+  s_c170f47e0c11df::t_25397df54b4422 31
+src/workerd/api/tests/connect-handler-delegate-test.js
+  s_c170f47e0c11df::t_740d701cc98a62 1-59
+src/workerd/util/stream-utils.h
+  s_c170f47e0c11df::t_30ccae38326c66 49-54
+types/generated-snapshot/experimental/index.d.ts
+  s_c170f47e0c11df::t_4ac6e0d2fdf2c9 523
+src/workerd/api/tests/connect-handler-test-proxy.js
+  s_c170f47e0c11df::t_9aefab2e6d046e 48-49,51-53,56-58,60-62
+  s_c170f47e0c11df::t_f57850fa3105b2 21-25,27-29,54-55,64-66
+  s_c170f47e0c11df::t_c1a5e19c4f33d1 18-20,26
+  s_c170f47e0c11df::t_fdb59d9798eb57 41-47
+  s_c170f47e0c11df::t_da24e1febbdd7d 50,59,63
+  s_c170f47e0c11df::t_c40a71d117f6f0 30-40
+types/generated-snapshot/index.ts
+  s_c170f47e0c11df::t_4ac6e0d2fdf2c9 501
+src/workerd/util/stream-utils.c++
+  s_c170f47e0c11df::t_5b63a16fe20302 248-253
+src/workerd/api/global-scope.c++
+  s_c170f47e0c11df::t_11ded5034bac11 268-282
+  s_c170f47e0c11df::t_65ba01b279f469 34
+  s_c170f47e0c11df::t_96047c78f8ce92 259-262,265-267,283-288
+src/workerd/api/tests/BUILD.bazel
+  s_c170f47e0c11df::t_6f3f3b91efc56c 115-128
+src/workerd/api/global-scope.h
+  s_c170f47e0c11df::t_e4e5c478978e7d 517-521
+  s_c170f47e0c11df::t_1092bc5e0a573a 515-516
+  s_c170f47e0c11df::t_bacc4c11b5a352 582
+  s_c170f47e0c11df::t_898f58563c3fcf 513-514
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "266a74927132e400ba5087cb6327d2ff6f343b50",
+  "prompts": {},
+  "sessions": {
+    "s_c170f47e0c11df": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037b1a868ffeOWCafUWvMKLPfh",
+        "model": "claude-opus-5"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    }
+  }
+}

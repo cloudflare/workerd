@@ -1,0 +1,25 @@
+src/workerd/api/oidc-test.c++
+  s_8a31beec700f7c::t_9f53e2f697360c 109,111,134,138,144,152,173
+src/workerd/api/oidc.c++
+  s_8a31beec700f7c::t_f68ae969f27898 20-25,32-36
+src/workerd/api/oidc.h
+  s_8a31beec700f7c::t_5532c297f8f685 15-17
+src/workerd/api/tests/oidc-test.js
+  s_8a31beec700f7c::t_e8edbab0bb60b9 36-39,53-54,61-70,81-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c61b2226e3e83a9b047144623e5add17208d761a",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+src/workerd/server/container-client.c++
+  s_d8eb431832bf4f::t_384156f1301aa0 2346,2398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c27d495230ecd36b98aa6b045f5756dd378d664d",
+  "prompts": {},
+  "sessions": {
+    "s_d8eb431832bf4f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0321faf8cffeUrQP7oyYbc16Jb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
