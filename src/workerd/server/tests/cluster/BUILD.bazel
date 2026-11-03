@@ -1,9 +1,14 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 # Two takeovers wait out a dead owner's 20 s lease. Downstream caps
-# "eternal" at 240 s; add takeovers to the simulations instead.
-js_test(
-    name = "cluster-test",
+# "eternal" at 240 s; add takeovers to the simulations instead. The tests
+# run in shards that each stay well under that.
+#
+# The tests of deployments, whose names say "deploy", run in a target of their
+# own. Each test runs a fake S3 and up to three nodes: on a loaded machine, a
+# node starved for 12 s lets its lease lapse and leaves the cluster.
+[js_test(
+    name = name,
     size = "large",
     timeout = "eternal",
     data = [
@@ -23,6 +28,14 @@ js_test(
         "FAKE_S3_CONFIG": "$(rootpath :fake-s3.wd-test)",
         "NODE_CONFIG": "$(rootpath :cluster-node.wd-test)",
         "DEPLOYMENT_CONFIG": "$(rootpath :cluster-deployment.wd-test)",
+        "NODE_OPTIONS": "--test-{}-pattern=deploy".format(which),
     },
-    tags = ["js-test"],
-)
+    shard_count = shards,
+    tags = [
+        "cpu:4",
+        "js-test",
+    ],
+) for name, which, shards in [
+    ("cluster-test", "skip", 3),
+    ("cluster-deploy-test", "name", 1),
+]]
