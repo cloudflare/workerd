@@ -76,14 +76,16 @@ class OtlpExporter::Impl final: public OtlpSpanExporter, private kj::TaskSet::Er
     KJ_DEFER(--running);
     while (!pending.empty()) {
       auto request = takeBatch();
-      try {
-        co_await timer.timeoutAfter(REQUEST_TIMEOUT,
+      // Use a continuation to avoid Windows coroutine catch miscompilation. evalNow also
+      // covers synchronous failures during collector request setup.
+      co_await kj::evalNow([&]() {
+        return timer.timeoutAfter(REQUEST_TIMEOUT,
             post(KJ_ASSERT_NONNULL(collector)->start_request(kj::heap<RequestMetadata>()),
                 headerTable, kj::mv(request)));
-      } catch (kj::Exception& exception) {
+      }).catch_([this](kj::Exception&& exception) {
         // Failed batches are not retried. Keep draining so a collector can recover.
         taskFailed(kj::mv(exception));
-      }
+      });
     }
   }
 
