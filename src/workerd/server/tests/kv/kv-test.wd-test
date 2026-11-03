@@ -15,6 +15,9 @@ const unitTests :Workerd.Config = (
           ( name = "BY_DESIGNATOR",
             kvNamespace = (
               name = "workerd:kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
+          ( name = "BUILTIN",
+            service = (
+              name = "workerd:kv", props = ( json = "{\"namespace\": \"test\"}" ) ) ),
         ],
       )
     ),

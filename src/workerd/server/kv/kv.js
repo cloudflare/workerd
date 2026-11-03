@@ -24,6 +24,9 @@
 // as `wrangler kv key put --local`, must be seen at once. Rows name blobs
 // rather than hold them, so entries are small; blobs never change, and in a
 // cluster `BLOBS` caches them on the node's disk.
+//
+// Outside a cluster, POST /clock?advance=<ms> moves this process's
+// expiration clock forward, for tests of expiry; it moves nothing else.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -56,6 +59,8 @@ const fail = (status, text) =>
   new Response(null, { status, statusText: text.replace(/[\r\n]/g, ' ') });
 
 let clustered;
+let skew = 0;
+const clock = () => Date.now() + skew;
 
 export default {
   async fetch(request, env, ctx) {
@@ -86,6 +91,10 @@ async function serve(request, env, ns) {
   switch (request.method) {
     case 'POST':
       if (path === '/bulk/get') return bulk(request, env, space);
+      if (path === '/clock' && !clustered) {
+        skew += Number(params.get('advance'));
+        return new Response(null);
+      }
       break;
     case 'GET':
       if (path === '/') return list(space, params);
@@ -188,7 +197,7 @@ async function put(request, env, space, key, params) {
 // An `expiration` or `expiration_ttl` parameter as a time in ms, parsed
 // and refused as production does.
 function expires(params) {
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(clock() / 1000);
   const ttlText = params.get('expiration_ttl');
   if (ttlText !== null) {
     const ttl = parseInt(ttlText);
@@ -469,7 +478,7 @@ export class KVNamespace extends DurableObject {
   // Each key's row, or null if it is absent or expired, and the version
   // they are as of.
   read(keys) {
-    const now = Date.now();
+    const now = clock();
     const [{ v }] = this.sql.exec('SELECT v FROM clock').toArray();
     const rows = keys.map(
       (key) =>
@@ -552,7 +561,7 @@ export class KVNamespace extends DurableObject {
         end,
         prefix,
         prefix,
-        Date.now(),
+        clock(),
         limit
       )
       .toArray();

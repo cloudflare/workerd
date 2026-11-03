@@ -327,6 +327,38 @@ export const errors = {
 
 // A kvNamespace designator may name workerd:kv with the namespace in its
 // props, for a namespace chosen at runtime.
+// Keys disappear from get and list once the expiration clock passes them.
+export const expiry = {
+  async test(ctrl, env) {
+    await env.KV.put('x/ttl', 'v', { expirationTtl: 60 });
+    await env.KV.put('x/at', 'v', { expiration: now() + 120 });
+    await env.KV.put('x/forever', 'v');
+    const advance = (s) =>
+      env.BUILTIN.fetch(`http://kv/clock?advance=${s * 1000}`, {
+        method: 'POST',
+      });
+    try {
+      await advance(61);
+      assert.strictEqual(await env.KV.get('x/ttl'), null);
+      assert.strictEqual(await env.KV.get('x/at'), 'v');
+      let { keys } = await env.KV.list({ prefix: 'x/' });
+      assert.deepStrictEqual(
+        keys.map((k) => k.name),
+        ['x/at', 'x/forever']
+      );
+      await advance(60);
+      assert.strictEqual(await env.KV.get('x/at'), null);
+      ({ keys } = await env.KV.list({ prefix: 'x/' }));
+      assert.deepStrictEqual(
+        keys.map((k) => k.name),
+        ['x/forever']
+      );
+    } finally {
+      await advance(-121);
+    }
+  },
+};
+
 export const byDesignator = {
   async test(ctrl, env) {
     await env.KV.put('d', 'shared');
