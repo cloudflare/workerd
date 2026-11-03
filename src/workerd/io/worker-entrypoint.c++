@@ -771,6 +771,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   // TODO(soon): Implement basic TLS support for connect handler.
   JSG_REQUIRE(!settings.useTls, Error, "Incoming CONNECT with TLS not supported");
+  // The peer's startTls() slot is only valid while its call is on the stack, and the lambda below
+  // runs after waiting for the isolate lock.
+  auto tlsUpgrade = api::takeConnectTlsUpgrade(settings, featureFlags.getConnectHandlerStartTls());
   // Capture workerTracer, see request() for rationale.
   kj::Maybe<BaseTracer&> workerTracer;
 
@@ -791,17 +794,18 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   return wrapWithCanceler(
       context
-          .run([weakThis = addWeakToThis(), &headers, &connection,
-                   weakResponse = wrappedResponse->addWeak(),
-                   entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
-                   host = kj::str(host), clientAddress = kj::mv(clientAddress),
-                   settings = kj::mv(settings)](Worker::Lock& lock, IoContext& context) mutable {
+          .run(
+              [weakThis = addWeakToThis(), &headers, &connection,
+                  weakResponse = wrappedResponse->addWeak(),
+                  entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
+                  host = kj::str(host), clientAddress = kj::mv(clientAddress),
+                  tlsUpgrade = kj::mv(tlsUpgrade)](Worker::Lock& lock, IoContext& context) mutable {
     auto traceScope = context.makeRequestTraceScope(lock);
 
     auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "WorkerEntrypoint destroyed before connect");
     auto& response = KJ_REQUIRE_NONNULL(weakResponse.tryGet(), "response destroyed before connect");
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
-        response, kj::mv(settings), lock,
+        response, kj::mv(tlsUpgrade), lock,
         lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(self.props),
             context.getActor(), self.isDynamicDispatch));
   })

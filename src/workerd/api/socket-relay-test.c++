@@ -204,7 +204,7 @@ KJ_TEST("relayStreams() upgrades the other end between the bytes sent before and
   // Bytes sent after asking are held back until the upgrade is done.
   auto sentAfter = writeString(*a.far, "EHLO");
   sentAfter.wait(waitScope);
-  kj::byte buffer[4];
+  kj::byte buffer[4]{};
   auto readAfter = b.far->read(buffer);
   KJ_EXPECT(!readAfter.poll(waitScope));
 

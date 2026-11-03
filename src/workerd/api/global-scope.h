@@ -10,6 +10,7 @@
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+#include "sockets.h"
 
 #include <workerd/api/hibernation-event-params.h>
 #ifdef WORKERD_FUZZILLI
@@ -705,6 +706,25 @@ constexpr bool alarmRetryCountsAgainstLimit(AlarmRetryFailureInfo info) {
 }
 
 // Global object API exposed to JavaScript.
+// What a connect() handler's Socket gets for startTls(), taken from the slot the peer offered.
+struct ConnectTlsUpgrade {
+  kj::Own<kj::TlsStarterCallback> starter = kj::heap<kj::TlsStarterCallback>();
+  SecureTransportKind secureTransport = SecureTransportKind::OFF;
+  // See InternalTlsRendezvous::peerRequests.
+  kj::Maybe<kj::Rc<InboundTlsUpgrade>> inboundUpgrade;
+  // To be held for as long as the handler runs. See InternalTlsRendezvous::handlerRun.
+  kj::Maybe<kj::Own<void>> handlerRun;
+};
+
+// Takes the TlsStarterCallback slot out of `settings`, if the transport that delivered the CONNECT
+// offered one and `enabled`, and leaves `settings.tlsStarter` empty either way.
+//
+// The slot belongs to whoever opened the connection, and is only valid until their side of the
+// call goes away, which can happen while the CONNECT is still waiting to be delivered to the
+// handler. So this has to run synchronously within the call that carries `settings`, before
+// anything suspends; the result owns everything the handler needs.
+ConnectTlsUpgrade takeConnectTlsUpgrade(kj::HttpConnectSettings& settings, bool enabled);
+
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
  public:
   ServiceWorkerGlobalScope();
@@ -737,7 +757,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
-      kj::HttpConnectSettings settings,
+      ConnectTlsUpgrade tlsUpgrade,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
