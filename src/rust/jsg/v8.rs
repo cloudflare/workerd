@@ -266,7 +266,9 @@ pub mod ffi {
         ) -> MaybeLocal;
         pub unsafe fn array_buffer_from_backing_store(isolate: *mut Isolate, store: usize)
         -> Local;
+        #[nothrow]
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_array_buffer_data(buffer: &Local) -> *mut u8;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
@@ -610,6 +612,7 @@ pub mod ffi {
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
         // Wrappable - data access
+        #[nothrow]
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
@@ -935,6 +938,7 @@ pub mod ffi {
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
+        #[nothrow]
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
