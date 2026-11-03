@@ -996,8 +996,11 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     // ABORT SITE: moot by construction (an in-flight pull at tee time
     // implies a prior release, which already aborted), but specified for
-    // completeness.
-    this.#abortCurrentPull(new TypeError('stream was teed'));
+    // completeness. The reason is built only for a pull in flight: an
+    // error's stack trace is costly, and tee() runs once per clone().
+    if (this.#pullAbortController !== undefined) {
+      this.#abortCurrentPull(new TypeError('stream was teed'));
+    }
     const teeAlgorithm = this.#teeAlgorithm;
     if (teeAlgorithm === undefined) {
       throw new TypeError('This native stream source does not support tee');
@@ -1029,7 +1032,9 @@ class NativePullConduit implements ByteStreamConsumerType {
   // read, which sets disturbed). The abort site is specified anyway.
   detachForExtraction(): object {
     const source = this.#source;
-    this.#abortCurrentPull(new TypeError('stream was extracted'));
+    if (this.#pullAbortController !== undefined) {
+      this.#abortCurrentPull(new TypeError('stream was extracted'));
+    }
     this.#status = 'closed';
     this.#byobRequestCache = null;
     return source;
