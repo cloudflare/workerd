@@ -1776,4 +1776,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  nodeJsProcessVersion24 @202 :Bool
+      $compatEnableFlag("nodejs_process_version_24")
+      $compatDisableFlag("no_nodejs_process_version_24")
+      $compatEnableDate("2026-11-24");
+  # Reports the latest Node.js 24 release, instead of Node.js 22, as `process.version` and
+  # `process.versions.node`. Libraries feature-sniff on these values, so a Worker that enables the
+  # flag may take code paths written for Node.js 24, even where the Node.js compatibility layer
+  # does not match Node.js 24 behavior. Requires `nodejs_compat` and `enable_nodejs_process_v2`.
 }

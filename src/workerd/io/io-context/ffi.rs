@@ -7,7 +7,8 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, io_callback_run() opens a scope C++ has \
-              set up, and the trace span calls take literals that C++ does not copy"
+              set up, the waitUntil and abort calls take V8 handles, and the trace span calls \
+              take literals that C++ does not copy"
 )]
 
 use std::any::Any;
@@ -20,6 +21,15 @@ use jsg::v8;
 
 #[cxx::bridge(namespace = "workerd::io_context")]
 pub mod bridge {
+    #[namespace = "workerd::rust::jsg"]
+    unsafe extern "C++" {
+        include!("workerd/rust/jsg/ffi.h");
+        include!("workerd/rust/jsg/v8.rs.h");
+
+        type Local = jsg::v8::ffi::Local;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+    }
+
     #[namespace = "workerd"]
     unsafe extern "C++" {
         include!("workerd/io/io-context.h");
@@ -44,6 +54,12 @@ pub mod bridge {
             callback: Box<IoCallback>,
         ) -> Result<()>;
         fn io_context_add_object(id: u64, slot: Box<IoOwnedSlot>) -> Result<KjOwn<IoOwnedObject>>;
+        fn io_context_set_fail_open(id: u64) -> Result<()>;
+
+        // These two return false when they leave a JavaScript exception pending. The handles
+        // belong to the scope of the caller's lock.
+        unsafe fn io_context_add_wait_until(id: u64, promise: Local) -> Result<bool>;
+        unsafe fn io_context_abort(id: u64, reason: MaybeLocal) -> Result<bool>;
 
         // The `&[u8]` names, keys and literal values below are NUL-terminated strings with the
         // NUL, which C++ requires and does not copy, so they must outlive the spans: the
@@ -118,6 +134,38 @@ pub mod bridge {
             callback: Box<IoCallback>,
             output: Box<IoOutput>,
         ) -> IoCallbackOutcome;
+    }
+}
+
+/// `io_context_add_wait_until()`, failing with [`jsg::Error::pending`] if it left an exception
+/// pending.
+pub fn add_wait_until<'s>(
+    _lock: &mut jsg::Lock<'s>,
+    id: u64,
+    promise: v8::Local<'s, v8::Promise>,
+) -> jsg::Result<()> {
+    // SAFETY: the handle belongs to the scope of `lock`, which is open throughout the call.
+    let added = unsafe { bridge::io_context_add_wait_until(id, promise.into_ffi()) }?;
+    pending_unless(added)
+}
+
+/// `io_context_abort()`, failing with [`jsg::Error::pending`] if it left an exception pending.
+pub fn abort<'s>(
+    _lock: &mut jsg::Lock<'s>,
+    id: u64,
+    reason: Option<v8::Local<'s, v8::Value>>,
+) -> jsg::Result<()> {
+    // SAFETY: as in `add_wait_until()`.
+    let aborted = unsafe { bridge::io_context_abort(id, v8::Local::into_ffi_maybe(reason)) }?;
+    pending_unless(aborted)
+}
+
+/// `Ok` if a shim that returns false when it leaves an exception pending returned true.
+fn pending_unless(succeeded: bool) -> jsg::Result<()> {
+    if succeeded {
+        Ok(())
+    } else {
+        Err(jsg::Error::pending())
     }
 }
 
