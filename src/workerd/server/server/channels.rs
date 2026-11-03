@@ -111,6 +111,12 @@ pub trait ActorClass {
         actor: &ffi::ActorHandle,
     ) -> Result<KjOwn<WorkerInterface>>;
 
+    /// Runs the captured onHibernate handler with this class's I/O channels.
+    fn run_on_hibernate<'a>(
+        &'a self,
+        actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>>;
+
     fn require_allows_transfer(&self) -> Result<()> {
         Ok(())
     }

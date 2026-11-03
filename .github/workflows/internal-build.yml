@@ -5,6 +5,11 @@ on:
     # `edited` covers base branch changes: when the parent of a stacked PR merges, GitHub
     # retargets the child onto the default branch, and the build must run then.
     types: [opened, synchronize, reopened, edited]
+    # A stacked PR can't land until its parent merges and it is retargeted onto main, which
+    # triggers this workflow. Filtering here rather than in a job condition means a stacked PR
+    # has no `internal-build` check until then, rather than a skipped one that would count as
+    # passing once it targets main.
+    branches: [main]
 
 # Read-only permissions are enough
 permissions: read-all
@@ -18,22 +23,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    # Skip PRs that target anything other than the default branch: a stacked PR can't land
-    # until its parent merges and it is retargeted, which re-triggers this workflow.
-    # Also skip edits that don't change the base branch.
-    if: >-
-      github.event.pull_request.base.ref == github.event.repository.default_branch &&
-      (github.event.action != 'edited' || github.event.changes.base)
+  # `internal-build` is a required check, and GitHub counts a skipped required check as passing.
+  # GitHub still creates a check run for a job skipped by its `if`, so a skipped run for an edit
+  # must not be named `internal-build`: on the same commit as a build in progress, it would let
+  # the PR merge before that build finishes. Hence the job id is not `internal-build`, which
+  # GitHub could fall back to, and only runs that check the PR are given that name.
+  build:
+    name: "${{ (github.event.action != 'edited' || github.event.changes.base) && 'internal-build' || 'internal-build (skipped: PR edit only)' }}"
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-latest
-    outputs:
-      internal_build: ${{ steps.filter.outputs.internal_build }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout trusted workflow tooling
+        uses: actions/checkout@v7
         with:
+          path: trusted
           persist-credentials: false
           show-progress: false
 
+      # The steps after this one run only for PRs that need an internal build. For other PRs
+      # the job succeeds without them. If this step fails, so does the job, rather than
+      # reporting success without having checked.
       - name: Check for internal build changes
         id: filter
         env:
@@ -62,14 +71,9 @@ jobs:
 
           echo "internal_build=$internal_build" >> "$GITHUB_OUTPUT"
 
-  internal-build:
-    needs: changes
-    if: needs.changes.outputs.internal_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
       # Check if this is a fork and if the owner is a Cloudflare org member
       - name: Check fork status and org membership
-        if: github.event.pull_request.head.repo.fork
+        if: steps.filter.outputs.internal_build == 'true' && github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORK_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
@@ -90,16 +94,10 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout trusted workflow tooling
-        uses: actions/checkout@v7
-        with:
-          path: trusted
-          persist-credentials: false
-          show-progress: false
-
       # Try to checkout the merge commit - will fail if PR isn't mergeable
       - uses: actions/checkout@v7
         id: checkout_merge
+        if: steps.filter.outputs.internal_build == 'true'
         continue-on-error: true
         with:
           # Fork PRs reach this step only after their owner is confirmed to be a
@@ -112,12 +110,13 @@ jobs:
 
       # Fail the workflow if checkout failed (PR isn't mergeable)
       - name: Fail if PR isn't mergeable
-        if: steps.checkout_merge.outcome != 'success'
+        if: steps.filter.outputs.internal_build == 'true' && steps.checkout_merge.outcome != 'success'
         run: |
           echo "The pull request is not mergeable. Please rebase and resolve any conflicts."
           exit 1
 
       - name: Run internal build
+        if: steps.filter.outputs.internal_build == 'true'
         working-directory: trusted
         env:
           CI_URL: ${{ secrets.CI_URL }}

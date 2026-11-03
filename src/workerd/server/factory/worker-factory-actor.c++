@@ -733,6 +733,14 @@ void actor_abort(const ActorHandle& actor, const AbortReason& reason) {
   }
 }
 
+bool actor_has_on_hibernate_handler(const ActorHandle& actor) {
+  return actor.getActor().hasOnHibernateHandler();
+}
+
+bool actor_is_shared(const ActorHandle& actor) {
+  return actor.getActor().isShared();
+}
+
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor) {
   co_return kj::heap<ActorLock>(
       co_await actor.getActor().getWorker().takeAsyncLockWithoutRequest(nullptr));

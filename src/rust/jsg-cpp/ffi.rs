@@ -47,6 +47,9 @@ pub mod bridge {
         ///
         /// `visitor` is the visitor of a visit in progress.
         pub unsafe fn cpp_ref_visit(visitor: *mut GcVisitor, cpp_ref: &CppRef);
+        /// Makes the reference strong again and forgets its parent, as moving a C++ `jsg::Ref`
+        /// does; see `jsg::GcVisitor::is_detaching`. Requires the isolate lock.
+        pub fn cpp_ref_detach(cpp_ref: &CppRef);
     }
 
     impl KjOwn<CppRef> {}
@@ -78,6 +81,10 @@ pub use bridge::CppRef;
 pub unsafe trait CppResource: Sized + 'static {
     /// The JavaScript class name, for error messages.
     fn class_name() -> &'static str;
+
+    /// The C++ class's name as `jsg::fullyQualifiedTypeName()` gives it, such as
+    /// `workerd::api::Fetcher`. The RTTI export refers to the C++ class's description by it.
+    fn fully_qualified_name() -> &'static str;
 
     /// A reference to the object that `value` wraps, if it wraps an instance of the class or of
     /// a subclass. Fails only if the class is not registered with the isolate.
@@ -204,8 +211,11 @@ impl<T: CppResource> Clone for Ref<T> {
 
 impl<T: CppResource> jsg::Traced for Ref<T> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
-        // SAFETY: the visitor's pointer is valid for the duration of the visit.
-        unsafe { bridge::cpp_ref_visit(visitor.as_ffi(), &self.inner) };
+        match visitor.as_ffi() {
+            // SAFETY: the visitor's pointer is valid for the duration of the visit.
+            Some(visitor) => unsafe { bridge::cpp_ref_visit(visitor, &self.inner) },
+            None => bridge::cpp_ref_detach(&self.inner),
+        }
     }
 }
 
@@ -216,6 +226,15 @@ impl<T: CppResource> jsg::Type for Ref<T> {
 
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_object()
+    }
+}
+
+impl<T: CppResource> jsg::TypeInfo for Ref<T> {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::CppStructure {
+            name: T::class_name(),
+            fully_qualified_name: T::fully_qualified_name(),
+        }
     }
 }
 

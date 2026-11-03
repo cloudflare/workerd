@@ -18,7 +18,18 @@
 //      minted in-process and passed through props.
 //   8. A stub that has resolved to a remote DO keeps failing once that DO
 //      breaks, while a fresh stub reaches the re-instantiated DO.
-//   9. Facets, their deletions and deleteAll() survive a takeover.
+//   9. Facets and their deletions survive a takeover.
+//  10. Draining cancels a running onHibernate handler.
+//
+// A takeover waits out a dead owner's 20 s lease, so each one here costs
+// that much: one test per mechanism. The simulations in ../../cluster
+// (alarms-test.rs, capture-test.rs, owner-test.rs) search the cases.
+// These run there, not here, so not through a real binary and SQLite
+// (`git log -S'facet clones survive'` has the tests that did):
+//   - facet clones, nested deletions and deleteAll() across a takeover:
+//     owner-test.rs, capture-test.rs;
+//   - a dead owner's alarms adopted with its node record gone: only the
+//     orphan scan finds them. alarms-test.rs.
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -475,6 +486,17 @@ test('cluster: killing the owner allows another node to take over', async () => 
     const survivorIndex = ownerIndex === 0 ? 1 : 0;
     const survivor = nodes[survivorIndex];
 
+    // Facets and a deletion ride along: real SQLite, restored elsewhere.
+    for (const path of ['a', 'a', 'a,b%2Fc', 'x', 'x,y']) {
+      await facetAdd(nodes[0].httpPort, 'takeover', path);
+    }
+    // Nothing commits after the delete: it is durable once it returns.
+    const del = await fetchJson(
+      nodes[0].httpPort,
+      '/facet-delete?name=takeover&path=x'
+    );
+    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
+
     // Hard-kill the owner. SIGKILL leaves its lease record in place, so the
     // survivor takes over once that lease expires.
     await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
@@ -522,6 +544,12 @@ test('cluster: killing the owner allows another node to take over', async () => 
     assert.strictEqual(followup.status, 200);
     assert.strictEqual(followup.body.count, 3);
     assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, 'takeover', 'a'), 3);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'a,b%2Fc'), 2);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'x'), 1);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'x,y'), 1);
   });
 });
 
@@ -662,6 +690,37 @@ test(
       assert.strictEqual(response.body.count, 2);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  'cluster: draining cancels a running onHibernate handler',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(1, async ({ nodes: [node] }) => {
+      const url = (path) =>
+        `http://127.0.0.1:${node.httpPort}/on-hibernate/${path}`;
+      assert.strictEqual(await (await fetch(url('start'))).text(), 'running');
+
+      // The eviction waits for the handler, which outlasts its 10 s budget.
+      const eviction = fetch(url('evict'), {
+        signal: AbortSignal.timeout(20_000),
+      });
+      const deadline = Date.now() + 10_000;
+      while (!(await (await fetch(url('started'))).json())) {
+        assert(Date.now() < deadline, 'the onHibernate handler did not start');
+        await sleep(50);
+      }
+
+      // Releasing the object's ownership cancels the handler, so the waiting
+      // eviction fails at once and the drain doesn't wait out the budget.
+      const drainedAt = Date.now();
+      const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      const drainMs = Date.now() - drainedAt;
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+      assert(drainMs < 5_000, `the drain took ${drainMs} ms`);
+      assert.strictEqual((await eviction).status, 500);
     });
   }
 );
@@ -996,7 +1055,7 @@ test("cluster: an alarm runs once on its object's owner", async () => {
 });
 
 test("cluster: a killed owner's alarm runs once on a survivor", async () => {
-  await withCluster(2, async ({ nodes }) => {
+  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
     const set = await fetchJson(
       nodes[0].httpPort,
       '/set-alarm?name=orphan&ms=5000'
@@ -1007,155 +1066,29 @@ test("cluster: a killed owner's alarm runs once on a survivor", async () => {
     await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
     // No request touches the object: the survivor finds the alarm in the
     // dead owner's index once its lease lapses, and claims the object when
-    // the alarm fires.
-    await sleep(30_000);
-    const res = await fetchJson(survivor.httpPort, '/alarms?name=orphan', {
-      timeoutMs: 10_000,
-    });
+    // the alarm fires. Watch the bucket for that claim, then the alarm.
+    const deadline = Date.now() + 30_000;
+    let res;
+    for (;;) {
+      if ((await bucket.owner(set.body.id)) === nodeKeys.get(survivor.nodeId)) {
+        res = await fetchJson(survivor.httpPort, '/alarms?name=orphan', {
+          timeoutMs: 10_000,
+        });
+        if (res.body.fired.length > 0) break;
+      }
+      assert(Date.now() < deadline, `${survivor.nodeId} never ran the alarm`);
+      await sleep(200);
+    }
     assert.strictEqual(res.body.nodeId, survivor.nodeId);
     assert.deepStrictEqual(res.body.fired, [survivor.nodeId]);
   });
 });
-
-test("cluster: a killed owner's alarm runs without its record", async () => {
-  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
-    const set = await fetchJson(
-      nodes[0].httpPort,
-      '/set-alarm?name=unrecorded&ms=5000'
-    );
-    assert.strictEqual(set.status, 200, JSON.stringify(set.body));
-    const ownerIndex = nodes.findIndex((n) => n.nodeId === set.body.nodeId);
-    const survivor = nodes[1 - ownerIndex];
-    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
-    // With the record gone, no listing of nodes finds the dead owner: only
-    // the look for orphaned alarms does, which a starting node runs first.
-    await bucket.delete(`nodes/${nodeKeys.get(set.body.nodeId)}.json`);
-    // Killed, as SIGTERM does on Windows: the survivor's previous instance
-    // keeps its lease a while, and may be assigned the alarm meanwhile.
-    await survivor.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
-    await survivor.start();
-    await sleep(30_000);
-    const res = await fetchJson(survivor.httpPort, '/alarms?name=unrecorded', {
-      timeoutMs: 10_000,
-    });
-    assert.deepStrictEqual(res.body.fired, [survivor.nodeId]);
-    assert.match(
-      survivor.stderr,
-      /adopting the alarms of \w+, which has no record/
-    );
-  });
-});
-
-// Kills the node serving `ownerId` and waits until the other serves DO
-// `name`, returning the survivor.
-async function killOwnerAndTakeOver(nodes, ownerId, name) {
-  const ownerIndex = nodes.findIndex((n) => n.nodeId === ownerId);
-  const survivor = nodes[1 - ownerIndex];
-  await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const got = await fetchJson(survivor.httpPort, `/get?name=${name}`, {
-      timeoutMs: 10_000,
-    }).catch(() => null);
-    if (got?.status === 200 && got.body.nodeId === survivor.nodeId) {
-      return survivor;
-    }
-    await sleep(200);
-  }
-  throw new Error(`${survivor.nodeId} never took ${name} over`);
-}
 
 async function facetAdd(port, name, path) {
   const r = await fetchJson(port, `/facet-add?name=${name}&path=${path}`);
   assert.strictEqual(r.status, 200, JSON.stringify(r.body));
   return r.body.count;
 }
-
-test('cluster: facets and their deletions survive their owner', async () => {
-  await withCluster(2, async ({ nodes }) => {
-    const port = nodes[0].httpPort;
-    const name = 'faceted';
-    for (const path of ['a', 'a', 'a,b%2Fc', 'x', 'x,y']) {
-      await facetAdd(port, name, path);
-    }
-    // Nothing commits after the delete: it is durable once it returns.
-    const del = await fetchJson(port, `/facet-delete?name=${name}&path=x`);
-    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
-    const survivor = await killOwnerAndTakeOver(nodes, del.body.nodeId, name);
-    const p = survivor.httpPort;
-    assert.strictEqual(await facetAdd(p, name, 'a'), 3);
-    assert.strictEqual(await facetAdd(p, name, 'a,b%2Fc'), 2);
-    assert.strictEqual(await facetAdd(p, name, 'x'), 1);
-    assert.strictEqual(await facetAdd(p, name, 'x,y'), 1);
-  });
-});
-
-test('cluster: facet clones survive their owner', async () => {
-  await withCluster(2, async ({ nodes }) => {
-    const port = nodes[0].httpPort;
-    const name = 'cloned';
-    for (const path of ['a', 'a', 'a,b', 'c', 'c,d']) {
-      await facetAdd(port, name, path);
-    }
-    // Over a facet: c's subtree goes, a's is copied, running.
-    let clone = await fetchJson(port, `/facet-clone?name=${name}&path=a,c`);
-    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
-    assert.strictEqual(await facetAdd(port, name, 'c'), 3);
-    // Nothing commits after the clone: it is durable once it returns.
-    clone = await fetchJson(port, `/facet-clone?name=${name}&path=c,e`);
-    assert.strictEqual(clone.status, 200, JSON.stringify(clone.body));
-    const survivor = await killOwnerAndTakeOver(nodes, clone.body.nodeId, name);
-    const p = survivor.httpPort;
-    assert.strictEqual(await facetAdd(p, name, 'a'), 3);
-    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
-    assert.strictEqual(await facetAdd(p, name, 'c'), 4);
-    assert.strictEqual(await facetAdd(p, name, 'c,b'), 2);
-    assert.strictEqual(await facetAdd(p, name, 'c,d'), 1);
-    assert.strictEqual(await facetAdd(p, name, 'e'), 4);
-    assert.strictEqual(await facetAdd(p, name, 'e,b'), 2);
-  });
-});
-
-test("cluster: a facet's deletion takes its descendants only", async () => {
-  await withCluster(2, async ({ nodes }) => {
-    const port = nodes[0].httpPort;
-    const name = 'nested';
-    for (const path of ['a', 'a,b', 'a,b,c', 'a,bc']) {
-      await facetAdd(port, name, path);
-    }
-    const del = await fetchJson(port, `/facet-delete?name=${name}&path=a,b`);
-    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
-    // A facet created after a deletion takes a freed lane.
-    await facetAdd(port, name, 'd');
-    const survivor = await killOwnerAndTakeOver(nodes, del.body.nodeId, name);
-    const p = survivor.httpPort;
-    assert.strictEqual(await facetAdd(p, name, 'a'), 2);
-    assert.strictEqual(await facetAdd(p, name, 'a,b,c'), 1);
-    assert.strictEqual(await facetAdd(p, name, 'a,bc'), 2);
-    assert.strictEqual(await facetAdd(p, name, 'd'), 2);
-  });
-});
-
-test("cluster: deleteAll() takes a DO's facets across a takeover", async () => {
-  await withCluster(2, async ({ nodes }) => {
-    const port = nodes[0].httpPort;
-    const name = 'wiped';
-    await fetchJson(port, `/increment?name=${name}`);
-    for (const path of ['a', 'a,b']) {
-      await facetAdd(port, name, path);
-    }
-    const wipe = await fetchJson(port, `/delete-all?name=${name}`);
-    assert.strictEqual(wipe.status, 200, JSON.stringify(wipe.body));
-    // The facets were running: they start over, here and after a takeover.
-    assert.strictEqual(await facetAdd(port, name, 'a,b'), 1);
-    const survivor = await killOwnerAndTakeOver(nodes, wipe.body.nodeId, name);
-    const p = survivor.httpPort;
-    const got = await fetchJson(p, `/get?name=${name}`);
-    assert.strictEqual(got.body.count, 0, JSON.stringify(got.body));
-    assert.strictEqual(await facetAdd(p, name, 'a'), 1);
-    assert.strictEqual(await facetAdd(p, name, 'a,b'), 2);
-  });
-});
 
 test('cluster: a DO reopened where it was closed resumes its epoch', async () => {
   await withCluster(1, async ({ nodes, bucket }) => {

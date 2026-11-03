@@ -633,6 +633,10 @@ void local_promise_mark_as_handled(const Local& promise) {
   local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
 }
 
+bool local_promise_has_handler(const Local& promise) {
+  return local_as_ref_from_ffi<v8::Promise>(promise)->HasHandler();
+}
+
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
   if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
@@ -880,11 +884,34 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
-MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+MaybeLocal wrappable_attach_opaque_wrapper(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing) {
   if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
-  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
+  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h), and
+  // the values wrapOpaque() carries through promises.
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
-      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true)));
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), needs_gc_tracing)));
+}
+
+namespace {
+// The Rust Wrappable that `wrappable` is, if it is one. C++ JSG has opaque wrappers of its own,
+// so the type is checked, as ::workerd::jsg::downcastWrappable() does.
+kj::Maybe<kj::Rc<Wrappable>> asRustWrappable(::workerd::jsg::Wrappable& wrappable) {
+  const auto& actualType = typeid(wrappable);
+  if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+    return kj::downcast<Wrappable>(wrappable).toRc();
+  }
+  return kj::none;
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value) {
+  KJ_IF_SOME(wrappable,
+      ::workerd::jsg::Wrappable::tryUnwrapOpaque(
+          isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    return asRustWrappable(wrappable);
+  }
+  return kj::none;
 }
 
 // Unwrappers
@@ -1174,12 +1201,8 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
-    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
-    // as ::workerd::jsg::downcastWrappable() does.
-    const auto& actualType = typeid(wrappable);
-    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
-      return kj::downcast<Wrappable>(wrappable).toRc();
-    }
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data.
+    return asRustWrappable(wrappable);
   }
   return kj::none;
 }
@@ -1716,6 +1739,26 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
 
 void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
+}
+
+bool isolate_terminate_execution_now(Isolate* isolate) {
+  // Already terminating: the termination is pending, and entering V8 again would run code with it
+  // pending, which V8 forbids.
+  if (isolate->IsExecutionTerminating()) return true;
+  isolate_terminate_execution(isolate);
+  // TerminateExecution() only requests the termination; V8 delivers it at its next interrupt
+  // check. Running V8 code makes it check at once, as in jsg::Lock::terminateExecutionNow(). The
+  // result is empty once the termination is pending; no TryCatch here, so it stays pending.
+  //
+  // This skips the exceptionPending() check of the shim rules (ffi.h) for an ordinary exception:
+  // JSON::Stringify enters through PrepareForExecutionScope, which clears a pending exception, and
+  // the termination then takes its place. Replacing the exception is the point here, as it is in
+  // jsg::Lock::terminateExecutionNow(), and not entering V8 would leave the termination
+  // undelivered, so that JavaScript could catch the exception and run on.
+  auto context = isolate->GetCurrentContext();
+  KJ_ASSERT(!context.IsEmpty(), "terminating execution now requires an entered context");
+  (void)v8::JSON::Stringify(context, v8::String::Empty(isolate));
+  return isolate->IsExecutionTerminating();
 }
 
 bool isolate_is_execution_terminating(Isolate* isolate) {

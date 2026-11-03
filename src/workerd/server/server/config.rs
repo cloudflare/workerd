@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use capnp::message::ReaderOptions;
 use capnp::serialize::BufferSegments;
+use futures::future::LocalBoxFuture;
 use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
@@ -269,6 +270,17 @@ impl ActorClass for InvalidConfigActorClass {
         Err(kj::failed!(
             "an actor of an invalid config's class cannot exist"
         ))
+    }
+
+    fn run_on_hibernate<'a>(
+        &'a self,
+        _actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>> {
+        Box::pin(async {
+            Err(kj::failed!(
+                "an actor of an invalid config's class cannot exist"
+            ))
+        })
     }
 
     fn require_allows_transfer(&self) -> Result<()> {
