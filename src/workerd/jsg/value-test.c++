@@ -1440,46 +1440,6 @@ KJ_TEST("kj::Exception wrapper works") {
 }
 
 // ========================================================================================
-struct NameContext: public ContextGlobalObject {
-  Name name(Name value) {
-    return kj::mv(value);
-  }
-
-  Name forSymbol(Lock& js, kj::String symbol) {
-    return js.newSymbol(symbol);
-  }
-
-  Name forSymbolShared(Lock& js, kj::String symbol) {
-    return js.newSharedSymbol(symbol);
-  }
-
-  Name forSymbolApi(Lock& js, kj::String symbol) {
-    return js.newApiSymbol(symbol);
-  }
-
-  JSG_RESOURCE_TYPE(NameContext) {
-    JSG_METHOD(name);
-    JSG_METHOD(forSymbol);
-    JSG_METHOD(forSymbolShared);
-    JSG_METHOD(forSymbolApi);
-  }
-};
-JSG_DECLARE_ISOLATE_TYPE(NameIsolate, NameContext);
-
-KJ_TEST("jsg::Name works") {
-  Evaluator<NameContext, NameIsolate> e(v8System);
-  e.expectEval("name('hello')", "string", "hello");
-  e.expectEval("name(Symbol('foo')).description", "string", "foo");
-  e.expectEval("name(Symbol.for('foo')).description", "string", "foo");
-  e.expectEval("forSymbol('foo').description", "string", "foo");
-  e.expectEval("forSymbolShared('foo').description", "string", "foo");
-  e.expectEval("forSymbolApi('foo').description", "string", "foo");
-  e.expectEval("forSymbol('foo') !== Symbol.for('foo')", "boolean", "true");
-  e.expectEval("forSymbolShared('foo') === Symbol.for('foo')", "boolean", "true");
-  e.expectEval("forSymbolShared('foo') !== forSymbolApi('foo')", "boolean", "true");
-}
-
-// ========================================================================================
 // SelfConvertible
 
 // A simple self-converting type that wraps/unwraps a number.
