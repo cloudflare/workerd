@@ -674,12 +674,6 @@ type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high" | "us";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
-interface DurableObjectClass<
-  _T extends Rpc.DurableObjectBranded | undefined = undefined,
-> {}
-interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
-  cohort?: string;
-}
 type DurableObjectLocationHint =
   | "wnam"
   | "enam"
@@ -700,6 +694,12 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
     cohort?: string;
   };
   retry?: DurableObjectRetryOptions;
+}
+interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
 }
 interface DurableObjectRetryOptions {
   maxRetries?: number;
