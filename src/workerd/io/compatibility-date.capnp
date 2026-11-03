@@ -1775,4 +1775,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  enableNodejsProcessMemoryUsage @202 :Bool
+      $compatEnableFlag("enable_nodejs_process_memory_usage")
+      $experimental;
+  # Populates heapTotal, heapUsed, and external in Node.js process.memoryUsage()
+  # from the isolate's V8 heap statistics. Without the flag, all fields are 0.
 }

@@ -11,6 +11,19 @@ export const versions: Record<string, string>;
 export const platform: string;
 export function shouldThrowOnNotImplementedTlsOption(): boolean;
 
+export interface MemoryUsage {
+  // Always 0: Resident Set Size is a process-wide OS metric and does not apply
+  // to an individual Worker isolate in a multi-tenant process.
+  rss: number;
+  heapTotal: number;
+  heapUsed: number;
+  external: number;
+  // Always 0: V8's default ArrayBuffer::Allocator does not report per-isolate
+  // backing store byte totals via HeapStatistics.
+  arrayBuffers: number;
+}
+export function getMemoryUsage(): MemoryUsage;
+
 declare global {
   const Cloudflare: {
     readonly compatibilityFlags: Record<string, boolean> & {
