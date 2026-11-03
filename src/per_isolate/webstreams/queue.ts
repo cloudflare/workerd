@@ -34,9 +34,9 @@
 //   - Copy-on-read for shared byte entries: copy iff any OTHER live cursor
 //     still needs the entry (exact last-consumer test) — REQUIRED for
 //     soundness, not just spec parity.
-//   - Cursors hold weak owner refs; orphan pruning happens on every cursor
-//     walk (the controller's own cursor excepted: the controller pins its
-//     owner), with the FinalizationRegistry as the idle-queue backstop
+//   - Cursors hold weak owner refs; orphan pruning happens on cursor walks
+//     (the controller's own cursor excepted: the controller pins its
+//     owner; a per-read walk checks only the cursors that decide it), with the FinalizationRegistry as the idle-queue backstop
 //     (the native backend needs NEITHER — JSG owns its source lifetime).
 //   - A queue whose last cursor has left or been collected has no consumer
 //     for good: it drops what it holds and what is enqueued later, and
@@ -406,7 +406,9 @@ class StreamQueue<T, V = T> {
 
   // Drop cursors whose owning stream has been collected. Every walk starts
   // here, so a stale position never blocks reclamation or holds
-  // backpressure. #cursors is stable for the rest of a walk whose callbacks
+  // backpressure, except the per-read ones (#gc and
+  // hasOtherLiveCursorAtOrBefore), which check only the cursors that
+  // decide their answer. #cursors is stable for the rest of a walk whose callbacks
   // run no user code (all but notify(), see #notifyAll): they never add or
   // remove a cursor synchronously, and a re-entrant prune (notify → #gc)
   // finds nothing new, since a deref'd owner stays alive to the end of the
@@ -501,11 +503,18 @@ class StreamQueue<T, V = T> {
     cursor: QueueCursor<T, V>,
     logicalIndex: number
   ): boolean {
-    this.#prune();
+    // Liveness is checked only for the cursors that still need the entry;
+    // an orphan is skipped here and pruned by the next walk.
     const cursors = this.#cursors;
     for (let i = 0; i < cursors.length; i++) {
       const other = cursors[i] as QueueCursor<T, V>;
-      if (other !== cursor && other.position <= logicalIndex) return true;
+      if (
+        other !== cursor &&
+        other.position <= logicalIndex &&
+        (other === this.#anchor || !other.isOrphaned())
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -722,14 +731,31 @@ class StreamQueue<T, V = T> {
     this.#onConsumption = hook;
   }
 
+  // Only an orphan at the reclamation point holds entries back, so only
+  // the slowest cursor's liveness is checked, until a live one is the
+  // slowest; orphans ahead of it are pruned by a later walk. With every
+  // cursor orphaned, every one is pruned.
   #gc(): void {
-    this.#prune();
     const cursors = this.#cursors;
-    if (cursors.length === 0) return;
-    let minPos = (cursors[0] as QueueCursor<T, V>).position;
-    for (let i = 1; i < cursors.length; i++) {
-      const position = (cursors[i] as QueueCursor<T, V>).position;
-      if (position < minPos) minPos = position;
+    let minPos = 0;
+    while (true) {
+      if (cursors.length === 0) {
+        this.#checkAllCursorsGone();
+        return;
+      }
+      let slowest = 0;
+      minPos = (cursors[0] as QueueCursor<T, V>).position;
+      for (let i = 1; i < cursors.length; i++) {
+        const position = (cursors[i] as QueueCursor<T, V>).position;
+        if (position < minPos) {
+          minPos = position;
+          slowest = i;
+        }
+      }
+      const cursor = cursors[slowest] as QueueCursor<T, V>;
+      if (cursor === this.#anchor || !cursor.isOrphaned()) break;
+      this.#removeAt(slowest);
+      unregisterCursorCleanup(cursor);
     }
     const freedCount = minPos - this.#headOffset;
     if (freedCount > 0) {
