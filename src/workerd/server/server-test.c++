@@ -3792,6 +3792,127 @@ KJ_TEST("Server: Ephemeral Objects") {
   conn.httpGet200("/bar", "http://foo/bar: http://foo/bar 2");
 }
 
+constexpr kj::StringPtr ON_HIBERNATE_CONFIG = R"((
+  services = [
+    (name = "main", worker = (
+      compatibilityDate = "2026-01-01",
+      compatibilityFlags = ["experimental", "unsafe_module"],
+      modules = [(name = "main.js", esModule =
+        `import { DurableObject } from "cloudflare:workers";
+        `import { onHibernate } from "cloudflare:durable-objects";
+        `import unsafe from "workerd:unsafe";
+        `let nextInstance = 0;
+        `export class Actor extends DurableObject {
+        `  instance = ++nextInstance;
+        `  async fetch() {
+        `    const checkpoint = await this.ctx.storage.get("checkpoint") ?? 0;
+        `    return new Response(`${this.instance}:${checkpoint}`);
+        `  }
+        `  async [onHibernate](info) {
+        `    const response = await this.env.GATE.fetch(
+        `        `http://hook/${info.reason}/${Object.isFrozen(info)}`);
+        `    await response.text();
+        `    this.ctx.storage.put("checkpoint", this.instance);
+        `  }
+        `}
+        `export default {
+        `  async fetch(request, env) {
+        `    const path = new URL(request.url).pathname;
+        `    try {
+        `      if (path === "/evict") {
+        `        await unsafe.evict(env.NS.getByName("test"));
+        `        return new Response("evicted");
+        `      }
+        `      if (path === "/abort") await unsafe.abortAllDurableObjects();
+        `      return await env.NS.getByName("test").fetch(request);
+        `    } catch (error) {
+        `      return new Response("failed");
+        `    }
+        `  }
+        `};
+      )],
+      bindings = [
+        (name = "NS", durableObjectNamespace = "Actor"),
+        (name = "GATE", service = "gate"),
+      ],
+      durableObjectNamespaces = [(className = "Actor", uniqueKey = "on-hibernate")],
+      durableObjectStorage = (localDisk = "my-disk"),
+    )),
+    (name = "my-disk", disk = (path = "../../do-storage", writable = true)),
+    (name = "gate", external = (address = "hook-addr")),
+  ],
+  sockets = [(name = "http", address = "test-addr", service = "main")],
+))"_kj;
+
+KJ_TEST("Server: onHibernate checkpoints before an idle actor's successor starts") {
+  TestServer test(ON_HIBERNATE_CONFIG);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "1:0");
+
+  test.wait(10);
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET /inactive/true HTTP/1.1\n[\\s\\S]*\n\n");
+  auto arrival = test.connect("test-addr");
+  arrival.sendHttpGet("/");
+  char c;
+  KJ_EXPECT(!arrival.getStream().tryRead(&c, 1, 1).poll(test.ws));
+
+  hook.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+  arrival.recvHttp200("2:1");
+}
+
+KJ_TEST("Server: onHibernate retirement survives a canceled eviction caller") {
+  TestServer test(ON_HIBERNATE_CONFIG);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "1:0");
+
+  auto eviction = kj::heap(test.connect("test-addr"));
+  eviction->sendHttpGet("/evict");
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET /inactive/true HTTP/1.1\n[\\s\\S]*\n\n");
+  // Nothing else waits for the retirement when its only caller goes away.
+  eviction = nullptr;
+  test.wait(0);
+
+  auto otherEviction = test.connect("test-addr");
+  otherEviction.sendHttpGet("/evict");
+  auto arrival = test.connect("test-addr");
+  arrival.sendHttpGet("/");
+  char c;
+  KJ_EXPECT(!otherEviction.getStream().tryRead(&c, 1, 1).poll(test.ws));
+  KJ_EXPECT(!arrival.getStream().tryRead(&c, 1, 1).poll(test.ws));
+
+  hook.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+  otherEviction.recvHttp200("evicted");
+  arrival.recvHttp200("2:1");
+  KJ_EXPECT(!test.server.accept("hook-addr").poll(test.ws), "hook ran twice");
+}
+
+KJ_TEST("Server: a failed onHibernate retirement leaves the replacement actor in place") {
+  TestServer test(ON_HIBERNATE_CONFIG);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "1:0");
+
+  test.wait(10);
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET /inactive/true HTTP/1.1\n[\\s\\S]*\n\n");
+  // Keeps the retiring container alive once the abort removes it from the namespace.
+  auto arrival = test.connect("test-addr");
+  arrival.sendHttpGet("/");
+  char c;
+  KJ_EXPECT(!arrival.getStream().tryRead(&c, 1, 1).poll(test.ws));
+
+  test.connect("test-addr").httpGet200("/abort", "2:0");
+  arrival.recvHttp200("failed");
+  test.connect("test-addr").httpGet200("/", "2:0");
+}
+
 KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   TestServer test(R"((
     services = [

@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::cell::Cell;
 use std::io::Write;
 
 use jsg::ToJsTypedArray;
@@ -43,7 +42,7 @@ enum Payload<'a> {
 #[jsg_resource(name = "RustRttiFixture", ts_root)]
 struct Fixture {
     label: String,
-    child: Cell<Option<jsg::Rc<Self>>>,
+    child: jsg::Cell<Option<jsg::Rc<Self>>>,
 }
 
 #[jsg_resource(nested_types(Rows = NestedChild))]
@@ -52,7 +51,7 @@ impl Fixture {
     fn constructor(label: OptionalLabel) -> Self {
         Self {
             label: label.unwrap_or_default(),
-            child: Cell::new(None),
+            child: jsg::Cell::new(None),
         }
     }
 
@@ -181,8 +180,8 @@ impl Fixture {
     }
 
     #[jsg_property(prototype)]
-    fn get_child(&self) -> jsg::Nullable<jsg::Rc<Self>> {
-        let child = self.child.take();
+    fn get_child(&self, lock: &mut jsg::Lock<'_>) -> jsg::Nullable<jsg::Rc<Self>> {
+        let child = self.child.take(lock);
         let result = child.clone();
         self.child.set(child);
         match result {

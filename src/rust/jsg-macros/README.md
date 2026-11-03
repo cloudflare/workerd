@@ -68,12 +68,10 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 
 - **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
   a resource while one of its methods runs, so methods never get `&mut self`; keep state
-  they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
-  call that can run JavaScript makes a re-entrant call panic, and tracing skips a mutably borrowed
-  `RefCell`, so while a `borrow_mut()` is held across a call that can allocate on the V8 heap,
-  wrap the resource or create or drop a `jsg::Rc` to it, the values of the `TracedGlobal`s in it
-  and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
-  abort instead).
+  they change in `Cell` or `RefCell` fields; state that holds a `jsg::Rc` or a `TracedGlobal`
+  goes in a `jsg::Cell` or `jsg::RefCell`, whose `take`, `replace` and `borrow_mut` take the lock
+  and make the contents strong (see "Cells" in `src/rust/jsg/README.md`). Prefer `Cell`: a
+  `RefCell` borrow held across a call that can run JavaScript makes a re-entrant call panic.
 - **Static methods** (no receiver) are placed on the constructor.
 - **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
   method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
@@ -85,6 +83,9 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
+- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
+  as the creator for an instance method and `None` for a static one, as C++ JSG passes
+  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
@@ -117,7 +118,7 @@ impl DnsUtil {
     // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
     #[jsg_method]
     pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
-        watcher.targets.borrow_mut().push(this);
+        watcher.targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
     }
 
     // Static — DnsUtil.create(…)
@@ -513,14 +514,15 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
 | `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
-| `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
-| `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
+| `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
+| `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
 | `#[jsg_struct]` types | Delegates to each field, like a resource |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
-The `Cell<…>` variants are required whenever a traced field needs to be mutated
-after construction, because `Traced::trace` receives `&self`.
+A cell is required whenever a traced field needs to be mutated after construction,
+because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
+`TracedGlobal` uses the `jsg::` cells.
 
 ### Manual tracing with `custom_trace`
 
@@ -558,7 +560,6 @@ pub struct MySocket {
 ```
 
 ```rust
-use std::cell::Cell;
 use std::collections::HashMap;
 
 #[jsg_resource]
@@ -571,7 +572,7 @@ pub struct EventRouter {
 
     // Interior-mutable callback set after construction; dual-mode TracedGlobal enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    on_error: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,

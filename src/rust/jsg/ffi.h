@@ -311,6 +311,7 @@ PromiseState local_promise_state(const Local& promise);
 // if it is.
 Local local_promise_result(const Local& promise);
 void local_promise_mark_as_handled(const Local& promise);
+bool local_promise_has_handler(const Local& promise);
 // `promise.then(on_fulfilled, on_rejected)`, without looking up `then` or the species
 // constructor. An empty result means an exception is pending (one that a promise hook threw, or a
 // termination), as local_function_call() leaves it. While one is pending this, and the
@@ -429,10 +430,15 @@ MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
-// function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of
-// them is reachable. Returns empty if an exception or a termination is pending. Throws if
-// `wrappable` already has a wrapper, or if V8 could not create one.
-MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable);
+// function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,
+// and traced if `needs_gc_tracing`, for as long as it is reachable. Returns empty if an exception
+// or a termination is pending. Throws if `wrappable` already has a wrapper, or if V8 could not
+// create one.
+MaybeLocal wrappable_attach_opaque_wrapper(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing);
+// The Rust Wrappable whose opaque wrapper `value` is, as wrappable_attach_opaque_wrapper() returns
+// it; none if `value` is anything else, including the opaque wrapper of a C++ Wrappable.
+kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value);
 
 // Unwrappers
 // Convert with V8's ToString and ToNumber (not JavaScript's String() and Number(), which accept a
@@ -583,6 +589,11 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
+// Terminates execution and has V8 deliver the termination before returning, so that it is
+// pending, as jsg::Lock::terminateExecutionNow() does. Requires a context to be entered. Returns
+// whether execution is terminating, which it always should be. Does not enter V8 if execution is
+// already terminating. A pending exception is replaced by the termination.
+bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context

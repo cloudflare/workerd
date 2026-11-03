@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 mod async_context;
 mod buffer;
+mod cell;
 mod dict;
 pub mod fast_api;
 pub mod feature_flags;
@@ -19,12 +20,14 @@ pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
 mod oneof;
+mod opaque;
 mod promise;
 pub mod resource;
 pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod typed_promise;
 pub mod v8;
 mod wrappable;
 
@@ -32,6 +35,8 @@ pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
+pub use cell::Cell;
+pub use cell::RefCell;
 pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
@@ -81,10 +86,17 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+pub use typed_promise::Promise;
+pub use typed_promise::PromiseArgument;
+pub use typed_promise::PromiseResolver;
+pub use typed_promise::PromiseValue;
+pub use typed_promise::TracedPromise;
+pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
+pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
 
@@ -939,6 +951,48 @@ impl<'s> Lock<'s> {
         unsafe {
             v8::ffi::isolate_terminate_execution(self.isolate().as_ffi());
         }
+    }
+
+    /// Terminates JavaScript execution on this isolate now, as C++
+    /// `jsg::Lock::terminateExecutionNow()` does, and returns the error that carries the
+    /// termination to the code that started the JavaScript.
+    ///
+    /// Unlike [`Lock::terminate_execution`], which only requests a termination that V8 delivers
+    /// at its next interrupt check, this has V8 deliver it before returning, so that no more
+    /// JavaScript runs: not the rest of the calling function, nor a `catch` or `finally` block.
+    /// Where C++ then unwinds with `JsExceptionThrown`, the caller returns the error, for which
+    /// [`Error::is_pending`] is true:
+    ///
+    /// ```ignore
+    /// #[jsg_method]
+    /// fn stop(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+    ///     Err(lock.terminate_execution_now())
+    /// }
+    /// ```
+    ///
+    /// A `#[jsg_method]` that returns it sets no return value and throws nothing. Code that
+    /// goes on instead cannot run JavaScript or throw anyway: calls into JavaScript fail with a
+    /// pending error while execution is terminating, and the `throw_*` methods throw nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 does not deliver the termination, which C++ asserts too. V8 delivers it
+    /// while it runs code in the entered context, so there must be one.
+    ///
+    /// This panics rather than returning an ordinary error, because an ordinary error would
+    /// throw a JavaScript exception that a `catch` or `finally` block could run after, which
+    /// this function exists to prevent. In a callback from V8, such as a `#[jsg_method]`,
+    /// [`catch_panic`] turns the panic into an internal error and terminates execution, as
+    /// intended. Code that C++ calls through `callback_scope!` has no such handler, and a panic
+    /// that reaches C++ aborts the process.
+    #[must_use = "return the error, so that the termination reaches the code that started the \
+                  JavaScript"]
+    pub fn terminate_execution_now(&mut self) -> Error {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        let terminating =
+            unsafe { v8::ffi::isolate_terminate_execution_now(self.isolate().as_ffi()) };
+        assert!(terminating, "V8 did not terminate execution when asked");
+        Error::pending()
     }
 }
 

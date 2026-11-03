@@ -53,11 +53,13 @@ use crate::v8::ffi::Wrappable;
 ///   declaration order.
 ///
 /// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
-/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
-/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
-/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
-/// `README.md` §Safety rules, rule 2, and
-/// <https://github.com/cloudflare/workerd/issues/7976>.
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved
+/// out of the field by a bitwise move is then neither strong nor traced, unlike a moved C++
+/// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
+/// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
+/// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. See `README.md` §Safety
+/// rules, rule 2, and <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,
@@ -121,6 +123,16 @@ impl<R: Resource> Rc<R> {
         );
     }
 
+    /// Makes this `Rc` strong again and forgets its parent, as moving a C++ `jsg::Ref` does; see
+    /// [`v8::GcVisitor::is_detaching`].
+    pub(crate) fn detach(&self) {
+        if !self.strong.get() {
+            self.wrappable.add_strong_ref();
+            self.strong.set(true);
+        }
+        self.parent.set(None);
+    }
+
     /// Creates a [`Weak`] reference to this resource.
     ///
     /// The weak reference does not prevent GC collection. Use
@@ -160,7 +172,7 @@ impl<R: Resource> Deref for Rc<R> {
 
 impl<R: Resource> Clone for Rc<R> {
     fn clone(&self) -> Self {
-        let mut wrappable = self.wrappable.clone();
+        let wrappable = self.wrappable.clone();
         wrappable.add_strong_ref();
         Self {
             handle: std::rc::Rc::clone(&self.handle),
@@ -221,7 +233,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self>, Error> {
-        let Some(mut wrappable) = v8::WrappableRc::from_js(lock, value) else {
+        let Some(wrappable) = v8::WrappableRc::from_js(lock, value) else {
             return Ok(None);
         };
         let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
@@ -323,7 +335,7 @@ impl<R: Resource> Weak<R> {
         // is alive too (the Wrappable's Rc clone keeps the resource alive, which
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
-        let mut wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
         wrappable.add_strong_ref();
         Some(Rc {
             handle,
@@ -365,6 +377,8 @@ impl<R: Resource> Traced for Weak<R> {
         false
     }
 }
+
+impl<R: Resource> crate::HoldsNoGcReferences for Weak<R> {}
 
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {

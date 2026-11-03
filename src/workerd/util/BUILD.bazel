@@ -477,6 +477,7 @@ kj_test(
     deps = [
         ":sqlite-metering",
         "@capnp-cpp//src/kj",
+        "@sqlite3",
     ],
 )
 

@@ -78,6 +78,7 @@ fn tracing_visits_only_some() {
     let visits = Cell::new(0);
     let mut visitor = v8::GcVisitor {
         handle: v8::ffi::GcVisitor { ptr: 0 },
+        mode: v8::VisitMode::Visit,
     };
     NullOrUndefined::Some(Edge(&visits)).trace(&mut visitor);
     NullOrUndefined::<Edge<'_>>::Null.trace(&mut visitor);

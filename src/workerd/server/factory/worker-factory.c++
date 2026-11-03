@@ -1182,6 +1182,14 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
       kj::mv(channels), kj::mv(tails), kj::none);
 }
 
+kj::Promise<void> worker_run_actor_on_hibernate(
+    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels) {
+  auto ioChannelFactory =
+      kj::rc<RustIoChannelFactory>(kj::addRef(worker.getImpl()), kj::mv(channels));
+  return actor.getActor().runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::mv(ioChannelFactory), kj::refcounted<RequestObserver>(), kj::none);
+}
+
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
     kj::Own<WorkerInterface> worker, ::rust::Slice<const uint64_t> params) {
   capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));

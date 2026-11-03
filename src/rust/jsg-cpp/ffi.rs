@@ -47,6 +47,9 @@ pub mod bridge {
         ///
         /// `visitor` is the visitor of a visit in progress.
         pub unsafe fn cpp_ref_visit(visitor: *mut GcVisitor, cpp_ref: &CppRef);
+        /// Makes the reference strong again and forgets its parent, as moving a C++ `jsg::Ref`
+        /// does; see `jsg::GcVisitor::is_detaching`. Requires the isolate lock.
+        pub fn cpp_ref_detach(cpp_ref: &CppRef);
     }
 
     impl KjOwn<CppRef> {}
@@ -156,8 +159,8 @@ pub unsafe fn call_cpp_for_ref<T: CppResource>(
 ///   parameter does, and runs no JavaScript to check it.
 /// - To JavaScript, it is the object's existing wrapper, or a new one for its dynamic type.
 /// - A resource field holding one is traced like a C++ `jsg::Ref` field. As for a `jsg::Rc`, a
-///   `Ref` moved out of a traced field must be cloned before use; see `src/rust/jsg/README.md`
-///   §Safety rules, rule 2.
+///   `Ref` moved out of a field lives in a `jsg::Cell` or `jsg::RefCell`, which make it strong
+///   on the way out; see `src/rust/jsg/README.md` §Safety rules, rule 2.
 ///
 /// It is neither `Send` nor `Sync`: cloning it changes a refcount that the isolate lock guards.
 /// It may be dropped on any thread, as a `jsg::Ref` may.
@@ -208,8 +211,11 @@ impl<T: CppResource> Clone for Ref<T> {
 
 impl<T: CppResource> jsg::Traced for Ref<T> {
     fn trace(&self, visitor: &mut v8::GcVisitor) {
-        // SAFETY: the visitor's pointer is valid for the duration of the visit.
-        unsafe { bridge::cpp_ref_visit(visitor.as_ffi(), &self.inner) };
+        match visitor.as_ffi() {
+            // SAFETY: the visitor's pointer is valid for the duration of the visit.
+            Some(visitor) => unsafe { bridge::cpp_ref_visit(visitor, &self.inner) },
+            None => bridge::cpp_ref_detach(&self.inner),
+        }
     }
 }
 

@@ -113,16 +113,19 @@ use crate::v8;
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
-/// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
-/// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
-///   debug builds abort if it can hold GC references.
+/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`** — only for
+///   `T: HoldsNoGcReferences`, so there is nothing in them to visit; see
+///   [`HoldsNoGcReferences`].
+/// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — delegate to the
+///   value, and detach it from the cell's owner as it leaves the cell; see
+///   [`GcVisitor::is_detaching`](crate::v8::GcVisitor::is_detaching).
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
-    /// Whether a value of this type can hold GC-visible references. Tracing a `RefCell` checks
-    /// it. It defaults to `true`, and wrappers and collections take it from what they hold. A
-    /// type whose `trace` is a no-op should return `false`, as `jsg_traced!` does.
+    /// Whether a value of this type can hold GC-visible references. It defaults to `true`, and
+    /// wrappers and collections take it from what they hold. A type whose `trace` is a no-op
+    /// should return `false`, as `jsg_traced!` does.
     fn holds_gc_references() -> bool
     where
         Self: Sized,
@@ -142,9 +145,30 @@ pub trait Traced {
     /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
     /// it is never collected. Don't keep a type that holds GC references behind an
     /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
-    /// `README.md` §Safety rules, rule 2.
+    /// `README.md` §Safety rules, rule 2. Other than through `visitor`, it must not change the
+    /// value or anything that holds it: a [`crate::Cell`] visits its value in place.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
+
+/// Marks a `Traced` type that holds no GC references: no `jsg::Rc` and no `TracedGlobal` that
+/// its `trace` visits, directly or inside another type. (The keys of a map are not visited.)
+///
+/// `std::cell::Cell<T>` and `std::cell::RefCell<T>` are `Traced` only for
+/// `T: HoldsNoGcReferences`. A reference that GC has visited in a field is weak and depends on
+/// the field's owner to trace it, and a move out of a std cell is bitwise and leaves it that
+/// way. A resource is reached only through `&self`, except in its `Drop` impl, so a cell is the
+/// only way to move a reference out of a field of a live resource. With the std cells closed to
+/// them, every `jsg::Rc` and `TracedGlobal` that leaves a traced field of a live resource is
+/// strong, unless a hand-written `impl Traced` reaches it through a std cell. A field that holds one and changes
+/// after construction is a [`crate::Cell`] or [`crate::RefCell`], which take any `Traced` type.
+///
+/// Every built-in `Traced` type implements it, except those that can hold GC references:
+/// `jsg::Rc`, `TracedGlobal`, `Lenient`, `TracedPromise`, `TracedPromiseResolver` and
+/// `TracedAsyncContextFrame`. Wrappers and collections implement it when their contents do.
+/// `jsg_traced!` implements it for the types it covers; `#[jsg_struct]` and `#[jsg_oneof]` don't,
+/// since their fields can hold GC references. Implement it for a hand-written `Traced` type, or
+/// a `#[jsg_struct]` of plain data, only if its `trace` visits nothing.
+pub trait HoldsNoGcReferences: Traced {}
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
@@ -153,7 +177,9 @@ macro_rules! impl_traced_noop {
             fn holds_gc_references() -> bool {
                 false
             }
-        })*
+        }
+
+        impl HoldsNoGcReferences for $t {})*
     };
 }
 
@@ -175,24 +201,7 @@ impl_traced_noop!(
     f32,
     f64,
     std::time::SystemTime,
-    crate::v8::ArrayBuffer,
-    crate::v8::ArrayBufferView,
     crate::v8::BackingStore,
-    crate::v8::BigInt64Array,
-    crate::v8::BigUint64Array,
-    crate::v8::Boolean,
-    crate::v8::Float32Array,
-    crate::v8::Float64Array,
-    crate::v8::Int8Array,
-    crate::v8::Int16Array,
-    crate::v8::Int32,
-    crate::v8::Int32Array,
-    crate::v8::Integer,
-    crate::v8::Number,
-    crate::v8::Uint8Array,
-    crate::v8::Uint16Array,
-    crate::v8::Uint32,
-    crate::v8::Uint32Array,
     &str,
 );
 
@@ -207,6 +216,8 @@ impl<T: Traced> Traced for Option<T> {
         }
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
 
 impl<T: Traced> Traced for Lenient<T> {
     // An unconvertable value is a `TracedGlobal`, whatever `T` is.
@@ -236,6 +247,8 @@ impl<T: Traced> Traced for Nullable<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Nullable<T> {}
+
 impl<T: Traced> Traced for NullOrUndefined<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
@@ -248,6 +261,8 @@ impl<T: Traced> Traced for NullOrUndefined<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
+
 impl<T: Traced> Traced for NonCoercible<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
@@ -257,6 +272,8 @@ impl<T: Traced> Traced for NonCoercible<T> {
         self.as_ref().trace(visitor);
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NonCoercible<T> {}
 
 impl<T: Traced> Traced for Vec<T> {
     fn holds_gc_references() -> bool {
@@ -270,6 +287,8 @@ impl<T: Traced> Traced for Vec<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Vec<T> {}
+
 impl<V: Traced> Traced for Dict<V> {
     fn holds_gc_references() -> bool {
         V::holds_gc_references()
@@ -282,6 +301,8 @@ impl<V: Traced> Traced for Dict<V> {
     }
 }
 
+impl<V: HoldsNoGcReferences> HoldsNoGcReferences for Dict<V> {}
+
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
     fn holds_gc_references() -> bool {
         V::holds_gc_references()
@@ -292,6 +313,11 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
             value.trace(visitor);
         }
     }
+}
+
+impl<K, V: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+    for std::collections::HashMap<K, V, S>
+{
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
@@ -306,6 +332,8 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     }
 }
 
+impl<K, V: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeMap<K, V> {}
+
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
@@ -316,6 +344,11 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
             item.trace(visitor);
         }
     }
+}
+
+impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+    for std::collections::HashSet<T, S>
+{
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
@@ -330,7 +363,11 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
     }
 }
 
-impl<T: Traced> Traced for std::cell::Cell<T> {
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeSet<T> {}
+
+/// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` taken out of a std `Cell`
+/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`].
+impl<T: HoldsNoGcReferences> Traced for std::cell::Cell<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
@@ -345,40 +382,33 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
     }
 }
 
-impl<T: Traced> Traced for std::cell::RefCell<T> {
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::Cell<T> {}
+
+/// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` moved out through a std
+/// `RefCell`'s mutable borrow would be neither strong nor traced. A cell that holds one is a
+/// [`crate::RefCell`].
+impl<T: HoldsNoGcReferences> Traced for std::cell::RefCell<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // A mutable borrow is active here only if the code holding it calls something that visits
-        // the resource: an allocation on the V8 heap, which can start a GC, or wrapping the
-        // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
-        // wrapper, which switch its references between strong and traced. The contents cannot be
-        // read then, so the visit misses their references. A missed GC visit can cost a weak
-        // `TracedGlobal` its value and a `jsg::Rc` the JS wrapper of its resource; a missed switch
-        // can leave a reference weak that should be strong, for a later GC to free, or strong that
-        // should be weak, which leaks. Debug builds abort when that can happen (a panic cannot
-        // unwind out of a visit made from C++); release builds skip the cell.
-        //
-        // The real fix is a JSG cell type whose mutable borrow takes the lock and makes the
-        // references it holds strong until the borrow ends, so that a visit can skip a borrowed
-        // cell safely. That also covers a `TracedGlobal` taken out of a `Cell`, which nothing
-        // traces.
-        let Ok(inner) = self.try_borrow() else {
-            debug_assert!(
-                !T::holds_gc_references(),
-                "tracing found a mutably borrowed RefCell that can hold GC references, which it \
-                 cannot visit; do not hold a RefCell borrow_mut() across a call that can allocate \
-                 on the V8 heap, wrap the resource, or create or drop a jsg::Rc to it"
-            );
-            return;
-        };
-        inner.trace(visitor);
+        // `T` holds no GC references, so a mutably borrowed cell can be skipped: a visit would
+        // find nothing in it. (`crate::RefCell` holds references, and makes them strong when it
+        // is mutably borrowed, so a visit can skip it too.)
+        if let Ok(inner) = self.try_borrow() {
+            inner.trace(visitor);
+        }
     }
 }
 
-impl<T: Traced> Traced for std::rc::Rc<T> {
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::RefCell<T> {}
+
+/// Only for `T: HoldsNoGcReferences`: every owner of a shared `Rc` would trace what it holds, and
+/// a GC reference has a single parent. A `jsg::Rc` visited by two parents asserts, as a C++
+/// `jsg::Ref` does, and a `TracedGlobal` would stay alive only while the last one to visit it
+/// does. Share a resource through a `jsg::Rc` or `jsg::Weak` to it instead.
+impl<T: HoldsNoGcReferences> Traced for std::rc::Rc<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
@@ -387,6 +417,8 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
         (**self).trace(visitor);
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::rc::Rc<T> {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)
@@ -418,6 +450,21 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 pub trait ToJS<'s>: Sized {
     /// Converts this Rust value into a JavaScript value in the scope of `lock`.
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error>;
+
+    /// Converts this Rust value into a JavaScript value for `creator`, the object whose method or
+    /// property returned it, as C++ JSG's `wrap()` takes the `creator` of a value: a value that
+    /// stays pending, such as a [`Promise`](crate::Promise), keeps `creator` alive until it
+    /// settles, as C++ JSG's promises do. A `#[jsg_method]` or property of a resource passes the
+    /// resource's wrapper, and a static one `None`. A container passes `creator` on to what it
+    /// holds; any other type converts as [`ToJS::to_js`] does, which is the default.
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
+        let _ = creator;
+        self.to_js(lock)
+    }
 }
 
 // =============================================================================
@@ -1098,8 +1145,16 @@ impl<'s> ToJS<'s> for () {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Some(value) => value.to_js(lock),
+            Some(value) => value.to_js_with_creator(lock, creator),
             None => Ok(lock.undefined()),
         }
     }
@@ -1107,14 +1162,30 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
 
 impl<'s, T: Coercible + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        self.into_inner().to_js(lock)
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.into_inner().to_js_with_creator(lock, creator)
     }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
         }
     }
@@ -1122,8 +1193,16 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
             Self::Undefined => Ok(lock.undefined()),
         }
@@ -1132,8 +1211,16 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
-            Self::Some(value) => value.to_js(lock),
+            Self::Some(value) => value.to_js_with_creator(lock, creator),
             Self::Null => Ok(lock.null()),
             Self::Undefined | Self::Unconvertable(_) => Ok(lock.undefined()),
         }
@@ -1352,12 +1439,20 @@ impl<T: Type> Type for Vec<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         // As C++ JSG does, this builds the array from its elements instead of setting them
         // one by one, so no setter a script put on Array.prototype runs. Converting stops at
         // the first element that fails.
         let elements = self
             .into_iter()
-            .map(|item| item.to_js(lock))
+            .map(|item| item.to_js_with_creator(lock, creator))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(v8::Array::with_elements(lock, &elements).into())
     }
@@ -1416,9 +1511,17 @@ impl<V> Type for Dict<V> {
 
 impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        self.to_js_with_creator(lock, None)
+    }
+
+    fn to_js_with_creator(
+        self,
+        lock: &mut Lock<'s>,
+        creator: Option<v8::Local<'s, v8::Object>>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
         let entries = self
             .into_iter()
-            .map(|(key, value)| Ok((key, value.to_js(lock)?)))
+            .map(|(key, value)| Ok((key, value.to_js_with_creator(lock, creator)?)))
             .collect::<Result<Vec<_>, Error>>()?;
         let properties: Vec<(&str, v8::Local<'s, v8::Value>)> = entries
             .iter()
