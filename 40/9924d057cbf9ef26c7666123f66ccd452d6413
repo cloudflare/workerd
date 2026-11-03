@@ -1,0 +1,68 @@
+src/workerd/api/worker-rpc.h
+  s_29743b6b20a528::t_d8e2ad068ea862 306-312,453-454
+  s_ab4e43acd62623::t_e24b52f8b500bf 350-351
+  s_29743b6b20a528::t_4277700e15b3dd 313-314
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_29743b6b20a528::t_e83a2f7206deec 48-49,402-403
+src/workerd/io/observer.h
+  s_2192e8a6d105f9::t_5350c504b9c72a 24,165
+  s_2192e8a6d105f9::t_9759afca78607d 166-168
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_2192e8a6d105f9::t_890a437f866d0f 24,26-28,32,81-86,109,117-118
+  s_2192e8a6d105f9::t_e01e67b4bf8beb 119
+src/workerd/api/actor.h
+  s_acade4cac5b71c::t_ed584230ec76c6 352
+  s_1e024e77d05daf::t_508220efb9204a 423
+  s_6ba2030b43c23b::t_f4100042faa302 351,393,422
+  s_6ba2030b43c23b::t_a6d2bcab178791 394-395
+src/workerd/api/actor-fetch-retry-test.c++
+  s_6ba2030b43c23b::t_8a47ec9711c3ad 90,330
+  s_4cbeffab6dcecf::t_9fe45b24098702 91
+  s_1bb40d255e21f5::t_10b59738608fc9 331
+src/workerd/api/http.c++
+  s_c1a7662859f799::t_e0d348d9e6e727 2826
+  s_b89908ec6702ef::t_cae20d84fb4d97 1672
+  s_6ba2030b43c23b::t_a9d8f9b928267b 2822,2824
+  s_b89908ec6702ef::t_ae51c3d3e19cd0 1673-1675
+src/workerd/api/bench-jsrpc-sender.c++
+  s_6ba2030b43c23b::t_800d8c0c4ad2f7 93-94
+  s_6ba2030b43c23b::t_7ba856034c26f2 158,164
+src/workerd/api/http.h
+  s_6ba2030b43c23b::t_367d7ff6725d98 259
+  s_c1a7662859f799::t_3489443daf930c 260-262
+  s_6ba2030b43c23b::t_3082611e6dd8e0 257-258
+  s_c1a7662859f799::t_468013623656c8 263-264
+src/workerd/api/worker-rpc.c++
+  s_ab4e43acd62623::t_59120a5bb21f8e 414-415,419,516-522,543,547-548
+  s_29743b6b20a528::t_1202186caf0d74 652-655
+src/workerd/api/BUILD.bazel
+  s_29743b6b20a528::t_c9149366f9c257 844-851
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_2db61388bc6b35::t_a822560382931f 1-362
+src/workerd/tests/test-fixture.h
+  s_2db61388bc6b35::t_8c5fa127c15b03 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "409924d057cbf9ef26c7666123f66ccd452d6413",
+  "prompts": {},
+  "sessions": {
+    "s_29743b6b20a528": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f60d29d7affe9cTTo7zk9geRdo",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_2db61388bc6b35": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5ba74c5fffeo0nh5OZQmoGZCa",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

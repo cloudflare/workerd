@@ -1,0 +1,35 @@
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_2b15188db47a9e 24
+src/rust/worker/BUILD
+  s_dadaf0660bfcbe::t_ac75073539b0d2 36,46
+src/rust/worker/bridge.h
+  s_dadaf0660bfcbe::t_ce1cad6ea56736 46-80
+src/rust/worker/ffi.c++
+  s_dadaf0660bfcbe::t_f6d996b06098f9 7-8,52-70
+src/rust/worker/ffi.h
+  s_dadaf0660bfcbe::t_5a5a93a402f832 30-32,78-80
+src/rust/worker/ffi.rs
+  s_dadaf0660bfcbe::t_a2b640a1be1103 139-141,197-205
+src/rust/worker/lib.rs
+  s_dadaf0660bfcbe::t_be8f1e06ace85d 22,44,98-103,114-130
+src/rust/worker/pending.rs
+  s_dadaf0660bfcbe::t_f171549c9f7601 1-147
+src/rust/worker/test.c++
+  s_dadaf0660bfcbe::t_f409234cfc4d71 64-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9183cbfd41836044564d517774eca291a2737d4c",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,70 @@
+src/workerd/server/compiled-bindings.capnp
+  s_f70c3d9c923e90::t_fe8b9e34200d41 74
+types/generated-snapshot/experimental/index.d.ts
+  s_f70c3d9c923e90::t_e3e83a149c155b 702
+  s_7cfc41b5e42d40::t_55ba9a96ad2b38 677-682,704-706
+src/workerd/api/tests/actor-stub-test.js
+  s_f70c3d9c923e90::t_23e5249585ded8 52,108-129
+src/workerd/api/actor-call-retry-test.c++
+  s_f70c3d9c923e90::t_7578df58cbc2de 337,344,352,355-356
+  s_f70c3d9c923e90::t_92faf027bdd4db 283
+types/test/types/durable-objects.ts
+  s_f70c3d9c923e90::t_5f94c890985ac3 30-39
+src/workerd/server/workerd-api.c++
+  s_f70c3d9c923e90::t_ab97851a7b8dbf 674
+  s_f70c3d9c923e90::t_2c3f9662943170 682
+src/workerd/api/export-loopback.h
+  s_f70c3d9c923e90::t_7379e99cc06efe 167,171
+src/workerd/api/tests/actor-stub-test.wd-test
+  s_f70c3d9c923e90::t_c94aedc3693f89 8,12
+src/workerd/api/http.h
+  s_f70c3d9c923e90::t_4f03bed7d1cce7 274
+src/workerd/server/workerd.capnp
+  s_f70c3d9c923e90::t_62d36b815d7459 573
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_f70c3d9c923e90::t_8aa17fba71496f 1271,1295,1357
+src/workerd/server/server/bindings-test.rs
+  s_f70c3d9c923e90::t_326b46ead5cea3 198
+src/workerd/api/actor-fetch-retry-test.c++
+  s_f70c3d9c923e90::t_3f742fd609605b 586-604,1135,1169,1176,1188,1430,1435,1489-1618
+  s_7cfc41b5e42d40::t_c099a47b28e455 10
+types/generated-snapshot/experimental/index.ts
+  s_7cfc41b5e42d40::t_413d0fba744299 680-685,707-709
+  s_f70c3d9c923e90::t_1b1dfd7dd42e41 705
+src/workerd/api/actor.c++
+  s_f70c3d9c923e90::t_408ebfd1acca7b 9,18-19,24-47,259-264,270-275,281-286,293-316,346,351,370-371,376
+src/workerd/api/http.c++
+  s_f70c3d9c923e90::t_1e62c089e0719a 1566
+src/workerd/api/actor-call-retry.h
+  s_f70c3d9c923e90::t_43f8d84d0d44aa 21-23,26-27,36,42,49
+src/workerd/api/worker-rpc.c++
+  s_f70c3d9c923e90::t_0de863d5886ec0 953
+src/workerd/api/actor.h
+  s_f70c3d9c923e90::t_d383dcd06bf8c9 184,188,192,196,200,255-302,308-310,317-318,324-326,336-347,379-384,553-555
+src/workerd/api/worker-rpc.h
+  s_f70c3d9c923e90::t_81586679b0ce98 341-342
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "18e72d17ee70029c91194e9bcb9f9d6dd2cb55c8",
+  "prompts": {},
+  "sessions": {
+    "s_7cfc41b5e42d40": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_eee16846affealLl3AkD6YeG4I",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_f70c3d9c923e90": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2fdf8364ffeOHX8yTIJunIGkw",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

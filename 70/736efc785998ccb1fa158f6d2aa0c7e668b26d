@@ -1,0 +1,25 @@
+build/fixtures/BUILD.bazel
+  s_ad98b07a2ebbe9::t_8f179c23b2729c 1-4
+build/fixtures/rust_io_link_check.sh
+  s_ad98b07a2ebbe9::t_54817c4ce19d09 1-68
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_d5540f5e5223ab 1-24,38-165
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_d1c2f5fbf1525b 4,6,115-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "70736efc785998ccb1fa158f6d2aa0c7e668b26d",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

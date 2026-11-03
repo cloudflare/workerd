@@ -1,0 +1,23 @@
+src/workerd/api/tracing.c++
+  s_ebf47686d728a3::t_9f9f8e18034b90 530,531-532
+src/workerd/api/tracing.h
+  s_ebf47686d728a3::t_0d44fe21349404 244
+types/defines/trace.d.ts
+  s_ebf47686d728a3::t_5b2ee5f32a46df 122-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "17e4f5a73014286398fcf4e14f22c9caaffec42d",
+  "prompts": {},
+  "sessions": {
+    "s_ebf47686d728a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe81e04f4ffegtcU3p2joqak5h",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

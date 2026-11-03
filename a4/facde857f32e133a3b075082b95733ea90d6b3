@@ -1,0 +1,35 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_858c7e553a1921 4
+build/config/BUILD.bazel
+  s_1b9ab9fb100cf8::t_379a7d01f83258 15-27
+build/wd_test.bzl
+  s_1b9ab9fb100cf8::t_ff28579656d041 188,268-271,280,361-364
+images/container-client-test/BUILD.bazel
+  s_1b9ab9fb100cf8::t_3073dae76b650e 65-82
+images/container-client-test/images.bzl
+  s_1b9ab9fb100cf8::t_46601824ea879b 1-12
+src/workerd/server/tests/container-client/BUILD.bazel
+  s_1b9ab9fb100cf8::t_aa4d627cfd0022 2,8
+src/workerd/server/tests/container-client/README.md
+  s_1b9ab9fb100cf8::t_387f16ac7197b3 29
+src/workerd/server/tests/container-shutdown/BUILD.bazel
+  s_1b9ab9fb100cf8::t_be64b7868304b3 2,12
+src/workerd/server/tests/container-shutdown/test.mjs
+  s_1b9ab9fb100cf8::t_116e80802cea0b 5-6,75-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a4facde857f32e133a3b075082b95733ea90d6b3",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

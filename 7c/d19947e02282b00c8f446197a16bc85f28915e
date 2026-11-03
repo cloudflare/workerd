@@ -1,0 +1,77 @@
+src/workerd/server/cli_process.rs
+  s_dadaf0660bfcbe::t_47c8fc34f80231 1-344
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_3f7c524a9b8999 167-168,172,176-185,195,228
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_22aa1581ff06b7 5,11-14,53-54
+src/workerd/server/cli_config.rs
+  s_dadaf0660bfcbe::t_c5d32c903fb244 1-210
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_1c1e978fbbe22f 103-104,189-190,192,230-234,242,374,381,492,563
+src/workerd/server/cli_socket_fd.rs
+  s_dadaf0660bfcbe::t_f71912aec6f1b6 1-163
+src/workerd/server/cli.rs
+  s_dadaf0660bfcbe::t_0847a8840f386d 1-495
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_c82f601f987a27 213-222,225
+src/rust/cxx/kj-rs-io/loopback.rs
+  s_dadaf0660bfcbe::t_5865667ede539a 1-141
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_25ea9745024634 45,99-101,154,180-190,193-196,286,289-304
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_09607ee572a529 21-22,80-81,106-112,290-294,454-464,550-568,574,579-584,587,589-593,595,614-619,662,777-778,784,787-809,922,924-925,928-929,932-933,939,941,946-954,956-963,979,982,988-989,991-994,999-1002,1009-1016,1046-1050,1191-1193,1214-1222,1259-1267,1271-1312,1548,1726
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_6dec44279872df 40-42
+src/rust/cxx/kj-rs-io/watcher.rs
+  s_dadaf0660bfcbe::t_1e6c25a3c36cc4 4-5
+src/workerd/server/cli_watch.rs
+  s_dadaf0660bfcbe::t_697a9aa9c8af5c 1-71
+src/workerd/server/config-compiler.c++
+  s_dadaf0660bfcbe::t_4647e6053f42b5 1,5,7,18,20,28,34-35,40,65,88,100,197-198,200,202,208,210,214-215,217-221,223,225-226,228-236,249,255,258,264,270-278,281,284-285,297-302,304-308,316-322,325-326,332-347,349-350
+src/workerd/server/server.h
+  s_dadaf0660bfcbe::t_3fe52a31431942 35
+docs/jsg.md
+  s_dadaf0660bfcbe::t_3ae44c02c9ed39 348,351
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_7026412b8a9c60 7,34
+src/workerd/server/cli-main.c++
+  s_dadaf0660bfcbe::t_c85835177442bc 1-415
+src/workerd/server/cli-main.h
+  s_dadaf0660bfcbe::t_3f1c2ff1b2d6ab 1-39
+src/workerd/server/workerd.rs
+  s_dadaf0660bfcbe::t_04b0b38a116b6a 1-9
+src/workerd/server/cli_bridge.rs
+  s_dadaf0660bfcbe::t_ef625c842bf475 1-145
+src/workerd/server/workerd.capnp
+  s_dadaf0660bfcbe::t_d87b2b43d72ff2 39
+src/rust/cxx/kj-rs-io/signal.rs
+  s_dadaf0660bfcbe::t_89904c5d0046b3 58
+src/workerd/server/cli_args.rs
+  s_dadaf0660bfcbe::t_e39ee255583db8 1-612
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_43742ef86ef31a 63-64,73-74,83-87,139,143,201
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_244f118719e738 6,10-11,67-68,70,72-73,75-100,102-123,129,133,140-156
+src/workerd/util/setup-async-io-test.c++
+  s_dadaf0660bfcbe::t_2dc1822b18e0dc 5
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_8681762db43c1a 868-934
+src/workerd/server/config-compiler.h
+  s_dadaf0660bfcbe::t_72ce3add90c955 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7cd19947e02282b00c8f446197a16bc85f28915e",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

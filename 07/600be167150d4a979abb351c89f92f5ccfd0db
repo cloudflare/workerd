@@ -1,0 +1,19 @@
+.github/workflows/internal-build.yml
+  s_b146b4ad038aee::t_40726ab6b12aa0 8-12,26-33,36-37,39,43-45,76,100,113,119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "07600be167150d4a979abb351c89f92f5ccfd0db",
+  "prompts": {},
+  "sessions": {
+    "s_b146b4ad038aee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e61e1d8e0ffeBbKfgf6gXu9joU",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Jon Phillips <jphillips@cloudflare.com>"
+    }
+  }
+}

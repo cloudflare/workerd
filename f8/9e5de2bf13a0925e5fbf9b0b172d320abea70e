@@ -1,0 +1,35 @@
+src/workerd/api/tests/do-on-hibernate-symbol-test.wd-test
+  s_f332e176eb9835::t_889c71bbbf27dc 12,17,25-31
+src/workerd/io/observer.h
+  s_f332e176eb9835::t_4761161fe938fe 195-198,496-499
+src/workerd/io/worker.h
+  s_f332e176eb9835::t_3a961c34489ed9 64,921-927,938-949,1086-1108,1248-1252
+src/workerd/api/tests/do-on-hibernate-symbol-unflagged-test.js
+  s_f332e176eb9835::t_4488c069db9cd0 6,9-28,34-40
+src/workerd/io/io-context.c++
+  s_f332e176eb9835::t_193a914b05d1ae 513-527
+src/workerd/util/uncaught-exception-source.h
+  s_f332e176eb9835::t_1ce0c80d99b92e 17,34-35
+src/workerd/io/worker.c++
+  s_f332e176eb9835::t_c93ecbc93c7951 3934-3936,4239-4265,4326-4328,4824-4959
+src/workerd/io/limit-enforcer.h
+  s_f332e176eb9835::t_565002cced3e45 177-188
+src/workerd/api/tests/do-on-hibernate-symbol-test.js
+  s_f332e176eb9835::t_bb4cdd136b45ae 17-37,52-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f89e5de2bf13a0925e5fbf9b0b172d320abea70e",
+  "prompts": {},
+  "sessions": {
+    "s_f332e176eb9835": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec654b52dffe5R4MDhsJqmPWkg",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

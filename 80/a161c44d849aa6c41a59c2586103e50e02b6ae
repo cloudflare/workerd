@@ -1,0 +1,31 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_fc9ca53abd58a7 597-599,622-626,628-629,631
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_15769d548531c7 42-49,88-89,176-179,182,187,202,206,210,229,282
+.github/workflows/release-python-snapshots.yml
+  s_1b9ab9fb100cf8::t_5e34650e750d4f 21
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_d17d10275b70ee 89-91,110-111,131-132,145-146
+.github/workflows/update-wpt.yml
+  s_1b9ab9fb100cf8::t_e30d565ebd333d 53
+build/check_ci_flags.sh
+  s_1b9ab9fb100cf8::t_aace66a03a922f 1-32
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_7557d0f5acbf3f 56,101-107,115-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80a161c44d849aa6c41a59c2586103e50e02b6ae",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

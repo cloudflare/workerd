@@ -1,0 +1,25 @@
+src/rust/cxx/kj-rs-io/lib.rs
+  s_b96e35e9740ea9::t_b93db250b136bb 86
+src/rust/cxx/kj-rs-io/watcher.rs
+  s_b96e35e9740ea9::t_2d3c0b90a1e8d7 4
+src/rust/AGENTS.md
+  s_b96e35e9740ea9::t_2a825095a56fc0 7
+src/workerd/server/AGENTS.md
+  s_b96e35e9740ea9::t_5a01688e809d2e 5,12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ca70a0403de64a3c9558c059c8c5c81c8d390eaa",
+  "prompts": {},
+  "sessions": {
+    "s_b96e35e9740ea9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63b5e4a0-0d53-46c5-9b6c-7ba079d63b7d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

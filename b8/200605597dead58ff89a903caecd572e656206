@@ -1,0 +1,33 @@
+src/workerd/api/tests/BUILD.bazel
+  s_9e291bb5d844d4::t_7441999a2701c8 1318-1320
+  s_9e291bb5d844d4::t_20d57f85cbf0d8 1315-1317
+src/workerd/io/io-own.h
+  s_9e291bb5d844d4::t_d09e956509622f 95-101,116-119,124,151-155,158-161,173-174
+src/workerd/api/tests/actor-cross-context-promise-test.wd-test
+  s_9e291bb5d844d4::t_7743922d50ff7d 1-26
+src/workerd/io/compatibility-date.capnp
+  s_9e291bb5d844d4::t_d72f5b62fc8597 601-604
+src/workerd/io/io-context.c++
+  s_9e291bb5d844d4::t_49250c500e4768 398-401,1990-1991,1993-1994,1996-2015,2017-2019
+src/workerd/io/io-own.c++
+  s_9e291bb5d844d4::t_f82f1c3261117d 72-79,104-111
+  s_9e291bb5d844d4::t_8193c18f03ef14 112
+src/workerd/api/tests/actor-cross-context-promise-test.js
+  s_9e291bb5d844d4::t_59b67c615bb57a 1-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b8200605597dead58ff89a903caecd572e656206",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}

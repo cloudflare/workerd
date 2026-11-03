@@ -1,0 +1,19 @@
+deps/rust/Cargo.lock
+  s_b5100e8818a1d4::t_4bc418fbf52d84 69,71,755,757,1600,1602,1612,1614,1623,1625,1649,1651,1675,1677,1694,1696,1712,1729,1731,1741,1743,1746,1761,1763,1783,1785,1808,1810,1826,1828,1845,1847,1901,1903
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2caf41b403f3c7f1b524cc8b1c62efedd2250aa9",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

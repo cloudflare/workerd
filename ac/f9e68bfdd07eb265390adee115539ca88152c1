@@ -1,0 +1,1865 @@
+.bazelrc
+  s_144e1c38c83f9e::t_22ce69793d3cce 4,9,19-21,101-108,279-280,282,303-304,315-316,318,399-405,557-559,597-683
+.clang-tidy
+  s_144e1c38c83f9e::t_77f12597aa3971 62,65-66,68,80-81,93,157-175
+.devcontainer/Dockerfile
+  s_144e1c38c83f9e::t_075740eaff18ec 7
+.github/actions/setup-bazelflare/action.yml
+  s_144e1c38c83f9e::t_a0f7abb78ccf71 1-62
+.github/workflows/_bazel.yml
+  s_144e1c38c83f9e::t_66125fb429b7a6 42-48,85-104,120-121,131-157,160-162,170-172,196,201,211,215,234,248,310-318
+.github/workflows/coverage.yml
+  s_144e1c38c83f9e::t_487ecd7c67d634 19-20,30-34
+.github/workflows/deps-updater.yml
+  s_144e1c38c83f9e::t_9d3d30a951433d 38,55
+.github/workflows/internal-build.yml
+  s_144e1c38c83f9e::t_63396e0816fec0 8-12,26-33,36-37,39,43-45,76,100,113,119
+.github/workflows/release-python-runtime.yml
+  s_144e1c38c83f9e::t_d36d662a5c0231 1,44
+.github/workflows/release-python-snapshots.yml
+  s_144e1c38c83f9e::t_a5a516ffdf34f5 1,63
+.github/workflows/release.yml
+  s_144e1c38c83f9e::t_b1553aa9ed924c 76,82,113-116,254-255,257,263,265,308-309,311,318
+.github/workflows/test.yml
+  s_144e1c38c83f9e::t_95f0db51f9144d 21-22,57-61,85-88,90,105-108,126-129,141-145,149,155-198,205-209,215-217,219-223
+.gitignore
+  s_144e1c38c83f9e::t_39a23d61a781fd 44
+.opencode/agent/review-safety.md
+  s_144e1c38c83f9e::t_4a2b92d1a6c10d 59
+.opencode/skills/wpt-update/SKILL.md
+  s_144e1c38c83f9e::t_6d614e2d6d4efe 177-184
+AGENTS.md
+  s_144e1c38c83f9e::t_8fb742224c38f5 26,180-181,191,204,305
+BUILD.bazel
+  s_144e1c38c83f9e::t_30a42af9b6dab4 3,30-37,40-48
+Dockerfile.release
+  s_144e1c38c83f9e::t_c938f07aca0e83 7
+MODULE.bazel
+  s_144e1c38c83f9e::t_059c2936afed5e 53
+README.md
+  s_144e1c38c83f9e::t_fd104ba33b9035 57-58,86,111-116
+build/BUILD.llvm-libc
+  s_144e1c38c83f9e::t_f43d3911867d22 1-23
+build/BUILD.llvm-runtimes
+  s_144e1c38c83f9e::t_ea38ea2067358f 15-18,35,40-42,56-64
+build/BUILD.sqlite3
+  s_144e1c38c83f9e::t_8a3f3b428f1f72 45-56,153,157-164,167-169,173,176,180,196-200,209-213,240-244,256-260,295-297,299,302-312,315-317,321,325,347-349,351,355-356,363-365,369,372,376
+build/BUILD.wpt
+  s_144e1c38c83f9e::t_6d7beb73c8b0c9 14-20,25,28
+build/bazelflare/BUILD.bazel
+  s_144e1c38c83f9e::t_3194609dfc187e 1-48
+build/bazelflare/ca.pem
+  s_144e1c38c83f9e::t_f8d1a7ae2a50fc 1-11
+build/bazelflare/credential-helper
+  s_144e1c38c83f9e::t_39b834fb02919f 1-6,8-10,12-13,15-33,35-42
+build/bazelflare/exec_properties.bzl
+  s_144e1c38c83f9e::t_0f0ef0d80a88bd 1-29
+build/check_ci_flags.sh
+  s_144e1c38c83f9e::t_0ad647a568a536 1-33
+build/ci.bazelrc
+  s_144e1c38c83f9e::t_3c447a12628c73 54,64-65,84-86,110-129
+build/config/BUILD.bazel
+  s_144e1c38c83f9e::t_7a742ce5b4154d 15-27
+build/deps/BUILD
+  s_144e1c38c83f9e::t_101d1216a7a0c3 6,66-73
+build/deps/build_deps.jsonc
+  s_144e1c38c83f9e::t_a71cf69e90b7b0 75-77,87-91,141,150,159,173
+build/deps/dep_pyodide.bzl
+  s_144e1c38c83f9e::t_324e348246e10e 119
+build/deps/deps.jsonc
+  s_144e1c38c83f9e::t_7491fbbc01c604 47
+build/deps/formatters/rustfmt_repository.bzl
+  s_144e1c38c83f9e::t_b3c4f20c75fa3c 31-46
+build/deps/gen/build_deps.MODULE.bazel
+  s_144e1c38c83f9e::t_7989e4504def83 17,32-33,41-42,44,52-53,61-62,89,92,98,104,107,113-114,134-137
+build/deps/gen/deps.MODULE.bazel
+  s_144e1c38c83f9e::t_a92283c3c13b80 25,30-31,33,41,152
+build/deps/gen/shared_deps.MODULE.bazel
+  s_144e1c38c83f9e::t_9607b2aac665bc 120-121,123
+build/deps/llvm.MODULE.bazel
+  s_144e1c38c83f9e::t_4eda1292ccd791 1-97
+build/deps/pyodide.MODULE.bazel
+  s_144e1c38c83f9e::t_4af6bbc26b5397 35-38
+build/deps/python.MODULE.bazel
+  s_144e1c38c83f9e::t_d72f47b33b682d 5-12,20,26
+build/deps/rust.MODULE.bazel
+  s_144e1c38c83f9e::t_b91dc8ef308097 108-127,133-136
+build/deps/shared_deps.jsonc
+  s_144e1c38c83f9e::t_1bf4e2dd5a4c46 116
+build/deps/update-deps.py
+  s_144e1c38c83f9e::t_a11c00e317fd7d 83,578-580
+build/deps/v8.MODULE.bazel
+  s_144e1c38c83f9e::t_cd03fbb39d8755 21,23,66-74,88
+build/deps/v8.requirements.txt
+  s_144e1c38c83f9e::t_28b0941cf2aac5 11-72
+build/fixtures/BUILD.bazel
+  s_144e1c38c83f9e::t_e46f79b53411df 1-8
+build/fixtures/flags-probe.sh
+  s_144e1c38c83f9e::t_82b6ebf52fd69b 1-2
+build/kj_test.bzl
+  s_144e1c38c83f9e::t_d2ba7c7fd086dd 3-4,36,38-39,42,46,48-49,54,57-95
+build/python_metadata.bzl
+  s_144e1c38c83f9e::t_701dfad3f1dfe9 120-121,148-149,194-195,216-217
+build/rust/build_std.bzl
+  s_144e1c38c83f9e::t_b7d9b021310e56 13-15,69-111,113-114,134-135,137-141,144-145,168-169,192-198
+build/rust/build_std.sh
+  s_144e1c38c83f9e::t_acbf0eaba2f8b0 18,24,41,88-93
+build/rust/sanitizer_toolchain.bzl
+  s_144e1c38c83f9e::t_3bc3b07263e627 7,150-168
+build/sysroot.bzl
+  s_144e1c38c83f9e::t_b1351e05a867a4 1-101
+build/tools/clang_tidy/clang_tidy.bzl
+  s_144e1c38c83f9e::t_d5dc786636b594 201-203,213
+build/tools/llvm/BUILD.bazel
+  s_144e1c38c83f9e::t_1cac26e24703ae 1-40
+build/tools/llvm/coverage.bzl
+  s_144e1c38c83f9e::t_8149cc8c272399 1-52
+build/tools/python/BUILD
+  s_144e1c38c83f9e::t_f85bdb03038ae9 1-6
+build/tools/python/python_interpreter.bzl
+  s_144e1c38c83f9e::t_b7e30eac8abc93 1-23
+build/wd_bench.bzl
+  s_144e1c38c83f9e::t_2ab97de27dec0e 17,34,97
+build/wd_rust_proc_macro.bzl
+  s_144e1c38c83f9e::t_9286c9185962a5 4-15,46
+build/wd_test.bzl
+  s_144e1c38c83f9e::t_dc57ad27f01b0b 2-3,46,188,191-194,268-271,280,318,334,361-364
+build/wd_ts_test.bzl
+  s_144e1c38c83f9e::t_c844836a8ec696 5,23
+build/workerd-v8/BUILD
+  s_144e1c38c83f9e::t_0edd41ee357e64 8
+build/wpt_test.bzl
+  s_144e1c38c83f9e::t_78bbd46803e827 29,39-43,48-50,72,90,103-106,125,127-128,189-194,224-225,242-246,303-307,341-342,361,488-492,498-502,506,624,630,637,648,685-688,694,708-716
+cfsetup.yaml
+  s_144e1c38c83f9e::t_928ad432450682 15
+ci/BUILD.bazel
+  s_144e1c38c83f9e::t_3fc973fbd96d09 1-16
+ci/v8_update.py
+  s_144e1c38c83f9e::t_f7eeade6be7a01 15,47-51,155-291,419
+ci/v8_update_test.py
+  s_144e1c38c83f9e::t_66412032c1deb1 1-181
+deps/rust/BUILD.bazel
+  s_144e1c38c83f9e::t_bc6d74eaa149cf 46-56
+deps/rust/Cargo.lock
+  s_144e1c38c83f9e::t_eb02569ff7e4ab 69,71,210-219,222,224,242,244,271,273,391,393,417-425,513,515,525,527,575-606,636,649,665-666,1108-1129,1132,1134,1144-1158,1161,1163,1167,1173-1178,1181,1183,1195,1197,1201,1203,1215,1217,1221,1223,1227-1228,1326-1331,1469-1470,1488,1556,1558,1567-1568,1570,1575,1577,1621-1639,1648,1650,1802-1803,1946-1955,2370,2372,2386,2388,2406-2414,2457,2459,2509,2511,2528,2530,2563,2565,2575,2577,2594,2596,2616,2618,2641,2643,2659,2661,2678,2680,2734,2736,2799-2832,2862-2873,2876,2878,2881,2893,2895,2998,3000,3050,3052,3151,3153,3179,3197-3204,3278,3280,3289,3291,3366,3371,3373,3375,3383,3385,3403-3415
+deps/rust/Cargo.toml
+  s_144e1c38c83f9e::t_671f3e448ba56d 80-81,94-103,110,126-127
+deps/rust/cargo-bazel-lock.json
+  s_144e1c38c83f9e::t_f157b17d2dd6d1 1-16048
+docs/benchmarking.md
+  s_144e1c38c83f9e::t_619615c452c313 146-147
+docs/development.md
+  s_144e1c38c83f9e::t_2d38bd886dfb84 35-43
+docs/jsg.md
+  s_144e1c38c83f9e::t_b60a23e15fa83c 1313-1344
+docs/reference/detail/abort-signal.md
+  s_144e1c38c83f9e::t_99251cc480e94f 61-71,119-123,133,135-138,141-143
+docs/reference/detail/new-module-registry.md
+  s_144e1c38c83f9e::t_18af9095d91075 50-51,137-144,182-196,858
+docs/reference/rust-review-checklist.md
+  s_144e1c38c83f9e::t_89bb5805b5033b 98-111,115-119,124-128,135-142,146-148
+docs/v8-updates.md
+  s_144e1c38c83f9e::t_f47da06b9410c0 94-104,145-146
+fuzzilli/README.md
+  s_144e1c38c83f9e::t_acd464bdfc39ae 24
+images/BUILD.bazel
+  s_144e1c38c83f9e::t_02938e04ff4507 3-8,18,26
+images/container-client-test/BUILD.bazel
+  s_144e1c38c83f9e::t_a05cc0f05f5ebd 50-52,60-80
+images/container-client-test/images.bzl
+  s_144e1c38c83f9e::t_8169eca065db12 1-12
+justfile
+  s_144e1c38c83f9e::t_8dc8973762ad1a 142
+patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch
+  s_144e1c38c83f9e::t_1a064a78b8d0ca 16
+patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch
+  s_144e1c38c83f9e::t_c273620f914ac5 1-65
+patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch
+  s_144e1c38c83f9e::t_a70c763019ede9 1,3-11,13-32
+patches/rust/0001-teach-tsan-about-fcntl-file-descriptor-duplication.patch
+  s_144e1c38c83f9e::t_cf8b05869d4e76 14-16,25-29,44
+patches/rust/BUILD.bazel
+  s_144e1c38c83f9e::t_a65d74558b6d06 1-5
+patches/toolchains_llvm/per-action-files.patch
+  s_144e1c38c83f9e::t_381eb04418715c 1-50
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_144e1c38c83f9e::t_a8a03d59a14990 40,43
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_144e1c38c83f9e::t_bafb2132d0c883 26,29,41,71
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_144e1c38c83f9e::t_bddac4165a4ef2 9,12,91,94,119
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_144e1c38c83f9e::t_ec02706cf3a2cd 13,24,53,62,65,81,100,136
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_144e1c38c83f9e::t_e852291d92e695 8,11,27,30,40,61,64,91,154,190,193,208,211,250,253,262,270,312,315,331,344,353,356,366,370,373,386,399,401,403,406,414-417,423,433,444,456,459,469,472,515
+patches/v8/0008-increase-visibility-of-virtual-method.patch
+  s_144e1c38c83f9e::t_b518081f0b01ea 12,15
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_144e1c38c83f9e::t_28744a8e405557 33,36,48
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_144e1c38c83f9e::t_dc1770b81bf214 11,14,45
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_144e1c38c83f9e::t_0a072d0cc20ffc 17,20,30
+patches/v8/0012-Update-illegal-invocation-error-message-in-v8.patch
+  s_144e1c38c83f9e::t_2442bafde24858 9,12,26,29,46-47,61
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_144e1c38c83f9e::t_2cd872bed4cd82 9,12,39,42,52,55,77,95,169,172,181,206,217,244,259,262,277-278,287,290-292,305,308,337,363,398,412,415,417-418,420-423,434,446,471
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_144e1c38c83f9e::t_97291128f95d38 9,12
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_144e1c38c83f9e::t_708b7cf81be388 33,36,48,76
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_144e1c38c83f9e::t_5721191dd852a5 9,12,20,28,36,45,53,64,73,76,84,92
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_144e1c38c83f9e::t_ffc3033e2a8c87 15,18,26,35,44,76,94
+patches/v8/0019-Remove-unneded-latomic-linker-flag.patch
+  s_144e1c38c83f9e::t_414e56b1ab6e8d 9,12
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_144e1c38c83f9e::t_31143a8faff05d 11,14,32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_144e1c38c83f9e::t_06360e7b33683c 9,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_144e1c38c83f9e::t_7ce636538be4d0 9,24,27,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_144e1c38c83f9e::t_aef29f4057841e 8,11
+patches/v8/0024-Disable-slow-handle-check.patch
+  s_144e1c38c83f9e::t_ac0b2df195cb6e 9,12
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_144e1c38c83f9e::t_f3a74f0a42a5c1 28,31,43,46
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_144e1c38c83f9e::t_542263e68b7480 8,11,20
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_144e1c38c83f9e::t_df488d8b5e071a 11,27,30
+patches/v8/0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch
+  s_144e1c38c83f9e::t_277f58495962b1 17,20,35
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_144e1c38c83f9e::t_c12aa31761fc1f 8,11
+patches/v8/0032-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_144e1c38c83f9e::t_ed939095b2bdd9 8,11
+patches/v8/0034-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch
+  s_144e1c38c83f9e::t_463e0e10a1945d 14,17
+patches/v8/0035-Fix-ExtendedMap-layout-on-Windows.patch
+  s_144e1c38c83f9e::t_73cd922467f5bd 44,47,56
+patches/v8/0036-Fix-CFunction-MemorySpan-declarations-on-Windows.patch
+  s_144e1c38c83f9e::t_bd869f2dff25dd 14
+patches/v8/0037-Properly-depend-on-llvm-libc.patch
+  s_144e1c38c83f9e::t_a3f7639119e865 9,12,26
+patches/v8/0038-Fix-TSan-build-without-the-V8-sandbox.patch
+  s_144e1c38c83f9e::t_e07c662371914d 12,20,23-25,31,36,41
+patches/v8/0039-Enable-Perfetto-support-in-the-V8-Bazel-build.patch
+  s_144e1c38c83f9e::t_c1593c4e010952 14,26,29,34,63,71,94
+patches/v8/0041-Build-V8-release-archives-without-metagen.patch
+  s_144e1c38c83f9e::t_f6695cd016829f 24,42
+patches/v8/0043-Consider-all-dynamic-functions-code-like.patch
+  s_144e1c38c83f9e::t_24734e1489e05b 11
+patches/v8/0044-Add-UnboundModuleScript-GetCompileHintsCollector.patch
+  s_144e1c38c83f9e::t_ea7036616593f3 53,56
+patches/v8/0045-Forward-ThinStrings-shortcut-by-the-scavenger.patch
+  s_144e1c38c83f9e::t_f9cc06f669e2a6 15,18
+patches/v8/0046-Add-v8-Data-IsCompatibleWithIsolate.patch
+  s_144e1c38c83f9e::t_616ac15a9224c0 30
+patches/v8/0047-Keep-llvm-libc-private-to-v8_libbase.patch
+  s_144e1c38c83f9e::t_0644e3f516b78a 2-4,6-8,10-25
+patches/v8/0048-Keep-v8_libshared-private-to-v8.patch
+  s_144e1c38c83f9e::t_bad8a407b27b5e 1-56
+patches/v8/0049-Build-Temporal-in-the-V8-Bazel-build.patch
+  s_144e1c38c83f9e::t_7c791822764d96 1-181
+samples/BUILD.bazel
+  s_144e1c38c83f9e::t_836463e0e4f538 4
+samples/wrangler/.gitignore
+  s_144e1c38c83f9e::t_fac0f8dc349e31 1
+samples/wrangler/README.md
+  s_144e1c38c83f9e::t_3ce605a96abc64 1,3-5,7-9,11,13-14,16-20,23-30,32
+samples/wrangler/src/index.ts
+  s_144e1c38c83f9e::t_f98cc7b59cd221 1-39
+samples/wrangler/wrangler.jsonc
+  s_144e1c38c83f9e::t_047cdeba7565ab 1-10
+src/bench/streams/AGENTS.md
+  s_144e1c38c83f9e::t_439da23dfdf625 1-125
+src/bench/streams/body/AGENTS.md
+  s_144e1c38c83f9e::t_5a7e30f16a1af3 1-35
+src/bench/streams/body/BUILD.bazel
+  s_144e1c38c83f9e::t_28be36be5aa6a6 1-20
+src/bench/streams/body/body-cpp.wd-bench
+  s_144e1c38c83f9e::t_2116bfc8431444 1-22
+src/bench/streams/body/body-modules.capnp
+  s_144e1c38c83f9e::t_bd2d9fefb6234d 1-17
+src/bench/streams/body/body-ts.wd-bench
+  s_144e1c38c83f9e::t_416786cc655a43 1-23
+src/bench/streams/body/clone.js
+  s_144e1c38c83f9e::t_a805470c9b3e0f 1-54
+src/bench/streams/body/consume.js
+  s_144e1c38c83f9e::t_f2c83a476ab863 1-65
+src/bench/streams/body/form-data.js
+  s_144e1c38c83f9e::t_2f498a74714624 1-52
+src/bench/streams/body/helpers.js
+  s_144e1c38c83f9e::t_442e5d4d8f2413 1-104
+src/bench/streams/body/html-rewriter.js
+  s_144e1c38c83f9e::t_a0d14e03b0344f 1-104
+src/bench/streams/body/main.js
+  s_144e1c38c83f9e::t_5ae2dfcedde773 1-17
+src/bench/streams/body/pipe.js
+  s_144e1c38c83f9e::t_e0082cdea924e2 1-73
+src/bench/streams/body/read.js
+  s_144e1c38c83f9e::t_a552dcf95b40c0 1-52
+src/bench/streams/body/service-binding.js
+  s_144e1c38c83f9e::t_97ba323abf00bd 1-95
+src/bench/streams/compression/AGENTS.md
+  s_144e1c38c83f9e::t_b9abb399d2226a 1-26
+src/bench/streams/compression/BUILD.bazel
+  s_144e1c38c83f9e::t_f0cd8ffacf4103 1-18
+src/bench/streams/compression/compress.js
+  s_144e1c38c83f9e::t_57e327b8dd2462 1-40
+src/bench/streams/compression/compression-cpp.wd-bench
+  s_144e1c38c83f9e::t_09bf87bd61f473 1-17
+src/bench/streams/compression/compression-modules.capnp
+  s_144e1c38c83f9e::t_49d947e58261eb 1-14
+src/bench/streams/compression/compression-ts.wd-bench
+  s_144e1c38c83f9e::t_3fddc733a7822d 1-21
+src/bench/streams/compression/construction.js
+  s_144e1c38c83f9e::t_13434340e4ca63 1-31
+src/bench/streams/compression/decompress.js
+  s_144e1c38c83f9e::t_3e5170a1e76cf7 1-35
+src/bench/streams/compression/helpers.js
+  s_144e1c38c83f9e::t_b53b9072b18ce7 1-106
+src/bench/streams/compression/main.js
+  s_144e1c38c83f9e::t_58c7ff7fe74499 1-12
+src/bench/streams/compression/pipeline.js
+  s_144e1c38c83f9e::t_48d6c6f6acc13a 1-68
+src/bench/streams/digest/AGENTS.md
+  s_144e1c38c83f9e::t_586bbeea046d0b 1-21
+src/bench/streams/digest/BUILD.bazel
+  s_144e1c38c83f9e::t_8b310b17934f57 1-18
+src/bench/streams/digest/construction.js
+  s_144e1c38c83f9e::t_e66bcf2700cb7c 1-26
+src/bench/streams/digest/digest-cpp.wd-bench
+  s_144e1c38c83f9e::t_7b8b60518b13dc 1-17
+src/bench/streams/digest/digest-modules.capnp
+  s_144e1c38c83f9e::t_6474c1890ae568 1-13
+src/bench/streams/digest/digest-ts.wd-bench
+  s_144e1c38c83f9e::t_3255abea6eef45 1-20
+src/bench/streams/digest/helpers.js
+  s_144e1c38c83f9e::t_0aa824a17064a1 1-48
+src/bench/streams/digest/main.js
+  s_144e1c38c83f9e::t_6357481d9be9dc 1-11
+src/bench/streams/digest/pipe.js
+  s_144e1c38c83f9e::t_60fd3896ed1286 1-41
+src/bench/streams/digest/write.js
+  s_144e1c38c83f9e::t_25126cc05919fc 1-54
+src/bench/streams/encoding/AGENTS.md
+  s_144e1c38c83f9e::t_ae78665425a79f 1-32
+src/bench/streams/encoding/BUILD.bazel
+  s_144e1c38c83f9e::t_3dc369e8f1cbfc 1-19
+src/bench/streams/encoding/construction.js
+  s_144e1c38c83f9e::t_422a2ca81a88e2 1-24
+src/bench/streams/encoding/decoder.js
+  s_144e1c38c83f9e::t_6ea48b7bb0ef97 1-66
+src/bench/streams/encoding/encoder.js
+  s_144e1c38c83f9e::t_078192ade463ed 1-30
+src/bench/streams/encoding/encoding-cpp.wd-bench
+  s_144e1c38c83f9e::t_7d95031d3404d8 1-17
+src/bench/streams/encoding/encoding-modules.capnp
+  s_144e1c38c83f9e::t_aba79c17f9eaca 1-14
+src/bench/streams/encoding/encoding-ts.wd-bench
+  s_144e1c38c83f9e::t_d4b8148222668a 1-20
+src/bench/streams/encoding/helpers.js
+  s_144e1c38c83f9e::t_67b073047586c7 1-53
+src/bench/streams/encoding/main.js
+  s_144e1c38c83f9e::t_17843bb24ee07e 1-12
+src/bench/streams/encoding/pipeline.js
+  s_144e1c38c83f9e::t_979e4be219b6b6 1-38
+src/bench/streams/identity/AGENTS.md
+  s_144e1c38c83f9e::t_f5f921f24d8ecf 1-29
+src/bench/streams/identity/BUILD.bazel
+  s_144e1c38c83f9e::t_269eb09552cc57 1-20
+src/bench/streams/identity/construction.js
+  s_144e1c38c83f9e::t_27c4511ac4f841 1-29
+src/bench/streams/identity/helpers.js
+  s_144e1c38c83f9e::t_c06764d1f54c28 1-79
+src/bench/streams/identity/identity-cpp.wd-bench
+  s_144e1c38c83f9e::t_0369c717105f82 1-17
+src/bench/streams/identity/identity-modules.capnp
+  s_144e1c38c83f9e::t_ce03b45df22253 1-14
+src/bench/streams/identity/identity-ts.wd-bench
+  s_144e1c38c83f9e::t_6a1151b0b4779c 1-20
+src/bench/streams/identity/main.js
+  s_144e1c38c83f9e::t_a532d37d185855 1-12
+src/bench/streams/identity/pipe.js
+  s_144e1c38c83f9e::t_404601a0f251ac 1-66
+src/bench/streams/identity/roundtrip.js
+  s_144e1c38c83f9e::t_4fbba028d4eff5 1-58
+src/bench/streams/identity/throughput.js
+  s_144e1c38c83f9e::t_24cc785186edf6 1-85
+src/bench/streams/piping/AGENTS.md
+  s_144e1c38c83f9e::t_d5af176c8ef5aa 1-16
+src/bench/streams/piping/BUILD.bazel
+  s_144e1c38c83f9e::t_05ffc98541e0ce 1-20
+src/bench/streams/piping/byte-pipes.js
+  s_144e1c38c83f9e::t_92ea68e5f6d881 1-35
+src/bench/streams/piping/helpers.js
+  s_144e1c38c83f9e::t_f6a43bb9b0242b 1-80
+src/bench/streams/piping/main.js
+  s_144e1c38c83f9e::t_6a658f792772cb 1-12
+src/bench/streams/piping/pipe-options.js
+  s_144e1c38c83f9e::t_59b8fca5f6154f 1-51
+src/bench/streams/piping/pipe-through.js
+  s_144e1c38c83f9e::t_bcccc8dc9f2316 1-41
+src/bench/streams/piping/pipe-to.js
+  s_144e1c38c83f9e::t_8af5951a02f602 1-35
+src/bench/streams/piping/piping-cpp.wd-bench
+  s_144e1c38c83f9e::t_189ab098253ee4 1-17
+src/bench/streams/piping/piping-modules.capnp
+  s_144e1c38c83f9e::t_6519a72cb8db3b 1-14
+src/bench/streams/piping/piping-ts.wd-bench
+  s_144e1c38c83f9e::t_6b99c5a9922022 1-20
+src/bench/streams/readable-byte/AGENTS.md
+  s_144e1c38c83f9e::t_da954578053615 1-30
+src/bench/streams/readable-byte/BUILD.bazel
+  s_144e1c38c83f9e::t_4a2ea5070f8784 1-18
+src/bench/streams/readable-byte/auto-allocate.js
+  s_144e1c38c83f9e::t_c76219b8cdb55a 1-32
+src/bench/streams/readable-byte/byob-reader.js
+  s_144e1c38c83f9e::t_43c0e112e74324 1-109
+src/bench/streams/readable-byte/construction.js
+  s_144e1c38c83f9e::t_6b44a4ff100ecf 1-27
+src/bench/streams/readable-byte/default-reader.js
+  s_144e1c38c83f9e::t_a7174974d5c12d 1-36
+src/bench/streams/readable-byte/helpers.js
+  s_144e1c38c83f9e::t_cdfa5faf0776df 1-97
+src/bench/streams/readable-byte/main.js
+  s_144e1c38c83f9e::t_f44a21ca8793fd 1-13
+src/bench/streams/readable-byte/readable-byte-cpp.wd-bench
+  s_144e1c38c83f9e::t_2e0293f85b9476 1-17
+src/bench/streams/readable-byte/readable-byte-modules.capnp
+  s_144e1c38c83f9e::t_f689f1d1b4f4e9 1-15
+src/bench/streams/readable-byte/readable-byte-ts.wd-bench
+  s_144e1c38c83f9e::t_efa02e3e2373a4 1-20
+src/bench/streams/readable-byte/tee.js
+  s_144e1c38c83f9e::t_1c57e5f60f1211 1-30
+src/bench/streams/readable/AGENTS.md
+  s_144e1c38c83f9e::t_d794ab24484a42 1-30
+src/bench/streams/readable/BUILD.bazel
+  s_144e1c38c83f9e::t_a037ca8b998080 1-18
+src/bench/streams/readable/async-iteration.js
+  s_144e1c38c83f9e::t_7d383398503ee9 1-49
+src/bench/streams/readable/cancel.js
+  s_144e1c38c83f9e::t_a2dad60e7baa45 1-50
+src/bench/streams/readable/construction.js
+  s_144e1c38c83f9e::t_e9106452e8b4d4 1-35
+src/bench/streams/readable/from.js
+  s_144e1c38c83f9e::t_d6ace060bfcaca 1-35
+src/bench/streams/readable/helpers.js
+  s_144e1c38c83f9e::t_dba8a348ef2397 1-63
+src/bench/streams/readable/main.js
+  s_144e1c38c83f9e::t_ae28234d3ffee7 1-15
+src/bench/streams/readable/read-loop.js
+  s_144e1c38c83f9e::t_69e3f3129ffa6b 1-41
+src/bench/streams/readable/readable-cpp.wd-bench
+  s_144e1c38c83f9e::t_0750f884501343 1-17
+src/bench/streams/readable/readable-modules.capnp
+  s_144e1c38c83f9e::t_76eb4fd640f285 1-17
+src/bench/streams/readable/readable-ts.wd-bench
+  s_144e1c38c83f9e::t_f0ffed1dd5f62a 1-20
+src/bench/streams/readable/reader.js
+  s_144e1c38c83f9e::t_03e4d5a3fc0ef6 1-84
+src/bench/streams/readable/tee.js
+  s_144e1c38c83f9e::t_979485aa25ca6b 1-45
+src/bench/streams/strategies/AGENTS.md
+  s_144e1c38c83f9e::t_f647c31010f916 1-23
+src/bench/streams/strategies/BUILD.bazel
+  s_144e1c38c83f9e::t_00b692216748e9 1-18
+src/bench/streams/strategies/helpers.js
+  s_144e1c38c83f9e::t_c0575fc374133f 1-17
+src/bench/streams/strategies/main.js
+  s_144e1c38c83f9e::t_f5a151d5863c37 1-10
+src/bench/streams/strategies/queue-accounting.js
+  s_144e1c38c83f9e::t_f126e1f19638e8 1-58
+src/bench/streams/strategies/strategies-cpp.wd-bench
+  s_144e1c38c83f9e::t_71db867bb14347 1-17
+src/bench/streams/strategies/strategies-modules.capnp
+  s_144e1c38c83f9e::t_b3e385a9cc9d76 1-12
+src/bench/streams/strategies/strategies-ts.wd-bench
+  s_144e1c38c83f9e::t_26b9e5114a3597 1-20
+src/bench/streams/strategies/strategy-objects.js
+  s_144e1c38c83f9e::t_9842b34d3b705b 1-45
+src/bench/streams/transform/AGENTS.md
+  s_144e1c38c83f9e::t_f51a632f8b4938 1-17
+src/bench/streams/transform/BUILD.bazel
+  s_144e1c38c83f9e::t_333685af238b95 1-18
+src/bench/streams/transform/construction.js
+  s_144e1c38c83f9e::t_486b49dd342511 1-38
+src/bench/streams/transform/helpers.js
+  s_144e1c38c83f9e::t_899ee396f01f9d 1-78
+src/bench/streams/transform/main.js
+  s_144e1c38c83f9e::t_94adbe882a1b32 1-11
+src/bench/streams/transform/roundtrip.js
+  s_144e1c38c83f9e::t_2ba1303b8301f9 1-38
+src/bench/streams/transform/throughput.js
+  s_144e1c38c83f9e::t_1fc61c305ae761 1-46
+src/bench/streams/transform/transform-cpp.wd-bench
+  s_144e1c38c83f9e::t_44a5498e6b0b51 1-17
+src/bench/streams/transform/transform-modules.capnp
+  s_144e1c38c83f9e::t_0023d55d12950c 1-13
+src/bench/streams/transform/transform-ts.wd-bench
+  s_144e1c38c83f9e::t_a899aaaa74763c 1-20
+src/bench/streams/writable/AGENTS.md
+  s_144e1c38c83f9e::t_b20a5d0797092c 1-13
+src/bench/streams/writable/BUILD.bazel
+  s_144e1c38c83f9e::t_de1b17dfeda53b 1-18
+src/bench/streams/writable/abort.js
+  s_144e1c38c83f9e::t_4cc8e6c29a8b99 1-47
+src/bench/streams/writable/construction.js
+  s_144e1c38c83f9e::t_24c525bf2795a8 1-30
+src/bench/streams/writable/helpers.js
+  s_144e1c38c83f9e::t_b82bfe0efb92fd 1-30
+src/bench/streams/writable/main.js
+  s_144e1c38c83f9e::t_63e4ab591e3998 1-12
+src/bench/streams/writable/writable-cpp.wd-bench
+  s_144e1c38c83f9e::t_f2409ce72597d3 1-17
+src/bench/streams/writable/writable-modules.capnp
+  s_144e1c38c83f9e::t_338e0547be51ee 1-14
+src/bench/streams/writable/writable-ts.wd-bench
+  s_144e1c38c83f9e::t_4a62317540ae4b 1-20
+src/bench/streams/writable/write-loop.js
+  s_144e1c38c83f9e::t_348807c72203a2 1-64
+src/bench/streams/writable/writer.js
+  s_144e1c38c83f9e::t_64a4a22ca57a7b 1-52
+src/cloudflare/durable-objects.ts
+  s_144e1c38c83f9e::t_f55e0f9e4d317d 8
+src/cloudflare/internal/workers.d.ts
+  s_144e1c38c83f9e::t_3c52cd93ee415f 74
+src/node/internal/filesystem.d.ts
+  s_144e1c38c83f9e::t_796fe3a9c07524 51-53
+src/node/internal/inspector.d.ts
+  s_144e1c38c83f9e::t_471a55ce9b6fb8 5
+src/node/internal/internal_fs_callback.ts
+  s_144e1c38c83f9e::t_c58129a0dfc371 27,1351-1354
+src/node/internal/internal_fs_stdio.ts
+  s_144e1c38c83f9e::t_02b3a64c67f186 1-113
+src/node/internal/internal_fs_sync.ts
+  s_144e1c38c83f9e::t_7ffd3dfe17e367 90,823,856
+src/node/internal/internal_mime.ts
+  s_144e1c38c83f9e::t_2478d4a4621d32 1-670
+src/node/util.ts
+  s_144e1c38c83f9e::t_1201762aea0448 9,105
+src/per_isolate/AGENTS.md
+  s_144e1c38c83f9e::t_7fa67c7286530e 4,25-26,54-57,200-202
+src/per_isolate/events/AGENTS.md
+  s_144e1c38c83f9e::t_f2b7ab09b0214b 1-29
+src/per_isolate/events/event-target-internals.ts
+  s_144e1c38c83f9e::t_f5b47a0ab58eff 1-115
+src/per_isolate/main.ts
+  s_144e1c38c83f9e::t_d2959892c69bc9 34,281-331
+src/per_isolate/messagechannel/messagechannel.ts
+  s_144e1c38c83f9e::t_993e17a00d2650 1-423
+src/per_isolate/per_isolate-env.d.ts
+  s_144e1c38c83f9e::t_e4ca8c191312ed 96-98,121-152
+src/per_isolate/primordials.ts
+  s_144e1c38c83f9e::t_d4326d34ef2a4f 681
+src/per_isolate/webstreams/AGENTS.md
+  s_144e1c38c83f9e::t_fb5af7b4569c07 123-129,171-180,183,202,204,207-209,212-214
+src/per_isolate/webstreams/common.ts
+  s_144e1c38c83f9e::t_af7ad296e47d08 108,331-334
+src/per_isolate/webstreams/native.ts
+  s_144e1c38c83f9e::t_351cab3bba9591 12-14,191-192,194-195,198,201,203,211-212,224,226-229,235-237,242-243
+src/per_isolate/webstreams/readable.ts
+  s_144e1c38c83f9e::t_e95b01a31686ed 268-271,275,392,396-401,1691-1695,1774-1780,2129-2132,2705-2707,2712,2816-2861,3597-3600,3626-3629,3699-3706,3710-3715,3845-3846,3868,3871-3872,3875,3910-3920,3965-3968,3977,4302-4304,4338,4392-4394,4629-4632,4812-4822,4826-4831,4834-4836,4948,4975-4976
+src/per_isolate/webstreams/transform.ts
+  s_144e1c38c83f9e::t_2e6eb71fc33f09 569-573
+src/per_isolate/webstreams/types.d.ts
+  s_144e1c38c83f9e::t_49aa98eb45ffdf 39-44
+src/per_isolate/webstreams/writable.ts
+  s_144e1c38c83f9e::t_7c2c235ed1836c 166-168,202-205,209,290,292,394,411-413,787,809,921-932,985,1089-1092,1142-1145,1149-1187,1228,1244,1781,1796-1798
+src/pyodide/AGENTS.md
+  s_144e1c38c83f9e::t_10331455b83747 16,20-21
+src/pyodide/BUILD.bazel
+  s_144e1c38c83f9e::t_ef543ea4fab75b 2
+src/pyodide/helpers.bzl
+  s_144e1c38c83f9e::t_a2a5e88b509d88 7,246,262,270
+src/pyodide/internal/loadPackage.ts
+  s_144e1c38c83f9e::t_15a510d028e2d5 6-7,10,13-15,19-20,24-31,33-34,37-39,49-82
+src/pyodide/internal/metadata.ts
+  s_144e1c38c83f9e::t_5e0b5bfc2f6b5a 59-60
+src/pyodide/internal/pool/emscriptenSetup.ts
+  s_144e1c38c83f9e::t_492226bbf50fd4 59,65-77,242
+src/pyodide/internal/python.ts
+  s_144e1c38c83f9e::t_9f057ac41832e6 224
+src/pyodide/python_packages.capnp
+  s_144e1c38c83f9e::t_93d8019250f4a3 12
+src/pyodide/scripts/make_snapshots.py
+  s_144e1c38c83f9e::t_0f6aac1d65f9b7 27,321
+src/pyodide/scripts/upload_bundles.py
+  s_144e1c38c83f9e::t_c7022a6a99c636 100
+src/pyodide/tools/BUILD.bazel
+  s_144e1c38c83f9e::t_1f1af3ad679b5c 2,26-33
+src/pyodide/types/filesystem.d.ts
+  s_144e1c38c83f9e::t_15df37c8e8e48b 34
+src/pyodide/types/pyodide-lock.d.ts
+  s_144e1c38c83f9e::t_ee40229f254a41 5-6
+src/pyodide/types/python_stdlib.d.ts
+  s_144e1c38c83f9e::t_e7fb5258a45f47 5-6,8-9
+src/pyodide/types/runtime-generated/metadata.d.ts
+  s_144e1c38c83f9e::t_9474eb5e82b49c 16
+src/rust/AGENTS.md
+  s_144e1c38c83f9e::t_cc1139e01a3646 17-18,37-41,43-45,48,50,61,70,74,135
+src/rust/api/BUILD.bazel
+  s_144e1c38c83f9e::t_0a9ec41395e4c7 1,14,27-44
+src/rust/api/inspector.c++
+  s_144e1c38c83f9e::t_c1299d984c5902 1,5,7-8,12-13,18,20,22-50,53-56,60-63,65,68,71,76-85,88-91,95,97-117,119-121,123
+src/rust/api/inspector.h
+  s_144e1c38c83f9e::t_abe28468625105 1-51
+src/rust/api/inspector.rs
+  s_144e1c38c83f9e::t_aedfabc1bb12b9 1-184
+src/rust/api/lib-test.rs
+  s_144e1c38c83f9e::t_c4343bc2c0055e 5,16-17
+src/rust/api/lib.rs
+  s_144e1c38c83f9e::t_23f2b2a91605e9 8,12,23-46,57-67,73
+src/rust/cxx/BUILD.bazel
+  s_144e1c38c83f9e::t_343aa1761d35fb 3,125
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_144e1c38c83f9e::t_e461c61772bf13 468
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_144e1c38c83f9e::t_67e1742e0d4ac4 241,1348
+src/rust/cxx/kj-hyper/tls.rs
+  s_144e1c38c83f9e::t_8be728393d6c81 372,374,377,380
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_144e1c38c83f9e::t_f21fd2652e016d 84,110,150,160,224,356,426,449,561,586,607,638,664,672,680,728,750,860,936,978,1026,1050,1066,1099,1144,1169,1216,1238,1252,1304,1320,1386,1538,1623,1630,1634
+src/rust/cxx/src/exception.rs
+  s_144e1c38c83f9e::t_636946ed56d64f 225-233
+src/rust/cxx/src/result.rs
+  s_144e1c38c83f9e::t_0e4359c4c53a0b 56,59-67,93
+src/rust/cxx/src/symbols/rust_string.rs
+  s_144e1c38c83f9e::t_71499ac6560da7 34-38,43-55
+src/rust/cxx/tests/ffi/lib.rs
+  s_144e1c38c83f9e::t_a4e76045945203 303
+src/rust/cxx/tests/ffi/tests.cc
+  s_144e1c38c83f9e::t_ff1ec09bff331f 828-834,1278-1287
+src/rust/cxx/tests/ffi/tests.h
+  s_144e1c38c83f9e::t_c9e5e07d7ff61e 278
+src/rust/cxx/tests/test.rs
+  s_144e1c38c83f9e::t_6b37d1b7af6f98 818-828
+src/rust/jsg-bench/BUILD.bazel
+  s_144e1c38c83f9e::t_135ba22ad78f58 1-42
+src/rust/jsg-bench/README.md
+  s_144e1c38c83f9e::t_c6a2050bb3c1d0 1-107
+src/rust/jsg-bench/analyze.py
+  s_144e1c38c83f9e::t_03cb5e5b1897bf 1-133
+src/rust/jsg-bench/bench.c++
+  s_144e1c38c83f9e::t_9810d556ab91ff 1-606
+src/rust/jsg-bench/lib.rs
+  s_144e1c38c83f9e::t_5cc487c045b344 1-345
+src/rust/jsg-bench/smoke-test.sh
+  s_144e1c38c83f9e::t_65ff1c9393407f 2-3,6-7
+src/rust/jsg-compile-tests/array-buffer-is-bytes-only.rs
+  s_144e1c38c83f9e::t_529931df06b89f 1-18
+src/rust/jsg-compile-tests/async-context-enter-holds-the-lock.rs
+  s_144e1c38c83f9e::t_be1b3d4e20d3cf 5-8,10
+src/rust/jsg-compile-tests/async-context-enter-lock-cannot-escape.rs
+  s_144e1c38c83f9e::t_b43055c69c97a0 1-11
+src/rust/jsg-compile-tests/async-context-frame-is-not-traced.rs
+  s_144e1c38c83f9e::t_7fdbfdab15655b 1-18
+src/rust/jsg-compile-tests/callback-must-not-capture.rs
+  s_144e1c38c83f9e::t_2219a26c3c0aac 11-14
+src/rust/jsg-compile-tests/duplicate-parameter-names.rs
+  s_144e1c38c83f9e::t_8fe7a041b68f93 1-17
+src/rust/jsg-compile-tests/function-new-closure-must-not-capture.rs
+  s_144e1c38c83f9e::t_17a93fd24faed0 1-15
+src/rust/jsg-compile-tests/js-string-is-scoped.rs
+  s_144e1c38c83f9e::t_424b7f2a411735 5-10
+src/rust/jsg-compile-tests/method-receiver-is-shared.rs
+  s_144e1c38c83f9e::t_b746c9cfc73805 33-34,38-39,43,48,50,54,66,70
+src/rust/jsg-compile-tests/non-coercible-type.rs
+  s_144e1c38c83f9e::t_598b91edc6ab34 1-33
+src/rust/jsg-compile-tests/ok-async-context-frame.rs
+  s_144e1c38c83f9e::t_d5d8949d2ef827 1-34
+src/rust/jsg-compile-tests/ok-builtin-module.rs
+  s_144e1c38c83f9e::t_d7c9c802845ace 5-6,8-20,26
+src/rust/jsg-compile-tests/ok-callback.rs
+  s_144e1c38c83f9e::t_4537321f1e707c 10-13
+src/rust/jsg-compile-tests/ok-empty-struct.rs
+  s_144e1c38c83f9e::t_ac8ceca99af232 1-13
+src/rust/jsg-compile-tests/ok-function-new.rs
+  s_144e1c38c83f9e::t_fd3b00920518b4 1-15
+src/rust/jsg-compile-tests/ok-generic-conversions.rs
+  s_144e1c38c83f9e::t_45695aa2d9ecf1 13,21
+src/rust/jsg-compile-tests/ok-local-casts.rs
+  s_144e1c38c83f9e::t_c74c9427502b8b 25-29,38
+src/rust/jsg-compile-tests/ok-oneof.rs
+  s_144e1c38c83f9e::t_52b74df6f7d2a3 1-70
+src/rust/jsg-compile-tests/ok-promise.rs
+  s_144e1c38c83f9e::t_c8a4285da931e6 1-42
+src/rust/jsg-compile-tests/ok-slice-then-js.rs
+  s_144e1c38c83f9e::t_af46f5f9fb55a9 13
+src/rust/jsg-compile-tests/ok-this-parameter.rs
+  s_144e1c38c83f9e::t_558646f84b5d80 29-30,38,40,59-60,69-70
+src/rust/jsg-compile-tests/ok-wildcard-property-shapes.rs
+  s_144e1c38c83f9e::t_432a64e86d5c9b 1-45
+src/rust/jsg-compile-tests/oneof-duplicate-types.rs
+  s_144e1c38c83f9e::t_0aeb046393b8f2 1-33
+src/rust/jsg-compile-tests/oneof-generic-parameters.rs
+  s_144e1c38c83f9e::t_e3acf7c6526682 1-23
+src/rust/jsg-compile-tests/oneof-nested-duplicate-types.rs
+  s_144e1c38c83f9e::t_5da011263cba81 1-74
+src/rust/jsg-compile-tests/oneof-variant-type.rs
+  s_144e1c38c83f9e::t_7bcc0220fe9347 1-15
+src/rust/jsg-compile-tests/oneof-web-idl-rules.rs
+  s_144e1c38c83f9e::t_f661c9544be9b8 1-110
+src/rust/jsg-compile-tests/owned-fromjs-bound-rejects-local.rs
+  s_144e1c38c83f9e::t_3019d96a2b8c0f 6-7,14
+src/rust/jsg-compile-tests/promise-resolver-is-not-a-value.rs
+  s_144e1c38c83f9e::t_7119a0523af094 1-12
+src/rust/jsg-compile-tests/promise-then-callback-must-not-capture.rs
+  s_144e1c38c83f9e::t_9d386546e8c771 1-18
+src/rust/jsg-compile-tests/slice-across-js-call.rs
+  s_144e1c38c83f9e::t_1d029700363f50 14
+src/rust/jsg-compile-tests/this-parameter-is-the-receiver.rs
+  s_144e1c38c83f9e::t_7f6461941c41b5 69,72,76
+src/rust/jsg-compile-tests/tojs-result-is-scoped.rs
+  s_144e1c38c83f9e::t_8254c943bb4e0a 9-11
+src/rust/jsg-compile-tests/traced-async-context-frame-is-not-sync.rs
+  s_144e1c38c83f9e::t_af3d6dc81b967a 1-17
+src/rust/jsg-compile-tests/wildcard-property-shape.rs
+  s_144e1c38c83f9e::t_2daa51612a7e04 1-122
+src/rust/jsg-cpp/BUILD.bazel
+  s_144e1c38c83f9e::t_18437e6107f421 1-42
+src/rust/jsg-cpp/ffi.c++
+  s_144e1c38c83f9e::t_66c0a17d5f0c03 1-22
+src/rust/jsg-cpp/ffi.rs
+  s_144e1c38c83f9e::t_4032cde6537836 1-274
+src/rust/jsg-cpp/jsg-cpp.h
+  s_144e1c38c83f9e::t_c759ddabb00e2d 1-271
+src/rust/jsg-cpp/lib.rs
+  s_144e1c38c83f9e::t_1a2e42c51e81ef 1-24
+src/rust/jsg-macros/README.md
+  s_144e1c38c83f9e::t_6a2af551c0973c 19,23-37,41,73-74,80-84,88-91,124,128,130-132,137-141,163-174,177,197,203-204,206,212,221,223-225,229-231,233-234,264-265,283-284,295-302,310-312,319-321,329,336,342,345,365-368,373-374,376,409-437,440-450,457,466,500-502,505-506
+src/rust/jsg-macros/lib.rs
+  s_144e1c38c83f9e::t_9fbf1f8861d67d 17,25,29,40-41,46,49,60,63-67,69,74,80,82,86,99-102,104-108,120,130-131,136-138,147-148,182-184,189-302,327-332,341,347-356,359-365,373,448,451-452,456-462,466,503,506-514,518-521,604,758-761,841,843-844,865-871,884-909,916-917,919-928,935,940
+src/rust/jsg-macros/oneof-test.rs
+  s_144e1c38c83f9e::t_856bf55e1844de 1-45
+src/rust/jsg-macros/oneof.rs
+  s_144e1c38c83f9e::t_13d9e4b63a31e7 1-396
+src/rust/jsg-macros/resource-test.rs
+  s_144e1c38c83f9e::t_e7c98eaf38ecd0 300,307,309,313,316-420,440-441,448-495,500,506-507,510-512,514,520-609,736,739-797
+src/rust/jsg-macros/resource.rs
+  s_144e1c38c83f9e::t_2c1d4f269cee41 9-11,14,27,31,42,54,115-117,125-131,134-137,147-148,175-178,182-187,196-206,212-213,217-219,224-253,268-272,281-284,287-294,296-303,305-323,325-329,334-387,403,410,416-421,469,476,478,480,606-607,661-662,664,673,675-678,687-688,698-772,916,957,960-965,973-977,983-984,1014-1019,1026-1027,1037-1048,1050-1064,1067-1076,1079-1084,1091-1115,1118-1119,1126,1154-1161,1183,1198-1199,1266,1289,1323-1332,1347-1348,1360-1361,1364
+src/rust/jsg-macros/utils-test.rs
+  s_144e1c38c83f9e::t_87d214944a1046 23-88,119-132,186-191,193-204
+src/rust/jsg-macros/utils.rs
+  s_144e1c38c83f9e::t_aae7113f0d24a5 47-50,63,194-199,244,246,250-251,283,291-293,295-328
+src/rust/jsg-macros/wildcard.rs
+  s_144e1c38c83f9e::t_59bff46aa50276 1-239
+src/rust/jsg-test/BUILD.bazel
+  s_144e1c38c83f9e::t_ecef2076826345 7,13,20-23,25,28,45,51,58
+src/rust/jsg-test/cpp-interop.c++
+  s_144e1c38c83f9e::t_7f18fb525ea2a3 1-178
+src/rust/jsg-test/cpp-interop.h
+  s_144e1c38c83f9e::t_70ca9627de043d 1-151
+src/rust/jsg-test/cpp_interop.rs
+  s_144e1c38c83f9e::t_4db54361df2587 1-356
+src/rust/jsg-test/ffi.c++
+  s_144e1c38c83f9e::t_bdfb31ef3676b8 7-8,10-11,18,26,41-47,101,140-200,255-258,284-298,307-325,330-392
+src/rust/jsg-test/ffi.h
+  s_144e1c38c83f9e::t_7a13190ac4624a 32-39,88-90,101-105,112-118,122-148
+src/rust/jsg-test/lib.rs
+  s_144e1c38c83f9e::t_d53b7c9c08c8fb 6-7,14,26,79-83,85-91,103-107,129-134,145-155,158-190,196-234,304-317,333-350,352-355,357-359,387-394,521-527,612-729
+src/rust/jsg-test/tests/argument_errors.rs
+  s_144e1c38c83f9e::t_4c47ae74961f96 22-23,27,39-40,62-63,69,86,114,134
+src/rust/jsg-test/tests/arrays.rs
+  s_144e1c38c83f9e::t_944f8d6930bc18 6-8,16,25-26,30-31,40-41,55-56,60-61,65-66,70-77,81-88,92-97,101-102,106-112,116-122,126-132,136-142,151,154-157,172,175-179,184,194,197-198,203,206,216,219,222,224,227-232,242,256-257,259,263,266-277,280,283,295,316,321,325-332,334-362,364-450,452-485,497-498,508,511,523-524,527-536,551-627,629,632-650,655,660-662,664,667,669,672,674-676,678,681,683,686-702,711-713,715,717-718,723,728-733,736-737,740-741,744-747,757-759,761,763-764,773,796,809,827,840,851,859,870,873,875-876,878,880-882,884-885,897,908,911,913-915,917-918,930,941-942,944,946-952,959,963,966-970,972,974-975,977,979-981,983-984,1007-1008,1017-1018,1027-1028,1037,1041,1053,1056,1059,1062,1065,1068,1078,1094,1097,1101,1111,1176,1205,1209,1213,1225,1230,1235,1240,1249,1252-1253,1255-1256,1258-1259,1261-1270,1277,1280-1282,1284-1286,1293,1296-1298,1300-1301,1307-1310,1312-1313,1315-1354,1356-1366,1368-1369,1374-1377,1379-1380,1383-1418,1420-1422,1427-1428,1430,1433-1455,1457-1469,1474-1475,1477,1480-1499
+src/rust/jsg-test/tests/async_context.rs
+  s_144e1c38c83f9e::t_e9d895bd1195bc 1-524
+src/rust/jsg-test/tests/boolean.rs
+  s_144e1c38c83f9e::t_1aeda505739a17 1-73
+src/rust/jsg-test/tests/buffer_types.rs
+  s_144e1c38c83f9e::t_d1b316adfa44e0 7,31,34-35,48,188,217,284,303-304,313-317,319,390,464,525,550-551,560-564,567,667,719,724,736
+src/rust/jsg-test/tests/builtin_module.rs
+  s_144e1c38c83f9e::t_e60562ae3d1327 1-72
+src/rust/jsg-test/tests/coercion_safety.rs
+  s_144e1c38c83f9e::t_4e006de404567b 7,11-14,29,33-75,89,95-97,99,102-133,135,162,173,179,184,189-190,198,200-201,209-210,215-224,226,241,275,278,280,284-285,319,324,341-342,344,360,375,380,388,400-401,403,409-410,418,441-444,446,452,462,464-465,471,473,479,486,488-489,506,515-519,532,537-551,557,562-563,565,567-950
+src/rust/jsg-test/tests/collections_gc.rs
+  s_144e1c38c83f9e::t_f4cc510fd6190a 7-14,17-18,20-21,44-64,76-77,109-111,116-117,150,194-195,202-203,234,278-279,286-287,318,369-370,377-378,409,458-459,466-467,498,514-572,601-602,607-608,639,683,691-692,742-744,754-755,791,798-799,850,857-858,930,937-938,1001,1006-1007
+src/rust/jsg-test/tests/cpp_interop.rs
+  s_144e1c38c83f9e::t_de12109aee2005 1-319
+src/rust/jsg-test/tests/date_bigint.rs
+  s_144e1c38c83f9e::t_d5006e4e0efb65 5-6,15-17,31-32,39-45,48,71-79,161-212,273-473
+src/rust/jsg-test/tests/dict.rs
+  s_144e1c38c83f9e::t_fc2d1fec296931 1-451
+src/rust/jsg-test/tests/eval.rs
+  s_144e1c38c83f9e::t_e4f262e767fd4e 28,57,66,115-116,118,253,259,264,267-269,309-310,319,329,339,341-342,351,353-354,363,365-366,375,377-378,387,390-391
+src/rust/jsg-test/tests/fast_api.rs
+  s_144e1c38c83f9e::t_077af1bb0b19c5 22-23,27-28,32-33,37,46-79,86-87,91-93,97-98,134,138-166,173,179,191,197,209,215,227,233,262-283,323-443,452,481
+src/rust/jsg-test/tests/function.rs
+  s_144e1c38c83f9e::t_d98d44ce6e53bc 84-85,98-101,114-116,134-135,154-155,173,190-195,220,222-223,237-241
+src/rust/jsg-test/tests/function_new.rs
+  s_144e1c38c83f9e::t_a3d7dd1d1a2d50 1-437
+src/rust/jsg-test/tests/gc.rs
+  s_144e1c38c83f9e::t_938c84d6260fd6 101,135,172,232,256,284,290,413,463,468,588,658-659,692,694,716,747,847,880,906,927-928,969,1024,1106,1226,1260,1290,1319,1349,1378
+src/rust/jsg-test/tests/global.rs
+  s_144e1c38c83f9e::t_fd43670af1fc3e 52,110,196,226,267
+src/rust/jsg-test/tests/harness.rs
+  s_144e1c38c83f9e::t_f6e04504d40f05 44-58
+src/rust/jsg-test/tests/integer.rs
+  s_144e1c38c83f9e::t_f61852cbdca3a5 5-8,12-17,59-60,95-96,107-190,205-668
+src/rust/jsg-test/tests/internal_error.rs
+  s_144e1c38c83f9e::t_f1d96b0bc09fb1 1-27
+src/rust/jsg-test/tests/isolates.rs
+  s_144e1c38c83f9e::t_b59cb389161728 59,74,88,114,126,166,209,217,229-275,347,359,391,420,439
+src/rust/jsg-test/tests/js_string.rs
+  s_144e1c38c83f9e::t_42b09f3876cd0c 1-172
+src/rust/jsg-test/tests/jsg_oneof.rs
+  s_144e1c38c83f9e::t_8916eaaf9b8f10 5-13,15-16,20,22-70,76,82,86,89-96,98,103,105-200,204,207-294,296,298-299,304,306-307,312,314-315,320,322-323,328,330-331,334-372,375-387,389-396,398-413,417-423,425-430,435-441,443-461,465-469,471-481,483-493,497-498,500-510,512-514,516-522,527-533,535-541,543-567,569-574,579-588,590-596,598-601,603-608,611-613,618-637,639-641,643,645-646,648-661,664-673,675-676,679-693,695-697,701-739
+src/rust/jsg-test/tests/jsg_oneof_variants.rs
+  s_144e1c38c83f9e::t_e84590c92fc7ad 1-628
+src/rust/jsg-test/tests/jsg_struct.rs
+  s_144e1c38c83f9e::t_18dd213fc8e83e 41-83,91,97,99,114,127,141,145,160-161,164-165,182,201-202,245,250,255,325,330-343,348-349,351,358,365-457
+src/rust/jsg-test/tests/local_cast.rs
+  s_144e1c38c83f9e::t_e680bbeef13377 8-9,21,36,51,66,85,103,121,139,186,196,204,244,254,261,263,277,295,313,331,362-363,380
+src/rust/jsg-test/tests/local_value.rs
+  s_144e1c38c83f9e::t_53e559c5252f42 54-55,67
+src/rust/jsg-test/tests/lock_errors.rs
+  s_144e1c38c83f9e::t_db7e02f73adc24 1-104
+src/rust/jsg-test/tests/mod.rs
+  s_144e1c38c83f9e::t_a3b138d77840e3 7-8,10,14,16,20,25,27,29,34,38-40,42-43,46-47,51,55,59
+src/rust/jsg-test/tests/nested_type.rs
+  s_144e1c38c83f9e::t_81e3a45908ac3d 58,60,104,154,190,245,257
+src/rust/jsg-test/tests/non_coercible.rs
+  s_144e1c38c83f9e::t_0992d5bb6840f5 28,49-50,61-62,87-89,130,158-159,163
+src/rust/jsg-test/tests/null_or_undefined.rs
+  s_144e1c38c83f9e::t_94abb1f5a61f4d 1-217
+src/rust/jsg-test/tests/nullable.rs
+  s_144e1c38c83f9e::t_1863b00489d7f1 1-257
+src/rust/jsg-test/tests/number.rs
+  s_144e1c38c83f9e::t_232ceea3cc92dd 1-265
+src/rust/jsg-test/tests/pending_exception.rs
+  s_144e1c38c83f9e::t_a746375e084bd5 1-221
+src/rust/jsg-test/tests/promise.rs
+  s_144e1c38c83f9e::t_b6ce7f8d17bfe4 1-1258
+src/rust/jsg-test/tests/resource_callback.rs
+  s_144e1c38c83f9e::t_1622ff57454229 61-62,86,104,126,145,157,176-177,186-187,190,204,207,221,226,234-237,251,265,269-270,274,292,333,336-348,350-351,362,365-366,376,381,387,399,402,410-413,416,454,520,561,577,618,631-632,647,659,673,806-830,928,958,985,995-1088,1116,1119-1124,1134,1150,1167,1187,1206,1212,1217,1227,1230-1233,1260,1278,1284-1286,1293-1294,1334,1336,1357,1359,1363,1370
+src/rust/jsg-test/tests/resource_conversion.rs
+  s_144e1c38c83f9e::t_00e2e8735f18ac 34,40-41,57,71-72,75-76
+src/rust/jsg-test/tests/resource_from_cpp.rs
+  s_144e1c38c83f9e::t_d7a27308dca8f2 1-210
+src/rust/jsg-test/tests/resource_lazy_properties.rs
+  s_144e1c38c83f9e::t_05c5fde7a0e888 1-299
+src/rust/jsg-test/tests/resource_properties.rs
+  s_144e1c38c83f9e::t_ecacf829a100b7 24,32-33,37-38,50,65,69,149,155-156,160-161,165-166,171,185-186,190-191,217,219,228,231-232,241,257,260,269,273,282,286,299,314,332,347,359,380,403,425,446-447,450-451,453-456,471,475-477,488,490,493,495-498,561,563,572,575,584,604-605,633-634,810,827,842,859,891,928,975,992,1009,1042,1104,1133,1154,1177,1184-1185,1189-1190,1205,1217,1240,1242,1244,1254,1258,1260,1283-1286,1292-1293,1300-1301,1304-1305,1310-1311,1316-1317,1320-1321,1326-1327,1364-1365,1370-1371,1378-1381,1386-1387,1400,1412,1439,1486,1498,1532,1773,1802,1895-1896,1903-1904,1909-1910,1915-1916,1921,1935,1937-1939,1952,1955-1957,1971,1996,2014,2034,2036-2038,2061,2084,2102-2103,2108,2122,2147,2160,2175,2177,2192
+src/rust/jsg-test/tests/resource_template.rs
+  s_144e1c38c83f9e::t_6021469756bbfd 9,22-46,55,58,60,64-88,129,133,139-146,148-152,160,227,232,366,368,386-432
+src/rust/jsg-test/tests/resource_this.rs
+  s_144e1c38c83f9e::t_3f1868c1b1bc92 71-74,88-90,136-137,145,147,181-201
+src/rust/jsg-test/tests/serialization.rs
+  s_144e1c38c83f9e::t_2d3b4a576bc862 1-423
+src/rust/jsg-test/tests/string.rs
+  s_144e1c38c83f9e::t_53c9830c807f65 5-7,13-14,367-368,378-379,390-391,402-403,414-415,426-427,440,446-488,497,508,525-617,700-772
+src/rust/jsg-test/tests/termination.rs
+  s_144e1c38c83f9e::t_3c6350c8187a7a 12-13,16-38,67-135,147-171,174,182,185,193,197,199,223-367
+src/rust/jsg-test/tests/traceable_gc.rs
+  s_144e1c38c83f9e::t_887c37294c4694 10,92,120,154,182-183,192,196-274
+src/rust/jsg-test/tests/traced_global_lifetime.rs
+  s_144e1c38c83f9e::t_07c6df209e33b4 110,132,158,325,329,509
+src/rust/jsg-test/tests/unwrap.rs
+  s_144e1c38c83f9e::t_6b7e8726039727 5,11,21,24,34,37,40,51,55,59,69,75,88-97,106-116
+src/rust/jsg/BUILD.bazel
+  s_144e1c38c83f9e::t_569875864030c0 10-18,29-36,60,77-80,95
+src/rust/jsg/README.md
+  s_144e1c38c83f9e::t_c1280b6474ecb3 5-56,75,77-80,82-102,104,106-107,109-154,165-167,222-225,233-259,283-285,302,330,436,440,446,455,460-461,472-544,557-558,560-562,586-595,599-600,607-608,615-621,703-805,808-810,812,817-820,826-837,841-909,911-934,959-1022,1054-1062,1075-1078,1129-1132,1146,1149,1159-1162,1170-1208,1250-1253
+src/rust/jsg/async_context.rs
+  s_144e1c38c83f9e::t_4a0d0b560873d8 1-229
+src/rust/jsg/buffer.rs
+  s_144e1c38c83f9e::t_2ef458ba777925 1,5,7-17,19-20,22-36,38-40,43-47,49-65,68-78,81-99,101-103
+src/rust/jsg/cpp-jsg-allowlist-checker-test.py
+  s_144e1c38c83f9e::t_92f7905b1bd5d7 1-93
+src/rust/jsg/cpp-jsg-allowlist-test.py
+  s_144e1c38c83f9e::t_6506c3c928d644 14-21,38-41,44-47,50-67,103,109-116,122-128,135,139-143,159-160
+src/rust/jsg/cpp-jsg-allowlist.txt
+  s_144e1c38c83f9e::t_ea2a3cb2ba678c 5,7-13,19-22
+src/rust/jsg/dict-test.rs
+  s_144e1c38c83f9e::t_8cca8fce7f29e8 1-29
+src/rust/jsg/dict.rs
+  s_144e1c38c83f9e::t_e16464d5af3677 1-99
+src/rust/jsg/fast_api.rs
+  s_144e1c38c83f9e::t_883472fd5f0dd9 62-64,66-67,71-76,78-90,93,105-106,108-109,113-138,309-313
+src/rust/jsg/feature_flags-test.rs
+  s_144e1c38c83f9e::t_161b7e03ee1306 65-82
+src/rust/jsg/feature_flags.rs
+  s_144e1c38c83f9e::t_986d783006c2cc 37-42,46-59
+src/rust/jsg/ffi.c++
+  s_144e1c38c83f9e::t_3441f8a96aa086 14,56-75,78-81,158-165,254-257,281-282,287-313,316-325,364,373,382,387,453-483,485-492,497-500,502-507,515,532-538,540-561,565,568-569,573,576-577,581-665,677-683,686-687,690,798-801,803,832-838,849-853,857,874,883-889,892-893,895-896,900-901,906-908,910,917-918,922-923,925,929-935,950,961-972,976-977,990-1002,1004-1005,1007,1174-1186,1207-1214,1224-1228,1230-1231,1250-1253,1293-1338,1352-1357,1361-1362,1365-1366,1378-1381,1410-1411,1414-1415,1506-1518,1552-1555,1561-1562,1565,1618-1623,1645,1651-1677,1694,1709-1711,1714,1729-1736
+src/rust/jsg/ffi.h
+  s_144e1c38c83f9e::t_2827813fef02f9 25,37,42-45,123-139,144-151,164-165,189,195-203,244-256,258-259,261,264-266,269-274,279-282,285-328,333-340,418-429,431-435,438-442,444,446-448,450-451,465-467,476-479,483-485,493-497,508-511,517,519,525-527,537-558,563,565-568,588-592
+src/rust/jsg/jsg.h
+  s_144e1c38c83f9e::t_097052945cb141 21-34,43-46,51-79,81-87,100,102,109-113,139
+src/rust/jsg/lenient.rs
+  s_144e1c38c83f9e::t_5757febf785215 5,13,17-18,21-22,61-67,69-72,77,87-106,115-120
+src/rust/jsg/lib-test.rs
+  s_144e1c38c83f9e::t_d7acd7c52fb7fb 111-176
+src/rust/jsg/lib.rs
+  s_144e1c38c83f9e::t_6b87c721247392 10-11,13,20,22-23,25,27-28,32-35,38,42,44-58,60,63,65-68,71,77-78,84-86,151-155,255-258,266-278,321-325,332-338,359-360,362-363,481-486,488,509-510,514-517,576,578-579,581-588,590-591,594-598,601,629-633,689-691,696,703-705,707-714,774-775,803-806,881-917,967-970,972-988,1043-1045,1055-1057,1060-1062,1066,1070-1071,1074,1095-1104,1109,1115-1121,1346-1366
+src/rust/jsg/modules.rs
+  s_144e1c38c83f9e::t_5c38f8a7999491 14-17,19,26-35,41-42,47-49,51-52,59-65,67,75-81
+src/rust/jsg/null_or_undefined-test.rs
+  s_144e1c38c83f9e::t_ce825eef6f7a53 1-86
+src/rust/jsg/null_or_undefined.rs
+  s_144e1c38c83f9e::t_fde9d42919abcf 1-115
+src/rust/jsg/nullable.rs
+  s_144e1c38c83f9e::t_3788b6e2b213f2 11,13-16,18-19,21-28,36,38,44-48,53-54,57,61,65,86,94,102-104,109-110,114,131-132,136-137,148,162,175,180,183,187,192,201,215,224,235-236,263
+src/rust/jsg/oneof-test.rs
+  s_144e1c38c83f9e::t_990004262bf308 1-203
+src/rust/jsg/oneof.rs
+  s_144e1c38c83f9e::t_5db2837cec8a72 1-386
+src/rust/jsg/resource-test.rs
+  s_144e1c38c83f9e::t_55410d056fd4b8 32-33,38,48-123
+src/rust/jsg/resource.rs
+  s_144e1c38c83f9e::t_2c7280915fd541 29-30,33,183,188-205,209-210,411-412,418,424-428,439-441,456-461,464,471-518,523-526,538,541-543,545,548,555,561,575-579,599-609,614,620,632-645,653-670,691,697,700,802-900,907,909-914
+src/rust/jsg/rtti-test.rs
+  s_144e1c38c83f9e::t_682eedad3c87e5 1-404
+src/rust/jsg/rtti.rs
+  s_144e1c38c83f9e::t_c87575821e3f74 1-591
+src/rust/jsg/scope.rs
+  s_144e1c38c83f9e::t_97533a0f911d55 258-261,270,275-276,322-330,338,353,358,366-368,375-390,539-657
+src/rust/jsg/ser.c++
+  s_144e1c38c83f9e::t_70abd01b3274ed 1-320
+src/rust/jsg/ser.rs
+  s_144e1c38c83f9e::t_c652eee0761c23 1-75
+src/rust/jsg/string.rs
+  s_144e1c38c83f9e::t_eca092668663e9 1-87
+src/rust/jsg/v8-test.rs
+  s_144e1c38c83f9e::t_f1a2b096bbe9ca 1-25
+src/rust/jsg/v8.rs
+  s_144e1c38c83f9e::t_7b582d37587a97 32-34,51,56-57,59-62,138-145,170,285-286,310,316-336,405-417,419-420,422,425,435-439,442-451,457,462,468-504,508-509,515-517,521-522,595-602,605-610,613,627-629,638-641,650,658-670,672,676-680,697-703,729-730,733-735,740-741,755-756,775-779,783,792-798,806,816,821-822,829-835,842-852,854,858,883-892,896-898,903,933-944,947-967,987-988,995-1007,1019-1020,1062-1063,1068,1082,1090,1102,1110,1122,1130,1141,1149,1161,1169,1458,1468,1528-1550,1691-1696,1741-1819,1838-1983,1985,1989-1991,1995-1997,2000,2005-2008,2010,2015,2023-2035,2039-2059,2127-2131,2139,2163-2183,2200,2202-2227,2232-2237,2239-2246,2458-2469,2943-2945,2950-2953,2985-2995,3000-3006,3025-3029,3175,3192,3227,3256-3257,3259,3284,3288,3291,3329-3437,3502-3521,3532-3563,3582-3583,3592,3603,3605-3619,3646-3648,3669-3711,3713-3720,3723-3735,3738-3744,3746-3753,3756-3762,3764-3831,4129-4135,4184-4187,4193-4203,4275,4311-4346,4481,4483,4633-4639,4820-4858,4877-4889,4891,4895-4900,4902-4904,4906-4907,5028-5084,5087-5088,5096-5104,5106-5109
+src/rust/jsg/wrappable-test.rs
+  s_144e1c38c83f9e::t_3f72862aa969e4 32,36
+src/rust/jsg/wrappable.rs
+  s_144e1c38c83f9e::t_815bd83cf4c6ba 8,21,24-28,30-31,36-37,40,42-44,46,48-55,57-60,62-65,68,71-76,79-82,84-85,90,93-94,111-112,218,224,229,231-232,235,305-324,361-380,542-562,565,575-579,617-626,629-634,645-646,657-658,661,668-669,684-685,696-697,703-709,716-717,726,730-733,743-746,750,753-754,763-771,779-780,793-794,803,810-811,829-836,842-843,875-880,887-908,910-928,935,952-953,959,967-997,1012-1018,1021-1040,1046-1047,1066,1077-1154,1184,1214-1232,1238-1240,1245,1248,1253-1254,1260-1269,1272-1273,1279,1282-1283,1321-1335,1338-1339,1370-1385,1397,1408,1416-1453,1487-1488,1499-1507,1546,1549-1551,1553-1555,1557-1560,1562-1577,1579-1580,1582-1584,1586-1591,1593-1601,1603-1633,1635-1640,1642-1646,1648-1653,1655,1659-1670,1677-1678,1681-1682,1692-1693,1710-1711,1728-1824
+src/rust/kj/tests/ffi-test.c++
+  s_144e1c38c83f9e::t_ebb548b9714202 19
+src/rust/node-exceptions/lib-test.rs
+  s_144e1c38c83f9e::t_7ce5794eb93adf 30,54,78,105,122,142-143,159-211
+src/rust/node-exceptions/lib.rs
+  s_144e1c38c83f9e::t_40212a20d8a982 56-57,126-129,171,174-176,249,274-277,281,285,288,297-298,316-317,340,348
+src/tests/events/AGENTS.md
+  s_144e1c38c83f9e::t_d620a1cd84763d 1-48
+src/tests/events/messagechannel/AGENTS.md
+  s_144e1c38c83f9e::t_e2e734acf81c29 1-150
+src/tests/events/messagechannel/BUILD.bazel
+  s_144e1c38c83f9e::t_4e53f46a1b4eb5 1-47
+src/tests/events/messagechannel/api-surface.js
+  s_144e1c38c83f9e::t_8d7720fbfb0b95 1-217
+src/tests/events/messagechannel/cloning.js
+  s_144e1c38c83f9e::t_77ced819abce2b 1-111
+src/tests/events/messagechannel/close.js
+  s_144e1c38c83f9e::t_ba274e1b2e96c6 1-69
+src/tests/events/messagechannel/construction.js
+  s_144e1c38c83f9e::t_9e6ab85761afcd 1-53
+src/tests/events/messagechannel/delivery.js
+  s_144e1c38c83f9e::t_e094a4653b4efd 1-88
+src/tests/events/messagechannel/gc.js
+  s_144e1c38c83f9e::t_30a2a8e610ff14 1-85
+src/tests/events/messagechannel/helpers.js
+  s_144e1c38c83f9e::t_5f26f731814241 1-17
+src/tests/events/messagechannel/illegal-invocation.js
+  s_144e1c38c83f9e::t_3db6fc4a2f7b20 1-41
+src/tests/events/messagechannel/inspect.js
+  s_144e1c38c83f9e::t_5d3c17137f8af2 1-49
+src/tests/events/messagechannel/legacy-listener-exceptions.js
+  s_144e1c38c83f9e::t_7469f60b83fea8 1-70
+src/tests/events/messagechannel/legacy-main.js
+  s_144e1c38c83f9e::t_b510e0e605f22f 1-16
+src/tests/events/messagechannel/legacy-shape.js
+  s_144e1c38c83f9e::t_f6fa6c7bacc90c 1-62
+src/tests/events/messagechannel/listener-exceptions.js
+  s_144e1c38c83f9e::t_e71e272cc6744d 1-94
+src/tests/events/messagechannel/main.js
+  s_144e1c38c83f9e::t_8e402e0b1d8c94 1-90
+src/tests/events/messagechannel/message-event.js
+  s_144e1c38c83f9e::t_95ace8754523d3 1-25
+src/tests/events/messagechannel/messagechannel-cpp-legacy.wd-test
+  s_144e1c38c83f9e::t_d48e3d7dcdff96 1-27
+src/tests/events/messagechannel/messagechannel-cpp-opt-in.wd-test
+  s_144e1c38c83f9e::t_53e6eb5402809a 1-28
+src/tests/events/messagechannel/messagechannel-cpp.wd-test
+  s_144e1c38c83f9e::t_58c19869534053 1-35
+src/tests/events/messagechannel/messagechannel-modules.capnp
+  s_144e1c38c83f9e::t_af5a549b78a668 1-37
+src/tests/events/messagechannel/messagechannel-ts-legacy.wd-test
+  s_144e1c38c83f9e::t_b1f5932768ff1b 1-25
+src/tests/events/messagechannel/messagechannel-ts-opt-in.wd-test
+  s_144e1c38c83f9e::t_befa03c9f7e1cc 1-29
+src/tests/events/messagechannel/messagechannel-ts.wd-test
+  s_144e1c38c83f9e::t_ed0bf285897cb1 1-38
+src/tests/events/messagechannel/onmessage.js
+  s_144e1c38c83f9e::t_f1ad9fae1cefec 1-108
+src/tests/events/messagechannel/pollution.js
+  s_144e1c38c83f9e::t_4fc72aaf67b4a4 1-111
+src/tests/events/messagechannel/port-queue.js
+  s_144e1c38c83f9e::t_a3d8cab3ecf073 1,5-8,10-11,13,17-19,24-26,29-32,34,38-39,42-44,64,68-69,86,90-114,125,132-133,136-143
+src/tests/events/messagechannel/post-message-arguments.js
+  s_144e1c38c83f9e::t_14a156c420f5b5 1-139
+src/tests/events/messagechannel/which-impl.js
+  s_144e1c38c83f9e::t_56f20ad300d51d 1-29
+src/tests/node/stream/stream-ts.wd-test
+  s_144e1c38c83f9e::t_ab421f6890fd3f 5-7
+src/tests/streams/cache/AGENTS.md
+  s_144e1c38c83f9e::t_4c2c08525cbb32 24
+src/tests/streams/cache/cache-streams.js
+  s_144e1c38c83f9e::t_c40c99775ff168 60-82
+src/tests/streams/cache/main.js
+  s_144e1c38c83f9e::t_e577f754cf2ab8 10
+src/tests/streams/formdata/AGENTS.md
+  s_144e1c38c83f9e::t_67ab856125268e 24-26
+src/tests/streams/formdata/binary-file-parts.js
+  s_144e1c38c83f9e::t_da01d21cd0a9c2 1-90
+src/tests/streams/formdata/formdata-modules.capnp
+  s_144e1c38c83f9e::t_d9c3be2d6fde8b 8
+src/tests/streams/formdata/main.js
+  s_144e1c38c83f9e::t_22375983eb9d62 18-23
+src/tests/streams/htmlrewriter/AGENTS.md
+  s_144e1c38c83f9e::t_f06316b161e71d 22
+src/tests/streams/htmlrewriter/main.js
+  s_144e1c38c83f9e::t_7d561775accfe7 14
+src/tests/streams/htmlrewriter/rewrite-streams.js
+  s_144e1c38c83f9e::t_e2db61eda105dc 128-162
+src/tests/streams/identity/AGENTS.md
+  s_144e1c38c83f9e::t_cfe97e538494e1 206-209,275,301
+src/tests/streams/identity/content-length.js
+  s_144e1c38c83f9e::t_ce8defaf0bfd19 1-76
+src/tests/streams/identity/identity-cpp-pedantic.wd-test
+  s_144e1c38c83f9e::t_1a3f2e41d96a1d 31-33
+src/tests/streams/identity/identity-cpp.wd-test
+  s_144e1c38c83f9e::t_4ef2dffaa56024 46-48
+src/tests/streams/identity/identity-modules.capnp
+  s_144e1c38c83f9e::t_105bb1ac990265 40
+src/tests/streams/identity/identity-ts.wd-test
+  s_144e1c38c83f9e::t_37dfc64f6fc1b2 5,32-34
+src/tests/streams/identity/main.js
+  s_144e1c38c83f9e::t_d419537b762ca7 229-247
+src/tests/streams/readable-byte/AGENTS.md
+  s_144e1c38c83f9e::t_f8d6d60182228f 61-63,154
+src/tests/streams/readable-byte/expected-length.js
+  s_144e1c38c83f9e::t_79e121444fa01a 25-42,44,288-405
+src/tests/streams/readable-byte/main.js
+  s_144e1c38c83f9e::t_5edba2e34b705e 9-10,73-75,322-324
+src/tests/streams/readable/AGENTS.md
+  s_144e1c38c83f9e::t_51f4fa9597f246 38,51-54,79,88-97,113,134-135,138,140,142,146
+src/tests/streams/readable/construction.js
+  s_144e1c38c83f9e::t_f46fff705ecff5 227-237
+src/tests/streams/readable/draining-reader.js
+  s_144e1c38c83f9e::t_adbf40b0f16708 20-24,224-272
+src/tests/streams/readable/expected-length.js
+  s_144e1c38c83f9e::t_cee1faef2710c0 1-192
+src/tests/streams/readable/integration-body-failures.js
+  s_144e1c38c83f9e::t_aeb3af001316c1 8-11,187-265
+src/tests/streams/readable/integration-body.js
+  s_144e1c38c83f9e::t_57f66d0d66ee1b 330-340,343-344,349,356,361-363,366,369-375
+src/tests/streams/readable/main.js
+  s_144e1c38c83f9e::t_ab835286edfbbe 10-16,20-29,31-36,224-225,235-241,274,285-286,305,316-321
+src/tests/streams/readable/pollution.js
+  s_144e1c38c83f9e::t_4fc6200da2ddab 26-55
+src/tests/streams/readable/readable-cpp-pedantic.wd-test
+  s_144e1c38c83f9e::t_81167f22f4d3d2 24
+src/tests/streams/readable/readable-cpp.wd-test
+  s_144e1c38c83f9e::t_66227d844ceeab 23-24,39
+src/tests/streams/readable/readable-modules.capnp
+  s_144e1c38c83f9e::t_3c59efa152e5e4 29,38
+src/tests/streams/readable/readable-ts.wd-test
+  s_144e1c38c83f9e::t_27f32832f150aa 18
+src/tests/streams/readable/string-chunks.js
+  s_144e1c38c83f9e::t_a06f3dd6cb2db9 1-92
+src/tests/streams/readable/then-interceptors.js
+  s_144e1c38c83f9e::t_19da67c1c4808a 9-10,15-16,499-550
+src/tests/streams/sockets/AGENTS.md
+  s_144e1c38c83f9e::t_e548c4afb4df45 31,44-50,54,66
+src/tests/streams/sockets/main.js
+  s_144e1c38c83f9e::t_dad9ac3d705f68 22
+src/tests/streams/sockets/socket-streams.js
+  s_144e1c38c83f9e::t_3e028eeb54e5e1 18-21,73-80,357-465,674-692
+src/tests/streams/transform/AGENTS.md
+  s_144e1c38c83f9e::t_96127bad5bb923 47,106
+src/tests/streams/transform/expected-length.js
+  s_144e1c38c83f9e::t_3baca224d8850a 18-24,26,118-182
+src/tests/streams/transform/main.js
+  s_144e1c38c83f9e::t_c743f0bef104eb 127
+src/tests/streams/writable/AGENTS.md
+  s_144e1c38c83f9e::t_971a09dbec132f 109
+src/tests/streams/writable/writable-cpp.wd-test
+  s_144e1c38c83f9e::t_7f78edfe824e2b 42-49
+src/tests/streams/writable/writable-ts.wd-test
+  s_144e1c38c83f9e::t_5200abe52024aa 24-30
+src/workerd/api/BUILD.bazel
+  s_144e1c38c83f9e::t_38104d4cf7eb0c 20,80,674,704-711,721,730,827,862-870
+src/workerd/api/abort-signal-test.c++
+  s_144e1c38c83f9e::t_c67912007a6c68 1-413
+src/workerd/api/actor-state.c++
+  s_144e1c38c83f9e::t_4154bc16a4aebd 915,931,943-948
+src/workerd/api/actor-state.h
+  s_144e1c38c83f9e::t_76ff3da50af0a0 386-389,773,777-779,784-785,789,793
+src/workerd/api/actor.c++
+  s_144e1c38c83f9e::t_0ec31f5689a710 331-336
+src/workerd/api/api-rtti-test.c++
+  s_144e1c38c83f9e::t_43a3302ced9321 15,29,82-141
+src/workerd/api/basics.c++
+  s_144e1c38c83f9e::t_c85cb96fa03f0f 13,199,225,232-244,261,559,572-611,613,617,622,1110,1116-1117,1119,1126-1128,1130-1131,1133,1143,1149-1150,1155,1159,1161,1343,1350-1359,1406-1408,1513-1515
+src/workerd/api/basics.h
+  s_144e1c38c83f9e::t_e4b367a0c00db7 484-485,512-524,771-773,848,962-968
+src/workerd/api/capnp.c++
+  s_144e1c38c83f9e::t_a7127e47248812 18,25,107-108,118-120,122
+src/workerd/api/commonjs.c++
+  s_144e1c38c83f9e::t_2b0f330988deed 78-84,89
+src/workerd/api/compression-test.c++
+  s_144e1c38c83f9e::t_445a3b93d631fc 83,107
+src/workerd/api/container-test.c++
+  s_144e1c38c83f9e::t_ca1c2919839291 419
+src/workerd/api/container.c++
+  s_144e1c38c83f9e::t_4f8ad182f5acdb 374
+src/workerd/api/container.h
+  s_144e1c38c83f9e::t_33730575165874 267,291,312
+src/workerd/api/crypto/AGENTS.md
+  s_144e1c38c83f9e::t_427e2cc81aa531 15,19
+src/workerd/api/crypto/aes.c++
+  s_144e1c38c83f9e::t_ad04f183e6a5b4 137-140,218,277
+src/workerd/api/crypto/chacha20-poly1305.c++
+  s_144e1c38c83f9e::t_e918b78e626a0a 1-204
+src/workerd/api/crypto/crypto.c++
+  s_144e1c38c83f9e::t_3b566737586204 107,123-131,138-139,157,166-167,216,222-225,229-233,433-434,458,462,469,478,492-496,770,1134-1135,1218,1340,1533
+src/workerd/api/crypto/crypto.h
+  s_144e1c38c83f9e::t_351bb581fd57ac 390-391
+src/workerd/api/crypto/digest.c++
+  s_144e1c38c83f9e::t_56b69faea81424 111-114,161
+src/workerd/api/crypto/hkdf.c++
+  s_144e1c38c83f9e::t_5be7d1993ea137 74-77
+src/workerd/api/crypto/hybridkem.c++
+  s_144e1c38c83f9e::t_ddcd07e1f052f0 1-267
+src/workerd/api/crypto/impl-test.c++
+  s_144e1c38c83f9e::t_c9af505d1112a5 16-39
+src/workerd/api/crypto/impl.c++
+  s_144e1c38c83f9e::t_cd9207bf64bec4 234-235
+src/workerd/api/crypto/impl.h
+  s_144e1c38c83f9e::t_62f1f9de7931a5 22-23,83-90,106-114,151,162,171,179,284-288
+src/workerd/api/crypto/pbkdf2.c++
+  s_144e1c38c83f9e::t_aadcc90f6a667f 94-97
+src/workerd/api/deferred-proxy-flow-test.c++
+  s_144e1c38c83f9e::t_cc488bd2a855e8 171
+src/workerd/api/event-target-bootstrap-test.c++
+  s_144e1c38c83f9e::t_bb2739f5516e3d 1-348
+src/workerd/api/event-target-bootstrap.c++
+  s_144e1c38c83f9e::t_48d0746cce000d 1-152
+src/workerd/api/event-target-bootstrap.h
+  s_144e1c38c83f9e::t_1fec6cce8a53e5 1-60
+src/workerd/api/events.c++
+  s_144e1c38c83f9e::t_a9a59c1dfe7f76 16-73,80,91,103,115,138-140,170-174,176,179
+src/workerd/api/events.h
+  s_144e1c38c83f9e::t_15b7eeed740b57 13-69,75,82,90,98,112-113,136,138,159,164
+src/workerd/api/eventsource-test.c++
+  s_144e1c38c83f9e::t_5e340fb4d4c883 72
+src/workerd/api/filesystem.c++
+  s_144e1c38c83f9e::t_99ae1a3123cd0a 10,12,499-507
+src/workerd/api/filesystem.h
+  s_144e1c38c83f9e::t_ac4eec31529025 107-112,214-215
+src/workerd/api/global-scope.c++
+  s_144e1c38c83f9e::t_0bd0cb8487b3ae 363-367
+src/workerd/api/global-scope.h
+  s_144e1c38c83f9e::t_cc08c713b905f4 650-652,1013-1015
+src/workerd/api/http.c++
+  s_144e1c38c83f9e::t_e4bca417847e0b 1081,1210,1342,1349,1358-1364,2266-2267,2337,2683,2738-2739
+src/workerd/api/http.h
+  s_144e1c38c83f9e::t_3c6d7ac8c4e8de 1131-1133,1223-1224
+src/workerd/api/js-readable-stream-test.c++
+  s_144e1c38c83f9e::t_467724119b6930 18,146-186,871-929,1691,1699-1700,1707-1708,1713,1968,1985-2167,2301,2315-2318,2321,2328,2355,2357-2371,2387,2391,2408,2412,2619,2622-2623,2630-2644,2652-2654,2657,2711,2714-2720,2918-2938,3216-3218,3226-3231,3727-3787
+src/workerd/api/js-readable-stream.c++
+  s_144e1c38c83f9e::t_6f4e9a964576d9 37-40,45,83-88,90-91,93-105,111-113,118-125,131-135,140-142,426-429,432-434,438-440,461-507,521-523,531-534,542-543,549-550,553,560-561,568,587,589-592,604-605,1195-1196,1200-1202,1470-1475,1477,1481,1483,1492-1496,1548-1549,1554-1558,1567,1585,1600,1629-1632,1689-1690,1697-1700,1709,1729,1784-1794
+src/workerd/api/js-readable-stream.h
+  s_144e1c38c83f9e::t_f12238e4b1be3f 203-207,366-368,457,461,498-500,509-514
+src/workerd/api/js-streams-bridge.h
+  s_144e1c38c83f9e::t_40f95f2867ce91 17,25
+src/workerd/api/js-writable-stream-test.c++
+  s_144e1c38c83f9e::t_7842098434e1b2 628-629,634,802,810-811,1487,1720,1723-1729
+src/workerd/api/js-writable-stream.c++
+  s_144e1c38c83f9e::t_824444362b0c2d 22-23,28
+src/workerd/api/js-writable-stream.h
+  s_144e1c38c83f9e::t_bdaf5d48feded8 34,324,330
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_144e1c38c83f9e::t_015d76587c6488 1348
+src/workerd/api/memory-cache-test.c++
+  s_144e1c38c83f9e::t_fbdd92e111d4c6 9,213-261
+src/workerd/api/memory-cache.c++
+  s_144e1c38c83f9e::t_39b737bd8ddd92 380-382
+src/workerd/api/messagechannel.c++
+  s_144e1c38c83f9e::t_3c5b0bc8501b88 6,50-52,56-57,63-65,73,228-246
+src/workerd/api/messagechannel.h
+  s_144e1c38c83f9e::t_088c981aa71b3c 9,13-19,192-195,197-203
+src/workerd/api/node/AGENTS.md
+  s_144e1c38c83f9e::t_8291be54d8d918 5-6
+src/workerd/api/node/crypto-keys.c++
+  s_144e1c38c83f9e::t_dc967129dfe445 56-59,61,74-76,402,405,448,451
+src/workerd/api/node/crypto.h
+  s_144e1c38c83f9e::t_71aad1fb8d0281 212
+src/workerd/api/node/exceptions.c++
+  s_144e1c38c83f9e::t_f927d76c2a7e8c 12
+src/workerd/api/node/i18n-test.c++
+  s_144e1c38c83f9e::t_01f74a1947e0e8 110-112,114
+src/workerd/api/node/module.c++
+  s_144e1c38c83f9e::t_740a25a3f2e630 111-118,122-123
+src/workerd/api/node/node.h
+  s_144e1c38c83f9e::t_d6ac7aaa5bcae3 15,37,229,262,381,394
+src/workerd/api/node/tests/BUILD.bazel
+  s_144e1c38c83f9e::t_02fe42fcf34426 368-386,405-423,468-469,599,705-721
+src/workerd/api/node/tests/crypto_keys-test.js
+  s_144e1c38c83f9e::t_ac375577746375 92-152
+src/workerd/api/node/tests/fs-stdio-cpp.wd-test
+  s_144e1c38c83f9e::t_bcd7c4a3b204ca 1,3-4,6-18
+src/workerd/api/node/tests/fs-stdio-test.js
+  s_144e1c38c83f9e::t_b74b6fbe90546f 1-103
+src/workerd/api/node/tests/fs-stdio-ts.wd-test
+  s_144e1c38c83f9e::t_309a67e3b89222 1-19
+src/workerd/api/node/tests/inspector-real-nodejs-test.js
+  s_144e1c38c83f9e::t_97e9b0bc8766aa 146-287
+src/workerd/api/node/tests/mimetype-test.js
+  s_144e1c38c83f9e::t_83bdd4b46dc242 4,6-8,38-781
+src/workerd/api/node/tests/module-create-require-test.js
+  s_144e1c38c83f9e::t_1742ae26359935 59-66
+src/workerd/api/node/tests/test_process_stdio.sh
+  s_144e1c38c83f9e::t_7e727980b6749f 11,20,22-25
+src/workerd/api/node/util.h
+  s_144e1c38c83f9e::t_763bc35fa44457 168
+src/workerd/api/node/zlib-util.h
+  s_144e1c38c83f9e::t_467c1d1b2a6e01 153
+src/workerd/api/per-isolate-bootstrap.c++
+  s_144e1c38c83f9e::t_442eeb50585cb6 10,15,206-304,318-344,396-405,420-429
+src/workerd/api/pyodide/pyodide.c++
+  s_144e1c38c83f9e::t_e6fee3568acece 72-85
+src/workerd/api/pyodide/pyodide.h
+  s_144e1c38c83f9e::t_e2e8b44c62ca70 77-81,83,87,108
+src/workerd/api/pyodide/wasm-module-test.c++
+  s_144e1c38c83f9e::t_ab6c927b07dcb8 47-48,53-56
+src/workerd/api/queue.c++
+  s_144e1c38c83f9e::t_8b56e4c3d27377 165-167,169
+src/workerd/api/r2-bucket.c++
+  s_144e1c38c83f9e::t_65d1b39494a314 629-634,637
+src/workerd/api/rtti.c++
+  s_144e1c38c83f9e::t_3dde19a68953a7 105-110,171-178,180,262-272,281,285-287,295-299,310-312
+src/workerd/api/sockets-test.c++
+  s_144e1c38c83f9e::t_044aeca341df5e 176-177
+src/workerd/api/sockets.c++
+  s_144e1c38c83f9e::t_bf7f37acf5ca20 1530-1534
+src/workerd/api/sockets.h
+  s_144e1c38c83f9e::t_63bce662dc2573 274,521
+src/workerd/api/streams/internal-test.c++
+  s_144e1c38c83f9e::t_6ae6ff21aca850 12,20-21,133,1195-1197,1199,1446-1499
+src/workerd/api/streams/readable.c++
+  s_144e1c38c83f9e::t_0d7120cbf20127 566-578,583-585,813-816,1010-1013,1016,1030,1173,1179
+src/workerd/api/streams/readable.h
+  s_144e1c38c83f9e::t_229d671b18f2cb 279-280,282-285
+src/workerd/api/streams/standard-test.c++
+  s_144e1c38c83f9e::t_df6d20e663d500 1926,1931,1985,2030-2100
+src/workerd/api/streams/standard.c++
+  s_144e1c38c83f9e::t_de5a8cfe2a5877 4605
+src/workerd/api/streams/termination-injection-test.c++
+  s_144e1c38c83f9e::t_9a1ca0c6f9a747 405
+src/workerd/api/streams/writable.c++
+  s_144e1c38c83f9e::t_0289d47d66e4ad 631,637
+src/workerd/api/system-streams-test.c++
+  s_144e1c38c83f9e::t_589ea0a970ead9 10,93-120,365-389
+src/workerd/api/system-streams.c++
+  s_144e1c38c83f9e::t_74059e5979c940 296-300,459-460,473-476,501
+src/workerd/api/tests/BUILD.bazel
+  s_144e1c38c83f9e::t_dadbd3cbb36188 18-22,123,126-127,214-219,227-228,299-303,553-558,710-714,772-777,907-911,1015-1022,1050-1054,1346-1354,1421-1425,1522-1523,1616
+src/workerd/api/tests/actor-cross-context-promise-test.js
+  s_144e1c38c83f9e::t_0b369310afafee 1-127
+src/workerd/api/tests/actor-cross-context-promise-test.wd-test
+  s_144e1c38c83f9e::t_6f5123c1845195 1,3-26
+src/workerd/api/tests/commonjs-module-test.js
+  s_144e1c38c83f9e::t_140cf3ffec3743 6,35-43
+src/workerd/api/tests/commonjs-module-test.wd-test
+  s_144e1c38c83f9e::t_7ec442fbf89cd1 12-14,16
+src/workerd/api/tests/crypto-extras-test.js
+  s_144e1c38c83f9e::t_c04aee17fcb3e4 488-518
+src/workerd/api/tests/crypto-modern-algorithms-test.js
+  s_144e1c38c83f9e::t_178288514c67f4 5,44-162,258-565
+src/workerd/api/tests/crypto-sha3-test.js
+  s_144e1c38c83f9e::t_0698e3974e6151 1-118
+src/workerd/api/tests/crypto-sha3-test.wd-test
+  s_144e1c38c83f9e::t_05888d23b775fc 1-20
+src/workerd/api/tests/do-on-hibernate-symbol-test.js
+  s_144e1c38c83f9e::t_e0461889f44fc8 7,9-10,12-34,40,47,49-56
+src/workerd/api/tests/do-on-hibernate-symbol-test.wd-test
+  s_144e1c38c83f9e::t_ebc1742b678c31 5,7,11-12,16-17,20,22,25-31
+src/workerd/api/tests/do-on-hibernate-symbol-unflagged-test.js
+  s_144e1c38c83f9e::t_4512bda46c59b6 1-40
+src/workerd/api/tests/durable-object-offpeak-hint-test.js
+  s_144e1c38c83f9e::t_af4774fc6f4121 1-38
+src/workerd/api/tests/durable-object-offpeak-hint-test.wd-test
+  s_144e1c38c83f9e::t_436aeaee179971 1-67
+src/workerd/api/tests/eventsource-test.js
+  s_144e1c38c83f9e::t_324e9a0d16a73b 360-384
+src/workerd/api/tests/eventsource-ts-test.wd-test
+  s_144e1c38c83f9e::t_6ff7051dc9f5fc 1-20
+src/workerd/api/tests/js-rpc-socket-streams-ts-test.wd-test
+  s_144e1c38c83f9e::t_1aa26af50f0f32 1-4
+src/workerd/api/tests/js-rpc-streams-cancel-reason-mixed-test.js
+  s_144e1c38c83f9e::t_c90c3c474608b2 1-172
+src/workerd/api/tests/js-rpc-streams-cancel-reason-mixed-test.wd-test
+  s_144e1c38c83f9e::t_5d4f57332f9055 1-4,6-11,13-18,20-104
+src/workerd/api/tests/js-rpc-streams-cancellation-test.wd-test
+  s_144e1c38c83f9e::t_803f3a6232f057 4-6,13,21
+src/workerd/api/tests/js-rpc-streams-crossflag-test.js
+  s_144e1c38c83f9e::t_86faf263b3030e 40-50,106-109,156-172,269-314,329-330,348-357,401-437
+src/workerd/api/tests/js-rpc-streams-ts-test.wd-test
+  s_144e1c38c83f9e::t_cf025f64b10601 2-4
+src/workerd/api/tests/js-rpc-test.js
+  s_144e1c38c83f9e::t_6b52f98245d977 1933
+src/workerd/api/tests/new-module-registry-test.js
+  s_144e1c38c83f9e::t_e0d1ae6b58dcbb 36
+src/workerd/api/tests/opennextjs/BUILD.bazel
+  s_144e1c38c83f9e::t_f4c90638686146 12-13,15
+src/workerd/api/tests/opennextjs/src/BUILD.bazel
+  s_144e1c38c83f9e::t_e5a04bebd0e28f 24-25
+src/workerd/api/tests/r2-cross-request-stream-test.js
+  s_144e1c38c83f9e::t_275c6470d29965 1-47
+src/workerd/api/tests/r2-cross-request-stream-test.wd-test
+  s_144e1c38c83f9e::t_ca6cc1fdbb5613 1-20
+src/workerd/api/tests/response-status-text-target.js
+  s_144e1c38c83f9e::t_8f1c4107fe0e73 1-13
+src/workerd/api/tests/response-status-text-test.js
+  s_144e1c38c83f9e::t_1a02591d601b75 1-38
+src/workerd/api/tests/response-status-text-test.wd-test
+  s_144e1c38c83f9e::t_e22195460795ea 1-25
+src/workerd/api/tests/rpc-error-mixed-test.js
+  s_144e1c38c83f9e::t_4fb6311d4c4969 1-42
+src/workerd/api/tests/rpc-error-test.wd-test
+  s_144e1c38c83f9e::t_f7c5b5b3913c99 24-69
+src/workerd/api/tests/temporal-hidden-test.js
+  s_144e1c38c83f9e::t_c68f4bbd310a99 1-43
+src/workerd/api/tests/temporal-hidden-test.wd-test
+  s_144e1c38c83f9e::t_e4fe54dd5c93d8 5,8,10
+src/workerd/api/tests/temporal-test.js
+  s_144e1c38c83f9e::t_8d5a2d69660397 1-1138
+src/workerd/api/tests/temporal-test.wd-test
+  s_144e1c38c83f9e::t_c15c8be28a7ffa 1-18
+src/workerd/api/tests/ts-webstreams-test.js
+  s_144e1c38c83f9e::t_def720e900e1df 450-454,467-482,487-507
+src/workerd/api/tests/wasm-source-url-test.js
+  s_144e1c38c83f9e::t_9ea3e54f5bde5d 1-46
+src/workerd/api/tests/wasm-source-url-test.wd-test
+  s_144e1c38c83f9e::t_66677f7fcc7c72 1-58
+src/workerd/api/tests/wasm-source-url.wat
+  s_144e1c38c83f9e::t_5d4426fc892fd6 1-4
+src/workerd/api/trace.c++
+  s_144e1c38c83f9e::t_8e95fe0674fd64 699-700,744-748,753-762,775,793-795
+src/workerd/api/trace.h
+  s_144e1c38c83f9e::t_f318a4d3b81aea 755-760,762-767,793-797,801
+src/workerd/api/unsafe.c++
+  s_144e1c38c83f9e::t_e8add935bd86a1 62
+src/workerd/api/worker-loader.c++
+  s_144e1c38c83f9e::t_72cf2024546e42 248
+src/workerd/api/worker-rpc.c++
+  s_144e1c38c83f9e::t_ae968387f82e26 199-202,214,218,222,2329
+src/workerd/api/worker-rpc.h
+  s_144e1c38c83f9e::t_79d464635e3ebd 226-227,231-238,266
+src/workerd/api/workers-module.c++
+  s_144e1c38c83f9e::t_a5361862856ea3 100-101
+src/workerd/api/workers-module.h
+  s_144e1c38c83f9e::t_e41ffb6f97be4d 104,125
+src/workerd/io/AGENTS.md
+  s_144e1c38c83f9e::t_adb0ec656250f1 30,48
+src/workerd/io/BUILD.bazel
+  s_144e1c38c83f9e::t_c2c948e4ae04df 650-654,759,775
+src/workerd/io/caught-exception-reset-test.js
+  s_144e1c38c83f9e::t_37c915b1ae5f57 1-92
+src/workerd/io/caught-exception-reset-test.wd-test
+  s_144e1c38c83f9e::t_a5e8d56ac84f11 1-20
+src/workerd/io/compatibility-date.capnp
+  s_144e1c38c83f9e::t_98ca0c02316954 1685-1689,1738-1778
+src/workerd/io/features-test.c++
+  s_144e1c38c83f9e::t_379e5492293f7a 39,64
+src/workerd/io/features.h
+  s_144e1c38c83f9e::t_1d5b5a2f2d2a59 62-64
+src/workerd/io/incoming-request-test.c++
+  s_144e1c38c83f9e::t_953c32d4165069 12,14,28-34,277-292,294-297,300-324,364-404,441-752,778-957
+src/workerd/io/io-context.c++
+  s_144e1c38c83f9e::t_7f48e75ab08333 15,345,348-350,352-353,402-406,438-440,442-444,482-485,499-536,668-687,1759,1799,1828,1856-1860,1871,1884,2035-2036,2038-2055,2057-2080,2086-2123
+src/workerd/io/io-context.h
+  s_144e1c38c83f9e::t_c6af75c965e7d7 55-59,65-72,155-158,162-164,202-215,544-547,577-584,699-707,1410-1422,1459-1468,1470-1472,1510-1517,1572-1580,1616,1621-1622,1631,1637-1638,1647-1648,1660,1664,1779,1786-1787,1794-1796,1812,1817-1888,1892,1895,1911-1912,1920-1944,2074
+src/workerd/io/io-context/BUILD.bazel
+  s_144e1c38c83f9e::t_fd72c0aab96f01 1-95
+src/workerd/io/io-context/compile-tests/await-io-and-run-callback-handles-are-scoped.rs
+  s_144e1c38c83f9e::t_3c46b92fe988c8 1-18
+src/workerd/io/io-context/compile-tests/await-io-and-run-future-is-send.rs
+  s_144e1c38c83f9e::t_502f1d9af18550 1-14
+src/workerd/io/io-context/compile-tests/await-io-and-run-is-static.rs
+  s_144e1c38c83f9e::t_4bde58f23652f2 1-19
+src/workerd/io/io-context/compile-tests/await-io-callback-handles-are-scoped.rs
+  s_144e1c38c83f9e::t_9c52a34bf283f4 1-16
+src/workerd/io/io-context/compile-tests/await-io-future-is-send.rs
+  s_144e1c38c83f9e::t_290a67eed85732 1-24
+src/workerd/io/io-context/compile-tests/ok-await-io-and-run.rs
+  s_144e1c38c83f9e::t_731888942607eb 1-20
+src/workerd/io/io-context/compile-tests/ok-await-io.rs
+  s_144e1c38c83f9e::t_94f2abc89f5726 1-24
+src/workerd/io/io-context/ffi.c++
+  s_144e1c38c83f9e::t_862adb96c30bf5 1-203
+src/workerd/io/io-context/ffi.h
+  s_144e1c38c83f9e::t_a6d265fc500773 1-95
+src/workerd/io/io-context/ffi.rs
+  s_144e1c38c83f9e::t_bb87a6deb37808 1-210
+src/workerd/io/io-context/io-context-test.c++
+  s_144e1c38c83f9e::t_632c56af77f8bd 1-944
+src/workerd/io/io-context/lib-test.rs
+  s_144e1c38c83f9e::t_521d61c056c082 1-23
+src/workerd/io/io-context/lib.rs
+  s_144e1c38c83f9e::t_d75935ec598a58 1-406
+src/workerd/io/io-context/test-bridge-state.h
+  s_144e1c38c83f9e::t_682d0a096b44de 1-24
+src/workerd/io/io-context/test-bridge.c++
+  s_144e1c38c83f9e::t_e5d8848a814a31 1-41
+src/workerd/io/io-context/test-bridge.h
+  s_144e1c38c83f9e::t_6d3caa6e3ebe24 1-18
+src/workerd/io/io-context/test_bridge.rs
+  s_144e1c38c83f9e::t_b8cc56d27f236a 1-658
+src/workerd/io/io-context/trace.rs
+  s_144e1c38c83f9e::t_232e12f01e23f1 1-176
+src/workerd/io/io-own-test.c++
+  s_144e1c38c83f9e::t_bc9532664048ba 3,5-6,100-594
+src/workerd/io/io-own.c++
+  s_144e1c38c83f9e::t_a6b55d48e7fc36 6-7,74-97,122-146,195-198
+src/workerd/io/io-own.h
+  s_144e1c38c83f9e::t_6eabd65195fdff 95-110,125-127,132,159-161,164-169,181-182,198-200,247
+src/workerd/io/limit-enforcer.h
+  s_144e1c38c83f9e::t_fd66ace85a7840 177-188,210
+src/workerd/io/maximum-compatibility-date.txt
+  s_144e1c38c83f9e::t_a819852ea80807 1
+src/workerd/io/observer.h
+  s_144e1c38c83f9e::t_5772dd977cf175 164-167,346-347,362-366,405-406,450-453
+src/workerd/io/release-version.txt
+  s_144e1c38c83f9e::t_5b3fe39dd776a0 1
+src/workerd/io/trace-stream.c++
+  s_144e1c38c83f9e::t_5d7c1be5baf0ff 1090-1098,1119-1124,1162-1165
+src/workerd/io/trace-stream.h
+  s_144e1c38c83f9e::t_7762940e3254ec 15-19,21-26,64-68,78
+src/workerd/io/tracer.c++
+  s_144e1c38c83f9e::t_d7bf3895388e60 279-286,296
+src/workerd/io/tracer.h
+  s_144e1c38c83f9e::t_5ee611a2f00386 174-176
+src/workerd/io/tracked-wasm-instance-test.js
+  s_144e1c38c83f9e::t_ce68a9e35f584f 266-313
+src/workerd/io/wasm-instantiate-shim.js
+  s_144e1c38c83f9e::t_589047f6e42038 84-87,99-104
+src/workerd/io/worker-code-cache-test.c++
+  s_144e1c38c83f9e::t_1c845cea225176 12,263-304
+src/workerd/io/worker-entrypoint-test.c++
+  s_144e1c38c83f9e::t_2d9735b180b44f 799-860,971-1067
+src/workerd/io/worker-entrypoint.c++
+  s_144e1c38c83f9e::t_fa8712fa79d66b 16,1013-1022
+src/workerd/io/worker-interface.capnp
+  s_144e1c38c83f9e::t_9934183b317412 556-560,792,795-799,939-949,956-957,960-962,1004-1005,1008-1010
+src/workerd/io/worker-modules.h
+  s_144e1c38c83f9e::t_c1423e8c2b22fe 80-84,87-89,159-162,323-324,337,348,354-355,376-377,391,552-557
+src/workerd/io/worker-source.h
+  s_144e1c38c83f9e::t_7fe6da329c4653 70-74
+src/workerd/io/worker.c++
+  s_144e1c38c83f9e::t_e66b8cef317dd2 50,161-165,219,306,334-337,348,355,362,648-652,683,718-721,730-738,743-744,1003,1305-1306,1324,1437-1440,1593,1643,1801-1805,1911-1913,1915,1958,1961-1967,2009-2013,2034,2352,2380,3972-3974,4277-4303,4364-4366,4563-4569,4869-5015
+src/workerd/io/worker.h
+  s_144e1c38c83f9e::t_e7a25da3b78654 64,360-361,369,371,574,923-929,940-951,1088-1110,1209-1211,1253-1257
+src/workerd/jsg/AGENTS.md
+  s_144e1c38c83f9e::t_30dc1a8120fb78 28,137-146
+src/workerd/jsg/BUILD.bazel
+  s_144e1c38c83f9e::t_00438cdf8b3191 66
+src/workerd/jsg/README.md
+  s_144e1c38c83f9e::t_4fa3e2afc5119c 31-38,153-159,606-611
+src/workerd/jsg/async-context.c++
+  s_144e1c38c83f9e::t_8c37260f94f7fe 15-17
+src/workerd/jsg/bench-dispatch.c++
+  s_144e1c38c83f9e::t_9793bedad6674e 22-33,37-38,57,65-67,74,76,80-81,90,103-104,109-123
+src/workerd/jsg/code-cache-test.c++
+  s_144e1c38c83f9e::t_0ee040e20937ed 180,495-575
+src/workerd/jsg/fast-api-test.c++
+  s_144e1c38c83f9e::t_3371a9b1e00463 67-94,103-107,112-113,359-365,371-384,386-387,391-393,395-399,401-406,493-515,524-528
+src/workerd/jsg/fast-api.h
+  s_144e1c38c83f9e::t_f4c556992e24d5 18,97,115-121,161-191
+src/workerd/jsg/jsg-test.h
+  s_144e1c38c83f9e::t_2df3580319618a 63,102,148
+src/workerd/jsg/jsg.c++
+  s_144e1c38c83f9e::t_d0eef2bfe443d0 306-313
+src/workerd/jsg/jsg.h
+  s_144e1c38c83f9e::t_005f11f3d13dd7 497-499,508-510,2892,3130-3131,3588,3643-3645,3648
+src/workerd/jsg/jsvalue.c++
+  s_144e1c38c83f9e::t_a740a2d2b4d842 79-83,89-93,365-366,371-372,378-379,404,414,425,1624,1657
+src/workerd/jsg/jsvalue.h
+  s_144e1c38c83f9e::t_597d72a4b18749 354-356,358,380-382,384,443-445,447,482-484,486,508-510,512,552-554,556,830,832
+src/workerd/jsg/modules-compile-hints-test.c++
+  s_144e1c38c83f9e::t_a577545912c2e5 7-8,24-31,33-34,38-41,61,67,136-340
+src/workerd/jsg/modules-new.c++
+  s_144e1c38c83f9e::t_6e160500905927 18,233-240,1165-1187,2100-2103,2445,2527-2535,2681
+src/workerd/jsg/modules-new.h
+  s_144e1c38c83f9e::t_1dd28fdabaf4e4 282-283,328-329,731-732,801-815
+src/workerd/jsg/modules.c++
+  s_144e1c38c83f9e::t_c5e590eb5b4afc 204,496-503,517-519,526-527,534-538,544-546,597-600,609-613
+src/workerd/jsg/modules.h
+  s_144e1c38c83f9e::t_28d8b5d68bd2e6 20,67-72,105-115,225-227,245-248,253-254,258-259,265-266,335-347,696-710,909
+src/workerd/jsg/multiple-typewrappers-test.c++
+  s_144e1c38c83f9e::t_81608d92e2919d 119
+src/workerd/jsg/promise.h
+  s_144e1c38c83f9e::t_29d64cf52b1be5 523
+src/workerd/jsg/resource-test.c++
+  s_144e1c38c83f9e::t_b4550671fcb97b 821,826-829,833,838,841,843-846,849,851-852,855-862
+src/workerd/jsg/resource.c++
+  s_144e1c38c83f9e::t_325b184ef86307 70-94
+src/workerd/jsg/resource.h
+  s_144e1c38c83f9e::t_74e5da4bf852de 257,270-277,322-323,336-344,461-463,466,475-476,522-524,527,536-537,767-768,776-779,816,826-829,947-949,952,961-963,1000-1001,1004,1013-1015,1527-1528,1817-1822,1827-1832,1954-1956,1980-1983,2059-2064,2066,2075-2083,2101-2180
+src/workerd/jsg/ser-test.c++
+  s_144e1c38c83f9e::t_35f4f1f5e5a130 155-224,241-244,444-476
+src/workerd/jsg/ser.c++
+  s_144e1c38c83f9e::t_c3760db9428b32 141,162-165,202-205,295,305-351,454-457,473-476,626-679,681-682
+src/workerd/jsg/ser.h
+  s_144e1c38c83f9e::t_736d231fafcd54 197-206,244-247,321-329,342-344,349-369
+src/workerd/jsg/setup.h
+  s_144e1c38c83f9e::t_27acfe51d5ca6a 453-460,621
+src/workerd/jsg/split-isolate-test.c++
+  s_144e1c38c83f9e::t_016fb3e351a5b1 1-45
+src/workerd/jsg/type-wrapper-test.c++
+  s_144e1c38c83f9e::t_9561b322d3562b 186-188,190
+src/workerd/jsg/type-wrapper.h
+  s_144e1c38c83f9e::t_a1e57985703d15 25-26,691-698,718-739,996-1005,1057-1095
+src/workerd/jsg/util-test.c++
+  s_144e1c38c83f9e::t_e5c1a8148d6fbe 202
+src/workerd/jsg/util.c++
+  s_144e1c38c83f9e::t_efe9f9afba7112 281-283,285-287,293,462,471-475
+src/workerd/jsg/util.h
+  s_144e1c38c83f9e::t_721f3af4290e83 99-104,433
+src/workerd/jsg/value-test.c++
+  s_144e1c38c83f9e::t_d2c35a9c645fd0 7-8,15-24,455-483,544-569,691-703,760-798,855-891
+src/workerd/jsg/value.h
+  s_144e1c38c83f9e::t_e1f5670485333d 15,24-25,28-42,105,140,178,213,255,295
+src/workerd/jsg/wrappable-tag.h
+  s_144e1c38c83f9e::t_953989cb43dc0d 28,43-46,49,79-83
+src/workerd/jsg/wrappable.h
+  s_144e1c38c83f9e::t_e863731bc5409b 70-71,80-85,88-93,103-105,107,121-124,127
+src/workerd/server/AGENTS.md
+  s_144e1c38c83f9e::t_2e0d19c3fc03f2 10,61,95
+src/workerd/server/BUILD.bazel
+  s_144e1c38c83f9e::t_876b443b549254 89,96-97,214-228,245-247
+src/workerd/server/channel-token-test.c++
+  s_144e1c38c83f9e::t_da449b0c9ee999 417-434
+src/workerd/server/channel-token.c++
+  s_144e1c38c83f9e::t_d08379d47d9c5e 12,26-37
+src/workerd/server/channel-token.h
+  s_144e1c38c83f9e::t_119fa0244b4c6c 63-64
+src/workerd/server/cli/args-test.rs
+  s_144e1c38c83f9e::t_93ba746cf99a78 68-69,90-91
+src/workerd/server/cli/args.rs
+  s_144e1c38c83f9e::t_bad95ee631d784 58-64,225-226,336-350
+src/workerd/server/cli/lib.rs
+  s_144e1c38c83f9e::t_992ff26ea5b33c 19,354-363,377-383,487-488
+src/workerd/server/cli/wrangler-test.rs
+  s_144e1c38c83f9e::t_7f7bd4bbfae6b4 1-420
+src/workerd/server/cli/wrangler.rs
+  s_144e1c38c83f9e::t_2d5accb9ed93ae 1-607
+src/workerd/server/cluster/BUILD.bazel
+  s_144e1c38c83f9e::t_061fbbf52c1e18 1-45
+src/workerd/server/cluster/alarms-test.rs
+  s_144e1c38c83f9e::t_204b7bcaac4771 1-870
+src/workerd/server/cluster/alarms.rs
+  s_144e1c38c83f9e::t_6e930d1bb62258 1-471
+src/workerd/server/cluster/bucket.rs
+  s_144e1c38c83f9e::t_f4dae7764b446b 1-255
+src/workerd/server/cluster/capture-test.rs
+  s_144e1c38c83f9e::t_4a382b9423b4cc 1-541
+src/workerd/server/cluster/capture.rs
+  s_144e1c38c83f9e::t_d97fe0579b2461 1-314
+src/workerd/server/cluster/cluster.rs
+  s_144e1c38c83f9e::t_b1ffbbf6fd301c 1-473
+src/workerd/server/cluster/dst.rs
+  s_144e1c38c83f9e::t_d4da484a7e57c3 1-240
+src/workerd/server/cluster/frames.capnp
+  s_144e1c38c83f9e::t_2e62bcfb5c314e 1-166
+src/workerd/server/cluster/http-test.rs
+  s_144e1c38c83f9e::t_b97c06040ae383 1-35
+src/workerd/server/cluster/http.rs
+  s_144e1c38c83f9e::t_553f28f7454152 1-297
+src/workerd/server/cluster/lib.rs
+  s_144e1c38c83f9e::t_b3fb6a8d0bccf5 1-148
+src/workerd/server/cluster/log.rs
+  s_144e1c38c83f9e::t_9655b562b0a075 1-844
+src/workerd/server/cluster/log_tests.rs
+  s_144e1c38c83f9e::t_5a19cab7eda622 1-949
+src/workerd/server/cluster/logic/BUILD.bazel
+  s_144e1c38c83f9e::t_8af6a9cb1f6783 1-8
+src/workerd/server/cluster/logic/lease.rs
+  s_144e1c38c83f9e::t_b9faf677061493 1-145
+src/workerd/server/cluster/logic/lib.rs
+  s_144e1c38c83f9e::t_56c13ddaed4f12 1-16
+src/workerd/server/cluster/owner-test.rs
+  s_144e1c38c83f9e::t_806c3b38e868f0 1-761
+src/workerd/server/cluster/owner.rs
+  s_144e1c38c83f9e::t_a72b9d088e3a06 1-776
+src/workerd/server/cluster/ownership.rs
+  s_144e1c38c83f9e::t_ca76422342eac3 1-633
+src/workerd/server/cluster/registry.rs
+  s_144e1c38c83f9e::t_cf2d78a022cfba 1-368
+src/workerd/server/cluster/s3.rs
+  s_144e1c38c83f9e::t_2b53e3799fd1e6 1-573
+src/workerd/server/container-client.c++
+  s_144e1c38c83f9e::t_fb901a97e2dad5 60-70,573,588,898,1022-1032,1119,1133,1355-1359,1361-1362,1364-1380,1916,2132,2174,2230,2301-2302,2308,2311-2314,2369,2386,2399,2871-2872
+src/workerd/server/container-client.h
+  s_144e1c38c83f9e::t_8f3a2a032b4f46 92,138-140,209-210,217-218
+src/workerd/server/factory/bootstrap.c++
+  s_144e1c38c83f9e::t_6c37364446c17f 89-95,100-101
+src/workerd/server/factory/bootstrap.h
+  s_144e1c38c83f9e::t_de915d866c5548 8
+src/workerd/server/factory/worker-factory-actor.c++
+  s_144e1c38c83f9e::t_355662fcea1139 18-163,167-169,174-177,183,185-187,245-246,252-259,284-338,356-366,433,437,449-458,461-463,472,475,479-498,521-522,524-525,535,538,540-541,554,558-576,580-582,584,589-595,608-609,630-631,677-680,701-703,763-770
+src/workerd/server/factory/worker-factory-impl.h
+  s_144e1c38c83f9e::t_fd751e48ab44b2 218-219,222-224,247-256,258-259,262-264
+src/workerd/server/factory/worker-factory-rpc.c++
+  s_144e1c38c83f9e::t_5ec75194d9c258 43,73,179-193,200,210-221,223
+src/workerd/server/factory/worker-factory.c++
+  s_144e1c38c83f9e::t_99db1104c13f33 88-90,399
+src/workerd/server/factory/worker-factory.h
+  s_144e1c38c83f9e::t_9ae1f95dee3652 57-58,101,289-291,308,394-395,397-398,403-404
+src/workerd/server/fallback-service.c++
+  s_144e1c38c83f9e::t_f71dfb97a2e82f 105-107
+src/workerd/server/json-logger-test.c++
+  s_144e1c38c83f9e::t_b47c460bed5011 54,79
+src/workerd/server/server-test.c++
+  s_144e1c38c83f9e::t_c2ab05ec66cf18 579,921-923,925-926,947,949,969-976,1078-1106,8400-8490
+src/workerd/server/server/BUILD.bazel
+  s_144e1c38c83f9e::t_3348031edcd107 38-39,51
+src/workerd/server/server/actor.rs
+  s_144e1c38c83f9e::t_a9923d007468b7 24,59-64,86-87,103-123,134,143,151-184,188-259,339-346,426-432,439-443,474-499,509-694,747-748,811,922,934-975,986,1036-1042,1158,1162-1175,1198,1358-1360,1362,1464-1472,1476,1490-1503,1507-1542,1544-1560,1601-1608
+src/workerd/server/server/bridge.rs
+  s_144e1c38c83f9e::t_2a6fe8ffa9dd3a 28-30,170-179,439-440,473-483,509-510,590-598,607-612,866-891,912-913,918-926
+src/workerd/server/server/cluster-test.rs
+  s_144e1c38c83f9e::t_3b487efbeaa4fb 1-71
+src/workerd/server/server/cluster.rs
+  s_144e1c38c83f9e::t_7f114a05a995c5 1-580
+src/workerd/server/server/config.rs
+  s_144e1c38c83f9e::t_1be6dc50d8e7fd 54,316-317,338-342,642,674,763,840,1021,1068-1082,1089,1092-1096,1103,1512-1531
+src/workerd/server/server/lib.rs
+  s_144e1c38c83f9e::t_6909c6c4fc5142 18
+src/workerd/server/server/run.rs
+  s_144e1c38c83f9e::t_2c19e0bdf285b5 32-33,66-68,147-155,161,205-207,225-242,410-426
+src/workerd/server/server/worker.rs
+  s_144e1c38c83f9e::t_84c65b52649e94 57,466,479-480,488,492,498-500
+src/workerd/server/tests/cluster/BUILD.bazel
+  s_144e1c38c83f9e::t_09b6c52d69b062 1-23
+src/workerd/server/tests/cluster/cluster-test.mjs
+  s_144e1c38c83f9e::t_694730e1fc76fd 1-1372
+src/workerd/server/tests/cluster/cluster-test.wd-test
+  s_144e1c38c83f9e::t_2fbb228f005aee 1-53
+src/workerd/server/tests/cluster/cluster-worker.js
+  s_144e1c38c83f9e::t_1d94c0b0652ddf 1-373
+src/workerd/server/tests/cluster/fake-s3.js
+  s_144e1c38c83f9e::t_a7fda89e7303eb 1-135
+src/workerd/server/tests/cluster/fake-s3.wd-test
+  s_144e1c38c83f9e::t_bf3831cfb5bb84 1-31
+src/workerd/server/tests/compile-tests/compile-test.sh
+  s_144e1c38c83f9e::t_1af787ee0f2967 49-54
+src/workerd/server/tests/container-client/BUILD.bazel
+  s_144e1c38c83f9e::t_ab5e39767cdfa0 2,8
+src/workerd/server/tests/container-client/README.md
+  s_144e1c38c83f9e::t_328ae2903dde2f 29
+src/workerd/server/tests/container-session/BUILD.bazel
+  s_144e1c38c83f9e::t_19c11d6378f761 1-27
+src/workerd/server/tests/container-session/config.capnp
+  s_144e1c38c83f9e::t_fa63030da1fa73 1-36
+src/workerd/server/tests/container-session/test.mjs
+  s_144e1c38c83f9e::t_87bab3d527cf90 1-144
+src/workerd/server/tests/container-session/worker.mjs
+  s_144e1c38c83f9e::t_4d6470ea061545 1-30
+src/workerd/server/tests/container-shutdown/BUILD.bazel
+  s_144e1c38c83f9e::t_0e2aebcb92eb56 2-9,19,25-26
+src/workerd/server/tests/container-shutdown/test.mjs
+  s_144e1c38c83f9e::t_d683ff29dd7109 5-6,75-80
+src/workerd/server/tests/python/BUILD.bazel
+  s_144e1c38c83f9e::t_d0657c0a722bd4 95-102
+src/workerd/server/tests/python/py_wd_test.bzl
+  s_144e1c38c83f9e::t_6e1595aba90fd9 64
+src/workerd/server/tests/python/sdk/worker.py
+  s_144e1c38c83f9e::t_ef5aec96c70c57 466
+src/workerd/server/tests/python/stdlib-zip/stdlib-zip.wd-test
+  s_144e1c38c83f9e::t_e63d3f6df0abcb 1-14
+src/workerd/server/tests/python/stdlib-zip/worker.py
+  s_144e1c38c83f9e::t_a6e51ec6471927 1-27
+src/workerd/server/tests/python/vendor_pkg_tests/BUILD
+  s_144e1c38c83f9e::t_18fedd4f75bcab 77
+src/workerd/server/tests/python/vendor_pkg_tests/vendor_test.bzl
+  s_144e1c38c83f9e::t_3e3e1fc23f555e 31,38-40
+src/workerd/server/tests/structured-logging/structured-logging-test.mjs
+  s_144e1c38c83f9e::t_e9ce275560ef7d 30-31,35-38
+src/workerd/server/workerd-api-isolate.h
+  s_144e1c38c83f9e::t_ee92b04ef8cafa 1-146
+src/workerd/server/workerd-api-templates-0.c++
+  s_144e1c38c83f9e::t_29279cd54a0d3b 1-11
+src/workerd/server/workerd-api-templates-1.c++
+  s_144e1c38c83f9e::t_ed5eb4ab6da5e5 1-11
+src/workerd/server/workerd-api-templates-2.c++
+  s_144e1c38c83f9e::t_4b1dec3bf88f2f 1-11
+src/workerd/server/workerd-api-templates-3.c++
+  s_144e1c38c83f9e::t_5c87f3148f1b48 1-11
+src/workerd/server/workerd-api-templates-4.c++
+  s_144e1c38c83f9e::t_66bf621dcfe2d0 1-11
+src/workerd/server/workerd-api-templates-5.c++
+  s_144e1c38c83f9e::t_d9fd652868586c 1-11
+src/workerd/server/workerd-api-templates-6.c++
+  s_144e1c38c83f9e::t_2592ce3983dd61 1-11
+src/workerd/server/workerd-api-templates-7.c++
+  s_144e1c38c83f9e::t_32249448c52051 1-11
+src/workerd/server/workerd-api.c++
+  s_144e1c38c83f9e::t_279def6dc374aa 7-8,212-213,701-702,977
+src/workerd/server/workerd-api.h
+  s_144e1c38c83f9e::t_74518dc0b2459f 10,118-120
+src/workerd/server/workerd.capnp
+  s_144e1c38c83f9e::t_23b374f70870f4 97-158,881-882,912-924
+src/workerd/tests/bench-try-sync.c++
+  s_144e1c38c83f9e::t_3a066f524585df 283
+src/workerd/tests/test-fixture.c++
+  s_144e1c38c83f9e::t_9dbff4bb53ad23 127-128,130-131,163,168-171,182,204,245-247,254,275,279-281,283-287,323,393-395,496,519-529,601-602,611-689
+src/workerd/tests/test-fixture.h
+  s_144e1c38c83f9e::t_6827afcbd6b61f 13,42-46,56-58,168-171,211-217,276-281,346,351-352,409-436
+src/workerd/util/autogate.h
+  s_144e1c38c83f9e::t_424e82ac6d5fb3 51-52,124-147
+src/workerd/util/sentry.h
+  s_144e1c38c83f9e::t_6a1faeea8edcdf 73-74,76,89,121
+src/workerd/util/sqlite-kv-test.c++
+  s_144e1c38c83f9e::t_c49318cef585f7 341-360
+src/workerd/util/sqlite-kv.c++
+  s_144e1c38c83f9e::t_a3b852e1dc3bd6 279-288
+src/workerd/util/sqlite-kv.h
+  s_144e1c38c83f9e::t_a90abb91f57ee7 229
+src/workerd/util/sqlite-metadata-test.c++
+  s_144e1c38c83f9e::t_c295e6d51dee27 68-85
+src/workerd/util/sqlite-metadata.c++
+  s_144e1c38c83f9e::t_78cb01eb413509 103-105,107-114
+src/workerd/util/sqlite-metadata.h
+  s_144e1c38c83f9e::t_d0d4b146a4826c 78
+src/workerd/util/sqlite-test.c++
+  s_144e1c38c83f9e::t_5337cb1b706167 1802-1821
+src/workerd/util/sqlite.c++
+  s_144e1c38c83f9e::t_4a3b51f9522978 699-703,729,854,1061,1075,1094-1131,1491,1596-1598,1600-1611,1914-1920,1924,1927
+src/workerd/util/sqlite.h
+  s_144e1c38c83f9e::t_6fb4ea06f90665 310-334,348-357,391-395,427,430-432,602,756,875
+src/workerd/util/stream-utils-test.c++
+  s_144e1c38c83f9e::t_4def24183e5a48 46,48,50-68
+src/workerd/util/stream-utils.c++
+  s_144e1c38c83f9e::t_def549ed958cec 100,104-107,148
+src/workerd/util/stream-utils.h
+  s_144e1c38c83f9e::t_3337e207947826 29
+src/workerd/util/uncaught-exception-source.h
+  s_144e1c38c83f9e::t_674e1443229c5b 17,34-35
+src/wpt/BUILD.bazel
+  s_144e1c38c83f9e::t_e27a849a22f631 53-58,65-70,76,95,106-126,143,182,218-223,230-235,284-324
+src/wpt/FileAPI-test.ts
+  s_144e1c38c83f9e::t_f6374b262cdcfa 1-277
+src/wpt/WebCryptoAPI-test.ts
+  s_144e1c38c83f9e::t_f5d029f54c0604 187,243,247-378,387-407,512
+src/wpt/console-test.ts
+  s_144e1c38c83f9e::t_ea5ca63c1eddaa 1-34
+src/wpt/encoding-test-ts.ts
+  s_144e1c38c83f9e::t_3146b0c618576d 146-147,153
+src/wpt/encoding-test.ts
+  s_144e1c38c83f9e::t_ed7ce982c985fe 153-154,160
+src/wpt/eventsource-test.ts
+  s_144e1c38c83f9e::t_c607ebf7bea8a9 117-124,161-164,173-176
+src/wpt/fetch/AGENTS.md
+  s_144e1c38c83f9e::t_3b60a736bb8f24 8
+src/wpt/fetch/api-test-ts.ts
+  s_144e1c38c83f9e::t_b983b0f711f7db 364-370,739,851,855-856
+src/wpt/fetch/api-test.ts
+  s_144e1c38c83f9e::t_98bdc9f09ed968 361-367,736,848,852-853
+src/wpt/fetch/misc-test.ts
+  s_144e1c38c83f9e::t_dee617bada41eb 1-521
+src/wpt/harness/assertions.ts
+  s_144e1c38c83f9e::t_a56e897a29bedb 132-138,813-842
+src/wpt/harness/globals.ts
+  s_144e1c38c83f9e::t_e3b5fc80578a8c 98-99
+src/wpt/harness/harness.ts
+  s_144e1c38c83f9e::t_eeea99f9aca585 118-120,133-135,139,145,441,471-484
+src/wpt/harness/test.ts
+  s_144e1c38c83f9e::t_2ed23650d509a3 45-49,207,209,214-305,455-488
+src/wpt/harness/utils.ts
+  s_144e1c38c83f9e::t_3c458f6e33b1c7 28,58-61,73,92-97,146-151,154-156,239,243,245,267-271
+src/wpt/hr-time-test.ts
+  s_144e1c38c83f9e::t_fa47f67e2ce1f8 5-23
+src/wpt/html/webappapis/atob-test.ts
+  s_144e1c38c83f9e::t_3b13a9cf3f46fa 5,7-9
+src/wpt/html/webappapis/microtask-queuing-test.ts
+  s_144e1c38c83f9e::t_112932ffd98aac 1-22
+src/wpt/html/webappapis/structured-clone-test.ts
+  s_144e1c38c83f9e::t_833d682f7e1a06 1-59
+src/wpt/html/webappapis/timers-test.ts
+  s_144e1c38c83f9e::t_a8ccb4307ad9fb 1-30
+src/wpt/mimesniff/mime-types-test.ts
+  s_144e1c38c83f9e::t_dcf7b2eebea331 1-116
+src/wpt/performance-timeline-test.ts
+  s_144e1c38c83f9e::t_566f4c1ee99c1d 82
+src/wpt/user-timing-test.ts
+  s_144e1c38c83f9e::t_c76cb6404ea2e2 1-138
+src/wpt/wasm/jsapi-test.ts
+  s_144e1c38c83f9e::t_dae530091735a3 64,73,80
+src/wpt/webidl-test.ts
+  s_144e1c38c83f9e::t_fcbdd00cf5f416 26-30
+src/wpt/webmessaging-test.ts
+  s_144e1c38c83f9e::t_bd1272a031fb5c 1-170
+tools/clang-tidy/BUILD.bazel
+  s_144e1c38c83f9e::t_274355e0d6d875 39,74-90,96,99,107,112,119-122,128,156,187,207,224-229,261-288,291
+tools/clang-tidy/coroutine-hostile-raii-test.sh
+  s_144e1c38c83f9e::t_10fb37d7d667e3 12-14,22,46
+tools/clang-tidy/raw-v8-trycatch-negative-test.c++
+  s_144e1c38c83f9e::t_a36c0cff632cdf 1-44
+tools/clang-tidy/raw-v8-trycatch-positive-test.c++
+  s_144e1c38c83f9e::t_4726a24d623c52 1-34
+tools/clang-tidy/raw-v8-trycatch-test.sh
+  s_144e1c38c83f9e::t_572a411e853a7f 1-66
+tools/clang-tidy/test-headers.bzl
+  s_144e1c38c83f9e::t_5a1616ef027ad4 3-5,15-61
+tools/clang-tidy/unsafe-continuation-capture-test.py
+  s_144e1c38c83f9e::t_522e6cb556312a 28-31,50-57
+tools/clang-tidy/use-after-move-test.sh
+  s_144e1c38c83f9e::t_17932ef9cf2eb4 12-14,22,48,69
+tools/cross/format.json
+  s_144e1c38c83f9e::t_78978b0f71e5c2 41-45
+types/AGENTS.md
+  s_144e1c38c83f9e::t_872b1d724c7f3f 5
+types/BUILD.bazel
+  s_144e1c38c83f9e::t_9bcee410a55459 93-96,99-108
+types/README.md
+  s_144e1c38c83f9e::t_48646833a09242 4-7
+types/defines/trace.d.ts
+  s_144e1c38c83f9e::t_d77708fb1ec5d5 269
+types/generated-snapshot/experimental/index.d.ts
+  s_144e1c38c83f9e::t_2b492051088424 708,712,4215,18149
+types/generated-snapshot/experimental/index.ts
+  s_144e1c38c83f9e::t_e7b69544da8e5f 711,4221,18049
+types/generated-snapshot/index.d.ts
+  s_144e1c38c83f9e::t_02929cb71b463b 4030,17783
+types/generated-snapshot/index.ts
+  s_144e1c38c83f9e::t_fcc081a190898b 4039,17686
+types/rtti-fixture/BUILD.bazel
+  s_144e1c38c83f9e::t_12a1ac35c68351 1-10
+types/rtti-fixture/main.rs
+  s_144e1c38c83f9e::t_d8814247978346 1-354
+types/src/generator/type.ts
+  s_144e1c38c83f9e::t_45ced63fbf16ea 94-97
+types/test/generator/rust.spec.ts
+  s_144e1c38c83f9e::t_72866281e95993 1-254
+types/test/types/durable-objects.ts
+  s_144e1c38c83f9e::t_31a4d6f43c3618 5,41-42,45,47,50-51
+types/test/types/tail-stream-diag.ts
+  s_144e1c38c83f9e::t_4b7c7ec845d00f 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "acf9e68bfdd07eb265390adee115539ca88152c1",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

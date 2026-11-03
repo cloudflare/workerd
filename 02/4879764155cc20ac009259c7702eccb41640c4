@@ -1,0 +1,55 @@
+docs/reference/oidc.md
+  s_8a31beec700f7c::t_542c9eec7da5ab 1-56
+src/workerd/api/BUILD.bazel
+  s_8a31beec700f7c::t_a1aaf187667c70 34,93,672-679
+src/workerd/api/actor-state.h
+  s_8a31beec700f7c::t_8111e7885af8e3 12,620-623,761-763
+src/workerd/api/global-scope.h
+  s_8a31beec700f7c::t_3a7eb9d39c36c6 11,389-392,416-418,1266-1267
+src/workerd/api/oidc-test.c++
+  s_8a31beec700f7c::t_2c51fd31616908 1-203
+src/workerd/api/oidc.c++
+  s_8a31beec700f7c::t_cac852049bf2e9 1-43
+src/workerd/api/oidc.h
+  s_8a31beec700f7c::t_ecb28002a494a6 1-35
+src/workerd/api/tests/BUILD.bazel
+  s_8a31beec700f7c::t_bf927d6307a65d 37-42
+src/workerd/api/tests/oidc-test.js
+  s_8a31beec700f7c::t_fce77b52a3d1a6 1-158
+src/workerd/api/tests/oidc-test.wd-test
+  s_8a31beec700f7c::t_49f3626c729f60 1-28
+src/workerd/io/BUILD.bazel
+  s_8a31beec700f7c::t_70b6e3c107c4e5 82
+src/workerd/io/compatibility-date.capnp
+  s_8a31beec700f7c::t_b9dc449aeefc35 1708-1718
+src/workerd/io/io-channels.c++
+  s_8a31beec700f7c::t_d42e7eb4128e62 11-16
+src/workerd/io/io-channels.h
+  s_8a31beec700f7c::t_bd62cfa2052514 134-151
+src/workerd/util/BUILD.bazel
+  s_8a31beec700f7c::t_cc05063210e666 556-568
+src/workerd/util/oidc-test.c++
+  s_8a31beec700f7c::t_7aff7b651ac5fb 1-48
+src/workerd/util/oidc.c++
+  s_8a31beec700f7c::t_3a36b9ae63e761 1-157
+src/workerd/util/oidc.h
+  s_8a31beec700f7c::t_c72bbfcb0f4af8 1-15
+types/test/types/oidc.ts
+  s_8a31beec700f7c::t_69fe8b85c2ff81 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "024879764155cc20ac009259c7702eccb41640c4",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

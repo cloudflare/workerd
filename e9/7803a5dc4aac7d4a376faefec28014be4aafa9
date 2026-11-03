@@ -1,0 +1,55 @@
+src/rust/cxx/kj-rs/awaiter.c++
+  s_b5100e8818a1d4::t_9d7ca7ba5bff78 85,88,92-93,107-139,159,161-166,168-175,177-178,195-196
+src/rust/cxx/kj-rs/awaiter.h
+  s_b5100e8818a1d4::t_5a46cb0e61a091 5,88-92,120-124,142-145,156-157,168-189,191,201,254,256
+src/rust/cxx/kj-rs/executor-guarded.h
+  s_b5100e8818a1d4::t_6133b99bd9d2c7 4,17-25,35,44,55-63
+src/rust/cxx/kj-rs/future.h
+  s_b5100e8818a1d4::t_44b59c9bece1bd 70,114,116
+src/rust/cxx/kj-rs/future.rs
+  s_b5100e8818a1d4::t_0a9afb090be560 36,38,40,76,119
+src/rust/cxx/kj-rs/lib.rs
+  s_b5100e8818a1d4::t_1c776f84b22283 1-4,21-22,45,52,75-101,130-132,135
+src/rust/cxx/kj-rs/refcount.rs
+  s_b5100e8818a1d4::t_62ace5f866f1b3 33-52
+src/rust/cxx/kj-rs/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_7fa2b0177ae538 135
+src/rust/cxx/kj-rs/waker.c++
+  s_b5100e8818a1d4::t_a2b669abe749d2 3,8-25,27-48,51-85,89-95,97,100-104,107-111,115-137,139-140,142-143,145-148,151,153-159,162-165,168-169
+src/rust/cxx/kj-rs/waker.h
+  s_b5100e8818a1d4::t_d88acdbb950cf6 4,7,13-14,17,19-28,30-45,47-48,50-53,55-58,60-62,65-89,93,95-118,120-124,126-172,174-179,181-187,190-201,203-238,242,244-256,258-262,264-265,267-269,271-274,276-282
+src/rust/cxx/kj-rs/waker.rs
+  s_b5100e8818a1d4::t_efbb378d1dd624 1-7,12-14,16-34,36-45,47-50,54-64,67-73,76-82,85-108,111-161,165-169,172-188,190
+src/rust/cxx/kj-rs/awaiter.rs
+  s_b5100e8818a1d4::t_17c2161fedbd39 10,84-93
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_b5100e8818a1d4::t_16bafb3ee55960 18-19,25,91-98
+src/rust/cxx/kj-rs-tokio/tests/test_helpers.rs
+  s_b5100e8818a1d4::t_fbaf6d40fb8db4 216-264
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_b5100e8818a1d4::t_4c5d1a57068050 356-382
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_b5100e8818a1d4::t_d3781a3824537e 10-13,201,203-205,377-837
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_b5100e8818a1d4::t_4cda3b993e0f34 17-18,20-25,30,33,36,42,44-46,49,53,55,57,59-60,293-346
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_b5100e8818a1d4::t_c3ea6508796aef 140-162,165,168-170,176-199,462-1015
+src/rust/kj/tests/ffi-test.c++
+  s_b5100e8818a1d4::t_7b1ad740de88cb 51-52,55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e97803a5dc4aac7d4a376faefec28014be4aafa9",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+src/workerd/api/worker-loader.c++
+  s_722b93a0a59e74::t_7f47e853f5637d 407-412
+src/workerd/io/compatibility-date-test.c++
+  s_722b93a0a59e74::t_64f1fce09b91fe 78-79,110,146-170
+src/workerd/io/compatibility-date.c++
+  s_722b93a0a59e74::t_e9019a5613246a 220-221,224-226,228,231
+src/workerd/io/validation.h
+  s_722b93a0a59e74::t_9a4a4906fe3a31 19-28
+src/workerd/io/worker.h
+  s_722b93a0a59e74::t_6afe9ea184cbed 1128-1129,1134-1136,1151
+src/workerd/server/server-test.c++
+  s_722b93a0a59e74::t_28fc7be7ab5b64 346-353,371-377,386,396,462,1009-1034
+src/workerd/server/server.c++
+  s_722b93a0a59e74::t_819f544c8f86ab 230-231,238,3356-3359,3371-3376
+src/workerd/server/server.h
+  s_722b93a0a59e74::t_035cf66056fa73 44-45,135-138,148
+src/workerd/server/workerd.c++
+  s_722b93a0a59e74::t_7c12d676ed2c7e 704-705
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a33a75d1f5f18eed1551cf2e545fc98de75769c5",
+  "prompts": {},
+  "sessions": {
+    "s_722b93a0a59e74": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00aefdb80ffegMvdiAH2yBMWS8",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Pete Bacon Darwin <pbacondarwin@cloudflare.com>"
+    }
+  }
+}

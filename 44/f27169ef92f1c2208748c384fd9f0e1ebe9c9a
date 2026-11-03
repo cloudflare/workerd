@@ -1,0 +1,23 @@
+src/workerd/api/worker-rpc.h
+  s_80fd8e845a3525::t_c640e04bdf0bf8 17,330-331,368-369,465-466,578-579
+src/workerd/tests/test-fixture.c++
+  s_80fd8e845a3525::t_9997631a6d2961 405,432
+src/workerd/tests/test-fixture.h
+  s_80fd8e845a3525::t_95fd13cf44b6ed 42-44,274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "44f27169ef92f1c2208748c384fd9f0e1ebe9c9a",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+build/deps/build_deps.jsonc
+  s_1b9ab9fb100cf8::t_1a0e9af4ea2976 76-77
+build/deps/gen/build_deps.MODULE.bazel
+  s_1b9ab9fb100cf8::t_cc7d78fc7478c3 114
+patches/rules_rust/0003-Place-sysroot-symlinks-by-each-files-repository.patch
+  s_1b9ab9fb100cf8::t_307fb2b0740c1f 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c8dec11d6467a41ffe17e99641e00738db413d62",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

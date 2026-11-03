@@ -1,0 +1,19 @@
+src/workerd/server/BUILD.bazel
+  s_dccdbcee9eb73b::t_9f35ad6b1cd710 123,147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3ec6f64c3a99bbe6066204f99d440d6d6583e44b",
+  "prompts": {},
+  "sessions": {
+    "s_dccdbcee9eb73b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07663-3837-7741-892f-3e0fae2953db",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

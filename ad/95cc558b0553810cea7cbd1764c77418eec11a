@@ -1,0 +1,27 @@
+docs/virtual-time.md
+  s_1b2058fc828c17::t_1c9c5957d985d2 477-482
+src/workerd/api/unsafe.h
+  s_1b2058fc828c17::t_3123b9e568067e 504
+src/workerd/server/server.c++
+  s_1b2058fc828c17::t_b7ef82b65deafe 908-911,913,2408,2419-2420
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_1b2058fc828c17::t_b92fece8629d7f 7,74-81,412-446
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.wd-test
+  s_1b2058fc828c17::t_945e508d21c623 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ad95cc558b0553810cea7cbd1764c77418eec11a",
+  "prompts": {},
+  "sessions": {
+    "s_1b2058fc828c17": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18412-aa60-7331-b4ea-ba09f2ba75e3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

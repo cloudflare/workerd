@@ -1,0 +1,21 @@
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_2599bfc166a501 133-143,296-298
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_69aa99f19fe54c 106-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efee6d66fbf16afd696075904b730ad641484131",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

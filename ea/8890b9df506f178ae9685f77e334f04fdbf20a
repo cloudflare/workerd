@@ -1,0 +1,25 @@
+src/workerd/api/tests/BUILD.bazel
+  s_8e632801372b9b::t_4d985c31947e9d 322-323
+src/workerd/api/tests/tail-worker-test-event-log.js
+  s_8e632801372b9b::t_00b0a77d77c17c 1-11
+src/workerd/api/tests/tail-worker-test-on-hibernate.js
+  s_8e632801372b9b::t_3cd2b9709951f8 1-24
+src/workerd/api/tests/tail-worker-test.wd-test
+  s_8e632801372b9b::t_25a29f31723b2f 47,90-91,190-207,230-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea8890b9df506f178ae9685f77e334f04fdbf20a",
+  "prompts": {},
+  "sessions": {
+    "s_8e632801372b9b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e5f1cb7c0ffePkRJ76bDgw64WR",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

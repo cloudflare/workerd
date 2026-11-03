@@ -1,0 +1,31 @@
+src/workerd/util/runtime-trace.c++
+  s_23b639c1b7d101::t_04730dcf47b2fd 15-16,43-64,116-130
+src/workerd/util/runtime-trace-test.c++
+  s_23b639c1b7d101::t_ca3320bd68d4c3 61-85
+src/workerd/api/unsafe.h
+  s_23b639c1b7d101::t_26ae722db02a11 407,422,425-438,446-454,460,619-620,631-632
+src/workerd/util/runtime-trace.h
+  s_23b639c1b7d101::t_f16a784326abe3 37-38,40,64-68,71-77
+docs/virtual-time.md
+  s_23b639c1b7d101::t_b964f436235cd4 516-518,525,529,573-586,589-590
+src/workerd/server/tests/virtual-time/virtual-time-runtime-trace-test.js
+  s_23b639c1b7d101::t_9504a6fa2d0849 613-717
+src/workerd/api/unsafe.c++
+  s_23b639c1b7d101::t_452ad8594f7b05 548-549,601,606-657
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cd1eb765de7959ec12a5d99f67a515ca319a4352",
+  "prompts": {},
+  "sessions": {
+    "s_23b639c1b7d101": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18dd1-d250-705e-9cd8-f2f0848b6d0e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

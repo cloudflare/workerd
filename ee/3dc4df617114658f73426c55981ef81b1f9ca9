@@ -1,0 +1,25 @@
+src/workerd/api/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_bb7a6fd6961c60 500-505
+src/workerd/api/tests/actor-block-concurrency-timer-test.js
+  s_dadaf0660bfcbe::t_562909d3b7cf0c 1-31
+src/workerd/api/tests/actor-block-concurrency-timer-test.wd-test
+  s_dadaf0660bfcbe::t_44e20f61967f06 1-25
+src/workerd/io/io-context.c++
+  s_dadaf0660bfcbe::t_55e82063567757 86,117-121,129-131,133-134,136-139,918-922,995,997,1001-1003,1020-1030,1032-1034,1037,1039,1041,1044-1047
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ee3dc4df617114658f73426c55981ef81b1f9ca9",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

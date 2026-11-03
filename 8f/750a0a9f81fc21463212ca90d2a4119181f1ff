@@ -1,0 +1,39 @@
+src/workerd/api/tests/do-on-hibernate-symbol-test.js
+  s_f332e176eb9835::t_210243c8b9193a 17-34,49-55
+src/workerd/api/tests/do-on-hibernate-symbol-test.wd-test
+  s_f332e176eb9835::t_902b786abb0973 12,17,25-31
+src/workerd/api/tests/do-on-hibernate-symbol-unflagged-test.js
+  s_f332e176eb9835::t_d0d63e190139b7 6,9-28,34-40
+src/workerd/io/incoming-request-test.c++
+  s_f332e176eb9835::t_8963a1886e1be7 13,385-559
+src/workerd/io/io-context.c++
+  s_f332e176eb9835::t_093815a99a9c3b 513-526
+src/workerd/io/io-context.h
+  s_f332e176eb9835::t_ac0cf0845dafec 182-195,1377-1381,1958
+src/workerd/io/limit-enforcer.h
+  s_f332e176eb9835::t_10156bf4eea4f0 177-188
+src/workerd/io/observer.h
+  s_f332e176eb9835::t_bfa70f542f3156 195-198,496-499
+src/workerd/io/worker.c++
+  s_f332e176eb9835::t_4bc3760b04abba 3934-3936,4239-4265,4326-4328,4824-4959
+src/workerd/io/worker.h
+  s_f332e176eb9835::t_7587b0d49868ee 64,921-927,938-949,1086-1108,1248-1252
+src/workerd/util/uncaught-exception-source.h
+  s_f332e176eb9835::t_db76a3474e2830 17,34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8f750a0a9f81fc21463212ca90d2a4119181f1ff",
+  "prompts": {},
+  "sessions": {
+    "s_f332e176eb9835": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec654b52dffe5R4MDhsJqmPWkg",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_6c07c62a555180 77-78,204
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_68777f68d5208f 132
+build/wd_test.bzl
+  s_1b9ab9fb100cf8::t_f1455e7872b543 188,268-271,280,361-364
+images/BUILD.bazel
+  s_1b9ab9fb100cf8::t_8013b858c86637 3
+images/container-client-test/BUILD.bazel
+  s_1b9ab9fb100cf8::t_531ade0b65da2b 54-69
+src/workerd/server/tests/container-client/BUILD.bazel
+  s_1b9ab9fb100cf8::t_5d23634018884e 7-10
+src/workerd/server/tests/container-shutdown/BUILD.bazel
+  s_1b9ab9fb100cf8::t_7bb86d78587684 9-10,16
+src/workerd/server/tests/container-shutdown/test.mjs
+  s_1b9ab9fb100cf8::t_b2cff2f89c64de 5,51-61,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1dcc0b6d797909327ecaf22c6afd555a05565e7f",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
