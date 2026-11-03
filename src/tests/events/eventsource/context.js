@@ -2,6 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// An EventSource is bound to the request that created it. Its callbacks do
+// nothing when another request resumes them, and close() from another
+// request throws. The fixture (context-worker.js) runs in each cell as the
+// services context-current and context-legacy, which differ in
+// handle_cross_request_promise_resolution, and captures an EventSource's
+// fetch continuation in one request to resume it in the next.
+
 import { deepStrictEqual, match, ok, strictEqual } from 'node:assert';
 
 async function check(kind, env) {
@@ -27,13 +34,13 @@ async function check(kind, env) {
 }
 
 export const delayedNoBody = {
-  async test(_controller, env) {
+  async test(ctrl, env) {
     await check('204', env);
   },
 };
 
 export const delayedBody = {
-  async test(_controller, env) {
+  async test(ctrl, env) {
     await check('200', env);
   },
 };

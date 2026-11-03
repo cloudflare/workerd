@@ -72,6 +72,12 @@ declare const primordials: {
   // if there is none.
   readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
 
+  // Uncurries the getter of a JSG readonly property `name` of `proto`, typed as
+  // T. Under compat dates without workers_api_getters_setters_on_prototype the
+  // property is an own data property of each instance instead, which the
+  // result then reads.
+  readonly captureJsgGetter: <T>(proto: object, name: string) => T;
+
   // Promise.resolve and Promise.reject, bound to the captured constructor.
   readonly PromiseResolve: {
     (): Promise<void>;
@@ -140,8 +146,12 @@ declare const utils: {
   createTrustedMessageEvent(
     type: string,
     data: unknown,
-    source: object | null
+    source: object | null,
+    lastEventId?: string,
+    origin?: string | null
   ): MessageEvent;
+  createTrustedOpenEvent(): Event;
+  createTrustedErrorEvent(error: unknown): ErrorEvent;
   // Structured-clones a MessagePort message (api/per-isolate-bootstrap.c++:
   // CloneMessageData): serializes it, throwing on a SharedArrayBuffer, and
   // returns the deserialized copy.
@@ -150,7 +160,33 @@ declare const utils: {
   // Promise::Then(), so scheduling runs no user code (no species lookup). A
   // throw rejects the reaction's promise, reported as unhandled.
   queueReaction(fn: () => void): void;
+  // The request-bound I/O handle (api/request-io.h), bound to the current
+  // request, or undefined outside of one.
+  createRequestIo(): RequestIo | undefined;
+  // The helpers of api/bootstrap-utils.h.
+  isFetcher(value: unknown): boolean;
+  // Parses an absolute URL with no base (ada, whatever the global URL is).
+  parseUrl(
+    input: string
+  ): { readonly href: string; readonly origin: string } | undefined;
+  // The lowercased `type/subtype`, or undefined if not a MIME type.
+  mimeTypeEssence(input: string): string | undefined;
+  // Undefined for anything but a ReadableStream of either implementation.
+  readableStreamState(
+    value: unknown
+  ): 'locked' | 'disturbed' | 'readable' | undefined;
 };
+
+// The I/O of a bootstrap API, bound to the request that created it
+// (api/request-io.h: RequestIo). Every method but isCurrent() throws, as the
+// runtime does for I/O objects used across requests, outside that request.
+declare interface RequestIo {
+  isCurrent(): boolean;
+  requireCurrent(): void;
+  fetch(fetcher: unknown, url: string, init?: RequestInit): Promise<Response>;
+  wait(milliseconds: number, signal: AbortSignal): Promise<void>;
+  logUncaughtException(error: unknown): void;
+}
 
 // An abort algorithm registration. Obtained only from
 // utils.addAbortAlgorithm(); it has no JS-reachable constructor.
