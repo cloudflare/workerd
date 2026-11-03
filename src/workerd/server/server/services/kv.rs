@@ -67,7 +67,7 @@ pub const NAME: &str = "workerd:kv";
 const BLOBS: &str = "workerd:kv-blobs";
 const UNIQUE_KEY: &str = "workerd-KVNamespace";
 const BLOB_CACHE: &str = "workerd-KVNamespace-blob-cache";
-const BLOB_CACHE_BYTES: u64 = 1 << 30;
+const BLOB_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// `config` with `workerd:kv` if a Worker binds a `kvNamespaceId`;
 /// unchanged when none does.

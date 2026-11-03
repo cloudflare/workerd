@@ -34,7 +34,7 @@ export const getPutDelete = {
     assert.deepStrictEqual(new Uint8Array(bytes), new Uint8Array([1, 2, 3]));
     await env.KV.put('j', JSON.stringify({ a: [1] }));
     assert.deepStrictEqual(await env.KV.get('j', 'json'), { a: [1] });
-    const big = 'x'.repeat(1 << 20);
+    const big = 'x'.repeat(1024 * 1024);
     await env.KV.put('big', big);
     assert.strictEqual(await env.KV.get('big'), big);
     const odd = 'a/b c?d=e&f%20é/..';
@@ -49,7 +49,7 @@ export const getPutDelete = {
 // A value written as a stream, in chunks, inline and as a blob.
 export const streamedPut = {
   async test(ctrl, env) {
-    for (const size of [1000, 70_000, 2 << 20]) {
+    for (const size of [1000, 70_000, 2 * 1024 * 1024]) {
       const value = Uint8Array.from({ length: size }, (_, i) => i % 251);
       let sent = 0;
       const stream = new ReadableStream({
@@ -146,7 +146,7 @@ export const bulk = {
 export const threshold = {
   async test(ctrl, env) {
     const before = (await blobs(env)).length;
-    const at = 'x'.repeat(64 << 10);
+    const at = 'x'.repeat(64 * 1024);
     await env.KV.put('t/at', at);
     assert.strictEqual((await blobs(env)).length, before);
     await env.KV.put('t/over', at + 'y');
@@ -208,7 +208,7 @@ export const cacheTtl = {
     const got = await env.KV.getWithMetadata('c');
     assert.strictEqual(got.cacheStatus, 'HIT');
     // A row names its blob, so a large value's row is cached too.
-    const big = 'b'.repeat(2 << 20);
+    const big = 'b'.repeat(2 * 1024 * 1024);
     await env.KV.put('big', big);
     const again = await env.KV.getWithMetadata('big');
     assert.deepStrictEqual([again.value, again.cacheStatus], [big, 'HIT']);
@@ -224,7 +224,7 @@ export const cacheTtl = {
 // does not replace the write's entry in the cache.
 export const readRacesWrite = {
   async test(ctrl, env) {
-    const old = 'o'.repeat(2 << 20);
+    const old = 'o'.repeat(2 * 1024 * 1024);
     await env.KV.put('race', old);
     const [got] = await Promise.all([
       env.KV.get('race'),

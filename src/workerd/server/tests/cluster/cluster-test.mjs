@@ -755,7 +755,7 @@ test('cluster: a node caches KV blobs on its disk', async () => {
   await withCluster(2, async ({ nodes, bucket }) => {
     const [a, b] = nodes.map((n) => n.httpPort);
     const q = (params) => new URLSearchParams(params);
-    const MiB = 1 << 20;
+    const MiB = 1024 * 1024;
     const put = (port, key, size) =>
       fetchJson(port, `/kv/put?${q({ key, size: String(size) })}`);
     const get = async (port, key) =>

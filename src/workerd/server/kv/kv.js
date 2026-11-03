@@ -25,15 +25,15 @@
 
 import { DurableObject } from 'cloudflare:workers';
 
-const INLINE = 64 << 10;
-const MAX_VALUE = 25 << 20;
+const INLINE = 64 * 1024;
+const MAX_VALUE = 25 * 1024 * 1024;
 const MAX_METADATA = 1024;
 const MAX_LIST = 1000;
 const MAX_BULK = 100;
 const MIN_EXPIRATION_TTL = 60;
 const MIN_CACHE_TTL = 30;
 const CACHE_TTL = 60;
-const CACHE_BYTES = 64 << 20;
+const CACHE_BYTES = 64 * 1024 * 1024;
 // A reserved blob unclaimed this long is deleted.
 const RESERVE_MS = 600_000;
 // A blob no row names is deleted this much later, which spares readers
