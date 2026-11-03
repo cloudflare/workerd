@@ -505,6 +505,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // cancel any tasks synchronously, as this might cancel the current promise, leading to a crash.
   void abort(kj::Exception&& e);
 
+  // The exception ctx.abort() aborts with when called without a reason.
+  static kj::Exception abortWithoutReasonException();
+
   // Await the given promise and, if it throws, call `abort()` with the exception. The promise
   // given here should just be a monitoring promise, it should not represent any sort of background
   // work beyond monitoring. In particular, it must not be a task that attempts to enter the

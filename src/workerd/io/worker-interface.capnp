@@ -558,6 +558,15 @@ enum SerializationTag {
   # An EmailMessage (the `cloudflare:email` class): envelope sender and recipient followed by the
   # raw message body as a readableStream. Implemented upstream of workerd; the tag is allocated here
   # so that every embedder agrees on the wire value.
+
+  r2Checksums @20;
+  # Checksums attached to an R2 object.
+
+  r2Object @21;
+  # R2 object metadata without a body.
+
+  r2ObjectBody @22;
+  # R2 object metadata with a transferred body stream.
 }
 
 enum StreamEncoding {

@@ -328,6 +328,13 @@ impl ActorClass for DynamicActorClass {
         self.inner()?.start_request(metadata, actor)
     }
 
+    fn run_on_hibernate<'a>(
+        &'a self,
+        actor: &'a ffi::ActorHandle,
+    ) -> LocalBoxFuture<'a, Result<()>> {
+        Box::pin(async move { self.inner()?.run_on_hibernate(actor).await })
+    }
+
     fn require_allows_transfer(&self) -> Result<()> {
         Err(dynamic_transfer_error())
     }

@@ -29,6 +29,8 @@ from pathlib import Path
 # listed, because Rust JSG still shares them with C++ JSG.
 CONSTRUCTS = {
     "jsg::Lock": r"\bjsg::Lock\b",
+    # IoContext::getCurrentLock() returns the C++ jsg::Lock.
+    "getCurrentLock": r"\bgetCurrentLock\s*\(",
     "JSG_TRY": r"\bJSG_(?:TRY|CATCH)\b",
     "tryCatch": r"(?:\.|->)tryCatch\s*\(",
     "jsg::check": r"\bjsg::check\b",

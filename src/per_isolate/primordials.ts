@@ -678,6 +678,7 @@ module.exports = ObjectFreeze({
   BigInt: BigIntCtor,
   DataView: DataViewCtor,
   Error: ErrorCtor,
+  EventTarget: EventTargetCtor,
   FinalizationRegistry: FinalizationRegistryCtor,
   Function: FunctionCtor,
   Map: MapCtor,

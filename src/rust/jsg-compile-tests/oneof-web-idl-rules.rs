@@ -42,6 +42,12 @@ pub enum TwoStrings<'s> {
     Handle(v8::Local<'s, v8::String>),
 }
 
+#[jsg_oneof] //~ ERROR E0080: at most one string type
+pub enum OwnedAndJsString<'s> {
+    String(String),
+    JsString(jsg::JsString<'s>),
+}
+
 #[jsg_oneof] //~ ERROR E0080: an object type only if
 pub enum ObjectAndResource<'s> {
     Object(v8::Local<'s, v8::Object>),

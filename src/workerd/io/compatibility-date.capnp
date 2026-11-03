@@ -1745,7 +1745,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # unsupported.
 
   pythonSharedStandardLibrary @198 :Bool
-      $compatEnableFlag("python_shared_standard_library");
+      $compatEnableFlag("python_shared_standard_library")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
   # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
   # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
@@ -1775,7 +1776,31 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
-  enableWorkloadIdentityContext @202 :Bool
+
+  nodeJsProcessVersion24 @202 :Bool
+      $compatEnableFlag("nodejs_process_version_24")
+      $compatDisableFlag("no_nodejs_process_version_24")
+      $compatEnableDate("2026-11-24");
+  # Reports the latest Node.js 24 release, instead of Node.js 22, as `process.version` and
+  # `process.versions.node`. Libraries feature-sniff on these values, so a Worker that enables the
+  # flag may take code paths written for Node.js 24, even where the Node.js compatibility layer
+  # does not match Node.js 24 behavior. Requires `nodejs_compat` and `enable_nodejs_process_v2`.
+
+  r2BindingsJsrpc @203 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The binding must specify a named entrypoint implementing the R2 backend
+  # methods: head, get, put, delete, list, createMultipartUpload, uploadPart,
+  # abortMultipartUpload, and completeMultipartUpload. Object results use the
+  # corresponding native R2 API types; createMultipartUpload returns an object
+  # containing uploadId. The expected TypeScript interface is type-checked in
+  # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  enableWorkloadIdentityContext @204 :Bool
       $compatEnableFlag("enable_workload_identity_context")
       $compatDisableFlag("disable_workload_identity_context");
   # Adds ctx.identity.caller() on an opt-in basis until the platform rollout completes.

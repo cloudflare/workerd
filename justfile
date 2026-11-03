@@ -167,8 +167,8 @@ generate-types:
   cp -r bazel-bin/types/definitions/. types/generated-snapshot/
   chmod -R u+w types/generated-snapshot
 
-update-reported-node-version:
-  python3 tools/update_node_version.py src/workerd/api/node/node-version.h
+update-reported-node-version *args:
+  python3 tools/update_node_version.py src/workerd/api/node/node-version.h {{args}}
 
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
 # rust-analyzer doesn't like stderr output, redirect it to /dev/null
