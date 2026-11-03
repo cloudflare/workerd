@@ -431,6 +431,8 @@ pub async fn run(
         return Ok(());
     };
 
+    // Whatever way this returns, the cluster port answers that this instance is not ready.
+    let _serving = server.cluster().map(ClusterNode::serving);
     let drain = std::pin::pin!(drain);
     let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
     let mut stop = None;

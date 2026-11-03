@@ -9,7 +9,8 @@
 //! one capnp session an instance keeps to each peer: the tunnel carries `WorkerdDebugPort`,
 //! whose `getActor` gives a `WorkerdBootstrap` for one Durable Object, so HTTP, WebSockets and
 //! JS RPC to the object cross unchanged. A request for an object this instance
-//! does not own routes on through its own channel to the owner.
+//! does not own routes on through its own channel to the owner. `GET /ready` answers whether
+//! the instance takes traffic: it serves, holds its lease, and is not stopping.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -78,6 +79,8 @@ pub struct ClusterNode {
     deadlines: Cell<Option<Deadlines>>,
     /// The requests peers have in flight here.
     peer_requests: Rc<PeerRequests>,
+    /// Whether the application's listeners are being served (`Serving`).
+    serving: Cell<bool>,
 }
 
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
@@ -95,6 +98,15 @@ pub struct Deadlines {
 struct PeerRequests {
     count: Cell<usize>,
     none: Notify,
+}
+
+/// The application's listeners are being served, until this is dropped.
+pub struct Serving(Rc<ClusterNode>);
+
+impl Drop for Serving {
+    fn drop(&mut self) {
+        self.0.serving.set(false);
+    }
 }
 
 /// A request a peer has in flight here, from its start until its interface is dropped.
@@ -320,7 +332,14 @@ impl ClusterNode {
             },
             deadlines: Cell::new(None),
             peer_requests: Rc::default(),
+            serving: Cell::new(false),
         }))
+    }
+
+    /// Marks the application's listeners as served until the guard is dropped.
+    pub fn serving(self: &Rc<Self>) -> Serving {
+        self.serving.set(true);
+        Serving(Rc::clone(self))
     }
 
     /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
@@ -668,14 +687,23 @@ impl PeerConnection {
 impl Handler for PeerConnection {
     async fn request<'a>(
         &'a self,
-        _method: Method,
-        _url: &'a [u8],
+        method: Method,
+        url: &'a [u8],
         _headers: HeadersRef<'a>,
         _body: Pin<&'a mut kj::io::AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
-        let table = header_table(&self.node.factory);
-        send_error(response, 404, "Not Found", &Headers::new(table)).await
+        let headers = Headers::new(header_table(&self.node.factory));
+        if method != Method::GET || url != b"/ready" {
+            return send_error(response, 404, "Not Found", &headers).await;
+        }
+        // Ready to take traffic: serving, a member of the cluster, not stopping.
+        let cluster = &self.node.cluster;
+        if self.node.serving.get() && cluster.lease_holds() && !cluster.is_draining() {
+            send_error(response, 200, "OK", &headers).await
+        } else {
+            send_error(response, 503, "Service Unavailable", &headers).await
+        }
     }
 
     async fn connect<'a>(

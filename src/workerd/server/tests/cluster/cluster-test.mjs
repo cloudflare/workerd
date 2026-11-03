@@ -33,7 +33,8 @@
 //      too: requests that arrive meanwhile wait for a DO's handoff and follow
 //      it, JS RPC calls and other DOs' calls included, the calls of a
 //      handoff's work are not held, and a DO whose handoff outlasts its
-//      deadline moves once the node left.
+//      deadline moves once the node left. A rolling restart of the cluster,
+//      paced by the nodes' readiness, fails, loses and replays no request.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -2001,6 +2002,47 @@ test('cluster: a request a forwarding peer could not route is retried', async ()
     assert.strictEqual(response.body.count, 3);
   });
 });
+
+test(
+  'cluster: a rolling restart under load loses and replays no request',
+  SIGTERM_DRAINS,
+  async () => {
+    const ready = async (port) =>
+      (await fetch(`http://127.0.0.1:${port}/ready`).catch(() => null))?.status;
+    await withCluster(3, async ({ nodes }) => {
+      const names = Array.from({ length: 6 }, (_, i) => `rolled-${i}`);
+      let serving = [0, 1, 2];
+      const finish = load(nodes, names, () => serving);
+      await sleep(500);
+      for (const [i, node] of nodes.entries()) {
+        const port = node.clusterPort;
+        assert.strictEqual(await ready(port), 200);
+        const exit = node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+        let status = 200;
+        while (status === 200) {
+          await sleep(20);
+          status = await ready(port);
+        }
+        // Not ready while it drains, then gone.
+        assert(status === 503 || status === undefined, `status ${status}`);
+        // As a load balancer would, a while after the node is not ready;
+        // meanwhile it serves the requests it still gets.
+        await sleep(1000);
+        serving = serving.filter((n) => n !== i);
+        assert.deepStrictEqual(await exit, { code: 0, signal: null });
+        await node.start();
+        const deadline = Date.now() + 10_000;
+        while ((await ready(node.clusterPort)) !== 200) {
+          assert(Date.now() < deadline, `${node.nodeId} never got ready`);
+          await sleep(50);
+        }
+        serving = [...serving, i].sort();
+        await sleep(500);
+      }
+      await assertLoadServed(await finish(), nodes);
+    });
+  }
+);
 
 test('cluster: a freshly minted RpcTarget stub passed via props reaches its DO after it breaks', async () => {
   await withCluster(2, async ({ nodes }) => {

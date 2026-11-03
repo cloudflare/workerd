@@ -264,6 +264,9 @@ struct ClusterConfig {
   # due on a stopping instance runs where its object goes: when a request claims the object there,
   # or else once a peer adopts the alarms of the instance that left, within five seconds of its
   # leaving, so up to one stop and five seconds late.
+  #
+  # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
+  # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
 }
 
 struct LoggingOptions {
