@@ -12,8 +12,9 @@
 // TypeError. These helpers give a DataView the typed arrays' answer, so
 // such a view reads as empty whichever kind it is — as it does in the C++
 // implementation, which treats it as zero-length. A detached ArrayBuffer
-// is empty too: its byteLength getter reports 0. Leaf module: requires
-// nothing.
+// is empty too: its byteLength getter reports 0. Requires only common.
+
+import type { CommonHelpers } from './common';
 
 const {
   ArrayBufferPrototypeByteLengthGet,
@@ -30,11 +31,24 @@ const {
 
 const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
 
-interface ViewExtent {
-  buffer: ArrayBufferLike;
-  byteOffset: number;
-  byteLength: number;
+const { nullPrototypeRecord } = require('webstreams/common') as Pick<
+  CommonHelpers,
+  'nullPrototypeRecord'
+>;
+
+// Made for every chunk a write or an enqueue takes, so a record class (see
+// nullPrototypeRecord).
+class ViewExtent {
+  declare buffer: ArrayBufferLike;
+  declare byteOffset: number;
+  declare byteLength: number;
+  constructor(buffer: ArrayBufferLike, byteOffset: number, byteLength: number) {
+    this.buffer = buffer;
+    this.byteOffset = byteOffset;
+    this.byteLength = byteLength;
+  }
 }
+nullPrototypeRecord(ViewExtent);
 
 // PRECONDITION: isArrayBufferView(view). A view without a [[TypedArrayName]]
 // is a DataView, whose getters brand-check the receiver; they throw only for
@@ -53,12 +67,11 @@ function viewByteLength(view: ArrayBufferView): number {
 // PRECONDITION: isArrayBufferView(view). The buffer getters never throw.
 function viewByteExtent(view: ArrayBufferView): ViewExtent {
   if (TypedArrayPrototypeGetSymbolToStringTag(view) !== undefined) {
-    return {
-      __proto__: null,
-      buffer: TypedArrayPrototypeGetBuffer(view),
-      byteOffset: TypedArrayPrototypeGetByteOffset(view),
-      byteLength: TypedArrayPrototypeGetByteLength(view),
-    } as ViewExtent;
+    return new ViewExtent(
+      TypedArrayPrototypeGetBuffer(view) as ArrayBufferLike,
+      TypedArrayPrototypeGetByteOffset(view) as number,
+      TypedArrayPrototypeGetByteLength(view) as number
+    );
   }
   const dataView = view as DataView;
   const buffer = DataViewPrototypeGetBuffer(dataView) as ArrayBufferLike;
@@ -71,7 +84,7 @@ function viewByteExtent(view: ArrayBufferView): ViewExtent {
     byteOffset = 0;
     byteLength = 0;
   }
-  return { __proto__: null, buffer, byteOffset, byteLength } as ViewExtent;
+  return new ViewExtent(buffer, byteOffset, byteLength);
 }
 
 // The extent of a BufferSource: a view's (see viewByteExtent), or the whole
@@ -79,22 +92,20 @@ function viewByteExtent(view: ArrayBufferView): ViewExtent {
 function bufferSourceExtent(chunk: unknown): ViewExtent | undefined {
   if (isArrayBufferView(chunk)) return viewByteExtent(chunk);
   if (isArrayBuffer(chunk)) {
-    return {
-      __proto__: null,
-      buffer: chunk,
-      byteOffset: 0,
-      byteLength: ArrayBufferPrototypeByteLengthGet(chunk),
-    } as ViewExtent;
+    return new ViewExtent(
+      chunk,
+      0,
+      ArrayBufferPrototypeByteLengthGet(chunk) as number
+    );
   }
   if (isSharedArrayBuffer(chunk)) {
     // ArrayBuffer.prototype.byteLength throws on a SharedArrayBuffer, so read
     // the length through a Uint8Array; shared memory cannot be detached.
-    return {
-      __proto__: null,
-      buffer: chunk,
-      byteOffset: 0,
-      byteLength: TypedArrayPrototypeGetByteLength(new Uint8Array(chunk)),
-    } as ViewExtent;
+    return new ViewExtent(
+      chunk,
+      0,
+      TypedArrayPrototypeGetByteLength(new Uint8Array(chunk)) as number
+    );
   }
   return undefined;
 }

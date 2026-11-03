@@ -123,6 +123,8 @@ const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
+  nullPrototypeRecord,
+  UnderlyingSourceRecord,
   toStringTagProperty,
   promiseResolvedWith,
   newHandledPending,
@@ -2748,13 +2750,26 @@ class ReadableStreamDrainingReader<R> {
   }
 }
 
-// StreamPipeOptions after WebIDL conversion: plain data, no getters.
-interface ConvertedPipeOptions {
-  readonly preventAbort: boolean;
-  readonly preventCancel: boolean;
-  readonly preventClose: boolean;
-  readonly signal: AbortSignal | undefined;
+// StreamPipeOptions after WebIDL conversion: plain data, no getters. Made
+// per pipe, so a record class (see nullPrototypeRecord).
+class ConvertedPipeOptions {
+  declare preventAbort: boolean;
+  declare preventCancel: boolean;
+  declare preventClose: boolean;
+  declare signal: AbortSignal | undefined;
+  constructor(
+    preventAbort: boolean,
+    preventCancel: boolean,
+    preventClose: boolean,
+    signal: AbortSignal | undefined
+  ) {
+    this.preventAbort = preventAbort;
+    this.preventCancel = preventCancel;
+    this.preventClose = preventClose;
+    this.signal = signal;
+  }
 }
+nullPrototypeRecord(ConvertedPipeOptions);
 
 // WebIDL conversion of StreamPipeOptions. Members are read once each in spec
 // order (WPT piping/throwing-options.any.js).
@@ -2784,13 +2799,12 @@ function convertPipeOptions(options: unknown): ConvertedPipeOptions {
       throw new TypeError('options.signal must be an AbortSignal');
     }
   }
-  return {
-    __proto__: null,
+  return new ConvertedPipeOptions(
     preventAbort,
     preventCancel,
     preventClose,
-    signal,
-  } as ConvertedPipeOptions;
+    signal
+  );
 }
 
 // The pipe methods' steps after their brand checks. The options convert
@@ -3283,7 +3297,10 @@ function pipeToInternal<R>(
 // cost two microtasks and a Promise.prototype.then lookup per chunk on the
 // from(array) path.
 
-const kFromStrategy = ObjectFreeze({ __proto__: null, highWaterMark: 0 });
+const kFromStrategy = ObjectFreeze({
+  __proto__: kNullProtoObject,
+  highWaterMark: 0,
+});
 
 type IteratorMethod = (this: unknown, ...args: unknown[]) => unknown;
 
@@ -3457,37 +3474,44 @@ function readableStreamFromIterable<R>(
   let source: UnderlyingDefaultSource<R>;
   if (asyncMethod !== undefined) {
     const { iterator, next } = openIterator(iterable, asyncMethod);
-    source = {
-      __proto__: null,
-      // WebIDL "get the next value".
-      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
-        let nextResult: object;
-        try {
-          nextResult = iteratorNext(iterator, next);
-        } catch (e) {
-          return PromiseReject(e);
-        }
-        return PromisePrototypeThen(
-          promiseResolvedWith(nextResult),
-          (iterResult: unknown) => {
-            if (!isObjectLike(iterResult)) {
-              throw new TypeError('The result of next() must be an object');
-            }
-            if ((iterResult as { done?: unknown }).done) {
-              defaultControllerClose(controller);
-            } else {
-              defaultControllerEnqueue(
-                controller,
-                (iterResult as { value?: unknown }).value
-              );
-            }
+    // WebIDL "get the next value".
+    const pull = (
+      controller: ReadableStreamDefaultControllerType
+    ): Promise<void> => {
+      let nextResult: object;
+      try {
+        nextResult = iteratorNext(iterator, next);
+      } catch (e) {
+        return PromiseReject(e);
+      }
+      return PromisePrototypeThen(
+        promiseResolvedWith(nextResult),
+        (iterResult: unknown) => {
+          if (!isObjectLike(iterResult)) {
+            throw new TypeError('The result of next() must be an object');
           }
-        ) as Promise<void>;
-      },
-      cancel(reason: unknown): Promise<void> {
-        return closeAsyncIterator(iterator, reason);
-      },
-    } as UnderlyingDefaultSource<R>;
+          if ((iterResult as { done?: unknown }).done) {
+            defaultControllerClose(controller);
+          } else {
+            defaultControllerEnqueue(
+              controller,
+              (iterResult as { value?: unknown }).value
+            );
+          }
+        }
+      ) as Promise<void>;
+    };
+    const cancel = (reason: unknown): Promise<void> => {
+      return closeAsyncIterator(iterator, reason);
+    };
+    source = new UnderlyingSourceRecord<R, UnderlyingDefaultSource<R>>(
+      undefined, // autoAllocateChunkSize
+      cancel, // cancel
+      undefined, // expectedLength
+      pull, // pull
+      undefined, // start
+      undefined // type
+    ) as UnderlyingDefaultSource<R>;
   } else {
     const syncMethod = getIteratorMethod(
       iterable,
@@ -3498,35 +3522,42 @@ function readableStreamFromIterable<R>(
       throw new TypeError('The argument must be sync or async iterable');
     }
     const { iterator, next } = openIterator(iterable, syncMethod);
-    source = {
-      __proto__: null,
-      // The async-from-sync wrapper's next(), then "get the next value" on
-      // its result, which is always an object: nothing more to check. The
-      // continuation is reacted to directly (ledger #29; see above).
-      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
-        let result: object;
-        try {
-          result = iteratorNext(iterator, next);
-        } catch (e) {
-          return PromiseReject(e);
-        }
-        return asyncFromSyncContinuation(
-          iterator,
-          result,
-          true,
-          (value: unknown, done: boolean) => {
-            if (done) {
-              defaultControllerClose(controller);
-            } else {
-              defaultControllerEnqueue(controller, value);
-            }
+    // The async-from-sync wrapper's next(), then "get the next value" on
+    // its result, which is always an object: nothing more to check. The
+    // continuation is reacted to directly (ledger #29; see above).
+    const pull = (
+      controller: ReadableStreamDefaultControllerType
+    ): Promise<void> => {
+      let result: object;
+      try {
+        result = iteratorNext(iterator, next);
+      } catch (e) {
+        return PromiseReject(e);
+      }
+      return asyncFromSyncContinuation(
+        iterator,
+        result,
+        true,
+        (value: unknown, done: boolean) => {
+          if (done) {
+            defaultControllerClose(controller);
+          } else {
+            defaultControllerEnqueue(controller, value);
           }
-        );
-      },
-      cancel(reason: unknown): Promise<void> {
-        return closeSyncIterator(iterator, reason);
-      },
-    } as UnderlyingDefaultSource<R>;
+        }
+      );
+    };
+    const cancel = (reason: unknown): Promise<void> => {
+      return closeSyncIterator(iterator, reason);
+    };
+    source = new UnderlyingSourceRecord<R, UnderlyingDefaultSource<R>>(
+      undefined, // autoAllocateChunkSize
+      cancel, // cancel
+      undefined, // expectedLength
+      pull, // pull
+      undefined, // start
+      undefined // type
+    ) as UnderlyingDefaultSource<R>;
   }
   return new ReadableStream<R>(source, kFromStrategy as QueuingStrategy<R>);
 }
@@ -4530,13 +4561,17 @@ class ReadableStream<R> {
     if (typeof asyncIterable === 'string' || isArrayBufferView(asyncIterable)) {
       const chunk = asyncIterable as unknown as R;
       return new ReadableStream<R>(
-        {
-          __proto__: null,
-          pull(controller: ReadableStreamDefaultControllerType) {
+        new UnderlyingSourceRecord<R, UnderlyingDefaultSource<R>>(
+          undefined, // autoAllocateChunkSize
+          undefined, // cancel
+          undefined, // expectedLength
+          (controller: ReadableStreamDefaultControllerType) => {
             defaultControllerEnqueue(controller, chunk);
             defaultControllerClose(controller);
-          },
-        } as UnderlyingDefaultSource<R>,
+          }, // pull
+          undefined, // start
+          undefined // type
+        ) as UnderlyingDefaultSource<R>,
         kFromStrategy as QueuingStrategy<R>
       );
     }
@@ -4825,19 +4860,28 @@ async function collectChunks<R>(
 
 // The bytes behind every body consumption of the C++ bridge (arrayBuffer(),
 // bytes(), blob(), text(), json()), which builds each result from them
-// itself. They resolve in a null-prototype record: resolving with the
-// ArrayBuffer itself would look up its then, which a patched
-// Object.prototype.then supplies.
+// itself. They resolve in a null-prototype record (see nullPrototypeRecord):
+// resolving with the ArrayBuffer itself would look up its then, which a
+// patched Object.prototype.then supplies.
+class ConsumedBytes {
+  declare buffer: ArrayBuffer;
+  constructor(buffer: ArrayBuffer) {
+    this.buffer = buffer;
+  }
+}
+nullPrototypeRecord(ConsumedBytes);
+
 async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
 ): Promise<{ buffer: ArrayBuffer }> {
-  const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
-  return { __proto__: null, buffer } as { buffer: ArrayBuffer };
+  return new ConsumedBytes(
+    (await collectChunks(stream, limit)).toArrayBuffer()
+  );
 }
 
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   closed: kEnumerable,
   cancel: kEnumerable,
   read: kEnumerable,
@@ -4845,7 +4889,7 @@ ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
   [SymbolToStringTag]: toStringTagProperty('ReadableStreamDefaultReader'),
 });
 ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   closed: kEnumerable,
   cancel: kEnumerable,
   read: kEnumerable,
@@ -4853,11 +4897,11 @@ ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
   [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBReader'),
 });
 ObjectDefineProperties(ReadableStream, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   from: kEnumerable,
 });
 ObjectDefineProperties(ReadableStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   locked: kEnumerable,
   cancel: kEnumerable,
   getReader: kEnumerable,
@@ -4867,7 +4911,7 @@ ObjectDefineProperties(ReadableStream.prototype, {
   values: kEnumerable,
   // WebIDL: the same function object as values(), not enumerable.
   [SymbolAsyncIterator]: {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     value: ReadableStream.prototype.values,
     writable: true,
     enumerable: false,
@@ -4876,19 +4920,19 @@ ObjectDefineProperties(ReadableStream.prototype, {
   [SymbolToStringTag]: toStringTagProperty('ReadableStream'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(ReadableByteStreamController, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   close: kEnumerable,
   enqueue: kEnumerable,
   error: kEnumerable,
@@ -4908,7 +4952,7 @@ const defaultControllerClose = uncurryThis(
   ReadableStreamDefaultController.prototype.close
 ) as (controller: object) => void;
 ObjectDefineProperties(ReadableByteStreamController.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   close: kEnumerable,
   enqueue: kEnumerable,
   error: kEnumerable,
@@ -4917,19 +4961,19 @@ ObjectDefineProperties(ReadableByteStreamController.prototype, {
   [SymbolToStringTag]: toStringTagProperty('ReadableByteStreamController'),
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   respond: kEnumerable,
   respondWithNewView: kEnumerable,
   view: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBRequest'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype.enqueue, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(ReadableByteStreamController.prototype.enqueue, {
-  __proto__: null,
-  length: { __proto__: null, value: 1 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 1 },
 });
 
 // The cppExports are not part of the public API. They are exported to the

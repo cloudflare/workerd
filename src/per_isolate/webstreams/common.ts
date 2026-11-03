@@ -15,6 +15,7 @@ const {
   NumberIsFinite,
   NumberIsNaN,
   ObjectFreeze,
+  ObjectSetPrototypeOf,
   PromiseWithResolvers,
   RangeError,
   TypeError,
@@ -35,6 +36,31 @@ const kEnumerable: PropertyDescriptor = ObjectFreeze({
   __proto__: kNullProtoObject,
   enumerable: true,
 });
+
+// Makes a class's instances null-prototype records: detaches its prototype
+// from Object.prototype, deletes its `constructor` and freezes it, once, so a
+// record that reached user code could not be used to give every record a
+// member. For internal objects only: a record has no Object.prototype
+// methods, and its prototype is shared by every record of the class.
+//
+// An object literal with a __proto__ member (`{ __proto__: kNullProtoObject,
+// ... }`) sets its prototype with a runtime call every time it is evaluated,
+// and `{ __proto__: null, ... }` creates a dictionary-mode object. A record
+// class costs no more to instantiate than a plain literal, and its instances
+// keep fast, in-object properties, so it is the shape for internal objects
+// created per chunk, per operation or per stream. Its constructor must set
+// every member, undefined when absent, so the shape is stable and no member
+// is looked up on the prototype. Declare the fields with `declare`, so the
+// class has no field initializers to run before the constructor's stores.
+function nullPrototypeRecord<
+  C extends abstract new (...args: never[]) => object,
+>(recordClass: C): C {
+  const prototype = recordClass.prototype as { constructor?: unknown };
+  ObjectSetPrototypeOf(prototype, null);
+  delete prototype.constructor;
+  ObjectFreeze(prototype);
+  return recordClass;
+}
 
 // WebIDL "a promise resolved with" a value: a new promise resolved with it.
 // For a promise or thenable, its reactions run one microtask after the
@@ -183,10 +209,22 @@ function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
 // A strategy argument as WebIDL converts a QueuingStrategy dictionary: each
 // member read once, in lexicographic order. highWaterMark has been through
 // ToNumber; size is a function. An absent member is undefined.
-interface QueuingStrategyDict {
-  highWaterMark: number | undefined;
-  size: ((chunk: unknown) => number) | undefined;
+//
+// The record class doubles as the strategy of an internal stream pair, which
+// the inner stream converts again, reading its data properties.
+class QueuingStrategyRecord {
+  declare highWaterMark: number | undefined;
+  declare size: ((chunk: unknown) => number) | undefined;
+  constructor(
+    highWaterMark: number | undefined,
+    size: ((chunk: unknown) => number) | undefined
+  ) {
+    this.highWaterMark = highWaterMark;
+    this.size = size;
+  }
 }
+nullPrototypeRecord(QueuingStrategyRecord);
+type QueuingStrategyDict = QueuingStrategyRecord;
 
 function convertQueuingStrategy(value: unknown): QueuingStrategyDict {
   const strategy = toStrategyDictionary(value);
@@ -198,11 +236,10 @@ function convertQueuingStrategy(value: unknown): QueuingStrategyDict {
   if (size !== undefined && typeof size !== 'function') {
     throw new TypeError('strategy.size must be a function');
   }
-  return {
-    __proto__: kNullProtoObject,
+  return new QueuingStrategyRecord(
     highWaterMark,
-    size,
-  } as QueuingStrategyDict;
+    size as QueuingStrategyDict['size']
+  );
 }
 
 // ToNumber and the range check of the spec's ExtractHighWaterMark: NaN and
@@ -254,26 +291,42 @@ function convertCallback<F>(value: F | undefined, name: string): F | undefined {
 // lexicographic order, each callback checked. type is kept as read, for the
 // WritableStream constructor to check. The callbacks still run with the
 // sink itself as their receiver.
-export interface UnderlyingSinkDict<W> {
-  abort: UnderlyingSink<W>['abort'];
-  close: UnderlyingSink<W>['close'];
-  start: UnderlyingSink<W>['start'];
-  type: unknown;
-  write: UnderlyingSink<W>['write'];
+//
+// The record class doubles as the sink of an internal stream pair.
+class UnderlyingSinkRecord<W> {
+  declare abort: UnderlyingSink<W>['abort'];
+  declare close: UnderlyingSink<W>['close'];
+  declare start: UnderlyingSink<W>['start'];
+  declare type: unknown;
+  declare write: UnderlyingSink<W>['write'];
+  constructor(
+    abort: UnderlyingSink<W>['abort'],
+    close: UnderlyingSink<W>['close'],
+    start: UnderlyingSink<W>['start'],
+    type: unknown,
+    write: UnderlyingSink<W>['write']
+  ) {
+    this.abort = abort;
+    this.close = close;
+    this.start = start;
+    this.type = type;
+    this.write = write;
+  }
 }
+nullPrototypeRecord(UnderlyingSinkRecord);
+export type UnderlyingSinkDict<W> = UnderlyingSinkRecord<W>;
 
 function convertUnderlyingSink<W>(
   sink: UnderlyingSink<W>
 ): UnderlyingSinkDict<W> {
-  // The members are read in the order listed.
-  return {
-    __proto__: kNullProtoObject,
-    abort: convertCallback(sink.abort, 'underlyingSink.abort'),
-    close: convertCallback(sink.close, 'underlyingSink.close'),
-    start: convertCallback(sink.start, 'underlyingSink.start'),
-    type: (sink as { type?: unknown }).type,
-    write: convertCallback(sink.write, 'underlyingSink.write'),
-  } as UnderlyingSinkDict<W>;
+  // The members are read in the order listed: arguments evaluate in order.
+  return new UnderlyingSinkRecord<W>(
+    convertCallback(sink.abort, 'underlyingSink.abort'),
+    convertCallback(sink.close, 'underlyingSink.close'),
+    convertCallback(sink.start, 'underlyingSink.start'),
+    (sink as { type?: unknown }).type,
+    convertCallback(sink.write, 'underlyingSink.write')
+  );
 }
 
 // A transformer as WebIDL converts it to a Transformer dictionary, before
@@ -282,15 +335,37 @@ function convertUnderlyingSink<W>(
 // extension converted. readableType and writableType are kept as read, for
 // the TransformStream constructor to check. The callbacks still run with
 // the transformer itself as their receiver.
-interface TransformerDict<I, O> {
-  cancel: Transformer<I, O>['cancel'];
-  expectedLength: bigint | undefined;
-  flush: Transformer<I, O>['flush'];
-  readableType: unknown;
-  start: Transformer<I, O>['start'];
-  transform: Transformer<I, O>['transform'];
-  writableType: unknown;
+//
+// The record class doubles as the transformer of an internal
+// TransformStream.
+class TransformerRecord<I, O> {
+  declare cancel: Transformer<I, O>['cancel'];
+  declare expectedLength: bigint | undefined;
+  declare flush: Transformer<I, O>['flush'];
+  declare readableType: unknown;
+  declare start: Transformer<I, O>['start'];
+  declare transform: Transformer<I, O>['transform'];
+  declare writableType: unknown;
+  constructor(
+    cancel: Transformer<I, O>['cancel'],
+    expectedLength: bigint | undefined,
+    flush: Transformer<I, O>['flush'],
+    readableType: unknown,
+    start: Transformer<I, O>['start'],
+    transform: Transformer<I, O>['transform'],
+    writableType: unknown
+  ) {
+    this.cancel = cancel;
+    this.expectedLength = expectedLength;
+    this.flush = flush;
+    this.readableType = readableType;
+    this.start = start;
+    this.transform = transform;
+    this.writableType = writableType;
+  }
 }
+nullPrototypeRecord(TransformerRecord);
+type TransformerDict<I, O> = TransformerRecord<I, O>;
 
 function convertTransformer<I, O>(
   transformer: Transformer<I, O>
@@ -300,17 +375,16 @@ function convertTransformer<I, O>(
     readableType?: unknown;
     writableType?: unknown;
   };
-  // The members are read in the order listed.
-  return {
-    __proto__: kNullProtoObject,
-    cancel: convertCallback(transformer.cancel, 'transformer.cancel'),
-    expectedLength: normalizeExpectedLength(members.expectedLength),
-    flush: convertCallback(transformer.flush, 'transformer.flush'),
-    readableType: members.readableType,
-    start: convertCallback(transformer.start, 'transformer.start'),
-    transform: convertCallback(transformer.transform, 'transformer.transform'),
-    writableType: members.writableType,
-  } as TransformerDict<I, O>;
+  // The members are read in the order listed: arguments evaluate in order.
+  return new TransformerRecord<I, O>(
+    convertCallback(transformer.cancel, 'transformer.cancel'),
+    normalizeExpectedLength(members.expectedLength),
+    convertCallback(transformer.flush, 'transformer.flush'),
+    members.readableType,
+    convertCallback(transformer.start, 'transformer.start'),
+    convertCallback(transformer.transform, 'transformer.transform'),
+    members.writableType
+  );
 }
 
 // WebIDL's conversion of the ReadableStreamType enum, whose one value is
@@ -333,17 +407,39 @@ function convertReadableStreamType(value: unknown): 'bytes' | undefined {
 // byte source uses it. The callbacks still run with the source itself as
 // their receiver.
 // S narrows the callbacks to one kind of source, once type is known.
-export interface UnderlyingSourceDict<
+//
+// The record class doubles as the source of an internal stream pair.
+class UnderlyingSourceRecord<
   R,
   S extends UnderlyingSource<R> = UnderlyingSource<R>,
 > {
-  autoAllocateChunkSize: number | undefined;
-  cancel: S['cancel'];
-  expectedLength: bigint | undefined;
-  pull: S['pull'];
-  start: S['start'];
-  type: 'bytes' | undefined;
+  declare autoAllocateChunkSize: number | undefined;
+  declare cancel: S['cancel'];
+  declare expectedLength: bigint | undefined;
+  declare pull: S['pull'];
+  declare start: S['start'];
+  declare type: 'bytes' | undefined;
+  constructor(
+    autoAllocateChunkSize: number | undefined,
+    cancel: S['cancel'],
+    expectedLength: bigint | undefined,
+    pull: S['pull'],
+    start: S['start'],
+    type: 'bytes' | undefined
+  ) {
+    this.autoAllocateChunkSize = autoAllocateChunkSize;
+    this.cancel = cancel;
+    this.expectedLength = expectedLength;
+    this.pull = pull;
+    this.start = start;
+    this.type = type;
+  }
 }
+nullPrototypeRecord(UnderlyingSourceRecord);
+export type UnderlyingSourceDict<
+  R,
+  S extends UnderlyingSource<R> = UnderlyingSource<R>,
+> = UnderlyingSourceRecord<R, S>;
 
 function convertUnderlyingSource<R>(
   source: UnderlyingSource<R>
@@ -353,24 +449,26 @@ function convertUnderlyingSource<R>(
     expectedLength?: unknown;
     type?: unknown;
   };
-  // The members are read in the order listed.
-  return {
-    __proto__: kNullProtoObject,
-    autoAllocateChunkSize: convertAutoAllocateChunkSize(
-      members.autoAllocateChunkSize
-    ),
-    cancel: convertCallback(source.cancel, 'underlyingSource.cancel'),
-    expectedLength: normalizeExpectedLength(members.expectedLength),
-    pull: convertCallback(source.pull, 'underlyingSource.pull'),
-    start: convertCallback(source.start, 'underlyingSource.start'),
-    type: convertReadableStreamType(members.type),
-  } as UnderlyingSourceDict<R>;
+  // The members are read in the order listed: arguments evaluate in order.
+  return new UnderlyingSourceRecord<R>(
+    convertAutoAllocateChunkSize(members.autoAllocateChunkSize),
+    convertCallback(source.cancel, 'underlyingSource.cancel'),
+    normalizeExpectedLength(members.expectedLength),
+    convertCallback(source.pull, 'underlyingSource.pull'),
+    convertCallback(source.start, 'underlyingSource.start'),
+    convertReadableStreamType(members.type)
+  );
 }
 
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
   kEnumerable: typeof kEnumerable;
+  nullPrototypeRecord: typeof nullPrototypeRecord;
+  QueuingStrategyRecord: typeof QueuingStrategyRecord;
+  UnderlyingSinkRecord: typeof UnderlyingSinkRecord;
+  TransformerRecord: typeof TransformerRecord;
+  UnderlyingSourceRecord: typeof UnderlyingSourceRecord;
   toStringTagProperty: typeof toStringTagProperty;
   promiseResolvedWith: typeof promiseResolvedWith;
   newHandledPending: typeof newHandledPending;
@@ -396,6 +494,11 @@ module.exports = ObjectFreeze({
   isActualObject,
   kNullProtoObject,
   kEnumerable,
+  nullPrototypeRecord,
+  QueuingStrategyRecord,
+  UnderlyingSinkRecord,
+  TransformerRecord,
+  UnderlyingSourceRecord,
   toStringTagProperty,
   promiseResolvedWith,
   newHandledPending,
