@@ -1,0 +1,39 @@
+src/workerd/util/sqlite.h
+  s_9bec65fea38bed::t_67dbf55e5ab3f7 384-387
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.wd-test
+  s_9bec65fea38bed::t_b4eb6e83d1a1e4 15-17,22
+src/workerd/util/sqlite.c++
+  s_9bec65fea38bed::t_edd4fb58a67365 698-704
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_9bec65fea38bed::t_bbd66aae75c77f 34-55,235-280
+src/workerd/server/server.c++
+  s_9bec65fea38bed::t_7e80ff7191c6d7 221-222,227-232,292-294,296-297,305,307-319,323,341,346,364-365,371-381,384-390,988-991,1330-1333,1652-1658
+src/workerd/api/unsafe.h
+  s_5151cc1496feb5::t_56c25fa010864b 434
+src/workerd/util/sqlite-test.c++
+  s_5151cc1496feb5::t_b7e104e9cf382f 2256-2275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "90df35b68d25849f667d5183b992579415c75ef9",
+  "prompts": {},
+  "sessions": {
+    "s_5151cc1496feb5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a15aa2-7027-7665-afb9-5acaa3bb2b97",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_9bec65fea38bed": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0fbe4-40ac-7221-84c5-a0be89a63e03",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

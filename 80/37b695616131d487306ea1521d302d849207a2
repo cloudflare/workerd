@@ -1,0 +1,45 @@
+docs/virtual-time.md
+  s_4bcd2f07aa5d0a::t_0a9bd3ff5b1265 47,194-197,227-243
+src/workerd/api/unsafe.c++
+  s_4bcd2f07aa5d0a::t_0b26fea954780f 231-248,489
+src/workerd/api/unsafe.h
+  s_4bcd2f07aa5d0a::t_5c9785f330e0d2 340,357,373-374,446
+src/workerd/server/server.c++
+  s_4bcd2f07aa5d0a::t_b0ebe66605717f 221-226,235-236,239-240,243,284,466,627,683-690,782,952-954,1133,1155,1186,1242,1250,1363,1375-1376,1417,1762-1764,1778-1789,1818-1823,7167-7176,7184,7190-7193,7221,7251-7261
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_4bcd2f07aa5d0a::t_527eb7ed093c86 50-55
+src/workerd/server/tests/virtual-time/virtual-time-hibernation-test.js
+  s_4bcd2f07aa5d0a::t_a618e9bcbf2ded 1-208
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_4bcd2f07aa5d0a::t_6e5cdded515067 213,307-310
+src/workerd/server/workerd.capnp
+  s_4bcd2f07aa5d0a::t_e7b5e902989786 154-167
+src/workerd/util/storage-telemetry-test.c++
+  s_4bcd2f07aa5d0a::t_7cc90f6482abf6 44,97,113-114
+src/workerd/util/storage-telemetry.c++
+  s_4bcd2f07aa5d0a::t_cc31a7e7f7722a 73,80
+src/workerd/util/storage-telemetry.h
+  s_4bcd2f07aa5d0a::t_1853ef01c67f08 64-70,107
+src/workerd/util/virtual-time-test.c++
+  s_4bcd2f07aa5d0a::t_7bd37ff8a590a8 232-341
+src/workerd/util/virtual-time.c++
+  s_4bcd2f07aa5d0a::t_3a1b34ac2ba709 44-47,51,57-58,64,70,147-148,153,157-161,176-183,186,204-205,212-216,218,233,254-258,265-268,291-293,304-305,326-329,467-470
+src/workerd/util/virtual-time.h
+  s_4bcd2f07aa5d0a::t_ee258fe4c43afe 28-30,56-58,72-73,129-130,132,138-139,150-153,171,188-190,268,306-322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8037b695616131d487306ea1521d302d849207a2",
+  "prompts": {},
+  "sessions": {
+    "s_4bcd2f07aa5d0a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f80b-b3fd-718f-a242-352c049eed26",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

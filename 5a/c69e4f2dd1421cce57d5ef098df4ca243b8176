@@ -1,0 +1,25 @@
+src/rust/AGENTS.md
+  s_144e1c38c83f9e::t_7c664eb7c8580c 38
+src/rust/jsg-macros/README.md
+  s_144e1c38c83f9e::t_551fe479e831ff 606-611
+src/rust/jsg/cell.rs
+  s_144e1c38c83f9e::t_e11b1ab1a3dd6a 141-142
+src/rust/jsg/wrappable.rs
+  s_144e1c38c83f9e::t_e0ae46d7c6d43b 181-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5ac69e4f2dd1421cce57d5ef098df4ca243b8176",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+src/workerd/jsg/BUILD.bazel
+  s_509bb65ebf3f2d::t_f3df0fb7001532 368,372-382
+src/workerd/jsg/perf-map-test.c++
+  s_509bb65ebf3f2d::t_e9d7bee9f099a2 9,16-23,25,66
+src/workerd/jsg/perf-map.c++
+  s_509bb65ebf3f2d::t_3e45e8992ee3dc 7-9,13,17-25,57
+src/workerd/jsg/perf-map.h
+  s_509bb65ebf3f2d::t_e76ab2304c1eb1 22-26
+src/workerd/jsg/setup.c++
+  s_509bb65ebf3f2d::t_bc13edc0ad5dcd 227-228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b2fff3b32db5ef6dc3843d169123633ac2cea068",
+  "prompts": {},
+  "sessions": {
+    "s_509bb65ebf3f2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_509bb65ebf3f2d",
+        "model": "unknown"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
