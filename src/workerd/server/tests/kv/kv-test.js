@@ -234,7 +234,100 @@ export const readRacesWrite = {
   },
 };
 
-// A key whose name is a URL's special characters.
+// The errors production gives, as Miniflare's KV tests check them.
+export const errors = {
+  async test(ctrl, env) {
+    const fails = (p, text) =>
+      assert.rejects(p, (e) => {
+        assert.strictEqual(e.message, text);
+        return true;
+      });
+    const t = now();
+    const put = (options) => env.KV.put('k', 'v', options);
+    for (const ttl of [0, -5]) {
+      await fails(
+        put({ expirationTtl: ttl }),
+        `KV PUT failed: 400 Invalid expiration_ttl of ${ttl}. Please ` +
+          'specify integer greater than 0.'
+      );
+    }
+    await fails(
+      put({ expirationTtl: 30 }),
+      'KV PUT failed: 400 Invalid expiration_ttl of 30. Expiration TTL ' +
+        'must be at least 60.'
+    );
+    for (const at of [t, -5]) {
+      await fails(
+        put({ expiration: at }),
+        `KV PUT failed: 400 Invalid expiration of ${at}. Please specify ` +
+          'integer greater than the current number of seconds since the ' +
+          'UNIX epoch.'
+      );
+    }
+    await fails(
+      put({ expiration: t + 30 }),
+      `KV PUT failed: 400 Invalid expiration of ${t + 30}. Expiration ` +
+        'times must be at least 60 seconds in the future.'
+    );
+    const max = 25 * 1024 * 1024;
+    await fails(
+      env.KV.put('k', new Uint8Array(max + 1)),
+      `KV PUT failed: 413 Value length of ${max + 1} exceeds limit of ${max}.`
+    );
+    // Metadata counts in UTF-8 bytes: "é…é" is 2 + 2n of them.
+    await put({ metadata: 'é'.repeat(511) });
+    await fails(
+      put({ metadata: 'é'.repeat(512) }),
+      'KV PUT failed: 413 Metadata length of 1026 exceeds limit of 1024.'
+    );
+    await fails(
+      env.KV.list({ limit: 1001 }),
+      'KV GET failed: 400 Invalid key_count_limit of 1001. Please specify ' +
+        'an integer less than 1000.'
+    );
+    await fails(
+      env.KV.list({ prefix: 'p'.repeat(513) }),
+      'KV GET failed: 414 UTF-8 encoded length of 513 exceeds key length ' +
+        'limit of 512.'
+    );
+    const keys = Array.from({ length: 101 }, (_, i) => `k${i}`);
+    await fails(
+      env.KV.get(keys),
+      'KV GET_BULK failed: 400 You can request a maximum of 100 keys'
+    );
+    await fails(
+      env.KV.get([]),
+      'KV GET_BULK failed: 400 You must request a minimum of 1 key'
+    );
+    await fails(
+      env.KV.get(['a', '']),
+      'KV GET_BULK failed: 400 Key names must not be empty'
+    );
+    await fails(
+      env.KV.get(['a', '..']),
+      'KV GET_BULK failed: 400 Illegal key name "..". Please use a ' +
+        'different name.'
+    );
+    await fails(
+      env.KV.get(['a', 'k'.repeat(513)]),
+      'KV GET_BULK failed: 414 UTF-8 encoded length of 513 exceeds key ' +
+        'length limit of 512.'
+    );
+    const half = 'x'.repeat(13 * 1024 * 1024);
+    await env.KV.put('half1', half);
+    await env.KV.put('half2', half);
+    await fails(
+      env.KV.get(['half1', 'half2']),
+      'KV GET_BULK failed: 413 Total size of request exceeds the limit of ' +
+        '25MB'
+    );
+    assert.strictEqual((await env.KV.get(['half1'])).get('half1'), half);
+  },
+};
+
+// A kvNamespace designator may name workerd:kv with the namespace in its
+// props, for a namespace chosen at runtime.
+
 export const keyNames = {
   async test(ctrl, env) {
     for (const key of ['a/../b', '.a', '?', '#', '%', ' ', 'bulk/get']) {

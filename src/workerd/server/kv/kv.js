@@ -30,6 +30,8 @@ import { DurableObject } from 'cloudflare:workers';
 const INLINE = 64 * 1024;
 const MAX_VALUE = 25 * 1024 * 1024;
 const MAX_METADATA = 1024;
+const MAX_KEY = 512;
+const MAX_BULK_BYTES = 25 * 1024 * 1024;
 const MAX_LIST = 1000;
 const MAX_BULK = 100;
 const MIN_EXPIRATION_TTL = 60;
@@ -119,17 +121,44 @@ async function get(env, space, key, params) {
   return new Response(entry.value, { headers });
 }
 
+// A key's validity, as a single get checks it in the binding.
+function validate(key) {
+  if (key === '') throw new Fail(400, 'Key names must not be empty');
+  if (key === '.' || key === '..') {
+    throw new Fail(
+      400,
+      `Illegal key name "${key}". Please use a different name.`
+    );
+  }
+  validateLength(key);
+}
+
+function validateLength(key) {
+  const n = bytes(key);
+  if (n > MAX_KEY) {
+    throw new Fail(
+      414,
+      `UTF-8 encoded length of ${n} exceeds key length limit of ${MAX_KEY}.`
+    );
+  }
+}
+
+const bytes = (s) => new TextEncoder().encode(s).byteLength;
+
 async function put(request, env, space, key, params) {
   const value = new Uint8Array(await request.arrayBuffer());
   if (value.byteLength > MAX_VALUE) {
-    throw new Fail(413, `Value length exceeds limit of ${MAX_VALUE}.`);
+    throw new Fail(
+      413,
+      `Value length of ${value.byteLength} exceeds limit of ${MAX_VALUE}.`
+    );
   }
   const expiration = expires(params);
   const metadata = request.headers.get('CF-KV-Metadata');
-  if (metadata !== null && metadata.length > MAX_METADATA) {
+  if (metadata !== null && bytes(metadata) > MAX_METADATA) {
     throw new Fail(
       413,
-      `Metadata length of ${metadata.length} exceeds limit of ` +
+      `Metadata length of ${bytes(metadata)} exceeds limit of ` +
         `${MAX_METADATA}.`
     );
   }
@@ -156,45 +185,57 @@ async function put(request, env, space, key, params) {
   return new Response(null);
 }
 
-// An `expiration` or `expiration_ttl` parameter as a time in ms.
+// An `expiration` or `expiration_ttl` parameter as a time in ms, parsed
+// and refused as production does.
 function expires(params) {
   const now = Math.floor(Date.now() / 1000);
-  const parse = (name) => {
-    const v = params.get(name);
-    if (v === null) return null;
-    if (!/^\d+$/.test(v)) throw new Fail(400, `Invalid ${name} of ${v}.`);
-    return Number(v);
-  };
-  const ttl = parse('expiration_ttl');
-  if (ttl !== null) {
+  const ttlText = params.get('expiration_ttl');
+  if (ttlText !== null) {
+    const ttl = parseInt(ttlText);
+    const bad = `Invalid expiration_ttl of ${ttlText}.`;
+    if (Number.isNaN(ttl) || ttl <= 0) {
+      throw new Fail(400, `${bad} Please specify integer greater than 0.`);
+    }
     if (ttl < MIN_EXPIRATION_TTL) {
       throw new Fail(
         400,
-        `Invalid expiration_ttl of ${ttl}. Expiration TTL must be at ` +
-          `least ${MIN_EXPIRATION_TTL}.`
+        `${bad} Expiration TTL must be at least ${MIN_EXPIRATION_TTL}.`
       );
     }
     return (now + ttl) * 1000;
   }
-  const at = parse('expiration');
-  if (at !== null && at < now + MIN_EXPIRATION_TTL) {
+  const atText = params.get('expiration');
+  if (atText === null) return null;
+  const at = parseInt(atText);
+  const bad = `Invalid expiration of ${atText}.`;
+  if (Number.isNaN(at) || at <= now) {
     throw new Fail(
       400,
-      `Invalid expiration of ${at}. Expiration times must be at least ` +
-        `${MIN_EXPIRATION_TTL} seconds in the future.`
+      `${bad} Please specify integer greater than the current number of ` +
+        'seconds since the UNIX epoch.'
     );
   }
-  return at === null ? null : at * 1000;
+  if (at < now + MIN_EXPIRATION_TTL) {
+    throw new Fail(
+      400,
+      `${bad} Expiration times must be at least ${MIN_EXPIRATION_TTL} ` +
+        'seconds in the future.'
+    );
+  }
+  return at * 1000;
 }
 
 async function list(space, params) {
-  const limit = params.has('key_count_limit')
-    ? Number(params.get('key_count_limit'))
-    : MAX_LIST;
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIST) {
+  const text = params.get('key_count_limit');
+  const limit = text === null ? MAX_LIST : parseInt(text);
+  const bad = `Invalid key_count_limit of ${limit}.`;
+  if (Number.isNaN(limit) || limit < 1) {
+    throw new Fail(400, `${bad} Please specify an integer greater than 0.`);
+  }
+  if (limit > MAX_LIST) {
     throw new Fail(
       400,
-      `Invalid key_count_limit. Please specify an integer 1 to ${MAX_LIST}.`
+      `${bad} Please specify an integer less than ${MAX_LIST}.`
     );
   }
   let after = '';
@@ -207,6 +248,7 @@ async function list(space, params) {
     }
   }
   const prefix = params.get('prefix') ?? '';
+  validateLength(prefix);
   const rows = await space.shard.list(prefix, after, limit + 1);
   const keys = rows.slice(0, limit).map(({ key, expiration, metadata }) => {
     const k = { name: key };
@@ -230,15 +272,27 @@ async function bulk(request, env, space) {
     throw new Fail(400, 'Invalid JSON');
   }
   const keys = Array.isArray(body.keys) ? body.keys : [];
-  if (keys.length < 1 || keys.length > MAX_BULK) {
-    throw new Fail(400, `You must request 1 to ${MAX_BULK} keys`);
-  }
   const type = body.type ?? 'text';
   if (type !== 'text' && type !== 'json') {
     throw new Fail(400, `"${type}" is not a valid type. Use "json" or "text"`);
   }
+  if (keys.length > MAX_BULK) {
+    throw new Fail(400, `You can request a maximum of ${MAX_BULK} keys`);
+  }
+  if (keys.length < 1) {
+    throw new Fail(400, 'You must request a minimum of 1 key');
+  }
+  for (const key of keys) validate(String(key));
   const ttl = cacheTtl(body.cacheTtl);
   const got = await read(env, space, keys, ttl);
+  const total = got.reduce((n, g) => n + (g.entry?.value.byteLength ?? 0), 0);
+  if (total > MAX_BULK_BYTES) {
+    throw new Fail(
+      413,
+      `Total size of request exceeds the limit of ` +
+        `${MAX_BULK_BYTES / 1024 / 1024}MB`
+    );
+  }
   const out = {};
   keys.forEach((key, i) => {
     const { entry } = got[i];
