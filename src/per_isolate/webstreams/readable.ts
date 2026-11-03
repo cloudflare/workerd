@@ -4746,11 +4746,12 @@ function acquireReadableStreamDrainingReader<R>(
 // up to kCollectBlockSize); a chunk of kCollectCopySize or more that the
 // current block can't hold is taken on its own instead, closing that
 // block, so a large chunk never lands in a block mostly left unused. Such
-// a chunk is copied, unless the collector owns it (see collectChunks), in
-// which case it is kept as it is. A declared length that fits one block is
-// allocated whole up front, so a body that meets it fills exactly one
-// block and is handed over without a further copy, as is a body of one
-// owned chunk that spans its whole buffer.
+// a chunk is copied, unless the collector owns it (see collectChunks) and
+// it spans its whole buffer, in which case it is kept as it is: keeping a
+// view keeps its whole buffer alive, and the memory limit counts only the
+// view's bytes. A declared length that fits one block is allocated whole
+// up front, so a body that meets it fills exactly one block and is handed
+// over without a further copy, as is a body of one kept chunk.
 const kCollectBlockSize = 1024 * 1024;
 const kCollectCopySize = 16 * 1024;
 
@@ -4786,8 +4787,10 @@ class CollectedBytes {
         : TypedArrayPrototypeGetByteLength(block) - this.#filled;
     if (byteLength > room && byteLength >= kCollectCopySize) {
       this.#closeBlock();
+      const keep =
+        owned && ArrayBufferPrototypeByteLengthGet(buffer) === byteLength;
       // Constructing from a view copies without zero-filling first.
-      ArrayPrototypePush(this.#parts, owned ? source : new Uint8Array(source));
+      ArrayPrototypePush(this.#parts, keep ? source : new Uint8Array(source));
       this.#length += byteLength;
       return;
     }

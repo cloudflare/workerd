@@ -35,8 +35,9 @@
 //     still needs the entry (exact last-consumer test) — REQUIRED for
 //     soundness, not just spec parity.
 //   - Cursors hold weak owner refs; orphan pruning happens on cursor walks
-//     (the controller's own cursor excepted: the controller pins its
-//     owner; a per-read walk checks only the cursors that decide it), with the FinalizationRegistry as the idle-queue backstop
+//     (the controller's own cursor excepted: it holds its owner strongly,
+//     as the controller does; a per-read walk checks only the cursors that
+//     decide it), with the FinalizationRegistry as the idle-queue backstop
 //     (the native backend needs NEITHER — JSG owns its source lifetime).
 //   - A queue whose last cursor has left or been collected has no consumer
 //     for good: it drops what it holds and what is enqueued later, and
@@ -375,8 +376,8 @@ class StreamQueue<T, V = T> {
   // Live cursors in join order, walked by index; almost always exactly one.
   #cursors: QueueCursor<T, V>[] = [];
   // The controller's own cursor. Its owner is the controller's stream,
-  // which the controller holds, so it cannot be orphaned while anything
-  // can reach this queue; #prune skips its deref. Tee and detach remove it,
+  // which the controller holds, so the cursor holds it strongly too and is
+  // never orphaned (see QueueCursor.#anchorOwner). Tee and detach remove it,
   // and every cursor they create can be orphaned: a detached shell adopts
   // the controller, but the controller's stream stays the husk, so nothing
   // strong holds the shell. Its cursor therefore keeps the per-walk deref
@@ -408,16 +409,16 @@ class StreamQueue<T, V = T> {
   // here, so a stale position never blocks reclamation or holds
   // backpressure, except the per-read ones (#gc and
   // hasOtherLiveCursorAtOrBefore), which check only the cursors that
-  // decide their answer. #cursors is stable for the rest of a walk whose callbacks
-  // run no user code (all but notify(), see #notifyAll): they never add or
-  // remove a cursor synchronously, and a re-entrant prune (notify → #gc)
-  // finds nothing new, since a deref'd owner stays alive to the end of the
-  // job.
+  // decide their answer. #cursors is stable for the rest of a walk whose
+  // callbacks run no user code (all but notify(), see #notifyAll): they
+  // never add or remove a cursor synchronously, and a re-entrant prune
+  // (notify → #gc) finds nothing new, since a deref'd owner stays alive to
+  // the end of the job.
   #prune(): void {
     const cursors = this.#cursors;
     for (let i = cursors.length - 1; i >= 0; i--) {
       const cursor = cursors[i] as QueueCursor<T, V>;
-      if (cursor !== this.#anchor && cursor.isOrphaned()) {
+      if (cursor.isOrphaned()) {
         this.#removeAt(i);
         unregisterCursorCleanup(cursor);
       }
@@ -511,7 +512,7 @@ class StreamQueue<T, V = T> {
       if (
         other !== cursor &&
         other.position <= logicalIndex &&
-        (other === this.#anchor || !other.isOrphaned())
+        !other.isOrphaned()
       ) {
         return true;
       }
@@ -753,7 +754,7 @@ class StreamQueue<T, V = T> {
         }
       }
       const cursor = cursors[slowest] as QueueCursor<T, V>;
-      if (cursor === this.#anchor || !cursor.isOrphaned()) break;
+      if (!cursor.isOrphaned()) break;
       this.#removeAt(slowest);
       unregisterCursorCleanup(cursor);
     }
