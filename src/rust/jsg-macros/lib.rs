@@ -43,6 +43,7 @@ use utils::extract_name_attribute;
 use utils::extract_named_fields;
 use utils::fast_api_signature;
 use utils::has_flag;
+use utils::is_attr;
 use utils::is_lock_ref;
 use utils::is_named_this;
 use utils::is_null_or_undefined_type;
@@ -779,7 +780,8 @@ fn reject(
 ///
 /// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
-/// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories, which also
+/// `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_constructor]`, and `#[jsg_static_constant]`
+/// item, plus member factories, which also
 /// describe their members for RTTI.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
@@ -890,6 +892,58 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(instance_kind),
         None,
         ReceiverCheck::Marker,
+    )
+}
+
+/// Registers a method as `prototype[Symbol.dispose]` of a `#[jsg_resource]` type, which
+/// `using` calls when the variable goes out of scope, like C++ JSG's `JSG_DISPOSE`.
+///
+/// The method takes `&self`, or `this: jsg::Rc<Self>` as its first parameter in place of it,
+/// and is called like a `#[jsg_method]`. Combined with `#[jsg_method]` on the same function, it
+/// is also exposed under its own name, like `JSG_METHOD(close); JSG_DISPOSE(close);`. A type has
+/// at most one, and not along with a `#[jsg_async_dispose]`. See `src/rust/jsg/README.md` for
+/// how to write one.
+#[proc_macro_attribute]
+pub fn jsg_dispose(attr: TokenStream, item: TokenStream) -> TokenStream {
+    disposer("jsg_dispose", attr, item)
+}
+
+/// Registers a method as `prototype[Symbol.asyncDispose]` of a `#[jsg_resource]` type, like C++
+/// JSG's `JSG_ASYNC_DISPOSE`.
+///
+/// `await using` calls it when the variable goes out of scope and awaits what it returns, which
+/// should be a promise (`jsg::Promise<'s, T>` or `jsg::v8::Local<'s, jsg::v8::Promise>`). As
+/// `#[jsg_dispose]` otherwise. Prefer `#[jsg_dispose]` unless disposal has to wait for I/O.
+#[proc_macro_attribute]
+pub fn jsg_async_dispose(attr: TokenStream, item: TokenStream) -> TokenStream {
+    disposer("jsg_async_dispose", attr, item)
+}
+
+/// Generates the callback of a `#[jsg_dispose]` or `#[jsg_async_dispose]` method, which
+/// `#[jsg_resource]` registers. A method that is also a `#[jsg_method]` gets its callback from
+/// that attribute instead: when `#[jsg_method]` expands first it drops the other attributes, and
+/// when it comes second it is still on the method here.
+fn disposer(attr_name: &str, attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        let mut output: TokenStream = syn::Error::new_spanned(
+            proc_macro2::TokenStream::from(attr),
+            format!("#[{attr_name}] takes no arguments"),
+        )
+        .to_compile_error()
+        .into();
+        output.extend(disposer(attr_name, TokenStream::new(), item));
+        return output;
+    }
+    let is_method = syn::parse::<ItemFn>(item.clone())
+        .is_ok_and(|f| f.attrs.iter().any(|a| is_attr(a, "jsg_method")));
+    if is_method {
+        return item;
+    }
+    callback(
+        item,
+        Callback::Function,
+        Some(TokenStream::new()),
+        ReceiverCheck::Signature,
     )
 }
 

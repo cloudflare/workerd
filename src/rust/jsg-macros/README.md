@@ -132,14 +132,14 @@ The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
 Each factory also describes its member for RTTI, which describes a resource type with the
 members its `Resource::members` registers, in registration order. Methods, properties,
-constructors, and constants are described; inspect and wildcard properties are not. Parameter
+constructors, and constants are described; inspect and wildcard properties and disposers are not. Parameter
 names are retained, injected `this` and lock parameters are excluded, and fallible return types
 describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
@@ -222,6 +222,8 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
 | Wildcard property `get_var` | `Self::get_var_member()` |
+| Disposer `close` (`#[jsg_dispose]`) | `Self::close_dispose_member()` |
+| Async disposer `close` (`#[jsg_async_dispose]`) | `Self::close_async_dispose_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -436,6 +438,34 @@ impl Env {
 // JS: env.HOME        // "/home/user"
 //     env.MISSING     // undefined
 //     'HOME' in env   // true
+```
+
+## `#[jsg_dispose]` and `#[jsg_async_dispose]`
+
+Registers a method as `Symbol.dispose` (for `using`) or `Symbol.asyncDispose` (for
+`await using`) of the prototype of a `#[jsg_resource]` type. Equivalent to C++ `JSG_DISPOSE` and
+`JSG_ASYNC_DISPOSE`. The method takes `&self` or `this: jsg::Rc<Self>` and is called like a
+`#[jsg_method]`; with `#[jsg_method]` on the same function it is also exposed under its own name.
+An async disposer should return `jsg::Promise<'s, T>` or `jsg::v8::Local<'s, jsg::v8::Promise>`,
+optionally in a `Result`. The attributes take no arguments, and a disposer cannot also be a
+property, inspect property or wildcard property. A type has at most one disposer, sync or async;
+with automatic registration a second is a compile error, and a custom `members` list that
+includes two panics when the template is created. See
+[Explicit resource management](../jsg/README.md#explicit-resource-management) for how to write one.
+
+```rust
+use jsg_macros::{jsg_dispose, jsg_method, jsg_resource};
+
+#[jsg_resource]
+struct Connection { closed: std::cell::Cell<bool> }
+
+#[jsg_resource]
+impl Connection {
+    #[jsg_method]
+    #[jsg_dispose]
+    pub fn close(&self) { self.closed.set(true); }
+}
+// JS: { using conn = connect(); /* ... */ }  // conn.close() runs here
 ```
 
 ## `#[jsg_oneof]`

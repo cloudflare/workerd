@@ -1169,6 +1169,19 @@ pub enum Member {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
     },
+    /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
+    /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
+    /// `v8::Signature`. A type has at most one, and not along with a [`Member::AsyncDispose`].
+    Dispose {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
+    /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
+    /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
+    /// one, and not along with a [`Member::Dispose`].
+    AsyncDispose {
+        callback: RawFunctionCallback,
+    },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.

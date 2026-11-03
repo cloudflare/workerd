@@ -807,6 +807,10 @@ pub mod ffi {
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
         pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.dispose]`.
+        pub dispose: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.asyncDispose]`.
+        pub async_dispose: KjMaybe<usize>,
     }
 
     // Resources

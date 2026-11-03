@@ -378,6 +378,100 @@ fn collect_wildcard_registrations(
     (registrations, error)
 }
 
+/// The attributes of members that take a receiver but are registered without the type's
+/// `v8::Signature`, which a disposer cannot also be. (A constructor has no receiver.)
+const NON_DISPOSER_MEMBERS: [&str; 3] = [
+    "jsg_property",
+    "jsg_inspect_property",
+    "jsg_wildcard_property",
+];
+
+/// Scans `impl_block` for `#[jsg_dispose]` and `#[jsg_async_dispose]` methods, returning their
+/// registrations and the compile errors of those that are invalid.
+///
+/// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
+/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// type has at most one disposer, sync or async, so with automatic registration a second one is
+/// an error too; custom registration may choose between several by compatibility flag, and
+/// registering more than one at once panics when the template is created. A method rejected for
+/// its shape is not registered; a second disposer is, so that the type adds no errors of its own.
+fn collect_dispose_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Vec<proc_macro2::TokenStream>) {
+    let mut registrations = Vec::new();
+    let mut errors = Vec::new();
+    let mut first: Option<&syn::Ident> = None;
+    for item in &impl_block.items {
+        let syn::ImplItem::Fn(method) = item else {
+            continue;
+        };
+        let has_dispose = method.attrs.iter().any(|a| is_attr(a, "jsg_dispose"));
+        let is_async = method.attrs.iter().any(|a| is_attr(a, "jsg_async_dispose"));
+        if !has_dispose && !is_async {
+            continue;
+        }
+        let attr_name = if is_async {
+            "jsg_async_dispose"
+        } else {
+            "jsg_dispose"
+        };
+        let rust_name = &method.sig.ident;
+        let mut error = |message: String| {
+            errors.push(syn::Error::new_spanned(rust_name, message).to_compile_error());
+        };
+        let has_receiver = method.sig.receiver().is_some() || this_param(&method.sig).is_some();
+        if !has_receiver {
+            error(format!(
+                "a #[{attr_name}] method takes `&self`, or `this: jsg::Rc<Self>` in its place"
+            ));
+            continue;
+        }
+        if let Some(other) = method
+            .attrs
+            .iter()
+            .find_map(|a| NON_DISPOSER_MEMBERS.iter().find(|name| is_attr(a, name)))
+        {
+            error(format!(
+                "a #[{attr_name}] method cannot be a #[{other}]; only #[jsg_method] combines \
+                 with it"
+            ));
+            continue;
+        }
+        if has_dispose && is_async {
+            error(
+                "a method cannot be both #[jsg_dispose] and #[jsg_async_dispose]; a type has at \
+                 most one disposer"
+                    .to_owned(),
+            );
+        }
+        if mode == RegistrationMode::Automatic {
+            if let Some(first) = first {
+                error(format!(
+                    "a resource type has at most one disposer, and `{first}` is one already; a \
+                     type is either #[jsg_dispose] or #[jsg_async_dispose]. Use `custom_members` \
+                     to choose between several by compatibility flag"
+                ));
+            }
+            first.get_or_insert(rust_name);
+        }
+        let callback_name = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
+        let (variant, suffix) = if is_async {
+            (quote! { AsyncDispose }, "async_dispose_member")
+        } else {
+            (quote! { Dispose }, "dispose_member")
+        };
+        // C++ RTTI describes disposers, but the TypeScript generator ignores them.
+        registrations.push(MemberRegistration::with_factory_name(
+            rust_name,
+            syn::Ident::new(&format!("{rust_name}_{suffix}"), rust_name.span()),
+            quote! { jsg::Member::#variant { callback: Self::#callback_name() } },
+            None,
+        ));
+    }
+    (registrations, errors)
+}
+
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts.
 fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration> {
     impl_block
@@ -653,6 +747,8 @@ fn generate_resource_bindings(
     registrations.extend(collect_constant_registrations(impl_block));
     let (wildcard, wildcard_error) = collect_wildcard_registrations(impl_block, mode);
     registrations.extend(wildcard);
+    let (disposers, dispose_errors) = collect_dispose_registrations(impl_block, mode);
+    registrations.extend(disposers);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
@@ -678,6 +774,7 @@ fn generate_resource_bindings(
 
     Ok(quote! {
         #wildcard_error
+        #(#dispose_errors)*
 
         #[automatically_derived]
         impl #self_ty {

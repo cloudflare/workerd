@@ -533,6 +533,8 @@ fn get_resource_descriptor<R: Resource>(
         static_methods: Vec::new(),
         static_constants: Vec::new(),
         wildcard_property: KjMaybe::None,
+        dispose: KjMaybe::None,
+        async_dispose: KjMaybe::None,
     };
 
     let mut members = TemplateMembers(Vec::new());
@@ -640,9 +642,30 @@ fn get_resource_descriptor<R: Resource>(
                     query_callback: query_callback as usize,
                 });
             }
+            Member::Dispose { callback } => {
+                assert!(
+                    descriptor.dispose.is_none(),
+                    "{} has more than one dispose method",
+                    R::class_name()
+                );
+                descriptor.dispose = KjMaybe::Some(callback as usize);
+            }
+            Member::AsyncDispose { callback } => {
+                assert!(
+                    descriptor.async_dispose.is_none(),
+                    "{} has more than one async dispose method",
+                    R::class_name()
+                );
+                descriptor.async_dispose = KjMaybe::Some(callback as usize);
+            }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
     }
+    assert!(
+        descriptor.dispose.is_none() || descriptor.async_dispose.is_none(),
+        "{} has both a dispose and an async dispose method",
+        R::class_name()
+    );
 
     (descriptor, nested_types)
 }

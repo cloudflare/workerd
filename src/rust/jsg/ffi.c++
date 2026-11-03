@@ -1450,6 +1450,22 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, functionTemplate);
   }
 
+  // Mirrors ResourceTypeBuilder::registerDispose and registerAsyncDispose in resource.h.
+  auto setDisposer = [&](v8::Local<v8::Symbol> symbol, size_t callback) {
+    registerExternalRef(callback);
+    prototype->Set(symbol,
+        v8::FunctionTemplate::New(isolate,
+            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::PropertyAttribute::DontEnum);
+  };
+  KJ_IF_SOME(callback, descriptor.dispose) {
+    setDisposer(v8::Symbol::GetDispose(isolate), callback);
+  }
+  KJ_IF_SOME(callback, descriptor.async_dispose) {
+    setDisposer(v8::Symbol::GetAsyncDispose(isolate), callback);
+  }
+
   // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
   // the inspectProperties ObjectTemplate under the kResourceTypeInspect API symbol.  node:util's
   // inspect() checks for this symbol on the prototype to identify JSG resource types and uses
