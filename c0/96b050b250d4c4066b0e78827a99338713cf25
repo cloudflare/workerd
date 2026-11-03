@@ -1,0 +1,25 @@
+src/workerd/jsg/setup.c++
+  s_cccee23fea7c2e::t_944b1cda704867 343-348
+src/workerd/jsg/tracing-test.c++
+  s_cccee23fea7c2e::t_0325382580c237 115-159,188-191,201-202,205,217-219,325-344
+src/workerd/jsg/wrappable.c++
+  s_cccee23fea7c2e::t_955c5e3171680b 63-65,328
+src/workerd/jsg/wrappable.h
+  s_cccee23fea7c2e::t_85899958a7503d 583-589
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c096b050b250d4c4066b0e78827a99338713cf25",
+  "prompts": {},
+  "sessions": {
+    "s_cccee23fea7c2e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c871cee7-9e04-41fe-a7b2-0382b3ff9cc2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
