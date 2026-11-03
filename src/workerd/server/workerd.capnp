@@ -230,6 +230,23 @@ struct ClusterConfig {
   # Allow a public IP as `address` or `advertise`. Refused by default, since traffic between
   # instances is not encrypted. Private, loopback, link-local and shared (100.64.0.0/10, as
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
+
+  stopTimeoutMs @6 :UInt32 = 8000;
+  # How long an instance takes to stop, from SIGTERM to exit. A stopping instance claims no more
+  # Durable Objects, lets those it runs go, and leaves the cluster, for its peers to take them over.
+  # It keeps accepting requests until at least five seconds after SIGTERM (or until the handoff
+  # deadline, if that comes sooner), as load balancers take a while to stop sending them, sending
+  # each to where its object runs now, lets its connections finish, and stops its containers' Docker
+  # containers.
+  #
+  # The time is spent in order: at three quarters of it, the instance stops letting its objects go
+  # and leaves the cluster, giving up on leaving at nine tenths, when it also stops waiting for its
+  # connections, whose requests end as it exits; the rest is for the containers.
+  #
+  # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
+  # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
+  # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
+  # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut short.
 }
 
 struct LoggingOptions {

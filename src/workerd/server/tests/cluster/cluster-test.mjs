@@ -29,6 +29,8 @@
 //      `workerd deploy` publishes a Cap'n Proto config or a wrangler project for
 //      the nodes to start on, and refuses a deployment that holds more than
 //      services or conflicts with another.
+//  12. A stopping node keeps accepting requests a while, and sends one for a
+//      DO it evicted before to a peer.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -442,15 +444,14 @@ async function withCluster(
     }
     await fn({ nodes, bucket, nodeKeys });
   } finally {
-    // Stop all nodes (ignore errors -- some may already be stopped by the
-    // test itself).
-    for (const node of nodes) {
-      try {
-        await node.stop({ timeoutMs: 5000 });
-      } catch (_) {
-        // ignore
-      }
-    }
+    // Kill all nodes, some of which the test may have stopped already: a
+    // drain, which keeps accepting requests for seconds, is for the tests
+    // that check it to wait out.
+    await Promise.all(
+      nodes.map((node) =>
+        node.stop({ signal: 'SIGKILL', timeoutMs: 5000 }).catch(() => {})
+      )
+    );
     await bucket.stop();
     await rm(root, { recursive: true, force: true });
   }
@@ -769,13 +770,20 @@ test(
       }
 
       // Releasing the object's ownership cancels the handler, so the waiting
-      // eviction fails at once and the drain doesn't wait out the budget.
+      // eviction fails at once and the drain doesn't wait out the budget. The
+      // drain itself still keeps accepting requests for its grace period.
       const drainedAt = Date.now();
+      const evicted = eviction.then((response) => ({
+        status: response.status,
+        ms: Date.now() - drainedAt,
+      }));
       const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
       const drainMs = Date.now() - drainedAt;
       assert.deepStrictEqual(exit, { code: 0, signal: null });
-      assert(drainMs < 5_000, `the drain took ${drainMs} ms`);
-      assert.strictEqual((await eviction).status, 500);
+      assert(drainMs < 10_000, `the drain took ${drainMs} ms`);
+      const { status, ms } = await evicted;
+      assert.strictEqual(status, 500);
+      assert(ms < 5_000, `the eviction failed after ${ms} ms`);
     });
   }
 );
@@ -1551,6 +1559,31 @@ test(
       assert.strictEqual(called.status, 200, JSON.stringify(called.body));
       assert.strictEqual(called.body.target.nodeId, nodes[1].nodeId);
       assert.strictEqual(called.body.target.count, 2);
+    });
+  }
+);
+
+test(
+  'cluster: a stopping node hands off a DO it evicted before',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      await fetchJson(nodes[0].httpPort, '/increment?name=evicted');
+      // Breaking it evicts it: dormant on node 0, which still owns it.
+      await fetchJson(nodes[0].httpPort, '/break?name=evicted');
+      await sleep(500);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      await sleep(300);
+      // Node 0 still accepts requests, and sends this one where the DO goes.
+      const response = await fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=evicted',
+        { timeoutMs: 20_000 }
+      );
+      assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+      assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual(response.body.count, 2);
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
   }
 );

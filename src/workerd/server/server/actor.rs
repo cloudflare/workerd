@@ -775,6 +775,7 @@ impl Channel for RoutedChannel {
         let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
         let remote = self.remote;
+        let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
         Ok(PromisedInterface::new(async move {
             // A resolution over a session known to be down would fail unsent: resolve again.
             let live = bound
@@ -815,6 +816,7 @@ impl Channel for RoutedChannel {
                     Box::new(hook),
                 )),
             }
+            .map(|interface| attach(interface, counted))
         })
         .into_kj())
     }

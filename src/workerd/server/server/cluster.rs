@@ -23,6 +23,7 @@ use std::time::Duration;
 use cluster::Cluster;
 use cluster::Layout;
 use cluster::Route;
+use cluster_logic::handoff::Budget;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
@@ -41,6 +42,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
+use tokio::time::Instant;
 use workerd_capnp::cluster_config;
 
 use crate::Result;
@@ -69,6 +72,41 @@ pub struct ClusterNode {
     nonces: RefCell<HashMap<String, u64>>,
     /// The clustered namespaces, by their part of the bucket's keys.
     namespaces: RefCell<HashMap<String, Weak<ActorNamespace>>>,
+    /// How a stop's time is spent (`stopTimeoutMs`).
+    budget: Budget,
+    /// Set once this instance drains.
+    deadlines: Cell<Option<Deadlines>>,
+    /// The requests peers have in flight here.
+    peer_requests: Rc<PeerRequests>,
+}
+
+/// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
+#[derive(Clone, Copy)]
+pub struct Deadlines {
+    pub handoff: Instant,
+    pub grace: Instant,
+    pub connections: Instant,
+    pub stop: Instant,
+}
+
+/// A count of requests, and its waiters for it to reach zero.
+#[derive(Default)]
+struct PeerRequests {
+    count: Cell<usize>,
+    none: Notify,
+}
+
+/// A request a peer has in flight here, from its start until its interface is dropped.
+pub struct PeerRequest(Rc<PeerRequests>);
+
+impl Drop for PeerRequest {
+    fn drop(&mut self) {
+        let count = self.0.count.get() - 1;
+        self.0.count.set(count);
+        if count == 0 {
+            self.0.none.notify_waiters();
+        }
+    }
 }
 
 /// How often an instance tidies its alarm index and adopts dead peers' alarms.
@@ -276,24 +314,67 @@ impl ClusterNode {
             advertise: address,
             nonces: RefCell::default(),
             namespaces: RefCell::default(),
+            budget: Budget {
+                stop_ms: conf.get_stop_timeout_ms().into(),
+            },
+            deadlines: Cell::new(None),
+            peer_requests: Rc::default(),
         }))
     }
 
+    /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
+    pub fn start_draining(&self) -> Deadlines {
+        let now = Instant::now();
+        let at = |ms| now + Duration::from_millis(ms);
+        let deadlines = Deadlines {
+            handoff: at(self.budget.handoff_ms()),
+            grace: at(self.budget.grace_ms()),
+            connections: at(self.budget.connections_ms()),
+            stop: at(self.budget.stop_ms),
+        };
+        self.deadlines.set(Some(deadlines));
+        self.cluster.start_draining();
+        deadlines
+    }
+
     /// Hands off an object this draining instance owns at `epoch` but does not run, once it is
-    /// at rest here. Answers whether it was released; one that was not is abandoned
-    /// (`Cluster::abandon_actor`).
+    /// at rest here, unless the handoff's deadline passes first. Answers whether it was released;
+    /// one that was not is abandoned (`Cluster::abandon_actor`).
     pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> bool {
-        let released = match self.cluster.release_actor(namespace, actor, epoch).await {
-            Ok(released) => released,
-            Err(e) => {
+        let Some(deadlines) = self.deadlines.get() else {
+            return false;
+        };
+        let release = self.cluster.release_actor(namespace, actor, epoch);
+        let released = match tokio::time::timeout_at(deadlines.handoff, release).await {
+            Ok(Ok(released)) => released,
+            Ok(Err(e)) => {
                 tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
                 false
             }
+            Err(_) => false,
         };
         if !released {
             self.cluster.abandon_actor(namespace, actor);
         }
         released
+    }
+
+    /// Counts a request a peer makes here until the guard is dropped.
+    pub fn peer_request(&self) -> PeerRequest {
+        let requests = Rc::clone(&self.peer_requests);
+        requests.count.set(requests.count.get() + 1);
+        PeerRequest(requests)
+    }
+
+    /// Resolves once no peer has a request in flight here.
+    pub async fn peer_requests_done(&self) {
+        loop {
+            let none = self.peer_requests.none.notified();
+            if self.peer_requests.count.get() == 0 {
+                return;
+            }
+            none.await;
+        }
     }
 
     pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
