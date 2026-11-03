@@ -445,6 +445,164 @@ impl Progress {
     }
 }
 
+/// What a read of the catalog found, for a deploy that waits for its roll.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatalogSeen {
+    Unreadable,
+    Absent,
+    /// Its revision, and whether it names the version the deploy published.
+    Revision {
+        revision: u64,
+        names_version: bool,
+    },
+}
+
+/// What a read of `deploy/roll.json` found, for a deploy that waits. One that does not parse is
+/// `Absent`, as a node takes it.
+#[derive(Clone, Copy, Debug)]
+pub enum RollSeen<'a> {
+    Unreadable,
+    Absent,
+    Present(&'a Roll),
+}
+
+/// What a deploy that waits does after a round of reads: each with the line to say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Waited {
+    /// The roll is done.
+    Done(String),
+    /// It will not be done: the deploy fails.
+    Fail(String),
+    /// Not done yet: read again.
+    Waiting(String),
+}
+
+/// A deploy's wait for the roll to the catalog revision that published its version, a round of
+/// reads at a time (`step`).
+///
+/// The roll is done once every live node serves the revision, as many as served when the deploy
+/// counted them (`baseline`) and as the roll's own baseline, and a node has marked the roll done
+/// in `deploy/roll.json`; or, when no roll there names the revision, as when the nodes started on
+/// it or the roll was deleted, once they serve it. A later revision is waited for instead while
+/// it still names the version, since it rolls the version out too; one that does not supersedes
+/// it. A node that refused the revision, or failed to start on it, fails the wait: neither will
+/// serve it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wait {
+    /// The revision the deploy published, or found naming its version.
+    pub published: u64,
+    /// The revision waited for: `published`, or a later one that still names the version.
+    pub revision: u64,
+    /// How many live nodes served before the deploy published.
+    pub baseline: usize,
+}
+
+impl Wait {
+    #[must_use]
+    pub const fn new(published: u64, baseline: usize) -> Self {
+        Self {
+            published,
+            revision: published,
+            baseline,
+        }
+    }
+
+    /// What a round of reads means: of the catalog, of `deploy/roll.json`, and of the live nodes'
+    /// records, `None` when they did not read.
+    pub fn step(
+        &mut self,
+        catalog: CatalogSeen,
+        roll: RollSeen<'_>,
+        live: Option<&[Node<'_>]>,
+    ) -> Waited {
+        match catalog {
+            // Unread, the catalog may name another version: the nodes' progress means nothing.
+            CatalogSeen::Unreadable => {
+                return Waited::Waiting("could not read deploy/catalog.json".to_owned());
+            }
+            CatalogSeen::Absent => {
+                return Waited::Fail("deploy/catalog.json is missing".to_owned());
+            }
+            CatalogSeen::Revision { revision, .. } if revision == self.revision => {}
+            CatalogSeen::Revision {
+                revision,
+                names_version: true,
+            } => self.revision = revision,
+            CatalogSeen::Revision { revision, .. } => {
+                return Waited::Fail(format!(
+                    "catalog revision {revision} does not select this deployment version"
+                ));
+            }
+        }
+        let Some(live) = live else {
+            return Waited::Waiting("could not read the node records".to_owned());
+        };
+        let at = self.label();
+        let progress = Progress::of(live, self.revision);
+        if !progress.refused.is_empty() {
+            return Waited::Fail(format!(
+                "cannot complete the rollout to {at}. These nodes refused it: {}. Their configs \
+                 cannot serve it. Check their logs",
+                progress.refused.join(", "),
+            ));
+        }
+        if !progress.failed.is_empty() {
+            return Waited::Fail(format!(
+                "cannot complete the rollout to {at}. These nodes failed to start: {}. Publish a \
+                 fix or the previous version",
+                progress.failed.join(", ")
+            ));
+        }
+        // `None`: no roll names the revision. The nodes count those that served before, the
+        // baseline of a roll they left unfinished included.
+        let (baseline, marked) = match roll {
+            RollSeen::Unreadable => (self.baseline, Some(false)),
+            RollSeen::Present(roll) if roll.revision == self.revision => {
+                (roll.baseline.max(self.baseline), Some(roll.done))
+            }
+            RollSeen::Present(_) | RollSeen::Absent => (self.baseline, None),
+        };
+        if progress.done(baseline) {
+            return match (roll, marked) {
+                (_, Some(true) | None) => Waited::Done(if progress.live == 1 {
+                    format!("the only live node serves {at}")
+                } else {
+                    format!("all {} live nodes serve {at}", progress.live)
+                }),
+                (RollSeen::Unreadable, _) => Waited::Waiting(format!(
+                    "all live nodes serve {at}, but deploy/roll.json could not be read"
+                )),
+                _ => Waited::Waiting(format!(
+                    "all live nodes serve {at}. Waiting for deploy/roll.json to mark the rollout \
+                     complete"
+                )),
+            };
+        }
+        let mut progressed = format!(
+            "{} of {} live nodes serve {at}",
+            progress.done, progress.live
+        );
+        if progress.serving < baseline {
+            let missing = baseline - progress.serving;
+            progressed +=
+                &format!(". Waiting for {missing} more of the {baseline} nodes that served before");
+        }
+        Waited::Waiting(progressed)
+    }
+
+    /// The revision waited for, as the lines name it.
+    fn label(&self) -> String {
+        if self.revision == self.published {
+            format!("catalog revision {}", self.revision)
+        } else {
+            format!(
+                "catalog revision {}, a later deploy that also changed other deployments",
+                self.revision
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "rollout-test.rs"]
 mod tests;

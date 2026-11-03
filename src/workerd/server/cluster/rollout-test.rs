@@ -55,7 +55,7 @@ fn a_record_names_the_revisions_served_refused_and_failed() {
         let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
         let now = now_ms();
         a.renew(now).await.unwrap();
-        let live = live_nodes(&bucket, now).await.unwrap();
+        let live = live_nodes(&bucket, &|| now).await.unwrap();
         assert_eq!((live[0].revision, live[0].refused), (None, None));
         // Written as before, without the fields, until the node serves.
         let (body, _) = bucket.get("nodes/a.json").await.unwrap().unwrap();
@@ -65,7 +65,7 @@ fn a_record_names_the_revisions_served_refused_and_failed() {
         a.refuse(4);
         a.fail(5);
         a.renew(now).await.unwrap();
-        let live = live_nodes(&bucket, now).await.unwrap();
+        let live = live_nodes(&bucket, &|| now).await.unwrap();
         assert_eq!(
             (live[0].revision, live[0].refused, live[0].failed),
             (Some(3), Some(4), Some(5))
@@ -74,7 +74,26 @@ fn a_record_names_the_revisions_served_refused_and_failed() {
         assert_eq!(progress(&live, 4).refused, ["a"]);
         assert_eq!(progress(&live, 5).failed, ["a"]);
         // An expired lease is not live.
-        assert!(live_nodes(&bucket, now + 10_000).await.unwrap().is_empty());
+        assert!(
+            live_nodes(&bucket, &|| now + 10_000)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn a_waiting_deploy_takes_a_roll_that_does_not_parse_as_none() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        assert_eq!(roll(&bucket).await.unwrap(), None);
+        bucket.put(ROLL, b"{ not json".to_vec(), &[]).await.unwrap();
+        assert_eq!(roll(&bucket).await.unwrap(), None);
+        let file = br#"{"revision": 2, "baseline": 3, "since_ms": 0, "done": true}"#;
+        bucket.put(ROLL, file.to_vec(), &[]).await.unwrap();
+        let read = roll(&bucket).await.unwrap().unwrap();
+        assert_eq!((read.revision, read.baseline, read.done), (2, 3, true));
     });
 }
 
@@ -119,7 +138,7 @@ fn a_revision_this_node_cannot_serve_is_refused_in_its_record() {
         assert_eq!(watch.refused(), Some(published.revision));
         assert_eq!(watch.accepted(), None);
         registry.renew(now_ms()).await.unwrap();
-        let live = live_nodes(&bucket, now_ms()).await.unwrap();
+        let live = live_nodes(&bucket, &now_ms).await.unwrap();
         assert_eq!(live[0].refused, Some(published.revision));
     });
 }

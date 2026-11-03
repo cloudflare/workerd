@@ -268,16 +268,41 @@ fn run_deploy(
     if let Err(errors) = deploy::check(&name, &deployment) {
         return failed(errors);
     }
-    let options = args.bucket_options();
-    match deploy::publish(&args.bucket, &options, &name, &deployment) {
-        Ok(published) => {
-            println!(
-                "catalog revision {} selects deployment \"{name}\" version {}",
-                published.revision, published.version
-            );
-            0
+    let cluster = match deploy::Cluster::open(&args.bucket, &args.bucket_options()) {
+        Ok(cluster) => cluster,
+        Err(errors) => return failed(errors),
+    };
+    // Counted before the roll can take any instance away.
+    let baseline = if args.wait {
+        match cluster.serving() {
+            Ok(0) => {
+                return failed(vec![
+                    "no live nodes are serving. The deployment was not published because no node \
+                     could adopt it"
+                        .to_owned(),
+                ]);
+            }
+            Ok(serving) => Some(serving),
+            Err(errors) => return failed(errors),
         }
-        Err(errors) => failed(errors),
+    } else {
+        None
+    };
+    let published = match cluster.publish(&name, &deployment) {
+        Ok(published) => published,
+        Err(errors) => return failed(errors),
+    };
+    println!(
+        "catalog revision {} selects deployment \"{name}\" version {}",
+        published.revision, published.version
+    );
+    let Some(baseline) = baseline else {
+        return 0;
+    };
+    let timeout = std::time::Duration::from_secs(args.timeout);
+    match cluster.wait(&name, &published, baseline, timeout) {
+        Ok(()) => 0,
+        Err(error) => failed(vec![error]),
     }
 }
 

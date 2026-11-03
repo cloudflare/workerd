@@ -135,28 +135,48 @@ struct ClusterConfig {
   #   config by name.
   # - A deployment's `fromEnvironment` binding must name a variable set on the instance.
   #
-  # Once it serves, an instance reads the catalog every few seconds. A new revision whose
-  # deployments compose with the instance's config is adopted by restarting: the instances stop
-  # one at a time, each as on SIGTERM but with its open connections closed after 30 s, and exit
-  # with status 75 for their supervisor to start them again on it. The turn to stop is taken in
-  # `deploy/roll.json` in the bucket, and one stops only once as many instances serve as when the
-  # roll began, so a replacement that does not come up holds the roll there. If an instance is
-  # gone for good, deleting `deploy/roll.json` (or lowering its `baseline`) lets the roll go on.
-  # The supervisor must restart a process that exits with 75: systemd's `Restart=on-failure` and
-  # `Restart=always` do, and so do Kubernetes and Docker's `--restart on-failure`. Kubernetes
-  # counts these exits towards its CrashLoopBackOff delay like any other.
+  # A running instance reads the catalog every few seconds. It logs catalog read errors and keeps
+  # serving its current revision. Its lease record names that revision. The record also names the
+  # latest revision the instance refused or failed to start on.
   #
-  # An instance that cannot serve a revision, or cannot read the catalog, logs why and serves on;
-  # its lease record names the revision it serves and the latest one it refused. Only the running
-  # process remembers a refusal: an instance that restarts for another reason starts on the
-  # catalog as it is. An instance whose config fails with the deployments merged in (a binding to
-  # a service no one defines, JavaScript that does not load) names that revision as failed in its
-  # record and exits, also under `--watch`; the other instances then stop the roll to it for good.
-  # To recover, publish a fix or the previous version: the failing instance starts on it at its
-  # next restart, and the roll to it proceeds.
+  # A refusal lasts for the life of the process. An unrelated restart makes the instance try the
+  # catalog's selected revision at startup.
   #
-  # Every instance must run with `--experimental`, and a workerd with rollouts: an instance that
-  # never names a revision in its record, as one without either does not, holds every roll.
+  # Instances adopt an acceptable revision through a rolling restart. They stop one at a time.
+  # Each stop drains like SIGTERM. Connections still open after 30 seconds are closed. The process
+  # exits with status 75, and its supervisor must restart it.
+  #
+  # The following supervisors restart a process that exits with status 75:
+  #
+  # - systemd with `Restart=on-failure` or `Restart=always`
+  # - Kubernetes
+  # - Docker with `--restart on-failure`
+  #
+  # Kubernetes counts these exits toward its CrashLoopBackOff delay.
+  #
+  # The bucket record `deploy/roll.json` assigns restart turns. It also contains the rollout's
+  # `baseline`. At least that many instances must be serving before the next instance stops. A
+  # replacement that does not start therefore holds the rollout. If an instance has left the
+  # cluster permanently, delete `deploy/roll.json` or lower its `baseline` to continue.
+  #
+  # A revision can pass the initial checks but fail while the server starts. For example, a binding
+  # may refer to a missing service, or JavaScript may fail to load. The instance records the failed
+  # revision and exits, even under `--watch`. Other instances then stop the rollout. The
+  # `workerd deploy --wait` command also fails. Publish a fixed version or the previous version to
+  # recover. The failed instance serves that revision after its next restart, and the rollout
+  # continues.
+  #
+  # `workerd deploy --wait` waits for every live instance to serve the target revision. It also
+  # requires the number of serving instances to reach both of these counts:
+  #
+  # - the number that served when the command published
+  # - the rollout's `baseline`
+  #
+  # If an instance leaves during the rollout, the command waits for a replacement until
+  # `--timeout`. It fails as soon as an instance refuses the revision or fails to start on it.
+  #
+  # Every instance must run with `--experimental` and a workerd version that supports rollouts.
+  # Otherwise, its lease record does not name a catalog revision and it holds every rollout.
   #
   # The bucket layout for tools that write deployments is documented in
   # `src/workerd/server/cluster/deploy.rs`.

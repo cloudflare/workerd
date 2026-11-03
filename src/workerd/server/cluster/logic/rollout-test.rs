@@ -453,3 +453,169 @@ fn refusals_and_failures_are_reported() {
     };
     assert!(Progress::of(&[past], 2).refused.is_empty());
 }
+
+const fn at(revision: u64) -> CatalogSeen {
+    CatalogSeen::Revision {
+        revision,
+        names_version: true,
+    }
+}
+
+fn marked(revision: u64, baseline: usize) -> Roll {
+    Roll {
+        done: true,
+        ..roll(revision, baseline, None)
+    }
+}
+
+fn waiting(line: &str) -> Waited {
+    Waited::Waiting(line.to_owned())
+}
+
+#[test]
+fn a_wait_is_done_once_the_roll_is_marked_done() {
+    let mut wait = Wait::new(4, 2);
+    let rolling = roll(4, 2, Some("b"));
+    let live = [node("a", Some(4)), node("b", None), node("c", Some(3))];
+    assert_eq!(
+        wait.step(at(4), RollSeen::Present(&rolling), Some(&live)),
+        waiting("1 of 3 live nodes serve catalog revision 4")
+    );
+    // The roll's baseline counts too: a node that left after the deploy counted waits.
+    let rolling = roll(4, 3, Some("b"));
+    let live = [node("a", Some(4)), node("c", Some(4))];
+    assert_eq!(
+        wait.step(at(4), RollSeen::Present(&rolling), Some(&live)),
+        waiting(
+            "2 of 2 live nodes serve catalog revision 4. Waiting for 1 more of the 3 nodes that served before"
+        )
+    );
+    let live = [node("a", Some(4)), node("c", Some(4)), node("d", Some(4))];
+    assert_eq!(
+        wait.step(at(4), RollSeen::Present(&rolling), Some(&live)),
+        waiting(
+            "all live nodes serve catalog revision 4. Waiting for deploy/roll.json to mark the \
+             rollout complete"
+        )
+    );
+    assert_eq!(
+        wait.step(at(4), RollSeen::Present(&marked(4, 3)), Some(&live)),
+        Waited::Done("all 3 live nodes serve catalog revision 4".to_owned())
+    );
+}
+
+#[test]
+fn a_wait_with_no_roll_for_its_revision_is_done_once_every_node_serves_it() {
+    // The nodes started on the revision, or the roll was deleted: none will mark it done.
+    let live = [node("a", Some(4)), node("b", Some(4))];
+    for roll in [RollSeen::Absent, RollSeen::Present(&marked(3, 5))] {
+        let mut wait = Wait::new(4, 2);
+        assert_eq!(
+            wait.step(at(4), roll, Some(&live)),
+            Waited::Done("all 2 live nodes serve catalog revision 4".to_owned())
+        );
+    }
+    // As many as served before.
+    let mut wait = Wait::new(4, 3);
+    assert_eq!(
+        wait.step(at(4), RollSeen::Absent, Some(&live)),
+        waiting(
+            "2 of 2 live nodes serve catalog revision 4. Waiting for 1 more of the 3 nodes that served before"
+        )
+    );
+}
+
+#[test]
+fn a_wait_does_not_judge_what_did_not_read() {
+    let mut wait = Wait::new(4, 1);
+    let live = [node("a", Some(4))];
+    assert_eq!(
+        wait.step(CatalogSeen::Unreadable, RollSeen::Absent, Some(&live)),
+        waiting("could not read deploy/catalog.json")
+    );
+    assert_eq!(
+        wait.step(at(4), RollSeen::Absent, None),
+        waiting("could not read the node records")
+    );
+    assert_eq!(
+        wait.step(at(4), RollSeen::Unreadable, Some(&live)),
+        waiting("all live nodes serve catalog revision 4, but deploy/roll.json could not be read")
+    );
+    // An unread roll does not hide a refusal.
+    let refusing = Node {
+        refused: Some(4),
+        ..node("b", Some(3))
+    };
+    assert!(matches!(
+        wait.step(at(4), RollSeen::Unreadable, Some(&[refusing])),
+        Waited::Fail(_)
+    ));
+}
+
+#[test]
+fn a_wait_fails_on_a_refusal_a_failed_start_or_a_lost_catalog() {
+    let mut wait = Wait::new(4, 1);
+    let refusing = Node {
+        refused: Some(4),
+        ..node("b", Some(3))
+    };
+    assert_eq!(
+        wait.step(
+            at(4),
+            RollSeen::Absent,
+            Some(&[node("a", Some(4)), refusing])
+        ),
+        Waited::Fail(
+            "cannot complete the rollout to catalog revision 4. These nodes refused it: b. Their \
+             configs cannot serve it. Check their logs"
+                .to_owned()
+        )
+    );
+    let failed = Node {
+        failed: Some(4),
+        ..node("b", Some(3))
+    };
+    assert_eq!(
+        wait.step(at(4), RollSeen::Absent, Some(&[failed])),
+        Waited::Fail(
+            "cannot complete the rollout to catalog revision 4. These nodes failed to start: b. \
+             Publish a fix or the previous version"
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        wait.step(CatalogSeen::Absent, RollSeen::Absent, None),
+        Waited::Fail("deploy/catalog.json is missing".to_owned())
+    );
+}
+
+#[test]
+fn a_wait_follows_a_later_revision_that_still_names_its_version() {
+    let mut wait = Wait::new(4, 1);
+    let refusing = Node {
+        refused: Some(5),
+        ..node("a", Some(4))
+    };
+    assert_eq!(
+        wait.step(at(5), RollSeen::Absent, Some(&[refusing])),
+        Waited::Fail(
+            "cannot complete the rollout to catalog revision 5, a later deploy that also changed other deployments. These nodes \
+             refused it: a. Their configs cannot serve it. Check their logs"
+                .to_owned()
+        )
+    );
+    assert_eq!(wait.revision, 5);
+    let live = [node("a", Some(5))];
+    assert_eq!(
+        wait.step(at(5), RollSeen::Present(&marked(5, 1)), Some(&live)),
+        Waited::Done("the only live node serves catalog revision 5, a later deploy that also changed other deployments".to_owned())
+    );
+    let superseding = CatalogSeen::Revision {
+        revision: 6,
+        names_version: false,
+    };
+    assert_eq!(
+        wait.step(superseding, RollSeen::Absent, Some(&live)),
+        Waited::Fail("catalog revision 6 does not select this deployment version".to_owned())
+    );
+}
