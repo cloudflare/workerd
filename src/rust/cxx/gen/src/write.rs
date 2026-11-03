@@ -807,10 +807,17 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
     } else {
         writeln!(out, ") noexcept {{");
     }
+    // Converting the function to a pointer of the declared type checks, at compile time, that the
+    // C++ signature matches the bridge's exactly. A free function is converted only in an
+    // unevaluated operand and then called by name: under -fsanitize=cfi-icall its address is its
+    // CFI jump table entry, and a call through that can't be inlined.
     write!(out, "  ");
+    if efn.receiver.is_none() {
+        write!(out, "static_assert(sizeof(static_cast<");
+    }
     write_return_type(out, &efn.ret);
     match &efn.receiver {
-        None => write!(out, "(*{}$)(", efn.name.rust),
+        None => write!(out, "(*)("),
         Some(receiver) => write!(
             out,
             "({}::*{}$)(",
@@ -830,12 +837,11 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
     {
         write!(out, " const");
     }
-    write!(out, " = ");
     match &efn.receiver {
-        None => write!(out, "{}", efn.name.to_fully_qualified()),
+        None => write!(out, ">(&{})) != 0)", efn.name.to_fully_qualified()),
         Some(receiver) => write!(
             out,
-            "&{}::{}",
+            " = &{}::{}",
             out.types.resolve(&receiver.ty).name.to_fully_qualified(),
             efn.name.cxx,
         ),
@@ -861,7 +867,7 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
         _ => {}
     }
     match &efn.receiver {
-        None => write!(out, "{}$(", efn.name.rust),
+        None => write!(out, "{}(", efn.name.to_fully_qualified()),
         Some(_) => write!(out, "(self.*{}$)(", efn.name.rust),
     }
     for (i, arg) in efn.args.iter().enumerate() {

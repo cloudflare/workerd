@@ -116,12 +116,35 @@ fn test_nothrow_extern_c_function() {
     assert!(
         output.contains("void cxxbridge1$nothrow_len(::rust::Str s, ::std::size_t *return$) {")
     );
-    assert!(output.contains("new (return$) ::std::size_t(nothrow_len$(s));"));
+    assert!(output.contains("new (return$) ::std::size_t(::nothrow_len(s));"));
     assert!(output.contains("void cxxbridge1$nothrow_pair(::Pair *return$) {"));
+    assert!(output.contains("new (return$) ::Pair(::nothrow_pair());"));
     assert!(output.contains("void cxxbridge1$nothrow_string(::rust::String *return$) {"));
-    assert!(output.contains("new (return$) ::rust::String(nothrow_string$());"));
+    assert!(output.contains("new (return$) ::rust::String(::nothrow_string());"));
     assert!(output.contains("void cxxbridge1$nothrow_void(::std::size_t n) {"));
     assert!(!output.contains("Result::run("));
+}
+
+#[test]
+fn test_extern_c_function_called_by_name() {
+    let source = r#"
+        #[cxx::bridge(namespace = "ns")]
+        mod ffi {
+            unsafe extern "C++" {
+                fn len(s: &str) -> usize;
+            }
+        }
+    "#;
+    let opt = cxx_gen::Opt::default();
+    let generated = generate_header_and_cc(source.parse().unwrap(), &opt).unwrap();
+    let output = str::from_utf8(&generated.implementation).unwrap();
+    // The signature is checked in an unevaluated operand, and the call doesn't go through a
+    // function pointer, which -fsanitize=cfi-icall would route through a CFI jump table.
+    assert!(output.contains(
+        "static_assert(sizeof(static_cast<::std::size_t (*)(::rust::Str)>(&::ns::len)) != 0);"
+    ));
+    assert!(output.contains("new (return$) ::std::size_t(::ns::len(s));"));
+    assert!(!output.contains("(*len$)"));
 }
 
 #[test]
