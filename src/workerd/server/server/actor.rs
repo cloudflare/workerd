@@ -1617,8 +1617,8 @@ impl ActorContainer {
 
     /// Hands a clustered root off as this instance drains, once `handoffs` marked it. Its
     /// requests in flight may finish until `in_flight`, and are cancelled then. The object then
-    /// stops and, with one of the `slots`, its ownership is released to the next claim
-    /// anywhere (`Owned::hand_off`).
+    /// stops and, with one of the `slots`, its Docker container stops and its ownership is
+    /// released to the next claim anywhere (`Owned::hand_off`).
     async fn hand_off(
         self: Rc<Self>,
         ns: Weak<ActorNamespace>,
@@ -1637,6 +1637,14 @@ impl ActorContainer {
             let Ok(_slot) = slots.acquire().await else {
                 return;
             };
+            let unique_key = ns.unique_key().unwrap_or_default();
+            if ns.container().is_some()
+                && let Err(e) =
+                    ffi::factory_stop_container(ns.factory.raw(), unique_key, &self.key).await
+            {
+                let e = crate::Error::from(e);
+                tracing::warn!("stopping {}'s container: {}", self.key, e.description());
+            }
             if let Some(owned) = owned
                 && owned.hand_off().await
             {

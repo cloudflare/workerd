@@ -820,4 +820,18 @@ kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory) {
   return kj::joinPromises(cleanups.releaseAsArray());
 }
 
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor) {
+  auto& impl = factory.getImpl();
+  // Container ids end in `<uniqueKey>-<actorId>` (getContainerClient).
+  auto suffix = kj::str("-", uniqueKey, "-", actor);
+  kj::Vector<kj::Promise<void>> cleanups;
+  for (auto& entry: impl.containers) {
+    if (!entry.key.endsWith(suffix)) continue;
+    KJ_IF_SOME(client, entry.value->client) client.shutdown();
+    cleanups.add(entry.value->cleanup.addBranch());
+  }
+  return kj::joinPromises(cleanups.releaseAsArray());
+}
+
 }  // namespace workerd::server

@@ -528,6 +528,13 @@ pub mod ffi {
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
+        /// Shuts down the Docker client of root actor `actor`'s container, in the namespace
+        /// `unique_key`, and resolves once Docker has removed the container.
+        async fn factory_stop_container(
+            factory: &WorkerFactory,
+            unique_key: &str,
+            actor: &str,
+        ) -> Result<()>;
         /// Gives `metadata` what made it when an actor's work makes it: the actor's
         /// `ActorHooks::stamp_cause`.
         fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);

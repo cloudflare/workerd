@@ -251,7 +251,7 @@ struct ClusterConfig {
   # whose requests end as it exits; the rest is for the containers. A call that reaches an object
   # being handed off through a stateless worker, rather than from a Durable Object, waits like any
   # other request, so a call from the object back to itself that way ends only with the requests
-  # in flight.
+  # in flight. Stopping an object's Docker container takes one of the few handoffs that run at once.
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,

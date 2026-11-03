@@ -321,6 +321,8 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor);
 void stamp_current_actor_cause(RequestMetadata& metadata);
 
 // =======================================================================================
