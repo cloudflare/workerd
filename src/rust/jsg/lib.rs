@@ -1269,7 +1269,7 @@ impl Realm {
     /// this realm's compatibility flags.
     pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
         self.resources
-            .get_constructor::<R>(self.isolate, &self.state, self.feature_flags.reader())
+            .get_constructor::<R>(self.isolate, &self.state, &self.feature_flags)
     }
 }
 

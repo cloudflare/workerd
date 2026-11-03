@@ -11,6 +11,8 @@ use std::any::TypeId;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::BuildHasherDefault;
+use std::hash::Hasher;
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -19,6 +21,7 @@ use kj_rs::KjMaybe;
 
 use crate::ConstantValue;
 use crate::Error;
+use crate::FeatureFlags;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
@@ -699,11 +702,11 @@ type Nesting = Vec<(TypeId, &'static str)>;
 /// A resource type must not nest itself, directly or through other nested
 /// types; creating its template panics.
 pub struct NestedType {
-    template: for<'a, 'f> fn(
+    template: for<'a> fn(
         &'a mut Resources,
         v8::IsolatePtr,
         &Arc<IsolateState>,
-        compatibility_flags::Reader<'f>,
+        &FeatureFlags,
         &mut Nesting,
     ) -> &'a v8::Global<v8::FunctionTemplate>,
     describe: fn(&mut rtti::Context) -> &'static str,
@@ -720,21 +723,45 @@ impl NestedType {
     }
 }
 
+/// Hashes a [`TypeId`], whose `Hash` implementation writes a single `u64` that is already a
+/// high-quality hash, so this passes it through rather than hashing it again.
+#[derive(Default)]
+struct TypeIdHasher(u64);
+
+impl Hasher for TypeIdHasher {
+    fn write_u64(&mut self, value: u64) {
+        self.0 = value;
+    }
+
+    // `TypeId` only calls `write_u64`; this keeps any other input correct.
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Default)]
 pub struct Resources {
-    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`, which GC never visits.
-    templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
+    /// The index in `templates` of each resource type's template.
+    slots: HashMap<TypeId, usize, BuildHasherDefault<TypeIdHasher>>,
+    /// Cached V8 `FunctionTemplate`s, which GC never visits.
+    templates: Vec<v8::Global<v8::FunctionTemplate>>,
 }
 
 impl Resources {
     /// Gets or creates the cached `FunctionTemplate` for a resource type.
     ///
-    /// `flags` are only consulted when the template is first created.
+    /// `flags` are only read when the template is first created.
     pub(crate) fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
-        flags: compatibility_flags::Reader<'_>,
+        flags: &FeatureFlags,
     ) -> &v8::Global<v8::FunctionTemplate> {
         self.get_nested_constructor::<R>(isolate, state, flags, &mut Vec::new())
     }
@@ -754,25 +781,28 @@ impl Resources {
         &'a mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
-        flags: compatibility_flags::Reader<'_>,
+        flags: &FeatureFlags,
         nesting: &mut Nesting,
     ) -> &'a v8::Global<v8::FunctionTemplate> {
         let type_id = TypeId::of::<R>();
-        if !self.templates.contains_key(&type_id) {
-            let name = std::any::type_name::<R>();
-            if nesting.iter().any(|&(id, _)| id == type_id) {
-                let path: Vec<_> = nesting.iter().map(|&(_, name)| name).collect();
-                panic!(
-                    "resource type nests itself: {} -> {name}",
-                    path.join(" -> ")
-                );
-            }
-            nesting.push((type_id, name));
-            let template = self.create_resource_constructor::<R>(isolate, state, flags, nesting);
-            nesting.pop();
-            self.templates.insert(type_id, template);
+        if let Some(&slot) = self.slots.get(&type_id) {
+            return &self.templates[slot];
         }
-        &self.templates[&type_id]
+        let name = std::any::type_name::<R>();
+        if nesting.iter().any(|&(id, _)| id == type_id) {
+            let path: Vec<_> = nesting.iter().map(|&(_, name)| name).collect();
+            panic!(
+                "resource type nests itself: {} -> {name}",
+                path.join(" -> ")
+            );
+        }
+        nesting.push((type_id, name));
+        let template = self.create_resource_constructor::<R>(isolate, state, flags, nesting);
+        nesting.pop();
+        let slot = self.templates.len();
+        self.templates.push(template);
+        self.slots.insert(type_id, slot);
+        &self.templates[slot]
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI,
@@ -781,10 +811,10 @@ impl Resources {
         &mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
-        flags: compatibility_flags::Reader<'_>,
+        flags: &FeatureFlags,
         nesting: &mut Nesting,
     ) -> v8::Global<v8::FunctionTemplate> {
-        let (descriptor, nested_types) = get_resource_descriptor::<R>(flags);
+        let (descriptor, nested_types) = get_resource_descriptor::<R>(flags.reader());
         // SAFETY: Caller guarantees the isolate is valid and locked.
         let handle = unsafe { v8::ffi::create_resource_template(isolate.as_ffi(), &descriptor) };
         let template = v8::Global::from_ffi_in(handle, Arc::clone(state));
@@ -810,9 +840,10 @@ impl Resources {
     /// pipeline, which disposes each handle before `CreateBlob`; the cache is left empty and
     /// templates are recreated lazily on demand.
     pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
+        self.slots.clear();
         self.templates
-            .drain()
-            .map(|(_, global)| global.into_ffi_for_snapshot())
+            .drain(..)
+            .map(v8::Global::into_ffi_for_snapshot)
             .collect()
     }
 }
