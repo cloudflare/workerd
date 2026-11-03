@@ -117,8 +117,10 @@ struct CollectedNativeBytes {
   }
 };
 
-// Large reads, as the legacy AllReader makes: a body of known length takes one.
+// Large reads, as the legacy AllReader makes: a body declaring a length of up to
+// kNativeCollectDeclaredReadSize takes one.
 constexpr size_t kNativeCollectReadSize = 128 * 1024;
+constexpr size_t kNativeCollectDeclaredReadSize = 512 * 1024;
 
 // Collects every byte of a native source that a body consumption extracted
 // (extractNativeSourceForCollection in webstreams/readable.ts), failing as the JavaScript
@@ -130,9 +132,10 @@ constexpr size_t kNativeCollectReadSize = 128 * 1024;
 kj::Promise<CollectedNativeBytes> collectNativeSource(
     kj::Own<ReadableStreamSource> source, uint64_t bound, bool declared) {
   CollectedNativeBytes collected;
+  size_t readSize = declared ? kNativeCollectDeclaredReadSize : kNativeCollectReadSize;
   while (true) {
     // Room for one byte more than the bound allows, so a breach shows without reading on.
-    size_t size = kj::min(bound - collected.length + 1, kNativeCollectReadSize);
+    size_t size = kj::min(bound - collected.length + 1, readSize);
     auto buffer = kj::heapArray<kj::byte>(size);
     size_t amount = co_await source->tryRead(buffer.begin(), size, size);
     if (amount == 0) break;

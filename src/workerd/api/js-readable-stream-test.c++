@@ -2314,6 +2314,20 @@ KJ_TEST("JsReadableStream consumption collects a native TypeScript stream from i
   KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == kData.asBytes());
 }
 
+KJ_TEST("JsReadableStream consumption reads a declared length of up to 512 KiB at once") {
+  // As the legacy AllReader does. Without a declaration, the same bytes take 128 KiB reads.
+  auto data = kj::heapArray<kj::byte>(300 * 1024);
+  data.asPtr().fill('x');
+  auto declared = consumeDeclaring(data, data.size(), kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(declared.bytes).asPtr() == data.asPtr());
+  KJ_ASSERT(declared.minimums.size() == 1, declared.minimums.size());
+  KJ_EXPECT(declared.minimums[0] == data.size() + 1, declared.minimums[0]);
+
+  auto undeclared = consumeDeclaring(data, kj::none, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == data.asPtr());
+  KJ_EXPECT(undeclared.minimums.size() == 3, undeclared.minimums.size());
+}
+
 KJ_TEST("JsReadableStream consumption of a native stream holds it to its declared length") {
   // As the native conduit does: more bytes than declared, or fewer, fail the consumption
   // without canceling the source.
@@ -2341,7 +2355,7 @@ KJ_TEST("JsReadableStream consumption of a native stream over the limit cancels 
 
 KJ_TEST("JsReadableStream text() of a native stream strips a BOM across several reads") {
   // Longer than one read, so the collected bytes come in several buffers.
-  auto data = kj::heapArray<kj::byte>(UTF8_BOM_SIZE + 300 * 1024);
+  auto data = kj::heapArray<kj::byte>(UTF8_BOM_SIZE + 600 * 1024);
   data.first(UTF8_BOM_SIZE).copyFrom(kj::arrayPtr(UTF8_BOM, UTF8_BOM_SIZE));
   data.slice(UTF8_BOM_SIZE).fill('x');
   for (auto declared: {kj::Maybe<uint64_t>(data.size()), kj::Maybe<uint64_t>(kj::none)}) {
