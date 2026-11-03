@@ -159,8 +159,8 @@ pub unsafe fn call_cpp_for_ref<T: CppResource>(
 ///   parameter does, and runs no JavaScript to check it.
 /// - To JavaScript, it is the object's existing wrapper, or a new one for its dynamic type.
 /// - A resource field holding one is traced like a C++ `jsg::Ref` field. As for a `jsg::Rc`, a
-///   `Ref` moved out of a traced field must be cloned before use; see `src/rust/jsg/README.md`
-///   §Safety rules, rule 2.
+///   `Ref` moved out of a field lives in a `jsg::Cell` or `jsg::RefCell`, which make it strong
+///   on the way out; see `src/rust/jsg/README.md` §Safety rules, rule 2.
 ///
 /// It is neither `Send` nor `Sync`: cloning it changes a refcount that the isolate lock guards.
 /// It may be dropped on any thread, as a `jsg::Ref` may.

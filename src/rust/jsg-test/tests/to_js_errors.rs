@@ -6,8 +6,6 @@
 //! the value, and from the return value of a method or a wildcard property to the JavaScript
 //! caller, which catches what JavaScript threw during the conversion.
 
-use std::cell::RefCell;
-
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -93,7 +91,7 @@ impl Converter {
 /// Answers its `value` property with what calling its callback returns.
 #[jsg_resource]
 struct WildcardConverter {
-    callback: RefCell<Option<v8::TracedGlobal<v8::Function>>>,
+    callback: jsg::RefCell<Option<v8::TracedGlobal<v8::Function>>>,
 }
 
 #[jsg_resource]
@@ -106,7 +104,7 @@ impl WildcardConverter {
     ) -> jsg::Result<()> {
         let callback = v8::Local::<v8::Function>::try_from(callback)
             .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
-        *self.callback.borrow_mut() = Some(v8::TracedGlobal::new(lock, callback));
+        *self.callback.borrow_mut(lock) = Some(v8::TracedGlobal::new(lock, callback));
         Ok(())
     }
 
@@ -126,7 +124,7 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
         lock,
         "wildcard",
         jsg::Rc::new(WildcardConverter {
-            callback: RefCell::new(None),
+            callback: jsg::RefCell::new(None),
         }),
     );
 }

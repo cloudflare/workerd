@@ -5,7 +5,6 @@
 //! Typed promises, `jsg::Promise<'s, T>`: carrying Rust values, reacting to them, and converting
 //! them where they cross into and out of JavaScript as C++ JSG's `jsg::Promise<T>` does.
 
-use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -253,7 +252,7 @@ impl Holder {}
 /// Keeps what a reaction hands it, as a resource field.
 #[jsg_resource]
 struct Keeper {
-    kept: RefCell<Option<jsg::Rc<Holder>>>,
+    kept: jsg::RefCell<Option<jsg::Rc<Holder>>>,
 }
 
 #[jsg_resource]
@@ -278,7 +277,7 @@ impl Keeper {
 fn carried_resource_can_be_kept_after_garbage_collection() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let keeper = jsg::Rc::new(Keeper {
-            kept: RefCell::new(None),
+            kept: jsg::RefCell::new(None),
         });
         ctx.set_global(lock, "keeper", keeper.clone());
         let object = lock.new_object();
@@ -289,7 +288,7 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
         });
         let (promise, resolver) = jsg::Promise::<jsg::Rc<Holder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, keeper, |lock, keeper, holder| {
-            *keeper.kept.borrow_mut() = Some(holder);
+            *keeper.kept.borrow_mut(lock) = Some(holder);
             // Traces the keeper, and through it the `jsg::Rc`, from its new owner.
             crate::Harness::request_gc(lock);
             Ok(())
@@ -856,8 +855,8 @@ fn carried_resource_survives_garbage_collection() {
 /// Hands out a typed promise and settles it from a later call, holding the resolver in between.
 #[jsg_resource]
 struct Deferred {
-    resolver: RefCell<Option<jsg::TracedPromiseResolver<Token>>>,
-    promise: RefCell<Option<jsg::TracedPromise<Token>>>,
+    resolver: jsg::RefCell<Option<jsg::TracedPromiseResolver<Token>>>,
+    promise: jsg::RefCell<Option<jsg::TracedPromise<Token>>>,
 }
 
 #[jsg_resource]
@@ -865,14 +864,14 @@ impl Deferred {
     #[jsg_method]
     fn start(&self, lock: &mut jsg::Lock<'_>) -> Result<(), jsg::Error> {
         let (promise, resolver) = jsg::Promise::<Token>::new_with_resolver(lock)?;
-        *self.resolver.borrow_mut() = Some(resolver.into_traced(lock));
-        *self.promise.borrow_mut() = Some(promise.into_traced(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
+        *self.promise.borrow_mut(lock) = Some(promise.into_traced(lock));
         Ok(())
     }
 
     #[jsg_method]
     fn name<'s>(&self, lock: &mut jsg::Lock<'s>) -> Result<jsg::Promise<'s, String>, jsg::Error> {
-        let promise = self.promise.borrow_mut().take();
+        let promise = self.promise.borrow_mut(lock).take();
         let promise = promise
             .ok_or_else(|| jsg::Error::new_type_error("not started"))?
             .into_local(lock);
@@ -881,7 +880,7 @@ impl Deferred {
 
     #[jsg_method]
     fn finish(&self, lock: &mut jsg::Lock<'_>, name: String) -> Result<(), jsg::Error> {
-        let resolver = self.resolver.borrow_mut().take();
+        let resolver = self.resolver.borrow_mut(lock).take();
         let resolver = resolver
             .ok_or_else(|| jsg::Error::new_type_error("not started"))?
             .as_local(lock);
@@ -893,8 +892,8 @@ impl Deferred {
 fn resource_keeps_typed_promise_and_resolver() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let deferred = jsg::Rc::new(Deferred {
-            resolver: RefCell::new(None),
-            promise: RefCell::new(None),
+            resolver: jsg::RefCell::new(None),
+            promise: jsg::RefCell::new(None),
         });
         ctx.set_global(lock, "deferred", deferred);
         ctx.eval_raw(lock, "deferred.start()").unwrap();
@@ -1002,14 +1001,14 @@ fn eval_now_rejects_with_what_fails() {
 /// Settles a typed promise from a later call, for a callback that returns its promise.
 #[jsg_resource]
 struct Later {
-    resolver: RefCell<Option<jsg::TracedPromiseResolver<Token>>>,
+    resolver: jsg::RefCell<Option<jsg::TracedPromiseResolver<Token>>>,
 }
 
 #[jsg_resource]
 impl Later {
     #[jsg_method]
     fn finish(&self, lock: &mut jsg::Lock<'_>, name: String) -> Result<(), jsg::Error> {
-        let resolver = self.resolver.borrow_mut().take();
+        let resolver = self.resolver.borrow_mut(lock).take();
         let resolver = resolver
             .ok_or_else(|| jsg::Error::new_type_error("nothing is waiting"))?
             .as_local(lock);
@@ -1018,7 +1017,7 @@ impl Later {
 
     #[jsg_method]
     fn fail(&self, lock: &mut jsg::Lock<'_>, message: String) -> Result<(), jsg::Error> {
-        let resolver = self.resolver.borrow_mut().take();
+        let resolver = self.resolver.borrow_mut(lock).take();
         let resolver = resolver
             .ok_or_else(|| jsg::Error::new_type_error("nothing is waiting"))?
             .as_local(lock);
@@ -1030,14 +1029,14 @@ impl Later {
     /// A pending promise, which `finish` or `fail` settles.
     fn wait<'s>(&self, lock: &mut jsg::Lock<'s>) -> Result<jsg::Promise<'s, Token>, jsg::Error> {
         let (promise, resolver) = jsg::Promise::<Token>::new_with_resolver(lock)?;
-        *self.resolver.borrow_mut() = Some(resolver.into_traced(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
         Ok(promise)
     }
 }
 
 fn install_later(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Later> {
     let later = jsg::Rc::new(Later {
-        resolver: RefCell::new(None),
+        resolver: jsg::RefCell::new(None),
     });
     ctx.set_global(lock, "later", later.clone());
     later
@@ -1159,14 +1158,14 @@ fn then_or_catch_promise_runs_the_callback_for_the_outcome() {
 /// holds the `Waiter`.
 #[jsg_resource]
 struct Source {
-    resolver: RefCell<Option<jsg::TracedPromiseResolver<u32>>>,
+    resolver: jsg::RefCell<Option<jsg::TracedPromiseResolver<u32>>>,
 }
 
 #[jsg_resource]
 impl Source {
     #[jsg_method]
     fn finish(&self, lock: &mut jsg::Lock<'_>, value: u32) -> Result<(), jsg::Error> {
-        let resolver = self.resolver.borrow_mut().take();
+        let resolver = self.resolver.borrow_mut(lock).take();
         let resolver = resolver
             .ok_or_else(|| jsg::Error::new_type_error("nothing is waiting"))?
             .as_local(lock);
@@ -1202,7 +1201,7 @@ impl Waiter {
         source: jsg::Rc<Source>,
     ) -> Result<jsg::Promise<'s, u32>, jsg::Error> {
         let (promise, resolver) = jsg::Promise::<u32>::new_with_resolver(lock)?;
-        *source.resolver.borrow_mut() = Some(resolver.into_traced(lock));
+        *source.resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
         Ok(promise)
     }
 
@@ -1224,7 +1223,7 @@ fn returned_promise_keeps_its_creator_alive(method: &str) {
     WAITER_DROPS.store(0, Ordering::SeqCst);
     crate::Harness::new().run_in_context(|lock, ctx| {
         let source = jsg::Rc::new(Source {
-            resolver: RefCell::new(None),
+            resolver: jsg::RefCell::new(None),
         });
         ctx.set_global(lock, "source", source);
         let make_waiter = v8::Function::new(lock, (), |lock, (), _args| {
