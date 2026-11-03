@@ -29,6 +29,7 @@ pub mod rtti;
 mod scope;
 pub mod ser;
 mod string;
+mod struct_fields;
 mod typed_promise;
 pub mod v8;
 mod wrappable;
@@ -89,6 +90,8 @@ pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
 pub use string::JsString;
+#[doc(hidden)]
+pub use struct_fields::StructFields;
 pub use typed_promise::Promise;
 pub use typed_promise::PromiseArgument;
 pub use typed_promise::PromiseResolver;
@@ -113,10 +116,6 @@ mod ffi {
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
-        #[expect(
-            clippy::unnecessary_box_returns,
-            reason = "cxx takes an opaque Rust type boxed"
-        )]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
         /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
@@ -1248,6 +1247,7 @@ pub struct Realm {
     /// by it.
     state: Arc<IsolateState>,
     resources: resource::Resources,
+    structs: struct_fields::StructCache,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -1259,6 +1259,7 @@ impl Realm {
             isolate,
             state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
+            structs: struct_fields::StructCache::default(),
             feature_flags,
         }
     }
@@ -1293,6 +1294,7 @@ impl Drop for Realm {
         // Dropped before the state is closed, so that their handles are reset rather than
         // left to `Dispose`.
         drop(std::mem::take(&mut self.resources));
+        drop(std::mem::take(&mut self.structs));
         // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
         // (guaranteed by the embedder; see the type's documentation).
         let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
@@ -1304,10 +1306,6 @@ impl Drop for Realm {
     }
 }
 
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "cxx takes an opaque Rust type boxed"
-)]
 #[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);

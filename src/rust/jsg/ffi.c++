@@ -599,6 +599,16 @@ MaybeLocal local_object_get_property_by_name(
   return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
 }
 
+bool local_object_set_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name, const Local& value) {
+  if (exceptionPending(isolate)) return false;
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  return v8_obj
+      ->Set(context, local_as_ref_from_ffi<v8::Name>(name), local_as_ref_from_ffi<v8::Value>(value))
+      .IsJust();
+}
+
 bool local_object_get_own_property_names(
     Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
   if (exceptionPending(isolate)) return false;

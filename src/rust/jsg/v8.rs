@@ -473,6 +473,12 @@ pub mod ffi {
             object: &Local,
             name: &Local,
         ) -> MaybeLocal;
+        pub unsafe fn local_object_set_property_by_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Local,
+            value: &Local,
+        ) -> bool;
         pub unsafe fn local_object_get_own_property_names(
             isolate: *mut Isolate,
             object: &Local,
@@ -3753,6 +3759,35 @@ impl<'s> Local<'s, Object> {
                     value.into_ffi(),
                 )
             }?;
+            Ok(ok.then_some(()))
+        })
+    }
+
+    /// Sets the property named `name` to `value`, like [`set`](Self::set) but with the key as a
+    /// handle, so that any string or symbol can be the key.
+    ///
+    /// # Errors
+    ///
+    /// As for [`set`](Self::set).
+    pub fn set_by_name(
+        self,
+        lock: &mut Lock<'s>,
+        name: Local<'s, Name>,
+        value: Local<'s, Value>,
+    ) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        name.debug_assert_isolate(lock);
+        value.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
+            let ok = unsafe {
+                ffi::local_object_set_property_by_name(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    name.raw(),
+                    value.raw(),
+                )
+            };
             Ok(ok.then_some(()))
         })
     }

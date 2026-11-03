@@ -299,6 +299,9 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 // The same for a `v8::Name` key.
 MaybeLocal local_object_get_property_by_name(
     Isolate* isolate, const Local& object, const Local& name);
+// local_object_set_property() for a `v8::Name` key.
+bool local_object_set_property_by_name(
+    Isolate* isolate, const Local& object, const Local& name, const Local& value);
 // Appends the names of the own enumerable string-keyed properties, converted to strings, to
 // `names` and returns true, or returns false with `names` empty if a Proxy trap threw, leaving
 // the exception pending.
