@@ -158,6 +158,10 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
+
+        /// Called from `toRustString` in `ffi.c++` to convert a one-byte V8 string, whose bytes
+        /// are Latin-1, to UTF-8.
+        fn string_from_latin1(latin1: &[u8]) -> String;
     }
 
     unsafe extern "C++" {
@@ -610,6 +614,15 @@ pub mod ffi {
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
         // Infallible: NumberValue reports what JavaScript threw in its result.
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
+
+        // simdutf
+        pub unsafe fn simdutf_validate_ascii(input: *const u8, length: usize) -> bool;
+        pub unsafe fn simdutf_utf8_length_from_latin1(input: *const u8, length: usize) -> usize;
+        pub unsafe fn simdutf_convert_latin1_to_utf8(
+            input: *const u8,
+            length: usize,
+            utf8_output: *mut u8,
+        ) -> usize;
 
         // ArrayBuffer detach/detachable/was-detached
         pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &Local) -> bool;
@@ -4577,6 +4590,26 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         // side uses .data()/.size() directly as a kj::StringPtr — no copy.
         trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
     }
+}
+
+fn string_from_latin1(latin1: &[u8]) -> std::string::String {
+    // SAFETY: `latin1` is valid for reads of `latin1.len()` bytes.
+    if unsafe { ffi::simdutf_validate_ascii(latin1.as_ptr(), latin1.len()) } {
+        // SAFETY: ASCII is valid UTF-8.
+        return unsafe { std::string::String::from_utf8_unchecked(latin1.to_vec()) };
+    }
+    // SAFETY: `latin1` is valid for reads of `latin1.len()` bytes.
+    let len = unsafe { ffi::simdutf_utf8_length_from_latin1(latin1.as_ptr(), latin1.len()) };
+    let mut utf8 = Vec::<u8>::with_capacity(len);
+    // SAFETY: Latin-1 converts to exactly `len` bytes of UTF-8, which `utf8` has room for.
+    let written = unsafe {
+        ffi::simdutf_convert_latin1_to_utf8(latin1.as_ptr(), latin1.len(), utf8.as_mut_ptr())
+    };
+    debug_assert_eq!(written, len);
+    // SAFETY: simdutf initialized the first `written` bytes.
+    unsafe { utf8.set_len(written) };
+    // SAFETY: simdutf writes valid UTF-8.
+    unsafe { std::string::String::from_utf8_unchecked(utf8) }
 }
 
 /// Visitor for garbage collection tracing.

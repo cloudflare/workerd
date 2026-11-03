@@ -23,3 +23,12 @@ fn v8_length_refuses_longer_input() {
     );
     assert_eq!(String::v8_length(usize::MAX), None);
 }
+
+#[test]
+fn string_from_latin1_converts_every_byte() {
+    assert_eq!(string_from_latin1(b""), "");
+    assert_eq!(string_from_latin1(b"ascii"), "ascii");
+    let every_byte: Vec<u8> = (0..=u8::MAX).collect();
+    let want: std::string::String = every_byte.iter().map(|&b| char::from(b)).collect();
+    assert_eq!(string_from_latin1(&every_byte), want);
+}
