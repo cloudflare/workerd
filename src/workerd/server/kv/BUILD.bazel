@@ -1,0 +1,6 @@
+# Built-in KV's Worker (server/services/kv.rs).
+
+exports_files(
+    ["kv.js"],
+    visibility = ["//src/workerd/server/server:__pkg__"],
+)

@@ -55,6 +55,7 @@ use crate::cluster::ClusterNode;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
+use crate::services::kv::make_blob_service;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -1094,6 +1095,8 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
+        let blobs = make_blob_service(config, &services.0, cluster.as_ref(), &factory)?;
+        services.0.extend(blobs);
 
         let server = Rc::new(Self {
             report,

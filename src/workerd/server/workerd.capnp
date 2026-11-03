@@ -97,6 +97,12 @@ struct Config {
 
   cluster @7 :ClusterConfig;
   # Set when this instance should join a cluster. Requires `--experimental`.
+
+  builtinStorage @8 :Text;
+  # The writable disk service (`Service.disk`) where workerd's built-in products keep their
+  # state, each in directories of its own: built-in KV's Durable Objects, and its values over
+  # 64 KiB, or in a cluster its cache of those values. Required when a Worker binds a
+  # `kvNamespaceId`. Experimental.
 }
 
 struct ClusterConfig {
@@ -600,6 +606,13 @@ struct Worker {
       #        const fetcher = await client.getEntrypoint("service", "entrypoint");
       #
       # This is a workerd-only API intended for local development and testing.
+
+      kvNamespaceId @29 :Text;
+      # A KV namespace kept by workerd itself, named by its id (wrangler's `id`). Bindings with
+      # the same id share a namespace. It lives in `Config.builtinStorage`, which it requires; in a cluster it
+      # replicates as any Durable Object, and its values over 64 KiB live in the cluster's
+      # bucket.
+      # Experimental: requires `--experimental`.
 
       # TODO(someday): dispatch, other new features
     }

@@ -11,6 +11,7 @@
 //! which borrows the factory's header table.
 
 pub mod disk;
+pub mod kv;
 pub mod network;
 pub mod rewriter;
 

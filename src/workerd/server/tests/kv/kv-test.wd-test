@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+    ( name = "kv-test",
+      worker = (
+        modules = [ ( name = "worker", esModule = embed "kv-test.js" ) ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+        bindings = [
+          ( name = "KV", kvNamespaceId = "test" ),
+          ( name = "SAME", kvNamespaceId = "test" ),
+          ( name = "OTHER", kvNamespaceId = "other" ),
+          ( name = "DISK", service = "TEST_TMPDIR" ),
+        ],
+      )
+    ),
+  ],
+  builtinStorage = "TEST_TMPDIR",
+);

@@ -24,12 +24,17 @@ export class Bucket extends DurableObject {
   next = 0;
   // Requests per object key, for tests that bound a cluster's bucket traffic.
   requests = new Map();
+  // Body bytes served per object key.
+  served = new Map();
 
   async fetch(request) {
     const storage = this.ctx.storage;
     const url = new URL(request.url);
     if (url.pathname === '/_requests') {
       return Response.json(this.requests.get(url.searchParams.get('key')) ?? 0);
+    }
+    if (url.pathname === '/_served') {
+      return Response.json(this.served.get(url.searchParams.get('key')) ?? 0);
     }
     const path = decodeURIComponent(url.pathname).slice(1);
     const slash = path.indexOf('/');
@@ -99,6 +104,7 @@ export class Bucket extends DurableObject {
         keys.forEach((k, i) =>
           out.set(new Uint8Array(chunks.get(k)), i * CHUNK)
         );
+        this.served.set(counted, (this.served.get(counted) ?? 0) + out.length);
         return new Response(out, {
           headers: { ...headers, etag: object.etag },
         });

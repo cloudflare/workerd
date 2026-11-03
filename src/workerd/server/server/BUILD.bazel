@@ -4,6 +4,8 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 # (//src/workerd/server/factory), reached through the cxx bridge in bridge.rs.
 wd_rust_crate(
     name = "workerd-server",
+    # Built-in KV's Worker (services/kv.rs).
+    compile_data = ["//src/workerd/server/kv:kv.js"],
     cxx_bridge_deps = [
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
         "//src/workerd/server/factory:bootstrap-hdrs",

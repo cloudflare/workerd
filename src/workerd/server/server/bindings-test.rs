@@ -666,3 +666,36 @@ fn loopbacks_are_numbered_after_the_bindings() {
         ["Counter".to_owned(), "Cache".to_owned()]
     );
 }
+
+#[test]
+fn kv_namespace_id_requires_experimental() {
+    let build = |bindings: struct_list::Builder<'_, binding::Owned>| {
+        let mut kv = bindings.get(0);
+        kv.set_name("KV");
+        kv.set_kv_namespace_id("ns");
+    };
+    let compiled = compile(&worker_message(1, build), &no_actors(), false);
+    assert_eq!(
+        compiled.errors,
+        [
+            "kvNamespaceId bindings are an experimental feature which may change or go away in the \
+             future. You must run workerd with `--experimental` to use this feature."
+        ]
+    );
+    assert!(rendered(&compiled.globals).is_empty());
+    assert!(compiled.subrequest.is_empty());
+
+    let compiled = compile(&worker_message(1, build), &no_actors(), true);
+    assert_eq!(compiled.errors, Vec::<String>::new());
+    assert_eq!(
+        rendered(&compiled.globals),
+        ["(name = \"KV\", kvNamespace = 2)"]
+    );
+    assert_eq!(
+        without_context(&compiled.subrequest),
+        [Designator {
+            props_json: Some(r#"{"namespace":"ns"}"#.to_owned()),
+            ..designator("workerd:kv")
+        }]
+    );
+}

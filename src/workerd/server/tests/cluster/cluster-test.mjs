@@ -302,6 +302,14 @@ class FakeS3 {
     ).json();
   }
 
+  // How many body bytes GETs of `key` were served.
+  async served(key) {
+    const query = new URLSearchParams({ key });
+    return (
+      await fetch(`http://127.0.0.1:${this.port}/_served?${query}`)
+    ).json();
+  }
+
   // The keys of the nodes with a lease record.
   async nodes() {
     // Not the `.probe` a starting node writes and deletes.
@@ -683,6 +691,122 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
 
 // Where a Durable Object's records are in the bucket: a hash of its
 // namespace's uniqueKey, then its ID.
+test('cluster: a KV namespace is an object, seen from every node', async () => {
+  await withCluster(2, async ({ nodes, bucket }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    for (const key of ['p/1', 'p/2', 'p/3', 'q']) {
+      const put = await fetchJson(a, `/kv/put?${q({ key, value: key })}`);
+      assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+    }
+    const meta = { key: 'm', value: 'v', metadata: '{"n":1}', ttl: '3600' };
+    await fetchJson(a, `/kv/put?${q(meta)}`);
+
+    const got = await fetchJson(b, `/kv/get?${q({ key: 'm' })}`);
+    assert.deepStrictEqual(got.body, {
+      value: 'v',
+      metadata: { n: 1 },
+      cacheStatus: 'MISS',
+    });
+
+    const names = [];
+    let page = { list_complete: false };
+    while (!page.list_complete) {
+      const query = { prefix: 'p/', limit: '2', cursor: page.cursor ?? '' };
+      page = (await fetchJson(b, `/kv/list?${q(query)}`)).body;
+      names.push(...page.keys.map((k) => k.name));
+    }
+    assert.deepStrictEqual(names, ['p/1', 'p/2', 'p/3']);
+    const listed = (await fetchJson(b, `/kv/list?${q({ prefix: 'm' })}`)).body;
+    assert.deepStrictEqual(listed.keys[0].metadata, { n: 1 });
+    assert.ok(listed.keys[0].expiration > Date.now() / 1000 + 3500);
+
+    await fetchJson(b, `/kv/delete?${q({ key: 'q' })}`);
+    const gone = await fetchJson(b, `/kv/get?${q({ key: 'q' })}`);
+    assert.strictEqual(gone.body.value, null);
+    // Small values are inline in the object: none is in the bucket.
+    assert.deepStrictEqual(await bucket.list('kv/'), []);
+
+    // A large value is a blob, and a listing does not read it.
+    for (const size of ['65536', '65537']) {
+      const big = { key: `big/${size}`, size, metadata: '{"b":1}' };
+      await fetchJson(a, `/kv/put?${q(big)}`);
+    }
+    const blobs = await bucket.list('kv/');
+    assert.strictEqual(blobs.length, 1, blobs.join());
+    const served = () => bucket.served(`v1/${blobs[0]}`);
+    const before = await served();
+    const bigListed = (await fetchJson(b, `/kv/list?${q({ prefix: 'big' })}`))
+      .body;
+    assert.deepStrictEqual(
+      bigListed.keys.map((k) => k.name),
+      ['big/65536', 'big/65537']
+    );
+    assert.strictEqual(await served(), before);
+    const value = await fetchJson(b, `/kv/get?${q({ key: 'big/65537' })}`);
+    assert.strictEqual(value.body.value.length, 65537);
+    assert.strictEqual(await served(), before + 65537);
+  });
+});
+
+// A node keeps the KV blobs it writes and reads on its disk, so it
+// downloads a value once. Eviction is a unit test (services/kv-test.rs).
+test('cluster: a node caches KV blobs on its disk', async () => {
+  await withCluster(2, async ({ nodes, bucket }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const MiB = 1 << 20;
+    const put = (port, key, size) =>
+      fetchJson(port, `/kv/put?${q({ key, size: String(size) })}`);
+    const get = async (port, key) =>
+      (await fetchJson(port, `/kv/get?${q({ key })}`)).body.value.length;
+    // Bytes the bucket served of every blob it has held.
+    const seen = new Set();
+    const served = async () => {
+      for (const key of await bucket.list('kv/')) seen.add(key);
+      let n = 0;
+      for (const key of seen) n += await bucket.served(`v1/${key}`);
+      return n;
+    };
+
+    await put(a, 'k1', 1.5 * MiB);
+    const before = await served();
+    // The writer wrote it through; another node downloads it once.
+    assert.strictEqual(await get(a, 'k1'), 1.5 * MiB);
+    assert.strictEqual(await served(), before);
+    for (let i = 0; i < 2; i++) {
+      assert.strictEqual(await get(b, 'k1'), 1.5 * MiB);
+      assert.strictEqual(await served(), before + 1.5 * MiB);
+    }
+
+    // An overwrite is a new blob.
+    await put(a, 'k1', 1.25 * MiB);
+    assert.strictEqual(await get(a, 'k1'), 1.25 * MiB);
+    assert.strictEqual(await served(), before + 1.5 * MiB);
+  });
+});
+
+// A node's cache keeps what it read for the read's cacheTtl; another
+// node's write does not reach it sooner.
+test('cluster: KV reads are stale for at most cacheTtl', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const read = async (port) =>
+      (await fetchJson(port, `/kv/get?${q({ key: 's', cacheTtl: '30' })}`))
+        .body;
+    await fetchJson(b, `/kv/put?${q({ key: 's', value: 'old' })}`);
+    const start = Date.now();
+    assert.strictEqual((await read(a)).value, 'old');
+    await fetchJson(b, `/kv/put?${q({ key: 's', value: 'new' })}`);
+    assert.strictEqual((await read(b)).value, 'new');
+    const stale = await read(a);
+    assert.deepStrictEqual([stale.value, stale.cacheStatus], ['old', 'HIT']);
+    await sleep(start + 31_000 - Date.now());
+    assert.strictEqual((await read(a)).value, 'new');
+  });
+});
+
 function objectPrefix(id, uniqueKey = 'counter-test-namespace') {
   const hash = createHash('sha256');
   for (const part of ['workerd cluster namespace v1', '', uniqueKey]) {

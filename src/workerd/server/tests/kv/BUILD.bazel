@@ -1,0 +1,7 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-test.js"],
+)

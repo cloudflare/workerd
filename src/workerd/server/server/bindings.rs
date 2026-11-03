@@ -30,6 +30,8 @@ use workerd_capnp::service_designator;
 use workerd_capnp::worker;
 use workerd_capnp::worker::binding;
 
+use crate::services::kv;
+
 /// `IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT` (src/workerd/io/io-context.h): the subrequest
 /// channels with a special meaning (the global outbound), ahead of the bindings' channels.
 pub const SPECIAL_SUBREQUEST_CHANNEL_COUNT: u32 = 2;
@@ -491,6 +493,20 @@ impl Compiler<'_> {
                 }
                 self.out.has_debug_port = true;
                 global.set_workerd_debug_port(());
+            }
+            Which::KvNamespaceId(id) => {
+                if !self.experimental_feature("kvNamespaceId") {
+                    return Ok(false);
+                }
+                let channel = len_u32(&self.out.subrequest) + SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+                let props = serde_json::json!({ "namespace": id?.to_str()? });
+                self.out.subrequest.push(Designator {
+                    service: kv::NAME.to_owned(),
+                    entrypoint: None,
+                    props_json: Some(props.to_string()),
+                    error_context,
+                });
+                global.set_kv_namespace(channel);
             }
         }
         Ok(true)

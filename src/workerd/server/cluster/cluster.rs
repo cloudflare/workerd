@@ -123,6 +123,11 @@ impl Cluster {
         })
     }
 
+    /// The bucket below `<prefix>kv/`, where built-in KV keeps large values.
+    pub fn kv_blobs(&self) -> Bucket {
+        self.bucket.at(&format!("{}kv", self.bucket.prefix()))
+    }
+
     pub fn node(&self) -> &str {
         self.registry.node()
     }

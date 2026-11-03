@@ -27,6 +27,7 @@ const config :Workerd.Config = (
         bindings = [
           ( name = "COUNTER", durableObjectNamespace = "Counter" ),
           ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+          ( name = "KV", kvNamespaceId = "cluster-kv" ),
         ],
         durableObjectNamespaces = [
           ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -35,6 +36,8 @@ const config :Workerd.Config = (
       )
     ),
   ],
+
+  builtinStorage = "local",
 
   sockets = [
     ( name = "http", address = "*:0", http = (), service = "main" ),
