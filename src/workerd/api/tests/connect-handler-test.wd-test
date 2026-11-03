@@ -20,7 +20,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "connect-handler-starttls-test",
@@ -28,7 +28,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-starttls-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
         bindings = [
           (name = "STARTTLS_TARGET", service = (
             name = "connect-handler-test-starttls-endpoint",
@@ -50,7 +50,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
       )
     ),
     ( name = "connect-handler-test-proxy",
@@ -66,7 +66,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"],

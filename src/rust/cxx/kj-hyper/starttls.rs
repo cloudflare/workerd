@@ -221,7 +221,18 @@ impl StartTlsIo {
         std::task::ready!(self.0.poll_settled(cx));
         let mut transport = self.0.transport.borrow_mut();
         match &mut *transport {
-            Transport::Plain(stream) | Transport::Tls(stream) => op(Pin::new(stream.as_mut()), cx),
+            Transport::Plain(stream) => {
+                let result = op(Pin::new(stream.as_mut()), cx);
+                if result.is_pending() {
+                    // The upgrade can begin while this operation is parked. The handshake then
+                    // takes over the socket's readiness wakers, so this task must also be
+                    // woken when the handshake settles, to carry on over TLS.
+                    drop(transport);
+                    self.0.park(cx);
+                }
+                result
+            }
+            Transport::Tls(stream) => op(Pin::new(stream.as_mut()), cx),
             Transport::Failed(why) => Poll::Ready(Err(io::Error::other(why.clone()))),
             Transport::Dialing | Transport::Handshaking(_) => {
                 drop(transport);
