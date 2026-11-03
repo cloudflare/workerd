@@ -626,13 +626,15 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
   return js.evalNow([&] {
     auto cancelReader = kj::defer([&] {
       KJ_IF_SOME(v, value) {
-        KJ_SWITCH_ONEOF(v) {
-          KJ_CASE_ONEOF(v, JsReadableStream) {
-            v.cancel(js,
+        KJ_IF_SOME(stream, v.tryGet<JsReadableStream>()) {
+          // This runs while the put's error unwinds the stack, so it must not throw. Canceling
+          // is best effort, and the put reports its own error rather than the cancel's. For
+          // example, a stream owned by another request can't be canceled from this one.
+          KJ_DTOR_CALL(js.tryCatch([&] {
+            stream.cancel(js,
                 js.error(
                     "Stream cancelled because the associated put operation encountered an error."));
-          }
-          KJ_CASE_ONEOF_DEFAULT {}
+          }, [](jsg::Value) {}));
         }
       }
     });

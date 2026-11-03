@@ -51,7 +51,7 @@ Three implementation divergences are pinned:
 
 | Test | Shape |
 | --- | --- |
-| `echoRoundTrip` | write ×2, half-close via writer.close(), drain echo to EOF |
+| `echoRoundTrip` | native writable brands/extractors are not reflected; write ×2, half-close via writer.close(), drain echo to EOF |
 | `degenerateViewsWithHighWaterMark` | byte-counting writable (`highWaterMark`): detached/out-of-bounds typed-array and DataView views count and send nothing; the stream keeps writing |
 | `stringSizesWithHighWaterMark` | byte-counting writable: a string counts its UTF-8 bytes (multi-byte sequences; 3 per lone surrogate, sent as U+FFFD) |
 | `greetReadsToEof` | server-initiated EOF: greeting then done, tail read `{done: true, value: undefined}` |

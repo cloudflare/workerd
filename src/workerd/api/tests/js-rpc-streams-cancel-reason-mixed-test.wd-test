@@ -1,0 +1,104 @@
+# Cancel reasons for streams transferred over JS RPC, in every pairing of the error serialization
+# modes. Each worker's module is named after its mode so that tests can spot the other side's
+# frames in a stack. See the header comment in the JS file.
+using Workerd = import "/workerd/workerd.capnp";
+
+const enhancedFlags :List(Text) = [
+  "nodejs_compat",
+  "rpc",
+  "streams_enable_constructors",
+  "enhanced_error_serialization",
+];
+
+const legacyFlags :List(Text) = [
+  "nodejs_compat",
+  "rpc",
+  "streams_enable_constructors",
+  "legacy_error_serialization",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner-enhanced-peer-enhanced",
+      worker = (
+        modules = [(name = "runner-enhanced", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .enhancedFlags,
+        bindings = [
+          (name = "PEER", service = (name = "peer-enhanced-a", entrypoint = "Peer")),
+          (name = "PEER_MODULE", text = "peer-enhanced"),
+          (name = "PEER_ENHANCED", json = "true"),
+          (name = "SELF_MODULE", text = "runner-enhanced"),
+          (name = "SELF_ENHANCED", json = "true"),
+        ],
+      )
+    ),
+    ( name = "runner-enhanced-peer-legacy",
+      worker = (
+        modules = [(name = "runner-enhanced", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .enhancedFlags,
+        bindings = [
+          (name = "PEER", service = (name = "peer-legacy-a", entrypoint = "Peer")),
+          (name = "PEER_MODULE", text = "peer-legacy"),
+          (name = "PEER_ENHANCED", json = "false"),
+          (name = "SELF_MODULE", text = "runner-enhanced"),
+          (name = "SELF_ENHANCED", json = "true"),
+        ],
+      )
+    ),
+    ( name = "runner-legacy-peer-enhanced",
+      worker = (
+        modules = [(name = "runner-legacy", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .legacyFlags,
+        bindings = [
+          (name = "PEER", service = (name = "peer-enhanced-b", entrypoint = "Peer")),
+          (name = "PEER_MODULE", text = "peer-enhanced"),
+          (name = "PEER_ENHANCED", json = "true"),
+          (name = "SELF_MODULE", text = "runner-legacy"),
+          (name = "SELF_ENHANCED", json = "false"),
+        ],
+      )
+    ),
+    ( name = "runner-legacy-peer-legacy",
+      worker = (
+        modules = [(name = "runner-legacy", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .legacyFlags,
+        bindings = [
+          (name = "PEER", service = (name = "peer-legacy-b", entrypoint = "Peer")),
+          (name = "PEER_MODULE", text = "peer-legacy"),
+          (name = "PEER_ENHANCED", json = "false"),
+          (name = "SELF_MODULE", text = "runner-legacy"),
+          (name = "SELF_ENHANCED", json = "false"),
+        ],
+      )
+    ),
+    # Each runner gets its own peer so that the cells do not share execution contexts.
+    ( name = "peer-enhanced-a",
+      worker = (
+        modules = [(name = "peer-enhanced", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .enhancedFlags,
+      )
+    ),
+    ( name = "peer-enhanced-b",
+      worker = (
+        modules = [(name = "peer-enhanced", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .enhancedFlags,
+      )
+    ),
+    ( name = "peer-legacy-a",
+      worker = (
+        modules = [(name = "peer-legacy", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .legacyFlags,
+      )
+    ),
+    ( name = "peer-legacy-b",
+      worker = (
+        modules = [(name = "peer-legacy", esModule = embed "js-rpc-streams-cancel-reason-mixed-test.js")],
+        compatibilityFlags = .legacyFlags,
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-rpc-externals-hydration",
+    "workerd-autogate-jsrpc-readable-cancel-propagation",
+  ],
+);

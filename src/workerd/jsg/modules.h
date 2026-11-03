@@ -906,6 +906,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   //
   // Importantly, we defensively catch any synchronous errors here and handle them
   // explicitly as rejected Promises.
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the import with what it caught.
   v8::TryCatch tryCatch(js.v8Isolate);
 
   // TODO(cleanup): If kj::Path::parse or kj::Path::eval fail it is most likely the application's

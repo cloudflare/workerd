@@ -93,6 +93,9 @@ declare const utils: {
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
+  // V8-private properties are neither reflected by JavaScript nor inherited.
+  setPrivate(object: object, name: string, value: unknown): void;
+  getPrivate(object: object, name: string): unknown;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;
@@ -115,6 +118,38 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The EventTarget seam (api/event-target-bootstrap.h). Bootstrap code reaches
+  // these only through events/event-target-internals, which documents them.
+  setListenerCountHook(
+    target: EventTarget,
+    type: string,
+    hook: (type: string, count: number) => void
+  ): void;
+  getEventHandlerAttribute(target: EventTarget, type: string): unknown;
+  setEventHandlerAttribute(
+    target: EventTarget,
+    type: string,
+    value: unknown
+  ): void;
+  dispatchEvent(
+    target: EventTarget,
+    event: Event,
+    report: boolean
+  ): { readonly exception: unknown } | undefined;
+  createTrustedEvent(type: string): Event;
+  createTrustedMessageEvent(
+    type: string,
+    data: unknown,
+    source: object | null
+  ): MessageEvent;
+  // Structured-clones a MessagePort message (api/per-isolate-bootstrap.c++:
+  // CloneMessageData): serializes it, throwing on a SharedArrayBuffer, and
+  // returns the deserialized copy.
+  cloneMessageData(data: unknown): unknown;
+  // Calls fn as a reaction to an already-resolved promise, through V8's
+  // Promise::Then(), so scheduling runs no user code (no species lookup). A
+  // throw rejects the reaction's promise, reported as unhandled.
+  queueReaction(fn: () => void): void;
 };
 
 // An abort algorithm registration. Obtained only from

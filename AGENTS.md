@@ -302,6 +302,7 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** edit `types/generated-snapshot/` directly; fix the source layer and run `just generate-types`
 - **NEVER** use C++ JSG in Rust JSG's C++ shims (`jsg::Lock::from`, `JSG_TRY`, `jsg::check`, `createTunneledException`, ...); see `src/rust/jsg/README.md` §Safety rules
 - **NEVER** throw a JS exception while execution is terminating; it replaces the termination and lets the script keep running
+- **NEVER** call a V8 API that takes a `v8::Local<v8::Context>` while a termination, or an exception that must keep propagating, is pending; V8 either clears the exception on entry, so the script runs on, or fails a debug check and in a release build runs on with it pending. (Reading an exception that your own `v8::TryCatch` caught is fine; reset it before calling into Rust JSG, whose shims treat a caught exception as pending.) Rust JSG's C++ shims check `exceptionPending()` for this; see `src/rust/jsg/README.md` §Safety rules. Creating strings, numbers, objects, arrays, error objects and templates is fine at any time
 
 ## Backward Compatibility
 

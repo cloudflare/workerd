@@ -383,6 +383,10 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     visitor.visit(maybePrimary);
   }
 
+  // A facet shares its root's underlying storage, and snapshots and restores apply to the whole
+  // object, so only the root may use them.
+  void requireNotFacet(kj::StringPtr method);
+
   struct AsyncTxnResult {
     jsg::JsRef<jsg::JsValue> value;
     bool isError;

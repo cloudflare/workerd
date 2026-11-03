@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <capnp/compat/byte-stream.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
 #include <kj/test.h>
@@ -87,6 +88,34 @@ class RejectingAsyncOutputStream final: public kj::AsyncOutputStream {
   }
 
   bool rejecting = false;
+};
+
+// Counts end() calls and, like a capnp ByteStream reached over RPC, rejects all but the first.
+class EndCountingOutputStream final: public capnp::ExplicitEndOutputStream {
+ public:
+  explicit EndCountingOutputStream(uint& endCount): endCount(endCount) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>>) override {
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> end() override {
+    if (endCount++ > 0) {
+      return KJ_EXCEPTION(FAILED, "already called end()");
+    }
+    return kj::READY_NOW;
+  }
+
+ private:
+  uint& endCount;
 };
 
 template <typename Decompressor>
@@ -330,6 +359,31 @@ KJ_TEST("Native pumps consume identity length metadata independently of transpor
         return expectNativePump(env.context, transportLength, identityLength);
       });
     }
+  }
+}
+
+KJ_TEST("Native pump that ends its sink leaves nothing for a later end()") {
+  TestFixture fixture;
+  kj::Maybe<uint64_t> transportLengths[] = {kj::none, uint64_t{6}};
+  for (auto transportLength: transportLengths) {
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      uint endCount = 0;
+      auto in = kj::newOneWayPipe(transportLength);
+      auto source = newSystemStream(kj::mv(in.in), StreamEncoding::IDENTITY, env.context);
+      auto sink = newSystemStream(
+          kj::heap<EndCountingOutputStream>(endCount), StreamEncoding::IDENTITY, env.context);
+
+      auto proxy = co_await source->pumpTo(sink->getPtr(), true);
+      co_await in.out->write("foobar"_kjb);
+      in.out = nullptr;
+      co_await proxy.proxyTask;
+      KJ_EXPECT(endCount == 1);
+
+      // A pipe closes its destination after the pump settles, so the sink must already know it
+      // has ended.
+      co_await sink->end();
+      KJ_EXPECT(endCount == 1);
+    });
   }
 }
 

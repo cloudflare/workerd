@@ -278,14 +278,19 @@ DecodedException decodeTunneledException(
       }
     }
 
+    // A payload written without enhanced error serialization uses V8's native error encoding,
+    // which restores each error's original stack whatever the deserializer options say. Only a
+    // trusted reader may use such a payload.
     auto& isolateBase = IsolateBase::from(isolate);
-    if ((options.trusted || isolateBase.getUsingEnhancedErrorSerialization()) &&
-        !options.ignoreDetail) {
+    bool canDropStacks = isolateBase.getUsingEnhancedErrorSerialization() &&
+        exception.getDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID) != kj::none;
+    if ((options.trusted || canDropStacks) && !options.ignoreDetail) {
       // If the error was originally converted from a JS error, then we likely have
       // serialized the original error object as a detail, if so, let's try to use
       // that, otherwise, we'll fall back to constructing a new error object. If
       // the ignoreDetail optiom is set, we skip trying to deserialize.
       KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
+        // NOLINTNEXTLINE(custom-raw-v8-trycatch): only logs what deserializing threw.
         v8::TryCatch tryCatch(isolate);
         try {
           auto& js = Lock::from(isolate);
@@ -454,6 +459,7 @@ void throwInternalError(
 }
 
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rethrows a termination.
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
     Serializer ser(js,
@@ -462,6 +468,11 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
           .version = 15});
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
+    if (js.isUsingEnhancedErrorSerialization()) {
+      exception.setDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID, kj::heapArray<kj::byte>({1}));
+    } else {
+      exception.releaseDetail(TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID);
+    }
   } catch (JsExceptionThrown&) {
     if (tryCatch.HasTerminated()) {
       // Execution is being terminated. Let it continue to unwind: swallowing it here would let

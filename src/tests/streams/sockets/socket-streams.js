@@ -70,6 +70,14 @@ async function drainToBytes(readable) {
 export const echoRoundTrip = {
   async test(ctrl, env) {
     const socket = connect(echoAddress(env));
+    strictEqual(
+      Object.getOwnPropertySymbols(socket.writable).some(
+        (key) =>
+          key.description === 'kExtractNativeSink' ||
+          key.description === 'kWritableStreamBrand'
+      ),
+      false
+    );
     const writer = socket.writable.getWriter();
     await writer.write(enc.encode('hello '));
     await writer.write(enc.encode('sockets'));

@@ -10,19 +10,76 @@ namespace workerd::api {
 
 class Blob;
 
+namespace messageevent {
+
+// A MessagePort as a MessageEvent holds one: either the C++ api::MessagePort, or an instance of
+// the per-isolate bootstrap's TypeScript implementation, whose constructor marks it with the
+// private brand BRAND (`utils.setPrivate(port, BRAND, true)`). The class is named after the type
+// users know, and lives in a namespace of its own, so that JSG's conversion errors name the type
+// as before.
+class MessagePort {
+ public:
+  static constexpr kj::StringPtr BRAND = "workerd:MessagePort"_kj;
+
+  using JsgRttiDelegate = jsg::Ref<api::MessagePort>;
+
+  explicit MessagePort(jsg::Ref<api::MessagePort> port): port(kj::mv(port)) {}
+
+  // Returns kj::none unless `value` is a MessagePort of either implementation. Runs no JS.
+  static kj::Maybe<MessagePort> tryFrom(jsg::Lock& js, jsg::JsValue value);
+
+  MessagePort addRef(jsg::Lock& js);
+  jsg::JsValue getHandle(jsg::Lock& js);
+
+  static v8::Local<v8::Value> jsgWrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      MessagePort value) {
+    return value.getHandle(js);
+  }
+  static kj::Maybe<MessagePort> jsgTryUnwrap(auto& typeWrapper,
+      jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return tryFrom(js, jsg::JsValue(handle));
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+  JSG_MEMORY_INFO(MessagePort) {
+    KJ_SWITCH_ONEOF(port) {
+      KJ_CASE_ONEOF(ref, jsg::Ref<api::MessagePort>) {
+        tracker.trackField("port", ref);
+      }
+      KJ_CASE_ONEOF(object, jsg::JsRef<jsg::JsObject>) {
+        tracker.trackField("port", object);
+      }
+    }
+  }
+
+ private:
+  explicit MessagePort(jsg::JsRef<jsg::JsObject> object): port(kj::mv(object)) {}
+
+  kj::OneOf<jsg::Ref<api::MessagePort>, jsg::JsRef<jsg::JsObject>> port;
+};
+
+}  // namespace messageevent
+
 class MessageEvent final: public Event {
  public:
   MessageEvent(jsg::Lock& js,
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
-      kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
+      kj::Maybe<messageevent::MessagePort> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
   MessageEvent(jsg::Lock& js,
       jsg::JsRef<jsg::JsValue> data,
       kj::String lastEventId = kj::String(),
-      kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
+      kj::Maybe<messageevent::MessagePort> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
@@ -30,7 +87,7 @@ class MessageEvent final: public Event {
       kj::String type,
       const jsg::JsValue& data,
       kj::String lastEventId = kj::String(),
-      kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
+      kj::Maybe<messageevent::MessagePort> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
@@ -38,7 +95,7 @@ class MessageEvent final: public Event {
       kj::String type,
       kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
       kj::String lastEventId = kj::String(),
-      kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
+      kj::Maybe<messageevent::MessagePort> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none,
       Trusted trusted = Trusted::NO);
 
@@ -52,8 +109,8 @@ class MessageEvent final: public Event {
     jsg::Optional<jsg::JsRef<jsg::JsValue>> data;
     jsg::Optional<jsg::USVString> origin;
     jsg::Optional<kj::String> lastEventId;
-    jsg::Optional<kj::Maybe<jsg::Ref<MessagePort>>> source;
-    jsg::Optional<kj::Array<jsg::Ref<MessagePort>>> ports;
+    jsg::Optional<kj::Maybe<messageevent::MessagePort>> source;
+    jsg::Optional<kj::Array<messageevent::MessagePort>> ports;
 
     JSG_STRUCT(bubbles, cancelable, composed, data, origin, lastEventId, source, ports);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
@@ -76,9 +133,9 @@ class MessageEvent final: public Event {
   // Per the spec, the source of a MessageEvent is one of a MessagePort,
   // ServiceWorker, WindowProxy, etc. The only one of these we actually
   // support is MessagePort, return that if its set or null if not.
-  kj::Maybe<jsg::Ref<MessagePort>> getSource();
+  kj::Maybe<messageevent::MessagePort> getSource(jsg::Lock& js);
 
-  kj::Array<jsg::Ref<MessagePort>> getPorts();
+  kj::Array<messageevent::MessagePort> getPorts(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(MessageEvent) {
     JSG_INHERIT(Event);
@@ -99,12 +156,12 @@ class MessageEvent final: public Event {
   // Blob is used only by web-socket.h/c++
   kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
   kj::String lastEventId;
-  kj::Maybe<jsg::Ref<MessagePort>> maybeSource;
+  kj::Maybe<messageevent::MessagePort> maybeSource;
   kj::Maybe<kj::String> maybeOrigin;
 
   // The runtime never attaches ports (we do not support transferring MessagePorts);
   // user-constructed events reflect the ports passed in their init.
-  kj::Array<jsg::Ref<MessagePort>> ports;
+  kj::Array<messageevent::MessagePort> ports;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

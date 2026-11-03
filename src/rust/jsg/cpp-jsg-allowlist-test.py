@@ -11,10 +11,14 @@ A count below it also fails, so that the allowlist is lowered when a use is remo
 
 Usage: cpp-jsg-allowlist-test.py ALLOWLIST FILE...
 
-The allowlist has one entry per line, `<path> <construct> <count>`, with `#` comments. The path
-is the file's path from the workerd repository root. When workerd is an external repository of
-another Bazel workspace, `$(location)` adds a prefix such as `external/<repo>/` to every path, so
-the test removes the prefix that comes before the allowlist's own path.
+The allowlist has one entry per line, `<path> <construct> <count>`, with `#` comments. A line
+`<path> interop` puts the file in the interop tier instead (src/rust/jsg-cpp, the binding between
+Rust JSG and C++ JSG resources, and no other directory): it may use the constructs in
+INTEROP_CONSTRUCTS without limit, and is checked against the allowlist for the rest like any
+other file. The path is the file's path from the workerd repository root. When workerd is an
+external repository of another Bazel workspace, `$(location)` adds a prefix such as
+`external/<repo>/` to every path, so the test removes the prefix that comes before the
+allowlist's own path.
 """
 
 import re
@@ -31,12 +35,35 @@ CONSTRUCTS = {
     "JsExceptionThrown": r"\bJsExceptionThrown\b",
     "createTunneledException": r"\bcreateTunneledException\b",
     "makeInternalError": r"\bmakeInternalError\b",
-    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|V8Ref|JsObject|JsString)\b",
-    "jsg::Ref": r"\bjsg::(?:Ref|Promise|Function|Optional|Sequence|Object)\b",
+    "jsg::Data": r"\bjsg::(?:Data|Value|JsValue|JsRef|JsObject|JsString)\b",
+    "jsg::V8Ref": r"\bjsg::V8Ref\b",
+    "jsg::Ref": r"\bjsg::(?:Ref|Optional|Object)\b",
+    "jsg::Promise": r"\bjsg::(?:Promise|Function|Sequence)\b",
     "JSG_REQUIRE": r"\bJSG_(?:REQUIRE|FAIL_REQUIRE|ASSERT|FAIL_ASSERT|WARN_ONCE)\b",
     "liftKj": r"\bliftKj\b",
-    "jsg::throw": r"\bjsg::throw[A-Z]\w*",
+    "throwInternalError": r"\bjsg::throwInternalError\b",
+    "jsg::throw": r"\bjsg::throw(?!InternalError\b)[A-Z]\w*",
+    # The interop crate, which only the interop tier may use.
+    "jsg-cpp": r"\bjsg[-_]cpp\b",
 }
+
+# What the interop tier may use: enough to hold, wrap and unwrap C++ JSG resources through the
+# isolate's TypeHandlers (jsg::Ref, jsg::Optional, jsg::Object, jsg::V8Ref) and to turn a C++
+# exception into a pending JavaScript one (jsg::throwInternalError). Not allowed, even there:
+# JSG_TRY/tryCatch, createTunneledException, makeInternalError, jsg::check, liftKj, JSG_REQUIRE,
+# the other jsg::throw* functions (throwTunneledException included), JS value handles (jsg::Data,
+# jsg::JsValue, ...) and jsg::Promise/jsg::Function/jsg::Sequence.
+INTEROP_CONSTRUCTS = {
+    "jsg::Lock",
+    "JsExceptionThrown",
+    "jsg::V8Ref",
+    "jsg::Ref",
+    "throwInternalError",
+    "jsg-cpp",
+}
+
+# The only directory whose files may be in the interop tier.
+INTEROP_DIR = "src/rust/jsg-cpp/"
 
 ALTERNATIVES = """\
 Use V8 directly instead:
@@ -73,28 +100,47 @@ def count_constructs(path):
 
 def read_allowlist(path):
     allowed = {}
+    interop = set()
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = line.split("#", 1)[0].strip()
         if not line:
             continue
         fields = line.split()
+        if fields[1:] == ["interop"]:
+            if not fields[0].startswith(INTEROP_DIR):
+                sys.exit(
+                    f"{path}:{number}: only files in {INTEROP_DIR} may be in the interop tier,"
+                    f" got: {line}"
+                )
+            interop.add(fields[0])
+            continue
         if len(fields) != 3 or not fields[2].isdigit() or fields[1] not in CONSTRUCTS:
             sys.exit(
                 f"{path}:{number}: expected `<path> <construct> <count>`, got: {line}"
             )
         allowed[(fields[0], fields[1])] = int(fields[2])
-    return allowed
+    for file, construct in allowed:
+        if file in interop and construct in INTEROP_CONSTRUCTS:
+            sys.exit(
+                f"{path}: `{file}` is in the interop tier, which may use {construct} without"
+                " a count. Remove its line."
+            )
+    return allowed, interop
 
 
 def main(argv):
     if len(argv) < 2:
         sys.exit(__doc__)
     allowlist = Path(argv[0])
-    allowed = read_allowlist(allowlist)
+    allowed, interop = read_allowlist(allowlist)
     prefix = allowlist.as_posix().removesuffix(ALLOWLIST_PATH)
     files = {Path(arg).as_posix().removeprefix(prefix): Path(arg) for arg in argv[1:]}
 
-    problems = []
+    problems = [
+        f"{allowlist}: `{file}` is in the interop tier but not checked (moved or deleted?)."
+        " Remove its `interop` line, or add the file to CPP_SHIMS in src/rust/jsg/BUILD.bazel."
+        for file in sorted(interop - files.keys())
+    ]
     for key, count in sorted(allowed.items()):
         file, construct = key
         if file not in files:
@@ -110,6 +156,8 @@ def main(argv):
     for file, path in sorted(files.items()):
         found = count_constructs(path)
         for construct in CONSTRUCTS:
+            if file in interop and construct in INTEROP_CONSTRUCTS:
+                continue
             actual = found.get(construct, 0)
             expected = allowed.get((file, construct), 0)
             if actual > expected:

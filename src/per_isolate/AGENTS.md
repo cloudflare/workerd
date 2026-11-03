@@ -22,6 +22,8 @@ at context creation, before any user code. C++ entry point:
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`.
+- EventTarget subclasses reach the (still C++) EventTarget they extend only
+  through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
@@ -49,6 +51,10 @@ at context creation, before any user code. C++ entry point:
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
+- C++/bootstrap-only markers and extraction hooks use `utils.setPrivate` /
+  `utils.getPrivate`, backed by `v8::Private::ForApi`. Labels are strings;
+  the properties are neither reflected nor inherited. Ordinary symbols,
+  including `getApiSymbol` results, are reflection-visible and are not secrets.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as

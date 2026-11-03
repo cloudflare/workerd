@@ -214,7 +214,7 @@ fn array_buffer_detach() {
         assert!(!buf.was_detached());
         assert_eq!(buf.byte_length(), 3);
 
-        buf.detach(lock);
+        buf.detach(lock)?;
         assert!(buf.was_detached());
         assert_eq!(buf.byte_length(), 0);
 
@@ -664,7 +664,7 @@ fn array_buffer_detach_zeroes_slices() {
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert_eq!(buf.as_slice(lock), &[1, 2, 3]);
-        buf.detach(lock);
+        buf.detach(lock)?;
         assert!(buf.as_slice(lock).is_empty());
         assert!(buf.to_vec().is_empty());
         Ok(())

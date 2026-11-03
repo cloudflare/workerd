@@ -16,8 +16,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::rc::Weak;
+use std::time::Duration;
 
 use cluster::Cluster;
+use cluster::Layout;
 use cluster::Route;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -40,6 +43,7 @@ use tokio::net::TcpStream;
 use workerd_capnp::cluster_config;
 
 use crate::Result;
+use crate::actor::ActorNamespace;
 use crate::bridge::ffi;
 use crate::config::Factory;
 use crate::services::header_table;
@@ -62,7 +66,12 @@ pub struct ClusterNode {
     advertise: String,
     /// The nonces of CONNECTs accepted within twice the window, by timestamp.
     nonces: RefCell<HashMap<String, u64>>,
+    /// The clustered namespaces, by their part of the bucket's keys.
+    namespaces: RefCell<HashMap<String, Weak<ActorNamespace>>>,
 }
+
+/// How often an instance tidies its alarm index and adopts dead peers' alarms.
+const ALARMS_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct RpcConnection(KjOwn<ffi::RpcClient>);
 
@@ -206,7 +215,34 @@ impl ClusterNode {
             sessions: Rc::default(),
             advertise: address,
             nonces: RefCell::default(),
+            namespaces: RefCell::default(),
         }))
+    }
+
+    pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
+        let hash = cluster::namespace_hash(unique_key);
+        self.namespaces.borrow_mut().insert(hash, namespace);
+    }
+
+    /// Keeps this instance's alarm index tidy and schedules its share of dead peers' alarms.
+    /// Never returns.
+    pub async fn alarms_loop(&self) {
+        loop {
+            tokio::time::sleep(ALARMS_INTERVAL).await;
+            let schedule = |alarm: cluster::Adopted| {
+                let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
+                let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
+                    // Not configured here: a peer that has it adopts it once this one dies.
+                    tracing::warn!("an adopted alarm's namespace is not configured here");
+                    return;
+                };
+                let (actor, name) = (&alarm.actor, alarm.name.as_deref());
+                if let Err(e) = namespace.adopt_alarm(actor, name, alarm.at_ms) {
+                    tracing::warn!("scheduling an adopted alarm: {}", e.description());
+                }
+            };
+            self.cluster.alarms_round(cluster::now_ms(), schedule).await;
+        }
     }
 
     /// Where a request for Durable Object `actor` of `namespace` should run.
@@ -247,9 +283,10 @@ impl ClusterNode {
             .await
             .map_err(|e| kj::disconnected!("{namespace}/{actor} on {node}: {e}"))?;
         // A channel per stub, so a stub stays with the instance it reached.
-        Ok(Owner::Remote(Rc::new(RpcConnection(
-            ffi::rpc_client_debug_actor(&session.0, service, class, actor),
-        ))))
+        let connection = RpcConnection(ffi::rpc_client_debug_actor(
+            &session.0, service, class, actor,
+        ));
+        Ok(Owner::Remote(Rc::new(connection), node))
     }
 
     /// The session to the peer at `address`: the open one, the one being
@@ -311,10 +348,11 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
     Ok(stream)
 }
 
-/// Where a Durable Object runs, for a request about to start on it.
+/// Where a Durable Object runs, for a request about to start on it: here at
+/// an epoch, or on the node named.
 pub enum Owner {
     Here(u64),
-    Remote(Rc<RpcConnection>),
+    Remote(Rc<RpcConnection>, String),
 }
 
 impl RpcConnection {
@@ -505,9 +543,9 @@ impl Owned {
         &self.node.cluster
     }
 
-    /// Takes the object over into the database at `path`, once: recovers what earlier epochs
-    /// committed and opens this one.
-    pub fn restore(&self, path: String) -> impl Future<Output = Result<()>> + use<> {
+    /// Takes the object over into the databases `layout` places, once: recovers what earlier
+    /// epochs committed and opens this one.
+    pub fn restore(&self, layout: Rc<dyn Layout>) -> impl Future<Output = Result<()>> + use<> {
         let mut restore = self.restore.borrow_mut();
         let cluster = Rc::clone(&self.node.cluster);
         let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
@@ -515,7 +553,7 @@ impl Owned {
             .get_or_insert_with(|| {
                 async move {
                     cluster
-                        .restore_actor(&namespace, &actor, epoch, &path)
+                        .restore_actor(&namespace, &actor, epoch, &*layout)
                         .await
                         .map_err(|e| kj::failed!("{namespace}/{actor}: takeover failed: {e}"))
                 }

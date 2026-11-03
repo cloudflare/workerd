@@ -481,7 +481,8 @@ class EventTarget: public jsg::Object {
   // addEventListener() and removeEventListener() — including once-listener removal during
   // dispatch and {signal}-triggered removals — and on managed event handler attribute
   // activation and deactivation, whose trampoline occupies a regular listener slot.
-  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown. Hooks registered
+  // through EventTargetBootstrap::setListenerCountHook() are called on the same occasions.
   virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
@@ -508,6 +509,19 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback);
 
  private:
+  friend class EventTargetBootstrap;
+
+  // Calls listenerCountChanged(), then the bootstrap hook registered for `type`, if any.
+  void notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count);
+
+  struct ListenerCountHook {
+    kj::String type;
+    jsg::JsRef<jsg::JsFunction> hook;
+  };
+  // Hooks registered through EventTargetBootstrap::setListenerCountHook(), at most one per type.
+  // Only EventTargets implemented in the per-isolate bootstrap have any, and then one or two.
+  kj::Vector<ListenerCountHook> listenerCountHooks;
+
   struct EventHandler {
     // The listener's identity (the function or object passed to addEventListener, or a
     // synthesized object for internally-registered listeners), used for removeEventListener
@@ -754,9 +768,9 @@ class AbortSignal final: public EventTarget {
   // Registers a native callback to be invoked with the abort exception if/when this signal
   // aborts. The callback runs under the isolate lock in the IoContext that is current at
   // registration time: synchronously when the abort is triggered within that context,
-  // otherwise delivered on that context's next turn, and dropped entirely (never invoked)
-  // once that context has been destroyed. If the signal can never abort, the callback is
-  // never invoked and no registration is made.
+  // otherwise as a cross-context action (see DeleteQueue::scheduleAction()), and dropped
+  // entirely (never invoked) once that context has been destroyed. If the signal can never
+  // abort, the callback is never invoked and no registration is made.
   //
   // Dropping the returned handle (safe from any thread) unregisters the callback: once the
   // handle is destroyed, the callback is guaranteed to never (again) be invoked, so it may
@@ -831,7 +845,7 @@ class AbortSignal final: public EventTarget {
 
   // One native abort action, shared between this signal and one consumer. The action is
   // invoked at most once, only ever in its owning IoContext (synchronously if the abort is
-  // triggered there; otherwise on that context's next turn), always under the isolate lock,
+  // triggered there; otherwise as addAbortAction() describes), always under the isolate lock,
   // and never again after the consumer's RAII handle clears the slot. Because the handle is
   // held by (or attached to) objects the owning request destroys, an IoContext teardown
   // reclaims the action without ever touching the signal; the signal side retains only this
@@ -944,6 +958,13 @@ class AbortSignal final: public EventTarget {
   // receiving context is already gone.
   kj::Maybe<IoCrossContextExecutor> rpcReceiverContext;
   bool isRpcReceiverContextCurrent();
+
+  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, whether a request to arm the RPC subscription
+  // has been queued on rpcReceiverContext. Queued only once, so registrations can't pile requests
+  // up on an idle actor; it arms the subscription unless the context is aborted or destroyed, or
+  // its idle actor's onHibernate event drops it, first. Without the autogate, this stays false and
+  // every registration from another context queues a request.
+  bool rpcSubscriptionRequested = false;
 
   // A promise that is fulfilled if an abort() message is received over RPC.
   kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;

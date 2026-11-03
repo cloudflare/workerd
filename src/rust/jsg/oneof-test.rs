@@ -142,6 +142,7 @@ fn each_type_has_the_kind_of_its_cpp_counterpart() {
     assert_kind::<bool>(Boolean, UnionTypes::BOOLEAN);
     assert_kind::<NonCoercible<bool>>(Boolean, UnionTypes::BOOLEAN);
     assert_kind::<String>(UnionMember::String, UnionTypes::STRING);
+    assert_kind::<crate::JsString<'static>>(UnionMember::String, UnionTypes::STRING);
     assert_kind::<NonCoercible<String>>(UnionMember::String, UnionTypes::STRING);
     assert_kind::<f64>(Numeric, UnionTypes::NUMERIC);
     assert_kind::<u8>(Numeric, UnionTypes::NUMERIC);

@@ -236,6 +236,8 @@ fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio:
     });
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move { cluster.tier_loop().await });
+    let node = Rc::clone(node);
+    factory.spawn_detached(async move { node.alarms_loop().await });
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).

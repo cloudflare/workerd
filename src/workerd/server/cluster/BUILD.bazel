@@ -8,6 +8,9 @@ wd_rust_crate(
     proc_macro_deps = ["@crates_vendor//:async-trait"],
     # The capture's tests drive a real SQLite.
     test_deps = ["@sqlite3"],
+    # The alarm simulation and the log tests outrun a medium test's 15 s
+    # under ASan.
+    test_size = "large",
     # The capture's tests hand SQLite Rust callbacks, which a downstream
     # build's cfi-icall rejects.
     test_tags = ["no-downstream"],

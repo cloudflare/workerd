@@ -255,6 +255,10 @@ pub trait CallbackScopeParam: callback_scope_param::Sealed {
     #[doc(hidden)]
     #[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
     unsafe fn into_isolate(self) -> v8::IsolatePtr;
+
+    /// Whether the parameter is the callback info of a callback that V8 entered.
+    #[doc(hidden)]
+    const V8_CALLBACK: bool = true;
 }
 
 mod callback_scope_param {
@@ -268,6 +272,8 @@ mod callback_scope_param {
 
 #[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
 impl CallbackScopeParam for *mut v8::ffi::Isolate {
+    const V8_CALLBACK: bool = false;
+
     /// # Panics
     /// Panics if the isolate is not locked by this thread or no context is entered: a C++
     /// caller bug that must not reach V8.
@@ -329,6 +335,7 @@ impl CallbackScopeParam for *mut v8::ffi::PropertyQueryCallbackInfo {
 pub struct CallbackScope {
     lock: Lock<'static>,
     open: bool,
+    v8_callback: bool,
     _pinned: PhantomPinned,
 }
 
@@ -343,11 +350,12 @@ impl CallbackScope {
     /// innermost `v8::HandleScope` must stay open and innermost until the storage is dropped.
     /// No other `Lock` for that `HandleScope` may be used while the storage lives. The
     /// storage must be dropped, not leaked, or its isolate keeps owning the thread.
-    pub unsafe fn new(param: impl CallbackScopeParam) -> Self {
+    pub unsafe fn new<P: CallbackScopeParam>(param: P) -> Self {
         Self {
             // SAFETY: forwarded from the caller.
             lock: Lock::new(unsafe { param.into_isolate() }),
             open: false,
+            v8_callback: P::V8_CALLBACK,
             _pinned: PhantomPinned,
         }
     }
@@ -355,13 +363,31 @@ impl CallbackScope {
     /// Opens the scope and returns its lock.
     ///
     /// # Panics
-    /// Panics if a scope of another isolate is open on this thread.
+    /// Panics if a scope of another isolate is open on this thread. With debug assertions, also
+    /// panics if V8 entered the callback while an exception other than a termination is
+    /// pending.
     pub fn open<'s>(self: Pin<&'s mut Self>) -> &'s mut Lock<'s> {
         // SAFETY: nothing is moved out of the storage.
         let this = unsafe { self.get_unchecked_mut() };
         if !this.open {
             scope_owner::enter(this.lock.isolate);
             this.open = true;
+            // An exception is pending here only if C++ ran JavaScript while one was, typically
+            // while its innermost `v8::TryCatch` still held one it had caught. Every operation
+            // of the callback would then fail with a pending error, and JavaScript would see
+            // `undefined`.
+            debug_assert!(
+                !this.v8_callback || {
+                    let isolate = this.lock.isolate.as_ffi();
+                    // SAFETY: the isolate is valid and locked (guaranteed by `new`'s caller).
+                    unsafe {
+                        v8::ffi::isolate_is_execution_terminating(isolate)
+                            || !v8::ffi::isolate_has_pending_exception(isolate)
+                    }
+                },
+                "V8 entered a Rust JSG callback while a v8::TryCatch held a caught exception; \
+                 reset the TryCatch before running more JavaScript"
+            );
         }
         // SAFETY: `Lock<'s>` differs from `Lock<'static>` only in its brand; `new`'s caller
         // keeps the scope open and innermost while the storage lives.

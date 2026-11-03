@@ -551,6 +551,12 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-cross-request-stream-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-cross-request-stream-test.js"],
+)
+
+wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -899,6 +905,11 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-streams-cancel-reason-mixed-test.wd-test",
+    data = ["js-rpc-streams-cancel-reason-mixed-test.js"],
+)
+
+wd_test(
     src = "js-rpc-writable-teardown-crossflag-reverse-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-writable-teardown-test.js"],
@@ -999,6 +1010,14 @@ wd_test(
     src = "response-error-test.wd-test",
     args = ["--experimental"],
     data = ["response-error-test.js"],
+)
+
+wd_test(
+    src = "response-status-text-test.wd-test",
+    data = [
+        "response-status-text-target.js",
+        "response-status-text-test.js",
+    ],
 )
 
 wd_test(
@@ -1400,6 +1419,11 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-cross-context-promise-test.wd-test",
+    data = ["actor-cross-context-promise-test.js"],
+)
+
+wd_test(
     src = "error-in-error-event-test.wd-test",
     args = ["--experimental"],
     data = ["error-in-error-event-test.js"],
@@ -1546,12 +1570,6 @@ wd_test(
     data = ["leak-fetch-test.js"],
 )
 
-wd_test(
-    src = "messageport-test.wd-test",
-    args = ["--experimental"],
-    data = ["messageport-test.js"],
-)
-
 js_binary(
     name = "starttls-nodejs-server",
     entry_point = "starttls-nodejs-server.js",
@@ -1595,6 +1613,7 @@ wd_test(
     src = "rpc-error-test.wd-test",
     args = ["--experimental"],
     data = [
+        "rpc-error-mixed-test.js",
         "rpc-error-test.js",
         "rpc-error-test.rpc.js",
     ],

@@ -302,6 +302,7 @@ export {
 export { structuredCloneReadable } from 'transfer';
 
 export {
+  nativeHandlesAreNotReflectable,
   patchedArrayIteratorKeepsBody,
   replacedNumberKeepsBody,
   patchedObjectThenKeepsText,

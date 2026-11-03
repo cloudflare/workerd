@@ -363,9 +363,9 @@ struct NativeSourceInFlightRead {
 // translates them into tryRead()/cancel() calls on the underlying source.
 //
 // Instances are created only from C++ (there is no JavaScript constructor) and are handed
-// to the TypeScript ReadableStream constructor carrying the native-source marker symbol.
-// The object is never exposed to user code, and it is suppressed from the generated TypeScript
-// types.
+// to the TypeScript ReadableStream constructor carrying a V8-private native-source marker.
+// Private extraction slots keep the handle internal. Methods independently guard callback
+// reentrancy. The type is suppressed from generated TypeScript types.
 class ReadableStreamNativeSource final: public jsg::Object {
  public:
   ReadableStreamNativeSource(IoContext& ioContext, kj::Own<ReadableStreamSource> source);
@@ -454,12 +454,11 @@ class ReadableStreamNativeSource final: public jsg::Object {
   void failTeeHandoff(jsg::Lock& js, jsg::Value& exception);
 
   jsg::Promise<void> pullDefault(
-      jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
+      jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal);
   jsg::Promise<void> pullByob(jsg::Lock& js,
       jsg::JsObject controller,
       jsg::JsObject byobRequest,
-      jsg::Ref<AbortSignal> signal,
-      Active& active);
+      jsg::Ref<AbortSignal> signal);
 
   // Completes a BYOB pull whose read produced `data` (following the stash): writes the
   // whole elements into `dest` and responds, keeping a trailing partial element in the
@@ -496,10 +495,9 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // failed.
   kj::Maybe<Active> state;
 
-  // Reusable read target, lazily allocated. KJ reads always land here -- never directly in
-  // V8-visible memory -- and delivery copies out under the isolate lock. Sized
-  // kScratchSize, growing when a BYOB read's minimum exceeds that (the conduit never
-  // re-pulls an unsatisfied minimum, so a single read must be able to satisfy it).
+  // Idle reusable read target. An asynchronous read takes ownership until delivery finishes,
+  // then returns the allocation here. KJ reads never target V8-visible memory; delivery
+  // copies out under the isolate lock. Grows when a BYOB minimum exceeds kScratchSize.
   kj::Array<kj::byte> scratch;
 
   // Bytes read but not delivered: those of a pull whose consumer abandoned it (per-pull
@@ -508,8 +506,12 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // across a reader release. Multiple abandoned pulls may accumulate.
   kj::Vector<kj::byte> stash;
 
-  // Defensive only: the TypeScript conduit guarantees at most one pull in flight (standard
-  // pulling/pullAgain serialization).
+  // Covers metadata getters, synchronous delivery, and asynchronous delivery/error cleanup.
+  // Unlike pullInFlight, this does not imply that a native read has started.
+  bool pulling = false;
+
+  // A native read has started and its settlement has not been processed. Cancellation and
+  // tee use this to keep the underlying source alive until the read finishes.
   bool pullInFlight = false;
 
   // The underlying source's IDENTITY length as of the moment the in-flight read was
