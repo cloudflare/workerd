@@ -3010,25 +3010,31 @@ function pipeToInternal<R>(
     }
   };
 
-  // Settles with the pipe's latest write, so that shutdownWithAction can
-  // wait for every write to be acknowledged.
-  let lastWriteSettled: Promise<void> = PromiseResolve(undefined);
+  // The pipe's writes not yet settled, so that shutdownWithAction can wait
+  // for every write to be acknowledged.
+  let unsettledWrites = 0;
 
   // Whether a shutdown is waiting for the pipe's writes before its action.
   let waitingForWrites = false;
+  // What the shutdown runs once the writes have settled.
+  let afterWrites: (() => void) | undefined;
 
-  // Calls `then` once the latest write has settled, waiting again if a
-  // write was made meanwhile.
+  // Runs afterWrites a microtask later, unless a write made meanwhile is
+  // still unsettled; its settlement checks again.
+  const checkWritesSettled = (): void => {
+    PromisePrototypeThen(PromiseResolve(), () => {
+      const then = afterWrites;
+      if (then === undefined || unsettledWrites > 0) return;
+      afterWrites = undefined;
+      then();
+    });
+  };
+
+  // Calls `then` once every write made so far, and every write made
+  // meanwhile, has settled.
   const waitForWrites = (then: () => void): void => {
-    const settled = lastWriteSettled;
-    const check = (): void => {
-      if (settled === lastWriteSettled) {
-        then();
-      } else {
-        waitForWrites(then);
-      }
-    };
-    PromisePrototypeThen(settled, check, check);
+    afterWrites = then;
+    if (unsettledWrites === 0) checkWritesSettled();
   };
 
   // Set when a write rejects NON-FATALLY (dest still writable — the
@@ -3235,29 +3241,45 @@ function pipeToInternal<R>(
   };
   checkConditions();
 
-  const writeChunk = (chunk: R): void => {
-    const writePromise = writableInternals.writerWrite(writer, chunk);
-    // One reaction per write. A rejection that leaves the destination
-    // WRITABLE is the internal transforms' non-fatal invalid-chunk
-    // rejection — fail the pipe with it (see onWriteRejectedNonFatally).
-    // Fatal rejections error the destination and are handled by the
-    // closed-promise observer instead. When a clean shutdown is already
-    // waiting for acknowledgment, record the failure for runAction's
-    // upgrade path. The reaction's promise settles once the write has,
-    // which is what shutdownWithAction waits for; the writable serializes
-    // writes, so every earlier write has settled by then too.
-    lastWriteSettled = PromisePrototypeThen(
-      writePromise,
-      undefined,
-      (e: unknown) => {
-        if (writableInternals.getState(destination) !== 'writable') return;
-        if (shuttingDown) {
-          pendingNonFatalWriteFailure ??= { reason: e };
-          return;
-        }
-        onWriteRejectedNonFatally(e);
+  // A rejection that leaves the destination WRITABLE is the internal
+  // transforms' non-fatal invalid-chunk rejection — fail the pipe with it
+  // (see onWriteRejectedNonFatally). Fatal rejections error the
+  // destination and are handled by the closed-promise observer instead.
+  // When a clean shutdown is already waiting for acknowledgment, record
+  // the failure for runAction's upgrade path.
+  const onWriteRejected = (e: unknown): void => {
+    if (writableInternals.getState(destination) !== 'writable') return;
+    if (shuttingDown) {
+      pendingNonFatalWriteFailure ??= { reason: e };
+      return;
+    }
+    onWriteRejectedNonFatally(e);
+  };
+
+  // Every write's request. The writable settles it from inside its own
+  // steps, where a fatal rejection has yet to error the destination, so
+  // the rejection is handled a microtask later, as a reaction to a write
+  // promise would be; and ahead of the shutdown's check for settled
+  // writes.
+  const writeRequest = {
+    resolve(): void {
+      if (--unsettledWrites === 0 && afterWrites !== undefined) {
+        checkWritesSettled();
       }
-    ) as Promise<void>;
+    },
+    reject(e: unknown): void {
+      PromisePrototypeThen(PromiseResolve(), () => {
+        onWriteRejected(e);
+      });
+      if (--unsettledWrites === 0 && afterWrites !== undefined) {
+        checkWritesSettled();
+      }
+    },
+  };
+
+  const writeChunk = (chunk: R): void => {
+    unsettledWrites++;
+    writableInternals.writerWriteWithRequest(writer, chunk, writeRequest);
   };
 
   // Spec: no reads while the writer's desiredSize is <= 0 or null.
