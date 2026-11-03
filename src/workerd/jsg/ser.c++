@@ -206,12 +206,17 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
-  // By default, V8 will call WriteHostObject() only for objects that have internal fields. We
-  // also want native errors and class instances (see IsHostObject()).
-  return true;
+  // By default, V8 will call WriteHostObject() for objects that have internal fields, which
+  // includes DOMExceptions. We only need to override IsHostObject() if we want to treat pure-JS
+  // objects differently, which we do if treatClassInstancesAsPlainObjects is false, or if
+  // treatErrorsAsHostObjects is true.
+  return !treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects;
 }
 
 v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // This is only called if HasCustomHostObject() returned true.
+  KJ_ASSERT(!treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects);
+
   // Any object with internal fields, a DOMException included, is DEFINITELY a host object.
   if (object->InternalFieldCount() > 0) {
     return v8::Just(true);

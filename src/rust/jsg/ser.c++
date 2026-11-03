@@ -116,14 +116,13 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   }
 
   bool HasCustomHostObject(v8::Isolate*) override {
-    // V8 treats only objects with internal fields, such as API objects and DOMExceptions, as host
-    // objects, and native errors are too if errorsAreHostObjects.
-    return true;
+    // V8 already treats objects with internal fields, such as API objects and DOMExceptions, as
+    // host objects.
+    return errorsAreHostObjects;
   }
 
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
-    return v8::Just(
-        object->InternalFieldCount() > 0 || (errorsAreHostObjects && object->IsNativeError()));
+    return v8::Just(object->InternalFieldCount() > 0 || object->IsNativeError());
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {

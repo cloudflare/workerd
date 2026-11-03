@@ -1838,6 +1838,12 @@ JSG_REQUIRE(isValid, DOMInvalidStateError, "The object is in an invalid state");
 JSG_REQUIRE(hasAccess, DOMNotSupportedError, "This operation is not supported");
 ```
 
+To create one without throwing it, call `js.domException(name, message)`, which returns a
+`jsg::JsObject`. A DOMException is recognized by a brand in its internal fields, whichever class
+created it (see `tryGetDOMExceptionFields()` in `jsg.h`), so don't take one as a
+`jsg::Ref<jsg::DOMException>` parameter: a DOMException that the TypeScript class in
+`src/per_isolate/dom-exception.ts` or native code created doesn't unwrap as one.
+
 ### Tunneled Exceptions
 
 JavaScript exceptions can be "tunneled" through KJ's exception system — thrown, caught as

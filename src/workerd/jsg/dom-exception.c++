@@ -197,8 +197,13 @@ bool isDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
 }
 
 void restoreDOMExceptionBrand(v8::Local<v8::Object> holder, int index) {
-  KJ_ASSERT(index == DOMExceptionField::BRAND &&
-      holder->InternalFieldCount() == DOMExceptionField::FIELD_COUNT);
+  // Anything else is a corrupt snapshot. Abort rather than throw: V8 is deserializing.
+  if (index != DOMExceptionField::BRAND ||
+      holder->InternalFieldCount() != DOMExceptionField::FIELD_COUNT) {
+    KJ_LOG(FATAL, "DOMException brand in an unexpected internal field of a context snapshot", index,
+        holder->InternalFieldCount());
+    abort();
+  }
   setBrand(holder);
 }
 
