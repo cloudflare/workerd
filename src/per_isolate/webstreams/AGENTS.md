@@ -116,7 +116,8 @@ A stream whose data moves to another stream is closed at the handoff,
 left locked and disturbed, and drops its controller
 (`closeReadableStreamHusk`): a teed branch (above), the source of a
 native-backed tee, a native-backed stream whose source is extracted
-(a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
+(a native-to-native pipe, the C++ bridge's `pumpTo`, a body consumption
+of a native-backed stream: see below) or detached (the
 bridge's `detach()`: `new Request(request)`, socket upgrades), and a
 detached queued stream other than the source's own stream (a tee
 branch, or a copy detached again). The legacy C++ streams leave the
@@ -183,6 +184,18 @@ connection.
   its own reads. Suite guard: `thenPatchOnlyInterceptsConsumptionResult`
   (readable), plus the patched-`then` consumption test in
   `js-readable-stream-test.c++`.
+- A body consumption of a native-backed stream that the JS collector
+  would read straight from its source (readable, unlocked, undisturbed,
+  not pending closure, any declared `expectedLength` within the limit)
+  skips the JS collector: `extractNativeSourceForCollection` hands the
+  source over, and the bridge collects it in C++
+  (`collectNativeSource` in `js-readable-stream.c++`), failing as the
+  JS path would: the conduit's `expectedLength` errors, and
+  `collectChunks()`'s memory-limit error, which cancels the source. The
+  stream is handed off at once (HANDED-OFF STREAMS), so it is closed
+  while the bytes are still being read, and a source failure no longer
+  errors it. Keep the two paths' outcomes identical when changing
+  either.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (V8-private marker, standard pull/cancel hooks,
