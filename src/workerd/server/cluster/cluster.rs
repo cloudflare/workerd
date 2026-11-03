@@ -199,6 +199,17 @@ impl Cluster {
         })
     }
 
+    /// Hand off an object this draining instance stopped, whose capture
+    /// `close_actor` closed: upload what the bucket lacks, then write the
+    /// owner record as unowned (`Ownership::release`). Nothing writes the
+    /// object here any more, so no write can follow the release; the next
+    /// owner's epoch fences anything else. Answers whether it was released.
+    pub async fn hand_off_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.owners.retire(ns, actor);
+        self.owners.evict(ns, actor, epoch).await;
+        self.release_actor(ns, actor, epoch).await
+    }
+
     /// Hand off an object this draining instance owns but does not serve,
     /// once no capture, eviction or compaction of it is in flight here: the
     /// next owner reads the files a compaction deletes. The caller bounds

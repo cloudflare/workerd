@@ -26,6 +26,7 @@ use workerd_capnp::service;
 use workerd_capnp::socket;
 
 use crate::Result;
+use crate::actor;
 use crate::bench;
 use crate::bindings::Designator;
 use crate::bindings::len_u32;
@@ -412,8 +413,9 @@ async fn serve_listeners(
 /// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
 /// error returned.
 ///
-/// In a cluster, the instance first lets its Durable Objects go and leaves the cluster, then
-/// accepts requests for a grace period at least; the cluster's `stopTimeoutMs` bounds all of it.
+/// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
+/// leaves the cluster, and accepts requests for a grace period at least; the cluster's
+/// `stopTimeoutMs` bounds all of it.
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -436,20 +438,27 @@ pub async fn run(
     match futures::future::select(serving.as_mut(), drain).await {
         Either::Left((result, _)) => result?,
         Either::Right(((), _)) => {
-            // A draining instance claims nothing more, lets its clustered objects go,
-            // `preventEviction` or not, and leaves the cluster, so peers take them over at their
-            // next listing. A request in flight on one could not commit anyway once a peer owns
-            // the object; one that arrives later is answered as moved, so that its caller
-            // re-resolves the object. It accepts requests until the grace period ends, as load
+            // A draining instance claims nothing more and hands its clustered objects off,
+            // `preventEviction` or not, while it serves on: a request for one waits for it and
+            // then goes where it runs next. Then it leaves the cluster, so peers take over what
+            // it did not hand off, accepts requests until the grace period ends, as load
             // balancers may still send some, and lets its connections, peers' among them, finish.
             if let Some(node) = server.cluster() {
                 let deadlines = node.start_draining();
                 let workers = server
                     .services()
                     .filter_map(|(_, service)| service.as_worker());
-                let namespaces = workers.flat_map(|worker| worker.namespaces());
-                for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
-                    namespace.release_all();
+                let namespaces: Vec<_> = workers
+                    .flat_map(|worker| worker.namespaces())
+                    .map(|(_, ns)| ns)
+                    .filter(|ns| ns.cluster().is_some())
+                    .collect();
+                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+                if let Either::Left((result, handoff)) =
+                    futures::future::select(serving.as_mut(), handoff).await
+                {
+                    result?;
+                    handoff.await;
                 }
                 // Released before the lease goes, so nothing is served after it. Until the
                 // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer

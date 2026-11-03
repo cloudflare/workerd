@@ -83,6 +83,7 @@ pub struct ClusterNode {
 /// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
 #[derive(Clone, Copy)]
 pub struct Deadlines {
+    pub in_flight: Instant,
     pub handoff: Instant,
     pub grace: Instant,
     pub connections: Instant,
@@ -327,6 +328,7 @@ impl ClusterNode {
         let now = Instant::now();
         let at = |ms| now + Duration::from_millis(ms);
         let deadlines = Deadlines {
+            in_flight: at(self.budget.in_flight_ms()),
             handoff: at(self.budget.handoff_ms()),
             grace: at(self.budget.grace_ms()),
             connections: at(self.budget.connections_ms()),
@@ -733,6 +735,8 @@ pub struct Owned {
     namespace: String,
     actor: String,
     epoch: u64,
+    /// Whether dropping it keeps the object dormant here; not once it is handed off.
+    evict: Cell<bool>,
     /// The takeover, shared by the requests that wait for it.
     restore: RefCell<Option<futures::future::Shared<LocalBoxFuture<'static, Result<()>>>>>,
 }
@@ -744,7 +748,26 @@ impl Owned {
             namespace: namespace.to_owned(),
             actor: actor.to_owned(),
             epoch,
+            evict: Cell::new(true),
             restore: RefCell::new(None),
+        }
+    }
+
+    /// Hands the object off as this instance drains, once it stopped: uploads what the bucket
+    /// lacks, then releases it to the next claim. Answers whether it was released.
+    pub fn hand_off(self) -> impl Future<Output = bool> + use<> {
+        self.evict.set(false);
+        let cluster = Rc::clone(&self.node.cluster);
+        let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
+        drop(self);
+        async move {
+            match cluster.hand_off_actor(&namespace, &actor, epoch).await {
+                Ok(released) => released,
+                Err(e) => {
+                    tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                    false
+                }
+            }
         }
     }
 
@@ -787,7 +810,11 @@ impl Owned {
 
 impl Drop for Owned {
     fn drop(&mut self) {
-        self.retire().run();
+        if self.evict.get() {
+            self.retire().run();
+        } else {
+            self.node.cluster.close_actor(&self.namespace, &self.actor);
+        }
     }
 }
 

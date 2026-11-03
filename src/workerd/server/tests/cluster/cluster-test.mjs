@@ -29,8 +29,9 @@
 //      `workerd deploy` publishes a Cap'n Proto config or a wrangler project for
 //      the nodes to start on, and refuses a deployment that holds more than
 //      services or conflicts with another.
-//  12. A stopping node keeps accepting requests a while, and sends one for a
-//      DO it evicted before to a peer.
+//  12. A node stopping under load hands its DOs to its peers: requests that
+//      arrive meanwhile wait for a DO's handoff and follow it, and a DO whose
+//      handoff outlasts its deadline moves once the node left.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -91,11 +92,13 @@ class ClusterNode {
   #stderrBuffer = '';
   #extraArgs;
   #disk;
+  #configName;
 
   // `localPath` is the directory of the config's disk service `disk`.
   constructor({
     binary,
     config,
+    configName,
     localPath,
     disk = 'local',
     s3Port,
@@ -104,6 +107,7 @@ class ClusterNode {
   }) {
     this.#extraArgs = extraArgs;
     this.#disk = disk;
+    this.#configName = configName;
     this.#binary = binary;
     this.#config = config;
     this.#localPath = localPath;
@@ -141,6 +145,7 @@ class ClusterNode {
     const args = [
       'serve',
       this.#config,
+      ...(this.#configName === undefined ? [] : [this.#configName]),
       '--experimental',
       '--verbose',
       `--control-fd=${CONTROL_FD}`,
@@ -389,14 +394,16 @@ class FakeS3 {
 //   bucket     the FakeS3
 //   nodeKeys   Map from nodeId to the node's key (32-char hex), which is also
 //              what owner records name
-// The nodes run `config`, whose disk service `disk` is a directory of each
-// node's own, once `before` has prepared the bucket.
+// The nodes run the config constant `configName` of `config`, whose disk
+// service `disk` is a directory of each node's own, once `before` has prepared
+// the bucket.
 async function withCluster(
   numNodes,
   fn,
   {
     extraArgs = () => [],
     config = env.WD_TEST_CONFIG,
+    configName = 'config',
     disk = 'local',
     before = async () => {},
   } = {}
@@ -416,6 +423,7 @@ async function withCluster(
       const node = new ClusterNode({
         binary: env.WORKERD_BINARY,
         config,
+        configName,
         localPath,
         disk,
         s3Port: bucket.port,
@@ -980,6 +988,7 @@ test('cluster: a public cluster address is refused', async () => {
       [
         'serve',
         env.WD_TEST_CONFIG,
+        'config',
         '--experimental',
         '--socket-addr=http=127.0.0.1:0',
         `${flag}=8.8.8.8:7000`,
@@ -1008,6 +1017,7 @@ test('cluster: Durable Objects from before cluster mode are refused', async () =
     const node = new ClusterNode({
       binary: env.WORKERD_BINARY,
       config: env.WD_TEST_CONFIG,
+      configName: 'config',
       localPath: local,
       s3Port: bucket.port,
       nodeId: 'old',
@@ -1435,8 +1445,9 @@ test(
         'follow-rpc',
       ]);
 
-      // The drained owner answers that the DO moved, before anything runs, so
-      // the fetch is sent again to the node that claims the DO now.
+      // The drained owner sends the fetch on to the node that claims the DO
+      // now, or answers that the DO moved, before anything ran, so that it is
+      // sent there again.
       const fetched = await fetchJson(
         nodes[1].httpPort,
         '/call-held-stub?name=holder&target=follow&path=/increment',
@@ -1446,20 +1457,21 @@ test(
       assert.strictEqual(fetched.body.target.nodeId, nodes[1].nodeId);
       assert.strictEqual(fetched.body.target.count, 2);
 
-      // A JS RPC call is not sent again, but fails as retryable, and the stub's
-      // next call finds the DO's new owner.
-      const failed = await fetchJson(
-        nodes[1].httpPort,
-        '/call-held-stub?name=holder&target=follow-rpc&rpc',
-        { timeoutMs: HANG_TIMEOUT_MS }
-      );
-      assert.strictEqual(failed.status, 500, JSON.stringify(failed.body));
-      assert.strictEqual(failed.body.retryable, true);
-      const called = await fetchJson(
-        nodes[1].httpPort,
-        '/call-held-stub?name=holder&target=follow-rpc&rpc',
-        { timeoutMs: HANG_TIMEOUT_MS }
-      );
+      // A JS RPC call is not sent again. One that reaches the drained owner
+      // while the DO is handed off waits and is sent on; one that arrives once
+      // it was released fails as retryable, and the stub's next call finds the
+      // DO's new owner.
+      const call = () =>
+        fetchJson(
+          nodes[1].httpPort,
+          '/call-held-stub?name=holder&target=follow-rpc&rpc',
+          { timeoutMs: HANG_TIMEOUT_MS }
+        );
+      let called = await call();
+      if (called.status === 500) {
+        assert.strictEqual(called.body.retryable, true);
+        called = await call();
+      }
       assert.strictEqual(called.status, 200, JSON.stringify(called.body));
       assert.strictEqual(called.body.target.nodeId, nodes[1].nodeId);
 
@@ -1483,10 +1495,9 @@ test(
       assert.strictEqual(held.body.nodeId, nodes[1].nodeId);
       assert.strictEqual(held.body.target.nodeId, nodes[0].nodeId);
 
-      // The request waits in the DO on node 0, which drains and exits under
-      // it, cutting the connection. Whether it ran there is unknown, so it
-      // fails, as retryable, and does not run again on the node that takes the
-      // DO over.
+      // The request waits in the DO on node 0 as node 0 drains. The handoff
+      // lets it finish there, and the DO moves with its write; it does not run
+      // again on the node that takes the DO over.
       const inFlight = fetchJson(
         nodes[1].httpPort,
         '/call-held-stub?name=holder&target=once&path=/hold-increment%3Fms%3D3000',
@@ -1499,22 +1510,16 @@ test(
       });
       assert.deepStrictEqual(exit, { code: 0, signal: null });
       const response = await inFlight;
-      assert.strictEqual(response.status, 500, JSON.stringify(response.body));
-      assert.strictEqual(response.body.retryable, true);
+      assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+      assert.strictEqual(response.body.target.nodeId, nodes[0].nodeId);
+      assert.strictEqual(response.body.target.count, 2);
 
-      // Until node 1's listing drops node 0, a request routes there and fails.
-      let state = null;
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline) {
-        state = await fetchJson(nodes[1].httpPort, '/get?name=once', {
-          timeoutMs: 15_000,
-        }).catch(() => null);
-        if (state?.status === 200) break;
-        await sleep(200);
-      }
-      assert.strictEqual(state?.status, 200, JSON.stringify(state?.body));
+      const state = await fetchJson(nodes[1].httpPort, '/get?name=once', {
+        timeoutMs: HANG_TIMEOUT_MS,
+      });
+      assert.strictEqual(state.status, 200, JSON.stringify(state.body));
       assert.strictEqual(state.body.nodeId, nodes[1].nodeId);
-      assert.strictEqual(state.body.count, 1);
+      assert.strictEqual(state.body.count, 2);
 
       // The held stub lost its connection, not its DO: its next call finds
       // the DO's new owner.
@@ -1525,7 +1530,7 @@ test(
       );
       assert.strictEqual(next.status, 200, JSON.stringify(next.body));
       assert.strictEqual(next.body.target.nodeId, nodes[1].nodeId);
-      assert.strictEqual(next.body.target.count, 2);
+      assert.strictEqual(next.body.target.count, 3);
     });
   }
 );
@@ -1563,6 +1568,153 @@ test(
   }
 );
 
+// Load on the DOs `names`: for each, one `/increment` at a time, each sent to
+// the next of the nodes `serving()` lists (indices into `nodes`), until
+// `finish()`. It resolves to the counts each DO's responses carried, in order,
+// and to the requests that failed.
+function load(nodes, names, serving) {
+  let finished = false;
+  const counts = new Map(names.map((name) => [name, []]));
+  const failures = [];
+  const loops = names.map(async (name, i) => {
+    for (let n = i; !finished; n++) {
+      const up = serving();
+      const node = nodes[up[n % up.length]];
+      const response = await fetchJson(
+        node.httpPort,
+        `/increment?name=${name}`,
+        { timeoutMs: 20_000 }
+      ).catch((e) => ({ status: 0, body: { error: String(e) } }));
+      if (response.status === 200) {
+        counts.get(name).push(response.body.count);
+      } else {
+        failures.push({ name, node: node.nodeId, ...response });
+      }
+    }
+  });
+  return async () => {
+    finished = true;
+    await Promise.all(loops);
+    return { counts, failures };
+  };
+}
+
+// What a node's drain promises the requests of `load`: none fails, none is
+// lost (each DO's count goes up by one per response, and the bucket's copy
+// ends where the responses did), and none runs twice.
+async function assertLoadServed({ counts, failures }, nodes, first = 0) {
+  assert.deepStrictEqual(failures, []);
+  for (const [name, seen] of counts) {
+    assert(seen.length > 0, `no request for ${name} completed`);
+    const expected = seen.map((_, i) => first + i + 1);
+    assert.deepStrictEqual(seen, expected, `the counts of ${name}`);
+    const state = await fetchJson(nodes[0].httpPort, `/get?name=${name}`);
+    assert.strictEqual(state.body.count, seen.at(-1), `the count of ${name}`);
+  }
+}
+
+test(
+  'cluster: a node stopping under load hands its DOs to its peers',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      3,
+      async ({ nodes, bucket, nodeKeys }) => {
+        // Node 0 owns every DO the load is on, and the peers send it their
+        // requests for them.
+        const names = Array.from({ length: 8 }, (_, i) => `loaded-${i}`);
+        for (const name of names) {
+          const first = await fetchJson(
+            nodes[0].httpPort,
+            `/increment?name=${name}`
+          );
+          assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+        }
+        await fetchJson(nodes[0].httpPort, '/get?name=slow');
+        const finish = load(nodes, names, () => [1, 2]);
+        // A request still running on its DO when the handoff's time for
+        // requests in flight runs out is cancelled, and not sent again.
+        const slow = fetchJson(
+          nodes[1].httpPort,
+          '/hold-increment?name=slow&ms=15000',
+          { timeoutMs: 30_000 }
+        );
+        await sleep(1000);
+
+        const stoppedAt = Date.now();
+        const exit = await nodes[0].stop({
+          signal: 'SIGTERM',
+          timeoutMs: 30_000,
+        });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        // Within the stop timeout of 6 s, with time for the process to start
+        // and exit.
+        assert(Date.now() - stoppedAt < 7_500, 'the drain took too long');
+        await sleep(1000);
+
+        const result = await finish();
+        await assertLoadServed(result, nodes.slice(1), 1);
+        const gone = nodeKeys.get(nodes[0].nodeId);
+        for (const name of names) {
+          const { body } = await fetchJson(
+            nodes[1].httpPort,
+            `/get?name=${name}`
+          );
+          assert.notStrictEqual(await bucket.owner(body.id), gone);
+        }
+        const cut = await slow;
+        assert.strictEqual(cut.status, 500, JSON.stringify(cut.body));
+        const state = await fetchJson(nodes[1].httpPort, '/get?name=slow');
+        assert.strictEqual(state.body.count, 0);
+      },
+      { configName: 'shortStop' }
+    );
+  }
+);
+
+test(
+  'cluster: requests to a DO of a stopping node wait for its handoff and follow it',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      await fetchJson(nodes[0].httpPort, '/increment?name=waited');
+      const held = fetchJson(
+        nodes[0].httpPort,
+        '/hold-increment?name=waited&ms=8000',
+        { timeoutMs: 20_000 }
+      );
+      await sleep(500);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      await sleep(300);
+      // One from a client of the stopping node, one through its peer: each
+      // waits for the request in flight, longer than a retry would, and then
+      // runs where the DO went.
+      const [local, peer] = await Promise.all(
+        [0, 1].map((i) =>
+          fetchJson(nodes[i].httpPort, '/increment?name=waited', {
+            timeoutMs: 20_000,
+          })
+        )
+      );
+      const first = await held;
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.deepStrictEqual(
+        [first.body.nodeId, first.body.count],
+        [nodes[0].nodeId, 2]
+      );
+      for (const response of [local, peer]) {
+        assert.strictEqual(response.status, 200, JSON.stringify(response.body));
+        assert.strictEqual(response.body.nodeId, nodes[1].nodeId);
+      }
+      assert.deepStrictEqual(
+        [local.body.count, peer.body.count].sort(),
+        [3, 4]
+      );
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+    });
+  }
+);
+
 test(
   'cluster: a stopping node hands off a DO it evicted before',
   SIGTERM_DRAINS,
@@ -1585,6 +1737,49 @@ test(
       assert.strictEqual(response.body.count, 2);
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
+  }
+);
+
+test(
+  'cluster: a DO whose handoff outlasts its deadline moves once its stopping node left',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(
+      2,
+      async ({ nodes, bucket }) => {
+        const first = await fetchJson(
+          nodes[0].httpPort,
+          '/increment?name=stuck'
+        );
+        assert.strictEqual(first.body.nodeId, nodes[0].nodeId);
+        // The write that releases the DO stalls past the handoff's 4.5 s.
+        await bucket.setFaults([
+          {
+            method: 'PUT',
+            prefix: `${objectPrefix(first.body.id)}/own.json`,
+            delayMs: 10_000,
+            times: 1,
+          },
+        ]);
+        const stoppedAt = Date.now();
+        const exit = await nodes[0].stop({
+          signal: 'SIGTERM',
+          timeoutMs: 20_000,
+        });
+        assert.deepStrictEqual(exit, { code: 0, signal: null });
+        assert(Date.now() - stoppedAt < 7_500, 'the drain took too long');
+        assert.deepStrictEqual(await bucket.faultHits(), [1]);
+        const after = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=stuck',
+          { timeoutMs: 20_000 }
+        );
+        assert.strictEqual(after.status, 200, JSON.stringify(after.body));
+        assert.strictEqual(after.body.nodeId, nodes[1].nodeId);
+        assert.strictEqual(after.body.count, 2);
+      },
+      { configName: 'shortStop' }
+    );
   }
 );
 

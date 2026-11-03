@@ -26,6 +26,7 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::time::Duration;
 
+use cluster_logic::handoff::Heat;
 use futures::FutureExt;
 use futures::future::Either;
 use futures::future::LocalBoxFuture;
@@ -36,6 +37,8 @@ use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 use kj_rs::KjRc;
 use tokio::sync::Notify;
+use tokio::sync::watch;
+use tokio::time::Instant;
 use worker::Interface;
 use worker::PromisedInterface;
 
@@ -59,6 +62,7 @@ use crate::channels::WorkerInterface;
 use crate::channels::attach;
 use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
+use crate::cluster::Deadlines;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
 use crate::cluster::ResultTask;
@@ -79,6 +83,11 @@ const EVICT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a test eviction waits before re-checking an actor that has no requests but is still
 /// referenced (a request tearing down).
 const EVICT_RETRY_DELAY: Duration = Duration::from_millis(1);
+
+/// How often a handoff checks whether the object's requests ended.
+const HANDOFF_POLL: Duration = Duration::from_millis(10);
+/// How many objects a draining instance releases at once.
+const HANDOFFS_AT_ONCE: usize = 32;
 
 const EVICT_TIMEOUT_MESSAGE: &str =
     "jsg.Error: Timed out waiting to evict Durable Object: it still has active references.";
@@ -271,7 +280,7 @@ impl ActorNamespace {
                 if let Some(container) = self.owned_container(&key) {
                     return Ok(Resolved::Here(Client(container)));
                 }
-                // A container added once `release_all` ran would never be released.
+                // A container added once the handoff began might never be handed off.
                 if cluster.cluster.is_draining() {
                     return Err(moved(&format!("{key}: this node is draining")));
                 }
@@ -463,17 +472,34 @@ impl ActorNamespace {
         }
     }
 
-    /// Lets every actor go as this instance drains, failing nothing in flight. A later request
-    /// that still reaches one here, through a stub or a peer that found it here, started nothing:
-    /// it is answered as `moved`, so that it can follow the actor to its next owner.
+    /// Stops every actor that is left as this instance's handoff ends; peers take them over
+    /// once it left the cluster. Any request still in flight is cancelled, as it could not
+    /// commit once a peer owns the object. A later request that still reaches one here, through
+    /// a stub or a peer that found it here, started nothing: it is answered as `moved`, so that
+    /// it can follow the actor to its next owner.
     pub fn release_all(&self) {
         let actors = std::mem::take(&mut *self.actors.borrow_mut());
         for (key, container) in &actors {
-            // `moved` is only the error of requests that start after this: the actor is shut down
-            // without a reason, so no request in flight fails with it.
             let left = moved(&format!("{key}: this node is draining"));
-            container.abort_then(None, Some(left));
+            container.abort_then(container.cancelled(), Some(left));
         }
+    }
+
+    /// The handoffs of this namespace's objects as this instance drains, each with its heat.
+    /// Each object takes no new request from now on (`RoutedChannel`).
+    fn handoffs(
+        &self,
+        in_flight: Instant,
+        slots: &Rc<tokio::sync::Semaphore>,
+    ) -> Vec<(Heat, LocalBoxFuture<'static, ()>)> {
+        let actors = self.actors.borrow();
+        let handoffs = actors.values().map(|c| {
+            *c.handoff.borrow_mut() = Some(watch::channel(false).0);
+            let ns = Weak::clone(&self.this);
+            let handoff = Rc::clone(c).hand_off(ns, in_flight, Rc::clone(slots));
+            (c.heat.get(), handoff.boxed_local())
+        });
+        handoffs.collect()
     }
 
     /// Aborts every actor and deletes the namespace's storage and alarms.
@@ -635,6 +661,11 @@ impl ActorNamespaceHandle {
         let Some(node) = namespace.cluster().map(Rc::clone) else {
             return namespace.container_for(id).start_request(metadata);
         };
+        // A draining instance starts nothing: the alarm runs where the object goes, once peers
+        // adopt this instance's alarms as it leaves, or the next owner opens the object.
+        if node.cluster.is_draining() {
+            return Ok(ffi::alarm_owned_elsewhere(ffi::AlarmElsewhere::Retry));
+        }
         // Only an object's owner runs its alarm. One that moved since this instance scheduled
         // the alarm has it scheduled where it lives now, since opening an object schedules its
         // alarm, unless the owner died before indexing it: this instance fires it again until
@@ -777,21 +808,42 @@ impl Channel for RoutedChannel {
         let remote = self.remote;
         let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
         Ok(PromisedInterface::new(async move {
-            // A resolution over a session known to be down would fail unsent: resolve again.
-            let live = bound
-                .borrow()
-                .clone()
-                .filter(|resolved| !resolved.is_down());
-            let resolved = if let Some(resolved) = live {
-                resolved
-            } else {
-                let resolved = namespace.resolve(id, remote).await.map_err(not_delivered)?;
-                let resolved = Rc::new(resolved);
-                let mut bound = bound.borrow_mut();
-                match &*bound {
-                    Some(other) if !other.is_down() => Rc::clone(other),
-                    _ => Rc::clone(bound.insert(resolved)),
-                }
+            // A peer's request that waited for a handoff is sent on to where the object went, so
+            // that it does not outlast its caller's retries; it binds nothing, so that the peer's
+            // next request is answered `moved` and finds the object itself (`resolve`).
+            let mut forward = false;
+            let resolved = loop {
+                // A resolution over a session known to be down would fail unsent: resolve again.
+                let live = bound
+                    .borrow()
+                    .clone()
+                    .filter(|resolved| !resolved.is_down());
+                let resolved = if let Some(resolved) = live.filter(|_| !forward) {
+                    resolved
+                } else {
+                    let resolved = namespace.resolve(ffi::actor_id_clone(&id), remote && !forward);
+                    let resolved = Rc::new(resolved.await.map_err(not_delivered)?);
+                    let mut bound = bound.borrow_mut();
+                    match &*bound {
+                        _ if forward => resolved,
+                        Some(other) if !other.is_down() => Rc::clone(other),
+                        _ => Rc::clone(bound.insert(resolved)),
+                    }
+                };
+                let Resolved::Here(container) = &*resolved else {
+                    break resolved;
+                };
+                // An object being handed off takes no new request: it waits for it to be gone.
+                let Some(mut handoff) = container.handoff() else {
+                    let mut heat = container.heat.get();
+                    heat.hit(cluster::now_ms());
+                    container.heat.set(heat);
+                    break resolved;
+                };
+                // Nothing ran: once the object is gone, the request follows it.
+                let _ = handoff.wait_for(|done| *done).await;
+                forget(&bound, &resolved);
+                forward = remote;
             };
             let hook = MovedHook {
                 namespace: Rc::downgrade(&namespace),
@@ -870,6 +922,14 @@ pub struct MovedHook {
     tried: Rc<Resolved>,
 }
 
+/// Clears a channel's resolution if it is still `tried`.
+fn forget(bound: &RefCell<Option<Rc<Resolved>>>, tried: &Rc<Resolved>) {
+    let mut bound = bound.borrow_mut();
+    if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, tried)) {
+        *bound = None;
+    }
+}
+
 impl MovedHook {
     pub fn moved(&self) {
         self.lost();
@@ -883,10 +943,7 @@ impl MovedHook {
 
     /// The connection to the instance was lost.
     pub fn lost(&self) {
-        let mut bound = self.bound.borrow_mut();
-        if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, &self.tried)) {
-            *bound = None;
-        }
+        forget(&self.bound, &self.tried);
     }
 }
 
@@ -944,6 +1001,10 @@ pub struct ActorContainer {
     retirement: RefCell<Option<Shared<RemoteHandle<Result<()>>>>>,
     /// A clustered root's ownership, for as long as the container is in its namespace's map.
     owned: RefCell<Option<Owned>>,
+    /// Set as a clustered root is handed off (`hand_off`), and true once it is gone.
+    handoff: RefCell<Option<watch::Sender<bool>>>,
+    /// How busy a clustered root has been: a draining instance hands off the busiest first.
+    heat: Cell<Heat>,
 }
 
 impl ActorContainer {
@@ -1008,6 +1069,8 @@ impl ActorContainer {
             shutdown_task: RefCell::new(None),
             retirement: RefCell::new(None),
             owned: RefCell::new(None),
+            handoff: RefCell::new(None),
+            heat: Cell::new(Heat::default()),
         }
     }
 }
@@ -1370,13 +1433,13 @@ impl ActorContainer {
             }
         }
         drop(manager);
-        self.release(actor.as_deref());
+        drop(self.release(actor.as_deref()));
         drop(actor);
     }
 
-    /// Closes a clustered actor's database and gives up its ownership, so nothing writes behind
-    /// the next owner.
-    fn release(&self, actor: Option<&KjOwn<ffi::ActorHandle>>) {
+    /// Closes a clustered actor's database and takes its ownership for the caller to give up,
+    /// so nothing writes behind the next owner.
+    fn release(&self, actor: Option<&KjOwn<ffi::ActorHandle>>) -> Option<Owned> {
         if let Some(actor) = actor
             && self
                 .namespace
@@ -1385,7 +1448,7 @@ impl ActorContainer {
         {
             ffi::actor_close_storage(actor);
         }
-        drop(self.owned.borrow_mut().take());
+        self.owned.borrow_mut().take()
     }
 
     /// Aborts the actor and its facets; every request on them fails with `reason`. Without one
@@ -1400,8 +1463,13 @@ impl ActorContainer {
 
     /// `abort`, with `later`, if given, the error of every request after it.
     fn abort_then(&self, reason: Option<crate::Error>, later: Option<crate::Error>) {
+        drop(self.stop(reason, later));
+    }
+
+    /// `abort_then`, which gives the ownership the actor held to the caller.
+    fn stop(&self, reason: Option<crate::Error>, later: Option<crate::Error>) -> Option<Owned> {
         if self.broken_reason.borrow().is_some() {
-            return;
+            return None;
         }
         let actor = self.actor.borrow_mut().take();
         if let Some(actor) = &actor {
@@ -1426,8 +1494,60 @@ impl ActorContainer {
                 .or(reason)
                 .unwrap_or_else(|| kj::failed!("jsg.Error: Actor aborted for unknown reason.")),
         );
-        self.release(actor.as_deref());
+        let owned = self.release(actor.as_deref());
         drop(actor);
+        owned
+    }
+
+    /// Whether this actor or a facet of it has a request in flight.
+    fn tree_active(&self) -> bool {
+        self.active.get() || self.facets.borrow().values().any(|f| f.tree_active())
+    }
+
+    /// Set while the object is handed off; true once it is gone.
+    fn handoff(&self) -> Option<watch::Receiver<bool>> {
+        self.handoff.borrow().as_ref().map(watch::Sender::subscribe)
+    }
+
+    /// The error of a request still in flight as the object stops for its handoff: it has
+    /// reached the object, so it fails as one that may have run, and is not sent again.
+    fn cancelled(&self) -> Option<crate::Error> {
+        self.tree_active().then(|| {
+            kj::disconnected!(
+                "{}: this node is draining, and the request outlasted its handoff",
+                self.key
+            )
+        })
+    }
+
+    /// Hands a clustered root off as this instance drains, once `handoffs` marked it. Its
+    /// requests in flight may finish until `in_flight`, and are cancelled then. The object then
+    /// stops and, with one of the `slots`, its ownership is released to the next claim
+    /// anywhere (`Owned::hand_off`).
+    async fn hand_off(
+        self: Rc<Self>,
+        ns: Weak<ActorNamespace>,
+        in_flight: Instant,
+        slots: Rc<tokio::sync::Semaphore>,
+    ) {
+        // However the handoff ends, the requests waiting for it go on.
+        let _done = HandedOff(&self);
+        while self.tree_active() && Instant::now() < in_flight {
+            tokio::time::sleep(HANDOFF_POLL).await;
+        }
+        let later = moved(&format!("{}: this node is draining", self.key));
+        let owned = self.stop(self.cancelled(), Some(later));
+        if let Some(ns) = ns.upgrade() {
+            ns.remove_container(&self);
+            let Ok(_slot) = slots.acquire().await else {
+                return;
+            };
+            if let Some(owned) = owned
+                && owned.hand_off().await
+            {
+                ns.clear_storage(&self.key);
+            }
+        }
     }
 
     /// Resets the actor's SQLite database while its connection is open, ahead of an abort that
@@ -1627,6 +1747,17 @@ async fn retire_actor(
     result
 }
 
+/// Wakes the requests waiting for a handoff once it ends.
+struct HandedOff<'a>(&'a ActorContainer);
+
+impl Drop for HandedOff<'_> {
+    fn drop(&mut self) {
+        if let Some(done) = &*self.0.handoff.borrow() {
+            done.send_replace(true);
+        }
+    }
+}
+
 /// Watches the actor; when it breaks, the container records the reason and leaves its map. The
 /// task holds no reference to the actor: a cancelled task's future is dropped only at its next
 /// poll, and the actor must close its storage when the container drops it (a deleted facet's
@@ -1666,7 +1797,7 @@ impl Drop for ActorContainer {
         if let Some(actor) = &actor {
             ffi::actor_abort(actor, &AbortReason(None));
         }
-        self.release(actor.as_deref());
+        drop(self.release(actor.as_deref()));
     }
 }
 
@@ -1977,5 +2108,33 @@ impl Channel for ActorChannel {
 
     fn evict_for_test(&self, hibernate: bool) -> LocalBoxFuture<'_, Result<()>> {
         self.container.evict_for_test(hibernate)
+    }
+}
+
+/// Hands off the objects of `namespaces` as this instance drains.
+///
+/// Every object stops once its requests in flight finished, or at the in-flight deadline,
+/// cancelling them. Then a few at a time, the busiest first, are released, until the handoff's
+/// deadline. What is left then is stopped where it is (`ActorNamespace::release_all`), for peers
+/// to take over once this instance left the cluster.
+pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadlines) {
+    let slots = Rc::new(tokio::sync::Semaphore::new(HANDOFFS_AT_ONCE));
+    let mut handoffs: Vec<_> = namespaces
+        .iter()
+        .flat_map(|ns| ns.handoffs(deadlines.in_flight, &slots))
+        .map(Some)
+        .collect();
+    let heats: Vec<Heat> = handoffs.iter().flatten().map(|(heat, _)| *heat).collect();
+    let order = cluster_logic::handoff::busiest_first(&heats, cluster::now_ms());
+    let ordered: Vec<_> = order
+        .into_iter()
+        .filter_map(|i| handoffs[i].take())
+        .map(|(_, handoff)| handoff)
+        .collect();
+    // All at once: what each waits for first is its requests in flight, not a slot.
+    let all = futures::future::join_all(ordered);
+    let _ = tokio::time::timeout_at(deadlines.handoff, all).await;
+    for ns in namespaces {
+        ns.release_all();
     }
 }

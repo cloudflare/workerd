@@ -232,21 +232,32 @@ struct ClusterConfig {
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
 
   stopTimeoutMs @6 :UInt32 = 8000;
-  # How long an instance takes to stop, from SIGTERM to exit. A stopping instance claims no more
-  # Durable Objects, lets those it runs go, and leaves the cluster, for its peers to take them over.
-  # It keeps accepting requests until at least five seconds after SIGTERM (or until the handoff
-  # deadline, if that comes sooner), as load balancers take a while to stop sending them, sending
-  # each to where its object runs now, lets its connections finish, and stops its containers' Docker
-  # containers.
+  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
+  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
+  # while it keeps serving the rest: each object takes no new requests, its requests in flight
+  # finish, and it is released for the next request anywhere to claim. Requests that arrive
+  # meanwhile wait for the object and then go where it runs next. Then the instance leaves the
+  # cluster, keeps accepting requests until at least five seconds after SIGTERM (or until the
+  # handoff deadline, if that comes sooner), as load balancers take a while to stop sending them,
+  # lets its connections finish, and stops its containers' Docker containers.
   #
-  # The time is spent in order: at three quarters of it, the instance stops letting its objects go
-  # and leaves the cluster, giving up on leaving at nine tenths, when it also stops waiting for its
-  # connections, whose requests end as it exits; the rest is for the containers.
+  # The time is spent in order: until half of it, requests in flight on an object being handed off
+  # may finish, and are then cancelled, failing as requests that may have run, which are not sent
+  # again; at three quarters, the handoff ends, and an object not yet released is taken over by a
+  # peer once the instance has left; at nine tenths, the instance stops waiting for its connections,
+  # whose requests end as it exits; the rest is for the containers.
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
   # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
   # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut short.
+  #
+  # A `fetch()` to an object that moves is sent on transparently. A JS RPC call that a peer sent
+  # through a stub to the stopping instance may fail once, as retryable; the stub's next call finds
+  # the object. WebSockets an object here accepted close as it is handed off. An alarm that comes
+  # due on a stopping instance runs where its object goes: when a request claims the object there,
+  # or else once a peer adopts the alarms of the instance that left, within five seconds of its
+  # leaving, so up to one stop and five seconds late.
 }
 
 struct LoggingOptions {
