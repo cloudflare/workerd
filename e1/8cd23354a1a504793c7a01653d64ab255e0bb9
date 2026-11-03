@@ -1,0 +1,34 @@
+src/workerd/util/storage-telemetry-test.c++
+  s_2dfe3889216c4d::t_af9bb98b61465f 72
+  s_e2c48765393779::t_a5054394c7294f 41,53,70,114,122,160-183
+src/workerd/server/server.c++
+  s_e2c48765393779::t_1eb1e45f16a775 237,241,1421-1423
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.js
+  s_e2c48765393779::t_309e327a446cd8 10,57-58,134,136,315-335
+src/workerd/server/tests/virtual-time/virtual-time-storage-test.wd-test
+  s_e2c48765393779::t_c16bd53f764ebd 15-18,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e18cd23354a1a504793c7a01653d64ab255e0bb9",
+  "prompts": {},
+  "sessions": {
+    "s_2dfe3889216c4d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0ecb8-bdfb-706a-b701-bd5fdc9b167f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    },
+    "s_e2c48765393779": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0f896-3960-708a-9649-5bdcbe58e9cc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

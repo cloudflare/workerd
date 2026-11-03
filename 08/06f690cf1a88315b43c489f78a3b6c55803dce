@@ -1,0 +1,19 @@
+MODULE.bazel.lock
+  s_7806464098a098::t_11ecbc0b5aec00 406,892-893,895
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0806f690cf1a88315b43c489f78a3b6c55803dce",
+  "prompts": {},
+  "sessions": {
+    "s_7806464098a098": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e635a6272ffesZONmQr8olWBas",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "William Perron <wperron@cloudflare.com>"
+    }
+  }
+}
