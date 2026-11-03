@@ -10,6 +10,7 @@
 #include "setup.h"
 
 #include "libplatform/libplatform.h"
+#include "modules-new.h"
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
@@ -607,10 +608,14 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
 }
 
 void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle) {
-  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
   auto& artifact = mutableSnapshotArtifact();
   v8::HandleScope scope(ptr);
   auto context = contextHandle.Get(ptr);
+  if (usingNewModuleRegistry) {
+    artifact.newModuleRegistryRecords =
+        modules::recordIsolateModuleRegistryForSnapshot(context, *getSnapshotCreator());
+    return;
+  }
   auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
       context, ContextPointerSlot::MODULE_REGISTRY));
   moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
