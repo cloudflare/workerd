@@ -10,6 +10,8 @@
 //!
 //! - `nodes/<node>.json`: one per running instance, with its address and a
 //!   lease expiry the instance renews. A peer is live while its lease is.
+//!   It also names the deployment catalog revision the instance serves
+//!   (`rollout.rs`).
 //! - `do/<namespace>/<actor>/own.json`: one per Durable Object, naming its
 //!   owner and an ownership epoch. A claim is a conditional write; taking an
 //!   object over from an owner whose lease expired bumps the epoch.
@@ -53,6 +55,7 @@ mod log_tests;
 mod owner;
 mod ownership;
 mod registry;
+pub mod rollout;
 pub mod s3;
 
 pub use alarms::Adopted;

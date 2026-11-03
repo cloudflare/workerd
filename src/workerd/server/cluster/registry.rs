@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -26,6 +27,16 @@ pub struct NodeRecord {
     /// The process that wrote it.
     #[serde(default)]
     pub instance: u64,
+    /// The deployment catalog revision the instance serves, 0 for none;
+    /// absent until it serves (`rollout.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    /// The latest catalog revision the instance refused to restart on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<u64>,
+    /// The catalog revision the instance failed to start on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<u64>,
 }
 
 /// This instance's membership: it publishes its own record and reads its
@@ -45,6 +56,12 @@ pub struct Registry {
     listed: RefCell<HashMap<String, NodeRecord>>,
     /// Dead peers whose records remain, as of the last listing.
     dead: RefCell<Vec<String>>,
+    /// When the last listing began.
+    listed_ms: Cell<Option<u64>>,
+    /// What the record says about deployments (`serve`, `refuse`, `fail`).
+    revision: Cell<Option<u64>>,
+    refused: Cell<Option<u64>>,
+    failed: Cell<Option<u64>>,
 }
 
 fn node_key(node: &str) -> String {
@@ -65,7 +82,29 @@ impl Registry {
             ),
             listed: RefCell::new(HashMap::new()),
             dead: RefCell::new(Vec::new()),
+            listed_ms: Cell::new(None),
+            revision: Cell::new(None),
+            refused: Cell::new(None),
+            failed: Cell::new(None),
         }
+    }
+
+    /// From the next renewal, the record says this instance serves catalog
+    /// revision `revision`.
+    pub fn serve(&self, revision: u64) {
+        self.revision.set(Some(revision));
+    }
+
+    /// From the next renewal, the record says this instance refused catalog
+    /// revision `revision`.
+    pub fn refuse(&self, revision: u64) {
+        self.refused.set(Some(revision));
+    }
+
+    /// From the next renewal, the record says this instance failed to start
+    /// on catalog revision `revision`.
+    pub fn fail(&self, revision: u64) {
+        self.failed.set(Some(revision));
     }
 
     pub fn node(&self) -> &str {
@@ -92,6 +131,9 @@ impl Registry {
             address: self.address.clone(),
             expires_ms: now_ms + self.ttl_ms,
             instance: self.instance,
+            revision: self.revision.get(),
+            refused: self.refused.get(),
+            failed: self.failed.get(),
         };
         let key = node_key(&self.node);
         let body = serde_json::to_vec(&record)?;
@@ -132,6 +174,9 @@ impl Registry {
             address: self.address.clone(),
             expires_ms: 0,
             instance: self.instance,
+            revision: None,
+            refused: None,
+            failed: None,
         };
         let body = serde_json::to_vec(&record)?;
         let key = node_key(&self.node);
@@ -211,12 +256,21 @@ impl Registry {
             peers.extend(record?);
         }
         *self.listed.borrow_mut() = peers.iter().map(|p| (p.node.clone(), p.clone())).collect();
+        self.listed_ms.set(Some(now_ms));
         *self.dead.borrow_mut() = nodes
             .into_iter()
             .filter(|n| !self.listed.borrow().contains_key(*n))
             .map(str::to_owned)
             .collect();
         Ok(peers)
+    }
+
+    /// The live nodes' records, this one's included, as of the last listing,
+    /// and when it began.
+    pub fn listing(&self, now_ms: u64) -> (Option<u64>, Vec<NodeRecord>) {
+        let listed = self.listed.borrow();
+        let live = listed.values().filter(|r| r.expires_ms > now_ms);
+        (self.listed_ms.get(), live.cloned().collect())
     }
 
     /// The live nodes, this one included, as of the last listing.
@@ -265,6 +319,9 @@ mod tests {
                 address: "a:1".into(),
                 expires_ms: 11_000,
                 instance: a.instance,
+                revision: None,
+                refused: None,
+                failed: None,
             };
             let body = serde_json::to_vec(&landed).unwrap();
             bucket.put(&node_key("a"), body, &[]).await.unwrap();
@@ -336,6 +393,9 @@ mod tests {
                     address: "a:1".into(),
                     expires_ms,
                     instance: a.instance,
+                    revision: None,
+                    refused: None,
+                    failed: None,
                 };
                 serde_json::to_vec(&record).unwrap()
             };

@@ -22,12 +22,15 @@
 //!   absent, `If-Match` after), so a deploy publishes all of its services or none, and a deploy
 //!   checked against one catalog cannot replace another. `revision` goes up by one each time.
 //!   A deploy keeps the fields of the catalog and of its entries that it does not know.
+//! - `deploy/roll.json`: the nodes' turns at restarting on a new revision, which they write
+//!   (`rollout.rs`).
 //!
 //! A name is 1 to 64 ASCII letters, digits, `-` and `_`, starting with a letter or digit. A
 //! version's objects are never rewritten or removed when the catalog moves on, so a rollback is
 //! a deploy of an earlier version, or, by hand, an edit of `catalog.json` that names it and
-//! raises `revision`. A node refuses a catalog or a manifest whose format it does not read, and
-//! reads the catalog and the deployments it names once, at startup.
+//! raises `revision`. A node refuses a catalog or a manifest whose format it does not read. It
+//! reads the catalog and the deployments it names at startup, and adopts a later revision by
+//! restarting (`rollout.rs`).
 //!
 //! A deployment runs with the authority of each node's config: its services reach the node's
 //! network, environment variables, container engine and named services. Whoever may write
