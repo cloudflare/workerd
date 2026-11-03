@@ -422,6 +422,18 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // to preserve encoding passthrough over RPC transfer.
   StreamEncoding getPreferredEncoding();
 
+  // Releases the underlying source for a C++-driven pump or body collection. Any bytes
+  // already consumed from the source but never delivered (the stash -- only reachable when a
+  // tee-seeded branch is extracted before being read) are folded in ahead of it as a prefix,
+  // so the returned source produces exactly the stream's remaining content. Called by
+  // JsReadableStream::pumpTo()'s TypeScript arm, WritableStreamNativeSink::pipeFrom() and the
+  // TypeScript arm's body consumption after the TypeScript side (the kExtractNativeSource
+  // extractor, or extractNativeSourceForCollection) has already detached the stream,
+  // validated it unlocked/undisturbed, and returned this object. If the source already
+  // completed (EOF or cancel released it), returns an always-EOF source: extraction of closed
+  // streams is legal per the contract, and the pump simply finishes.
+  kj::Own<ReadableStreamSource> releaseForPump(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ReadableStreamNativeSource) {
     JSG_PRIVATE_SYMBOL(kNativeSource);
     JSG_METHOD(pull);
@@ -471,17 +483,6 @@ class ReadableStreamNativeSource final: public jsg::Object {
       kj::ArrayPtr<const kj::byte> data,
       Eof eof,
       size_t elementSize);
-
-  // Releases the underlying source for a C++-driven pump. Any bytes already consumed from
-  // the source but never delivered (the stash -- only reachable when a tee-seeded branch is
-  // extracted before being read) are folded in ahead of it as a prefix, so the returned
-  // source produces exactly the stream's remaining content. Called by
-  // JsReadableStream::pumpTo()'s TypeScript arm and WritableStreamNativeSink::pipeFrom()
-  // after the TypeScript-side extractor (kExtractNativeSource) has already detached the
-  // stream, validated it unlocked/undisturbed, and returned this object. If the source
-  // already completed (EOF or cancel released it), returns an always-EOF source: extraction
-  // of closed streams is legal per the contract, and the pump simply finishes.
-  kj::Own<ReadableStreamSource> releaseForPump(jsg::Lock& js);
 
   // Ensure the scratch buffer can hold at least `capacity` bytes. Only called at the start
   // of a pull, when the scratch buffer holds no live data, so growing may discard previous

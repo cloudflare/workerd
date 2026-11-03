@@ -132,6 +132,7 @@ const {
   slotPromise,
   slotResolved,
   slotRejected,
+  kInternalReleaseError,
   requireObject,
   toDictionary,
   convertQueuingStrategy,
@@ -242,7 +243,12 @@ let detachReadableStream: <R>(
   stream: ReadableStream<R>,
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
-let readableStreamReaderGenericRelease: (reader: object) => void;
+// `releaseError` defaults to a new TypeError, as the spec's; an internal
+// reader passes kInternalReleaseError.
+let readableStreamReaderGenericRelease: (
+  reader: object,
+  releaseError?: TypeError
+) => void;
 
 // Closes a stream whose data has moved to another stream (extraction, and
 // the tee or detach of a native stream, or of a queued one other than its
@@ -391,9 +397,16 @@ let controllerError: (
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
 
 // BACKEND-DISPATCH point #4: the shared extractor function installed
-// in native-backed streams' kExtractNativeSource private slots. Assigned in
-// ReadableStream's static block (needs private-field access).
+// in native-backed streams' kExtractNativeSource private slots, and the
+// extraction it runs, which body consumption also uses
+// (extractNativeSourceForCollection). Assigned in ReadableStream's static
+// block (needs private-field access).
 let extractNativeSource: <R>(this: ReadableStream<R>) => object;
+let extractReadableStreamNativeSource: <R>(stream: ReadableStream<R>) => object;
+// Takes over a stream's onEof subscription (see getReadableStreamOnEof).
+let takeReadableStreamOnEof: <R>(
+  stream: ReadableStream<R>
+) => (() => void) | undefined;
 
 // The non-standard expectedLength pass-through behind
 // getReadableStreamExpectedLength. Chained like the other controller
@@ -488,7 +501,7 @@ function iteratorNextSteps(s: IteratorInternalState) {
       s.current = undefined;
       if (result.done) {
         s.done = true;
-        readableStreamReaderGenericRelease(s.reader);
+        readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
         promise.resolve(userReadResult(undefined, true));
       } else {
         promise.resolve(userReadResult(result.value, false));
@@ -497,7 +510,7 @@ function iteratorNextSteps(s: IteratorInternalState) {
     (e: unknown) => {
       s.current = undefined;
       s.done = true;
-      readableStreamReaderGenericRelease(s.reader);
+      readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
       promise.reject(e);
     }
   );
@@ -524,11 +537,11 @@ function iteratorReturnSteps(
 
   if (!s.preventCancel) {
     const result = cancelReadableStreamGenericReader(s.reader, value);
-    readableStreamReaderGenericRelease(s.reader);
+    readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
     return result as Promise<undefined>;
   }
 
-  readableStreamReaderGenericRelease(s.reader);
+  readableStreamReaderGenericRelease(s.reader, kInternalReleaseError);
   return PromiseResolve(undefined);
 }
 
@@ -659,11 +672,13 @@ class ReadableStreamReaderBase<R> {
       return readableStreamCancel(stream, reason);
     };
 
-    readableStreamReaderGenericRelease = (reader: object) => {
+    readableStreamReaderGenericRelease = (
+      reader: object,
+      releaseError = new TypeError('This reader has been released')
+    ) => {
       const base = getReaderBase(reader);
       const stream = base.#stream;
       if (stream === undefined) return;
-      const releaseError = new TypeError('This reader has been released');
       // Per spec: on a readable stream the pending closedPromise is
       // rejected; otherwise it is replaced with a fresh rejected promise.
       // The slot is pending exactly while the stream is readable, so
@@ -2844,8 +2859,8 @@ function finishNativePipe<R>(
   writer: WritableStreamDefaultWriterType<R>
 ): Promise<void> {
   const finalize = (): void => {
-    writableInternals.writerRelease(writer);
-    readableStreamReaderGenericRelease(reader);
+    writableInternals.writerRelease(writer, kInternalReleaseError);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
   };
   return PromisePrototypeThen(
     piped,
@@ -2900,7 +2915,7 @@ function pipeToInternal<R>(
   } catch (e) {
     // The catch here is purely defensive. The acquireWriter
     // should not actually throw.
-    readableStreamReaderGenericRelease(reader);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
     throw e;
   }
   setReadableStreamDisturbed(source);
@@ -2913,8 +2928,8 @@ function pipeToInternal<R>(
 
   const finalize = (error?: { reason: unknown }): void => {
     writableInternals.setReadyHook(destination, undefined);
-    writableInternals.writerRelease(writer);
-    readableStreamReaderGenericRelease(reader);
+    writableInternals.writerRelease(writer, kInternalReleaseError);
+    readableStreamReaderGenericRelease(reader, kInternalReleaseError);
     abortRegistration?.remove();
     if (error !== undefined) {
       reject(error.reason);
@@ -3712,6 +3727,12 @@ class ReadableStream<R> {
       return stream.#pendingClosure;
     };
 
+    takeReadableStreamOnEof = <R>(stream: ReadableStream<R>) => {
+      const resolve = stream.#onEofResolver;
+      stream.#onEofResolver = undefined;
+      return resolve;
+    };
+
     getReadableStreamOnEof = <R>(stream: ReadableStream<R>) => {
       // The EOF signal for the sockets API (allowHalfOpen: false teardown):
       // resolves when a native source's EOF is observed through the conduit
@@ -4335,27 +4356,32 @@ class ReadableStream<R> {
     // without executing JS and calls the function
     // to extract the native underlying source; absent means "queued,
     // use DrainingReader". One-shot: subsequent calls throw.
-    extractNativeSource = function <R>(this: ReadableStream<R>): object {
-      assertIsReadableStream(this);
-      if (isReadableStreamLocked(this)) {
+    extractReadableStreamNativeSource = <R>(
+      stream: ReadableStream<R>
+    ): object => {
+      assertIsReadableStream(stream);
+      if (isReadableStreamLocked(stream)) {
         throw new TypeError(
           'Cannot extract a native source from a locked stream'
         );
       }
-      if (this.#disturbed) {
+      if (stream.#disturbed) {
         throw new TypeError(
           'Cannot extract a native source from a disturbed stream'
         );
       }
-      const controller = this.#controller;
+      const controller = stream.#controller;
       if (!isNativeController(controller)) {
         throw new TypeError('This stream is not backed by a native source');
       }
       // Atomic: validate -> extract -> lock+disturb+close. No TOCTOU gap.
       const source = nativeControllerExtractSource(controller);
-      markHandedOff(this);
-      closeReadableStreamHusk(this);
+      markHandedOff(stream);
+      closeReadableStreamHusk(stream);
       return source;
+    };
+    extractNativeSource = function <R>(this: ReadableStream<R>): object {
+      return extractReadableStreamNativeSource(this);
     };
   }
 
@@ -4871,6 +4897,64 @@ class ConsumedBytes {
 }
 nullPrototypeRecord(ConsumedBytes);
 
+// A native-backed body that the C++ bridge is about to consume, handed
+// over for the bridge to collect from its native source directly
+// (collectNativeSource in js-readable-stream.c++): the JS collector would
+// pass that source's bytes through unchanged, one pull at a time. Only a
+// stream collectChunks() would read straight from its source qualifies:
+// native-backed, readable, unlocked, undisturbed, not pending closure, with
+// any declared expectedLength within the limit. Anything else, undefined,
+// is left to consumeReadableStreamAsArrayBufferRecord, which reports it.
+// The stream is handed off like any extracted stream (see HANDED-OFF
+// STREAMS in webstreams/AGENTS.md). `bound` and `declared` are the bound
+// the JavaScript path enforces: the declared expectedLength, an exact
+// total that the native conduit holds the source to, or else the limit,
+// capped as collectChunks() caps it. `onEof` is the stream's onEof
+// subscription, if any, for the bridge to resolve at the source's EOF, as
+// the conduit would have.
+class NativeCollection {
+  declare source: object;
+  declare bound: number;
+  declare declared: boolean;
+  declare onEof: (() => void) | undefined;
+  constructor(
+    source: object,
+    bound: number,
+    declared: boolean,
+    onEof: (() => void) | undefined
+  ) {
+    this.source = source;
+    this.bound = bound;
+    this.declared = declared;
+    this.onEof = onEof;
+  }
+}
+nullPrototypeRecord(NativeCollection);
+
+function extractNativeSourceForCollection<R>(
+  stream: ReadableStream<R>,
+  limit: bigint
+): NativeCollection | undefined {
+  if (
+    getReadableStreamNativeSource(stream) === undefined ||
+    getReadableStreamGetState(stream) !== 'readable' ||
+    isReadableStreamUnusable(stream) ||
+    isReadableStreamPendingClosure(stream)
+  ) {
+    return undefined;
+  }
+  if (limit > kMaximumAllowedLimit) limit = kMaximumAllowedLimit;
+  const declared = getReadableStreamExpectedLength(stream);
+  if (declared !== undefined && declared > limit) return undefined;
+  const onEof = takeReadableStreamOnEof(stream);
+  return new NativeCollection(
+    extractReadableStreamNativeSource(stream),
+    Number(declared !== undefined ? declared : limit),
+    declared !== undefined,
+    onEof
+  );
+}
+
 async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
@@ -4990,6 +5074,7 @@ const cppExports = ObjectFreeze({
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
   consumeReadableStreamAsArrayBufferRecord,
+  extractNativeSourceForCollection,
   detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamNativeSource,

@@ -280,7 +280,9 @@ let writerWriteInternal: <W>(
 ) => Promise<void>;
 let writerCloseInternal: WriterOp<[], Promise<void>>;
 let writerAbortInternal: WriterOp<[reason: unknown], Promise<void>>;
-let writerReleaseInternal: WriterOp<[], void>;
+// `releaseError` defaults to releasedWriterError(); a pipe's writer
+// passes kInternalReleaseError.
+let writerReleaseInternal: WriterOp<[releaseError?: TypeError], void>;
 let getWriterReadyPromiseInternal: WriterOp<[], Promise<void>>;
 let getWriterClosedPromiseInternal: WriterOp<[], Promise<void>>;
 
@@ -1416,10 +1418,12 @@ class WritableStreamDefaultWriter<
       return writableStreamCloseInternal(stream);
     };
 
-    writerReleaseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
+    writerReleaseInternal = <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      releaseError = releasedWriterError()
+    ) => {
       const stream = writer.#stream;
       if (stream === undefined) return;
-      const releaseError = releasedWriterError();
       writerEnsureReadyPromiseRejected(writer, releaseError);
       writerEnsureClosedPromiseRejected(writer, releaseError);
       setWritableStreamWriter(stream, undefined);
@@ -1791,8 +1795,10 @@ module.exports = {
     writerWrite: <W>(writer: WritableStreamDefaultWriter<W>, chunk: W) =>
       writerWriteInternal(writer, chunk),
     writerCloseWithErrorPropagation,
-    writerRelease: <W>(writer: WritableStreamDefaultWriter<W>) =>
-      writerReleaseInternal(writer),
+    writerRelease: <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      releaseError?: TypeError
+    ) => writerReleaseInternal(writer, releaseError),
     // The writer holding the stream's lock, if any.
     getWriter: <W>(stream: WritableStream<W>) =>
       getWritableStreamWriter(stream),

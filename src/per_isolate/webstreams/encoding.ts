@@ -1,8 +1,10 @@
 'use strict';
 
 // TextEncoderStream and TextDecoderStream — WHATWG Encoding Standard
-// stream wrappers, implemented purely in JS/TS over the captured
-// TextEncoder/TextDecoder primitives. These are standard category-3
+// stream wrappers, implemented purely in JS/TS over the C++ codecs: the
+// captured TextDecoder, and utils.encodeUtf8, which encodes non-Latin-1
+// text with simdutf as the C++ TextEncoderStream does (TextEncoder.encode()
+// does only under an autogate). These are standard category-3
 // transforms (not elidable, not native-backed): the codec work
 // dominates, and the readable side yields values (strings for TDS,
 // Uint8Array for TES), not bytes — so they deliberately do NOT use
@@ -25,17 +27,16 @@ const {
   SymbolToStringTag,
   TextDecoderEncodingGet,
   TextDecoder,
-  TextEncoder,
   TextDecoderFatalGet,
   TextDecoderIgnoreBOMGet,
-  TextEncoderEncode,
   TextDecoderDecode,
   TypeError,
   getProtoGetter,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
+const { encodeUtf8, isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } =
+  utils;
 
 const {
   TransformStream,
@@ -94,7 +95,6 @@ class TextEncoderStream {
 
   constructor() {
     const self = this;
-    const encoder = new TextEncoder();
     const transform = (chunk: unknown, controller: object): void => {
       // Spec: "encode and enqueue a chunk" ToString-coerces the input.
       // Template literal = ToString exactly: user toString honored for
@@ -114,27 +114,18 @@ class TextEncoderStream {
         ) as string;
         const prefix = StringPrototypeSlice(text, 0, len - 1) as string;
         if (prefix.length > 0) {
-          transformControllerEnqueue(
-            controller,
-            TextEncoderEncode(encoder, prefix)
-          );
+          transformControllerEnqueue(controller, encodeUtf8(prefix));
         }
       } else {
         self.#pendingHighSurrogate = '';
-        transformControllerEnqueue(
-          controller,
-          TextEncoderEncode(encoder, text)
-        );
+        transformControllerEnqueue(controller, encodeUtf8(text));
       }
     };
     const flush = (controller: object): void => {
       // A pending high surrogate at end-of-stream is replaced with
       // U+FFFD (the replacement character).
       if (self.#pendingHighSurrogate !== '') {
-        transformControllerEnqueue(
-          controller,
-          TextEncoderEncode(encoder, '\uFFFD')
-        );
+        transformControllerEnqueue(controller, encodeUtf8('\uFFFD'));
         self.#pendingHighSurrogate = '';
       }
     };
