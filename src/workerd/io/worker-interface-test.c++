@@ -106,7 +106,8 @@ struct RevocableFixture {
 
   kj::Promise<void> makeRevokeProm() {
     ++revokePromisesMade;
-    return killed.addWaiter().then([]() -> kj::Promise<void> { return KJ_EXCEPTION(FAILED, "revoked"); });
+    return killed.addWaiter().then(
+        []() -> kj::Promise<void> { return KJ_EXCEPTION(FAILED, "revoked"); });
   }
 
   kj::Own<WorkerInterface> makeLazy() {
