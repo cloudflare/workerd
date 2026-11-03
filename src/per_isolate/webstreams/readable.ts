@@ -1590,8 +1590,15 @@ class QueuedControllerCore<T, R> {
     const reasons = this.#departedReasons;
     ArrayPrototypePush(reasons, reason);
     if (isLastConsumer) {
+      // The composite reason is built only for a cancel algorithm to
+      // receive: no other code can observe it, and an AggregateError's
+      // stack trace is costly.
+      const composite =
+        reasons.length > 1 &&
+        this.#cancelAlgorithm !== undefined &&
+        this.#cancelPromise === undefined;
       return this.cancelSteps(
-        reasons.length > 1 ? makeCompositeCancelReason(reasons) : reason
+        composite ? makeCompositeCancelReason(reasons) : reason
       );
     }
     this.#pendingCancel ??=
