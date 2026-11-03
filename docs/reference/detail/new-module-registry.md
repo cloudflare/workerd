@@ -46,8 +46,9 @@ The new module registry was designed to address several limitations of the legac
    isolate imports the same module, the cached bytecode is consumed, skipping
    recompilation. If the embedder gives isolates a code cache store
    (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle, builtin and fallback
-   modules use the store instead, which both registries share. Embedded builtin
-   caches take precedence over runtime caches; see
+   modules use the store when a cache key is available. Both registries share
+   the store. Embedded builtin bytecode takes precedence. Otherwise, compilation
+   uses the per-module slot if the store or cache key is unavailable; see
    [Code cache store](#code-cache-store). Modules compiled with `PRODUCE_COMPILE_HINTS`
    bypass both caches; see [Compile hint production](#compile-hint-production).
 
