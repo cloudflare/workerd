@@ -273,6 +273,12 @@ struct TestFixture {
   void setHeapLimitExcessivelyExceeded(bool value) {
     heapLimitFlag->excessivelyExceeded.store(value, std::memory_order_relaxed);
   }
+  // Simulate a limit such as CPU time being exceeded: from now on, the limit enforcer of every
+  // IoContext reports `outcome` and fails requireLimitsNotExceeded(). Terminating execution, as
+  // the real enforcer does, is up to the test.
+  void setLimitsExceeded(EventOutcome outcome) {
+    limitsExceeded = outcome;
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -337,6 +343,7 @@ struct TestFixture {
       waitUntilTaskTrackerFactory;
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
+  kj::Maybe<EventOutcome> limitsExceeded;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

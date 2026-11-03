@@ -527,6 +527,290 @@ KJ_TEST("an await_io_and_run() future that panics fails the task, and its callba
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+// How the promise of the last await_promise() or await_value() has settled. It is read in a
+// request of its own: the one that awaited may have nothing left to wait for, and be aborted.
+kj::String awaitedOutcome(TestFixture& fixture) {
+  kj::String outcome;
+  auto reader = fixture.newIncomingRequest();
+  fixture.enterContext(*reader, [&](const TestFixture::Environment& env) {
+    outcome = kj::str(awaited_promise_outcome(isolateOf(env)));
+  });
+  fixture.drainAndDestroy(kj::mv(reader));
+  return outcome;
+}
+
+// The value of `source`, a script, run in the current request.
+v8::Local<v8::Value> runScript(const TestFixture::Environment& env, kj::StringPtr source) {
+  auto v8Context = env.isolate->GetCurrentContext();
+  auto script =
+      jsg::check(v8::Script::Compile(v8Context, v8::Local<v8::String>(env.js.str(source))));
+  return jsg::check(script->Run(v8Context));
+}
+
+// The value of `source`, a script, run in a request of its own, as a string.
+kj::String evaluate(TestFixture& fixture, kj::StringPtr source) {
+  kj::String value;
+  auto reader = fixture.newIncomingRequest();
+  fixture.enterContext(*reader, [&](const TestFixture::Environment& env) {
+    value = env.js.toString(jsg::JsValue(runScript(env, source)));
+  });
+  fixture.drainAndDestroy(kj::mv(reader));
+  return value;
+}
+
+KJ_TEST("await_io() resolves its promise with what the callback returns") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Value);
+  });
+  fixture.pollEventLoop();
+  KJ_EXPECT(awaitedOutcome(fixture) == "pending");
+  release_await(42);
+  fixture.pollEventLoop();
+  KJ_EXPECT(await_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(awaitedOutcome(fixture) == "fulfilled: 42");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_io() follows a promise that the callback returns") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Promise);
+  });
+  release_await(42);
+  fixture.pollEventLoop();
+  KJ_EXPECT(awaitedOutcome(fixture) == "fulfilled: 43");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_io() reads the then of the callback's value once, as C++ awaitIo() does") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto returnsThenable = runScript(env,
+        "(function () {"
+        "  let reads = 0;"
+        "  return {"
+        "    get then() { if (reads++) throw new TypeError('then read twice'); },"
+        "    valueOf() { return 7; },"
+        "  };"
+        "})");
+    keep_js_function(
+        isolateOf(env), ::workerd::rust::jsg::to_ffi(returnsThenable.As<v8::Function>()).ptr);
+    await_promise(isolateOf(env), PromiseEnding::CallJs);
+  });
+  release_await(42);
+  fixture.pollEventLoop();
+  auto outcome = awaitedOutcome(fixture);
+  KJ_EXPECT(outcome == "fulfilled: 7", outcome);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_io() rejects its promise with the error the callback returns") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Fail);
+  });
+  release_await(42);
+  fixture.pollEventLoop();
+  auto outcome = awaitedOutcome(fixture);
+  KJ_EXPECT(outcome == "rejected: TypeError: the callback failed", outcome);
+  // The rejection is the promise's, not the task's.
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::OK);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_io() creates the error the callback returns in a reaction, with an async stack") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Fail);
+    v8::Local<v8::Value> promise = ::workerd::rust::jsg::local_from_ffi<v8::Promise>(
+        ::workerd::rust::jsg::Local{awaited_promise(isolateOf(env))});
+    auto awaiter = runScript(env,
+        "(async function awaiter(promise) {"
+        "  try { await promise; } catch (e) { globalThis.awaitedStack = e.stack; }"
+        "})")
+                       .As<v8::Function>();
+    jsg::check(
+        awaiter->Call(env.isolate->GetCurrentContext(), v8::Undefined(env.isolate), 1, &promise));
+  });
+  release_await(42);
+  fixture.pollEventLoop();
+  auto stack = evaluate(fixture, "globalThis.awaitedStack");
+  KJ_EXPECT(stack.startsWith("TypeError: the callback failed"), stack);
+  KJ_EXPECT(stack.contains("at async awaiter"), stack);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("await_io() rejects its promise with what JavaScript threw in the callback") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Throw);
+  });
+  release_await(42);
+  fixture.pollEventLoop();
+  auto outcome = awaitedOutcome(fixture);
+  KJ_EXPECT(outcome == "rejected: RangeError: thrown by JavaScript", outcome);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a panic in the await_io() future rejects its promise, and execution continues") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::PanicInFuture);
+  });
+  release_await(42);
+  {
+    KJ_EXPECT_LOG(ERROR, "the future that IoContext::await_io() waited for panicked");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(await_observation() == AwaitObservation::Dropped);
+  KJ_EXPECT(awaited_future_dropped());
+  auto outcome = awaitedOutcome(fixture);
+  KJ_EXPECT(outcome.startsWith("rejected: Error: internal error; reference = "), outcome);
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::OK);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a panic in the await_io() callback terminates execution and settles nothing") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::PanicInCallback);
+  });
+  release_await(42);
+  {
+    KJ_EXPECT_LOG(ERROR, "the callback of IoContext::await_io_and_run() panicked");
+    KJ_EXPECT_LOG(ERROR, "internalMessage = the callback panicked");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(await_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEPTION);
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(awaitedOutcome(fixture) == "pending");
+}
+
+KJ_TEST("termination in the await_io() callback fails the task with the exceeded limit") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    keep_js_function(isolateOf(env),
+        ::workerd::rust::jsg::to_ffi(runScript(env, "(function () {})").As<v8::Function>()).ptr);
+    await_promise(isolateOf(env), PromiseEnding::Terminate);
+  });
+  fixture.setLimitsExceeded(EventOutcome::EXCEEDED_CPU);
+  release_await(42);
+  {
+    KJ_EXPECT_LOG(ERROR, "the test exceeded its limits");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(await_observation() == AwaitObservation::Ran);
+  KJ_EXPECT(context->waitUntilStatus() == EventOutcome::EXCEEDED_CPU);
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(awaitedOutcome(fixture) == "pending");
+}
+
+KJ_TEST("a panic while dropping a completed await_io() future is logged, and the output kept") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::PanicDroppingFuture);
+  });
+  release_await(42);
+  {
+    KJ_EXPECT_LOG(ERROR, "dropping the future that IoContext::await_io() waited for panicked");
+    fixture.pollEventLoop();
+  }
+  KJ_EXPECT(awaited_future_dropped());
+  KJ_EXPECT(awaitedOutcome(fixture) == "fulfilled: 42");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("a panic while dropping a cancelled future is logged") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::PanicDroppingFuture);
+  });
+  fixture.pollEventLoop();
+  {
+    KJ_EXPECT_LOG(ERROR, "dropping a future that the IoContext waited for panicked");
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+  KJ_EXPECT(awaited_future_dropped());
+  KJ_EXPECT(await_observation() == AwaitObservation::Dropped);
+}
+
+KJ_TEST("if the IoContext is destroyed first, the await_io() promise never settles") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Value);
+  });
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(await_observation() == AwaitObservation::Dropped);
+  KJ_EXPECT(awaited_future_dropped());
+
+  KJ_EXPECT(awaitedOutcome(fixture) == "pending");
+}
+
+KJ_TEST("in a Durable Object, an await_io() callback runs after the request that started it ends") {
+  TestFixture fixture({
+    .actorId = Worker::Actor::Id(kj::str("await-io-actor")),
+    .useRealTimers = false,
+  });
+  auto context = fixture.newIoContext();
+  auto first = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*first, [&](const TestFixture::Environment& env) {
+    await_promise(isolateOf(env), PromiseEnding::Value);
+  });
+  // An actor's request drains until a newer one takes over its tasks.
+  auto second = fixture.newIncomingRequest(*context);
+  fixture.drainAndDestroy(kj::mv(first));
+  KJ_EXPECT(await_observation() == AwaitObservation::Pending);
+
+  release_await(42);
+  fixture.pollEventLoop();
+  KJ_EXPECT(await_observation() == AwaitObservation::Ran);
+  fixture.enterContext(*second, [&](const TestFixture::Environment& env) {
+    KJ_EXPECT(kj::str(awaited_promise_outcome(isolateOf(env))) == "fulfilled: 42");
+  });
+  fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("await_io_value() resolves with the future's converted output, or rejects with its error") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { await_value(isolateOf(env), false); });
+  release_await(5);
+  fixture.pollEventLoop();
+  KJ_EXPECT(awaitedOutcome(fixture) == "fulfilled: 5");
+  fixture.drainAndDestroy(kj::mv(request));
+
+  request = fixture.newIncomingRequest();
+  fixture.enterContext(
+      *request, [&](const TestFixture::Environment& env) { await_value(isolateOf(env), true); });
+  release_await(5);
+  fixture.pollEventLoop();
+  auto outcome = awaitedOutcome(fixture);
+  KJ_EXPECT(outcome == "rejected: TypeError: the future failed", outcome);
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 KJ_TEST("add_object() drops the value with the IoContext, unless it was taken") {
   TestFixture fixture;
 
