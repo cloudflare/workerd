@@ -5,8 +5,6 @@
 // Methods take and return typed promises, also in containers, carry Rust values through
 // reactions, chain promises, keep a promise and its resolver in fields, and report errors by
 // rejecting, without `unsafe`.
-use std::cell::RefCell;
-
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -19,8 +17,8 @@ impl jsg::Traced for Carried {}
 
 #[jsg_resource]
 pub struct Waiter {
-    promise: RefCell<Option<jsg::TracedPromise<Carried>>>,
-    resolver: RefCell<Option<jsg::TracedPromiseResolver<Carried>>>,
+    promise: jsg::RefCell<Option<jsg::TracedPromise<Carried>>>,
+    resolver: jsg::RefCell<Option<jsg::TracedPromiseResolver<Carried>>>,
 }
 
 #[jsg_resource]
@@ -28,14 +26,15 @@ impl Waiter {
     #[jsg_method]
     fn start(&self, lock: &mut jsg::Lock<'_>) -> Result<(), jsg::Error> {
         let (promise, resolver) = jsg::Promise::<Carried>::new_with_resolver(lock)?;
-        *self.promise.borrow_mut() = Some(promise.into_traced(lock));
-        *self.resolver.borrow_mut() = Some(resolver.into_traced(lock));
+        *self.promise.borrow_mut(lock) = Some(promise.into_traced(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
         Ok(())
     }
 
     #[jsg_method]
     fn finish(&self, lock: &mut jsg::Lock<'_>, count: u32) -> Result<(), jsg::Error> {
-        if let Some(resolver) = self.resolver.borrow_mut().take() {
+        let resolver = self.resolver.borrow_mut(lock).take();
+        if let Some(resolver) = resolver {
             resolver.as_local(lock).resolve(
                 lock,
                 Carried {
@@ -48,7 +47,7 @@ impl Waiter {
 
     #[jsg_method]
     fn count<'s>(&self, lock: &mut jsg::Lock<'s>) -> Result<jsg::Promise<'s, u32>, jsg::Error> {
-        let promise = self.promise.borrow_mut().take();
+        let promise = self.promise.borrow_mut(lock).take();
         lock.eval_now(|lock| {
             let promise = promise
                 .ok_or_else(|| jsg::Error::new_type_error("not started"))?

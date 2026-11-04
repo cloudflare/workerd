@@ -69,6 +69,7 @@ namespace {
   V(METHOD, "method")                                                                              \
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
+  V(ONHIBERNATE, "onHibernate")                                                                    \
   V(ONSET, "onset")                                                                                \
   V(OUTCOME, "outcome")                                                                            \
   V(PREVIEW, "preview")                                                                            \
@@ -76,6 +77,7 @@ namespace {
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
   V(RCPTTO, "rcptTo")                                                                              \
+  V(REASON, "reason")                                                                              \
   V(RESPONSESTREAMDISCONNECTED, "responseStreamDisconnected")                                      \
   V(RETURN, "return")                                                                              \
   V(SCHEDULED, "scheduled")                                                                        \
@@ -258,6 +260,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache)
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const OnHibernateEventInfo& info, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, ONHIBERNATE_STR));
+  obj.set(js, REASON_STR, cache.get(js, kj::str(info.reason)));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
@@ -417,6 +426,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
     }
     KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, alarm, cache));
+    }
+    KJ_CASE_ONEOF(onHibernate, OnHibernateEventInfo) {
+      obj.set(js, INFO_STR, ToJs(js, onHibernate, cache));
     }
     KJ_CASE_ONEOF(queue, QueueEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, queue, cache));

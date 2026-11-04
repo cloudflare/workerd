@@ -393,6 +393,8 @@ impl jsg::Traced for CallbackOutcome {
     }
 }
 
+impl jsg::HoldsNoGcReferences for CallbackOutcome {}
+
 /// The reaction to the promise that [`IoContext::await_io`] resolves once its callback has
 /// returned: returns the callback's value, or throws its error. Throwing in a reaction gives the
 /// exception an async stack trace, as C++ `throwOrReturnResult()` does.
@@ -469,7 +471,13 @@ impl<T> IoOwned<T> {
 }
 
 /// Holds no JavaScript handles; see [`IoContext::add_object`].
-impl<T> jsg::Traced for IoOwned<T> {}
+impl<T> jsg::Traced for IoOwned<T> {
+    fn holds_gc_references() -> bool {
+        false
+    }
+}
+
+impl<T> jsg::HoldsNoGcReferences for IoOwned<T> {}
 
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);

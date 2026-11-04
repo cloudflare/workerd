@@ -580,6 +580,23 @@ kj::String AlarmEventInfo::toString() const {
   return kj::str("AlarmEventInfo");
 }
 
+OnHibernateEventInfo::OnHibernateEventInfo(Reason reason): reason(reason) {}
+
+OnHibernateEventInfo::OnHibernateEventInfo(rpc::Trace::OnHibernateEventInfo::Reader reader)
+    : reason(reader.getReason()) {}
+
+void OnHibernateEventInfo::copyTo(rpc::Trace::OnHibernateEventInfo::Builder builder) const {
+  builder.setReason(reason);
+}
+
+OnHibernateEventInfo OnHibernateEventInfo::clone() const {
+  return OnHibernateEventInfo(reason);
+}
+
+kj::String OnHibernateEventInfo::toString() const {
+  return kj::str("OnHibernateEventInfo");
+}
+
 QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
     : queueName(kj::mv(queueName)),
       batchSize(batchSize) {}
@@ -1102,6 +1119,9 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
         auto alarmBuilder = eventInfoBuilder.initAlarm();
         alarm.copyTo(alarmBuilder);
       }
+      KJ_CASE_ONEOF(onHibernate, tracing::OnHibernateEventInfo) {
+        onHibernate.copyTo(eventInfoBuilder.initOnHibernate());
+      }
       KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
         auto queueBuilder = eventInfoBuilder.initQueue();
         queue.copyTo(queueBuilder);
@@ -1216,6 +1236,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::ALARM:
         eventInfo = tracing::AlarmEventInfo(e.getAlarm());
+        break;
+      case rpc::Trace::EventInfo::Which::ON_HIBERNATE:
+        eventInfo = tracing::OnHibernateEventInfo(e.getOnHibernate());
         break;
       case rpc::Trace::EventInfo::Which::QUEUE:
         eventInfo = tracing::QueueEventInfo(e.getQueue());
@@ -1650,6 +1673,9 @@ Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
     case rpc::Trace::Onset::Info::ALARM: {
       return AlarmEventInfo(info.getAlarm());
     }
+    case rpc::Trace::Onset::Info::ON_HIBERNATE: {
+      return OnHibernateEventInfo(info.getOnHibernate());
+    }
     case rpc::Trace::Onset::Info::QUEUE: {
       return QueueEventInfo(info.getQueue());
     }
@@ -1685,6 +1711,9 @@ void writeOnsetInfo(const Onset::Info& info, rpc::Trace::Onset::Info::Builder& i
     }
     KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       alarm.copyTo(infoBuilder.initAlarm());
+    }
+    KJ_CASE_ONEOF(onHibernate, OnHibernateEventInfo) {
+      onHibernate.copyTo(infoBuilder.initOnHibernate());
     }
     KJ_CASE_ONEOF(queue, QueueEventInfo) {
       queue.copyTo(infoBuilder.initQueue());
@@ -1860,6 +1889,9 @@ EventInfo cloneEventInfo(const EventInfo& info) {
     }
     KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       return alarm.clone();
+    }
+    KJ_CASE_ONEOF(onHibernate, OnHibernateEventInfo) {
+      return onHibernate.clone();
     }
     KJ_CASE_ONEOF(queue, QueueEventInfo) {
       return queue.clone();

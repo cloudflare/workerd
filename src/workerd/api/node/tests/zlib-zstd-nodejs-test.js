@@ -446,3 +446,111 @@ export const zstdStreamLargeDecompressTest = {
     );
   },
 };
+
+function xorshiftBytes(length) {
+  const bytes = Buffer.allocUnsafe(length);
+  let x = length;
+  for (let i = 0; i < length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    bytes[i] = x & 0x7f;
+  }
+  return bytes;
+}
+
+async function zstdCompressStreaming(input, options, writeSize) {
+  const compress = zlib.createZstdCompress(options);
+  const chunks = [];
+  compress.on('data', (chunk) => chunks.push(chunk));
+  const { promise, resolve, reject } = Promise.withResolvers();
+  compress.on('end', resolve);
+  compress.on('error', reject);
+  for (let offset = 0; offset < input.length; offset += writeSize) {
+    compress.write(input.subarray(offset, offset + writeSize));
+  }
+  compress.end();
+  await promise;
+  return Buffer.concat(chunks);
+}
+
+export const zstdStreamFinalFlushOverflowsChunkTest = {
+  async test() {
+    const input = xorshiftBytes(200_000);
+    const compressed = await zstdCompressStreaming(
+      input,
+      { chunkSize: 1024 },
+      64 * 1024
+    );
+    assert(compressed.length > 1024);
+    assert(input.equals(zlib.zstdDecompressSync(compressed)));
+  },
+};
+
+export const zstdStreamFinalFlushCrossesMiBChunkBoundaryTest = {
+  async test() {
+    const input = xorshiftBytes(1_250_000);
+    const compressed = await zstdCompressStreaming(
+      input,
+      {
+        chunkSize: 1 << 20,
+        params: { [zlib.constants.ZSTD_c_compressionLevel]: 1 },
+      },
+      64 * 1024
+    );
+    assert(compressed.length > 1 << 20);
+    assert(input.equals(zlib.zstdDecompressSync(compressed)));
+  },
+};
+
+export const zstdCompressSyncOutputLargerThanFirstBufferTest = {
+  test() {
+    for (const length of [100_000, 2_000_000]) {
+      const input = xorshiftBytes(length);
+      const compressed = zlib.zstdCompressSync(input);
+      assert(compressed.length > 40 * 1024);
+      assert(input.equals(zlib.zstdDecompressSync(compressed)));
+    }
+  },
+};
+
+export const zstdCompressCallbackOutputLargerThanFirstBufferTest = {
+  async test() {
+    for (const length of [100_000, 2_000_000]) {
+      const input = xorshiftBytes(length);
+      const { promise, resolve, reject } = Promise.withResolvers();
+      zlib.zstdCompress(input, (err, res) => {
+        if (err) reject(err);
+        else resolve(res);
+      });
+      const compressed = await promise;
+      assert(compressed.length > 40 * 1024);
+      assert(input.equals(zlib.zstdDecompressSync(compressed)));
+    }
+  },
+};
+
+export const zstdCompressSyncMaxOutputLengthTest = {
+  test() {
+    assert.throws(
+      () =>
+        zlib.zstdCompressSync(xorshiftBytes(200_000), {
+          maxOutputLength: 64 * 1024,
+        }),
+      { name: 'RangeError', message: /Memory limit exceeded/ }
+    );
+  },
+};
+
+export const zstdCompressSyncMaxOutputLengthAtBufferBoundaryTest = {
+  test() {
+    const syncFirstBufferSize = 40 * 1024;
+    assert.throws(
+      () =>
+        zlib.zstdCompressSync(xorshiftBytes(200_000), {
+          maxOutputLength: 2 * syncFirstBufferSize,
+        }),
+      { name: 'RangeError', message: /Memory limit exceeded/ }
+    );
+  },
+};

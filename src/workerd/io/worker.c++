@@ -3960,6 +3960,9 @@ struct Worker::Actor::Impl {
 
   kj::Own<ActorObserver> metrics;
 
+  kj::Rc<NonHibernatableWebSocketCount> nonHibernatableWebSocketCount =
+      kj::rc<NonHibernatableWebSocketCount>();
+
   // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
   // on the first `ensureConstructed()`.
   kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
@@ -4750,6 +4753,10 @@ ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
 }
 
+kj::Rc<NonHibernatableWebSocketCount> Worker::Actor::getNonHibernatableWebSocketCount() {
+  return impl->nonHibernatableWebSocketCount.addRef();
+}
+
 kj::Own<Worker::Actor::WaitUntilTaskHandle> Worker::Actor::addedWaitUntilTask() {
   KJ_IF_SOME(tracker, waitUntilTaskTracker) {
     return tracker->registerTask();
@@ -4868,18 +4875,6 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
 
 namespace {
 
-kj::StringPtr hibernationReasonName(Worker::Actor::HibernationReason reason) {
-  switch (reason) {
-    case Worker::Actor::HibernationReason::INACTIVE:
-      return "inactive"_kj;
-    case Worker::Actor::HibernationReason::CODE_UPDATED:
-      return "codeUpdated"_kj;
-    case Worker::Actor::HibernationReason::SYSTEM:
-      return "system"_kj;
-  }
-  KJ_UNREACHABLE;
-}
-
 // Calls the actor's onHibernate handler and waits for it to settle, up to the handler's budget.
 kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
     IoContext& context,
@@ -4888,7 +4883,7 @@ kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
     Worker::Actor::HibernationReason reason) {
   jsg::Lock& js = lock;
   auto info = js.obj();
-  info.set(js, "reason", js.str(hibernationReasonName(reason)));
+  info.set(js, "reason", js.str(kj::str(reason)));
   info.recursivelyFreeze(js);
 
   // Unlike an alarm timeout, this doesn't abort the IoContext. The caller then cancels whatever
@@ -4958,7 +4953,7 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
+    t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
   }
   // Cross-context actions queued while the actor was idle are dropped rather than run with the
   // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they

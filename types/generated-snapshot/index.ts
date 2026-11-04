@@ -693,10 +693,15 @@ export type DurableObjectRoutingMode = "primary-only";
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
   routingMode?: DurableObjectRoutingMode;
+  retry?: DurableObjectRetryOptions;
 }
 export interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
+export interface DurableObjectRetryOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
@@ -3267,6 +3272,7 @@ export interface TraceItem {
         | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
+        | TraceItemOnHibernateEventInfo
         | TraceItemQueueEventInfo
         | TraceItemEmailEventInfo
         | TraceItemTailEventInfo
@@ -3332,6 +3338,9 @@ export interface TraceItemFetchEventInfoResponse {
 }
 export interface TraceItemJsRpcEventInfo {
   readonly rpcMethod: string;
+}
+export interface TraceItemOnHibernateEventInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 export interface TraceItemHibernatableWebSocketEventInfo {
   readonly getWebSocketEvent:
@@ -16099,6 +16108,12 @@ export interface JsonWebKeyWithKid extends JsonWebKey {
 }
 export interface RateLimitOptions {
   key: string;
+  /**
+   * Amount to add to the counter for this call. Must be a positive integer;
+   * defaults to `1`. The call is allowed while the counter is below the limit,
+   * even if `delta` takes it past the limit.
+   */
+  delta?: number;
 }
 export interface RateLimitOutcome {
   success: boolean;
@@ -17438,6 +17453,10 @@ export declare namespace TailStream {
     readonly type: "alarm";
     readonly scheduledTime: Date;
   }
+  interface OnHibernateEventInfo {
+    readonly type: "onHibernate";
+    readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+  }
   interface QueueEventInfo {
     readonly type: "queue";
     readonly queueName: string;
@@ -17525,6 +17544,7 @@ export declare namespace TailStream {
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo
+      | OnHibernateEventInfo
       | QueueEventInfo
       | EmailEventInfo
       | TraceEventInfo

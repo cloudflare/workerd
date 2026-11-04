@@ -522,18 +522,17 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    auto str = input.orDefault(js.str());
-    auto view = jsg::JsUint8Array::create(js, str.utf8Length(js));
-    [[maybe_unused]] auto result = str.writeInto(
-        js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-    KJ_DASSERT(result.written == view.size());
-    return view;
-  }
+namespace {
 
-  jsg::JsString str = input.orDefault(js.str());
+jsg::JsUint8Array encodeUtf8WithV8(jsg::Lock& js, jsg::JsString str) {
+  auto view = jsg::JsUint8Array::create(js, str.utf8Length(js));
+  [[maybe_unused]] auto result = str.writeInto(
+      js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  KJ_DASSERT(result.written == view.size());
+  return view;
+}
 
+jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   size_t utf8_length = 0;
   auto length = str.length(js);
 
@@ -596,6 +595,26 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
       simdutf::convert_utf16_to_utf8(data, length, view.asArrayPtr().asChars().begin());
   KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
   return view;
+}
+
+}  // namespace
+
+jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
+  auto str = input.orDefault(js.str());
+  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
+    return encodeUtf8WithV8(js, str);
+  }
+  return encodeUtf8WithSimdutf(js, str);
+}
+
+jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str) {
+  // V8 writes a one-byte string straight into the result, where encodeUtf8WithSimdutf()
+  // copies it through a temporary buffer first, so V8 is the faster of the two for one-byte
+  // strings and simdutf for two-byte strings.
+  if (str.isOneByte(js)) {
+    return encodeUtf8WithV8(js, str);
+  }
+  return encodeUtf8WithSimdutf(js, str);
 }
 
 namespace {

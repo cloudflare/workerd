@@ -10,8 +10,6 @@
     reason = "settles and reacts to promises through the V8 FFI"
 )]
 
-use std::cell::RefCell;
-
 use crate::Error;
 use crate::FromJS;
 use crate::Lock;
@@ -177,7 +175,7 @@ impl Promise {
 /// The data of a promise's reactions, which the first of them to run drops once it returns, as
 /// C++ JSG drops a `ThenCatchPair`: a promise settles once, so the other can no longer run. Until
 /// then, the garbage collector traces it through the reactions.
-struct ReactionData<T>(RefCell<Option<T>>);
+struct ReactionData<T>(crate::RefCell<Option<T>>);
 
 impl<T: Traced> Traced for ReactionData<T> {
     fn holds_gc_references() -> bool {
@@ -213,7 +211,7 @@ where
         None => unreachable!("a promise reaction ran after another reaction to the promise"),
     };
     // Dropped after the borrow ends, so that what its drop does cannot find the cell borrowed.
-    let data = data.0.borrow_mut().take();
+    let data = data.0.borrow_mut(lock).take();
     drop(data);
     result
 }
@@ -380,7 +378,7 @@ impl<'s> Local<'s, Promise> {
     {
         self.debug_assert_isolate(lock);
         let _ = (on_fulfilled, on_rejected);
-        let data = ReactionData(RefCell::new(Some(data)));
+        let data = ReactionData(crate::RefCell::new(Some(data)));
         let [on_fulfilled, on_rejected] =
             Function::new_sharing_data(lock, data, [reaction::<T, F>(), reaction::<T, R>()])?;
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; all three

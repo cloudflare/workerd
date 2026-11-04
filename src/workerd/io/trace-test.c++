@@ -324,6 +324,23 @@ KJ_TEST("Read/Write AlarmEventInfo works") {
   KJ_ASSERT(info.scheduledTime == info3.scheduledTime);
 }
 
+KJ_TEST("Read/Write OnHibernateEventInfo works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Onset::Info>();
+
+  // A reason other than the first enumerant, which a missing field would also read as.
+  writeOnsetInfo(OnHibernateEventInfo(OnHibernateEventInfo::Reason::CODE_UPDATED), infoBuilder);
+
+  auto info = readOnsetInfo(infoBuilder.asReader());
+  auto& onHibernate = KJ_ASSERT_NONNULL(info.tryGet<OnHibernateEventInfo>());
+  KJ_ASSERT(onHibernate.reason == OnHibernateEventInfo::Reason::CODE_UPDATED);
+  KJ_ASSERT(kj::str(onHibernate.reason) == "codeUpdated"_kj);
+
+  auto clone = cloneEventInfo(info);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(clone.tryGet<OnHibernateEventInfo>()).reason ==
+      OnHibernateEventInfo::Reason::CODE_UPDATED);
+}
+
 KJ_TEST("Read/Write QueueEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::QueueEventInfo>();

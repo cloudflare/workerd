@@ -10,6 +10,7 @@
 #include "form-data.h"
 #include "headers.h"
 #include "queue.h"
+#include "request-io.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
@@ -1330,7 +1331,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher, api::RequestIo
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
