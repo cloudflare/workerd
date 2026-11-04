@@ -7,6 +7,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/hibernation-handoff.h>
 #include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 
@@ -112,6 +113,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
    public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
         kj::ArrayPtr<kj::String> tags,
+        kj::Rc<HibernatableTransport> transport,
         LegacyHibernationManagerImpl& manager);
     ~HibernatableWebSocket() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
@@ -171,6 +173,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
     // Cancels promises that borrow `ws`. Declared after `ws` so it is destroyed first.
     kj::Canceler writeCanceler;
+
+    // Shared weakly with the api::WebSocket, through which couple() attaches the transport.
+    kj::Rc<HibernatableTransport> transport;
 
     friend LegacyHibernationManagerImpl;
   };

@@ -21,6 +21,7 @@
 
 namespace workerd {
 class ActorObserver;
+class HibernatableTransport;
 struct NonHibernatableWebSocketCount;
 }  // namespace workerd
 
@@ -187,15 +188,27 @@ class WebSocket: public EventTarget {
   //
   // Only one of this or accept() is allowed to be invoked.
   //
+  // Accepts the WebSocket of `response` with `headers`, which the WebSocket's peer can change
+  // first (see RequestObserver::tryTakeWebSocketTransportHandle()), and couples to it.
+  //
   // As an exception to the usual KJ convention, it is not necessary for the JavaScript `WebSocket`
   // object to be kept live while waiting for the promise returned by couple() to complete. Instead,
-  // the promise takes direct ownership of the underlying KJ-native WebSocket (as well as `other`).
-  kj::Promise<DeferredProxy<void>> couple(
-      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request);
+  // the promise takes direct ownership of the underlying KJ-native WebSocket (as well as the
+  // accepted one).
+  kj::Promise<DeferredProxy<void>> couple(jsg::Lock& js,
+      kj::HttpService::Response& response,
+      kj::HttpHeaders& headers,
+      RequestObserver& request);
 
   // The kj::WebSocket is shared with the HibernationManager so both it and this api::WebSocket
-  // retain ownership.
-  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags);
+  // retain ownership. `transport` is the manager's record of the socket's transport, which
+  // couple() on the other end of a WebSocketPair attaches the request's transport to.
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(
+      kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport);
+
+  // The record passed to acceptAsHibernatable(), or kj::none if this WebSocket isn't hibernatable,
+  // was revived from hibernation, or its manager no longer holds it.
+  kj::Maybe<HibernatableTransport&> getHibernatableTransport();
 
   // Accesses the tags of the hibernatable websocket.
   kj::Array<kj::StringPtr> getHibernatableTags();
@@ -434,10 +447,12 @@ class WebSocketAdapter {
   // construction for the URL ctor.
   virtual void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) = 0;
 
-  // Pumps messages between this WebSocket and `other`. Only valid in the post-connect /
-  // pre-accept state.
-  virtual kj::Promise<DeferredProxy<void>> couple(
-      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) = 0;
+  // Accepts the WebSocket of `response` and pumps messages between it and this WebSocket. Only
+  // valid in the post-connect / pre-accept state.
+  virtual kj::Promise<DeferredProxy<void>> couple(jsg::Lock& js,
+      kj::HttpService::Response& response,
+      kj::HttpHeaders& headers,
+      RequestObserver& request) = 0;
 
   // Like `accept()` but called by C++ rather than JS — used by the URL-ctor success
   // continuation.
@@ -470,7 +485,11 @@ class WebSocketAdapter {
   virtual kj::Ptr<bool> getDispatchFailed() = 0;
 
   // Hibernation transitions: shares ownership of the kj::WebSocket with the HibernationManager.
-  virtual kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
+  virtual kj::Rc<kj::WebSocket> acceptAsHibernatable(
+      kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport) = 0;
+
+  // See WebSocket::getHibernatableTransport().
+  virtual kj::Maybe<HibernatableTransport&> getHibernatableTransport() = 0;
 
   // HibernationManager coordination: signals that the underlying connection is winding
   // down and the adapter should arrange to deliver its terminal close/error event.
@@ -558,8 +577,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void setBinaryType(kj::String value) override;
 
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) override;
-  kj::Promise<DeferredProxy<void>> couple(
-      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) override;
+  kj::Promise<DeferredProxy<void>> couple(jsg::Lock& js,
+      kj::HttpService::Response& response,
+      kj::HttpHeaders& headers,
+      RequestObserver& request) override;
   void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) override;
 
   bool isAccepted() override;
@@ -569,7 +590,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void setObserver(kj::Own<WebSocketObserver> observer) override;
   kj::Ptr<bool> getDispatchFailed() override;
 
-  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(
+      kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport) override;
+  kj::Maybe<HibernatableTransport&> getHibernatableTransport() override;
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Array<kj::String> tags,
       WebSocket::HibernatableReleaseState releaseState) override;
@@ -631,6 +654,9 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
       // The native state can outlive the HibernationManager, so it owns its tag strings.
       kj::Array<kj::String> tags;
+
+      // Null for a WebSocket revived from hibernation, which has no peer left to couple.
+      kj::WeakRc<HibernatableTransport> transport = nullptr;
     };
 
     explicit Accepted(kj::Own<kj::WebSocket> ws, Native& native, IoContext& context);

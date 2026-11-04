@@ -10,6 +10,7 @@
 #include "util.h"
 
 #include <workerd/io/features.h>
+#include <workerd/io/hibernation-handoff.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
@@ -173,9 +174,11 @@ void WebSocket::setBinaryType(kj::String value) {
   impl->setBinaryType(kj::mv(value));
 }
 
-kj::Promise<DeferredProxy<void>> WebSocket::couple(
-    jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) {
-  return impl->couple(js, kj::mv(other), request);
+kj::Promise<DeferredProxy<void>> WebSocket::couple(jsg::Lock& js,
+    kj::HttpService::Response& response,
+    kj::HttpHeaders& headers,
+    RequestObserver& request) {
+  return impl->couple(js, response, headers, request);
 }
 
 void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
@@ -206,7 +209,8 @@ kj::Ptr<bool> WebSocket::getDispatchFailed() {
   return impl->getDispatchFailed();
 }
 
-kj::Rc<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags) {
+kj::Rc<kj::WebSocket> WebSocket::acceptAsHibernatable(
+    kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport) {
   // TODO(EW-10817): When the HibernatableWebSocketAdapter path is functional, re-enable the
   // autogate-driven swap below — extract the kj::WebSocket from the legacy adapter (via
   // `LegacyWebSocketAdapter::extractForHibernatableTransition`, also commented out today)
@@ -218,7 +222,11 @@ kj::Rc<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags
   //   impl = kj::heap<HibernatableWebSocketAdapter>(*this, ws.addRef(), kj::mv(tags));
   //   return ws;
   // }
-  return impl->acceptAsHibernatable(kj::mv(tags));
+  return impl->acceptAsHibernatable(kj::mv(tags), kj::mv(transport));
+}
+
+kj::Maybe<HibernatableTransport&> WebSocket::getHibernatableTransport() {
+  return impl->getHibernatableTransport();
 }
 
 void WebSocket::initiateHibernatableRelease(
@@ -631,8 +639,28 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   return ws;
 }
 
-kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
-    jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) {
+kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(jsg::Lock& js,
+    kj::HttpService::Response& response,
+    kj::HttpHeaders& headers,
+    RequestObserver& request) {
+  // Grab the peer reference if it exists and is still alive. We have to do
+  // this here while we have the isolate lock.
+  kj::Maybe<workerd::jsg::Ref<workerd::api::WebSocket>> maybePeerRef;
+  KJ_IF_SOME(p, peer) {
+    maybePeerRef = p.tryAddRef(js);
+  }
+
+  // This response is what connects a hibernatable peer to its client, so the transport carrying
+  // it is the peer's. The embedder can change the headers when it hands over the transport, so
+  // that happens before the response is accepted.
+  kj::Maybe<kj::Own<HibernatableTransportHandle>> transportHandle;
+  KJ_IF_SOME(peerRef, maybePeerRef) {
+    if (peerRef->getHibernatableTransport() != kj::none) {
+      transportHandle = request.tryTakeWebSocketTransportHandle(headers);
+    }
+  }
+  auto other = response.acceptWebSocket(headers);
+
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
@@ -647,16 +675,12 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
     }
   }
 
-  // Grab the peer reference if it exists and is still alive. We have to do
-  // this here while we have the isolate lock.
-  kj::Maybe<workerd::jsg::Ref<workerd::api::WebSocket>> maybePeerRef;
-  KJ_IF_SOME(p, peer) {
-    maybePeerRef = p.tryAddRef(js);
-  }
   kj::Maybe<kj::Ptr<bool>> peerDispatchFailed;
   KJ_IF_SOME(peerRef, maybePeerRef) {
     if (!peerRef->isHibernatable()) {
       peerDispatchFailed = peerRef->getDispatchFailed();
+    } else KJ_IF_SOME(transport, peerRef->getHibernatableTransport()) {
+      transport.attach(kj::mv(transportHandle));
     }
   }
 
@@ -1702,16 +1726,28 @@ void LegacyWebSocketAdapter::setPeer(jsg::WeakRef<WebSocket> other) {
   peer = kj::mv(other);
 }
 
-kj::Rc<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String> tags) {
+kj::Rc<kj::WebSocket> LegacyWebSocketAdapter::acceptAsHibernatable(
+    kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport) {
   KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
     // We can only request hibernation if we have not called accept.
     auto ws = kj::Rc<kj::WebSocket>(kj::mv(hibernatable.ws));
-    farNative->state.init<Accepted>(Accepted::Hibernatable{.ws = ws.addRef(), .tags = kj::mv(tags)},
+    farNative->state.init<Accepted>(
+        Accepted::Hibernatable{
+          .ws = ws.addRef(), .tags = kj::mv(tags), .transport = kj::mv(transport)},
         *farNative, IoContext::current());
     return ws;
   }
   JSG_FAIL_REQUIRE(TypeError,
       "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
+}
+
+kj::Maybe<HibernatableTransport&> LegacyWebSocketAdapter::getHibernatableTransport() {
+  KJ_IF_SOME(accepted, farNative->state.tryGet<Accepted>()) {
+    KJ_IF_SOME(hibernatable, accepted.ws.getIfHibernatable()) {
+      return hibernatable.transport.tryGet();
+    }
+  }
+  return kj::none;
 }
 
 // TODO(EW-10817): Re-enable when WebSocket::acceptAsHibernatable's autogate consultation

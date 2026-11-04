@@ -57,8 +57,10 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   void setBinaryType(kj::String value) override;
 
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) override;
-  kj::Promise<DeferredProxy<void>> couple(
-      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) override;
+  kj::Promise<DeferredProxy<void>> couple(jsg::Lock& js,
+      kj::HttpService::Response& response,
+      kj::HttpHeaders& headers,
+      RequestObserver& request) override;
   void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) override;
 
   bool isAccepted() override;
@@ -68,7 +70,9 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   void setObserver(kj::Own<WebSocketObserver> observer) override;
   kj::Ptr<bool> getDispatchFailed() override;
 
-  kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
+  kj::Rc<kj::WebSocket> acceptAsHibernatable(
+      kj::Array<kj::String> tags, kj::WeakRc<HibernatableTransport> transport) override;
+  kj::Maybe<HibernatableTransport&> getHibernatableTransport() override;
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Array<kj::String> tags,
       WebSocket::HibernatableReleaseState releaseState) override;

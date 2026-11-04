@@ -1311,8 +1311,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
       outHeaders.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
 
-    auto clientSocket = outer.acceptWebSocket(outHeaders);
-    auto wsPromise = ws->couple(js, kj::mv(clientSocket), context.getMetrics());
+    auto wsPromise = ws->couple(js, outer, outHeaders, context.getMetrics());
 
     KJ_IF_SOME(a, context.getActor()) {
       KJ_IF_SOME(hib, a.getHibernationManager()) {

@@ -21,6 +21,7 @@ LegacyHibernationManagerImpl::EventRegistry& LegacyHibernationManagerImpl::getEv
 LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
     jsg::Ref<api::WebSocket> websocket,
     kj::ArrayPtr<kj::String> tags,
+    kj::Rc<HibernatableTransport> transport,
     LegacyHibernationManagerImpl& manager)
     : tagItems(kj::heapArray<TagListItem>(tags.size())),
       activeOrPackage(kj::mv(websocket)),
@@ -28,7 +29,8 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
       // calling api::WebSocket::acceptAsHibernatable(). We will share ownership of the
       // kj::WebSocket before starting the readLoop.
       ws(kj::none),
-      manager(manager) {}
+      manager(manager),
+      transport(kj::mv(transport)) {}
 
 LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
   // We expect this dtor to be called when we're removing a HibernatableWebSocket
@@ -165,7 +167,8 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   JSG_REQUIRE(allWs.size() < ACTIVE_CONNECTION_LIMIT, Error, "only ", ACTIVE_CONNECTION_LIMIT,
       " websockets can be accepted on a single Durable Object instance");
 
-  auto hib = kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, *this);
+  auto hib =
+      kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, kj::rc<HibernatableTransport>(), *this);
 
   // TODO(mar): Improve accept span context capturing — route snapshotted user span context
   // to serialization point instead of capturing only the invocation root span here.
@@ -178,7 +181,7 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
   // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
   refToHibernatable.ws =
       refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
-          refToHibernatable.getTags());
+          refToHibernatable.getTags(), refToHibernatable.transport.downgrade());
 
   // Finally, we initiate the readloop for this HibernatableWebSocket and
   // give the task to the HibernationManager so it lives long.
@@ -564,6 +567,7 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
   while (true) {
     kj::WebSocket::Message message = co_await ws.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
+    hib.transport->countConsumed();
 
     auto skip = false;
 

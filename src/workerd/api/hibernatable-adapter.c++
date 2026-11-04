@@ -81,7 +81,7 @@ void HibernatableWebSocketAdapter::initConnection(jsg::Lock&, kj::Promise<Packed
 }
 
 kj::Promise<DeferredProxy<void>> HibernatableWebSocketAdapter::couple(
-    jsg::Lock&, kj::Own<kj::WebSocket>, RequestObserver&) {
+    jsg::Lock&, kj::HttpService::Response&, kj::HttpHeaders&, RequestObserver&) {
   unimplemented();
 }
 
@@ -109,8 +109,15 @@ bool HibernatableWebSocketAdapter::isAwaitingCoupling() {
   return false;
 }
 
-kj::Rc<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(kj::Array<kj::String>) {
+kj::Rc<kj::WebSocket> HibernatableWebSocketAdapter::acceptAsHibernatable(
+    kj::Array<kj::String>, kj::WeakRc<HibernatableTransport>) {
   unimplemented();
+}
+
+kj::Maybe<HibernatableTransport&> HibernatableWebSocketAdapter::getHibernatableTransport() {
+  // couple() asks a hibernatable peer for its transport, so this can't throw. The adapter doesn't
+  // track the transport yet, so its sockets can't be handed off.
+  return kj::none;
 }
 
 void HibernatableWebSocketAdapter::initiateHibernatableRelease(

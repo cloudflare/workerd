@@ -102,10 +102,14 @@ class TestResponse final: public kj::HttpService::Response {
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
     KJ_REQUIRE(webSocket.get() != nullptr, "request unexpectedly returned a WebSocket");
     statusCode = 101;
+    acceptedHeaders = headers.toString();
     return kj::mv(webSocket);
   }
 
   uint statusCode = 0;
+
+  // The headers of the accepted WebSocket response.
+  kj::String acceptedHeaders;
 
  private:
   kj::Own<kj::WebSocket> webSocket;
@@ -427,9 +431,16 @@ class RecordingObserver final: public RequestObserver, public WorkerInterface {
     return kj::none;
   }
 
+  kj::Maybe<kj::Own<HibernatableTransportHandle>> tryTakeWebSocketTransportHandle(
+      kj::HttpHeaders&) override {
+    ++transportHandleRequests;
+    return kj::none;
+  }
+
   kj::Maybe<EventOutcome> outcome;
 
   uint failureCount = 0;
+  uint transportHandleRequests = 0;
 
   // The IoContext of the request that coupled a WebSocket. Valid only while that request is pending.
   kj::Maybe<IoContext&> coupledContext;
@@ -1102,6 +1113,107 @@ KJ_TEST("hibernatable WebSocket clean close is reported as a stream disconnect")
   KJ_EXPECT(getJsEvents(fixture) == "close:1000:true;");
   KJ_EXPECT(
       observer->outcome.orDefault(EventOutcome::OK) == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+}
+
+// Supplies a handle for the transport of each request's hibernatable WebSocket, and says so in the
+// response's headers.
+class TransportSupplyingObserver final: public RequestObserver {
+ public:
+  struct Stats {
+    uint handleRequests = 0;
+    uint handlesDestroyed = 0;
+  };
+
+  explicit TransportSupplyingObserver(Stats& stats): stats(stats) {}
+
+  kj::Maybe<kj::Own<HibernatableTransportHandle>> tryTakeWebSocketTransportHandle(
+      kj::HttpHeaders& responseHeaders) override {
+    ++stats.handleRequests;
+    responseHeaders.addPtrPtr("X-Transport", "movable");
+    return kj::heap<Handle>(stats);
+  }
+
+ private:
+  class Handle final: public HibernatableTransportHandle {
+   public:
+    explicit Handle(Stats& stats): stats(stats) {}
+    ~Handle() noexcept(false) {
+      ++stats.handlesDestroyed;
+    }
+
+    kj::Promise<Pause> pause() override {
+      KJ_UNIMPLEMENTED("not paused in this test");
+    }
+
+   private:
+    Stats& stats;
+  };
+
+  Stats& stats;
+};
+
+KJ_TEST("a hibernatable WebSocket keeps the transport handle that its response was sent with") {
+  TransportSupplyingObserver::Stats stats;
+  auto loopback = kj::refcounted<FixtureLoopback>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = HIBERNATABLE_WEB_SOCKET_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("hibernatable-web-socket-transport-test")),
+    .actorClassName = "default"_kj,
+    .useRealTimers = false,
+    .actorLoopback = kj::addRef(*loopback),
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<TransportSupplyingObserver>(stats);
+  }),
+  });
+  loopback->fixture = fixture;
+  auto& actor = fixture.getActor();
+  actor.setHibernationManager(
+      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  kj::NullStream requestBody;
+  auto pipe = kj::newTwoWayPipe();
+  TestResponse response(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto request =
+      entrypoint->request(
+                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+          .eagerlyEvaluate(nullptr);
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  fixture.pollEventLoop();
+  KJ_ASSERT(response.statusCode == 101);
+
+  // The handle was taken once, before the response was accepted, which carries the header added
+  // with it.
+  KJ_EXPECT(stats.handleRequests == 1, stats.handleRequests);
+  KJ_EXPECT(response.acceptedHeaders.contains("X-Transport: movable"), response.acceptedHeaders);
+  KJ_EXPECT(stats.handlesDestroyed == 0);
+
+  // The Durable Object holds the handle until it drops the WebSocket.
+  peer->close(1000, "done").wait(fixture.getWaitScope());
+  auto message = peer->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::WebSocket::Close>());
+  auto exception = kj::runCatchingExceptions([&]() { request.wait(fixture.getWaitScope()); });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::DISCONNECTED);
+  fixture.pollEventLoop();
+  KJ_EXPECT(stats.handlesDestroyed == 1, stats.handlesDestroyed);
+}
+
+KJ_TEST("a locally accepted WebSocket doesn't take a transport handle") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(
+      kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE, WorkerHost::ACTOR);
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_EXPECT(test.observer->transportHandleRequests == 0);
+
+  peer = nullptr;
+  auto exception =
+      kj::runCatchingExceptions([&]() { test.request.wait(test.fixture.getWaitScope()); });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::DISCONNECTED);
 }
 
 // Like HIBERNATABLE_WEB_SOCKET_SOURCE, but fetch() also creates a promise for another context to
