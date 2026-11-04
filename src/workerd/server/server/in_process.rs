@@ -83,7 +83,11 @@ impl InProcessServer {
             ..RunOptions::default()
         };
         let factory = Rc::clone(&self.factory);
-        crate::run::run(factory, options, self.reporter(), self.drain.notified()).await
+        let drain = async {
+            self.drain.notified().await;
+            None
+        };
+        crate::run::run(factory, options, self.reporter(), drain).await
     }
 
     /// `workerd test`.

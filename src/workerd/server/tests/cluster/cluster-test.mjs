@@ -25,6 +25,14 @@
 //      `workerd deploy` publishes a Cap'n Proto config or a wrangler project for
 //      the nodes to start on, and refuses a deployment that holds more than
 //      services or conflicts with another.
+//  12. Nodes adopt a new revision of the deployment catalog by restarting, one
+//      at a time, as a supervisor restarts them, and the Durable Objects' state
+//      survives.
+//  13. `workerd deploy --wait` rolls a new version of the deployment out to a
+//      cluster under load. A version that fails to start holds the roll, and
+//      `--wait` fails, until a rollback; so does a node's refusal of one.
+//      Publishing the version the nodes started on is waited for at once.
+//      A wrangler project rolls out too.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -35,6 +43,9 @@
 //     owner-test.rs, capture-test.rs;
 //   - a dead owner's alarms adopted with its node record gone: only the
 //     orphan scan finds them. alarms-test.rs.
+//
+// The tests whose names say "deploy" run in a target of their own
+// (`cluster-deploy-test`).
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -43,7 +54,7 @@ import { connect, createServer } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -60,12 +71,29 @@ assert(
   'You must set the FAKE_S3_CONFIG environment variable.'
 );
 
+// Bazel shards this file (`shard_count`): each shard runs every n-th test.
+const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
+const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
+if (env.TEST_SHARD_STATUS_FILE !== undefined) {
+  await writeFile(env.TEST_SHARD_STATUS_FILE, '');
+}
+let testIndex = 0;
+function test(...args) {
+  if (testIndex++ % SHARDS === SHARD) nodeTest(...args);
+}
+
 const CONTROL_FD = 3;
 
 // Node's SIGTERM is TerminateProcess on Windows, so a node cannot drain there.
 const SIGTERM_DRAINS = {
   skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
 };
+
+// Sanitizer builds run several times slower; the deadlines of the deployment
+// tests, which wait for whole rolls, and of a node's first lease record scale by
+// this.
+const SLOW =
+  env.TSAN_OPTIONS !== undefined || env.ASAN_OPTIONS !== undefined ? 4 : 1;
 
 // A minimal harness specialized for the cluster test. Unlike server-harness.mjs
 // it:
@@ -82,6 +110,7 @@ class ClusterNode {
   #httpPort = null;
   #closed = null;
   #stderrBuffer = '';
+  #stopsAt = [];
   #extraArgs;
   #disk;
 
@@ -117,9 +146,32 @@ class ClusterNode {
     return this.#httpPort;
   }
 
+  // The http port, or null while the node is not listening.
+  get port() {
+    return this.#httpPort;
+  }
+
+  // Resolves to `{ code, signal }` once the process exits, by itself or by
+  // stop().
+  exited() {
+    return this.#closed;
+  }
+
+  // Starts the node again once its process has exited by itself.
+  async restart() {
+    this.#child = null;
+    this.#httpPort = null;
+    await this.start();
+  }
+
   // Returns the contents of the node's stderr observed so far.
   get stderr() {
     return this.#stderrBuffer;
+  }
+
+  // When the node said it stops for a restart, each time.
+  get stopsAt() {
+    return this.#stopsAt;
   }
 
   async start() {
@@ -154,6 +206,7 @@ class ClusterNode {
     child.stderr.on('data', (data) => {
       const chunk = data.toString('utf8');
       this.#stderrBuffer += chunk;
+      if (chunk.includes('stopping to restart')) this.#stopsAt.push(Date.now());
       // Mirror to our own stderr so test output remains useful.
       process.stderr.write(`[${this.#nodeId}] ${chunk}`);
     });
@@ -390,7 +443,7 @@ async function withCluster(
       // A node writes its lease record in its first maintenance round. Since
       // nodes start one at a time, the record that is new is this node's.
       const known = new Set(nodeKeys.values());
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + 10_000 * SLOW;
       let fresh = [];
       while (Date.now() < deadline) {
         fresh = (await bucket.nodes()).filter((key) => !known.has(key));
@@ -1371,8 +1424,9 @@ async function compileConfig(path, constName) {
 
 // Publishes `config`, an encoded Config, as deployment `name` the way any tool
 // may, by writing the bucket's layout (src/workerd/server/cluster/deploy.rs):
-// the version's objects, then the catalog, created conditionally.
-async function deploy(bucket, name, config) {
+// the version's objects, then the catalog, created conditionally as revision 1
+// or replaced as a later `revision`.
+async function deploy(bucket, name, config, revision = 1) {
   const version = createHash('sha256').update(config).digest('hex');
   const prefix = `deploy/${name}/${version}`;
   await bucket.put(`${prefix}/config.bin`, config);
@@ -1380,12 +1434,11 @@ async function deploy(bucket, name, config) {
   await bucket.put(`${prefix}/manifest.json`, JSON.stringify(manifest));
   const catalog = {
     format: 1,
-    revision: 1,
+    revision,
     deployments: { [name]: { version } },
   };
-  await bucket.put('deploy/catalog.json', JSON.stringify(catalog), {
-    'if-none-match': '*',
-  });
+  const create = revision === 1 ? { 'if-none-match': '*' } : {};
+  await bucket.put('deploy/catalog.json', JSON.stringify(catalog), create);
 }
 
 test('cluster: a fresh cluster serves the deployment in its bucket', async () => {
@@ -1456,6 +1509,120 @@ test('cluster: a node refuses a deployment that holds more than services', async
     await bucket.stop();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// Restarts `node` whenever its process exits with a failure, as systemd's
+// `Restart=on-failure` would: status 75 asks for a restart on a new catalog
+// revision, any other a second later. `exits` collects the status of each exit
+// and `listensAt` when each restarted process listened. `stop()` stops the node
+// and the supervision, failing if a restart failed otherwise than by the
+// process exiting.
+function supervise(node) {
+  const exits = [];
+  const listensAt = [];
+  let stopping = false;
+  const done = (async () => {
+    for (;;) {
+      const { code, signal } = await node.exited();
+      if (stopping) return;
+      exits.push(code ?? signal);
+      if (code === 0 || code === null) return;
+      if (code !== 75) await sleep(1000);
+      if (stopping) return;
+      try {
+        await node.restart();
+        listensAt.push(Date.now());
+      } catch (err) {
+        if (!/exited before listening/.test(err.message)) throw err;
+      }
+    }
+  })();
+  const stop = async () => {
+    stopping = true;
+    await node.stop({ timeoutMs: 5000 });
+    await done;
+  };
+  return { exits, listensAt, stop };
+}
+
+// Supervises `nodes` while `fn` runs, then stops them.
+async function withSupervision(nodes, fn) {
+  const supervised = nodes.map(supervise);
+  try {
+    await fn(supervised);
+  } finally {
+    await Promise.all(supervised.map((s) => s.stop()));
+  }
+}
+
+// Asserts that each of `nodes` restarted once, with status 75, and serves
+// `version`, and that they did one at a time: from the moment one stopped until
+// it listened again, no other stopped.
+async function assertRestartedInTurn(nodes, supervised, version) {
+  const windows = [];
+  for (const [i, node] of nodes.entries()) {
+    assert.deepStrictEqual(supervised[i].exits, [75], node.nodeId);
+    const { body } = await fetchJson(node.httpPort, '/version');
+    assert.strictEqual(body.version, version, node.nodeId);
+    assert.strictEqual(node.stopsAt.length, 1, node.nodeId);
+    windows.push([node.stopsAt[0], supervised[i].listensAt[0], node.nodeId]);
+  }
+  windows.sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < windows.length; i++) {
+    assert(
+      windows[i - 1][1] < windows[i][0],
+      `restarts overlap: ${JSON.stringify(windows)}`
+    );
+  }
+}
+
+test('cluster: nodes restart one at a time onto a new deployment catalog revision', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  const v2 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deploymentV2');
+  await withCluster(
+    3,
+    async ({ nodes, bucket }) => {
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=kept');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      await withSupervision(nodes, async (supervised) => {
+        await deploy(bucket, 'app', v2, 2);
+        const deadline = Date.now() + 120_000 * SLOW;
+        for (;;) {
+          const restarted = supervised.every((s) => s.listensAt.length > 0);
+          const versions = await Promise.all(
+            nodes.map((node) =>
+              fetchJson(node.port, '/version').then(
+                ({ body }) => body.version,
+                () => null
+              )
+            )
+          );
+          if (restarted && versions.every((v) => v === '2')) break;
+          assert(Date.now() < deadline, `serving: ${versions}`);
+          await sleep(200);
+        }
+        await assertRestartedInTurn(nodes, supervised, '2');
+        // A node marks the roll done, so that the next counts the nodes anew.
+        const done = Date.now() + 15_000 * SLOW;
+        let roll;
+        do {
+          await sleep(200);
+          roll = JSON.parse(await bucket.get('deploy/roll.json'));
+        } while (!roll.done && Date.now() < done);
+        assert.deepStrictEqual([roll.revision, roll.done], [2, true]);
+        // The object's state survived its owner's restart.
+        const { body } = await fetchJson(
+          nodes[1].httpPort,
+          '/increment?name=kept'
+        );
+        assert.strictEqual(body.count, first.body.count + 1);
+      });
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
 });
 
 // Runs `workerd deploy --experimental` with `args` against `bucket`, named by
@@ -1539,6 +1706,163 @@ test("cluster: `workerd deploy` publishes a Cap'n Proto config, and refuses one 
           deployed.stdout,
           /catalog revision 1 selects deployment "app" version [0-9a-f]{64}\b/
         );
+      },
+    }
+  );
+});
+
+test('cluster: `workerd deploy --wait` rolls a new version out under load', async (t) => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    3,
+    async ({ nodes, bucket }) => {
+      for (const node of nodes) {
+        const { body } = await fetchJson(node.httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+      }
+      await withSupervision(nodes, async (supervised) => {
+        // Increments one Durable Object through each node in turn until told to
+        // stop, skipping a node while it restarts.
+        const acked = [];
+        let failed = 0;
+        let stopping = false;
+        const load = (async () => {
+          for (let i = 0; !stopping; i++) {
+            const port = nodes[i % nodes.length].port;
+            if (port !== null) {
+              try {
+                const { status, body } = await fetchJson(
+                  port,
+                  '/increment?name=rolled',
+                  { timeoutMs: 10_000 * SLOW }
+                );
+                if (status === 200) acked.push(body.count);
+                else failed++;
+              } catch {
+                failed++;
+              }
+            }
+            await sleep(20);
+          }
+        })();
+
+        const deployed = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deploymentV2',
+          '--name=app',
+          '--wait',
+          `--timeout=${150 * SLOW}`,
+        ]);
+        stopping = true;
+        await load;
+        t.diagnostic(
+          `${acked.length} increments acknowledged, ${failed} failed`
+        );
+        assert.strictEqual(deployed.code, 0, deployed.stderr);
+        assert.match(deployed.stdout, /^catalog revision 2 selects /m);
+        assert.match(
+          deployed.stderr,
+          /all \d+ live nodes serve catalog revision 2/
+        );
+
+        await assertRestartedInTurn(nodes, supervised, '2');
+
+        // The object's state survived: no acknowledged increment was lost or
+        // given twice, and the object counts on from there.
+        // TODO(cluster): with nodes handing their objects off as they drain,
+        // assert that no request failed.
+        assert(acked.length > 0, `no increment succeeded (${failed} failed)`);
+        assert.strictEqual(new Set(acked).size, acked.length, `${acked}`);
+        const last = Math.max(...acked);
+        const { status, body } = await fetchJson(
+          nodes[0].httpPort,
+          '/increment?name=rolled'
+        );
+        assert.strictEqual(status, 200, JSON.stringify(body));
+        assert(body.count > last, `count ${body.count} after ${last}`);
+      });
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+test('cluster: a deployed version that fails to start holds the roll until a rollback', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  await withCluster(
+    2,
+    async ({ nodes, bucket }) => {
+      await withSupervision(nodes, async (supervised) => {
+        // It composes with the nodes' config, so the deploy and the nodes
+        // accept it, and the first node to restart on it fails to start.
+        const broken = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deploymentBroken',
+          '--name=app',
+          '--wait',
+          `--timeout=${120 * SLOW}`,
+        ]);
+        assert.strictEqual(broken.code, 1, broken.stderr);
+        assert.match(
+          broken.stderr,
+          /cannot complete the rollout to catalog revision 2.*failed to start/
+        );
+        const failing = supervised.findIndex((s) => s.exits.includes(1));
+        assert.notStrictEqual(failing, -1, JSON.stringify(supervised));
+        const other = nodes[1 - failing];
+        assert.deepStrictEqual(supervised[1 - failing].exits, []);
+        const { body } = await fetchJson(other.httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+
+        // The previous version, published again, is what the failing node
+        // starts on next, and then the roll goes on.
+        const back = await workerdDeploy(bucket, [
+          env.DEPLOYMENT_CONFIG,
+          'deployment',
+          '--name=app',
+          '--wait',
+          `--timeout=${120 * SLOW}`,
+        ]);
+        assert.strictEqual(back.code, 0, back.stderr);
+        assert.match(back.stdout, /^catalog revision 3 selects /m);
+        assert.deepStrictEqual(supervised[1 - failing].exits, [75]);
+        for (const node of nodes) {
+          const { body } = await fetchJson(node.httpPort, '/version');
+          assert.strictEqual(body.version, '1', node.nodeId);
+        }
+      });
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: (bucket) => deploy(bucket, 'app', v1),
+    }
+  );
+});
+
+test('cluster: `workerd deploy --wait` of the version the nodes started on is done at once', async () => {
+  const args = [env.DEPLOYMENT_CONFIG, 'deployment', '--name=app'];
+  await withCluster(
+    2,
+    async ({ bucket }) => {
+      // No roll names the revision, so none will be marked done: the nodes
+      // serving it is enough.
+      assert.strictEqual(await bucket.get('deploy/roll.json'), null);
+      const again = await workerdDeploy(bucket, [
+        ...args,
+        '--wait',
+        `--timeout=${30 * SLOW}`,
+      ]);
+      assert.strictEqual(again.code, 0, again.stderr);
+      assert.match(again.stdout, /^catalog revision 1 selects /m);
+      assert.match(again.stderr, /all 2 live nodes serve catalog revision 1/);
+    },
+    {
+      ...DEPLOYMENT_NODE,
+      before: async (bucket) => {
+        const deployed = await workerdDeploy(bucket, args);
+        assert.strictEqual(deployed.code, 0, deployed.stderr);
       },
     }
   );
@@ -1647,6 +1971,23 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
           [...nodeKeys.values()].includes(JSON.parse(record).node),
           record
         );
+
+        await configure('2');
+        await withSupervision(nodes, async (supervised) => {
+          const deployed = await workerdDeploy(bucket, [
+            project,
+            '--wait',
+            `--timeout=${120 * SLOW}`,
+          ]);
+          assert.strictEqual(deployed.code, 0, deployed.stderr);
+          assert.match(
+            deployed.stdout,
+            /^catalog revision 2 selects deployment "main" version [0-9a-f]{64}$/m
+          );
+          await assertRestartedInTurn(nodes, supervised, '2');
+          const { body } = await fetchJson(nodes[0].httpPort, '/increment');
+          assert.strictEqual(body.count, 3);
+        });
       },
       {
         ...DEPLOYMENT_NODE,
@@ -1659,6 +2000,42 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
             /catalog revision 1 selects deployment "main" version [0-9a-f]{64}\b/
           );
         },
+      }
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('cluster: `workerd deploy --wait` fails as soon as a node refuses the deployment', async () => {
+  const v1 = await compileConfig(env.DEPLOYMENT_CONFIG, 'deployment');
+  const project = await mkdtemp(join(tmpdir(), 'workerd-wrangler-'));
+  try {
+    await writeWranglerProject(project, { vars: { VERSION: 'refused' } });
+    await withCluster(
+      1,
+      async ({ nodes, bucket }) => {
+        // Its service is named as the node's disk is: the deploy cannot tell,
+        // since it does not read the node's config, but the node can.
+        const refused = await workerdDeploy(bucket, [
+          project,
+          '--name=do-storage',
+          '--wait',
+          `--timeout=${60 * SLOW}`,
+        ]);
+        assert.strictEqual(refused.code, 1, refused.stderr);
+        assert.match(refused.stdout, /^catalog revision 2 selects /m);
+        assert.match(
+          refused.stderr,
+          /cannot complete the rollout to catalog revision 2.*refused it/
+        );
+        // The node serves on.
+        const { body } = await fetchJson(nodes[0].httpPort, '/version');
+        assert.strictEqual(body.version, '1');
+      },
+      {
+        ...DEPLOYMENT_NODE,
+        before: (bucket) => deploy(bucket, 'app', v1),
       }
     );
   } finally {

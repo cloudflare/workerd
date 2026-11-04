@@ -14,8 +14,10 @@
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
 //!
-//! Exit: status 0 when the run completes, 1 if any error was reported or the run failed (the
-//! failure is printed as `*** Uncaught exception ***`). However the run ended, the factory has
+//! Exit: `rollout::RESTART_STATUS` when a cluster instance stopped for a restart on a new
+//! deployment catalog revision and its drain completed, otherwise status 0 when the run
+//! completes, and 1 if any error was reported or the run failed (the failure is printed as
+//! `*** Uncaught exception ***`). However the run ended, the factory has
 //! been dropped by then and, with it, V8 and the perfetto session. Unless `KJ_CLEAN_SHUTDOWN` is
 //! set the process ends right there, without running the remaining destructors, like
 //! `kj::ProcessContext::exit()`; with it, the Runtime is torn down and `main` returns the status.
@@ -37,6 +39,7 @@ use crate::channels::AbortReason;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::log::Severity;
+use crate::rollout;
 use crate::run::RunOptions;
 
 /// `--watch`: fails if watching does; a config change replaces the process with a fresh run of
@@ -45,6 +48,8 @@ pub type Watch = LocalBoxFuture<'static, Result<Infallible>>;
 
 /// Whether an error was reported (`error`): the exit status is then 1.
 static HAD_ERRORS: AtomicBool = AtomicBool::new(false);
+/// Whether the server stopped for a restart (`rollout::Stop`).
+static RESTART: AtomicBool = AtomicBool::new(false);
 
 /// Runs `workerd serve` (see the module doc); the exit status, if the process is to go on.
 pub fn serve(
@@ -143,7 +148,12 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
             let message = format!("*** Uncaught exception ***\n{failure}");
             error(structured, &message);
         }
-        let code = i32::from(HAD_ERRORS.load(Ordering::Relaxed));
+        // A restart's drain completed, even if `--watch` served despite config errors.
+        let code = if RESTART.load(Ordering::Relaxed) {
+            rollout::RESTART_STATUS
+        } else {
+            i32::from(HAD_ERRORS.load(Ordering::Relaxed))
+        };
         if std::env::var_os("KJ_CLEAN_SHUTDOWN").is_none() {
             ffi::cli_exit(code);
         }
@@ -219,8 +229,9 @@ fn sigterm() -> impl Future<Output = ()> {
     }
 }
 
-/// `workerd serve`: serves `factory`'s config until SIGTERM drains it (or a `--watch` reload
-/// replaces the process). A listener failure is the error.
+/// `workerd serve`: serves `factory`'s config until SIGTERM or a stop request
+/// (`RunOptions::stop`) drains it, or a `--watch` reload replaces the process. A listener
+/// failure is the error.
 async fn server_serve(
     factory: KjOwn<ffi::WorkerFactory>,
     options: RunOptions,
@@ -230,14 +241,20 @@ async fn server_serve(
     crate::log::install();
     let report = reporter(watch.is_some(), structured);
     let factory = Rc::new(Factory::new(factory));
+    let stop = options.stop.clone();
+    let drain = rollout::drain_signal(sigterm(), stop.clone());
     let result = with_watch(
-        crate::run::run(Rc::clone(&factory), options, report, sigterm()),
+        crate::run::run(Rc::clone(&factory), options, report, drain),
         watch.as_mut(),
     )
     .await;
     let shutdown = shutdown(factory).await;
     result?;
-    shutdown
+    shutdown?;
+    if stop.reason() == Some(rollout::Reason::Restart) {
+        RESTART.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 /// Tears the run down once the server is gone: ends the factory's background tasks, then drops

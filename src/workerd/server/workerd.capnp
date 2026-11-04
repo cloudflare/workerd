@@ -117,12 +117,16 @@ struct ClusterConfig {
   # may differ in backwards-compatible ways.
   #
   # The bucket can also hold deployments. A deployment is a named application stored as an encoded
-  # `Config`. It may contain only services. A catalog is the bucket record that selects the current
-  # version of every deployment.
+  # `Config`. It may contain only services. The catalog selects the current version of every
+  # deployment.
   #
-  # An instance is one workerd process in the cluster. At startup, each instance reads the catalog
-  # and serves its deployments beside the services in its own config. The instance refuses to
-  # start when a deployment breaks any of these rules:
+  # An instance is one workerd process in the cluster. At startup, it reads the catalog and loads
+  # the selected deployments. It serves them beside the services in its own config. If the catalog
+  # or a selected deployment cannot be loaded, the instance refuses to start.
+  #
+  # An instance checks every catalog revision against its own config before serving it. A failed
+  # startup check prevents the instance from serving. A running instance refuses an invalid new
+  # revision and continues to serve its current revision. The checks enforce these rules:
   #
   # - Service names must be unique across the instance's config and every deployment.
   # - Actor namespace keys must also be unique. These keys are Durable Object `uniqueKey` values
@@ -130,6 +134,49 @@ struct ClusterConfig {
   # - A deployment cannot define a `disk` service. It can refer to a disk service in the instance's
   #   config by name.
   # - A deployment's `fromEnvironment` binding must name a variable set on the instance.
+  #
+  # A running instance reads the catalog every few seconds. It logs catalog read errors and keeps
+  # serving its current revision. Its lease record names that revision. The record also names the
+  # latest revision the instance refused or failed to start on.
+  #
+  # A refusal lasts for the life of the process. An unrelated restart makes the instance try the
+  # catalog's selected revision at startup.
+  #
+  # Instances adopt an acceptable revision through a rolling restart. They stop one at a time.
+  # Each stop drains like SIGTERM. Connections still open after 30 seconds are closed. The process
+  # exits with status 75, and its supervisor must restart it.
+  #
+  # The following supervisors restart a process that exits with status 75:
+  #
+  # - systemd with `Restart=on-failure` or `Restart=always`
+  # - Kubernetes
+  # - Docker with `--restart on-failure`
+  #
+  # Kubernetes counts these exits toward its CrashLoopBackOff delay.
+  #
+  # The bucket record `deploy/roll.json` assigns restart turns. It also contains the rollout's
+  # `baseline`. At least that many instances must be serving before the next instance stops. A
+  # replacement that does not start therefore holds the rollout. If an instance has left the
+  # cluster permanently, delete `deploy/roll.json` or lower its `baseline` to continue.
+  #
+  # A revision can pass the initial checks but fail while the server starts. For example, a binding
+  # may refer to a missing service, or JavaScript may fail to load. The instance records the failed
+  # revision and exits, even under `--watch`. Other instances then stop the rollout. The
+  # `workerd deploy --wait` command also fails. Publish a fixed version or the previous version to
+  # recover. The failed instance serves that revision after its next restart, and the rollout
+  # continues.
+  #
+  # `workerd deploy --wait` waits for every live instance to serve the target revision. It also
+  # requires the number of serving instances to reach both of these counts:
+  #
+  # - the number that served when the command published
+  # - the rollout's `baseline`
+  #
+  # If an instance leaves during the rollout, the command waits for a replacement until
+  # `--timeout`. It fails as soon as an instance refuses the revision or fails to start on it.
+  #
+  # Every instance must run with `--experimental` and a workerd version that supports rollouts.
+  # Otherwise, its lease record does not name a catalog revision and it holds every rollout.
   #
   # The bucket layout for tools that write deployments is documented in
   # `src/workerd/server/cluster/deploy.rs`.
@@ -148,13 +195,8 @@ struct ClusterConfig {
   # defaults to the class name and stays the same after a rename. Deploying the project under
   # another name creates separate Durable Objects. They start empty.
   #
-  # An instance reads the catalog only at startup. Restart it to serve a published catalog
-  # revision. `workerd deploy` checks a deployment against the catalog's other deployments. It
-  # does not read any instance config.
-  #
-  # Each instance checks all deployments against its own config. It refuses to start if the
-  # configs do not compose. It also refuses to start if it cannot load a deployment. For example,
-  # a required service may be missing or the JavaScript may fail to load.
+  # `workerd deploy` checks a deployment against the catalog's other deployments. It does not read
+  # any instance config.
   #
   # A deployment has the authority granted by each instance's config. Its services can reach the
   # instance's network, environment variables, container engine, and named services. Anyone who

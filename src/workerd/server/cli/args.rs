@@ -199,9 +199,9 @@ to the class name and stays the same after a rename. Publishing the project unde
 creates a separate application with empty Durable Objects.
 
 The command checks the deployment before uploading it. The check includes the other deployments \
-in the catalog. The command repeats this check when it updates the catalog. Each instance also \
-checks the deployment against its own config at startup. An instance refuses to start if it \
-cannot serve the deployment.
+in the catalog. The command repeats this check when it updates the catalog. Each instance checks \
+the deployment against its own config before adopting it. An instance refuses a deployment it \
+cannot serve.
 
 Publishing the version already selected by the catalog leaves the catalog unchanged. Publishing \
 an earlier version rolls the deployment back to that version. The command prints the deployment \
@@ -214,8 +214,18 @@ Bucket credentials use the same environment variables as the instances:
 See `bucketOptions` in workerd.capnp for credential details. --endpoint uses AWS_ENDPOINT_URL \
 when the flag is absent. --region uses AWS_REGION, then defaults to us-east-1.
 
-Instances read the catalog only at startup. Restart each instance to serve a published catalog \
-revision. See `ClusterConfig` in workerd.capnp.
+Instances adopt the new revision by restarting one at a time. See `ClusterConfig` in \
+workerd.capnp.
+
+With --wait, the command prints progress until the rollout finishes. Every live instance must \
+serve the revision. At least as many instances must serve as before the command published. The \
+rollout may require a higher count in deploy/roll.json. If an instance leaves, the command waits \
+for a replacement until --timeout.
+
+The command fails if an instance refuses the revision or fails to start on it. Instance records \
+in the bucket show the revision served and the latest revision refused or failed. If another \
+deploy publishes a later revision that keeps this deployment version, the command waits for \
+that revision instead.
 ";
 
 const TEST_HELP: &str = "\
@@ -448,10 +458,29 @@ pub struct DeployArgs {
     #[arg(short, long)]
     pub binary: bool,
 
+    /// Wait for every live instance to serve the new catalog revision. At least as many instances
+    /// must serve as before publishing. Print progress and fail on refusal, startup failure, or
+    /// --timeout.
+    #[arg(long)]
+    pub wait: bool,
+
+    /// Set the --wait timeout in seconds. Bucket reads count toward it. The maximum is one year.
+    #[arg(
+        long,
+        value_name = "seconds",
+        default_value_t = 600,
+        requires = "wait",
+        value_parser = clap::value_parser!(u64).range(..=MAX_TIMEOUT),
+    )]
+    pub timeout: u64,
+
     /// Enable experimental features. Cluster mode requires this flag.
     #[arg(long)]
     pub experimental: bool,
 }
+
+/// The longest `--timeout`, a year: far from what a `Duration` past now can represent.
+const MAX_TIMEOUT: u64 = 365 * 24 * 60 * 60;
 
 impl DeployArgs {
     /// Build the bucket options used by the instances' `cluster.bucketOptions` setting.

@@ -33,6 +33,7 @@ use clap::error::ErrorKind;
 use workerd_server::bridge::ffi as server;
 use workerd_server::config::Overrides;
 use workerd_server::entry;
+use workerd_server::rollout::Deployments;
 use workerd_server::run::RunOptions;
 
 use crate::bridge::ffi;
@@ -97,9 +98,10 @@ fn run_compiled(
         usage_error::<T>(format!("the config compiled into this executable: {error}"))
     });
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
-    let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
+    let (mut options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    let config = with_deployments(config, &args.serve_or_test, &process);
+    let (config, deployments) = with_deployments(config, &args.serve_or_test, &process);
+    options.deployments = deployments;
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -123,10 +125,11 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
         } => {
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
+            let (mut options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
             let process = Process::new(executable, watcher, inherited_sockets);
             let config = load_config::<T>(config, const_name.const_name, &process);
-            let config = with_deployments(config, &serve_or_test, &process);
+            let (config, deployments) = with_deployments(config, &serve_or_test, &process);
+            options.deployments = deployments;
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -265,16 +268,41 @@ fn run_deploy(
     if let Err(errors) = deploy::check(&name, &deployment) {
         return failed(errors);
     }
-    let options = args.bucket_options();
-    match deploy::publish(&args.bucket, &options, &name, &deployment) {
-        Ok(published) => {
-            println!(
-                "catalog revision {} selects deployment \"{name}\" version {}",
-                published.revision, published.version
-            );
-            0
+    let cluster = match deploy::Cluster::open(&args.bucket, &args.bucket_options()) {
+        Ok(cluster) => cluster,
+        Err(errors) => return failed(errors),
+    };
+    // Counted before the roll can take any instance away.
+    let baseline = if args.wait {
+        match cluster.serving() {
+            Ok(0) => {
+                return failed(vec![
+                    "no live nodes are serving. The deployment was not published because no node \
+                     could adopt it"
+                        .to_owned(),
+                ]);
+            }
+            Ok(serving) => Some(serving),
+            Err(errors) => return failed(errors),
         }
-        Err(errors) => failed(errors),
+    } else {
+        None
+    };
+    let published = match cluster.publish(&name, &deployment) {
+        Ok(published) => published,
+        Err(errors) => return failed(errors),
+    };
+    println!(
+        "catalog revision {} selects deployment \"{name}\" version {}",
+        published.revision, published.version
+    );
+    let Some(baseline) = baseline else {
+        return 0;
+    };
+    let timeout = std::time::Duration::from_secs(args.timeout);
+    match cluster.wait(&name, &published, baseline, timeout) {
+        Ok(()) => 0,
+        Err(error) => failed(vec![error]),
     }
 }
 
@@ -463,19 +491,19 @@ fn load_config<T: CommandFactory>(
 }
 
 /// `config` with the deployments its cluster's bucket holds (`deployments.rs`), under
-/// `--experimental`. A deployment that cannot be composed with the config is a config error;
-/// a bucket that cannot be opened or read ends the process even under `--watch`, since the
-/// cause may lie outside the config files.
+/// `--experimental`, and what the server needs to know of them. A deployment that cannot be
+/// composed with the config is a config error; a bucket that cannot be opened or read ends the
+/// process even under `--watch`, since the cause may lie outside the config files.
 fn with_deployments(
     config: Config,
     serve_or_test: &args::ServeOrTestArgs,
     process: &Process,
-) -> Config {
+) -> (Config, Option<Deployments>) {
     if !serve_or_test.experimental {
-        return config;
+        return (config, None);
     }
     match deployments::add(config) {
-        Ok(config) => config,
+        Ok(added) => added,
         Err(deployments::Failure::Config(errors)) => config_errors(&errors, process),
         Err(deployments::Failure::Remote(errors)) => {
             for error in errors {

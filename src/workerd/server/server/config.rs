@@ -171,6 +171,12 @@ impl Reporter {
         (self.error)(message.into());
     }
 
+    /// Whether an error was reported, even one the server serves with (`--watch`).
+    #[must_use]
+    pub fn had_errors(&self) -> bool {
+        self.had_errors.get()
+    }
+
     /// Whether an error was reported that the server must not serve with.
     #[must_use]
     pub fn refuses(&self) -> bool {
