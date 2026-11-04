@@ -308,7 +308,6 @@ class Worker::Script: public kj::AtomicRefcounted {
       kj::StringPtr id,
       const Source& source,
       IsolateObserver::StartType startType,
-      bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan,
@@ -334,14 +333,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Determines whether a devtools inspector client can be attached.
   enum class InspectorPolicy {
     DISALLOW,
-    ALLOW_UNTRUSTED,
     ALLOW_FULLY_TRUSTED,
   };
 
   // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
-  // Usually it matches the script ID. An exception is preview isolates: there, each preview
-  // session has one isolate which may load many iterations of the script (this allows the
-  // inspector session to stay open across them).
+  // Usually it matches the script ID.
   // The Isolate object owns the Api object and outlives it in order to report teardown timing.
   // The Api object is created before the Isolate object and does not strictly require
   // request-specific information.
@@ -415,7 +411,6 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
       kj::Own<workerd::VirtualFileSystem> vfs,
-      bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
       // Must be provided if and only if the worker's compatibility flags
@@ -448,26 +443,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   uint getLockSuccessCount() const;
 
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  // Also adds a special JSON value to the header identified by `controlHeaderId`, for compatibility
-  // with internal Cloudflare systems.
   //
-  // This overload will dispatch all inspector messages on the _calling thread's_ `kj::Executor`.
-  // When linked against vanilla V8, this means that CPU profiling will only profile JavaScript
-  // running on the _calling thread_, which will most likely only be inspector console commands, and
-  // is not typically desired.
-  //
-  // For the above reason , this overload is currently only suitable for use by the internal Workers
-  // Runtime codebase, which patches V8 to profile whichever thread currently holds the `v8::Locker`
-  // for this Isolate.
-  kj::Promise<void> attachInspector(kj::Timer& timer,
-      kj::Duration timerOffset,
-      kj::HttpService::Response& response,
-      const kj::HttpHeaderTable& headerTable,
-      kj::HttpHeaderId controlHeaderId) const;
-
-  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  //
-  // This overload will dispatch all inspector messages on the `kj::Executor` passed in via
+  // All inspector messages are dispatched on the `kj::Executor` passed in via
   // `isolateThreadExecutor`. For CPU profiling to work as expected, this `kj::Executor` must be
   // associated with the same thread which executes the Worker's JavaScript.
   kj::Promise<void> attachInspector(kj::Own<const kj::Executor> isolateThreadExecutor,

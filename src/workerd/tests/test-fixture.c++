@@ -401,7 +401,6 @@ TestFixture::TestFixture(SetupParams&& params)
               params.featureFlags.orDefault(CompatibilityFlags::Reader()),
               *errorReporter),
           IsolateObserver::StartType::COLD,
-          false,
           kj::none,
           kj::none,
           SpanParent(nullptr),

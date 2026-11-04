@@ -2245,7 +2245,7 @@ void ActorCache::putImpl(Lock& lock,
 
 void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent traceSpan) {
   if (lru.options.neverFlush) {
-    // Skip all flushes. Used for preview sessions where data is strictly kept in memory.
+    // Skip all flushes. Used when data is strictly kept in memory.
 
     // Handle deleteAll state that would normally be processed during flushImplDeleteAll().
     KJ_IF_SOME(deleteAllState, requestedDeleteAll) {
@@ -2329,7 +2329,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent tr
 // the kj event loop and fulfilling a resolver that enqueues the continuation.
 kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush(SpanParent parentSpan) {
   if (lru.options.neverFlush) {
-    // We won't ever flush (usually because we're a preview session), so return a falsy maybe.
+    // We won't ever flush (because data is kept in memory), so return a falsy maybe.
     return kj::none;
   }
 
