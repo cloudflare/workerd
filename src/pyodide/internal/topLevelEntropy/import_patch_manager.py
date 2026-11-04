@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from functools import partial, wraps
 from typing import TYPE_CHECKING
 
-from .allow_entropy import TOP_LEVEL_ENTROPY_ERROR
+from .allow_entropy import (
+    TOP_LEVEL_ENTROPY_ERROR,
+    consume_bad_entropy_call,
+    get_bad_entropy_call_count,
+)
 
 if TYPE_CHECKING:
     from importlib.abc import Loader
@@ -204,13 +208,13 @@ IN_REQUEST_CONTEXT = False
 ORIG_MODULES = {}
 
 
-def block_calls(module, *, allowlist=()):
+def block_calls(module, *, allowlist=(), checkpoint=None):
     """Make top level calls to methods from the module that are not in allowlist fail.
 
     It gets removed automatically before the first request. Generally used with
     register_before_first_request.
     """
-    sys.modules[module.__name__] = BlockedCallModule(module, allowlist)
+    sys.modules[module.__name__] = BlockedCallModule(module, allowlist, checkpoint)
     ORIG_MODULES[module.__name__] = module
 
 
@@ -238,9 +242,10 @@ class BlockedCallModule:
     actually defines variables called _mod or _allow_list.
     """
 
-    def __init__(self, module, allowlist):
+    def __init__(self, module, allowlist, checkpoint=None):
         super().__setattr__("_mod", module)
         super().__setattr__("_allow_list", allowlist)
+        super().__setattr__("_checkpoint", checkpoint)
 
     def __getattribute__(self, key):
         mod = super().__getattribute__("_mod")
@@ -253,17 +258,34 @@ class BlockedCallModule:
         if key in super().__getattribute__("_allow_list"):
             return orig
 
+        checkpoint = super().__getattribute__("_checkpoint")
+
         # If we aren't in a request scope, the value is a callable, and it's not
         # in the allow_list, return a wrapper that raises an error if it's
         # called before entering the request scope.
         # TODO: this doesn't wrap classes correctly, does it matter?
         @wraps(orig)
         def wrapper(*args, **kwargs):
-            if not IN_REQUEST_CONTEXT:
+            if IN_REQUEST_CONTEXT:
+                return orig(*args, **kwargs)
+            entropy_calls_before = get_bad_entropy_call_count()
+            if checkpoint is None or entropy_calls_before <= 0:
                 raise RuntimeError(
-                    f"Cannot use {mod.__name__}.{key}() outside of request context. {TOP_LEVEL_ENTROPY_ERROR}"
+                    f"Cannot use {mod.__name__}.{key}() outside of request context. "
+                    f"{TOP_LEVEL_ENTROPY_ERROR}"
                 )
-            return orig(*args, **kwargs)
+            try:
+                return orig(*args, **kwargs)
+            finally:
+                try:
+                    # Some methods in the random module use getentropy() internally.
+                    # Otherwise, we need to consume the allowance here.
+                    # Check if the allowance count has changed - if not, we need to consume it.
+                    if get_bad_entropy_call_count() == entropy_calls_before:
+                        consume_bad_entropy_call()
+                finally:
+                    # Snapshot validation compares the random state against this checkpoint.
+                    checkpoint()
 
         return wrapper
 
