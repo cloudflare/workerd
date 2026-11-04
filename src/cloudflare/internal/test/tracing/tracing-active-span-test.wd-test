@@ -13,10 +13,21 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityFlags = ["nodejs_compat"],
         streamingTails = ["tail"],
+        durableObjectNamespaces = [
+          (
+            className = "SharedSpanObject",
+            uniqueKey = "tracing-active-span-shared-span"
+          )
+        ],
+        durableObjectStorage = (inMemory = void),
         bindings = [
           (
             name = "fetchTarget",
             service = "tracing-hierarchy-mock"
+          ),
+          (
+            name = "sharedSpan",
+            durableObjectNamespace = "SharedSpanObject"
           ),
         ],
       )

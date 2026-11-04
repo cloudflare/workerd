@@ -7,7 +7,7 @@
 // relationships the runtime reported in the streaming-tail events.
 
 import assert from 'node:assert';
-import { tracing } from 'cloudflare:workers';
+import { DurableObject, tracing } from 'cloudflare:workers';
 
 // Created outside any invocation, so this is a no-op span.
 const moduleScopeSpan = tracing.startSpan('was-module-scope');
@@ -77,6 +77,18 @@ export const rejectsNonRuntimeSpans = {
     };
     assert.throws(() => tracing.withActiveSpan(jsSpan, () => {}), TypeError);
     assert.throws(() => tracing.withActiveSpan(undefined, () => {}), TypeError);
+  },
+};
+
+export const rejectsNonFunctionCallback = {
+  test() {
+    const span = tracing.startSpan('was-non-function-callback');
+    assert.throws(
+      () => tracing.withActiveSpan(span, 'not a function'),
+      TypeError
+    );
+    assert.throws(() => tracing.withActiveSpan(span), TypeError);
+    span.end();
   },
 };
 
@@ -184,6 +196,46 @@ export const crossRequestSpanThrows = {
       () => tracing.withActiveSpan(crossRequestSpan, () => {}),
       /different request/
     );
+  },
+};
+
+// Requests to a Durable Object share an IoContext, so request B can activate a span that request A
+// created. While A is still running, B's child spans are reported under A's span.
+export class SharedSpanObject extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.releaseA = new Promise((resolve) => {
+      this.resolveReleaseA = resolve;
+    });
+  }
+
+  async fetch(request) {
+    const requestName = new URL(request.url).pathname.slice(1);
+
+    if (requestName === 'a') {
+      this.spanFromA = tracing.startSpan('was-do-span');
+      await this.releaseA;
+      this.spanFromA.end();
+      return new Response('a');
+    }
+
+    assert.ok(this.spanFromA, 'request a must start before request b');
+    tracing.withActiveSpan(this.spanFromA, () => {
+      assert.strictEqual(tracing.getActiveSpan(), this.spanFromA);
+      tracing.enterSpan('was-do-child', () => {});
+    });
+    this.resolveReleaseA();
+    return new Response('b');
+  }
+}
+
+export const durableObjectSharesSpanAcrossRequests = {
+  async test(ctrl, env) {
+    const stub = env.sharedSpan.get(env.sharedSpan.idFromName('test'));
+    const first = stub.fetch('https://example.com/a');
+    const second = await stub.fetch('https://example.com/b');
+    assert.strictEqual(await second.text(), 'b');
+    assert.strictEqual(await (await first).text(), 'a');
   },
 };
 

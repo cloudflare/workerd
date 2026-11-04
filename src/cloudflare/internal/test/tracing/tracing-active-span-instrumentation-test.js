@@ -71,6 +71,10 @@ export const validateHierarchy = {
     assertParent(span('was-task-b-child'), span('was-task-b'));
     assertParent(span('was-task-ambient-child'), span('was-task-ambient'));
 
+    // durableObjectSharesSpanAcrossRequests: a child created by request b is reported under request
+    // a's span, in request a's invocation.
+    assertParent(span('was-do-child'), span('was-do-span'));
+
     // endedSpanRemainsParent: an ended span can still parent spans created later.
     assert.ok(span('was-ended-parent').closed);
     assertParent(span('was-ended-child'), span('was-ended-parent'));
