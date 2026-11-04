@@ -257,6 +257,7 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 
       // NOLINTEND(custom-dtor-throw-during-unwind)
     }).eagerlyEvaluate([weakHandler = state.handler.addWeak()](kj::Exception&& e) {
+      // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
       auto& handler = KJ_REQUIRE_NONNULL(
           weakHandler.tryGet(), "StoredExternalHandler destroyed before externals were written");
       KJ_IF_SOME(f, handler.onEmptyFulfiller) {

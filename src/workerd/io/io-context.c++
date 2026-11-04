@@ -976,6 +976,7 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
         ? ctx.worker->takeAsyncLockWithoutRequest(nullptr)
         : ctx.worker->takeAsyncLock(ctx.getMetrics());
     return lockPromise.then([weakContext = kj::mv(weakContext)](Worker::AsyncLock asyncLock) {
+      // NOLINTNEXTLINE(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
       KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before hang abort")
           .abortFromHang(asyncLock);
     });
