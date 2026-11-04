@@ -176,6 +176,7 @@ class WorkerTracer final: public BaseTracer {
   // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
   void addSpanUpdateInternal(
       tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp);
+  void addSpanLinksInternal(tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp);
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;
