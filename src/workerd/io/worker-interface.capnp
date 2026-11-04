@@ -937,6 +937,11 @@ interface DatagramStream $Cxx.allowCancellation {
 
   abort @2 ();
   # The receive path of an outbound session failed; pending reads must reject.
+
+  sendWithAck @3 (datagram :Data);
+  # Outbound send with per-packet completion/error reporting. Resolves when the egress
+  # transport accepts the payload, not when the UDP destination receives it. Unlike
+  # streaming send(), this lets writer.write() reject for this packet's transport error.
 }
 
 interface TraceCompletion {

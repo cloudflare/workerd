@@ -415,8 +415,12 @@ class PromisedDatagramChannel final: public DatagramChannel {
 
 class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
  public:
+  enum class SendMode { STREAMING, ACKNOWLEDGED };
+
   // Creates a channel that sends datagrams through an RPC stream.
-  RpcDatagramChannel(rpc::DatagramStream::Client down): down(kj::mv(down)) {}
+  RpcDatagramChannel(rpc::DatagramStream::Client down, SendMode sendMode)
+      : down(kj::mv(down)),
+        sendMode(sendMode) {}
 
   // Disconnects any outstanding channel operations.
   ~RpcDatagramChannel() noexcept(false) {
@@ -445,6 +449,12 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
     KJ_IF_SOME(exception, failure) {
       return exception.clone();
+    }
+    if (sendMode == SendMode::ACKNOWLEDGED) {
+      auto req =
+          down.sendWithAckRequest(capnp::MessageSize{8 + datagram.size() / sizeof(capnp::word), 0});
+      req.setDatagram(datagram);
+      return req.sendIgnoringResult();
     }
     auto req = down.sendRequest(capnp::MessageSize{8 + datagram.size() / sizeof(capnp::word), 0});
     req.setDatagram(datagram);
@@ -503,6 +513,7 @@ class RpcDatagramChannel final: public DatagramChannel, public kj::Refcounted {
   };
 
   rpc::DatagramStream::Client down;
+  SendMode sendMode;
   kj::WaiterQueue<kj::Maybe<kj::Array<kj::byte>>> receivers;
   kj::Maybe<Pending> pending;
   kj::Maybe<kj::Exception> failure;
@@ -826,7 +837,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpEgressCustomEvent::sendRpc(
     FrankenvalueHandler&,
     rpc::EventDispatcher::Client dispatcher) {
   auto send = kj::newPromiseAndFulfiller<rpc::DatagramStream::Client>();
-  auto channel = kj::rc<RpcDatagramChannel>(rpc::DatagramStream::Client(kj::mv(send.promise)));
+  auto channel = kj::rc<RpcDatagramChannel>(rpc::DatagramStream::Client(kj::mv(send.promise)),
+      RpcDatagramChannel::SendMode::ACKNOWLEDGED);
   auto request = dispatcher.openUdpRequest();
   request.setHost(host);
   request.setReceived(kj::heap<IncomingRpcDatagramStream>(channel.downgrade()));
@@ -856,6 +868,10 @@ class UdpEgressRpcStream final: public rpc::DatagramStream::Server {
 
  private:
   kj::Promise<void> send(SendContext context) override {
+    KJ_REQUIRE(channel.get() != nullptr, "UDP session has ended");
+    co_await channel->send(context.getParams().getDatagram());
+  }
+  kj::Promise<void> sendWithAck(SendWithAckContext context) override {
     KJ_REQUIRE(channel.get() != nullptr, "UDP session has ended");
     co_await channel->send(context.getParams().getDatagram());
   }
@@ -968,7 +984,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::sendRpc
 kj::Promise<void> UdpConnectCustomEvent::receiveRpc(
     UdpConnectContext context, WorkerInterface& worker) {
   auto params = context.getParams();
-  auto channel = kj::rc<RpcDatagramChannel>(params.getDown());
+  auto channel =
+      kj::rc<RpcDatagramChannel>(params.getDown(), RpcDatagramChannel::SendMode::STREAMING);
   KJ_DEFER(channel->disconnect(KJ_EXCEPTION(DISCONNECTED, "UDP RPC event ended")));
 
   rpc::DatagramStream::Client up = kj::heap<IncomingRpcDatagramStream>(channel.downgrade());

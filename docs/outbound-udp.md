@@ -53,6 +53,9 @@ creating a connected native UDP socket. Unsupported services reject the event.
 
 EventDispatcher.openUdp carries the open across runtime RPC. Each direction uses
 DatagramStream capabilities, preserving record boundaries and consumption backpressure.
+Outbound writes use a non-streaming `sendWithAck` RPC so each write waits for the
+backend to accept that packet and receives its transport error. This acknowledgment
+is internal to the runtime; the UDP destination sends no acknowledgment.
 The returned send capability owns the backend channel and request lifetime. The reverse
 capability holds a weak reference to the caller's channel, avoiding a capability cycle.
 Dropping the owning channel releases the transport and request accounting state.
