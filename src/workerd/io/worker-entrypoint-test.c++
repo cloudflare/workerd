@@ -1122,6 +1122,7 @@ class TransportSupplyingObserver final: public RequestObserver {
   struct Stats {
     uint handleRequests = 0;
     uint handlesDestroyed = 0;
+    uint pauses = 0;
   };
 
   explicit TransportSupplyingObserver(Stats& stats): stats(stats) {}
@@ -1141,65 +1142,128 @@ class TransportSupplyingObserver final: public RequestObserver {
       ++stats.handlesDestroyed;
     }
 
+    // The client sends nothing before the transport is paused.
     kj::Promise<Pause> pause() override {
-      KJ_UNIMPLEMENTED("not paused in this test");
+      ++stats.pauses;
+      return Pause{
+        .sentCount = 0,
+        .token = kj::heapArray<kj::byte>(32),
+        .timeLimit = 30 * kj::SECONDS,
+        .lease = kj::heap<Lease>(),
+      };
     }
 
    private:
+    class Lease final: public PauseLease {
+     public:
+      kj::Promise<bool> confirmEnded() override {
+        KJ_UNIMPLEMENTED("the transport doesn't end in this test");
+      }
+    };
+
     Stats& stats;
   };
 
   Stats& stats;
 };
 
-KJ_TEST("a hibernatable WebSocket keeps the transport handle that its response was sent with") {
-  TransportSupplyingObserver::Stats stats;
-  auto loopback = kj::refcounted<FixtureLoopback>();
-  TestFixture fixture(TestFixture::SetupParams{
-    .mainModuleSource = HIBERNATABLE_WEB_SOCKET_SOURCE,
-    .actorId = Worker::Actor::Id(kj::str("hibernatable-web-socket-transport-test")),
-    .actorClassName = "default"_kj,
-    .useRealTimers = false,
-    .actorLoopback = kj::addRef(*loopback),
-    .requestObserverFactory =
-        kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<TransportSupplyingObserver>(stats);
-  }),
-  });
-  loopback->fixture = fixture;
-  auto& actor = fixture.getActor();
-  actor.setHibernationManager(
-      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+// An upgrade request to HIBERNATABLE_WEB_SOCKET_SOURCE, run by a LegacyHibernationManagerImpl,
+// whose observer is a TransportSupplyingObserver. The request is started and the event loop polled
+// once on construction.
+class TransportSupplyingWebSocketRequest {
+ public:
+  explicit TransportSupplyingWebSocketRequest(kj::StringPtr actorId)
+      : fixture(TestFixture::SetupParams{
+          .mainModuleSource = HIBERNATABLE_WEB_SOCKET_SOURCE,
+          .actorId = Worker::Actor::Id(kj::str(actorId)),
+          .actorClassName = "default"_kj,
+          .useRealTimers = false,
+          .actorLoopback = kj::addRef(*loopback),
+          .requestObserverFactory =
+              kj::Function<kj::Own<RequestObserver>()>([this]() -> kj::Own<RequestObserver> {
+                return kj::refcounted<TransportSupplyingObserver>(stats);
+              }),
+        }),
+        response(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none)),
+        headers(headerTable),
+        peer(kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none)) {
+    loopback->fixture = fixture;
+    auto& actor = fixture.getActor();
+    actor.setHibernationManager(
+        kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+    entrypoint = fixture.makeWorkerEntrypoint();
+    headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+    request =
+        entrypoint
+            ->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+            .eagerlyEvaluate(nullptr);
+    fixture.pollEventLoop();
+  }
 
-  auto entrypoint = fixture.makeWorkerEntrypoint();
+  Worker::Actor::HibernationManager& getHibernationManager() {
+    return KJ_ASSERT_NONNULL(fixture.getActor().getHibernationManager());
+  }
+
+  TransportSupplyingObserver::Stats stats;
+  kj::Own<FixtureLoopback> loopback = kj::refcounted<FixtureLoopback>();
+  TestFixture fixture;
+  kj::TwoWayPipe pipe = kj::newTwoWayPipe();
+  TestResponse response;
+  kj::Own<WorkerInterface> entrypoint;
   kj::HttpHeaderTable headerTable;
-  kj::HttpHeaders headers(headerTable);
-  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  kj::HttpHeaders headers;
   kj::NullStream requestBody;
-  auto pipe = kj::newTwoWayPipe();
-  TestResponse response(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
-  auto request =
-      entrypoint->request(
-                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
-          .eagerlyEvaluate(nullptr);
-  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
-  fixture.pollEventLoop();
-  KJ_ASSERT(response.statusCode == 101);
+  kj::Promise<void> request = nullptr;
+
+  // The client's end of the WebSocket.
+  kj::Own<kj::WebSocket> peer;
+};
+
+KJ_TEST("a hibernatable WebSocket keeps the transport handle that its response was sent with") {
+  TransportSupplyingWebSocketRequest test("hibernatable-web-socket-transport-test"_kj);
+  KJ_ASSERT(test.response.statusCode == 101);
+  auto& waitScope = test.fixture.getWaitScope();
 
   // The handle was taken once, before the response was accepted, which carries the header added
   // with it.
-  KJ_EXPECT(stats.handleRequests == 1, stats.handleRequests);
-  KJ_EXPECT(response.acceptedHeaders.contains("X-Transport: movable"), response.acceptedHeaders);
-  KJ_EXPECT(stats.handlesDestroyed == 0);
+  KJ_EXPECT(test.stats.handleRequests == 1, test.stats.handleRequests);
+  KJ_EXPECT(test.response.acceptedHeaders.contains("X-Transport: movable"),
+      test.response.acceptedHeaders);
+  KJ_EXPECT(test.stats.handlesDestroyed == 0);
 
   // The Durable Object holds the handle until it drops the WebSocket.
-  peer->close(1000, "done").wait(fixture.getWaitScope());
-  auto message = peer->receive().wait(fixture.getWaitScope());
+  test.peer->close(1000, "done").wait(waitScope);
+  auto message = test.peer->receive().wait(waitScope);
   KJ_ASSERT(message.is<kj::WebSocket::Close>());
-  auto exception = kj::runCatchingExceptions([&]() { request.wait(fixture.getWaitScope()); });
+  auto exception = kj::runCatchingExceptions([&]() { test.request.wait(waitScope); });
   KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::DISCONNECTED);
-  fixture.pollEventLoop();
-  KJ_EXPECT(stats.handlesDestroyed == 1, stats.handlesDestroyed);
+  test.fixture.pollEventLoop();
+  KJ_EXPECT(test.stats.handlesDestroyed == 1, test.stats.handlesDestroyed);
+}
+
+KJ_TEST("a hibernatable WebSocket can be handed off with the transport of its response") {
+  TransportSupplyingWebSocketRequest test("hibernatable-web-socket-handoff-test"_kj);
+  KJ_ASSERT(test.response.statusCode == 101);
+  auto& waitScope = test.fixture.getWaitScope();
+  auto& hm = test.getHibernationManager();
+
+  KJ_EXPECT(hm.checkWebSocketHandoff(1024) == WebSocketHandoffBlocker::WEBSOCKET_AWAKE);
+  test.fixture.enterWorkerLock([&](Worker::Lock& lock) { hm.hibernateWebSockets(lock); });
+  KJ_EXPECT(hm.checkWebSocketHandoff(1024) == kj::none);
+
+  // Detaching pauses the transport that the response's handle stands for.
+  auto handoff = hm.beginLoopbackHandoff();
+  auto detached = hm.detachWebSocketsForHandoff().wait(waitScope)->take();
+  KJ_EXPECT(test.stats.pauses == 1, test.stats.pauses);
+  KJ_ASSERT(detached.sockets.size() == 1);
+  hm.adoptWebSockets(kj::mv(detached));
+  handoff = nullptr;
+
+  // The adopted WebSocket still reaches the Durable Object, which echoes the Close.
+  test.peer->close(1000, "done").wait(waitScope);
+  auto message = test.peer->receive().wait(waitScope);
+  KJ_ASSERT(message.is<kj::WebSocket::Close>());
+  KJ_EXPECT(getJsEvents(test.fixture) == "close:1000:true;");
 }
 
 KJ_TEST("a locally accepted WebSocket doesn't take a transport handle") {

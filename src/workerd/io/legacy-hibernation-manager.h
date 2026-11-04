@@ -68,6 +68,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // Gets the event timeout if set.
   kj::Maybe<uint32_t> getEventTimeout() override;
 
+  kj::Maybe<WebSocketHandoffBlocker> checkWebSocketHandoff(size_t maxStateBytes) override;
+  kj::Promise<kj::Own<HibernatableWebSocketDetachment>> detachWebSocketsForHandoff() override;
+  void adoptWebSockets(DetachedHibernatableWebSockets detached) override;
+
   // Returns the manager that registered `websocketId`, or kj::none if no manager on this event loop
   // registered that ID.
   //
@@ -79,6 +83,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
  private:
   class HibernatableWebSocket;
+  class Detachment;
 
   // Ends the handoff identified by `generation`, putting the parked loopback back if no replacement
   // supplied one. Does nothing if that handoff already ended, so a handle dropped afterwards cannot
@@ -88,7 +93,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
   kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
 
-  // Starts `hib`'s read loop.
+  // Starts `hib`'s read loop, which detachment can cancel through the socket's readLoopCanceler.
   void startReadLoop(HibernatableWebSocket& hib);
 
   // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
@@ -114,6 +119,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     kj::Promise<void> whenReceived();
     kj::WebSocket::Message takeMessage();
 
+    // Waits for the message on behalf of whoever takes over the socket.
+    static kj::Promise<kj::WebSocket::Message> release(kj::Own<PendingReceive> self);
+
    private:
     kj::Maybe<kj::WebSocket::Message> message;
     kj::ForkedPromise<void> received;
@@ -128,7 +136,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // when initiating, or waking from hibernation.
   class HibernatableWebSocket {
    public:
-    HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
+    // Starts active for a newly accepted WebSocket, or hibernated for an adopted one.
+    HibernatableWebSocket(
+        kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage,
         kj::ArrayPtr<kj::String> tags,
         kj::Rc<HibernatableTransport> transport,
         LegacyHibernationManagerImpl& manager);
@@ -169,7 +179,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // accepting as hibernatable.
     kj::Maybe<kj::Rc<kj::WebSocket>> ws;
 
-    // The receive on `ws` that the read loop is waiting for.
+    // The receive on `ws` that the read loop is waiting for, or that an adopted socket brought.
     kj::Maybe<kj::Own<PendingReceive>> pendingReceive;
 
     LegacyHibernationManagerImpl& manager;
@@ -184,6 +194,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // True once we have dispatched the close event.
     // This prevents us from dispatching it if we have already done so.
     bool hasDispatchedClose = false;
+
+    // True while the read loop delivers an event for this socket, which detachment can't
+    // interrupt. Unlike the event's registration, this lasts after the handler claims the socket.
+    bool deliveringEvent = false;
 
     // Trace context captured at acceptWebSocket() time, restored when the DO is woken up
     // so that hibernation events are linked to the original trace.
@@ -201,8 +215,19 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Cancels promises that borrow `ws`. Declared after `ws` so it is destroyed first.
     kj::Canceler writeCanceler;
 
-    // Shared weakly with the api::WebSocket, through which couple() attaches the transport.
+    // Shared weakly with the api::WebSocket, through which couple() attaches the transport, and
+    // moved with the socket when it's handed off.
     kj::Rc<HibernatableTransport> transport;
+
+    // The pause that a detachment in progress took on the transport.
+    kj::Maybe<HibernatableTransportHandle::Pause> handoffPause;
+
+    // Cancels a detachment's pause of the transport, which stores its result in `handoffPause`.
+    kj::Canceler handoffCanceler;
+
+    // Cancels the read loop, which uses everything above. The read loop releases it before it
+    // destroys this socket record itself.
+    kj::Canceler readLoopCanceler;
 
     friend LegacyHibernationManagerImpl;
   };
@@ -211,11 +236,29 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   HibernatableWebSocket& insertWebSocket(
       kj::Own<HibernatableWebSocket> hib, kj::ArrayPtr<kj::String> tags);
 
-  // Removes a HibernatableWebSocket from the HibernationManager's various collections.
+  // Removes a HibernatableWebSocket from the HibernationManager's various collections. Called only
+  // by the socket's own read loop.
   void dropHibernatableWebSocket(HibernatableWebSocket& hib);
 
   // Removes the HibernatableWebSocket from `allWs`.
   inline void removeFromAllWs(HibernatableWebSocket& hib);
+
+  // The detachment in progress, from when detachWebSocketsForHandoff() starts until its result
+  // takes the sockets or is dropped.
+  kj::Maybe<Detachment&> detachment;
+
+  // Abandons the detachment in progress, if any.
+  void abandonDetachment(WebSocketHandoffBlocker blocker);
+
+  // What prevents detaching the sockets, apart from the size of their state.
+  kj::Maybe<WebSocketHandoffBlocker> checkDetachable();
+
+  // Pauses `hib`'s transport and stores the result in `hib.handoffPause`. Run through
+  // `hib.handoffCanceler`, so it ends with the socket.
+  kj::Promise<void> pauseTransport(HibernatableWebSocket& hib);
+
+  // Counts a message that `hib` received, toward the detachment's wait as well.
+  void countConsumed(HibernatableWebSocket& hib);
 
   struct RegisteredEvent {
     // Neither pointer is owning: a registration lives only as long as the task delivering the

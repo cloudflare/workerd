@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/web-socket.h>
+#include <workerd/io/hibernation-handoff.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 
@@ -39,6 +40,9 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   kj::Own<HibernationManager> addRef() override;
   void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) override;
   kj::Maybe<uint32_t> getEventTimeout() override;
+  kj::Maybe<WebSocketHandoffBlocker> checkWebSocketHandoff(size_t maxStateBytes) override;
+  kj::Promise<kj::Own<HibernatableWebSocketDetachment>> detachWebSocketsForHandoff() override;
+  void adoptWebSockets(DetachedHibernatableWebSockets detached) override;
 };
 
 }  // namespace workerd

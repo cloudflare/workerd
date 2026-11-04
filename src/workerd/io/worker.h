@@ -63,10 +63,13 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace api
 
 class BaseTracer;
+struct DetachedHibernatableWebSockets;
 class EmbedderBootstrap;
+class HibernatableWebSocketDetachment;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
+enum class WebSocketHandoffBlocker : uint8_t;
 
 class ThreadContext;
 class IoContext;
@@ -1011,6 +1014,40 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Own<HibernationManager> addRef() = 0;
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
+
+    // Handing the WebSockets to another manager, typically in another process, takes three steps.
+    // checkWebSocketHandoff() says whether to try. detachWebSocketsForHandoff() readies the sockets,
+    // and its result takes them out. adoptWebSockets() puts them into the other manager, or back
+    // into this one if the handoff is abandoned. The sockets' connections stay up throughout: only
+    // their transports, which the embedder supplies (see HibernatableTransportHandle), move.
+
+    // Returns what prevents detachWebSocketsForHandoff() from succeeding now, or kj::none if it can
+    // be tried. It can't if a socket is awake, has no transport or has sent its Close, if an event
+    // is in progress, or if the state of the sockets and the manager settings that apply to them
+    // takes more than `maxStateBytes`. The state counts WEBSOCKET_HANDOFF_BYTES_PER_SOCKET and
+    // WEBSOCKET_HANDOFF_BYTES_PER_TAG for each socket and tag besides its strings.
+    virtual kj::Maybe<WebSocketHandoffBlocker> checkWebSocketHandoff(size_t maxStateBytes) = 0;
+
+    // Pauses the transport of every socket, then waits until each socket has received every
+    // message its transport sent, and for any auto-response in progress. The result then takes the
+    // sockets out of the manager. Finish the handoff well within the pauses' time limits, after
+    // which the transports may resume on their own.
+    //
+    // Requires events to wait for a loopback (see beginLoopbackHandoff()), since an event would
+    // need the actor in this process. Until the sockets are taken, the handoff is abandoned as soon
+    // as an event starts waiting or a loopback arrives, if a socket is accepted, wakes up, goes away
+    // or is attached to another transport, or if the auto-response or event timeout changes.
+    // Failing, being abandoned, cancelling the returned promise, or dropping its result before
+    // taking the sockets leaves them in place and drops the pauses, which resumes the transports.
+    // A failure that a blocker causes carries it (see getWebSocketHandoffBlocker()).
+    virtual kj::Promise<kj::Own<HibernatableWebSocketDetachment>> detachWebSocketsForHandoff() = 0;
+
+    // Adds the sockets to this manager as hibernated sockets, applies the manager settings, starts
+    // the read loops, and then drops any pauses, which resumes the transports. Requires a timer
+    // channel (see setTimerChannel()) if the sockets come with an auto-response, which records the
+    // time it answers. To reconnect an adopted socket to another transport later, keep a reference
+    // to its `transport` before adopting it.
+    virtual void adoptWebSockets(DetachedHibernatableWebSockets detached) = 0;
   };
 
   class FacetManager {

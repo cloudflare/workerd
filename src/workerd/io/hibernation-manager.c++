@@ -90,4 +90,18 @@ kj::Maybe<uint32_t> HibernationManagerImpl::getEventTimeout() {
   KJ_UNIMPLEMENTED("HibernationManagerImpl::getEventTimeout not yet implemented (EW-10817)");
 }
 
+// An embedder asks whether it can hand off WebSockets before trying, so the answer must not throw.
+kj::Maybe<WebSocketHandoffBlocker> HibernationManagerImpl::checkWebSocketHandoff(size_t) {
+  return WebSocketHandoffBlocker::UNSUPPORTED;
+}
+
+kj::Promise<kj::Own<HibernatableWebSocketDetachment>> HibernationManagerImpl::
+    detachWebSocketsForHandoff() {
+  return makeWebSocketHandoffException(WebSocketHandoffBlocker::UNSUPPORTED);
+}
+
+void HibernationManagerImpl::adoptWebSockets(DetachedHibernatableWebSockets detached) {
+  KJ_UNIMPLEMENTED("HibernationManagerImpl::adoptWebSockets not yet implemented (EW-10817)");
+}
+
 }  // namespace workerd
