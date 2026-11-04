@@ -4,6 +4,7 @@
 
 use jsg::Error;
 use jsg::ExceptionType;
+use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_struct;
@@ -48,6 +49,12 @@ impl<'s> ToJS<'s> for Unconvertible {
     }
 }
 
+impl jsg::TypeInfo for Unconvertible {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
+
 impl<'s> jsg::FromJS<'s> for Unconvertible {
     type ResultType = Self;
 
@@ -73,6 +80,13 @@ struct FailingFieldStruct {
 #[jsg_struct]
 struct FailingNullishFieldStruct {
     pub bad: jsg::NullOrUndefined<Unconvertible>,
+}
+
+/// A struct with fields that hold JavaScript values, as C++ `jsg::JsRef<T>` fields do.
+#[jsg_struct]
+struct JsValueStruct {
+    pub value: v8::TracedGlobal<v8::Value>,
+    pub object: Option<v8::TracedGlobal<v8::Object>>,
 }
 
 #[test]
@@ -423,6 +437,96 @@ fn nullish_struct_fields_use_consuming_fallible_conversion() {
             Ok(())
         });
     }
+}
+
+/// A `TracedGlobal` field holds the value itself, which converts back to JavaScript unchanged,
+/// with and without `fast_jsg_struct`.
+#[test]
+fn struct_js_value_fields_keep_identity() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, ctx| {
+            let result = convert::<JsValueStruct>(
+                lock,
+                ctx,
+                "globalThis.v = { a: 1 }; ({ value: v, object: v })",
+            )?;
+            assert!(result.object.is_some());
+            let back = result.to_js(lock)?;
+            ctx.set_global(lock, "back", back);
+            assert!(
+                ctx.eval::<bool>(lock, "back.value === v && back.object === v")
+                    .unwrap()
+            );
+            Ok(())
+        });
+    }
+}
+
+/// Like C++ JSG's `jsg::JsRef<jsg::JsValue>`, a `TracedGlobal<Value>` field takes any value, an
+/// absent property as `undefined`; an optional field is absent then.
+#[test]
+fn struct_js_value_field_takes_any_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let result = convert::<JsValueStruct>(lock, ctx, "({})")?;
+        assert!(result.value.as_local(lock).is_undefined());
+        assert!(result.object.is_none());
+
+        let result = convert::<JsValueStruct>(lock, ctx, "({ value: 42 })")?;
+        let value = result.value.as_local(lock);
+        assert_eq!(u32::from_js(lock, value)?, 42);
+
+        let Err(err) = convert::<JsValueStruct>(lock, ctx, "null") else {
+            panic!("null has no value");
+        };
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "Cannot initialize JsValueStruct with required members from an undefined or null value."
+        );
+        Ok(())
+    });
+}
+
+/// A `TracedGlobal<Object>` field takes only an object, as a `Local<Object>` does.
+#[test]
+fn struct_js_object_field_rejects_other_values() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let Err(err) = convert::<JsValueStruct>(lock, ctx, "({ value: 1, object: 2 })") else {
+            panic!("2 is not an object");
+        };
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "Expected Object but got number");
+        Ok(())
+    });
+}
+
+/// A struct with `TracedGlobal` fields outlives the scope it was converted in, and keeps its
+/// values through a GC: outside a resource, nothing has made its handles weak.
+#[test]
+fn struct_js_value_field_outlives_its_scope() {
+    let harness = crate::Harness::new();
+    let kept = std::cell::RefCell::new(None);
+    harness.run_in_context(|lock, ctx| {
+        *kept.borrow_mut() = Some(convert::<JsValueStruct>(
+            lock,
+            ctx,
+            "({ value: { a: 1 }, object: { b: 2 } })",
+        )?);
+        Ok(())
+    });
+    harness.run_in_context(|lock, ctx| {
+        crate::Harness::request_gc(lock);
+        let back = kept.borrow_mut().take().unwrap().to_js(lock)?;
+        ctx.set_global(lock, "back", back);
+        assert!(
+            ctx.eval::<bool>(lock, "back.value.a === 1 && back.object.b === 2")
+                .unwrap()
+        );
+        Ok(())
+    });
 }
 
 /// A `Vec<u8>` field converts to an `Array` of numbers, like any other `Vec`, with and without

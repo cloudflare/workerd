@@ -45,9 +45,7 @@ runs at 2000-01-01.)
 
 The TS cell adds only what selects the implementation: the
 `typescript_implemented_streams` flag, `--experimental` in its
-`wd_bench()` (the flag is experimental), and the
-`workerd-autogate-per-isolate-javascript-bootstrap` autogate, without which
-workerd refuses to start a worker that sets the flag. The flag alone
+`wd_bench()` (the flag is experimental). The flag alone
 selects the implementation: the C++ cell's `@all-autogates` variant enables
 the autogate too and still runs C++ streams. Unlike the test suites' TS
 cells, the TS cells don't set the catch-all `experimental` flag, which would

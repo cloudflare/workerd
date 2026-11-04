@@ -77,6 +77,13 @@ class OutputGate;
 
 class StoredExternalHandler;
 
+// The number of non-hibernatable WebSockets a Durable Object instance has accepted and not yet
+// released. Refcounted because each WebSocket gives back its count from its own destructor, which
+// can run after the actor is destroyed.
+struct NonHibernatableWebSocketCount: public kj::Refcounted {
+  uint32_t count = 0;
+};
+
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
     kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
@@ -366,9 +373,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // We give a reference to the callback to the limit enforcer, so it has to outlive the limit
   // enforcer. The Isolate outlives the limit enforcer. If this function is called a second time, we
   // throw to avoid invalidating references.
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) const;
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
-  kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+  kj::Maybe<kj::Function<void()>> getCpuLimitNearlyExceededCallback() const;
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
   // At least one of signalOffset or terminatedOffset must be provided. The instance handle is
@@ -571,7 +578,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Own<AsyncTraceIsolate>> asyncTraceIsolate;
   kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
-  kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Maybe<kj::Function<void()>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 
@@ -920,12 +927,7 @@ class Worker::Actor final: public kj::Refcounted {
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
   static bool idsEqual(const Id& a, const Id& b);
 
-  // Why an actor is hibernating, as passed to its onHibernate handler.
-  enum class HibernationReason {
-    INACTIVE,
-    CODE_UPDATED,
-    SYSTEM,
-  };
+  using HibernationReason = rpc::Trace::OnHibernateEventInfo::Reason;
 
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
@@ -1160,6 +1162,9 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
 
   ActorObserver& getMetrics();
+
+  // Counts the non-hibernatable WebSockets this actor has accepted, to enforce a limit on them.
+  kj::Rc<NonHibernatableWebSocketCount> getNonHibernatableWebSocketCount();
 
   InputGate& getInputGate();
   OutputGate& getOutputGate();

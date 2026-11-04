@@ -172,6 +172,14 @@ pub mod ffi {
         replicated: bool,
     }
 
+    /// What an alarm does when another instance owns its object: runs again later, a retry
+    /// that counts against no limit, or is done.
+    #[repr(u8)]
+    enum AlarmElsewhere {
+        Retry,
+        Done,
+    }
+
     /// What a channel token is for (`IoChannelFactory::ChannelTokenUsage`): restoring a stub over
     /// RPC, or from Durable Object storage. The values are the C++ enum's.
     #[repr(u32)]
@@ -376,6 +384,13 @@ pub mod ffi {
             metadata: KjOwn<RequestMetadata>,
             tails: Box<WorkerInterfaceList>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Runs an idle actor's captured hook and flushes its writes, without starting a request
+        /// through the container's retirement gate or counting the actor as active.
+        async fn worker_run_actor_on_hibernate(
+            worker: &CompiledWorker,
+            actor: &ActorHandle,
+            channels: Box<ChannelFactory>,
+        ) -> Result<()>;
         /// `inner` with `keep` attached: dropped once `inner` has been.
         fn worker_interface_attach(
             inner: KjOwn<WorkerInterface>,
@@ -414,6 +429,8 @@ pub mod ffi {
         /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
         /// actor is shut down instead: its background work stops, and nothing is failed.
         fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
+        fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
         /// it on behalf of.
         type ActorLock;
@@ -463,6 +480,17 @@ pub mod ffi {
         ) -> Result<KjOwn<ActorStorage>>;
         /// Deletes every actor's storage and every alarm. Callers abort the actors first.
         fn actor_storage_delete_all(storage: &ActorStorage) -> Result<()>;
+        /// Schedules the alarm of root actor `actor` (its id's hex), whose `idFromName()` name
+        /// is `name`, empty for none, unless one is scheduled no later.
+        fn actor_storage_set_alarm(
+            storage: &ActorStorage,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Result<()>;
+        /// What an alarm runs on when another instance owns its object: nothing, and then
+        /// `then`.
+        fn alarm_owned_elsewhere(then: AlarmElsewhere) -> KjOwn<WorkerInterface>;
         /// Deletes the storage of the facet `name` of the actor numbered `parent_facet_id` (none
         /// for the root), and its descendants'. Nothing for a root actor that never had facets.
         fn actor_storage_delete_facet(
@@ -488,6 +516,8 @@ pub mod ffi {
             parent_facet_id: KjMaybe<u32>,
             name: &str,
         ) -> Result<KjMaybe<u32>>;
+        /// Removes the root actor `root_key`'s databases, its facets', and their index.
+        fn actor_storage_clear(storage: &ActorStorage, root_key: &str) -> Result<()>;
 
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
@@ -856,8 +886,25 @@ pub mod ffi {
         fn check_open(self: &ActorNamespaceHandle) -> Result<()>;
         /// A write SQLite made to one of the namespace's WAL files.
         fn wal_write(self: &ActorNamespaceHandle, file: &str, offset: u64, data: &[u8]);
-        /// The database of the root actor `root_key` was deleted.
-        fn database_reset(self: &ActorNamespaceHandle, root_key: &str);
+        /// The database `file`, a root actor's or a facet's, was deleted with the facet's
+        /// descendants.
+        fn database_reset(self: &ActorNamespaceHandle, file: &str);
+        /// Indexes root actor `actor`'s alarm at `at_ms` (0: cleared) in the cluster: done once
+        /// a peer would find it.
+        fn alarm_set(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
+        /// Indexes the alarm at `at_ms` that root actor `actor` came with as it opened here,
+        /// unless one is indexed no later.
+        fn alarm_opened(
+            self: &ActorNamespaceHandle,
+            actor: &str,
+            name: &str,
+            at_ms: u64,
+        ) -> Box<ResultTask>;
 
         /// An actor's way back to the server: the requests it raises for itself, its facets
         /// (named child actors sharing its storage), and its transitions between idle and active.
@@ -878,6 +925,8 @@ pub mod ffi {
         fn abort_facet(self: &ActorHooks, name: &str, reason: &Exception);
         fn delete_facet(self: &ActorHooks, name: &str) -> Result<()>;
         fn clone_facet(self: &ActorHooks, src: &str, dst: &str) -> Result<()>;
+        /// Whether the cluster replicates the actor's storage.
+        fn replicated(self: &ActorHooks) -> bool;
         /// The actor's first request started.
         fn active(self: &ActorHooks);
         /// The actor's last request ended.

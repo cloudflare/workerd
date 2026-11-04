@@ -5,7 +5,6 @@
 //! Tests for `this: jsg::Rc<Self>` parameters, which give a method or accessor a `jsg::Rc` of
 //! the resource it was called on, in place of `&self`.
 
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -28,7 +27,7 @@ struct Task {
     label: RefCell<String>,
     /// The wrapper of the queue this task is in, which the task keeps as a resource keeps a
     /// callback it registered: through a `TracedGlobal`, so that GC can collect the cycle.
-    queue: Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    queue: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl Drop for Task {
@@ -44,7 +43,7 @@ impl Task {
         Self {
             name,
             label: RefCell::new(String::new()),
-            queue: Cell::new(None),
+            queue: jsg::Cell::new(None),
         }
     }
 
@@ -89,7 +88,7 @@ impl Task {
         this.queue.set(Some(
             queue.clone().to_js(lock).unwrap().to_traced_global(lock),
         ));
-        queue.tasks.borrow_mut().push(this);
+        queue.tasks.borrow_mut(lock).push(this);
     }
 
     #[jsg_property]
@@ -116,7 +115,7 @@ impl Task {
 /// A resource that holds `jsg::Rc`s of tasks, as a callback's data would.
 #[jsg_resource]
 struct Queue {
-    tasks: RefCell<Vec<jsg::Rc<Task>>>,
+    tasks: jsg::RefCell<Vec<jsg::Rc<Task>>>,
 }
 
 #[jsg_resource]
@@ -124,13 +123,13 @@ impl Queue {
     #[jsg_constructor]
     fn constructor() -> Self {
         Self {
-            tasks: RefCell::new(Vec::new()),
+            tasks: jsg::RefCell::new(Vec::new()),
         }
     }
 
     #[jsg_method]
-    fn clear(&self) {
-        self.tasks.borrow_mut().clear();
+    fn clear(&self, lock: &mut jsg::Lock<'_>) {
+        self.tasks.borrow_mut(lock).clear();
     }
 
     #[jsg_method]
@@ -143,9 +142,9 @@ impl Queue {
 /// `Local` in the test's handle scope keeps a wrapper alive; the tests' scripts likewise end in
 /// `undefined` where their completion value would be one.
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let task = jsg::resource::function_template_of::<Task>(lock);
+    let task = jsg::resource::function_template_of::<Task>(lock).unwrap();
     ctx.set_global(lock, "Task", task);
-    let queue = jsg::resource::function_template_of::<Queue>(lock);
+    let queue = jsg::resource::function_template_of::<Queue>(lock).unwrap();
     ctx.set_global(lock, "Queue", queue);
     ctx.eval_raw(
         lock,

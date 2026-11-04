@@ -402,6 +402,7 @@ RunResult runScenario(TestFixture& fixture, uint index, uint64_t terminateAt) {
       // A previous run's watchdog may have fired after that run released the isolate.
       isolate->CancelTerminateExecution();
       auto& dog = watchdog.emplace(isolate, RUN_TIMEOUT);
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): test: catches the termination.
       v8::TryCatch tryCatch(isolate);
 
       // Runs one phase, recording anything other than the termination we injected. Returns

@@ -99,6 +99,7 @@ struct FacetStartInfo;
 struct ActorStorageSpec;
 struct HeaderEdit;
 struct UdpDatagram;
+enum class AlarmElsewhere : uint8_t;
 
 // How the config message is read: configs can legitimately be very large and are not malicious.
 constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {.traversalLimitInWords = kj::maxValue};
@@ -213,6 +214,8 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
+kj::Promise<void> worker_run_actor_on_hibernate(
+    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
@@ -255,6 +258,8 @@ class ActorHandle final {
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
 void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+bool actor_has_on_hibernate_handler(const ActorHandle& actor);
+bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
 bool actor_shutdown(
     const ActorHandle& actor, ::rust::Str reason, kj::Maybe<kj::Own<ActorLock>> lock);
@@ -286,6 +291,9 @@ kj::Own<ActorStorage> factory_new_actor_storage(const WorkerFactory& factory,
     ::rust::Str path,
     ::rust::Str uniqueKey,
     ::rust::Box<ActorNamespaceHandle> actors);
+void actor_storage_set_alarm(
+    const ActorStorage& storage, ::rust::Str actor, ::rust::Str name, uint64_t atMs);
+kj::Own<WorkerInterface> alarm_owned_elsewhere(AlarmElsewhere then);
 void actor_storage_delete_all(const ActorStorage& storage);
 // Facets have numbers only in a directory (SQLite storage). In-memory storage is an ActorCache per
 // actor, in which they have none, and nothing to delete or clone.
@@ -302,6 +310,7 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
     ::rust::Str rootKey,
     kj::Maybe<uint32_t> parentFacetId,
     ::rust::Str name);
+void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
 

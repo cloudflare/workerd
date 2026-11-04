@@ -18,6 +18,18 @@
 //      minted in-process and passed through props.
 //   8. A stub that has resolved to a remote DO keeps failing once that DO
 //      breaks, while a fresh stub reaches the re-instantiated DO.
+//   9. Facets and their deletions survive a takeover.
+//  10. Draining cancels a running onHibernate handler.
+//
+// A takeover waits out a dead owner's 20 s lease, so each one here costs
+// that much: one test per mechanism. The simulations in ../../cluster
+// (alarms-test.rs, capture-test.rs, owner-test.rs) search the cases.
+// These run there, not here, so not through a real binary and SQLite
+// (`git log -S'facet clones survive'` has the tests that did):
+//   - facet clones, nested deletions and deleteAll() across a takeover:
+//     owner-test.rs, capture-test.rs;
+//   - a dead owner's alarms adopted with its node record gone: only the
+//     orphan scan finds them. alarms-test.rs.
 
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -280,6 +292,12 @@ class FakeS3 {
     return res.status === 404 ? null : await res.text();
   }
 
+  async delete(key) {
+    await fetch(`http://127.0.0.1:${this.port}/wdtest/cluster/v1/${key}`, {
+      method: 'DELETE',
+    });
+  }
+
   // The key of the node that owns the Counter with this ID, or null when no
   // owner record exists.
   async owner(id) {
@@ -460,6 +478,17 @@ test('cluster: killing the owner allows another node to take over', async () => 
     const survivorIndex = ownerIndex === 0 ? 1 : 0;
     const survivor = nodes[survivorIndex];
 
+    // Facets and a deletion ride along: real SQLite, restored elsewhere.
+    for (const path of ['a', 'a', 'a,b%2Fc', 'x', 'x,y']) {
+      await facetAdd(nodes[0].httpPort, 'takeover', path);
+    }
+    // Nothing commits after the delete: it is durable once it returns.
+    const del = await fetchJson(
+      nodes[0].httpPort,
+      '/facet-delete?name=takeover&path=x'
+    );
+    assert.strictEqual(del.status, 200, JSON.stringify(del.body));
+
     // Hard-kill the owner. SIGKILL leaves its lease record in place, so the
     // survivor takes over once that lease expires.
     await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
@@ -507,6 +536,12 @@ test('cluster: killing the owner allows another node to take over', async () => 
     assert.strictEqual(followup.status, 200);
     assert.strictEqual(followup.body.count, 3);
     assert.strictEqual(followup.body.nodeId, survivor.nodeId);
+
+    const p = survivor.httpPort;
+    assert.strictEqual(await facetAdd(p, 'takeover', 'a'), 3);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'a,b%2Fc'), 2);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'x'), 1);
+    assert.strictEqual(await facetAdd(p, 'takeover', 'x,y'), 1);
   });
 });
 
@@ -647,6 +682,37 @@ test(
       assert.strictEqual(response.body.count, 2);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  'cluster: draining cancels a running onHibernate handler',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(1, async ({ nodes: [node] }) => {
+      const url = (path) =>
+        `http://127.0.0.1:${node.httpPort}/on-hibernate/${path}`;
+      assert.strictEqual(await (await fetch(url('start'))).text(), 'running');
+
+      // The eviction waits for the handler, which outlasts its 10 s budget.
+      const eviction = fetch(url('evict'), {
+        signal: AbortSignal.timeout(20_000),
+      });
+      const deadline = Date.now() + 10_000;
+      while (!(await (await fetch(url('started'))).json())) {
+        assert(Date.now() < deadline, 'the onHibernate handler did not start');
+        await sleep(50);
+      }
+
+      // Releasing the object's ownership cancels the handler, so the waiting
+      // eviction fails at once and the drain doesn't wait out the budget.
+      const drainedAt = Date.now();
+      const exit = await node.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      const drainMs = Date.now() - drainedAt;
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+      assert(drainMs < 5_000, `the drain took ${drainMs} ms`);
+      assert.strictEqual((await eviction).status, 500);
     });
   }
 );
@@ -834,12 +900,54 @@ test('cluster: each running instance holds a lease record', async () => {
   });
 });
 
-test('cluster: setting an alarm is refused', async () => {
-  await withCluster(1, async ({ nodes }) => {
-    const res = await fetchJson(nodes[0].httpPort, '/set-alarm?name=alarm');
-    assert.match(res.body.error ?? '', /not yet supported in cluster mode/);
+test("cluster: an alarm runs once on its object's owner", async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const set = await fetchJson(
+      nodes[0].httpPort,
+      '/set-alarm?name=alarm&ms=500'
+    );
+    assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+    await sleep(3000);
+    const res = await fetchJson(nodes[1].httpPort, '/alarms?name=alarm');
+    assert.deepStrictEqual(res.body.fired, [set.body.nodeId]);
   });
 });
+
+test("cluster: a killed owner's alarm runs once on a survivor", async () => {
+  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
+    const set = await fetchJson(
+      nodes[0].httpPort,
+      '/set-alarm?name=orphan&ms=5000'
+    );
+    assert.strictEqual(set.status, 200, JSON.stringify(set.body));
+    const ownerIndex = nodes.findIndex((n) => n.nodeId === set.body.nodeId);
+    const survivor = nodes[1 - ownerIndex];
+    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    // No request touches the object: the survivor finds the alarm in the
+    // dead owner's index once its lease lapses, and claims the object when
+    // the alarm fires. Watch the bucket for that claim, then the alarm.
+    const deadline = Date.now() + 30_000;
+    let res;
+    for (;;) {
+      if ((await bucket.owner(set.body.id)) === nodeKeys.get(survivor.nodeId)) {
+        res = await fetchJson(survivor.httpPort, '/alarms?name=orphan', {
+          timeoutMs: 10_000,
+        });
+        if (res.body.fired.length > 0) break;
+      }
+      assert(Date.now() < deadline, `${survivor.nodeId} never ran the alarm`);
+      await sleep(200);
+    }
+    assert.strictEqual(res.body.nodeId, survivor.nodeId);
+    assert.deepStrictEqual(res.body.fired, [survivor.nodeId]);
+  });
+});
+
+async function facetAdd(port, name, path) {
+  const r = await fetchJson(port, `/facet-add?name=${name}&path=${path}`);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  return r.body.count;
+}
 
 test('cluster: a DO reopened where it was closed resumes its epoch', async () => {
   await withCluster(1, async ({ nodes, bucket }) => {

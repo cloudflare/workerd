@@ -59,7 +59,6 @@ Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, de
 | `kj::OneOf<T...>`             | Union                       | Web IDL validated at compile time                           |
 | `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                              |
 | `jsg::Promise<T>`             | `Promise`                   | Full `.then()`/`.catch_()` API                              |
-| `jsg::Name`                   | `string` or `Symbol`        | Property name wrapper                                       |
 | `jsg::V8Ref<T>`               | Any V8 type                 | Persistent strong reference                                 |
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
@@ -150,14 +149,13 @@ so they remain injection-only.
 | `JSG_STATIC_CONSTANT(name)`                         | Class     | No               | N/A                     |
 | `JSG_PRIVATE_SYMBOL(name)`                          | Instance  | No               | No                      |
 
-`JSG_PRIVATE_SYMBOL(kName)` marks every instance with an own, read-only, non-enumerable,
-non-configurable property keyed by the `v8::Symbol::ForApi(isolate, "kName")` API-registry
-symbol, with the symbol itself as the value. C++ (and runtime-provided JS handed the symbol,
-e.g. via the per-isolate bootstrap's `utils.getApiSymbol()`) can re-acquire the identical
-symbol by name at any time; user code cannot mint it (the API registry is distinct from
-`Symbol.for()`'s). Useful as a tamper-resistant instance brand/marker recognizable from both
-sides of the boundary; note it is visible to `Object.getOwnPropertySymbols`, so it is a
-brand, not a secret. Not represented in RTTI/generated types.
+`JSG_PRIVATE_SYMBOL(kName)` marks every instance with a V8-private property whose value is
+`true`, using `v8::Private::ForApi(isolate, "kName")`. C++ reads it with
+`JsObject::getPrivate(js, "kName")`; per-isolate bootstrap code uses
+`utils.getPrivate(object, "kName")`. The slot is not inherited, serialized, or visible to
+JavaScript reflection, including `Object.getOwnPropertySymbols` and `Reflect.ownKeys`.
+An ordinary JavaScript/API symbol with the same label cannot address it. Not represented
+in RTTI/generated types. Keep the native private-property utilities inaccessible to user code.
 
 ### Type Relationships
 
@@ -257,9 +255,6 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
-
-`jsg::Name` is also not visitable (private `visitForGc`): its symbol handle is
-a strong root, and a `v8::Symbol` cannot form a JS↔C++ cycle.
 
 ## Weak References
 
@@ -603,6 +598,12 @@ Resolve `Context`: `BUNDLE`, `BUILTIN`, `BUILTIN_ONLY`.
 Resolve `Source`: `STATIC_IMPORT`, `DYNAMIC_IMPORT`, `REQUIRE`, `INTERNAL`.
 
 ## RTTI Type Mapping
+
+Rust JSG emits the same `rtti.capnp` schema through trait-based descriptions;
+see [Rust RTTI](../../rust/jsg/README.md#rtti-and-typescript-declarations).
+`MaybeType.allowsNull` and `MaybeType.allowsUndefined` describe which alternatives
+the wrapped type accepts. When both are false, the generator uses the native name
+to decode descriptions from legacy producers.
 
 | C++ Type                  | RTTI Kind   |
 | ------------------------- | ----------- |

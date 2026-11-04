@@ -170,11 +170,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // so it's likely to be caught in debug, and we'd like to avoid the extra overhead in releases.
     DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
 #endif
-#if V8_MINOR_VERSION >= 6
     auto funcPair = unwrapOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
-#else
-    auto funcPair = unwrapOpaque<FuncPairType>(isolate, args.Data());
-#endif
 #ifdef KJ_DEBUG
     kj::AllowAsyncDestructorsScope allowAsyncDestructors;
 #endif
@@ -215,11 +211,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
 template <typename FuncPairType, bool isCatch>
 void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto isolate = args.GetIsolate();
-#if V8_MINOR_VERSION >= 6
   dropOpaque<FuncPairType>(isolate, args.DataV2().As<v8::Value>());
-#else
-  dropOpaque<FuncPairType>(isolate, args.Data());
-#endif
   if constexpr (isCatch) {
     isolate->ThrowException(args[0]);
   } else {
@@ -528,6 +520,7 @@ Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions
 template <class Func>
 PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
   using Result = RemovePromise<ReturnType<Func, void>>;
+  // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the promise with what it caught.
   v8::TryCatch tryCatch(v8Isolate);
   try {
     if constexpr (isPromise<ReturnType<Func, void>>()) {

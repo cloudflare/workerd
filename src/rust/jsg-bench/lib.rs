@@ -67,7 +67,7 @@ enum NumberOrString {
 #[jsg_resource]
 struct Node {
     value: Cell<u32>,
-    child: Cell<Option<jsg::Rc<Self>>>,
+    child: jsg::Cell<Option<jsg::Rc<Self>>>,
 }
 
 #[jsg_resource]
@@ -76,7 +76,7 @@ impl Node {
     fn constructor(value: u32) -> Self {
         Self {
             value: Cell::new(value),
-            child: Cell::new(None),
+            child: jsg::Cell::new(None),
         }
     }
 
@@ -91,8 +91,8 @@ impl Node {
     }
 
     #[jsg_property(prototype)]
-    fn get_child(&self) -> Option<jsg::Rc<Node>> {
-        let child = self.child.take();
+    fn get_child(&self, lock: &mut jsg::Lock<'_>) -> Option<jsg::Rc<Node>> {
+        let child = self.child.take(lock);
         self.child.set(child.clone());
         child
     }
@@ -298,7 +298,7 @@ unsafe fn node_constructor(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLoca
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            Ok::<_, jsg::Error>(jsg::resource::function_template_of::<Node>(lock))
+            jsg::resource::function_template_of::<Node>(lock)
         })
     }
 }

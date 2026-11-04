@@ -5,12 +5,17 @@
 #include "per-isolate-bootstrap.h"
 
 #include <workerd/api/abort-bootstrap.h>
+#include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/encoding.h>
+#include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/request-io.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
@@ -84,7 +89,6 @@ struct BootstrapState {
   // Scripts is a const reference to the process-wide script lookup table built
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
   const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
-  v8::Global<v8::DictionaryTemplate> contextExtensionTemplate;
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
@@ -201,6 +205,159 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The EventTarget seam (see event-target-bootstrap.h). Plain methods: they allocate, can throw,
+// and some call back into JavaScript.
+static void SetListenerCountHook(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setListenerCountHook(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void GetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::getEventHandlerAttribute(
+              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]))));
+    });
+  });
+}
+
+static void SetEventHandlerAttribute(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      api::EventTargetBootstrap::setEventHandlerAttribute(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]));
+    });
+  });
+}
+
+static void DispatchEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      // The caller passes an actual boolean, so this is ToBoolean on a boolean and cannot run
+      // user code.
+      auto report = api::ReportListenerExceptions(args[2]->BooleanValue(args.GetIsolate()));
+      args.GetReturnValue().Set(v8::Local<v8::Value>(api::EventTargetBootstrap::dispatchEvent(
+          js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), report)));
+    });
+  });
+}
+
+static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args.GetIsolate(), [&] {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    js.withinHandleScope([&] {
+      args.GetReturnValue().Set(
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(js,
+              jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]),
+              jsg::JsValue(args[3]), jsg::JsValue(args[4]))));
+    });
+  });
+}
+
+static void CreateTrustedEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void CreateTrustedOpenEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedOpenEvent(js));
+  });
+}
+
+static void CreateTrustedErrorEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedErrorEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+// The request-bound I/O handle (see request-io.h) and the helpers of bootstrap-utils.h. Plain
+// methods: they allocate and can throw.
+static void CreateRequestIo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::RequestIo::createForBootstrap(js));
+  });
+}
+
+static void IsFetcher(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.boolean(api::BootstrapUtils::isFetcher(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ParseUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::parseUrl(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::readableStreamState(js, jsg::JsValue(args[0])));
+  });
+}
+
+// Structured-clones a MessagePort message as postMessage() does: serializes it (which can throw
+// a DataCloneError, and runs any getters on it), rejects a SharedArrayBuffer anywhere in it, and
+// returns the deserialized copy.
+static void CloneMessageData(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    jsg::Serializer ser(js);
+    ser.write(js, jsg::JsValue(args[0]));
+    auto released = ser.release();
+    JSG_REQUIRE(released.sharedArrayBuffers.size() == 0, TypeError,
+        "SharedArrayBuffer is unsupported with MessagePort");
+    jsg::Deserializer deserializer(js, released);
+    return v8::Local<v8::Value>(deserializer.readValue(js));
+  });
+}
+
+// Calls the function argument, with no arguments and an undefined receiver, as a reaction to an
+// already-resolved promise, as jsg::Promise::then() on js.resolvedPromise() does. V8's
+// Promise::Then() involves no species lookup, so scheduling runs no user code. If the function
+// throws, the reaction's promise rejects, and the rejection is reported as unhandled.
+static void QueueReaction(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto fn = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsFunction>(), TypeError,
+        "queueReaction() expects a function");
+    auto context = js.v8Context();
+    auto resolver = jsg::check(v8::Promise::Resolver::New(context));
+    jsg::check(resolver->Resolve(context, js.undefined()));
+    // The reaction's promise is dropped deliberately; see above.
+    std::ignore = jsg::check(resolver->GetPromise()->Then(context, v8::Local<v8::Function>(fn)));
+    return v8::Local<v8::Value>(js.undefined());
+  });
+}
+
 // The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
 // surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
 // method rather than a fast-API call, because V8 flattens the string first,
@@ -211,6 +368,35 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto str = JSG_REQUIRE_NONNULL(
         jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "utf8Length() expects a string");
     return js.num(static_cast<double>(str.utf8Length(js)));
+  });
+}
+
+// TextEncoder.encode() for the TypeScript TextEncoderStream: see api::encodeUtf8Chunk.
+static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "encodeUtf8() expects a string");
+    return api::encodeUtf8Chunk(js, str);
+  });
+}
+
+// The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
+// scripts use as a property key: `object[key]` reads or writes the slot that
+// jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
+// (v8::Object::GetPrivate() is that same property read). A private key is never inherited,
+// reflected or seen by Proxy traps, and only code holding the key can name it. The API does
+// not type a private symbol as a v8::Value, so it is handed over as a template property, as
+// Node.js hands over its own.
+static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto name = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError,
+        "getPrivateSymbol() expects a string argument");
+    v8::Local<v8::String> slot = js.strIntern("key"_kj);
+    auto holder = v8::ObjectTemplate::New(js.v8Isolate);
+    holder->Set(slot, v8::Private::ForApi(js.v8Isolate, name));
+    return jsg::check(jsg::check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot));
   });
 }
 
@@ -265,6 +451,23 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "encodeUtf8",
+    "getPrivateSymbol",
+    "setListenerCountHook",
+    "getEventHandlerAttribute",
+    "setEventHandlerAttribute",
+    "dispatchEvent",
+    "createTrustedMessageEvent",
+    "createTrustedEvent",
+    "cloneMessageData",
+    "queueReaction",
+    "createTrustedOpenEvent",
+    "createTrustedErrorEvent",
+    "createRequestIo",
+    "isFetcher",
+    "parseUrl",
+    "mimeTypeEssence",
+    "readableStreamState",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -279,6 +482,23 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    getMethod(js, EncodeUtf8),
+    getMethod(js, GetPrivateSymbol),
+    getMethod(js, SetListenerCountHook),
+    getMethod(js, GetEventHandlerAttribute),
+    getMethod(js, SetEventHandlerAttribute),
+    getMethod(js, DispatchEvent),
+    getMethod(js, CreateTrustedMessageEvent),
+    getMethod(js, CreateTrustedEvent),
+    getMethod(js, CloneMessageData),
+    getMethod(js, QueueReaction),
+    getMethod(js, CreateTrustedOpenEvent),
+    getMethod(js, CreateTrustedErrorEvent),
+    getMethod(js, CreateRequestIo),
+    getMethod(js, IsFetcher),
+    getMethod(js, ParseUrl),
+    getMethod(js, MimeTypeEssence),
+    getMethod(js, ReadableStreamState),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -286,43 +506,43 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
   return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values)).addRef(js);
 }
 
-// Build the context extension object for a script. This provides the pseudo-global
-// variables that scripts access directly (e.g. `require`, `compatFlags`, `primordials`).
-// We use a DictionaryTemplate to create a fresh object for each script with the same
-// shape. This is faster than creating a new object and defining properties on it for
-// each script using set().
-jsg::JsObject createContextExtension(jsg::Lock& js,
+// The pseudo-global variables that scripts access directly (e.g. `require`, `compatFlags`,
+// `primordials`). Each script is compiled as a function taking them as parameters, in this
+// order. gen-compile-cache (src/rust/gen-compile-cache/cxx-bridge.c++) compiles the scripts
+// with the same parameter list, which must match for V8 to accept the cache.
+//
+// They are parameters rather than the properties of a context extension object because an
+// extension object makes V8 resolve every free variable in the script (`undefined` included)
+// with a dynamic lookup slot: a runtime call that walks the context chain on every access,
+// even in optimized code.
+constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
+  "require"_kj,
+  "compatFlags"_kj,
+  "autogates"_kj,
+  "module"_kj,
+  "exports"_kj,
+  "primordials"_kj,
+  "utils"_kj,
+};
+constexpr size_t PSEUDO_GLOBAL_COUNT = kj::size(PSEUDO_GLOBAL_NAMES);
+
+// The values of PSEUDO_GLOBAL_NAMES for a script, in the same order.
+v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
     BootstrapState& state,
     const jsg::JsObject& moduleObj,
     const jsg::JsObject& exportsObj,
     bool includeRequire) {
-
-  auto tmpl = state.contextExtensionTemplate.Get(js.v8Isolate);
-  static constexpr std::string_view names[] = {
-    "require",
-    "compatFlags",
-    "autogates",
-    "module",
-    "exports",
-    "primordials",
-    "utils",
-  };
-  if (tmpl.IsEmpty()) {
-    tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
-    state.contextExtensionTemplate.Reset(js.v8Isolate, tmpl);
-  }
-
-  v8::MaybeLocal<v8::Value> values[] = {
-    js.v8Undefined(),  // require
-    v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
-    v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
-    v8::Local<v8::Value>(moduleObj),
-    v8::Local<v8::Value>(exportsObj),
-    js.v8Undefined(),  // primordials
-    v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
-  };
-
-  static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
+  v8::LocalVector<v8::Value> values(js.v8Isolate,
+      {
+        js.v8Undefined(),  // require
+        v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
+        v8::Local<v8::Value>(state.autogatesObj.getHandle(js)),
+        v8::Local<v8::Value>(moduleObj),
+        v8::Local<v8::Value>(exportsObj),
+        js.v8Undefined(),  // primordials
+        v8::Local<v8::Value>(state.utilsObj.getHandle(js)),
+      });
+  KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
 
   if (includeRequire) {
     values[0] = v8::Local<v8::Value>(state.requireFn.getHandle(js));
@@ -330,7 +550,7 @@ jsg::JsObject createContextExtension(jsg::Lock& js,
   KJ_IF_SOME(primordials, state.primordials) {
     values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
   }
-  return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values));
+  return values;
 }
 
 // Retrieve the BootstrapState from the current context's embedder data.
@@ -383,15 +603,10 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       auto exportsObj = js.obj();
       moduleObj.set(js, "exports"_kj, exportsObj);
 
-      // Build the context extension object containing all pseudo-globals:
-      //   require, compatFlags, primordials, module, exports
-      auto extObj =
-          createContextExtension(js, state, moduleObj, exportsObj, normalized != "primordials");
+      auto args = pseudoGlobalValues(js, state, moduleObj, exportsObj, normalized != "primordials");
 
-      // Compile the script as a function with the context extension.
-      // CompileFunction with context_extensions makes the extension object's
-      // properties available as variables in the function scope without
-      // putting them on globalThis.
+      // Compile the script as a function whose parameters are the pseudo-globals, which
+      // makes them available as variables in the script without putting them on globalThis.
       auto source = script.getSrc();
       auto& observer = jsg::IsolateBase::from(js.v8Isolate).getObserver();
       // Both branches hand V8 the script's bytes as a one-byte (Latin-1) string, without
@@ -438,9 +653,12 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
         options = v8::ScriptCompiler::kConsumeCodeCache;
       }
 
-      v8::Local<v8::Object> ext = extObj;
+      v8::Local<v8::String> params[PSEUDO_GLOBAL_COUNT];
+      for (auto i: kj::indices(params)) {
+        params[i] = js.strIntern(PSEUDO_GLOBAL_NAMES[i]);
+      }
       auto fn = jsg::JsFunction(jsg::check(v8::ScriptCompiler::CompileFunction(
-          js.v8Context(), &compilerSource, 0, nullptr, 1, &ext, options)));
+          js.v8Context(), &compilerSource, PSEUDO_GLOBAL_COUNT, params, 0, nullptr, options)));
 
       if (options == v8::ScriptCompiler::kConsumeCodeCache) {
         if (compilerSource.GetCachedData()->rejected) {
@@ -454,7 +672,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       }
 
       // Execute the script.
-      fn.call(js, js.undefined());
+      fn.call(js, js.undefined(), args);
 
       // Read back module.exports (script may have reassigned it).
       auto result = moduleObj.get(js, "exports"_kj);
@@ -544,8 +762,8 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
 
   // Load primordials first — this must happen before any other script so that
   // built-in prototype methods are captured before anything could pollute them.
-  // The result is cached in state and injected as a pseudo-global into every
-  // subsequent script via the context extension object.
+  // The result is cached in state and passed as the `primordials` parameter to every
+  // subsequent script.
   JSG_TRY(js) {
     {
       TRACE_EVENT("workerd", "PerIsolateBootrap::primordials");

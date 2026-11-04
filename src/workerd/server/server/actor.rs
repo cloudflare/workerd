@@ -29,6 +29,7 @@ use std::time::Duration;
 use futures::FutureExt;
 use futures::future::Either;
 use futures::future::LocalBoxFuture;
+use futures::future::RemoteHandle;
 use futures::future::Shared;
 use hashlink::LinkedHashMap;
 use kj_rs::KjMaybe;
@@ -60,6 +61,7 @@ use crate::cluster::ClusterNode;
 use crate::cluster::Committer;
 use crate::cluster::Owned;
 use crate::cluster::Owner;
+use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::config::Factory;
 use crate::tasks::TaskHandle;
@@ -155,7 +157,16 @@ impl ActorNamespace {
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
     pub fn set_cluster(&self, cluster: Rc<ClusterNode>) {
+        if let Some(unique_key) = self.unique_key() {
+            cluster.add_namespace(unique_key, Weak::clone(&self.this));
+        }
         let _ = self.cluster.set(cluster);
+    }
+
+    /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
+    pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
+        Ok(())
     }
 
     /// The cluster, for a namespace linked on disk; in-memory namespaces stay local.
@@ -163,13 +174,30 @@ impl ActorNamespace {
         self.directory.get().and_then(|_| self.cluster.get())
     }
 
-    /// The database of root actor `key`.
-    fn sqlite_path(&self, key: &str) -> Result<String> {
+    /// The database of root actor `key`'s facet numbered `facet_id`, the root's own for none.
+    fn sqlite_path(&self, key: &str, facet_id: Option<u32>) -> Result<String> {
         let directory = self
             .directory
             .get()
             .ok_or_else(|| kj::failed!("the namespace has no directory"))?;
-        Ok(format!("{directory}/{key}.sqlite"))
+        Ok(match facet_id {
+            Some(id) => format!("{directory}/{key}.{id}.sqlite"),
+            None => format!("{directory}/{key}.sqlite"),
+        })
+    }
+
+    /// The container running the database `file`, `<key>.sqlite` or a facet's
+    /// `<key>.<n>.sqlite`.
+    fn database_container(&self, file: &str) -> Option<Rc<ActorContainer>> {
+        fn find(c: &Rc<ActorContainer>, id: Option<u32>) -> Option<Rc<ActorContainer>> {
+            if c.facet_id.get() == id {
+                return Some(Rc::clone(c));
+            }
+            c.facets.borrow().values().find_map(|f| find(f, id))
+        }
+        let mut parts = file.split('.');
+        let root = self.actors.borrow().get(parts.next()?).cloned()?;
+        find(&root, parts.next().and_then(|n| n.parse().ok()))
     }
 
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
@@ -204,7 +232,7 @@ impl ActorNamespace {
             .route(&unique_key, &self.service, &self.class_name, &key)
             .await?
         {
-            Owner::Remote(connection) => Ok(Resolved::Remote(connection)),
+            Owner::Remote(connection, node) => Ok(Resolved::Remote(connection, node)),
             Owner::Here(epoch) => {
                 // A concurrent request may have taken it meanwhile.
                 if let Some(container) = self.owned_container(&key) {
@@ -218,6 +246,21 @@ impl ActorNamespace {
                 Ok(Resolved::Here(Client(container)))
             }
         }
+    }
+
+    /// Fails in a cluster once this instance's lease has lapsed. A node stalled past its lease may
+    /// have been taken over: running its actors, even to read their databases, could act on stale
+    /// data.
+    fn require_lease(&self) -> Result<()> {
+        if self
+            .cluster()
+            .is_some_and(|node| !node.cluster.lease_holds())
+        {
+            return Err(kj::failed!(
+                "this instance's cluster lease in the bucket has lapsed"
+            ));
+        }
+        Ok(())
     }
 
     fn owned_container(&self, key: &str) -> Option<Rc<ActorContainer>> {
@@ -409,6 +452,11 @@ impl ActorNamespace {
             unique_key,
             Box::new(ActorNamespaceHandle(Weak::clone(&self.this))),
         )?;
+        if self.cluster().is_some() {
+            // An earlier process's alarms: its objects may live elsewhere now, and peers adopt
+            // its alarms from the bucket.
+            ffi::actor_storage_delete_all(&storage)?;
+        }
         // Checked above; nothing else sets it.
         let _ = self.storage.set(storage);
         Ok(())
@@ -474,9 +522,70 @@ impl ActorNamespaceHandle {
             .0
             .upgrade()
             .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
-        namespace
-            .container_for(id)
-            .start_request(ffi::new_request_metadata(KjMaybe::None, KjMaybe::None))
+        let metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+        let Some(node) = namespace.cluster().map(Rc::clone) else {
+            return namespace.container_for(id).start_request(metadata);
+        };
+        // Only an object's owner runs its alarm. One that moved since this instance scheduled
+        // the alarm has it scheduled where it lives now, since opening an object schedules its
+        // alarm, unless the owner died before indexing it: this instance fires it again until
+        // the owner has outlived that (`Index::elsewhere`).
+        let key = ffi::actor_id_key(&id);
+        Ok(PromisedInterface::new(async move {
+            match namespace.resolve(id).await? {
+                Resolved::Here(client) => client.start_request(metadata),
+                Resolved::Remote(_, owner) => {
+                    let unique_key = namespace.unique_key().unwrap_or_default();
+                    let again = node
+                        .cluster
+                        .alarm_elsewhere(unique_key, &key, &owner, cluster::now_ms())
+                        .await
+                        .unwrap_or(true);
+                    let then = if again {
+                        ffi::AlarmElsewhere::Retry
+                    } else {
+                        ffi::AlarmElsewhere::Done
+                    };
+                    Ok(ffi::alarm_owned_elsewhere(then))
+                }
+            }
+        })
+        .into_kj())
+    }
+
+    pub fn alarm_set(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            let at_ms = (at_ms != 0).then_some(at_ms);
+            cluster.arm_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    pub fn alarm_opened(&self, actor: &str, name: &str, at_ms: u64) -> Box<ResultTask> {
+        let (actor, name) = (actor.to_owned(), name.to_owned());
+        Box::new(self.index_alarm(move |cluster, unique_key| async move {
+            let name = (!name.is_empty()).then_some(name.as_str());
+            cluster.opened_alarm(&unique_key, &actor, name, at_ms).await
+        }))
+    }
+
+    /// A task running `index` with the cluster and the namespace's unique key; nothing outside
+    /// a cluster.
+    fn index_alarm<F: Future<Output = cluster::Result<()>> + 'static>(
+        &self,
+        index: impl FnOnce(Rc<cluster::Cluster>, String) -> F + 'static,
+    ) -> ResultTask {
+        let target = self.namespace().and_then(|ns| {
+            let unique_key = ns.unique_key()?.to_owned();
+            Some((Rc::clone(&ns.cluster()?.cluster), unique_key))
+        });
+        ResultTask(Box::pin(async move {
+            let Some((cluster, unique_key)) = target else {
+                return Ok(());
+            };
+            (index(cluster, unique_key).await).map_err(|e| kj::failed!("indexing an alarm: {e}"))
+        }))
     }
 
     fn namespace(&self) -> Option<Rc<ActorNamespace>> {
@@ -488,19 +597,23 @@ impl ActorNamespaceHandle {
     }
 
     pub(crate) fn check_open(&self) -> Result<()> {
-        match self.namespace().as_ref().and_then(|ns| ns.cluster()) {
-            Some(node) if !node.cluster.lease_holds() => Err(kj::failed!(
-                "this instance's cluster lease in the bucket has lapsed"
-            )),
-            _ => Ok(()),
-        }
+        self.namespace().map_or(Ok(()), |ns| ns.require_lease())
     }
 
-    pub(crate) fn database_reset(&self, root_key: &str) {
-        if let Some(ns) = self.namespace()
-            && let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key())
-        {
-            node.cluster.database_reset(unique_key, root_key);
+    pub(crate) fn database_reset(&self, file: &str) {
+        let Some(ns) = self.namespace() else {
+            return;
+        };
+        // The facets beneath the database go with it: their connections close before their
+        // files are removed.
+        if let Some(container) = ns.database_container(file) {
+            let names: Vec<String> = container.facets.borrow().keys().cloned().collect();
+            for name in names {
+                container.abort_facet(&name, kj::failed!("jsg.Error: Facet was deleted."));
+            }
+        }
+        if let (Some(node), Some(unique_key)) = (ns.cluster(), ns.unique_key()) {
+            node.cluster.database_reset(unique_key, file);
         }
     }
 
@@ -516,7 +629,8 @@ impl ActorNamespaceHandle {
 /// Where a request to a clustered actor goes.
 enum Resolved {
     Here(Client),
-    Remote(Rc<RpcConnection>),
+    /// On the node named.
+    Remote(Rc<RpcConnection>, String),
 }
 
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
@@ -550,7 +664,7 @@ impl Channel for RoutedChannel {
             };
             match &*resolved {
                 Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection) => Ok(attach(
+                Resolved::Remote(connection, _) => Ok(attach(
                     connection.start_request(metadata),
                     Rc::clone(connection),
                 )),
@@ -584,7 +698,7 @@ impl Channel for RoutedChannel {
                 .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
             match namespace.resolve(ffi::actor_id_clone(&self.id)).await? {
                 Resolved::Here(container) => container.evict_for_test(hibernate).await,
-                Resolved::Remote(_) => Err(kj::failed!(
+                Resolved::Remote(..) => Err(kj::failed!(
                     "jsg.Error: Cannot evict a Durable Object another instance owns."
                 )),
             }
@@ -641,6 +755,9 @@ pub struct ActorContainer {
     on_broken_task: RefCell<Option<TaskHandle>>,
     /// The idle shutdown, armed when the last request ends and cancelled by the next.
     shutdown_task: RefCell<Option<TaskHandle>>,
+    /// A committed hook-bearing retirement. The container owns the task even if every eviction
+    /// caller goes away; requests and concurrent evictions wait for its shared result.
+    retirement: RefCell<Option<Shared<RemoteHandle<Result<()>>>>>,
     /// A clustered root's ownership, for as long as the container is in its namespace's map.
     owned: RefCell<Option<Owned>>,
 }
@@ -705,6 +822,7 @@ impl ActorContainer {
             idle: Notify::new(),
             on_broken_task: RefCell::new(None),
             shutdown_task: RefCell::new(None),
+            retirement: RefCell::new(None),
             owned: RefCell::new(None),
         }
     }
@@ -807,8 +925,19 @@ impl ActorContainer {
 
     /// The running actor, started first if it is not running.
     async fn get_actor(&self) -> Result<Rc<KjOwn<ffi::ActorHandle>>> {
-        self.require_not_broken()?;
-        if !self.is_running() {
+        loop {
+            let retirement = self.retirement.borrow().clone();
+            if let Some(retirement) = retirement {
+                // A request that the onHibernate handler makes to its own object waits here too,
+                // until the handler's wall-clock budget cuts it off. A successor may have started
+                // and begun retiring while this waited.
+                retirement.await?;
+                continue;
+            }
+            self.require_not_broken()?;
+            if let Some(actor) = self.actor.borrow().clone() {
+                return Ok(actor);
+            }
             if let Some(pending) = self.pending_class() {
                 pending.await?;
                 self.require_not_broken()?;
@@ -817,15 +946,20 @@ impl ActorContainer {
             class.when_ready().await?;
             self.require_not_broken()?;
             self.prepare_storage().await?;
+            self.require_not_broken()?;
+            if self.retirement.borrow().is_some() {
+                continue;
+            }
             // A concurrent request may have started the actor meanwhile.
             if !self.is_running() {
                 self.start(&class)?;
             }
+            return self
+                .actor
+                .borrow()
+                .clone()
+                .ok_or_else(|| kj::failed!("the actor did not start"));
         }
-        self.actor
-            .borrow()
-            .clone()
-            .ok_or_else(|| kj::failed!("the actor did not start"))
     }
 
     /// In cluster mode, readies the actor's database before the actor opens it: it is taken over
@@ -833,12 +967,15 @@ impl ActorContainer {
     /// next request claims anew.
     async fn prepare_storage(&self) -> Result<()> {
         let ns = self.namespace()?;
-        if ns.cluster().is_none() {
+        let Some(node) = ns.cluster() else {
             return Ok(());
-        }
-        let root_path = ns.sqlite_path(&self.root_key)?;
+        };
         if self.is_root() {
-            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(root_path)) else {
+            let layout = Rc::new(Databases {
+                ns: Rc::clone(&ns),
+                root_key: self.root_key.clone(),
+            });
+            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(layout)) else {
                 return Err(kj::failed!("a clustered actor without ownership"));
             };
             if let Err(e) = restore.await {
@@ -847,12 +984,24 @@ impl ActorContainer {
                 return Err(e);
             }
         } else {
-            // TODO(cluster): facets, each a log of its own in the root's epoch.
-            return Err(kj::failed!(
-                "jsg.Error: Facets are not supported in cluster mode."
-            ));
+            // A facet runs once its root has taken the object over: its database is a lane of
+            // the root's log.
+            let path = ns.sqlite_path(&self.root_key, self.facet_id()?)?;
+            let lane = self.lane_prefix()? + cluster::DB;
+            let unique_key = ns.unique_key().unwrap_or_default();
+            node.cluster
+                .open_lane(unique_key, &self.root_key, &path, &lane)
+                .map_err(|e| kj::failed!("{e}"))?;
         }
         Ok(())
+    }
+
+    /// The prefix of the lanes of this actor's subtree in its object's log: empty for the root.
+    fn lane_prefix(&self) -> Result<String> {
+        Ok(match self.parent()? {
+            Some(parent) => parent.lane_prefix()? + &cluster::facet_prefix([self.key.as_str()]),
+            None => String::new(),
+        })
     }
 
     /// Constructs the actor and starts watching it for breakage.
@@ -895,7 +1044,11 @@ impl ActorContainer {
             ns.ensure_cleanup_loop();
         }
         let client = Client(Rc::clone(self));
-        let running = self.actor.borrow().clone();
+        let running = if self.retirement.borrow().is_none() {
+            self.actor.borrow().clone()
+        } else {
+            None
+        };
         if let Some(actor) = running {
             return client.request_on(metadata, &actor);
         }
@@ -915,13 +1068,7 @@ impl Client {
         actor: &ffi::ActorHandle,
     ) -> Result<KjOwn<WorkerInterface>> {
         let ns = self.namespace()?;
-        // A node stalled past its lease may have been taken over: serving
-        // even a read from its database could return stale data.
-        if ns.cluster().is_some_and(|node| !node.cluster.lease_holds()) {
-            return Err(kj::failed!(
-                "this instance's cluster lease in the bucket has lapsed"
-            ));
-        }
+        ns.require_lease()?;
         let inner = {
             let state = self.class_and_id.borrow();
             let ClassState::Ready { class, id } = &*state else {
@@ -969,7 +1116,7 @@ impl ActorContainer {
         let Some(ns) = self.namespace.upgrade() else {
             return;
         };
-        if !ns.is_evictable() {
+        if !ns.is_evictable() || self.retirement.borrow().is_some() {
             return;
         }
         let factory = Rc::clone(&ns.factory);
@@ -1056,17 +1203,26 @@ impl ActorContainer {
     }
 
     /// Aborts the actor and its facets; every request on them fails with `reason`. Without one
-    /// the actors are shut down, failing nothing in flight, and later requests fail for an
-    /// unknown reason. The caller removes the container from any map that could route traffic to
-    /// it: at most call sites the map is at hand, and `abort` on a facet's tree leaves the facets
-    /// filed under their parent.
+    /// the actors are shut down, failing nothing in flight except a running onHibernate handler:
+    /// that is canceled with an error, which the evictions and requests waiting for it receive.
+    /// Later requests fail for an unknown reason. The caller removes the container from any map
+    /// that could route traffic to it: at most call sites the map is at hand, and `abort` on a
+    /// facet's tree leaves the facets filed under their parent.
     fn abort(&self, reason: Option<crate::Error>) {
         if self.broken_reason.borrow().is_some() {
             return;
         }
         let actor = self.actor.borrow_mut().take();
         if let Some(actor) = &actor {
-            ffi::actor_abort(actor, &AbortReason(reason.clone()));
+            // Only an error cancels a committed hook, which must stop before ownership is released.
+            let actor_reason = reason.clone().or_else(|| {
+                self.retirement.borrow().as_ref().map(|_| {
+                    kj::disconnected!(
+                        "the Durable Object was shut down during its onHibernate handler"
+                    )
+                })
+            });
+            ffi::actor_abort(actor, &AbortReason(actor_reason));
         }
         for facet in self.facets.borrow().values() {
             facet.abort(reason.clone());
@@ -1146,7 +1302,6 @@ impl ActorContainer {
                 .try_evict("broken.dropped; Actor evicted by test", hibernate)
                 .await?
             {
-                self.cancel_shutdown();
                 return Ok(());
             }
             let now = factory.now();
@@ -1165,6 +1320,46 @@ impl ActorContainer {
         }
     }
 
+    /// Starts a root's hook only once it has no requests. Once committed, retirement belongs to
+    /// the container, so canceling a test eviction or the idle timer cannot interrupt it.
+    async fn try_evict(&self, reason: &str, hibernate: bool) -> Result<bool> {
+        let retirement = self.retirement.borrow().clone();
+        if let Some(retirement) = retirement {
+            retirement.await?;
+            return Ok(true);
+        }
+        let current = self.actor.borrow().clone();
+        // The handler may be read only while the actor is idle.
+        if self.is_root()
+            && current
+                .as_ref()
+                .is_some_and(|actor| ffi::actor_is_shared(actor))
+        {
+            return Ok(false);
+        }
+        if let Some(actor) = current
+            && self.is_root()
+            && ffi::actor_has_on_hibernate_handler(&actor)
+        {
+            let ns = self.namespace()?;
+            ns.require_lease()?;
+            let class = self.class()?;
+            let container = Weak::clone(&self.this);
+            let reason = reason.to_owned();
+            let retirement = ns
+                .factory
+                .spawn(
+                    async move { retire_actor(container, actor, class, reason, hibernate).await },
+                )
+                .shared();
+            *self.retirement.borrow_mut() = Some(retirement.clone());
+            self.cancel_shutdown();
+            retirement.await?;
+            return Ok(true);
+        }
+        self.finish_eviction(reason, hibernate).await
+    }
+
     /// Shuts the actor down, keeping its storage. Returns false without evicting if the actor
     /// acquired a strong reference meanwhile (a request raced in): an idle shutdown is cancelled
     /// by a new request, but a test eviction is not cancellable, so it relies on that re-check.
@@ -1172,7 +1367,7 @@ impl ActorContainer {
     /// the shutdown and the clearing of the slot after it are one step, so no request finds a
     /// shut-down actor in the slot. The on-broken monitor is cancelled only once the shutdown
     /// is committed, so that an early `false` leaves the actor watched.
-    async fn try_evict(&self, reason: &str, hibernate: bool) -> Result<bool> {
+    async fn finish_eviction(&self, reason: &str, hibernate: bool) -> Result<bool> {
         let current = self.actor.borrow().clone();
         if let Some(actor) = &current {
             if hibernate {
@@ -1194,12 +1389,46 @@ impl ActorContainer {
             }
         }
         self.cancel_on_broken();
+        self.cancel_shutdown();
         *self.actor.borrow_mut() = None;
         if !hibernate {
             *self.manager.borrow_mut() = None;
         }
         Ok(true)
     }
+}
+
+async fn retire_actor(
+    container: Weak<ActorContainer>,
+    actor: Rc<KjOwn<ffi::ActorHandle>>,
+    class: Rc<dyn ActorClass>,
+    reason: String,
+    hibernate: bool,
+) -> Result<()> {
+    let hook = class.run_on_hibernate(&actor).await;
+    let container = container
+        .upgrade()
+        .ok_or_else(|| kj::disconnected!("the retiring actor's container is gone"))?;
+    let result = async {
+        hook?;
+        container.require_not_broken()?;
+        if !container.finish_eviction(&reason, hibernate).await? {
+            return Err(kj::failed!("a retiring actor acquired a strong reference"));
+        }
+        Ok(())
+    }
+    .await;
+    // An already-broken container has left its map; breaking it again could remove a replacement.
+    if let Err(error) = &result
+        && container.require_not_broken().is_ok()
+    {
+        ffi::actor_abort(&actor, &AbortReason(Some(error.clone())));
+        container.broken(error);
+    }
+    // Close the old actor's storage before releasing requests to its successor.
+    drop(actor);
+    drop(container.retirement.borrow_mut().take());
+    result
 }
 
 /// Watches the actor; when it breaks, the container records the reason and leaves its map. The
@@ -1343,18 +1572,19 @@ impl ActorContainer {
             &self.root_key,
             self.facet_id()?.into(),
             name,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some(node) = ns.cluster() {
+            let prefix = self.lane_prefix()? + &cluster::facet_prefix([name]);
+            let unique_key = ns.unique_key().unwrap_or_default();
+            node.cluster
+                .delete_lanes(unique_key, &self.root_key, &prefix)
+                .map_err(|e| kj::failed!("{e}"))?;
+        }
+        Ok(())
     }
 
     fn clone_facet(&self, src: &str, dst: &str) -> Result<()> {
         let ns = self.namespace()?;
-        if ns.cluster().is_some() {
-            // TODO(cluster): clone in the bucket's terms.
-            return Err(kj::failed!(
-                "jsg.Error: Cloning facets is not supported in cluster mode."
-            ));
-        }
         // Replacing a facet implies aborting it.
         self.abort_facet(dst, kj::failed!("jsg.Error: Facet was cloned-over."));
         if src == dst {
@@ -1368,9 +1598,57 @@ impl ActorContainer {
             self.facet_id()?.into(),
             src,
             dst,
-        )
-        .map_err(Into::into)
+        )?;
+        if let Some(node) = ns.cluster() {
+            let prefix = self.lane_prefix()?;
+            let [src, dst] = [src, dst].map(|n| prefix.clone() + &cluster::facet_prefix([n]));
+            let unique_key = ns.unique_key().unwrap_or_default();
+            let layout = Databases {
+                ns: Rc::clone(&ns),
+                root_key: self.root_key.clone(),
+            };
+            node.cluster
+                .clone_lanes(unique_key, &self.root_key, &src, &dst, &layout)
+                .map_err(|e| kj::failed!("{e}"))?;
+        }
+        Ok(())
     }
+}
+
+/// Where a clustered object's databases are: the root's, and each facet's beside it as the
+/// root's facet index numbers it.
+struct Databases {
+    ns: Rc<ActorNamespace>,
+    root_key: String,
+}
+
+impl Databases {
+    fn place(&self, lane: &str) -> Result<String> {
+        let path = cluster::facet_path(lane).ok_or_else(|| kj::failed!("a lane named {lane}"))?;
+        let storage = self.ns.storage()?;
+        let mut id = None;
+        for name in &path {
+            id = ffi::actor_storage_facet_id(storage, &self.root_key, id.into(), name)?.into();
+        }
+        self.ns.sqlite_path(&self.root_key, id)
+    }
+}
+
+impl cluster::Layout for Databases {
+    fn place(&self, lane: &str) -> cluster::Result<std::path::PathBuf> {
+        let path = Self::place(self, lane).map_err(|e| layout_error(&e))?;
+        Ok(path.into())
+    }
+
+    fn clear(&self) -> cluster::Result<()> {
+        let storage = self.ns.storage().map_err(|e| layout_error(&e))?;
+        ffi::actor_storage_clear(storage, &self.root_key)
+            .map_err(|e| layout_error(&crate::Error::from(e)))
+    }
+}
+
+fn layout_error(e: &crate::Error) -> cluster::Error {
+    cluster::Error::Replica(e.description().to_owned())
 }
 
 impl ActorHooks {
@@ -1429,6 +1707,14 @@ impl ActorHooks {
 
     pub(crate) fn delete_facet(&self, name: &str) -> Result<()> {
         self.container()?.delete_facet(name)
+    }
+
+    /// Whether the cluster replicates the actor's storage.
+    pub(crate) fn replicated(&self) -> bool {
+        self.0
+            .upgrade()
+            .and_then(|c| c.namespace.upgrade())
+            .is_some_and(|ns| ns.cluster().is_some())
     }
 
     pub(crate) fn clone_facet(&self, src: &str, dst: &str) -> Result<()> {

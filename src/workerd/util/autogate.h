@@ -103,17 +103,6 @@ namespace workerd::util {
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
   V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
-  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
-     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
-     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
-     without abort. */                                                                             \
-  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
-  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
-     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
-     canceled or released before EOF, and the origin's pump cancels the source (running its       \
-     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
-     the origin learns of the loss only when its next write fails. */                              \
-  V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
@@ -122,6 +111,18 @@ namespace workerd::util {
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
   V(NODEJS_I18N_RUST)                                                                              \
+  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
+     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
+     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
+  V(TS_STDIO)                                                                                      \
+  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
+     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
+     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
+     cloudflare-internal:messagechannel. */                                                        \
+  V(TS_MESSAGE_CHANNEL)                                                                            \
+  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
+     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
+  V(TS_EVENT_SOURCE)                                                                               \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
@@ -135,7 +136,13 @@ namespace workerd::util {
      abort's reason its queued deliveries share as external memory, and queues at most one         \
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
+     open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
+     opening one more fails with an Error. Enabling this gate removes that limit, making them      \
+     unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

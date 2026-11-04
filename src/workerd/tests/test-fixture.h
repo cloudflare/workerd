@@ -273,6 +273,12 @@ struct TestFixture {
   void setHeapLimitExcessivelyExceeded(bool value) {
     heapLimitFlag->excessivelyExceeded.store(value, std::memory_order_relaxed);
   }
+  // Simulate a limit such as CPU time being exceeded: from now on, the limit enforcer of every
+  // IoContext reports `outcome` and fails requireLimitsNotExceeded(). Terminating execution, as
+  // the real enforcer does, is up to the test.
+  void setLimitsExceeded(EventOutcome outcome) {
+    limitsExceeded = outcome;
+  }
   TimerChannel& getTimerChannel() {
     return *timerChannel;
   }
@@ -337,6 +343,7 @@ struct TestFixture {
       waitUntilTaskTrackerFactory;
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<ActorCallReplayMemoryReserver> actorCallReplayMemoryReserver;
+  kj::Maybe<EventOutcome> limitsExceeded;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
@@ -397,6 +404,34 @@ struct TestFixture {
 
     TimerChannel& timer;
   };
+};
+
+// A span that RecordedSpans recorded.
+struct RecordedSpan {
+  kj::String name;
+  // The index of its parent in RecordedSpans::spans, or none for a request's span.
+  kj::Maybe<size_t> parent;
+  // Its tags as "key=type:value", in key order and separated by spaces, once it has ended.
+  kj::String tags;
+  bool ended = false;
+};
+
+// Records the spans of the requests a TestFixture runs, when its requestObserverFactory() is
+// passed as TestFixture::SetupParams::requestObserverFactory. Each request's span is named
+// "request".
+class RecordedSpans final: public kj::Refcounted {
+ public:
+  // In the order they opened.
+  kj::Vector<RecordedSpan> spans;
+
+  // The first span named `name`.
+  kj::Maybe<RecordedSpan&> find(kj::StringPtr name);
+
+  // The name of the parent of `span`, or "none" for a request's span.
+  kj::StringPtr parentName(const RecordedSpan& span) const;
+
+  // Gives each request a span that records into this.
+  kj::Function<kj::Own<RequestObserver>()> requestObserverFactory();
 };
 
 }  // namespace workerd

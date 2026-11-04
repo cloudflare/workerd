@@ -1,0 +1,16 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "v8_update_test",
+    size = "small",
+    srcs = [
+        "v8_update.py",
+        "v8_update_test.py",
+    ],
+    # The test imports v8_update.py as a top-level module.
+    imports = ["."],
+    main = "v8_update_test.py",
+    # Not run by default: `bazel test //ci:v8_update_test`.
+    tags = ["manual"],
+    deps = ["//build/deps:jsonc"],
+)

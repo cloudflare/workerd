@@ -5,7 +5,7 @@ on:
       image:
         type: string
         required: false
-        default: 'ubuntu-22.04-16core'
+        default: 'ubuntu-24.04-16core'
       os_name:
         type: string
         required: false
@@ -122,9 +122,7 @@ permissions:
 
 jobs:
   bazel:
-    # Fork PRs cannot use bazelflare's OIDC credentials, so their tools execute on the runner.
-    # The x64 clang-tidy binary requires glibc 2.38, which Ubuntu 22.04 does not provide.
-    runs-on: ${{ inputs.bazelflare && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && inputs.image == 'ubuntu-22.04-16core' && 'ubuntu-24.04' || inputs.image }}
+    runs-on: ${{ inputs.image }}
     steps:
       - uses: actions/checkout@v7
         with:

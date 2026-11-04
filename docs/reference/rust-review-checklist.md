@@ -82,14 +82,12 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   Methods with a `&self` receiver are registered as instance methods on the prototype; methods
   without a receiver are registered as static methods on the constructor. Any other receiver is a
   compile error, since JavaScript can call back into the resource while a method runs; state that
-  methods change belongs in `Cell` or `RefCell` fields. A method or accessor can take
-  `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its resource, for example to
-  hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
+  methods change belongs in `Cell` or `RefCell` fields or, when it holds a `jsg::Rc` or a
+  `TracedGlobal`, in `jsg::Cell` or `jsg::RefCell` fields (`src/rust/jsg/README.md` §Cells). A
+  method or accessor can take `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its
+  resource, for example to hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
   the callback should hold `this` (or `this.downgrade()`) instead. Flag a
   `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
-  Also flag a `borrow_mut()` of a `RefCell` holding GC references (`TracedGlobal`, `jsg::Rc`)
-  held across a call that can allocate on the V8 heap, wrap the resource or create or drop a
-  `jsg::Rc` to it: tracing skips the cell, so those references can lose their values.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of
@@ -126,13 +124,23 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   during GC, including through `Option`, `Nullable`, and `NullOrUndefined` wrappers when
   `Some`. `Lenient` traces both `Some` and `Unconvertable`. `jsg::Weak<T>` fields are not
   traced (no-op). Verify that every resource reference is properly traced — missing traces
-  cause use-after-free when the child is collected prematurely.
+  cause use-after-free when the child is collected prematurely. `Traced::trace` has no
+  default; a type with nothing to trace uses `jsg::jsg_traced!` rather than an empty `trace`
+  next to a hand-written `HoldsNoGcReferences`.
 
 ### Rust JSG Safety Rules
 
 The rules, with reasons and examples, are in `src/rust/jsg/README.md` §Safety rules. Tests catch
 some violations, and the README says which. Reviewers flag these:
 
+- A C++ shim that passes a context to V8 without first checking
+  `if (exceptionPending(isolate)) return ...;`, and without a comment saying why it needn't.
+  Such an API takes a `v8::Local<v8::Context>` or uses the current one: a call, a property read
+  or write, a coercion, `Array::Iterate`, `ObjectTemplate::NewInstance`, `Function::New`,
+  `FunctionTemplate::GetFunction`, `Date::New`, `ArrayBuffer::Detach`, the promise APIs. While an
+  exception or a termination is pending, V8 either clears it on entry, so it is lost and
+  JavaScript runs on, or fails a debug check and in a release build runs on with it pending. Creating strings, numbers, objects, arrays, error objects and
+  templates takes no context and needs no check, also while execution is terminating.
 - A shim, other than the `isolate_throw_*` shims, that calls `isolate->ThrowException` with no
   `IsExecutionTerminating()` check first. `isolate_throw_*` already check, and so do
   `Lock::throw_*` and `fast_api_throw_*`, which call them.
@@ -144,10 +152,12 @@ some violations, and the README says which. Reviewers flag these:
 - An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if it is
   not shared yet. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that owns the state,
   such as a method's `this`.
-- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
-  a traced `Vec`) and used after a call that can run JavaScript or allocate on the V8 heap,
-  without a `.clone()` first
-  ([#7976](https://github.com/cloudflare/workerd/issues/7976)).
+- A `jsg::Rc` or `TracedGlobal` reached through interior mutability other than a `jsg::Cell` or
+  `jsg::RefCell`: `UnsafeCell`, `OnceCell`, a hand-written cell, or a std `Cell` or `RefCell`
+  that a hand-written `impl Traced` visits through `borrow()`. A `jsg::Rc` or `TracedGlobal` in
+  a std cell field of a `#[jsg_resource]` or `#[jsg_struct]` does not compile; these are the
+  paths the compiler cannot see ([#7976](https://github.com/cloudflare/workerd/issues/7976)).
+- A hand-written `impl HoldsNoGcReferences` on a type whose `trace` visits something.
 - A `jsg::v8::Global` inside a type with a hand-written `impl Traced`.
 - New C++ JSG (`jsg::Lock`, `JSG_TRY`/`JSG_CATCH`, `jsg::check`, `JsExceptionThrown`,
   `createTunneledException`, `makeInternalError`, `jsg::Data`/`jsg::Value`) in a `.c++` or `.h`

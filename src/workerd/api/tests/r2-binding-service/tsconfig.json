@@ -1,0 +1,10 @@
+{
+  "extends": "../../../../../tools/base.tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "exactOptionalPropertyTypes": false,
+    "allowJs": false
+  },
+  "files": ["../../../../../types/generated-snapshot/experimental/index.d.ts"],
+  "include": ["*.ts"]
+}

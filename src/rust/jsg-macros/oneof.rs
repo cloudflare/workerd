@@ -20,10 +20,12 @@ use syn::spanned::Spanned;
 use crate::utils::error;
 
 /// Expands `#[jsg_oneof]` on `item`.
-pub fn expand(item: TokenStream) -> TokenStream {
+pub fn expand(attr: &TokenStream, item: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(item as DeriveInput);
+    let custom_holds_no_gc_references =
+        crate::utils::has_flag(attr, "custom_holds_no_gc_references");
     match Union::parse(&input) {
-        Ok(union) => union.generate(&input).into(),
+        Ok(union) => union.generate(&input, custom_holds_no_gc_references).into(),
         Err(err) => err,
     }
 }
@@ -104,12 +106,17 @@ impl<'a> Union<'a> {
     }
 
     /// Generates the enum and the union's trait implementations.
-    fn generate(&self, input: &DeriveInput) -> proc_macro2::TokenStream {
+    fn generate(
+        &self,
+        input: &DeriveInput,
+        custom_holds_no_gc_references: bool,
+    ) -> proc_macro2::TokenStream {
         let checks = self.generate_checks(input);
         let type_impl = self.generate_type(input);
         let from_js_impl = self.generate_from_js(input);
-        let traced_impl = self.generate_traced(input);
+        let traced_impl = self.generate_traced(input, custom_holds_no_gc_references);
         let to_js_impl = self.generate_to_js(input);
+        let type_info_impl = self.generate_type_info(input);
         quote! {
             #input
             #checks
@@ -117,6 +124,7 @@ impl<'a> Union<'a> {
             #from_js_impl
             #traced_impl
             #to_js_impl
+            #type_info_impl
         }
     }
 
@@ -258,7 +266,11 @@ impl<'a> Union<'a> {
     /// `jsg::Traced`: a union holds whatever its variant holds, so it can be a resource field.
     /// A union that holds handles can't, so its implementation requires what its variants can't
     /// provide, and it is never used.
-    fn generate_traced(&self, input: &DeriveInput) -> proc_macro2::TokenStream {
+    fn generate_traced(
+        &self,
+        input: &DeriveInput,
+        custom_holds_no_gc_references: bool,
+    ) -> proc_macro2::TokenStream {
         let self_type = self.self_type(input);
         let lifetime = self.lifetime.into_iter();
         let variant_names = &self.variant_names;
@@ -266,19 +278,31 @@ impl<'a> Union<'a> {
         let where_clause = self.lifetime.map(|_| {
             quote! { where #(#inner_types: jsg::Traced,)* }
         });
+        let impl_lifetime = self.lifetime.into_iter();
+        let marker_types = &self.inner_types;
+        let marker_impl = (!custom_holds_no_gc_references).then(|| {
+            quote! {
+                // Higher-ranked, as for a `#[jsg_struct]`: a variant that holds a GC
+                // reference leaves the union without the impl.
+                #[automatically_derived]
+                impl<#(#impl_lifetime)*> jsg::HoldsNoGcReferences for #self_type
+                where
+                    #(for<'__jsgl> #marker_types: jsg::HoldsNoGcReferences,)*
+                {
+                }
+            }
+        });
         quote! {
             #[automatically_derived]
             impl<#(#lifetime)*> jsg::Traced for #self_type #where_clause {
-                fn holds_gc_references() -> bool {
-                    #(<#inner_types as jsg::Traced>::holds_gc_references())||*
-                }
-
                 fn trace(&self, visitor: &mut jsg::v8::GcVisitor) {
                     match self {
                         #(Self::#variant_names(value) => jsg::Traced::trace(value, visitor),)*
                     }
                 }
             }
+
+            #marker_impl
         }
     }
 
@@ -295,9 +319,35 @@ impl<'a> Union<'a> {
                 #(#inner_types: jsg::ToJS<#s>,)*
             {
                 fn to_js(self, lock: &mut jsg::Lock<#s>) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
+                    jsg::ToJS::to_js_with_creator(self, lock, None)
+                }
+
+                fn to_js_with_creator(
+                    self,
+                    lock: &mut jsg::Lock<#s>,
+                    creator: Option<jsg::v8::Local<#s, jsg::v8::Object>>,
+                ) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
                     match self {
-                        #(Self::#variant_names(value) => jsg::ToJS::to_js(value, lock),)*
+                        #(Self::#variant_names(value) => jsg::ToJS::to_js_with_creator(value, lock, creator),)*
                     }
+                }
+            }
+        }
+    }
+
+    /// `jsg::TypeInfo`, which describes the union as its variants' types, as C++ RTTI describes
+    /// a `kj::OneOf`.
+    fn generate_type_info(&self, input: &DeriveInput) -> proc_macro2::TokenStream {
+        let self_type = self.self_type(input);
+        let lifetime = self.lifetime.into_iter();
+        let inner_types = &self.inner_types;
+        quote! {
+            #[automatically_derived]
+            impl<#(#lifetime)*> jsg::TypeInfo for #self_type {
+                fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+                    jsg::rtti::Type::OneOf(vec![
+                        #(<#inner_types as jsg::TypeInfo>::describe(cx)),*
+                    ])
                 }
             }
         }

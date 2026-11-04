@@ -69,7 +69,7 @@ class UtilModule final: public jsg::Object {
   UtilModule() = default;
   UtilModule(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::Name getResourceTypeInspect(jsg::Lock& js);
+  jsg::JsSymbol getResourceTypeInspect(jsg::Lock& js);
 
   // `getOwnNonIndexProperties()` `filter`s
   static constexpr int ALL_PROPERTIES = jsg::PropertyFilter::ALL_PROPERTIES;

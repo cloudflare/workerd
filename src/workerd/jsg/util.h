@@ -430,6 +430,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
       return;
     }
 
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only rejects the promise with what it caught.
     v8::TryCatch tryCatch(isolate);
     try {
       try {
@@ -560,6 +561,11 @@ using ExternalStringSource = kj::OneOf<kj::ArrayPtr<const char>,
     kj::ArrayPtr<const uint16_t>,
     kj::Arc<OwnedAscii>,
     kj::Arc<OwnedUtf16>>;
+
+struct CodeCacheKey;
+// Hashes the exact external-string representation handed to CompileModule().
+CodeCacheKey codeCacheKeyForModule(const ExternalStringSource& source);
+CodeCacheKey codeCacheKeyForModule(StaticExternalStringSource source);
 
 inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
   return kj::arc<OwnedAscii>(kj::heapArray(source));

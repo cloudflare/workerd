@@ -677,11 +677,6 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
         kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
   }
 
-  if (flush_ == ZSTD_e_end && lastResult != 0) {
-    // lastResult > 0 means more output is needed, which shouldn't happen at end
-    return CompressionError("Unexpected end of file"_kj, "Z_BUF_ERROR"_kj, Z_BUF_ERROR);
-  }
-
   return kj::none;
 }
 

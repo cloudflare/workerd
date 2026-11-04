@@ -165,6 +165,12 @@ impl jsg::Type for FromJsOnly {
     }
 }
 
+impl jsg::TypeInfo for FromJsOnly {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::String
+    }
+}
+
 impl<'s> jsg::FromJS<'s> for FromJsOnly {
     type ResultType = Self;
 
@@ -693,11 +699,13 @@ fn union_field_traces_its_resource_variant() {
     });
 }
 
+/// A union of plain data holds no GC references. (That one with a variant that does isn't
+/// either is checked by the `gc-reference-in-std-cell-is-not-traced` compile test.)
 #[test]
-fn union_holds_gc_references_if_a_variant_does() {
-    use jsg::Traced;
-    assert!(TracedBoxOrNumber::holds_gc_references());
-    assert!(!StringOrNumber::holds_gc_references());
+fn union_of_plain_data_holds_no_gc_references() {
+    fn holds_no_gc_references<T: jsg::HoldsNoGcReferences>() {}
+    holds_no_gc_references::<StringOrNumber>();
+    holds_no_gc_references::<std::cell::RefCell<StringOrNumber>>();
 }
 
 #[test]
