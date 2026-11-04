@@ -61,11 +61,13 @@ impl MemoryCache {
     ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
         // As JSG calls a C++ method that returns a promise: under capture_async_api_throws, what
         // it throws rejects the promise instead, and otherwise it is thrown.
+        // The promise C++ returns, JSG follows through a reaction of its own.
         if !lock.feature_flags().get_capture_throws_as_rejections() {
-            return self.read_promise(lock, key, fallback);
+            let promise = self.read_promise(lock, key, fallback)?;
+            return pass_through(lock, promise);
         }
         match lock.try_catch(|lock| self.read_promise(lock, key, fallback))? {
-            Ok(promise) => Ok(promise),
+            Ok(promise) => pass_through(lock, promise),
             Err(exception) => v8::Promise::rejected(lock, exception),
         }
     }
@@ -270,6 +272,20 @@ fn system_now_ms() -> f64 {
 fn millis_since_epoch(time: SystemTime) -> f64 {
     time.duration_since(UNIX_EPOCH)
         .map_or(0.0, |since| since.as_millis() as f64)
+}
+
+/// The data of a reaction that needs none.
+pub(crate) struct NoData;
+
+impl jsg::Traced for NoData {}
+
+/// A promise that follows `promise` through a reaction that passes on what it settles with, as
+/// C++ JSG follows a promise when it converts it, so that it settles after as many microtasks.
+pub(crate) fn pass_through<'s>(
+    lock: &mut jsg::Lock<'s>,
+    promise: v8::Local<'s, v8::Promise>,
+) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+    promise.then(lock, NoData, |_lock, _: &NoData, value| Ok(value))
 }
 
 /// A cache error, which only a bug causes, so JavaScript sees it as an internal error.

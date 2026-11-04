@@ -566,6 +566,93 @@ export const fallbackReturnsThenable = {
   },
 };
 
+// How many microtasks pass from when `start` is called until the promise it returns settles,
+// counted by a loop that awaits once per microtask, plus the few that counting takes.
+async function microtasksUntilSettled(start) {
+  let settled = false;
+  let microtasks = 0;
+  const counting = (async () => {
+    while (!settled && microtasks < 100) {
+      await null;
+      microtasks++;
+    }
+  })();
+  await start().then(
+    () => {},
+    () => {}
+  );
+  settled = true;
+  await counting;
+  return microtasks;
+}
+
+export const settlesAfterAsManyMicrotasksAsCpp = {
+  async test(ctrl, env) {
+    // The counts are those of memory-cache.c++.
+    await env.CACHE.read('microtasksHit', () => ({ value: 1 }));
+    for (const read of [
+      () => env.CACHE.read('microtasksHit'),
+      () => env.CACHE.read('microtasksHit', () => ({ value: 2 })),
+      () => env.CACHE.read('microtasksMissing'),
+      () => env.CACHE.read('a'.repeat(3000)),
+    ]) {
+      strictEqual(await microtasksUntilSettled(read), 4, read.toString());
+    }
+    env.CACHE.delete('microtasksHit');
+
+    // From when the fallback is called, which is after the read waits for the cache.
+    const fromFallback = async (key, fallback) => {
+      let counted;
+      const read = env.CACHE.read(key, (k) => {
+        counted = microtasksUntilSettled(() => read);
+        return fallback(k);
+      });
+      await read.catch(() => {});
+      return counted;
+    };
+    const thenable = Cloudflare.compatibilityFlags.unwrap_custom_thenables
+      ? 9
+      : 7;
+    for (const [fallback, expected] of [
+      [() => ({ value: 1 }), 7],
+      [async () => ({ value: 1 }), 8],
+      [
+        () => {
+          throw new Error('x');
+        },
+        7,
+      ],
+      [
+        async () => {
+          throw new Error('x');
+        },
+        8,
+      ],
+      [() => ({ value: Symbol() }), 7],
+      [() => ({ value: 1, expiration: NaN }), 7],
+      [() => 42, 7],
+      [async () => 42, 8],
+      [
+        () => ({
+          then(resolve) {
+            resolve({ value: 1 });
+          },
+          value: 2,
+        }),
+        thenable,
+      ],
+    ]) {
+      const key = `microtasks ${fallback}`;
+      strictEqual(
+        await fromFallback(key, fallback),
+        expected,
+        fallback.toString()
+      );
+      env.CACHE.delete(key);
+    }
+  },
+};
+
 export const deleteNeedsRequest = {
   async test() {
     ok(deleteInGlobalScopeError instanceof Error);

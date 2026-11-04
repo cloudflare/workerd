@@ -6,6 +6,7 @@
 //! until the read it waits for finishes.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use io_context::IoContext;
 use io_context::IoOwned;
@@ -15,6 +16,7 @@ use jsg::v8;
 use memory_cache::CacheError;
 use memory_cache::FallbackPermit;
 
+use crate::NoData;
 use crate::cache_error;
 use crate::now_ms;
 use crate::trace;
@@ -65,8 +67,12 @@ impl PendingRead {
             .read
             .set_tag(c"entry_size", trace::count(value.bytes().len()));
         match lock.try_catch(|lock| jsg::ser::deserialize(lock, value.bytes())) {
+            // As memory-cache.c++ returns `js.resolvedPromise(value)` to awaitIo(), which resolves
+            // the read's promise with it.
             Ok(Ok(value)) => {
-                let _ = resolver.resolve(lock, value);
+                if let Ok(value) = v8::Promise::resolved(lock, value) {
+                    let _ = resolver.resolve(lock, value.into());
+                }
             }
             Ok(Err(exception)) => {
                 let _ = resolver.reject(lock, exception);
@@ -100,18 +106,33 @@ impl PendingRead {
             return reject(lock, resolver, &err);
         };
         let fill = match Fill::new(lock, permit, &key, read) {
-            Ok(fill) => fill,
+            Ok(fill) => SharedFill(Rc::new(fill)),
             Err(err) => return reject(lock, resolver, &err),
         };
         let fallback = fallback.as_local(lock);
         // With `globalThis` as `this`, as C++ JSG calls a `jsg::Function`.
         let global = lock.global_object();
-        match lock.try_catch(|lock| fallback.call(lock, Some(global.into()), &[key_js.into()])) {
-            Ok(Ok(produced)) => fill.attach(lock, resolver, produced),
-            // A fallback that throws rejects the read, as one whose promise rejects does.
-            Ok(Err(exception)) => fill.reject_now(lock, resolver, exception),
+        // As memory-cache.c++ calls the fallback in `js.evalNow()`: what it throws, or what
+        // converting what it produced throws, rejects the promise.
+        let produced = match lock.try_catch(|lock| {
+            let produced = fallback.call(lock, Some(global.into()), &[key_js.into()])?;
+            produce(lock, produced)
+        }) {
+            Ok(Ok(promise)) => Ok(promise),
+            Ok(Err(exception)) => v8::Promise::rejected(lock, exception),
             // Execution is terminating.
-            Err(_) => {}
+            Err(_) => return,
+        };
+        // As memory-cache.c++ chains `.then()` and `.catch_()` to it, and returns the result to
+        // awaitIo(), which resolves the read's promise with it.
+        let filled = produced
+            .and_then(|promise| promise.then(lock, SharedFill(Rc::clone(&fill.0)), fulfilled))
+            .and_then(|promise| promise.catch(lock, fill, rejected));
+        match filled {
+            Ok(filled) => {
+                let _ = resolver.resolve(lock, filled.into());
+            }
+            Err(err) => reject(lock, resolver, &err),
         }
     }
 }
@@ -133,20 +154,6 @@ struct Fill {
     /// The key, for the span of the write.
     key: String,
     spans: RefCell<FillSpans>,
-    /// What the fallback produced, if it returned it rather than a promise for it.
-    produced: jsg::RefCell<Option<Produced>>,
-}
-
-/// The fields of what a fallback returned, read as it returned.
-struct Produced {
-    value: v8::TracedGlobal<v8::Value>,
-    expiration: Option<f64>,
-}
-
-impl jsg::Traced for Produced {
-    fn trace(&self, visitor: &mut jsg::GcVisitor) {
-        self.value.trace(visitor);
-    }
 }
 
 /// The spans that end once the fallback settles, when the reactions to its promise drop the
@@ -156,11 +163,11 @@ struct FillSpans {
     fallback: SpanBuilder,
 }
 
-impl jsg::Traced for Fill {
-    fn trace(&self, visitor: &mut jsg::GcVisitor) {
-        self.produced.trace(visitor);
-    }
-}
+/// The [`Fill`] that the reactions to the fallback's result share, as memory-cache.c++'s share
+/// its spans. It holds no JavaScript values, so sharing it is sound.
+struct SharedFill(Rc<Fill>);
+
+impl jsg::Traced for SharedFill {}
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
@@ -182,68 +189,7 @@ impl Fill {
                 _read: read_span,
                 fallback: fallback_span,
             }),
-            produced: jsg::RefCell::new(None),
         })
-    }
-
-    /// Settles the read as the promise of what the fallback produced settles.
-    fn attach<'s>(
-        self,
-        lock: &mut jsg::Lock<'s>,
-        resolver: v8::Local<'s, v8::PromiseResolver>,
-        produced: v8::Local<'s, v8::Value>,
-    ) {
-        let promise = match lock.try_catch(|lock| self.promise_for(lock, produced)) {
-            Ok(Ok(promise)) => promise,
-            // As if the fallback threw it.
-            Ok(Err(exception)) => return self.reject_now(lock, resolver, exception),
-            // Execution is terminating.
-            Err(_) => return,
-        };
-        match promise.then_or_catch(lock, self, fulfilled, rejected) {
-            Ok(filled) => {
-                let _ = resolver.resolve(lock, filled.into());
-            }
-            Err(err) => reject(lock, resolver, &err),
-        }
-    }
-
-    /// A promise for what the fallback produced, as C++ JSG converts the value a callback
-    /// returns to a `jsg::Promise<CacheValueProduceResult>`: a promise is taken as is, and a
-    /// thenable is followed if the `unwrap_custom_thenables` compatibility flag is on. Anything
-    /// else is read now, into [`Fill::produced`], and the promise resolves with `undefined`.
-    fn promise_for<'s>(
-        &self,
-        lock: &mut jsg::Lock<'s>,
-        produced: v8::Local<'s, v8::Value>,
-    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
-        if let Ok(promise) = v8::Local::<v8::Promise>::try_from(produced) {
-            return Ok(promise);
-        }
-        if lock.feature_flags().get_unwrap_custom_thenables() && is_thenable(lock, produced)? {
-            return v8::Promise::resolved(lock, produced);
-        }
-        let (value, expiration) = read_result(lock, produced, Produce::Returned)?;
-        let value = v8::TracedGlobal::new(lock, value);
-        *self.produced.borrow_mut(lock) = Some(Produced { value, expiration });
-        let undefined = lock.undefined();
-        v8::Promise::resolved(lock, undefined)
-    }
-
-    /// Fails as [`Fill::fail`] does, for a fallback that threw, and rejects the read with what
-    /// it threw.
-    fn reject_now<'s>(
-        self,
-        lock: &mut jsg::Lock<'s>,
-        resolver: v8::Local<'s, v8::PromiseResolver>,
-        exception: v8::Local<'s, v8::Value>,
-    ) {
-        match self.fail(lock, exception) {
-            Ok(()) => {
-                let _ = resolver.reject(lock, exception);
-            }
-            Err(err) => reject(lock, resolver, &err),
-        }
     }
 
     fn tag_fallback<'v>(
@@ -266,16 +212,6 @@ impl Fill {
         self.tag_fallback(c"fallback_error", &exception.to_detail_string(lock)?);
         drop(self.permit.take(lock)?);
         Ok(())
-    }
-
-    /// Fails as [`Fill::fail`] does, and rejects with `exception`.
-    fn reject<'a>(
-        &self,
-        lock: &mut jsg::Lock<'a>,
-        exception: v8::Local<'a, v8::Value>,
-    ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-        self.fail(lock, exception)?;
-        Ok(v8::Promise::rejected(lock, exception)?.into())
     }
 
     /// Caches what the fallback produced, and records the write. Like memory-cache.c++, which
@@ -307,46 +243,102 @@ impl Fill {
     }
 }
 
-/// Caches what the fallback produced, and fulfills the read with its value. If the value cannot
-/// be cached, abandons the fallback and rejects the read. Tags the fallback's span as
-/// memory-cache.c++ does, so that a failure leaves the same tags.
+/// A promise for the fields of what the fallback produced, as C++ JSG converts the value a
+/// callback returns to a `jsg::Promise<CacheValueProduceResult>`: a promise is followed, and so
+/// is a thenable if the `unwrap_custom_thenables` compatibility flag is on, through a reaction
+/// that reads its result. Anything else is read now. The fields are held in a [`Produced`].
+fn produce<'s>(
+    lock: &mut jsg::Lock<'s>,
+    produced: v8::Local<'s, v8::Value>,
+) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+    let promise = if let Ok(promise) = v8::Local::<v8::Promise>::try_from(produced) {
+        promise
+    } else if lock.feature_flags().get_unwrap_custom_thenables() && is_thenable(lock, produced)? {
+        v8::Promise::resolved(lock, produced)?
+    } else {
+        let produced = Produced::read(lock, produced, Produce::Returned)?;
+        return v8::Promise::resolved(lock, produced.0.into());
+    };
+    promise.then(lock, NoData, |lock, _: &NoData, result| {
+        Ok(Produced::read(lock, result, Produce::Resolved)?.0.into())
+    })
+}
+
+/// The fields of what a fallback produced, as a promise passes them on: in an object with a
+/// `null` prototype, as C++ JSG holds a C++ value, so that resolving a promise with it follows
+/// nothing, and reading its fields runs no JavaScript.
+struct Produced<'s>(v8::Local<'s, v8::Object>);
+
+impl<'s> Produced<'s> {
+    fn read(
+        lock: &mut jsg::Lock<'s>,
+        result: v8::Local<'s, v8::Value>,
+        produce: Produce,
+    ) -> jsg::Result<Self> {
+        let (value, expiration) = read_result(lock, result, produce)?;
+        let fields = lock.new_object_with_null_prototype();
+        fields.set(lock, "value", value)?;
+        if let Some(expiration) = expiration {
+            let expiration = v8::Number::new(lock, expiration);
+            fields.set(lock, "expiration", expiration.into())?;
+        }
+        Ok(Self(fields))
+    }
+
+    fn fields(
+        lock: &mut jsg::Lock<'s>,
+        produced: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<(v8::Local<'s, v8::Value>, Option<f64>)> {
+        let fields = v8::Local::<v8::Object>::try_from(produced).map_err(|_| {
+            jsg::Error::new_internal_error("the memory cache fallback's fields are not an object")
+        })?;
+        let value = fields.get(lock, "value")?;
+        let expiration = fields.get(lock, "expiration")?;
+        let expiration = if expiration.is_undefined() {
+            None
+        } else {
+            Some(f64::from_js(lock, expiration)?)
+        };
+        Ok((value, expiration))
+    }
+}
+
+/// Caches what the fallback produced, and fulfills the read with its value, as the `.then()`
+/// of memory-cache.c++ does. What fails rejects the promise, for [`rejected`] to handle. Tags the
+/// fallback's span as memory-cache.c++ does, so that a failure leaves the same tags.
 fn fulfilled<'a>(
     lock: &mut jsg::Lock<'a>,
-    fill: &Fill,
-    result: v8::Local<'a, v8::Value>,
+    fill: &SharedFill,
+    produced: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-    let produced = fill.produced.borrow_mut(lock).take();
-    let (value, expiration) = match produced {
-        Some(Produced { value, expiration }) => (value.as_local(lock), expiration),
-        None => match lock.try_catch(|lock| read_result(lock, result, Produce::Resolved))? {
-            Ok(fields) => fields,
-            Err(exception) => return fill.reject(lock, exception),
-        },
-    };
+    let (value, expiration) = Produced::fields(lock, produced)?;
     let bytes = match serialize(lock, value)? {
         Ok(bytes) => bytes,
-        Err(exception) => return fill.reject(lock, exception),
+        Err(exception) => return Err(lock.throw_value(exception)),
     };
-    fill.tag_fallback(c"fallback_result_size", trace::count(bytes.len()));
+    fill.0
+        .tag_fallback(c"fallback_result_size", trace::count(bytes.len()));
     if expiration.is_some_and(f64::is_nan) {
-        let err = jsg::Error::new_type_error("Expiration time must not be NaN.");
-        let exception = lock.exception(&err)?;
-        return fill.reject(lock, exception);
+        return Err(jsg::Error::new_type_error(
+            "Expiration time must not be NaN.",
+        ));
     }
-    fill.tag_fallback(c"has_expiration", expiration.is_some());
+    fill.0.tag_fallback(c"has_expiration", expiration.is_some());
     // Only now, so that a failure above does not overwrite it.
-    fill.tag_fallback(c"fallback_success", true);
-    fill.succeed(lock, bytes, expiration)?;
+    fill.0.tag_fallback(c"fallback_success", true);
+    fill.0.succeed(lock, bytes, expiration)?;
     Ok(value)
 }
 
-/// Abandons the fallback, and rejects the read with what the fallback's promise rejected with.
+/// Abandons the fallback, and rejects the read with what failed, as the `.catch_()` of
+/// memory-cache.c++ does.
 fn rejected<'a>(
     lock: &mut jsg::Lock<'a>,
-    fill: &Fill,
+    fill: &SharedFill,
     reason: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-    fill.reject(lock, reason)
+    fill.0.fail(lock, reason)?;
+    Err(lock.throw_value(reason))
 }
 
 /// Serializes the value a fallback produced. Fails only if execution is terminating; otherwise

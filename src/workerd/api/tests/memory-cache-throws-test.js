@@ -98,3 +98,25 @@ export const deleteThrows = {
     );
   },
 };
+
+export const rejectionSettlesAfterAsManyMicrotasksAsCpp = {
+  async test(ctrl, env) {
+    if (!capturesThrows) return;
+    let settled = false;
+    let microtasks = 0;
+    const counting = (async () => {
+      while (!settled && microtasks < 100) {
+        await null;
+        microtasks++;
+      }
+    })();
+    await env.CACHE.read(123).then(
+      () => {},
+      () => {}
+    );
+    settled = true;
+    await counting;
+    // The count of memory-cache.c++, whose promise JSG rejects without following it.
+    strictEqual(microtasks, 3);
+  },
+};
