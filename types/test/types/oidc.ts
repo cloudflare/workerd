@@ -98,23 +98,20 @@ const actorCaller: Promise<CloudflareWorkloadIdentity | null> = actorContext.ide
 void actorCaller;
 
 const publicMetadata: IdentityOAuthClientMetadataDocument = await selected.getClientMetadata();
-const explicitMetadata = await selected.getClientMetadata('https://client.example/client.json');
-const assertion: string = await selected.getClientAssertion({ clientId: 'provider-id', audience: 'https://auth.example' });
-// @ts-expect-error Client and AS selection are required for public assertions.
-selected.getClientAssertion();
+// @ts-expect-error Client identity comes from configured authority.
+selected.getClientMetadata('https://client.example/client.json');
+const assertion: string = await selected.getClientAssertion();
+// @ts-expect-error Per-call assertion authority is forbidden.
+selected.getClientAssertion({ clientId: 'provider-id', audience: 'https://auth.example' });
 // @ts-expect-error No token, key or nonce API is exposed.
 selected.getDpopProof('https://api.example');
-void [publicMetadata, explicitMetadata, assertion];
+void [publicMetadata, assertion];
 
 const clientAlgorithm: 'ES256' | 'Ed25519' =
   publicMetadata.token_endpoint_auth_signing_alg;
 void clientAlgorithm;
-selected.getClientAssertion({
-  clientId: 'https://client.example/client.json',
-  audience: 'https://auth.example',
-  // @ts-expect-error The service selects the algorithm.
-  algorithm: 'ES256',
-});
+// @ts-expect-error Algorithms and audience cannot change a configured assertion capability.
+selected.getClientAssertion({ algorithm: 'ES256' });
 
 const namedAgent: Rpc.Stub<IdentityFetcher> = await binding.getIdentity({ agentId: 'agent_17' });
 const defaultAgent: Rpc.Stub<IdentityFetcher> = await binding.getIdentity({});

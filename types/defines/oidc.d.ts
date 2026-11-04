@@ -5,7 +5,7 @@ type IdentityFetchOptions = Omit<RequestInit, 'body' | 'cf' | 'signal'> & {
 };
 /** Public registration metadata; contains no private key, assertion or access token. */
 interface IdentityOAuthClientMetadataDocument {
-  /** Exact configured or explicitly selected client ID. */
+  /** Exact configured client ID. */
   client_id: string;
   /** Public opaque workload name. */
   client_name: string;
@@ -28,18 +28,16 @@ interface IdentityFetcher extends Rpc.RpcTargetBranded {
   /** Fresh five-minute JWT for this actor; requires the binding's configured audience. */
   getToken(): Promise<string>;
   /** Fresh WAG for this actor within the binding's authorization-server and scope limits. */
-  getAuthorizationGrant(options: {
-    authorizationServer: string;
+  getAuthorizationGrant(options?: {
+    authorizationServer?: string;
     scope?: string[];
   }): Promise<string>;
   /** Public Web Bot Auth identity URL; await this property on its RPC stub. */
   readonly signatureAgent: Promise<string>;
-  /** Public signed key directory URL; await this property on its RPC stub. */
-  readonly directoryURL: Promise<string>;
-  /** Configured client metadata; explicit publication URLs require client_authentication. */
-  getClientMetadata(clientId?: string): Promise<IdentityOAuthClientMetadataDocument>;
+  /** Public metadata for the configured client; requires client_authentication or managed client credentials. */
+  getClientMetadata(): Promise<IdentityOAuthClientMetadataDocument>;
   /** Fresh 60-second assertion. Requires client_authentication; performs no exchange. */
-  getClientAssertion(options: { clientId: string; audience: string }): Promise<string>;
+  getClientAssertion(): Promise<string>;
   /** Authenticates and sends within the parent binding's destination limits. */
   fetch(
     input: Request | string,
@@ -51,8 +49,8 @@ interface IdentityBinding {
   /** Fresh five-minute JWT for the default workload principal; requires an audience. */
   getToken(): Promise<string>;
   /** Fresh WAG for the default workload principal within the configured limits. */
-  getAuthorizationGrant(options: {
-    authorizationServer: string;
+  getAuthorizationGrant(options?: {
+    authorizationServer?: string;
     scope?: string[];
   }): Promise<string>;
   /** A string always means agentId. Omission selects the default workload principal.
@@ -118,6 +116,16 @@ type IdentityConnectionState = 'consent_required' | 'default_required' | 'pendin
   'disconnected' | 'reconnect_required' | 'scope_incompatible' | 'owner_disabled' |
   'connector_deleted' | 'connection_removed' | 'superseded';
 type IdentityProviderCleanup = 'complete' | 'pending' | 'unsupported' | 'unknown';
+/** Structural RPC error contract; custom class identity does not survive RPC.
+ * Requires enhanced_error_serialization (default from 2026-04-21).
+ */
+interface IdentityConnectionError extends Error {
+  readonly name: 'IdentityConnectionError';
+  /** Stable recovery code such as CONSENT_REQUIRED, DEFAULT_REQUIRED or RECONNECT_REQUIRED. */
+  readonly code: string;
+  /** Credential-free support correlation ID. */
+  readonly referenceId: string;
+}
 /** Local lifecycle observation, without provider account interpretation or liveness probing. */
 interface IdentityConnectionStatus {
   connectionId: string | null;
