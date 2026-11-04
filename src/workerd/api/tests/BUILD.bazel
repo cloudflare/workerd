@@ -337,6 +337,8 @@ wd_test(
         "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
         "tail-worker-test-throw.js",
+        "tail-worker-test-on-hibernate.js",
+        "tail-worker-test-event-log.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
