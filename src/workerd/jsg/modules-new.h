@@ -419,13 +419,19 @@ class Module {
       kj::Maybe<CodeCacheKey> codeCacheKey = kj::none);
 
   // Creates a new ESM module that does not take ownership of the given code.
-  // The backing data must have static process lifetime. This is used to
+  // The source and any embedded compileCache must have static process lifetime. This is used to
   // construct ESM modules from compiled-in built-in modules.
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
-  static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      kj::ArrayPtr<const char> code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
   // The source is already encoded as Latin-1 or UTF-16 for V8.
-  static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      StaticExternalStringSource code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
 
   // The following methods are used to create the evaluation callbacks for various
   // kinds of common simple synthetic module types. The module registry is not
@@ -615,12 +621,16 @@ class ModuleBundle {
     BuiltinBuilder& addSynthetic(
         const Url& id, BundleBuilder::EvaluateCallback callback) KJ_LIFETIMEBOUND;
 
-    // The source must be backed by static process-lifetime storage.
-    BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The source and any embedded compileCache must be backed by static process-lifetime storage.
+    BuiltinBuilder& addEsm(const Url& id,
+        kj::ArrayPtr<const char> source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
     // The UTF-8 source shares ownership of its backing storage.
     BuiltinBuilder& addEsm(const Url& id, kj::Arc<OwnedAscii> source) KJ_LIFETIMEBOUND;
-    // The source is already encoded as Latin-1 or UTF-16 for V8.
-    BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
+    // The source is already encoded as Latin-1 or UTF-16 for V8. Both buffers have process lifetime.
+    BuiltinBuilder& addEsm(const Url& id,
+        StaticExternalStringSource source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
 
     // Adds a module that is implemented in C++ as a jsg::Object
     template <typename T, typename TypeWrapper>
