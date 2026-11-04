@@ -415,3 +415,21 @@ fn handles_are_described_as_their_values() {
         Type::Unknown
     ));
 }
+
+#[test]
+fn rest_parameters_are_described_as_cpp_varargs() {
+    let ty = crate::Arguments::<u32>::describe(&mut Context::default());
+    assert!(matches!(ty, Type::Varargs));
+    let mut message = capnp::message::Builder::new_default();
+    ty.write(message.init_root::<rtti_capnp::type_::Builder>());
+    let reader = message
+        .get_root_as_reader::<rtti_capnp::type_::Reader>()
+        .unwrap();
+    let rtti_capnp::type_::Which::JsgImpl(jsg_impl) = reader.which().unwrap() else {
+        panic!("expected a JSG implementation type");
+    };
+    assert_eq!(
+        jsg_impl.unwrap().get_type().unwrap(),
+        rtti_capnp::jsg_impl_type::Type::JsgVarargs
+    );
+}

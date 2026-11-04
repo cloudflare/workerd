@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod arguments;
 mod async_context;
 mod buffer;
 mod cell;
@@ -31,6 +32,7 @@ mod typed_promise;
 pub mod v8;
 mod wrappable;
 
+pub use arguments::Arguments;
 pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;

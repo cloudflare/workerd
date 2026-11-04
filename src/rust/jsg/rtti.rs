@@ -63,6 +63,9 @@ pub enum Type {
         name: &'static str,
         fully_qualified_name: &'static str,
     },
+    /// A rest parameter, [`jsg::Arguments`](crate::Arguments), which C++ RTTI describes without
+    /// its element type, so TypeScript declares it as `...name: any[]`.
+    Varargs,
 }
 
 pub struct Parameter {
@@ -334,6 +337,9 @@ impl Type {
                 structure.set_name(*name);
                 structure.set_fully_qualified_name(*fully_qualified_name);
             }
+            Self::Varargs => builder
+                .init_jsg_impl()
+                .set_type(rtti_capnp::jsg_impl_type::Type::JsgVarargs),
         }
     }
 }
