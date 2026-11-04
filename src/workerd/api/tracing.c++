@@ -405,11 +405,18 @@ void Span::recordException(
     return;
   }
 
+  KJ_IF_SOME(fields, readException(js, exception.getHandle(js), exceptionHandler)) {
+    recordExceptionFields(kj::mv(fields));
+  }
+}
+
+kj::Maybe<Span::ExceptionFields> Span::readException(jsg::Lock& js,
+    v8::Local<v8::Value> handle,
+    const jsg::TypeHandler<ExceptionData>& exceptionHandler) {
   kj::String name;
   kj::String message;
   kj::Maybe<kj::String> stack;
   kj::Maybe<tracing::Exception::Code> code;
-  auto handle = exception.getHandle(js);
   if (handle->IsString()) {
     message = jsg::JsValue(handle).toString(js);
   } else if (handle->IsObject()) {
@@ -417,7 +424,7 @@ void Span::recordException(
     bool hasRequiredField =
         data.code != kj::none || data.name != kj::none || data.message != kj::none;
     if (!hasRequiredField) {
-      return;
+      return kj::none;
     }
     KJ_IF_SOME(c, data.code) {
       KJ_SWITCH_ONEOF(c) {
@@ -439,15 +446,26 @@ void Span::recordException(
       stack = kj::mv(s);
     }
   } else {
-    return;
+    return kj::none;
   }
 
+  return ExceptionFields{
+    .code = kj::mv(code),
+    .name = kj::mv(name),
+    .message = kj::mv(message),
+    .stack = kj::mv(stack),
+  };
+}
+
+void Span::recordExceptionFields(ExceptionFields fields) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
-      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+      s->recordException(
+          kj::mv(fields.code), kj::mv(fields.name), kj::mv(fields.message), kj::mv(fields.stack));
     }
     KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
-      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+      s->recordException(
+          kj::mv(fields.code), kj::mv(fields.name), kj::mv(fields.message), kj::mv(fields.stack));
     }
   }
 }
@@ -480,6 +498,10 @@ jsg::Ref<Span> Span::setStatus(jsg::Lock& js, TracingSpanStatus status) {
     JSG_FAIL_REQUIRE(TypeError, "Span status code must be 'unset', 'ok', or 'error'.");
   }
 
+  if (code != tracing::SpanStatusCode::UNSET) {
+    statusSet = true;
+  }
+
   kj::Maybe<kj::ConstString> message;
   if (code == tracing::SpanStatusCode::ERROR) {
     KJ_IF_SOME(value, status.message) {
@@ -499,6 +521,43 @@ jsg::Ref<Span> Span::setStatus(jsg::Lock& js, TracingSpanStatus status) {
     }
   }
   return JSG_THIS;
+}
+
+void Span::recordCallbackError(
+    jsg::Lock& js, jsg::Value& error, const jsg::TypeHandler<ExceptionData>& exceptionHandler) {
+  if (statusSet || !getIsTraced()) {
+    return;
+  }
+
+  // Reading the error's properties can run user code that throws. That must never replace the
+  // callback's own error, so it only leaves out the exception or the status message.
+  kj::Maybe<ExceptionFields> fields;
+  JSG_TRY(js) {
+    fields = readException(js, error.getHandle(js), exceptionHandler);
+  }
+  JSG_CATCH(exception KJ_UNUSED) {}
+
+  jsg::Optional<kj::String> message;
+  JSG_TRY(js) {
+    auto value = jsg::JsValue(error.getHandle(js));
+    KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
+      if (object.has(js, "message"_kj)) {
+        value = object.get(js, "message"_kj);
+      }
+    }
+    message = value.toString(js);
+  }
+  JSG_CATCH(exception KJ_UNUSED) {}
+
+  // That user code can also set the status. If it did, record neither the exception nor the
+  // error status.
+  if (statusSet) {
+    return;
+  }
+  KJ_IF_SOME(f, fields) {
+    recordExceptionFields(kj::mv(f));
+  }
+  setStatus(js, TracingSpanStatus{.code = kj::str("error"), .message = kj::mv(message)});
 }
 
 void Span::end() {
@@ -590,6 +649,7 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
     jsg::Arguments<jsg::Value> args,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
     const jsg::TypeHandler<jsg::Promise<jsg::Value>>* valuePromiseHandler,
+    const jsg::TypeHandler<user_tracing::ExceptionData>* exceptionHandler,
     SpanEndMode endMode) {
   auto createdSpan = createSpan(js, kj::mv(operationName));
   auto jsSpan = kj::mv(createdSpan.span);
@@ -613,7 +673,7 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
 
       // If the callback returned a promise, defer end() until settlement.
       if (result->IsPromise()) {
-        KJ_ASSERT(valuePromiseHandler != nullptr);
+        KJ_ASSERT(valuePromiseHandler != nullptr && exceptionHandler != nullptr);
         auto promise = KJ_ASSERT_NONNULL(valuePromiseHandler->tryUnwrap(js, result))
                            .then(js,
                                [jsSpan = jsSpan.addRef()](
@@ -621,8 +681,11 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
           jsSpan->end();
           return kj::mv(value);
         },
-                               [jsSpan = jsSpan.addRef()](
+                               [jsSpan = jsSpan.addRef(), exceptionHandler](
                                    jsg::Lock& js, jsg::Value exception) mutable -> jsg::Value {
+          // Injected TypeHandlers are static singletons (TYPE_HANDLER_INSTANCE in
+          // jsg/type-wrapper.h), so this one is still valid after enterSpan() returns.
+          jsSpan->recordCallbackError(js, exception, *exceptionHandler);
           jsSpan->end();
           js.throwException(kj::mv(exception));
         });
@@ -637,7 +700,8 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
       }
     }, [&](jsg::Value exception) -> v8::Local<v8::Value> {
       if (endMode == SpanEndMode::AUTO_END) {
-        // Synchronous exception: end then rethrow.
+        // Synchronous exception: record it, end the span, then rethrow.
+        jsSpan->recordCallbackError(js, exception, *exceptionHandler);
         jsSpan->end();
       }
       js.throwException(kj::mv(exception));
@@ -673,9 +737,10 @@ v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
     v8::Local<v8::Function> callback,
     jsg::Arguments<jsg::Value> args,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
-    const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler) {
+    const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler,
+    const jsg::TypeHandler<user_tracing::ExceptionData>& exceptionHandler) {
   return runSpan(js, kj::mv(operationName), callback, kj::mv(args), spanHandler,
-      &valuePromiseHandler, SpanEndMode::AUTO_END);
+      &valuePromiseHandler, &exceptionHandler, SpanEndMode::AUTO_END);
 }
 
 v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
@@ -683,7 +748,7 @@ v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
     v8::Local<v8::Function> callback,
     jsg::Arguments<jsg::Value> args,
     const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
-  return runSpan(js, kj::mv(operationName), callback, kj::mv(args), spanHandler, nullptr,
+  return runSpan(js, kj::mv(operationName), callback, kj::mv(args), spanHandler, nullptr, nullptr,
       SpanEndMode::MANUAL_END);
 }
 
