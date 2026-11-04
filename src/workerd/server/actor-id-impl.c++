@@ -122,6 +122,14 @@ bool ActorIdFactoryImpl::matchesJurisdiction(const ActorId& id) {
   return true;
 }
 
+kj::Maybe<kj::Own<ActorIdFactory>> ActorIdFactoryImpl::cloneForSnapshot() const {
+  auto clone = kj::heap<ActorIdFactoryImpl>(key);
+  // Unlike cloneWithJurisdiction(), the counter carries over: a unique ID the zygote's top level
+  // minted in predictable mode must not be minted again by the Worker started from the snapshot.
+  clone->counter = counter;
+  return kj::Own<ActorIdFactory>(kj::mv(clone));
+}
+
 void ActorIdFactoryImpl::computeMac(kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]) {
   // Given that the first `BASE_LENGTH` bytes of `id` are filled in, compute the second half
   // of the ID by HMACing the first half. The id must be in a buffer large enough to store the
