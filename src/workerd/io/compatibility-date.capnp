@@ -1799,4 +1799,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  spanLinks @204 :Bool
+      $compatEnableFlag("span_links")
+      $experimental;
+  # Exposes Span.addLink() and Span.addLinks(). Links are emitted as spanLinks
+  # streaming-tail events and preserve the linked context independently of the receiver.
 }

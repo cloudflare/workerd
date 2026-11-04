@@ -321,6 +321,24 @@ struct Trace @0x8e8d911203762d34 {
     }
   }
 
+  struct SpanLink {
+    context @0 :SpanContext;
+    attributes @1 :List(Attribute);
+    origin @2 :Origin;
+    traceState @3 :Text;
+    droppedAttributesCount @4 :UInt32;
+
+    enum Origin {
+      unknown @0;
+      local @1;
+      remote @2;
+    }
+  }
+
+  struct SpanLinks {
+    links @0 :List(SpanLink);
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -388,6 +406,7 @@ struct Trace @0x8e8d911203762d34 {
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
       spanUpdate @14 :SpanUpdate;
+      spanLinks @15 :SpanLinks;
     }
   }
 }

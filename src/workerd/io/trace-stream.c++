@@ -30,6 +30,8 @@ namespace {
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
+  V(CONTEXT, "context")                                                                            \
+  V(DROPPEDATTRIBUTESCOUNT, "droppedAttributesCount")                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
   V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
@@ -55,11 +57,13 @@ namespace {
   V(INFO, "info")                                                                                  \
   V(INTERNALERROR, "internalError")                                                                \
   V(INVOCATIONID, "invocationId")                                                                  \
+  V(ISREMOTE, "isRemote")                                                                          \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
   V(LEVEL, "level")                                                                                \
   V(LOADSHED, "loadShed")                                                                          \
   V(LOG, "log")                                                                                    \
+  V(LINKS, "links")                                                                                \
   V(MAILFROM, "mailFrom")                                                                          \
   V(MESSAGE, "message")                                                                            \
   V(METHOD, "method")                                                                              \
@@ -87,6 +91,8 @@ namespace {
   V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(SPANUPDATE, "spanUpdate")                                                                      \
+  V(SPANLINKS, "spanLinks")                                                                        \
+  V(TRACESTATE, "traceState")                                                                      \
   V(STACK, "stack")                                                                                \
   V(STATUS, "status")                                                                              \
   V(STATUSCODE, "statusCode")                                                                      \
@@ -522,6 +528,36 @@ jsg::JsValue ToJs(jsg::Lock& js, const SpanUpdate& spanUpdate, StringCache& cach
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const SpanLinks& links, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, SPANLINKS_STR));
+  obj.set(js, LINKS_STR,
+      js.arr(links.links.asPtr(), [&cache](jsg::Lock& js, const SpanLink& link) -> jsg::JsValue {
+    auto value = js.obj();
+    auto context = js.obj();
+    context.set(js, TRACEID_STR, js.str(link.context.getTraceId().toW3C()));
+    KJ_IF_SOME(spanId, link.context.getSpanId()) {
+      context.set(js, SPANID_STR, js.str(spanId.toGoString()));
+    }
+    KJ_IF_SOME(flags, link.context.getTraceFlags()) {
+      context.set(js, TRACEFLAGS_STR, js.num(flags));
+    }
+    if (link.origin != SpanLink::Origin::UNKNOWN) {
+      context.set(js, ISREMOTE_STR, js.boolean(link.origin == SpanLink::Origin::REMOTE));
+    }
+    KJ_IF_SOME(state, link.traceState) {
+      context.set(js, TRACESTATE_STR, js.str(state));
+    }
+    value.set(js, CONTEXT_STR, kj::mv(context));
+    value.set(js, ATTRIBUTES_STR,
+        js.arr(link.attributes.asPtr(),
+            [&cache](jsg::Lock& js, const Attribute& attr) { return ToJs(js, attr, cache); }));
+    value.set(js, DROPPEDATTRIBUTESCOUNT_STR, js.num(link.droppedAttributesCount));
+    return value;
+  }));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
@@ -663,6 +699,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
       obj.set(js, EVENT_STR, ToJs(js, spanUpdate, cache));
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      obj.set(js, EVENT_STR, ToJs(js, links, cache));
+    }
     KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -704,6 +743,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, SpanUpdate) {
       return SPANUPDATE_STR;
+    }
+    KJ_CASE_ONEOF(_, SpanLinks) {
+      return SPANLINKS_STR;
     }
     KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
