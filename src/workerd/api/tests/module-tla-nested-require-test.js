@@ -41,6 +41,32 @@ export const deferredNestedDynamicImportSettlesTopLevelAwait = {
   },
 };
 
+export const deferredNestedDynamicImportRejectsWhenEvaluationThrows = {
+  async test() {
+    const entry = await import('cyc-throw-entry');
+    await rejects(entry.chunk, { message: 'deferred boom' });
+    // The module is left errored, so importing it again rethrows the same error.
+    await rejects(import('cyc-throw-chunk'), { message: 'deferred boom' });
+  },
+};
+
+export const deferredNestedDynamicImportRejectsWhenTopLevelAwaitThrows = {
+  async test() {
+    const entry = await import('cyc-tla-throw-entry');
+    await rejects(entry.chunk, { message: 'tla boom' });
+  },
+};
+
+export const deferredNestedDynamicImportRejectsWhenLinkFails = {
+  async test() {
+    const entry = await import('cyc-link-entry');
+    await rejects(entry.chunk, {
+      name: 'SyntaxError',
+      message: /does not provide an export named 'nope'/,
+    });
+  },
+};
+
 export const nestedRequireOfCycleBackToImporterThrows = {
   async test() {
     // Before the fix this aborted the process in V8's Module::PrepareInstantiate.

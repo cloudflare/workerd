@@ -55,6 +55,22 @@ const unitTests :Workerd.Config = (
           (name = "cyc-tla-chunk",
            esModule = "import { a } from 'cyc-tla-entry';\nawait 0;\nexport const b = a + 2;\n"),
 
+          # Deferred imports that fail. The import must reject with the module's own error: the
+          # failure from the first, deferred link attempt must not leak out instead.
+          (name = "cyc-throw-entry",
+           esModule = "export const chunk = import('cyc-throw-chunk');\n"),
+          (name = "cyc-throw-chunk",
+           esModule = "import 'cyc-throw-entry';\nthrow new Error('deferred boom');\n"),
+          (name = "cyc-tla-throw-entry",
+           esModule = "export const chunk = import('cyc-tla-throw-chunk');\n"),
+          (name = "cyc-tla-throw-chunk",
+           esModule = "import 'cyc-tla-throw-entry';\nawait 0;\nthrow new Error('tla boom');\n"),
+          # The retried link fails too, here because the importer lacks the export.
+          (name = "cyc-link-entry",
+           esModule = "export const chunk = import('cyc-link-chunk');\n"),
+          (name = "cyc-link-chunk",
+           esModule = "import { nope } from 'cyc-link-entry';\nexport const v = nope;\n"),
+
           # The same cycle through a nested require(), which is synchronous and so cannot wait:
           # it must fail the require() rather than abort the process.
           (name = "req-cyc-entry", esModule = "import 'req-cyc-cjs';\nexport default 1;\n"),
