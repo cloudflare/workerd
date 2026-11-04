@@ -18,15 +18,29 @@ class HibernatableTransport {
  public:
   // Makes `handle` the socket's transport, replacing any previous one, and restarts the count of
   // received messages, which is compared against the count the transport reports when paused.
-  // `handle` is kj::none if what connected the socket supplied none, in which case the socket
-  // can't be handed off.
+  // `handle` is kj::none if what connected the socket supplied none. The socket then receives in a
+  // way that a handoff would interrupt, so from then on it can't be handed off, and it keeps no
+  // handle that a later transport supplies.
   void attach(kj::Maybe<kj::Own<HibernatableTransportHandle>> handle) {
-    this->handle = kj::mv(handle);
+    if (handle == kj::none) {
+      attachedWithoutHandle = true;
+    }
+    if (attachedWithoutHandle) {
+      this->handle = kj::none;
+    } else {
+      this->handle = kj::mv(handle);
+    }
     consumedCount = 0;
   }
 
   kj::Maybe<HibernatableTransportHandle&> getHandle() {
     return handle;
+  }
+
+  // False once the socket was connected to a transport without a handle. Until the socket is
+  // connected, it may yet get one.
+  bool mayHaveHandle() const {
+    return !attachedWithoutHandle;
   }
 
   // Messages, including Close, that the socket has received since its transport was attached.
@@ -40,6 +54,7 @@ class HibernatableTransport {
 
  private:
   kj::Maybe<kj::Own<HibernatableTransportHandle>> handle;
+  bool attachedWithoutHandle = false;
   uint64_t consumedCount = 0;
 };
 
