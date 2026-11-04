@@ -52,6 +52,8 @@ const {
 
 const { createFileSystemWriteContext } = utils;
 
+const { kNullProtoObject, kEnumerable } = require('webstreams/common');
+
 const {
   WritableStream,
   internalsForPipe: { isWritableStreamLocked, acquireWriter, writerRelease },
@@ -84,7 +86,7 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
     // temporal dead zone until super() returns.
     const ctx = context as FileSystemWriteContext;
     const sink = {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       write(chunk: unknown): Promise<void> {
         return ctx.write(chunk as ArrayBuffer);
       },
@@ -139,12 +141,12 @@ class FileSystemWritableFileStream extends WritableStream<unknown> {
 // worker with a compatibility date before that flag's 2024-09-26 default sees a
 // tag here where the C++ implementation exposes none.
 ObjectDefineProperties(FileSystemWritableFileStream.prototype, {
-  __proto__: null,
-  write: { __proto__: null, enumerable: true },
-  seek: { __proto__: null, enumerable: true },
-  truncate: { __proto__: null, enumerable: true },
+  __proto__: kNullProtoObject,
+  write: kEnumerable,
+  seek: kEnumerable,
+  truncate: kEnumerable,
   [SymbolToStringTag]: {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     value: 'FileSystemWritableFileStream',
     writable: false,
     enumerable: false,

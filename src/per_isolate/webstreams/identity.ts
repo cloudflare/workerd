@@ -134,6 +134,10 @@ const {
   kNullProtoObject,
   kEnumerable,
   normalizeExpectedLength,
+  nullPrototypeRecord,
+  QueuingStrategyRecord,
+  UnderlyingSinkRecord,
+  UnderlyingSourceRecord,
   toStringTagProperty,
   toStrategyDictionary,
   convertHighWaterMark,
@@ -208,25 +212,50 @@ const kPrivateSymbol: symbol = Symbol('private');
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
 // than discriminated with an `in` check so that a polluted Object.prototype
-// cannot forge or mask the discriminant.
-interface AcceptedWrite {
-  ok: true;
+// cannot forge or mask the discriminant. The snapshot entries and the
+// in-flight write are made per write, so they are record classes (see
+// nullPrototypeRecord).
+class AcceptedWrite {
+  declare ok: true;
   // The write's bytes; undefined for a zero-length write.
-  copied: Uint8Array | undefined;
+  declare copied: Uint8Array | undefined;
   // How many of them have been handed to the readable side.
-  delivered: number;
+  declare delivered: number;
   // Whether they are counted against a FixedLengthStream's budget.
-  budgeted: boolean;
+  declare budgeted: boolean;
   // The offset, in the delivered byte stream, just past the write's last
   // byte; -1 until all of it has been delivered.
-  end: number;
+  declare end: number;
+  constructor(copied: Uint8Array | undefined) {
+    this.ok = true;
+    this.copied = copied;
+    this.delivered = 0;
+    this.budgeted = false;
+    this.end = -1;
+  }
 }
-type SnapshotEntry = AcceptedWrite | { ok: false; error: unknown };
+nullPrototypeRecord(AcceptedWrite);
+// A write whose chunk sizeAndSnapshot rejected, with the error.
+class RejectedWrite {
+  declare ok: false;
+  declare error: unknown;
+  constructor(error: unknown) {
+    this.ok = false;
+    this.error = error;
+  }
+}
+nullPrototypeRecord(RejectedWrite);
+type SnapshotEntry = AcceptedWrite | RejectedWrite;
 // The write whose sink step is in flight, with its promise.
-interface InFlightWrite {
-  entry: AcceptedWrite;
-  pending: PromiseWithResolversType<void>;
+class InFlightWrite {
+  declare entry: AcceptedWrite;
+  declare pending: PromiseWithResolversType<void>;
+  constructor(entry: AcceptedWrite, pending: PromiseWithResolversType<void>) {
+    this.entry = entry;
+    this.pending = pending;
+  }
 }
+nullPrototypeRecord(InFlightWrite);
 
 class IdentityTransformStream {
   #readable: ReadableStreamType<Uint8Array>;
@@ -605,33 +634,18 @@ class IdentityTransformStream {
             : copied === undefined
               ? 0
               : (TypedArrayPrototypeGetByteLength(copied) as number);
-        this.#snapshots.push({
-          __proto__: null,
-          ok: true,
-          copied,
-          delivered: 0,
-          budgeted: false,
-          end: -1,
-        } as AcceptedWrite);
+        this.#snapshots.push(new AcceptedWrite(copied));
         if (copied !== undefined) this.#scheduleDelivery();
         return size;
       } catch (error) {
-        this.#snapshots.push({
-          __proto__: null,
-          ok: false,
-          error,
-        } as SnapshotEntry);
+        this.#snapshots.push(new RejectedWrite(error));
         return 1;
       }
     };
-    const sinkStrategy: Record<string, unknown> =
-      explicitHighWaterMark !== undefined
-        ? {
-            __proto__: null,
-            highWaterMark: explicitHighWaterMark,
-            size: sizeAndSnapshot,
-          }
-        : { __proto__: null, size: sizeAndSnapshot };
+    const sinkStrategy = new QueuingStrategyRecord(
+      explicitHighWaterMark as number | undefined,
+      sizeAndSnapshot
+    );
 
     // --- Writable side (byte-only ingress) ---
     const sinkWrite = (_chunk: unknown): Promise<void> | undefined => {
@@ -682,11 +696,7 @@ class IdentityTransformStream {
         return;
       }
       const pending = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      this.#current = {
-        __proto__: null,
-        entry,
-        pending,
-      } as InFlightWrite;
+      this.#current = new InFlightWrite(entry, pending);
       if (this.#parkedPull !== undefined && this.#deliver()) {
         this.#releaseParkedPull();
       }
@@ -717,15 +727,15 @@ class IdentityTransformStream {
     };
 
     this.#writable = new WritableStream(
-      {
-        __proto__: null,
-        start: (c: object) => {
+      new UnderlyingSinkRecord<unknown>(
+        sinkAbort, // abort
+        sinkClose, // close
+        (c: object) => {
           this.#writableController = c;
-        },
-        write: sinkWrite,
-        close: sinkClose,
-        abort: sinkAbort,
-      },
+        }, // start
+        undefined, // type
+        sinkWrite // write
+      ),
       sinkStrategy
     );
     // abort() runs the abort steps only after the in-flight write settles,
@@ -751,25 +761,23 @@ class IdentityTransformStream {
       this.#errorWritableAndUnblockWrite(reason);
     };
 
-    const byteSource: Record<string, unknown> = {
-      __proto__: null,
-      type: 'bytes',
-      start: (c: object) => {
+    const byteSource = new UnderlyingSourceRecord<Uint8Array>(
+      undefined, // autoAllocateChunkSize
+      sourceCancel, // cancel
+      expectedLength, // expectedLength
+      sourcePull, // pull
+      (c: object) => {
         this.#readableController = c;
-      },
-      pull: sourcePull,
-      cancel: sourceCancel,
-    };
-    if (expectedLength !== undefined) {
-      byteSource.expectedLength = expectedLength;
-    }
+      }, // start
+      'bytes' // type
+    );
 
     // highWaterMark: 0 ensures pull is not called eagerly — it fires
     // only when a reader.read() is pending, enforcing the rendezvous.
-    this.#readable = new ReadableStream(byteSource, {
-      __proto__: null,
-      highWaterMark: 0,
-    });
+    this.#readable = new ReadableStream(
+      byteSource,
+      new QueuingStrategyRecord(0, undefined)
+    );
     // A tee branch's (or the sole reader's) progress may settle the
     // in-flight write: its bytes count as read once the slowest consumer
     // has read them.
@@ -837,24 +845,24 @@ class FixedLengthStream extends IdentityTransformStream {
       // and a negative zero cannot leak through the min() below into the
       // highWaterMark (and from there into the writer's desiredSize).
       const numExpected = Number(length);
-      writableStrategy = {
-        __proto__: null,
-        highWaterMark: converted < numExpected ? converted : numExpected,
-      } as QueuingStrategy<unknown>;
+      writableStrategy = new QueuingStrategyRecord(
+        converted < numExpected ? converted : numExpected,
+        undefined
+      ) as QueuingStrategy<unknown>;
     }
     super(kPrivateSymbol, length, writableStrategy);
   }
 }
 
 ObjectDefineProperties(IdentityTransformStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   readable: kEnumerable,
   writable: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('IdentityTransformStream'),
 });
 
 ObjectDefineProperties(FixedLengthStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   [SymbolToStringTag]: toStringTagProperty('FixedLengthStream'),
 });
 

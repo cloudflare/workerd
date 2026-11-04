@@ -55,10 +55,20 @@
 //   An Event as the runtime fires one: isTrusted, neither bubbling nor
 //   cancelable.
 //
-// createTrustedMessageEvent(type, data, source)
+// createTrustedMessageEvent(type, data, source, lastEventId?, origin?)
 //   A MessageEvent as the runtime fires one: isTrusted, `data` as is (not
-//   cloned), an empty lastEventId, a null origin, no ports, and `source`, a
-//   MessagePort or null.
+//   cloned), no ports, `source` (a MessagePort or null), `lastEventId` (the
+//   empty string when omitted) and `origin` (a serialized origin; null when
+//   omitted).
+//
+// createTrustedOpenEvent()
+//   The 'open' event an EventSource fires, as the runtime fires one: an
+//   OpenEvent, isTrusted, neither bubbling nor cancelable.
+//
+// createTrustedErrorEvent(error)
+//   An 'error' ErrorEvent carrying `error` as the runtime fires one:
+//   isTrusted, neither bubbling nor cancelable, an empty message and
+//   filename, and line and column 0.
 
 const { EventTarget } = primordials;
 
@@ -69,6 +79,8 @@ const {
   dispatchEvent: utilsDispatchEvent,
   createTrustedEvent,
   createTrustedMessageEvent,
+  createTrustedOpenEvent,
+  createTrustedErrorEvent,
 } = utils;
 
 type ExceptionPolicy = 'report' | 'propagate';
@@ -101,6 +113,8 @@ export type EventTargetInternals = {
   dispatchEvent: typeof dispatchEvent;
   createTrustedEvent: typeof createTrustedEvent;
   createTrustedMessageEvent: typeof createTrustedMessageEvent;
+  createTrustedOpenEvent: typeof createTrustedOpenEvent;
+  createTrustedErrorEvent: typeof createTrustedErrorEvent;
 };
 
 module.exports = {
@@ -112,4 +126,6 @@ module.exports = {
   dispatchEvent,
   createTrustedEvent,
   createTrustedMessageEvent,
+  createTrustedOpenEvent,
+  createTrustedErrorEvent,
 };

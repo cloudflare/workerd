@@ -213,6 +213,7 @@ export {
 
 export {
   teeClonesChunksPerBranch,
+  teeBranchBodyResultIsItsOwn,
   teeByteStreamDefaultReaders,
   teeByteStreamMixedReaders,
   teeCancelComposite,
