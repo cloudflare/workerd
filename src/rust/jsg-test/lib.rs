@@ -153,6 +153,13 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
 
+        /// Converts `exception` to a `kj::Exception` and back, as C++ JSG does with
+        /// `jsg::Lock::exceptionToKj()` and `jsg::Lock::exceptionToJsValue()`. Fails if
+        /// converting it throws, leaving that exception pending.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_tunnel_exception(isolate: *mut Isolate, exception: Local) -> MaybeLocal;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -645,6 +652,26 @@ impl Harness {
                     .expect("C++ JSG should deserialize the data"),
             )
         }
+    }
+
+    /// Converts `exception` to a `kj::Exception` and back with C++ JSG, to compare with
+    /// [`jsg::TunneledException`].
+    ///
+    /// # Errors
+    ///
+    /// Fails, leaving the exception pending, if converting it throws.
+    pub fn cpp_tunnel_exception<'s>(
+        lock: &mut jsg::Lock<'s>,
+        exception: v8::Local<'s, v8::Value>,
+    ) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi_maybe(ffi::cpp_tunnel_exception(
+                lock.isolate().as_ffi(),
+                exception.into_ffi(),
+            ))
+        }
+        .ok_or_else(jsg::Error::pending)
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

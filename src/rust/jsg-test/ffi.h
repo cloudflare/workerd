@@ -116,6 +116,11 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // deserialization throws.
 ::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
+// Converts `exception` to a kj::Exception and back, as C++ JSG does. Returns none if converting it
+// threw, leaving that exception pending.
+::workerd::rust::jsg::MaybeLocal cpp_tunnel_exception(
+    Isolate* isolate, ::workerd::rust::jsg::Local exception);
+
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 

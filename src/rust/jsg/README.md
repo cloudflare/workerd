@@ -249,8 +249,8 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
 workerd's API objects serialize, since their serializers are written against C++ JSG, and
-`newDOMException` in `workerd/jsg/dom-exception.h`, through which Rust creates DOMExceptions
-whatever implements them. These hooks take and return only V8 and KJ types.
+`newDOMException` and `tryGetDOMExceptionNameAndMessage` in `workerd/jsg/dom-exception.h`,
+through which Rust creates and reads DOMExceptions whatever implements them. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources

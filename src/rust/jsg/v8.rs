@@ -48,6 +48,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::JsErrorType;
 pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::GarbageCollected;
@@ -134,6 +135,25 @@ pub mod ffi {
         Error,
         RangeError,
         ReferenceError,
+    }
+
+    /// The JavaScript error types that C++ JSG tunnels through a `kj::Exception`, those of
+    /// `JS_ERROR_TYPES` in `jsg/util.h`, named as there.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum JsErrorType {
+        Error,
+        RangeError,
+        TypeError,
+        SyntaxError,
+        ReferenceError,
+        WasmCompileError,
+        WasmLinkError,
+        WasmRuntimeError,
+        WasmSuspendError,
+        AggregateError,
+        SuppressedError,
+        URIError,
+        EvalError,
     }
 
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
@@ -688,6 +708,19 @@ pub mod ffi {
             name: &str,
             message: &[u8],
         ) -> MaybeLocal;
+        // Infallible, as exception_create_from_bytes().
+        pub unsafe fn js_error_create_from_bytes(
+            isolate: *mut Isolate,
+            error_type: JsErrorType,
+            message: &[u8],
+        ) -> Local;
+        // Fallible only if no context is entered.
+        pub unsafe fn dom_exception_try_unwrap(
+            isolate: *mut Isolate,
+            value: &Local,
+            name: &mut String,
+            message: &mut String,
+        ) -> Result<bool>;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
