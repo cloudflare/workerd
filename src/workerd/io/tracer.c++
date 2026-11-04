@@ -282,6 +282,16 @@ void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& u
   addSpanUpdateInternal(spanId, kj::mv(update), getTime());
 }
 
+void WorkerTracer::addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE || links.links.size() == 0) return;
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto size = links.size();
+  writer->report(context, kj::mv(links), getTime(), size);
+}
+
 void WorkerTracer::addSpanUpdateInternal(
     tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
@@ -729,6 +739,10 @@ void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
   if (wasAccepted) {
     submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(status)));
   }
+}
+
+void UserSpanObserver::onLinks(tracing::SpanLinks links) {
+  if (wasAccepted) submitter->submitSpanLinks(spanId, kj::mv(links));
 }
 
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {

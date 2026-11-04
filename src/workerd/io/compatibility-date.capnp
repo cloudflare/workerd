@@ -1841,4 +1841,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # caches as the snapshot recorded them, instead of invalidating them at startup. The snapshot is
   # collected with the Worker's files and packages already in place, so the caches still describe
   # them, and rebuilding them is a large part of startup.
+
+  spanLinks @207 :Bool
+      $compatEnableFlag("span_links")
+      $experimental;
+  # Exposes Span.addLink() and Span.addLinks(). Links are emitted as spanLinks
+  # streaming-tail events and preserve the linked context independently of the receiver.
 }

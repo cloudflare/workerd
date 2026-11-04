@@ -814,6 +814,49 @@ struct Attribute final {
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 
+struct SpanLink final {
+  using Origin = rpc::Trace::SpanLink::Origin;
+
+  SpanContext context;
+  CustomInfo attributes;
+  Origin origin;
+  kj::Maybe<kj::ConstString> traceState;
+  uint32_t droppedAttributesCount;
+
+  SpanLink(SpanContext context,
+      CustomInfo attributes,
+      Origin origin = Origin::UNKNOWN,
+      kj::Maybe<kj::ConstString> traceState = kj::none,
+      uint32_t droppedAttributesCount = 0);
+  explicit SpanLink(rpc::Trace::SpanLink::Reader reader);
+  SpanLink(SpanLink&&) noexcept = default;
+  SpanLink& operator=(SpanLink&&) = default;
+  KJ_DISALLOW_COPY(SpanLink);
+
+  // Link identities may have zero IDs when attributes or tracestate carry the relationship.
+  static kj::Maybe<SpanContext> parseContext(
+      kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags);
+  static kj::Maybe<kj::String> parseTracestate(kj::StringPtr value);
+  void copyTo(rpc::Trace::SpanLink::Builder builder) const;
+  SpanLink clone() const;
+  size_t size() const;
+};
+
+struct SpanLinks final {
+  kj::Array<SpanLink> links;
+
+  explicit SpanLinks(kj::Array<SpanLink> links): links(kj::mv(links)) {}
+  explicit SpanLinks(rpc::Trace::SpanLinks::Reader reader);
+  SpanLinks(SpanLinks&&) noexcept = default;
+  SpanLinks& operator=(SpanLinks&&) = default;
+  KJ_DISALLOW_COPY(SpanLinks);
+
+  void copyTo(rpc::Trace::SpanLinks::Builder builder) const;
+  SpanLinks clone() const;
+  size_t size() const;
+  kj::String toString() const;
+};
+
 struct SpanOpenData {
   // Represents the data needed for a SpanOpen event
   tracing::SpanId spanId;
@@ -1006,6 +1049,7 @@ struct TailEvent final {
       SpanOpen,
       SpanClose,
       SpanUpdate,
+      SpanLinks,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1337,6 +1381,8 @@ class SpanBuilder {
 
   void setStatus(tracing::SpanStatus status);
 
+  void addLinks(tracing::SpanLinks links);
+
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1424,6 +1470,8 @@ class SpanObserver: public kj::Refcounted {
   virtual void onUpdateName(kj::ConstString operationName) {}
 
   virtual void onUpdateStatus(tracing::SpanStatus&& status) {}
+
+  virtual void onLinks(tracing::SpanLinks links) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
