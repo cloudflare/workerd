@@ -53,11 +53,13 @@ use crate::v8::ffi::Wrappable;
 ///   declaration order.
 ///
 /// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
-/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
-/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
-/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
-/// `README.md` §Safety rules, rule 2, and
-/// <https://github.com/cloudflare/workerd/issues/7976>.
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved
+/// out of the field by a bitwise move is then neither strong nor traced, unlike a moved C++
+/// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
+/// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
+/// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. See `README.md` §Safety
+/// rules, rule 2, and <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,
@@ -375,6 +377,8 @@ impl<R: Resource> Traced for Weak<R> {
         false
     }
 }
+
+impl<R: Resource> crate::HoldsNoGcReferences for Weak<R> {}
 
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {

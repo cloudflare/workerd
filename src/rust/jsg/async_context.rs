@@ -106,9 +106,9 @@ impl AsyncContextFrame {
 /// to pass a resource's frame to async I/O.
 ///
 /// Once the resource has no strong reference from Rust, the garbage collector keeps the frame
-/// alive only by tracing it through the resource, like any `TracedGlobal`. A frame taken out of
-/// its field, for example with `Cell::take`, is traced by nothing, so enter it, clone it or
-/// convert it before anything can run JavaScript or allocate on the V8 heap, and put it back.
+/// alive only by tracing it through the resource, like any `TracedGlobal`. A field that the frame
+/// is taken out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong as it leaves,
+/// so it stays alive however long Rust holds it.
 pub struct TracedAsyncContextFrame {
     /// The frame's wrapper, or `None` for the root frame.
     value: Option<TracedGlobal<FrameWrapper>>,

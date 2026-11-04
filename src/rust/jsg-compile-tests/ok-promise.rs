@@ -4,15 +4,13 @@
 
 // A method returns a promise, keeps its resolver past the call, and reacts to another promise
 // in each of the three ways, without `unsafe`.
-use std::cell::RefCell;
-
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]
 pub struct Waiter {
-    resolver: RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
+    resolver: jsg::RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
 }
 
 #[jsg_resource]
@@ -24,7 +22,7 @@ impl Waiter {
         input: v8::Local<'s, v8::Promise>,
     ) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
         let resolver = v8::PromiseResolver::new(lock)?;
-        *self.resolver.borrow_mut() = Some(resolver.to_traced_global(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.to_traced_global(lock));
         let wrapped = input.then(lock, String::from("data"), |lock, data, value| {
             let object = lock.new_object();
             object.set(lock, data, value)?;
