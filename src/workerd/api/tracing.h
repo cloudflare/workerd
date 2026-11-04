@@ -225,6 +225,17 @@ class Tracing: public jsg::Object {
       jsg::Arguments<jsg::Value> args,
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
 
+  // Makes an existing span the active span while invoking callback(...args), without creating
+  // or ending a span, and returns the callback result. Spans created inside the callback, and
+  // continuations it schedules, nest under `span`. This lets a span opened with startSpan() or
+  // startActiveSpan() be re-entered later, e.g. by an executor that polls many tasks from one
+  // async context and needs each task to run under its own span.
+  v8::Local<v8::Value> withActiveSpan(jsg::Lock& js,
+      jsg::Ref<user_tracing::Span> span,
+      v8::Local<v8::Function> callback,
+      jsg::Arguments<jsg::Value> args,
+      const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler);
+
   // Creates a child span of the current user tracing span without making it active. The caller
   // must call span.end() explicitly. If no IoContext is available, returns a no-op span.
   jsg::Ref<user_tracing::Span> startSpan(jsg::Lock& js, kj::String operationName);
@@ -238,6 +249,7 @@ class Tracing: public jsg::Object {
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
     JSG_METHOD(startActiveSpan);
+    JSG_METHOD(withActiveSpan);
     JSG_METHOD(startSpan);
     JSG_METHOD(getActiveSpan);
 
@@ -258,6 +270,11 @@ class Tracing: public jsg::Object {
       startActiveSpan<T, A extends unknown[]>(
         name: string,
         callback: (span: Span, ...args: A) => T,
+        ...args: A
+      ): T;
+      withActiveSpan<T, A extends unknown[]>(
+        span: Span,
+        callback: (...args: A) => T,
         ...args: A
       ): T;
       startSpan(name: string): Span;

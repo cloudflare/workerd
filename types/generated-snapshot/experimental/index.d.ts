@@ -4942,6 +4942,11 @@ interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
   startSpan(name: string): Span;
   getActiveSpan(): Span | undefined;
   Span: typeof Span;

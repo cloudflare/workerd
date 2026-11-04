@@ -152,3 +152,116 @@ export const abandonedPromiseSpan = {
     });
   },
 };
+
+export const withActiveSpanReentersStartSpan = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+    const { tracing } = ctx;
+    // A startSpan() span is never active on its own; withActiveSpan() re-enters it so
+    // user spans and runtime spans (fetch), including after an await, nest under it.
+    const parent = tracing.startSpan('hierarchy-reentered');
+    parent.setAttribute('case', 'withActiveSpanReentersStartSpan');
+    parent.setAttribute('role', 'parent');
+
+    const sum = tracing.withActiveSpan(
+      parent,
+      (a, b) => {
+        assert.strictEqual(tracing.getActiveSpan(), parent);
+        withSpan('hierarchy-reentered-sync-child', (span) => {
+          span.setAttribute('case', 'withActiveSpanReentersStartSpan');
+        });
+        return a + b;
+      },
+      1,
+      2
+    );
+    assert.strictEqual(sum, 3);
+    assert.notStrictEqual(tracing.getActiveSpan(), parent);
+
+    await tracing.withActiveSpan(parent, async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      assert.strictEqual(tracing.getActiveSpan(), parent);
+      const response = await env.fetchTarget.fetch('http://mock/reentered');
+      assert.strictEqual(response.status, 200);
+      await response.text();
+    });
+
+    assert.throws(
+      () =>
+        tracing.withActiveSpan(parent, () => {
+          throw new Error('boom');
+        }),
+      /boom/
+    );
+    assert.ok(parent.isTraced, 'withActiveSpan must not end the span');
+    parent.end();
+  },
+};
+
+export const withActiveSpanOverridesAmbient = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+    const { tracing } = ctx;
+    // One callback drives two tasks, as a shared executor tick does: each task's spans
+    // must nest under its own span rather than under the ambient span, and the ambient
+    // span must be restored afterwards.
+    const a = tracing.startSpan('hierarchy-task-a');
+    const b = tracing.startSpan('hierarchy-task-b');
+    for (const span of [a, b]) {
+      span.setAttribute('case', 'withActiveSpanOverridesAmbient');
+    }
+
+    withSpan('hierarchy-task-ambient', (ambient) => {
+      ambient.setAttribute('case', 'withActiveSpanOverridesAmbient');
+      tracing.withActiveSpan(a, () => {
+        withSpan('hierarchy-task-a-child', () => {});
+      });
+      tracing.withActiveSpan(b, () => {
+        withSpan('hierarchy-task-b-child', () => {});
+      });
+      assert.strictEqual(tracing.getActiveSpan(), ambient);
+      withSpan('hierarchy-task-ambient-child', () => {});
+    });
+
+    a.end();
+    b.end();
+  },
+};
+
+export const withActiveSpanEndedSpan = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+    const { tracing } = ctx;
+    // An ended span has nothing to parent under, so spans created inside keep the
+    // enclosing parent.
+    const ended = tracing.startSpan('hierarchy-ended');
+    ended.end();
+    withSpan('hierarchy-ended-ambient', (ambient) => {
+      ambient.setAttribute('case', 'withActiveSpanEndedSpan');
+      tracing.withActiveSpan(ended, () => {
+        assert.strictEqual(tracing.getActiveSpan(), ended);
+        withSpan('hierarchy-ended-child', () => {});
+      });
+    });
+  },
+};
+
+let foreignSpan;
+
+export const withActiveSpanForeignA = {
+  async test(ctrl, env, ctx) {
+    foreignSpan = ctx.tracing.startSpan('hierarchy-foreign');
+    foreignSpan.end();
+  },
+};
+
+export const withActiveSpanForeignB = {
+  async test(ctrl, env, ctx) {
+    // A span is owned by the request that created it and cannot be re-entered by another.
+    assert.ok(foreignSpan, 'withActiveSpanForeignA must run first');
+    assert.throws(
+      () => ctx.tracing.withActiveSpan(foreignSpan, () => {}),
+      /different request/
+    );
+  },
+};

@@ -196,6 +196,59 @@ export const validateHierarchy = {
     // waitForCompletion() awaits them all. BaseTracer::WeakRef prevents the abandoned
     // SpanImpl from pinning the tracer past end-of-request.
 
+    // ---------- Case 9: withActiveSpanReentersStartSpan ----------
+    // Spans created inside withActiveSpan(), sync, async after an await, and the runtime
+    // fetch span, all nest under the re-entered startSpan() span.
+    {
+      const parent = findSpanByName(state, 'hierarchy-reentered');
+      const syncChild = findSpanByName(state, 'hierarchy-reentered-sync-child');
+      const fetchSpan = findSpanByName(
+        state,
+        'fetch',
+        (s) => s.invocationId === parent.invocationId
+      );
+      assert.ok(parent.closed);
+      assertTopLevelParent(parent, 'withActiveSpanReentersStartSpan (parent)');
+      assertParent(syncChild, parent, 'withActiveSpanReentersStartSpan (sync)');
+      assertParent(
+        fetchSpan,
+        parent,
+        'withActiveSpanReentersStartSpan (fetch)'
+      );
+    }
+
+    // ---------- Case 10: withActiveSpanOverridesAmbient ----------
+    {
+      const a = findSpanByName(state, 'hierarchy-task-a');
+      const b = findSpanByName(state, 'hierarchy-task-b');
+      const ambient = findSpanByName(state, 'hierarchy-task-ambient');
+      assertParent(
+        findSpanByName(state, 'hierarchy-task-a-child'),
+        a,
+        'withActiveSpanOverridesAmbient (a)'
+      );
+      assertParent(
+        findSpanByName(state, 'hierarchy-task-b-child'),
+        b,
+        'withActiveSpanOverridesAmbient (b)'
+      );
+      assertParent(
+        findSpanByName(state, 'hierarchy-task-ambient-child'),
+        ambient,
+        'withActiveSpanOverridesAmbient (restored)'
+      );
+    }
+
+    // ---------- Case 11: withActiveSpanEndedSpan ----------
+    {
+      const ambient = findSpanByName(state, 'hierarchy-ended-ambient');
+      assertParent(
+        findSpanByName(state, 'hierarchy-ended-child'),
+        ambient,
+        'withActiveSpanEndedSpan'
+      );
+    }
+
     console.log('All tracing-hierarchy tests passed!');
   },
 };

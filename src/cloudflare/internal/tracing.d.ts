@@ -105,6 +105,17 @@ declare const tracing: {
     ...args: A
   ): T;
 
+  // Makes an existing span active while invoking `callback(...args)`, without creating or
+  // ending a span, and returns the callback result. Spans created inside the callback, and
+  // continuations it schedules, nest under `span`. Throws if `span` belongs to a different
+  // request. If `span` is a no-op span or has ended, spans created inside the callback keep
+  // the enclosing parent.
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
+
   // Creates a span as a child of the current active user tracing span without making it active.
   // Callers must invoke `span.end()` explicitly.
   startSpan(name: string): Span;
