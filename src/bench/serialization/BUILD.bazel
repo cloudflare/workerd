@@ -1,0 +1,6 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+wd_bench(
+    src = "structured-clone.wd-bench",
+    data = ["structured-clone.js"],
+)
