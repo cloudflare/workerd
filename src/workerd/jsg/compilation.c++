@@ -90,16 +90,65 @@ v8::MaybeLocal<v8::Module> compileModuleWithHints(jsg::Lock& js,
 
 }  // namespace
 
+void IsolateCompileHints::record(Lock& js, kj::StringPtr name, v8::Local<v8::Module> module) {
+  auto& instances =
+      modules.findOrCreate(name, [&]() -> decltype(modules)::Entry { return {kj::str(name), {}}; });
+  instances.add(v8::Global<v8::Module>(js.v8Isolate, module));
+}
+
+kj::Array<ProducedCompileHints> IsolateCompileHints::collect(Lock& js) const {
+  kj::Vector<ProducedCompileHints> result;
+  for (auto& entry: modules) {
+    kj::Vector<int> positions;
+    for (auto& module: entry.value) {
+      positions.addAll(getProducedCompileHints(js, module.Get(js.v8Isolate)));
+    }
+    if (positions.size() > 1) {
+      std::sort(positions.begin(), positions.end());
+      positions.truncate(std::unique(positions.begin(), positions.end()) - positions.begin());
+    }
+    result.add(ProducedCompileHints{kj::str(entry.key), positions.releaseAsArray()});
+  }
+  return result.releaseAsArray();
+}
+
+void IsolateCompileHints::discard() {
+  modules.clear();
+}
+
+kj::Array<ProducedCompileHints> getProducedCompileHints(Lock& js) {
+  KJ_IF_SOME(hints, IsolateBase::from(js.v8Isolate).tryGetCompileHints()) {
+    return js.withinHandleScope([&]() { return hints.collect(js); });
+  }
+  return {};
+}
+
+kj::Array<int> getProducedCompileHints(Lock& js, v8::Local<v8::Module> module) {
+  auto positions =
+      module->GetUnboundModuleScript()->GetCompileHintsCollector()->GetCompileHints(js.v8Isolate);
+  std::sort(positions.begin(), positions.end());
+  positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+  return kj::heapArray<int>(positions.data(), positions.size());
+}
+
 v8::MaybeLocal<v8::Module> compileModule(Lock& js,
     v8::Local<v8::String> source,
     const v8::ScriptOrigin& origin,
     const CompilationObserver& observer,
     kj::FunctionParam<kj::Maybe<CodeCacheKey>(IsolateCodeCache&)> getCacheKey,
     const ModuleCompilationOptions& options) {
-  if (options.produceHints) {
-    v8::ScriptCompiler::Source compileSource(source, origin);
-    return v8::ScriptCompiler::CompileModule(
-        js.v8Isolate, &compileSource, v8::ScriptCompiler::kProduceCompileHints);
+  KJ_IF_SOME(name, options.bundleModuleName) {
+    KJ_IF_SOME(hints, IsolateBase::from(js.v8Isolate).tryGetCompileHints()) {
+      v8::ScriptCompiler::Source compileSource(source, origin);
+      v8::Local<v8::Module> module;
+      if (!v8::ScriptCompiler::CompileModule(
+              js.v8Isolate, &compileSource, v8::ScriptCompiler::kProduceCompileHints)
+               .ToLocal(&module)) {
+        return {};
+      }
+      hints.record(js, name, module);
+      return module;
+    }
   }
   auto compile = [&](v8::ScriptCompiler::Source* source,
                      v8::ScriptCompiler::CompileOptions options) {
