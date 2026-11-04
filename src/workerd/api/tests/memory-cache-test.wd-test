@@ -8,6 +8,10 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "memory-cache-test.js")
         ],
         compatibilityFlags = ["nodejs_compat", "unsafe_module", "memory_cache_delete"],
+        durableObjectNamespaces = [
+          (className = "CacheReader", uniqueKey = "memory-cache-test-cache-reader"),
+        ],
+        durableObjectStorage = (inMemory = void),
         bindings = [
           (name = "CACHE", memoryCache = (
             limits = (
@@ -29,7 +33,9 @@ const unitTests :Workerd.Config = (
               maxValueSize = 500,
               maxTotalValueSize = 600,
             ),
-          ))
+          )),
+          (name = "SELF", service = "memory-cache-test"),
+          (name = "READER", durableObjectNamespace = "CacheReader"),
         ]
       )
     ),

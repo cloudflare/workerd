@@ -144,7 +144,10 @@ namespace workerd::util {
      abort's reason its queued deliveries share as external memory, and queues at most one         \
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
+     (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
+  V(RUST_MEMORY_CACHE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
