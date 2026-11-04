@@ -43,7 +43,7 @@ struct LegacyHibernationManagerTestAccess {
   }
 
   static kj::Own<WorkerInterface> getWorkerForOnlyWebSocket(LegacyHibernationManagerImpl& manager) {
-    return manager.getWorkerForEvent(getOnlyWebSocket(manager));
+    return manager.getWorkerForEvent(getOnlyWebSocket(manager), EndsWebSocket::NO);
   }
 
   static size_t registeredEventCount(LegacyHibernationManagerImpl& manager) {
@@ -79,6 +79,20 @@ struct LegacyHibernationManagerTestAccess {
 
   static bool hasPendingReceive(LegacyHibernationManagerImpl& manager) {
     return getOnlyWebSocket(manager).pendingReceive != kj::none;
+  }
+
+  static bool isDetaching(Worker::Actor::HibernationManager& manager) {
+    return kj::downcast<LegacyHibernationManagerImpl>(manager).detachment != kj::none;
+  }
+
+  // Each WebSocket's tags joined with "+", in the order the WebSockets were accepted, joined
+  // with ",".
+  static kj::String describeTagsInAcceptOrder(LegacyHibernationManagerImpl& manager) {
+    kj::Vector<kj::String> sockets;
+    for (auto it = manager.allWs.rbegin(); it != manager.allWs.rend(); ++it) {
+      sockets.add(kj::strArray((*it)->getTags(), "+"));
+    }
+    return kj::strArray(sockets, ",");
   }
 
  private:
@@ -225,13 +239,16 @@ inline kj::Rc<Worker::Actor::HibernationManager> makeTestHm(
 // Create an api::WebSocket, accept it into the HM under `tag` (or untagged if `tag` is empty),
 // and return the eyeball end of the new pipe. Tests can call this multiple times to attach
 // multiple concurrent WebSockets; pass distinct tags to identify them later via getWebSockets.
+// With `transport`, the WebSocket is carried by the transport that the handle stands for, as if
+// coupled to a request that supplied it.
 //
 // Needs an IoContext (the api::WebSocket constructor stores IoOwn members), supplied by the
 // IR. Test code should pick an IR whose IoContext should "own" this api::WebSocket.
 inline kj::Own<kj::WebSocket> acceptNewWebSocket(TestFixture& fixture,
     IoContext::IncomingRequest& request,
     Worker::Actor::HibernationManager& hm,
-    kj::StringPtr tag = ""_kj) {
+    kj::StringPtr tag = ""_kj,
+    kj::Maybe<kj::Own<HibernatableTransportHandle>> transport = kj::none) {
   kj::Own<kj::WebSocket> eyeball;
   fixture.enterContext(request, [&](const TestFixture::Environment& env) {
     auto pipe = kj::newWebSocketPipe();
@@ -248,7 +265,10 @@ inline kj::Own<kj::WebSocket> acceptNewWebSocket(TestFixture& fixture,
 #endif
     auto tags = kj::heapArray<kj::String>(tag.size() == 0 ? 0 : 1);
     if (tag.size() != 0) tags[0] = kj::str(tag);
-    hm.acceptWebSocket(kj::mv(apiWs), tags);
+    hm.acceptWebSocket(apiWs.addRef(), tags);
+    KJ_IF_SOME(t, transport) {
+      KJ_ASSERT_NONNULL(apiWs->getHibernatableTransport()).attach(kj::mv(t));
+    }
   });
   return eyeball;
 }

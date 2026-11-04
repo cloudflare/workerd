@@ -10,6 +10,7 @@
 #include <workerd/util/uuid.h>
 
 #include <kj/common.h>
+#include <kj/sticky-flag.h>
 
 namespace workerd {
 
@@ -19,15 +20,16 @@ LegacyHibernationManagerImpl::EventRegistry& LegacyHibernationManagerImpl::getEv
 }
 
 LegacyHibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
-    jsg::Ref<api::WebSocket> websocket,
+    kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage,
     kj::ArrayPtr<kj::String> tags,
     kj::Rc<HibernatableTransport> transport,
     LegacyHibernationManagerImpl& manager)
     : tagItems(kj::heapArray<TagListItem>(tags.size())),
-      activeOrPackage(kj::mv(websocket)),
+      activeOrPackage(kj::mv(activeOrPackage)),
       // The `ws` starts off empty because we need to set up our tagging infrastructure before
       // calling api::WebSocket::acceptAsHibernatable(). We will share ownership of the
-      // kj::WebSocket before starting the readLoop.
+      // kj::WebSocket before starting the readLoop. An adopted socket gets its `ws` from the
+      // detached one.
       ws(kj::none),
       manager(manager),
       transport(kj::mv(transport)) {}
@@ -54,6 +56,10 @@ LegacyHibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() no
     item.hibWS = kj::none;
     item.list = kj::none;
   }
+
+  // A detachment watches the transport only while this record holds it, and the transport can
+  // outlive the record, as it does when the socket is taken out for a handoff.
+  transport->setOnAttach(kj::none);
 }
 
 class LegacyHibernationManagerImpl::LoopbackWaiterAdapter final: public LoopbackWaiter {
@@ -108,6 +114,12 @@ kj::WebSocket::Message LegacyHibernationManagerImpl::PendingReceive::takeMessage
   return kj::mv(KJ_ASSERT_NONNULL(message));
 }
 
+kj::Promise<kj::WebSocket::Message> LegacyHibernationManagerImpl::PendingReceive::release(
+    kj::Own<PendingReceive> self) {
+  co_await self->whenReceived();
+  co_return self->takeMessage();
+}
+
 kj::Promise<kj::WebSocket::Message> LegacyHibernationManagerImpl::HibernatableWebSocket::receive() {
   if (pendingReceive == kj::none) {
     auto& socket = *KJ_REQUIRE_NONNULL(ws);
@@ -139,6 +151,8 @@ kj::Promise<void> LegacyHibernationManagerImpl::HibernatableWebSocket::branchWri
 jsg::Ref<api::WebSocket> LegacyHibernationManagerImpl::HibernatableWebSocket::
     getActiveOrUnhibernate(jsg::Lock& js) {
   KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+    manager.abandonDetachment(*this, WebSocketHandoffBlocker::WEBSOCKET_AWAKE);
+
     // Recreate our tags array for the api::WebSocket.
     package.maybeTags = getTags();
 
@@ -196,6 +210,7 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
 
   JSG_REQUIRE(allWs.size() < ACTIVE_CONNECTION_LIMIT, Error, "only ", ACTIVE_CONNECTION_LIMIT,
       " websockets can be accepted on a single Durable Object instance");
+  abandonDetachment(WebSocketHandoffBlocker::WEBSOCKET_AWAKE);
 
   auto hib =
       kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, kj::rc<HibernatableTransport>(), *this);
@@ -260,7 +275,7 @@ LegacyHibernationManagerImpl::HibernatableWebSocket& LegacyHibernationManagerImp
 }
 
 void LegacyHibernationManagerImpl::startReadLoop(HibernatableWebSocket& hib) {
-  readLoopTasks.add(handleReadLoop(hib).catch_([](kj::Exception&& e) {
+  readLoopTasks.add(hib.readLoopCanceler.wrap(handleReadLoop(hib)).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
       LOG_EXCEPTION_IF_INTERNAL("LegacyHibernationManagerImpl::handleReadLoop", e);
     }
@@ -304,6 +319,7 @@ uint64_t LegacyHibernationManagerImpl::getWebSocketCount() const {
 
 void LegacyHibernationManagerImpl::setWebSocketAutoResponse(
     kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) {
+  abandonDetachment(WebSocketHandoffBlocker::WEBSOCKETS_CHANGED);
   KJ_IF_SOME(req, request) {
     // If we have a request, we must also have a response. If response is kj::none, we'll throw.
     autoResponsePair->request = kj::str(req);
@@ -327,6 +343,9 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> LegacyHibernationManagerI
 }
 
 void LegacyHibernationManagerImpl::setLoopback(kj::Own<Worker::Actor::Loopback> loopback) {
+  // Events no longer wait, so a message received from now on could reach the actor here.
+  abandonDetachment(WebSocketHandoffBlocker::LOOPBACK_ARRIVED);
+
   // A loopback arriving completes any handoff in progress: the parked one belongs to a generation
   // that is gone. Clearing the generation makes dropping that handoff's handle a no-op.
   handoffLoopback = kj::none;
@@ -438,6 +457,7 @@ void LegacyHibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
 }
 
 void LegacyHibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
+  abandonDetachment(WebSocketHandoffBlocker::WEBSOCKETS_CHANGED);
   eventTimeoutMs = kj::mv(timeoutMs);
 }
 
@@ -480,6 +500,7 @@ LegacyHibernationManagerImpl::HibernatableWebSocket& LegacyHibernationManagerImp
 
   --registered.manager->registeredEventCount;
   auto& webSocket = *registered.webSocket;
+  --webSocket.registeredEvents;
   registry.erase(entry);
   return webSocket;
 }
@@ -491,6 +512,7 @@ void LegacyHibernationManagerImpl::registerEventWebSocket(
       websocketId);
   registry.insert(kj::mv(websocketId), RegisteredEvent{this, &hib});
   ++registeredEventCount;
+  ++hib.registeredEvents;
 }
 
 void LegacyHibernationManagerImpl::cancelEvent(kj::StringPtr websocketId) {
@@ -499,11 +521,16 @@ void LegacyHibernationManagerImpl::cancelEvent(kj::StringPtr websocketId) {
     KJ_ASSERT(entry.value.manager == this,
         "hibernatable WebSocket event registered to a different manager", websocketId);
     --registeredEventCount;
+    --entry.value.webSocket->registeredEvents;
     registry.erase(entry);
   }
 }
 
 void LegacyHibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {
+  abandonDetachment(hib, WebSocketHandoffBlocker::WEBSOCKETS_CHANGED);
+
+  // The read loop calling this destroys `hib`, so `hib` must not cancel it.
+  hib.readLoopCanceler.release();
   removeFromAllWs(hib);
 }
 
@@ -541,7 +568,7 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
     }
 
     KJ_REQUIRE_NONNULL(params).setTimeout(eventTimeoutMs);
-    auto workerInterface = getWorkerForEvent(hib);
+    auto workerInterface = getWorkerForEvent(hib, EndsWebSocket::YES);
     event = workerInterface
                 ->customEvent(kj::rc<api::HibernatableWebSocketCustomEvent>(
                     hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)))
@@ -558,7 +585,7 @@ kj::Promise<void> LegacyHibernationManagerImpl::handleSocketTermination(
 }
 
 kj::Own<WorkerInterface> LegacyHibernationManagerImpl::getWorkerForEvent(
-    HibernatableWebSocket& hib) {
+    HibernatableWebSocket& hib, EndsWebSocket endsWebSocket) {
   SpanParent userSpanParent = SpanParent(nullptr);
   KJ_IF_SOME(ctx, hib.userSpanContext) {
     userSpanParent = SpanParent::fromSpanContext(tracing::SpanContext::clone(ctx));
@@ -579,6 +606,8 @@ kj::Own<WorkerInterface> LegacyHibernationManagerImpl::getWorkerForEvent(
       kj::newAdaptedPromise<kj::Own<WorkerInterface>, LoopbackWaiterAdapter>(
           loopbackWaiters, kj::mv(metadata));
 
+  eventWaitsForLoopback(hib, endsWebSocket);
+
   // Don't wait for the replacement loopback indefinitely.
   KJ_IF_SOME(t, timer) {
     worker = worker.exclusiveJoin(
@@ -596,7 +625,7 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
   while (true) {
     kj::WebSocket::Message message = co_await hib.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
-    hib.transport->countConsumed();
+    countConsumed(hib);
 
     auto skip = false;
 
@@ -699,7 +728,9 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
     auto params = kj::mv(KJ_REQUIRE_NONNULL(maybeParams));
     params.setTimeout(eventTimeoutMs);
     auto isClose = params.isCloseEvent();
-    auto workerInterface = getWorkerForEvent(hib);
+    hib.deliveringEvent = true;
+    KJ_DEFER(hib.deliveringEvent = false);
+    auto workerInterface = getWorkerForEvent(hib, EndsWebSocket(isClose));
     co_await workerInterface->customEvent(
         kj::rc<api::HibernatableWebSocketCustomEvent>(hibernationEventType, kj::mv(params))
             .toOwn());
@@ -707,6 +738,480 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
       co_return;
     }
   }
+}
+
+// =======================================================================================
+// Handing the WebSockets to another manager
+
+// A detachWebSocketsForHandoff() in progress. Readies the sockets, then holds them ready until
+// take() takes them or the detachment is dropped.
+//
+// Its work on each socket runs through the socket's handoffCanceler, so that it ends with the
+// socket, and records its result in the socket. A socket whose work fails, or hasn't finished when
+// the deadline passes, has no result, which leaves it out.
+class LegacyHibernationManagerImpl::Detachment final: public HibernatableWebSocketDetachment {
+ public:
+  explicit Detachment(LegacyHibernationManagerImpl& owner);
+  ~Detachment() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(Detachment);
+
+  // Pauses every transport, then waits until each socket has received what its transport sent,
+  // and for any auto-response in progress. Leaves out the sockets that can't be readied, and once
+  // `deadline` resolves, those that aren't ready yet.
+  kj::Promise<void> ready(kj::Promise<void> deadline);
+
+  DetachedHibernatableWebSockets take() override;
+  size_t getLeftOutCount() const override;
+
+  // Makes the detachment fail with what `blocker` causes, and resumes the transports. Only the
+  // first failure has an effect.
+  void abandon(WebSocketHandoffBlocker blocker);
+
+  // An event for `hib` waits for a loopback. The event can run only in the actor this manager
+  // belongs to, so it abandons the detachment, unless it ends the socket, which then can't move
+  // anyway. That leaves the socket out instead.
+  void eventWaits(HibernatableWebSocket& hib, EndsWebSocket endsWebSocket);
+
+  // Counts a message that `hib` received toward the wait for every socket to catch up.
+  void countConsumed(HibernatableWebSocket& hib);
+
+ private:
+  using Readiness = HibernatableWebSocket::HandoffReadiness;
+
+  kj::Own<LegacyHibernationManagerImpl> manager;
+
+  // Rejected, with `failure` set to the reason, as soon as the detachment can't succeed.
+  kj::StickyFlag abandoned;
+  kj::Maybe<kj::Exception> failure;
+
+  // Signaled once every socket has received every message its transport sent before pausing.
+  kj::StickyFlag caughtUp;
+
+  // How many sockets haven't, counted once every transport has paused.
+  kj::Maybe<size_t> laggingSockets;
+
+  // How many sockets the detachment began with, and how many of them it left out.
+  size_t socketCount;
+  size_t leftOutCount = 0;
+
+  // True once take() has taken the sockets, after which the manager is free for another
+  // detachment.
+  bool taken = false;
+
+  // Makes the detachment fail with `exception`, and resumes the transports, unless it failed
+  // already.
+  void fail(kj::Exception exception);
+
+  void throwIfFailed();
+
+  // Waits for `promise`, but fails if the detachment is abandoned first, or meanwhile.
+  kj::Promise<void> unlessAbandoned(kj::Promise<void> promise);
+
+  // Leaves `hib` out, and resumes its transport. Fails the detachment if no socket remains.
+  void leaveOut(HibernatableWebSocket& hib);
+
+  // Stores the pause of `hib`'s transport in `hib.handoffPause`.
+  static kj::Promise<void> pause(HibernatableWebSocket& hib);
+
+  // Whether `hib` hasn't received every message its transport sent before pausing.
+  static bool isLagging(HibernatableWebSocket& hib);
+
+  // Marks `hib` ready once no write to it is in progress.
+  static kj::Promise<void> finishWrites(HibernatableWebSocket& hib);
+
+  // Drops the pauses of the sockets in the manager, which resumes their transports.
+  void releasePauses();
+
+  // Stops watching the sockets that remain in the manager.
+  void release();
+};
+
+LegacyHibernationManagerImpl::Detachment::Detachment(LegacyHibernationManagerImpl& owner)
+    : manager(kj::addRef(owner)),
+      socketCount(owner.allWs.size()) {
+  owner.detachment = *this;
+  for (auto& hib: owner.allWs) {
+    // Another transport makes the pause stale, and restarts the count of received messages.
+    hib->transport->setOnAttach(
+        kj::Function<void()>([this]() { abandon(WebSocketHandoffBlocker::WEBSOCKETS_CHANGED); }));
+  }
+}
+
+LegacyHibernationManagerImpl::Detachment::~Detachment() noexcept(false) {
+  if (!taken) {
+    manager->detachment = kj::none;
+    releasePauses();
+    release();
+  }
+}
+
+void LegacyHibernationManagerImpl::Detachment::releasePauses() {
+  for (auto& hib: manager->allWs) {
+    hib->handoffCanceler.cancel("hibernatable WebSocket handoff ended");
+    hib->handoffPause = kj::none;
+  }
+}
+
+void LegacyHibernationManagerImpl::Detachment::release() {
+  for (auto& hib: manager->allWs) {
+    hib->transport->setOnAttach(kj::none);
+    hib->handoffReadiness = Readiness::READYING;
+  }
+}
+
+void LegacyHibernationManagerImpl::Detachment::abandon(WebSocketHandoffBlocker blocker) {
+  fail(makeWebSocketHandoffException(blocker));
+}
+
+void LegacyHibernationManagerImpl::Detachment::fail(kj::Exception exception) {
+  if (failure != kj::none) {
+    return;
+  }
+  failure = exception.clone();
+  abandoned.reject(kj::mv(exception));
+  releasePauses();
+}
+
+void LegacyHibernationManagerImpl::Detachment::throwIfFailed() {
+  KJ_IF_SOME(exception, failure) {
+    kj::throwFatalException(exception.clone());
+  }
+}
+
+kj::Promise<void> LegacyHibernationManagerImpl::Detachment::unlessAbandoned(
+    kj::Promise<void> promise) {
+  kj::Maybe<kj::Exception> error;
+  try {
+    co_await promise.exclusiveJoin(abandoned.whenSignaled());
+  } catch (...) {
+    error = kj::getCaughtExceptionAsKj();
+  }
+  // Prefer the reason for abandoning to a failure it caused, such as a cancelled pause.
+  throwIfFailed();
+  KJ_IF_SOME(exception, error) {
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+void LegacyHibernationManagerImpl::Detachment::leaveOut(HibernatableWebSocket& hib) {
+  if (failure != kj::none || hib.isLeftOutOfHandoff()) {
+    return;
+  }
+  if (isLagging(hib)) {
+    KJ_IF_SOME(lagging, laggingSockets) {
+      if (--lagging == 0) {
+        caughtUp.signal();
+      }
+    }
+  }
+  hib.handoffReadiness = Readiness::LEFT_OUT;
+  hib.transport->setOnAttach(kj::none);
+  hib.handoffCanceler.cancel("hibernatable WebSocket left out of the handoff");
+  hib.handoffPause = kj::none;
+  if (++leftOutCount == socketCount) {
+    fail(KJ_EXCEPTION(FAILED, "every hibernatable WebSocket was left out of the handoff"));
+  }
+}
+
+kj::Promise<void> LegacyHibernationManagerImpl::Detachment::pause(HibernatableWebSocket& hib) {
+  hib.handoffPause = co_await KJ_ASSERT_NONNULL(hib.transport->getHandle()).pause();
+}
+
+bool LegacyHibernationManagerImpl::Detachment::isLagging(HibernatableWebSocket& hib) {
+  KJ_IF_SOME(pause, hib.handoffPause) {
+    return hib.transport->getConsumedCount() < pause.sentCount;
+  }
+  return false;
+}
+
+kj::Promise<void> LegacyHibernationManagerImpl::Detachment::finishWrites(
+    HibernatableWebSocket& hib) {
+  co_await hib.branchWriteBarrier();
+  hib.handoffReadiness = Readiness::READY;
+}
+
+kj::Promise<void> LegacyHibernationManagerImpl::Detachment::ready(kj::Promise<void> deadline) {
+  auto& allWs = manager->allWs;
+  // Resolves once the deadline has passed, and work that had finished by then has recorded its
+  // result, so that a socket ready in time isn't left out.
+  auto whenDeadlinePasses = [passed = deadline.fork()]() mutable {
+    return passed.addBranch().then([]() { return kj::yieldUntilQueueEmpty(); });
+  };
+  // A socket whose work fails records no result, which leaves it out below.
+  auto ignoreFailure = [](kj::Exception&&) {};
+
+  // Pause every transport.
+  kj::Vector<kj::Promise<void>> pauses(allWs.size());
+  for (auto& hib: allWs) {
+    pauses.add(hib->handoffCanceler.wrap(pause(*hib)).catch_(ignoreFailure));
+  }
+  co_await unlessAbandoned(
+      kj::joinPromises(pauses.releaseAsArray()).exclusiveJoin(whenDeadlinePasses()));
+  for (auto& hib: allWs) {
+    if (hib->handoffPause == kj::none) {
+      leaveOut(*hib);
+    }
+  }
+  throwIfFailed();
+
+  // Wait until each socket has received every message its transport sent before pausing. One that
+  // matches the auto-response is answered meanwhile. Any other needs the actor, so its event waits
+  // for a loopback, which abandons the detachment.
+  size_t lagging = 0;
+  for (auto& hib: allWs) {
+    KJ_IF_SOME(pause, hib->handoffPause) {
+      if (hib->transport->getConsumedCount() > pause.sentCount) {
+        abandon(WebSocketHandoffBlocker::TRANSPORT_MISCOUNTED);
+        throwIfFailed();
+      }
+    }
+    if (isLagging(*hib)) {
+      ++lagging;
+    }
+  }
+  if (lagging > 0) {
+    laggingSockets = lagging;
+    co_await unlessAbandoned(caughtUp.whenSignaled().exclusiveJoin(whenDeadlinePasses()));
+    for (auto& hib: allWs) {
+      if (isLagging(*hib)) {
+        leaveOut(*hib);
+      }
+    }
+    throwIfFailed();
+  }
+
+  // Wait for auto-responses still being written. Nothing can start another on a socket that isn't
+  // left out, because it won't receive another message.
+  kj::Vector<kj::Promise<void>> writes(allWs.size());
+  for (auto& hib: allWs) {
+    if (hib->handoffReadiness == Readiness::READYING) {
+      writes.add(hib->handoffCanceler.wrap(finishWrites(*hib)).catch_(ignoreFailure));
+    }
+  }
+  co_await unlessAbandoned(
+      kj::joinPromises(writes.releaseAsArray()).exclusiveJoin(whenDeadlinePasses()));
+  for (auto& hib: allWs) {
+    if (hib->handoffReadiness == Readiness::READYING) {
+      leaveOut(*hib);
+    }
+  }
+  throwIfFailed();
+}
+
+void LegacyHibernationManagerImpl::Detachment::eventWaits(
+    HibernatableWebSocket& hib, EndsWebSocket endsWebSocket) {
+  if (hib.isLeftOutOfHandoff()) {
+    return;
+  }
+  if (endsWebSocket) {
+    leaveOut(hib);
+  } else {
+    abandon(WebSocketHandoffBlocker::EVENT_IN_PROGRESS);
+  }
+}
+
+void LegacyHibernationManagerImpl::Detachment::countConsumed(HibernatableWebSocket& hib) {
+  KJ_IF_SOME(pause, hib.handoffPause) {
+    auto consumed = hib.transport->getConsumedCount();
+    if (consumed > pause.sentCount) {
+      abandon(WebSocketHandoffBlocker::TRANSPORT_MISCOUNTED);
+    } else if (consumed == pause.sentCount) {
+      KJ_IF_SOME(lagging, laggingSockets) {
+        if (--lagging == 0) {
+          caughtUp.signal();
+        }
+      }
+    }
+  }
+}
+
+size_t LegacyHibernationManagerImpl::Detachment::getLeftOutCount() const {
+  return leftOutCount;
+}
+
+DetachedHibernatableWebSockets LegacyHibernationManagerImpl::Detachment::take() {
+  KJ_REQUIRE(!taken, "hibernatable WebSockets were already taken");
+  throwIfFailed();
+  auto& owner = *manager;
+  // Anything that could break these abandons the detachment.
+  KJ_ASSERT(owner.loopback == kj::none && owner.checkDetachable() == kj::none);
+
+  DetachedHibernatableWebSockets result;
+  KJ_IF_SOME(request, owner.autoResponsePair->request) {
+    result.autoResponse = DetachedHibernatableWebSockets::AutoResponse{
+      .request = kj::str(request),
+      .response = kj::str(KJ_ASSERT_NONNULL(owner.autoResponsePair->response)),
+    };
+  }
+  result.eventTimeoutMs = owner.eventTimeoutMs;
+
+  // In the order the sockets were accepted, which adoption preserves.
+  auto sockets =
+      kj::heapArrayBuilder<DetachedHibernatableWebSockets::Socket>(socketCount - leftOutCount);
+  for (auto it = owner.allWs.rbegin(); it != owner.allWs.rend(); ++it) {
+    auto& hib = **it;
+    if (hib.isLeftOutOfHandoff()) {
+      continue;
+    }
+    KJ_ASSERT(hib.handoffReadiness == Readiness::READY);
+    KJ_ASSERT(hib.transport->getConsumedCount() == KJ_ASSERT_NONNULL(hib.handoffPause).sentCount);
+
+    // The read loop is waiting for a message, or has just answered one with the auto-response.
+    // Either way, the receive it may be waiting for runs on in `pendingReceive`.
+    hib.readLoopCanceler.cancel("hibernatable WebSocket detached for handoff");
+    sockets.add(DetachedHibernatableWebSockets::Socket{
+      .ws = kj::mv(KJ_ASSERT_NONNULL(hib.ws)),
+      .pendingReceive = hib.pendingReceive.map([](kj::Own<PendingReceive>& pending) {
+      return PendingReceive::release(kj::mv(pending));
+    }),
+      .package = kj::mv(hib.activeOrPackage.get<api::WebSocket::HibernationPackage>()),
+      .tags = hib.getTags(),
+      .autoResponseTimestamp = hib.autoResponseTimestamp,
+      .userSpanContext = kj::mv(hib.userSpanContext),
+      .transport = hib.transport.addRef(),
+      .pause = kj::mv(hib.handoffPause),
+    });
+  }
+  result.sockets = sockets.finish();
+
+  taken = true;
+  owner.detachment = kj::none;
+  // Destroying the records also removes them from the tag lists, and stops their transports from
+  // reporting to this detachment. The sockets left out stay, as if no handoff had begun.
+  owner.allWs.remove_if(
+      [](const kj::Own<HibernatableWebSocket>& hib) { return !hib->isLeftOutOfHandoff(); });
+  release();
+  return result;
+}
+
+void LegacyHibernationManagerImpl::abandonDetachment(WebSocketHandoffBlocker blocker) {
+  KJ_IF_SOME(state, detachment) {
+    state.abandon(blocker);
+  }
+}
+
+void LegacyHibernationManagerImpl::abandonDetachment(
+    HibernatableWebSocket& hib, WebSocketHandoffBlocker blocker) {
+  if (!hib.isLeftOutOfHandoff()) {
+    abandonDetachment(blocker);
+  }
+}
+
+void LegacyHibernationManagerImpl::eventWaitsForLoopback(
+    HibernatableWebSocket& hib, EndsWebSocket endsWebSocket) {
+  KJ_IF_SOME(state, detachment) {
+    state.eventWaits(hib, endsWebSocket);
+  }
+}
+
+void LegacyHibernationManagerImpl::countConsumed(HibernatableWebSocket& hib) {
+  hib.transport->countConsumed();
+  KJ_IF_SOME(state, detachment) {
+    state.countConsumed(hib);
+  }
+}
+
+kj::Maybe<WebSocketHandoffBlocker> LegacyHibernationManagerImpl::checkDetachable() {
+  // A registration names its socket record, which detachment destroys.
+  for (auto& hib: allWs) {
+    if (!hib->isLeftOutOfHandoff() && hib->registeredEvents > 0) {
+      return WebSocketHandoffBlocker::EVENT_IN_PROGRESS;
+    }
+  }
+  for (auto& hib: allWs) {
+    if (hib->isLeftOutOfHandoff()) {
+      continue;
+    }
+    if (hib->deliveringEvent) {
+      return WebSocketHandoffBlocker::EVENT_IN_PROGRESS;
+    }
+    KJ_IF_SOME(package, hib->activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+      // Moving the socket ends its old transport with a Close, which the socket can't send twice.
+      if (package.closedOutgoingConnection) {
+        return WebSocketHandoffBlocker::WEBSOCKET_CLOSED;
+      }
+    } else {
+      return WebSocketHandoffBlocker::WEBSOCKET_AWAKE;
+    }
+    if (hib->transport->getHandle() == kj::none) {
+      return WebSocketHandoffBlocker::NO_TRANSPORT;
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<WebSocketHandoffBlocker> LegacyHibernationManagerImpl::checkWebSocketHandoff(
+    size_t maxStateBytes) {
+  KJ_IF_SOME(blocker, checkDetachable()) {
+    return blocker;
+  }
+
+  auto sizeOf = [](const auto& maybe) -> size_t {
+    KJ_IF_SOME(value, maybe) {
+      return value.size();
+    }
+    return 0;
+  };
+  size_t stateBytes = sizeOf(autoResponsePair->request) + sizeOf(autoResponsePair->response);
+  for (auto& hib: allWs) {
+    auto& package = hib->activeOrPackage.get<api::WebSocket::HibernationPackage>();
+    stateBytes += WEBSOCKET_HANDOFF_BYTES_PER_SOCKET + sizeOf(package.url) +
+        sizeOf(package.protocol) + sizeOf(package.extensions) +
+        sizeOf(package.serializedAttachment);
+    for (auto& item: hib->tagItems) {
+      stateBytes += WEBSOCKET_HANDOFF_BYTES_PER_TAG + item.tag.size();
+    }
+  }
+  if (stateBytes > maxStateBytes) {
+    return WebSocketHandoffBlocker::STATE_TOO_LARGE;
+  }
+  return kj::none;
+}
+
+kj::Promise<kj::Own<HibernatableWebSocketDetachment>> LegacyHibernationManagerImpl::
+    detachWebSocketsForHandoff(kj::Promise<void> deadline) {
+  KJ_REQUIRE(detachment == kj::none, "hibernatable WebSockets are already being detached");
+  KJ_REQUIRE(loopback == kj::none,
+      "detaching hibernatable WebSockets requires events to wait for a loopback");
+  KJ_IF_SOME(blocker, checkDetachable()) {
+    kj::throwFatalException(makeWebSocketHandoffException(blocker));
+  }
+
+  auto state = kj::heap<Detachment>(*this);
+  co_await state->ready(kj::mv(deadline));
+  co_return kj::mv(state);
+}
+
+void LegacyHibernationManagerImpl::adoptWebSockets(DetachedHibernatableWebSockets detached) {
+  KJ_REQUIRE(detachment == kj::none, "can't adopt hibernatable WebSockets while detaching them");
+  KJ_REQUIRE(allWs.size() + detached.sockets.size() <= ACTIVE_CONNECTION_LIMIT,
+      "too many hibernatable WebSockets to adopt", allWs.size(), detached.sockets.size());
+  // The read loop records the time it answers with the auto-response.
+  KJ_REQUIRE(detached.autoResponse == kj::none || timer != kj::none,
+      "adopting hibernatable WebSockets with an auto-response requires a timer channel");
+
+  KJ_IF_SOME(autoResponse, detached.autoResponse) {
+    setWebSocketAutoResponse(
+        kj::StringPtr(autoResponse.request), kj::StringPtr(autoResponse.response));
+  } else {
+    setWebSocketAutoResponse(kj::none, kj::none);
+  }
+  setEventTimeout(detached.eventTimeoutMs);
+
+  for (auto& socket: detached.sockets) {
+    auto hib = kj::heap<HibernatableWebSocket>(
+        kj::mv(socket.package), socket.tags, kj::mv(socket.transport), *this);
+    hib->ws = kj::mv(socket.ws);
+    hib->pendingReceive =
+        socket.pendingReceive.map([](kj::Promise<kj::WebSocket::Message>& receive) {
+      return kj::heap<PendingReceive>(kj::mv(receive));
+    });
+    hib->autoResponseTimestamp = socket.autoResponseTimestamp;
+    hib->userSpanContext = kj::mv(socket.userSpanContext);
+    startReadLoop(insertWebSocket(kj::mv(hib), socket.tags));
+  }
+
+  // Returning drops `detached`, and with it any pauses, once every read loop is running.
 }
 
 };  // namespace workerd

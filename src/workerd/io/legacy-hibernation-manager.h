@@ -10,6 +10,7 @@
 #include <workerd/io/hibernation-handoff.h>
 #include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/exception.h>
 #include <kj/list.h>
@@ -19,6 +20,9 @@
 namespace workerd {
 
 struct LegacyHibernationManagerTestAccess;
+
+// Whether a hibernatable WebSocket's event is its last, its close or error event.
+WD_STRONG_BOOL(EndsWebSocket);
 
 // Implements the HibernationManager class.
 class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManager {
@@ -66,6 +70,11 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // Gets the event timeout if set.
   kj::Maybe<uint32_t> getEventTimeout() override;
 
+  kj::Maybe<WebSocketHandoffBlocker> checkWebSocketHandoff(size_t maxStateBytes) override;
+  kj::Promise<kj::Own<HibernatableWebSocketDetachment>> detachWebSocketsForHandoff(
+      kj::Promise<void> deadline) override;
+  void adoptWebSockets(DetachedHibernatableWebSockets detached) override;
+
   // Returns the manager that registered `websocketId`, or kj::none if no manager on this event loop
   // registered that ID.
   //
@@ -76,6 +85,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
  private:
   class HibernatableWebSocket;
+  class Detachment;
 
   // Ends the handoff identified by `generation`, putting the parked loopback back if no replacement
   // supplied one. Does nothing if that handoff already ended, so a handle dropped afterwards cannot
@@ -85,7 +95,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
   kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
 
-  // Starts `hib`'s read loop.
+  // Starts `hib`'s read loop, which detachment can cancel through the socket's readLoopCanceler.
   void startReadLoop(HibernatableWebSocket& hib);
 
   // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
@@ -111,6 +121,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     kj::Promise<void> whenReceived();
     kj::WebSocket::Message takeMessage();
 
+    // Waits for the message on behalf of whoever takes over the socket.
+    static kj::Promise<kj::WebSocket::Message> release(kj::Own<PendingReceive> self);
+
    private:
     kj::Maybe<kj::WebSocket::Message> message;
     kj::ForkedPromise<void> received;
@@ -125,7 +138,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // when initiating, or waking from hibernation.
   class HibernatableWebSocket {
    public:
-    HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
+    // Starts active for a newly accepted WebSocket, or hibernated for an adopted one.
+    HibernatableWebSocket(
+        kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage,
         kj::ArrayPtr<kj::String> tags,
         kj::Rc<HibernatableTransport> transport,
         LegacyHibernationManagerImpl& manager);
@@ -137,6 +152,11 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
     // Returns a branch of the latest write barrier, or an already-completed promise if none exists.
     kj::Promise<void> branchWriteBarrier();
+
+    // Whether the detachment in progress left this socket out.
+    bool isLeftOutOfHandoff() const {
+      return handoffReadiness == HandoffReadiness::LEFT_OUT;
+    }
 
     // Returns a reference to the active websocket. If the websocket is currently hibernating,
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
@@ -166,7 +186,7 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // accepting as hibernatable.
     kj::Maybe<kj::Rc<kj::WebSocket>> ws;
 
-    // The receive on `ws` that the read loop is waiting for.
+    // The receive on `ws` that the read loop is waiting for, or that an adopted socket brought.
     kj::Maybe<kj::Own<PendingReceive>> pendingReceive;
 
     LegacyHibernationManagerImpl& manager;
@@ -181,6 +201,13 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // True once we have dispatched the close event.
     // This prevents us from dispatching it if we have already done so.
     bool hasDispatchedClose = false;
+
+    // True while the read loop delivers an event for this socket, which detachment can't
+    // interrupt. Unlike the event's registration, this lasts after the handler claims the socket.
+    bool deliveringEvent = false;
+
+    // How many events are registered for this socket (see registerEventWebSocket()).
+    uint registeredEvents = 0;
 
     // Trace context captured at acceptWebSocket() time, restored when the DO is woken up
     // so that hibernation events are linked to the original trace.
@@ -198,8 +225,30 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // Cancels promises that borrow `ws`. Declared after `ws` so it is destroyed first.
     kj::Canceler writeCanceler;
 
-    // Shared weakly with the api::WebSocket, through which couple() attaches the transport.
+    // Shared weakly with the api::WebSocket, through which couple() attaches the transport, and
+    // moved with the socket when it's handed off.
     kj::Rc<HibernatableTransport> transport;
+
+    // How far a detachment in progress has readied this socket.
+    enum class HandoffReadiness : uint8_t {
+      READYING,
+      // Its transport is paused, it has received what the transport sent, and it isn't writing.
+      READY,
+      // It stays in the manager whatever happens to the handoff.
+      LEFT_OUT,
+    };
+    HandoffReadiness handoffReadiness = HandoffReadiness::READYING;
+
+    // The pause that a detachment in progress took on the transport.
+    kj::Maybe<HibernatableTransportHandle::Pause> handoffPause;
+
+    // Cancels a detachment's work on this socket, which records its results here: the pause of the
+    // transport, and the end of the writes in progress.
+    kj::Canceler handoffCanceler;
+
+    // Cancels the read loop, which uses everything above. The read loop releases it before it
+    // destroys this socket record itself.
+    kj::Canceler readLoopCanceler;
 
     friend LegacyHibernationManagerImpl;
   };
@@ -208,11 +257,32 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   HibernatableWebSocket& insertWebSocket(
       kj::Own<HibernatableWebSocket> hib, kj::ArrayPtr<kj::String> tags);
 
-  // Removes a HibernatableWebSocket from the HibernationManager's various collections.
+  // Removes a HibernatableWebSocket from the HibernationManager's various collections. Called only
+  // by the socket's own read loop.
   void dropHibernatableWebSocket(HibernatableWebSocket& hib);
 
   // Removes the HibernatableWebSocket from `allWs`.
   inline void removeFromAllWs(HibernatableWebSocket& hib);
+
+  // The detachment in progress, from when detachWebSocketsForHandoff() starts until its result
+  // takes the sockets or is dropped.
+  kj::Maybe<Detachment&> detachment;
+
+  // Abandons the detachment in progress, if any.
+  void abandonDetachment(WebSocketHandoffBlocker blocker);
+
+  // Abandons the detachment in progress, if any, unless it left `hib` out.
+  void abandonDetachment(HibernatableWebSocket& hib, WebSocketHandoffBlocker blocker);
+
+  // Tells the detachment in progress, if any, that an event for `hib` waits for a loopback.
+  void eventWaitsForLoopback(HibernatableWebSocket& hib, EndsWebSocket endsWebSocket);
+
+  // What prevents detaching the sockets, apart from the size of their state. Ignores those that
+  // the detachment in progress left out.
+  kj::Maybe<WebSocketHandoffBlocker> checkDetachable();
+
+  // Counts a message that `hib` received, toward the detachment's wait as well.
+  void countConsumed(HibernatableWebSocket& hib);
 
   struct RegisteredEvent {
     // Neither pointer is owning: a registration lives only as long as the task delivering the
@@ -250,7 +320,8 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
   // Returns a worker to dispatch an event for `hib` on, carrying the trace context captured when
   // the WebSocket was accepted. Asks for pipeline re-resolution when no live actor owns this
   // manager, since the pipeline the loopback holds may name a version that is no longer current.
-  kj::Own<WorkerInterface> getWorkerForEvent(HibernatableWebSocket& hib);
+  kj::Own<WorkerInterface> getWorkerForEvent(
+      HibernatableWebSocket& hib, EndsWebSocket endsWebSocket);
 
   // Handles the termination of the websocket. If termination was not clean, we might try to
   // dispatch a close event (if we haven't already), or an error event.

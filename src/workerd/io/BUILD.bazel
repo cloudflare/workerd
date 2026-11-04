@@ -876,6 +876,15 @@ kj_test(
 )
 
 kj_test(
+    src = "hibernation-handoff-test.c++",
+    deps = [
+        ":hibernation-manager-test-fixture",
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "hibernation-manager-test.c++",
     deps = [
         ":hibernation-manager-test-fixture",
