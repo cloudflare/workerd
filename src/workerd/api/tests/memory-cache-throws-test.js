@@ -4,7 +4,8 @@
 
 // Whether MemoryCache.read() throws or rejects for an error it detects before it returns a
 // promise. Under capture_async_api_throws it rejects; otherwise it throws. memory-cache-test.wd-test
-// runs this both with the flag set by the compatibility date and with it enabled explicitly.
+// runs this both with the flag set by the compatibility date and with it enabled explicitly, the
+// latter without memory_cache_delete, to check that delete() is exposed only under that flag.
 import { match, ok, strictEqual } from 'node:assert';
 import { env as importedEnv } from 'cloudflare:workers';
 
@@ -77,8 +78,17 @@ export const readRejectsKeyTooLarge = {
   },
 };
 
+export const deleteExposedPerFlag = {
+  test(ctrl, env) {
+    const hasDelete = Cloudflare.compatibilityFlags.memory_cache_delete;
+    strictEqual('delete' in env.CACHE, hasDelete);
+    strictEqual(typeof env.CACHE.delete, hasDelete ? 'function' : 'undefined');
+  },
+};
+
 export const deleteThrows = {
   async test(ctrl, env) {
+    if (!Cloudflare.compatibilityFlags.memory_cache_delete) return;
     // delete() returns nothing, so it throws, whatever the flag.
     const failure = await failureOf(() => env.CACHE.delete(123));
     strictEqual(failure.thrown.name, 'TypeError');

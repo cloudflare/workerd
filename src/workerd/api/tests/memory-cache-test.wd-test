@@ -1,67 +1,68 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-const unitTests :Workerd.Config = (
-  services = [
-    ( name = "memory-cache-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "memory-cache-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "unsafe_module", "memory_cache_delete"],
-        durableObjectNamespaces = [
-          (className = "CacheReader", uniqueKey = "memory-cache-test-cache-reader"),
-        ],
-        durableObjectStorage = (inMemory = void),
-        bindings = [
-          (name = "CACHE", memoryCache = (
-            limits = (
-              maxKeys = 2,
-              maxValueSize = 1024,
-              maxTotalValueSize = 2056,
-            ),
-          )),
-          (name = "CACHE2", memoryCache = (
-            limits = (
-              maxKeys = 2,
-              maxValueSize = 1024,
-              maxTotalValueSize = 2056,
-            ),
-          )),
-          (name = "CACHE3", memoryCache = (
-            limits = (
-              maxKeys = 2,
-              maxValueSize = 500,
-              maxTotalValueSize = 600,
-            ),
-          )),
-          (name = "SELF", service = "memory-cache-test"),
-          (name = "READER", durableObjectNamespace = "CacheReader"),
-        ]
-      )
-    ),
-    # Whether read() throws or rejects, with capture_async_api_throws as the compatibility date
-    # sets it, and with it enabled explicitly.
-    ( name = "memory-cache-throws-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "memory-cache-throws-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "memory_cache_delete"],
-        bindings = [
-          (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
-        ]
-      )
-    ),
-    ( name = "memory-cache-throws-captured-test",
-      worker = (
-        modules = [
-          (name = "worker", esModule = embed "memory-cache-throws-test.js")
-        ],
-        compatibilityFlags = ["nodejs_compat", "memory_cache_delete", "capture_async_api_throws"],
-        bindings = [
-          (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
-        ]
-      )
-    ),
-  ],
-);
+# memory-cache-rust-test.wd-test runs these services against the Rust MemoryCache.
+const unitTests :Workerd.Config = (services = .services);
+
+const services :List(Workerd.Service) = [
+  ( name = "memory-cache-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "memory-cache-test.js")
+      ],
+      compatibilityFlags = ["nodejs_compat", "unsafe_module", "memory_cache_delete"],
+      durableObjectNamespaces = [
+        (className = "CacheReader", uniqueKey = "memory-cache-test-cache-reader"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "CACHE", memoryCache = (
+          limits = (
+            maxKeys = 2,
+            maxValueSize = 1024,
+            maxTotalValueSize = 2056,
+          ),
+        )),
+        (name = "CACHE2", memoryCache = (
+          limits = (
+            maxKeys = 2,
+            maxValueSize = 1024,
+            maxTotalValueSize = 2056,
+          ),
+        )),
+        (name = "CACHE3", memoryCache = (
+          limits = (
+            maxKeys = 2,
+            maxValueSize = 500,
+            maxTotalValueSize = 600,
+          ),
+        )),
+        (name = "SELF", service = "memory-cache-test"),
+        (name = "READER", durableObjectNamespace = "CacheReader"),
+      ]
+    )
+  ),
+  # Whether read() throws or rejects, with capture_async_api_throws as the compatibility date
+  # sets it, and with it enabled explicitly.
+  ( name = "memory-cache-throws-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "memory-cache-throws-test.js")
+      ],
+      compatibilityFlags = ["nodejs_compat", "memory_cache_delete"],
+      bindings = [
+        (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
+      ]
+    )
+  ),
+  ( name = "memory-cache-throws-captured-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "memory-cache-throws-test.js")
+      ],
+      compatibilityFlags = ["nodejs_compat", "capture_async_api_throws"],
+      bindings = [
+        (name = "CACHE", memoryCache = (limits = (maxKeys = 2, maxValueSize = 1024, maxTotalValueSize = 2056))),
+      ]
+    )
+  ),
+];

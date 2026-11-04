@@ -1083,6 +1083,16 @@ wd_test(
 )
 
 wd_test(
+    src = "memory-cache-rust-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "memory-cache-test.js",
+        "memory-cache-test.wd-test",
+        "memory-cache-throws-test.js",
+    ],
+)
+
+wd_test(
     src = "module-test.wd-test",
     args = ["--experimental"],
     data = ["module-test.js"],
