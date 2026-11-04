@@ -49,6 +49,18 @@ const unitTests :Workerd.Config = (
           (name = "cyc-chunk",
            esModule = "import { a } from 'cyc-entry';\nexport const b = a + 1;\n"),
 
+          # The same, where the deferred module then suspends on a top-level await.
+          (name = "cyc-tla-entry",
+           esModule = "export const a = 1;\nexport const chunk = import('cyc-tla-chunk');\n"),
+          (name = "cyc-tla-chunk",
+           esModule = "import { a } from 'cyc-tla-entry';\nawait 0;\nexport const b = a + 2;\n"),
+
+          # The same cycle through a nested require(), which is synchronous and so cannot wait:
+          # it must fail the require() rather than abort the process.
+          (name = "req-cyc-entry", esModule = "import 'req-cyc-cjs';\nexport default 1;\n"),
+          (name = "req-cyc-cjs", commonJsModule = "require('req-cyc-esm');"),
+          (name = "req-cyc-esm", esModule = "import 'req-cyc-entry';\nexport const x = 1;\n"),
+
           # Top-level await that never settles.
           (name = "never-settles",
            esModule = "await new Promise(() => {});\nexport const nope = 1;\n"),
