@@ -85,7 +85,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
-    let traced_impl = struct_traced_impl(name, &named_fields);
+    let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
+    let traced_impl = struct_traced_impl(name, &named_fields, custom_marker);
 
     for field in &named_fields {
         // Only public fields are projected into JavaScript objects.
@@ -197,26 +198,38 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field and holds GC
-/// references when a field does.
+/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field, and, unless
+/// `custom_holds_no_gc_references` leaves it to the author, its `HoldsNoGcReferences` impl, which
+/// applies when every field's type implements it.
 fn struct_traced_impl(
     name: &syn::Ident,
     fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+    custom_holds_no_gc_references: bool,
 ) -> proc_macro2::TokenStream {
     let field_types = fields.iter().map(|field| &field.ty);
     let trace_statements = generate_trace_statements(fields);
+    let marker_impl = (!custom_holds_no_gc_references).then(|| {
+        quote! {
+            // Higher-ranked, so that a field that holds a GC reference leaves the struct without the
+            // impl instead of failing to compile as a trivially false bound.
+            #[automatically_derived]
+            impl jsg::HoldsNoGcReferences for #name
+            where
+                #(for<'__jsgl> #field_types: jsg::HoldsNoGcReferences,)*
+            {
+            }
+        }
+    });
     quote! {
         #[automatically_derived]
         impl jsg::Traced for #name {
-            fn holds_gc_references() -> bool {
-                false #(|| <#field_types as jsg::Traced>::holds_gc_references())*
-            }
-
             fn trace(&self, visitor: &mut jsg::GcVisitor) {
                 let _ = visitor;
                 #(#trace_statements)*
             }
         }
+
+        #marker_impl
     }
 }
 
@@ -961,6 +974,6 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    oneof::expand(item)
+pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
+    oneof::expand(&attr, item)
 }

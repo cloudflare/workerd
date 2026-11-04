@@ -68,3 +68,32 @@ struct JsgCellInCell {
 
 #[jsg_resource]
 impl JsgCellInCell {}
+
+// `#[jsg_struct]` and `#[jsg_oneof]` derive `HoldsNoGcReferences` only when every field or
+// variant has it.
+#[jsg_macros::jsg_struct]
+pub struct Linked {
+    pub leaf: jsg::Rc<Leaf>,
+}
+
+#[jsg_resource] //~ ERROR E0277
+struct StructInCell {
+    linked: Cell<Option<Linked>>,
+}
+
+#[jsg_resource]
+impl StructInCell {}
+
+#[jsg_macros::jsg_oneof]
+pub enum LeafOrNumber {
+    Leaf(jsg::Rc<Leaf>),
+    Number(f64),
+}
+
+#[jsg_resource] //~ ERROR E0277
+struct UnionInRefCell {
+    value: RefCell<LeafOrNumber>,
+}
+
+#[jsg_resource]
+impl UnionInRefCell {}

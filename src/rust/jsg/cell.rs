@@ -86,10 +86,6 @@ impl<T: Traced> Cell<T> {
 }
 
 impl<T: Traced> Traced for Cell<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         // SAFETY: visits are single-threaded within an isolate, create only shared references, and
         // write only through the interior mutability of the GC references they reach (`trace`
@@ -171,10 +167,6 @@ impl<T: Traced> RefCell<T> {
 }
 
 impl<T: Traced> Traced for RefCell<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         // A mutably borrowed cell is skipped, by a detaching visit too: `borrow_mut` made
         // everything in it strong, and anything the borrower puts in is strong too, so the visit
