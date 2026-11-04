@@ -1,6 +1,7 @@
 #include "global-scope.h"
 #include "sockets.h"
 
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
@@ -121,6 +122,63 @@ class AsyncObservingDatagramChannel final: public DatagramChannel {
  private:
   kj::Weak<AsyncSendState> state;
 };
+
+class DelayedUdpSendStream final: public rpc::DatagramStream::Server {
+ public:
+  DelayedUdpSendStream(kj::Own<kj::PromiseFulfiller<void>> called, kj::Promise<void> result)
+      : called(kj::mv(called)),
+        result(kj::mv(result)) {}
+
+ private:
+  kj::Promise<void> sendWithAck(SendWithAckContext context) override {
+    KJ_EXPECT(context.getParams().getDatagram() == "packet"_kjb);
+    called->fulfill();
+    return kj::mv(result);
+  }
+
+  kj::Own<kj::PromiseFulfiller<void>> called;
+  kj::Promise<void> result;
+};
+
+class UdpSendTestDispatcher final: public rpc::EventDispatcher::Server {
+ public:
+  explicit UdpSendTestDispatcher(rpc::DatagramStream::Client stream): stream(kj::mv(stream)) {}
+
+ private:
+  kj::Promise<void> openUdp(OpenUdpContext context) override {
+    context.getResults().setSend(stream);
+    return kj::READY_NOW;
+  }
+
+  rpc::DatagramStream::Client stream;
+};
+
+KJ_TEST("Outbound UDP RPC send waits for transport completion and reports its error") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto called = kj::newPromiseAndFulfiller<void>();
+  auto result = kj::newPromiseAndFulfiller<void>();
+  rpc::DatagramStream::Client stream =
+      kj::heap<DelayedUdpSendStream>(kj::mv(called.fulfiller), kj::mv(result.promise));
+  rpc::EventDispatcher::Client dispatcher = kj::heap<UdpSendTestDispatcher>(kj::mv(stream));
+  capnp::ByteStreamFactory byteStreamFactory;
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory httpOverCapnpFactory(
+      byteStreamFactory, headerTableBuilder, capnp::HttpOverCapnpFactory::LEVEL_2);
+  auto headerTable = headerTableBuilder.build();
+  auto opened = kj::newPromiseAndFulfiller<kj::Own<DatagramChannel>>();
+  UdpEgressCustomEvent event(kj::str("example.com:8125"), kj::mv(opened.fulfiller));
+  event
+      .sendRpc(httpOverCapnpFactory, byteStreamFactory, getUnsupportedFrankenvalueHandler(),
+          kj::mv(dispatcher))
+      .wait(waitScope);
+  auto channel = opened.promise.wait(waitScope);
+  auto sent = channel->send("packet"_kjb).eagerlyEvaluate(nullptr);
+  called.promise.wait(waitScope);
+  KJ_EXPECT(!sent.poll(waitScope));
+  result.fulfiller->reject(KJ_EXCEPTION(FAILED, "test UDP transport rejected the payload"));
+  KJ_EXPECT_THROW_MESSAGE("test UDP transport rejected the payload", sent.wait(waitScope));
+}
 
 bool socketHasProtocolProperty(CompatibilityFlags::Reader flags) {
   kj::Pin<AsyncSendState> state;
