@@ -465,7 +465,11 @@ An async disposer should return `jsg::Promise<'s, T>` or `jsg::v8::Local<'s, jsg
 optionally in a `Result`. The attributes take no arguments, and a disposer cannot also be a
 property, inspect property or wildcard property. A type has at most one disposer, sync or async;
 with automatic registration a second is a compile error, and a custom `members` list that
-includes two panics when the template is created. See
+includes two panics when the template is created.
+
+A disposer must be idempotent and safe to re-enter. JavaScript can call it directly any number of
+times, and from inside itself when it runs JavaScript: mark the resource disposed before calling
+out, and hold no `RefCell` borrow across the call. See
 [Explicit resource management](../jsg/README.md#explicit-resource-management) for how to write one.
 
 ```rust

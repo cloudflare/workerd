@@ -1344,7 +1344,10 @@ As for C++ JSG (see the comment on `JSG_DISPOSE` in `src/workerd/jsg/jsg.h`):
   make the disposer only release the resource.
 - The disposer is not told about the exception, and an error it returns replaces the exception,
   which becomes the `suppressed` of a `SuppressedError`.
-- JavaScript can call the disposer directly, any number of times, so it must be idempotent.
+- JavaScript can call the disposer directly, any number of times, so it must be idempotent. It
+  must also be safe to re-enter: a disposer that runs JavaScript, such as a callback or an event
+  listener, can be called again before it returns. Mark the resource disposed before calling out,
+  so the nested call finds nothing left to do, and hold no `RefCell` borrow across the call.
 
 ## Static Constants
 
