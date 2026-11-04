@@ -185,14 +185,14 @@ jsg::JsObject managedDelegatedIdentity(jsg::Lock& js, jsg::JsValue value) {
   managedObject(js, value, 4 + hasAgent + hasAccount);
   requireManagedIdentity(managedString(js, input, "kind").toString(js) == "delegated-request");
   auto output = js.obj();
-  for (auto field: {"kind"_kj, "clientId"_kj, "userId"_kj, "sessionId"_kj})
+  for (const auto& field: {"kind"_kj, "clientId"_kj, "userId"_kj, "sessionId"_kj})
     output.createDataProperty(js, js.str(field), managedString(js, input, field));
   if (hasAgent)
     output.createDataProperty(js, js.str("agentId"_kj), managedString(js, input, "agentId", 256));
   if (hasAccount) {
     auto account = managedObject(js, managedField(js, input, "account"), 5);
     auto checked = js.obj();
-    for (auto field: {"issuer"_kj, "subject"_kj, "audience"_kj})
+    for (const auto& field: {"issuer"_kj, "subject"_kj, "audience"_kj})
       checked.createDataProperty(js, js.str(field), managedString(js, account, field));
     auto expiry = static_cast<v8::Local<v8::Value>>(managedField(js, account, "expiresAt"));
     requireManagedIdentity(expiry->IsNumber());
