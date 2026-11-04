@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! `#[jsg_callable]` behaves as C++ JSG's `JSG_CALLABLE`. The first test mirrors the
-//! "Test JSG_CALLABLE" test in `src/workerd/jsg/jsg-test.c++` case for case.
+//! "Test `JSG_CALLABLE`" test in `src/workerd/jsg/jsg-test.c++` case for case.
 
 use std::cell::Cell;
 
@@ -93,6 +93,10 @@ impl Stub {
     }
 
     #[jsg_wildcard_property]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "a wildcard property returns an Option"
+    )]
     fn get(&self, name: &str) -> Option<jsg::Rc<Self>> {
         Some(jsg::Rc::new(Self {
             path: format!("{}.{name}", self.path),

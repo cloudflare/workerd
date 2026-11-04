@@ -396,11 +396,25 @@ fn callback_with_instance(
     };
     // The method keeps its other attributes, so that a `#[jsg_callable]` after the attribute
     // being expanded still expands.
+    let method = reemit_method(&input_fn);
     quote! {
-        #input_fn
+        #method
         #callbacks
     }
     .into()
+}
+
+/// Re-emits `input_fn` with its other attributes. The body is wrapped in braces spanned at the
+/// macro call, as the methods have always been emitted, so that clippy treats the method as
+/// macro output and does not lint the signature against its generated callbacks.
+fn reemit_method(input_fn: &ItemFn) -> proc_macro2::TokenStream {
+    let ItemFn {
+        attrs,
+        vis,
+        sig,
+        block,
+    } = input_fn;
+    quote! { #(#attrs)* #vis #sig { #block } }
 }
 
 /// Generates the callbacks named in `callback_kinds`, each calling `input_fn`, or returns the
@@ -1005,10 +1019,13 @@ pub fn jsg_callable(attr: TokenStream, item: TokenStream) -> TokenStream {
     );
     // The method keeps its other attributes, so that a `#[jsg_method]` after this one expands.
     match callbacks {
-        Ok(callbacks) => quote! {
-            #input_fn
-            #callbacks
-        },
+        Ok(callbacks) => {
+            let method = reemit_method(&input_fn);
+            quote! {
+                #method
+                #callbacks
+            }
+        }
         Err(error) => error,
     }
     .into()
