@@ -37,6 +37,52 @@ export const teeClonesChunksPerBranch = {
   },
 };
 
+// A branch consumed as a body takes its large chunks without a copy under
+// TypeScript, so its result must not share memory with the other branch:
+// writing into the result leaves the other branch's bytes as enqueued,
+// whichever branch is consumed first, the one whose chunks the queue
+// copies or the one that takes the queue's own (parity).
+export const teeBranchBodyResultIsItsOwn = {
+  async test() {
+    const size = 64 * 1024;
+    for (const consumeFirst of [0, 1]) {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          for (let i = 0; i < 2; i++)
+            c.enqueue(new Uint8Array(size).fill(i + 1));
+          c.close();
+        },
+      });
+      const branches = rs.tee();
+      const first = new Uint8Array(
+        await new Response(branches[consumeFirst]).arrayBuffer()
+      );
+      strictEqual(first.byteLength, 2 * size);
+      first.fill(0);
+      const second = new Uint8Array(
+        await new Response(branches[1 - consumeFirst]).arrayBuffer()
+      );
+      strictEqual(second.byteLength, 2 * size);
+      strictEqual(second[0], 1, `consumeFirst=${consumeFirst}`);
+      strictEqual(second[2 * size - 1], 2, `consumeFirst=${consumeFirst}`);
+      const single = new Uint8Array(
+        await new Response(
+          new ReadableStream({
+            type: 'bytes',
+            start(c) {
+              c.enqueue(new Uint8Array(size).fill(7));
+              c.close();
+            },
+          })
+        ).arrayBuffer()
+      );
+      strictEqual(single.byteLength, size);
+      strictEqual(single[size - 1], 7);
+    }
+  },
+};
+
 // Both branches drain identical bytes through default readers (migrated
 // from streams-tee-edge-cases-test.js).
 export const teeByteStreamDefaultReaders = {

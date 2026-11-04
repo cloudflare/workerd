@@ -42,21 +42,6 @@ wd_test(
 )
 
 wd_test(
-    src = "eventsource-context-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "eventsource-context-test.js",
-        "eventsource-context-worker.js",
-    ],
-)
-
-wd_test(
-    src = "eventsource-lifetime-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-lifetime-test.js"],
-)
-
-wd_test(
     src = "queue-backing-store-test.wd-test",
     args = [
         "--experimental",
@@ -867,24 +852,6 @@ wd_test(
 )
 
 wd_test(
-    src = "eventsource-gc-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-gc-test.js"],
-)
-
-wd_test(
-    src = "eventsource-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-test.js"],
-)
-
-wd_test(
-    src = "eventsource-ts-test.wd-test",
-    args = ["--experimental"],
-    data = ["eventsource-test.js"],
-)
-
-wd_test(
     src = "legacy-dispatch-exceptions-test.wd-test",
     args = ["--experimental"],
     data = ["legacy-dispatch-exceptions-test.js"],
@@ -1321,6 +1288,19 @@ wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],
+)
+
+# The limit is off while its kill switch autogate is on, so this has no @all-autogates variant.
+# websocket-accept-limit-killswitch-test below covers the kill switch being on.
+wd_test(
+    src = "websocket-accept-limit-test.wd-test",
+    data = ["websocket-accept-limit-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "websocket-accept-limit-killswitch-test.wd-test",
+    data = ["websocket-accept-limit-killswitch-test.js"],
 )
 
 wd_test(

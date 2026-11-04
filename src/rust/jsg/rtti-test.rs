@@ -479,3 +479,16 @@ fn structure_without_callable_has_none() {
         .get(0);
     assert!(!structure.has_callable());
 }
+
+#[test]
+fn handles_are_described_as_their_values() {
+    let mut cx = Context::default();
+    assert!(matches!(
+        v8::TracedGlobal::<v8::Object>::describe(&mut cx),
+        Type::Object
+    ));
+    assert!(matches!(
+        v8::TracedGlobal::<v8::Value>::describe(&mut cx),
+        Type::Unknown
+    ));
+}

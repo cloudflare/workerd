@@ -607,6 +607,13 @@ impl<T: TypeInfo> TypeInfo for v8::Global<T> {
     }
 }
 
+// As C++ describes a `jsg::JsRef<T>` field: as its value.
+impl<T: TypeInfo> TypeInfo for v8::TracedGlobal<T> {
+    fn describe(cx: &mut Context) -> Type {
+        T::describe(cx)
+    }
+}
+
 #[cfg(test)]
 #[path = "rtti-test.rs"]
 mod tests;
