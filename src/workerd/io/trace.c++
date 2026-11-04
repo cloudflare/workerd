@@ -1494,7 +1494,7 @@ SpanLink::SpanLink(rpc::Trace::SpanLink::Reader reader)
 kj::Maybe<SpanContext> SpanLink::parseContext(
     kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags) {
   if (traceId.size() != 32 || spanId.size() != 16) return kj::none;
-  for (auto value: {traceId, spanId}) {
+  for (const auto& value: {traceId, spanId}) {
     for (auto c: value) {
       if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return kj::none;
     }
@@ -1518,7 +1518,7 @@ kj::Maybe<kj::String> SpanLink::parseTracestate(kj::StringPtr value) {
     auto entry = value.slice(start, end);
     while (entry.size() && (entry[0] == ' ' || entry[0] == '\t')) entry = entry.slice(1);
     while (entry.size() && (entry.back() == ' ' || entry.back() == '\t')) {
-      entry = entry.slice(0, entry.size() - 1);
+      entry = entry.first(entry.size() - 1);
     }
     // Empty list members are permitted by W3C Trace Context.
     if (entry.size() == 0) {
@@ -1526,12 +1526,12 @@ kj::Maybe<kj::String> SpanLink::parseTracestate(kj::StringPtr value) {
       continue;
     }
     auto equals = KJ_UNWRAP_OR_RETURN(entry.findFirst('='), kj::none);
-    auto key = entry.slice(0, equals);
+    auto key = entry.first(equals);
     auto data = entry.slice(equals + 1);
     if (key.size() == 0 || key.size() > 256 || data.size() == 0 || data.size() > 256 ||
         keys.size() == 32)
       return kj::none;
-    for (auto previous: keys) {
+    for (const auto& previous: keys) {
       if (previous == key) return kj::none;
     }
     auto at = key.findFirst('@');
