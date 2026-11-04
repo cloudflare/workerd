@@ -147,7 +147,13 @@ namespace workerd::util {
      abort's reason its queued deliveries share as external memory, and queues at most one         \
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
+     open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
+     opening one more fails with an Error. Enabling this gate removes that limit, making them      \
+     unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

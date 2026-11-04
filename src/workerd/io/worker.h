@@ -77,6 +77,13 @@ class OutputGate;
 
 class StoredExternalHandler;
 
+// The number of non-hibernatable WebSockets a Durable Object instance has accepted and not yet
+// released. Refcounted because each WebSocket gives back its count from its own destructor, which
+// can run after the actor is destroyed.
+struct NonHibernatableWebSocketCount: public kj::Refcounted {
+  uint32_t count = 0;
+};
+
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
     kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
@@ -1155,6 +1162,9 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
 
   ActorObserver& getMetrics();
+
+  // Counts the non-hibernatable WebSockets this actor has accepted, to enforce a limit on them.
+  kj::Rc<NonHibernatableWebSocketCount> getNonHibernatableWebSocketCount();
 
   InputGate& getInputGate();
   OutputGate& getOutputGate();
