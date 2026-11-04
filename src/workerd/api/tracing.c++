@@ -8,6 +8,8 @@
 #include <workerd/io/tracer.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <cmath>
+
 namespace workerd::api::user_tracing {
 
 namespace {
@@ -70,6 +72,98 @@ TracingSpanContext toTracingSpanContext(kj::Maybe<tracing::SpanContext> context)
   };
 }
 
+kj::Maybe<tracing::SpanLink> toSpanLink(jsg::Lock& js,
+    TracingSpanLink link,
+    const jsg::TypeHandler<TracingSpanLinkContext>& contextHandler,
+    const jsg::TypeHandler<TagValue>& attributeHandler) {
+  auto& contextValue = KJ_UNWRAP_OR_RETURN(link.context, kj::none);
+  auto inputContext =
+      KJ_UNWRAP_OR_RETURN(contextHandler.tryUnwrap(js, contextValue.getHandle(js)), kj::none);
+  auto& traceId = KJ_UNWRAP_OR_RETURN(inputContext.traceId, kj::none);
+  auto& spanId = KJ_UNWRAP_OR_RETURN(inputContext.spanId, kj::none);
+  auto& inputFlags = KJ_UNWRAP_OR_RETURN(inputContext.traceFlags, kj::none);
+  auto traceIdHandle = traceId.getHandle(js);
+  auto spanIdHandle = spanId.getHandle(js);
+  auto flagsHandle = inputFlags.getHandle(js);
+  if (!traceIdHandle->IsString() || !spanIdHandle->IsString() || !flagsHandle->IsNumber()) {
+    return kj::none;
+  }
+  if (traceIdHandle.As<v8::String>()->Length() != 32 ||
+      spanIdHandle.As<v8::String>()->Length() != 16) {
+    return kj::none;
+  }
+  auto flags = flagsHandle.As<v8::Number>()->Value();
+  if (!std::isfinite(flags) || flags < 0 || flags > 255 || std::trunc(flags) != flags) {
+    return kj::none;
+  }
+  auto context =
+      KJ_UNWRAP_OR_RETURN(tracing::SpanLink::parseContext(jsg::JsValue(traceIdHandle).toString(js),
+                              jsg::JsValue(spanIdHandle).toString(js),
+                              tracing::TraceFlags(static_cast<uint8_t>(flags))),
+          kj::none);
+  kj::Vector<tracing::Attribute> attributes;
+  uint32_t droppedAttributesCount = 0;
+  KJ_IF_SOME(input, link.attributes) {
+    auto handle = input.getHandle(js);
+    // Match OTel JS cleanAttributes(): inspect own enumerable string keys, discard invalid
+    // attributes without coercion, and count drops independently of caller-supplied metadata.
+    if (handle->IsObject() && !handle->IsFunction()) {
+      auto object = jsg::JsObject(handle.As<v8::Object>());
+      auto names = object.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+          static_cast<jsg::PropertyFilter>(
+              jsg::PropertyFilter::ONLY_ENUMERABLE | jsg::PropertyFilter::SKIP_SYMBOLS),
+          jsg::IndexFilter::INCLUDE_INDICES);
+      for (auto i: kj::zeroTo(names.size())) {
+        auto key = names.get(js, i);
+        auto field = object.get(js, key);
+        if (field.isUndefined()) continue;
+        auto name = key.toString(js);
+        if (name.size() == 0 || (!field.isString() && !field.isNumber() && !field.isBoolean())) {
+          ++droppedAttributesCount;
+          continue;
+        }
+        auto value = KJ_ASSERT_NONNULL(attributeHandler.tryUnwrap(js, field));
+        auto attributeName = kj::ConstString(kj::mv(name));
+        KJ_SWITCH_ONEOF(value) {
+          KJ_CASE_ONEOF(text, kj::String) {
+            attributes.add(
+                tracing::Attribute(kj::mv(attributeName), kj::ConstString(kj::mv(text))));
+          }
+          KJ_CASE_ONEOF(number, double) {
+            attributes.add(tracing::Attribute(kj::mv(attributeName), number));
+          }
+          KJ_CASE_ONEOF(boolean, bool) {
+            attributes.add(tracing::Attribute(kj::mv(attributeName), boolean));
+          }
+        }
+      }
+    }
+  }
+  kj::Maybe<kj::ConstString> traceState;
+  KJ_IF_SOME(value, inputContext.traceState) {
+    auto handle = value.getHandle(js);
+    if (handle->IsString() && handle.As<v8::String>()->Length() <= 512) {
+      KJ_IF_SOME(parsed, tracing::SpanLink::parseTracestate(jsg::JsValue(handle).toString(js))) {
+        traceState = kj::ConstString(kj::mv(parsed));
+      }
+    }
+  }
+  if ((context.getTraceId() == nullptr || context.getSpanId() == tracing::SpanId::nullId) &&
+      attributes.empty() && traceState == kj::none)
+    return kj::none;
+
+  auto origin = tracing::SpanLink::Origin::UNKNOWN;
+  KJ_IF_SOME(remote, inputContext.isRemote) {
+    auto handle = remote.getHandle(js);
+    if (handle->IsBoolean()) {
+      origin = handle.As<v8::Boolean>()->Value() ? tracing::SpanLink::Origin::REMOTE
+                                                 : tracing::SpanLink::Origin::LOCAL;
+    }
+  }
+  return tracing::SpanLink(kj::mv(context), attributes.releaseAsArray(), origin, kj::mv(traceState),
+      droppedAttributesCount);
+}
+
 }  // namespace
 
 // ======================================================================================
@@ -124,6 +218,21 @@ void SpanState::recordException(kj::Maybe<tracing::Exception::Code> code,
   recordExceptionImpl(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void SpanState::addLinks(tracing::SpanLinks links) {
+  if (!getIsTraced()) return;
+  kj::Vector<tracing::SpanLink> accepted;
+  for (auto& link: links.links) {
+    auto size = link.size();
+    if (bytesUsed > MAX_SPAN_BYTES || size > MAX_SPAN_BYTES - bytesUsed) {
+      recordSpanDataLimitError("link", "", size);
+      continue;
+    }
+    bytesUsed += size;
+    accepted.add(kj::mv(link));
+  }
+  if (!accepted.empty()) recordLinks(tracing::SpanLinks(accepted.releaseAsArray()));
+}
+
 class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
@@ -165,6 +274,10 @@ class UserSpanState final: public SpanState {
   }
 
  protected:
+  void recordLinks(tracing::SpanLinks links) override {
+    builder.addLinks(kj::mv(links));
+  }
+
   bool canRecordAttributes() override {
     return builder.isObserved();
   }
@@ -271,6 +384,16 @@ class InvocationSpanState final: public SpanState {
   }
 
  protected:
+  void recordLinks(tracing::SpanLinks links) override {
+    KJ_IF_SOME(valueContext, context) {
+      KJ_IF_SOME(valueTracer, tracer) {
+        valueTracer->runIfAlive([&](BaseTracer& tracer) {
+          tracer.addSpanLinks(valueContext.getSpanId(), kj::mv(links));
+        });
+      }
+    }
+  }
+
   bool canRecordAttributes() override {
     return getIsTraced();
   }
@@ -340,6 +463,8 @@ class NoopSpanState final: public SpanState {
   void setStatus(tracing::SpanStatus) override {}
 
  protected:
+  void recordLinks(tracing::SpanLinks) override {}
+
   bool canRecordAttributes() override {
     return false;
   }
@@ -468,6 +593,46 @@ jsg::Ref<Span> Span::updateName(jsg::Lock& js, kj::String operationName) {
     KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
       s->updateName(kj::mv(name));
     }
+  }
+  return JSG_THIS;
+}
+
+jsg::Ref<Span> Span::addLink(jsg::Lock& js,
+    jsg::Value link,
+    const jsg::TypeHandler<TracingSpanLink>& linkHandler,
+    const jsg::TypeHandler<TracingSpanLinkContext>& contextHandler,
+    const jsg::TypeHandler<TagValue>& attributeHandler) {
+  if (!getIsTraced()) return JSG_THIS;
+  KJ_IF_SOME(input, linkHandler.tryUnwrap(js, link.getHandle(js))) {
+    KJ_IF_SOME(value, toSpanLink(js, kj::mv(input), contextHandler, attributeHandler)) {
+      auto links = tracing::SpanLinks(kj::arr(kj::mv(value)));
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+          s->addLinks(kj::mv(links));
+        }
+        KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+          s->addLinks(kj::mv(links));
+        }
+      }
+    }
+  }
+  return JSG_THIS;
+}
+
+jsg::Ref<Span> Span::addLinks(jsg::Lock& js,
+    jsg::Value links,
+    const jsg::TypeHandler<TracingSpanLink>& linkHandler,
+    const jsg::TypeHandler<TracingSpanLinkContext>& contextHandler,
+    const jsg::TypeHandler<TagValue>& attributeHandler) {
+  if (!getIsTraced()) return JSG_THIS;
+  auto handle = links.getHandle(js);
+  if (!handle->IsArray()) return JSG_THIS;
+  auto array = handle.As<v8::Array>();
+  auto length = array->Length();
+  // Read each entry immediately before recording it: getters can end the receiver.
+  for (uint32_t i = 0; i < length && getIsTraced(); ++i) {
+    addLink(js, jsg::Value(js.v8Isolate, jsg::check(array->Get(js.v8Context(), i))), linkHandler,
+        contextHandler, attributeHandler);
   }
   return JSG_THIS;
 }

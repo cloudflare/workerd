@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "links", worker = (
+      modules = [(name = "worker", esModule = embed "span-links-test.js")],
+      compatibilityFlags = ["nodejs_compat", "span_links"],
+      streamingTails = ["tail"],
+    )),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "span-links-instrumentation-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+    (name = "no-tail", worker = (
+      modules = [(name = "worker", esModule = embed "span-links-noop-test.js")],
+      compatibilityFlags = ["nodejs_compat", "span_links"],
+      bindings = [(name = "enabled", json = "true")],
+    )),
+    (name = "flag-disabled", worker = (
+      modules = [(name = "worker", esModule = embed "span-links-noop-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "enabled", json = "false")],
+    )),
+  ],
+);

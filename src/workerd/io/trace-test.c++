@@ -625,6 +625,75 @@ KJ_TEST("Read/Write SpanUpdate status works") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(status3.getMessage()) == "failed");
 }
 
+KJ_TEST("SpanLink context parsing preserves all ID bits and permits zero IDs") {
+  constexpr auto traceId = "fedcba98765432100123456789abcdef"_kj;
+  constexpr auto spanId = "f123456789abcdef"_kj;
+  auto context = KJ_ASSERT_NONNULL(SpanLink::parseContext(traceId, spanId, TraceFlags(0xfe)));
+  KJ_EXPECT(context.getTraceId().toW3C() == traceId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(context.getSpanId()).toGoString() == spanId);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(context.getTraceFlags()) == 0xfe);
+  KJ_EXPECT(SpanLink::parseContext(
+                "00000000000000000000000000000000", "0000000000000000", TraceFlags(0)) != kj::none);
+  for (auto invalid: {"fedcba98765432100123456789abcde"_kj, "FEDCBA98765432100123456789ABCDEF"_kj,
+         "gedcba98765432100123456789abcdef"_kj}) {
+    KJ_EXPECT(SpanLink::parseContext(invalid, spanId, TraceFlags(0)) == kj::none);
+  }
+  for (auto invalid: {"123456789abcdef"_kj, "F123456789ABCDEF"_kj, "z123456789abcdef"_kj}) {
+    KJ_EXPECT(SpanLink::parseContext(traceId, invalid, TraceFlags(0)) == kj::none);
+  }
+}
+
+KJ_TEST("SpanLink tracestate validation and normalization") {
+  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate(" \ta=one , ,1tenant@vendor=two\t,")) ==
+      "a=one,1tenant@vendor=two");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate("a= leading space")) == "a= leading space");
+  for (auto invalid: {""_kj, " , \t"_kj, "a=1,a=2"_kj, "A=1"_kj, "1a=1"_kj, "a="_kj, "a=one=two"_kj,
+         "a=one\ntwo"_kj, "a@@b=1"_kj, "a@1b=1"_kj, "a@abcdefghijklmnop=1"_kj}) {
+    KJ_EXPECT(SpanLink::parseTracestate(invalid) == kj::none, invalid);
+  }
+  auto longValue = kj::str("a=", kj::repeat('x', 257));
+  KJ_EXPECT(SpanLink::parseTracestate(longValue) == kj::none);
+  kj::Vector<kj::String> members;
+  for (uint i = 0; i < 32; ++i) members.add(kj::str("k", i, "=v"));
+  KJ_EXPECT(SpanLink::parseTracestate(kj::strArray(members, ",")) != kj::none);
+  members.add(kj::str("overflow=v"));
+  KJ_EXPECT(SpanLink::parseTracestate(kj::strArray(members, ",")) == kj::none);
+}
+
+KJ_TEST("SpanLinks tail events round-trip and clone metadata, order, and duplicates") {
+  auto target = KJ_ASSERT_NONNULL(SpanLink::parseContext(
+      "fedcba98765432100123456789abcdef", "f123456789abcdef", TraceFlags(0xfe)));
+  SpanLink remote(SpanContext::clone(target),
+      kj::arr(Attribute("message"_kjc, kj::ConstString("original"_kjc))), SpanLink::Origin::REMOTE,
+      kj::ConstString("vendor=state"_kjc), 7);
+  auto duplicate = remote.clone();
+  SpanLink local(SpanContext::clone(target), {}, SpanLink::Origin::LOCAL);
+  SpanLink unknown(SpanContext::clone(target), {}, SpanLink::Origin::UNKNOWN);
+  SpanLinks links(kj::arr(kj::mv(remote), kj::mv(local), kj::mv(unknown), kj::mv(duplicate)));
+  auto size = links.size();
+  auto receiver = SpanContext(TraceId(1, 2), SpanId(3), TraceFlags(1));
+  TailEvent event(SpanContext::clone(receiver), TraceId(4, 5), kj::UNIX_EPOCH, 6, kj::mv(links));
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::Trace::TailEvent>();
+  event.copyTo(root);
+  for (auto& copy: kj::arr(TailEvent(root.asReader()), event.clone())) {
+    KJ_EXPECT(copy.spanContext == receiver);
+    KJ_EXPECT(copy.sequence == 6);
+    auto& result = copy.event.get<SpanLinks>();
+    KJ_ASSERT(result.links.size() == 4);
+    KJ_EXPECT(result.size() == size);
+    KJ_EXPECT(result.links[0].context == target);
+    KJ_EXPECT(result.links[0].origin == SpanLink::Origin::REMOTE);
+    KJ_EXPECT(result.links[1].origin == SpanLink::Origin::LOCAL);
+    KJ_EXPECT(result.links[2].origin == SpanLink::Origin::UNKNOWN);
+    KJ_EXPECT(result.links[2].traceState == kj::none);
+    KJ_EXPECT(result.links[3].context == target);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(result.links[3].traceState) == "vendor=state");
+    KJ_EXPECT(result.links[3].droppedAttributesCount == 7);
+    KJ_EXPECT(result.links[3].attributes[0].value[0].get<kj::ConstString>() == "original");
+  }
+}
+
 KJ_TEST("SpanStatus ignores messages for non-error status codes") {
   SpanStatus unsetStatus(SpanStatusCode::UNSET, kj::ConstString("ignored"_kjc));
   KJ_ASSERT(unsetStatus.getMessage() == kj::none);
