@@ -24,6 +24,15 @@ export const nestedDynamicImportDoesNotCrashSiblingTlaModule = {
   },
 };
 
+export const nestedDynamicImportOfCycleBackToImporterDoesNotCrash = {
+  async test() {
+    // Before the fix this aborted the process in V8's Module::PrepareInstantiate.
+    const entry = await import('cyc-entry');
+    const chunk = await entry.chunk;
+    strictEqual(chunk.b, 2);
+  },
+};
+
 export const dynamicImportStillSettlesTopLevelAwait = {
   async test() {
     // The depth-0 drain is what settles this module's top-level await.
