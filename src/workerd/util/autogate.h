@@ -85,9 +85,6 @@ namespace workerd::util {
   /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
      tokens and receivers claim them. */                                                           \
   V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
-  /* Enables Durable Object JSRPC retry requests. Requires the DURABLE_OBJECT_RETRIES_JSRPC        \
-     observe gate. */                                                                              \
-  V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \

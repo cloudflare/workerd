@@ -648,7 +648,7 @@ ActorCallDispatch makeActorPropertyRead(kj::ArrayPtr<const kj::StringPtr> autoga
   return dispatch;
 }
 
-KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
+KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
   auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-jsrpc"_kj));
 
   KJ_EXPECT(dispatch.singleUseCount == 0);
@@ -656,15 +656,6 @@ KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
   auto recordedMetadata = KJ_ASSERT_NONNULL(dispatch.metadata);
   KJ_EXPECT(recordedMetadata.isRetry == IsActorRetry::NO);
   KJ_EXPECT(recordedMetadata.retryGateEnabled == ActorRetryGateEnabled::NO);
-}
-
-KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
-  auto dispatch = makeReplayableActorCall(
-      kj::arr("durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj));
-
-  KJ_EXPECT(dispatch.singleUseCount == 0);
-  KJ_EXPECT(dispatch.actorAttemptCount == 1);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
 KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {

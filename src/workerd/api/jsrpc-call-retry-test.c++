@@ -511,8 +511,7 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   return {
     .waitScope = waitScope,
     .featureFlags = flags,
-    .autogates = kj::arr("durable-object-retries-jsrpc"_kj,
-        "durable-object-retries-jsrpc-retry-requests"_kj, "durable-object-retries-userland"_kj),
+    .autogates = kj::arr("durable-object-retries-jsrpc"_kj, "durable-object-retries-userland"_kj),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
@@ -1341,8 +1340,7 @@ KJ_TEST("configured retry policy is ignored for actor RPC with the userland gate
   TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
   // Keeps the userland gate off in the all-autogates variant too.
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-jsrpc"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
@@ -1576,30 +1574,6 @@ void expectNoRetry(const RetryTestState& state) {
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
-KJ_TEST("actor RPC does not retry with the JSRPC retry request gate off") {
-  auto io = kj::setupAsyncIo();
-  capnp::MallocMessageBuilder flagsMessage;
-  RetryTestState state;
-  PausingTimerChannel timer;
-  TestFixture receiver(makeReceiverParams(io.waitScope));
-  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-jsrpc"_kj, "durable-object-retries-userland"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
-
-  sender.runInIoContext([&](const TestFixture::Environment& env) {
-    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);
-    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
-    auto rejected =
-        expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
-    return env.context.awaitJs(env.js, kj::mv(rejected)).attach(kj::mv(fetcher));
-  });
-
-  KJ_ASSERT(state.metadata.size() == 1);
-  KJ_EXPECT(state.metadata[0].retryGateEnabled == ActorRetryGateEnabled::NO);
-  expectNoRetry(state);
-}
-
 KJ_TEST("actor RPC does not retry with the JSRPC retry observation gate off") {
   auto io = kj::setupAsyncIo();
   capnp::MallocMessageBuilder flagsMessage;
@@ -1609,8 +1583,7 @@ KJ_TEST("actor RPC does not retry with the JSRPC retry observation gate off") {
   TestFixture receiver(makeReceiverParams(io.waitScope));
   TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
   util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-jsrpc-retry-requests"_kj, "durable-object-retries-userland"_kj},
-      util::IgnoreAllAutogatesEnv::YES);
+      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1);

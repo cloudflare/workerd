@@ -916,11 +916,10 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
-// A stub's own policy applies only when it was given one and the retry request gates and the
-// userland gate are all on. Otherwise the runtime's default applies.
-ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent, bool enforcementRequested) {
-  if (enforcementRequested &&
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+// A stub's own policy applies only when it was given one and the userland gate is on. Otherwise
+// the runtime's default applies.
+ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent) {
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
     KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
       return ActorRetryPolicy::userDefined(userPolicy);
     }
@@ -939,10 +938,8 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     return result;
   }
 
-  auto enforcementRequested =
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS);
-  auto policy = getJsRpcRetryPolicy(parent, enforcementRequested);
-  auto enforcementEnabled = ActorRetryGateEnabled(enforcementRequested);
+  auto policy = getJsRpcRetryPolicy(parent);
+  auto enforcementEnabled = ActorRetryGateEnabled::YES;
   // A policy without retries never retains the call, so it neither reserves nor tracks memory.
   if (policy.allowsRetries()) {
     auto replayMemoryBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
@@ -950,12 +947,10 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     KJ_IF_SOME(value, name) {
       replayMemoryBytes += value.size();
     }
-    kj::Maybe<kj::Own<void>> reservation;
-    if (enforcementRequested) {
-      reservation = ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
-      if (reservation == kj::none) {
-        ioContext.getMetrics().recordActorCallReplayMemoryRejected();
-      }
+    auto reservation =
+        ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
+    if (reservation == kj::none) {
+      ioContext.getMetrics().recordActorCallReplayMemoryRejected();
     }
     enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
     // Tracked whether or not the reservation was granted, so demand does not depend on the budget.
