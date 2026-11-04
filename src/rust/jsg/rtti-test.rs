@@ -8,7 +8,11 @@ struct Node;
 
 impl TypeInfo for Node {
     fn describe(cx: &mut Context) -> Type {
-        cx.structure::<Self>("Node", true, |cx| {
+        let typescript = TypeScript {
+            ts_root: true,
+            ..TypeScript::default()
+        };
+        cx.structure::<Self>("Node", typescript, |cx, _| {
             vec![Member::Property {
                 name: "next",
                 ty: Type::Maybe {
@@ -28,7 +32,7 @@ struct FirstModule;
 struct SecondModule;
 
 fn describe_module<T: 'static>(cx: &mut Context, name: &'static str) -> Type {
-    cx.structure::<T>(name, false, |cx| {
+    cx.structure::<T>(name, TypeScript::default(), |cx, _| {
         vec![Member::Property {
             name: "node",
             ty: Node::describe(cx),
@@ -94,6 +98,8 @@ fn recursive_types_are_interned_before_visiting_members() {
     let node = structures.get(0);
     assert!(node.get_ts_root());
     assert_eq!(node.get_ts_name().unwrap(), "Node");
+    assert_eq!(node.get_ts_override().unwrap(), "");
+    assert_eq!(node.get_ts_define().unwrap(), "");
     let next = property(node.get_members().unwrap().get(0));
     assert_eq!(next.get_name().unwrap(), "next");
     assert!(next.get_readonly());
@@ -185,6 +191,7 @@ impl Resource for Flagged {
             value: crate::ConstantValue::Number(1.0),
         }));
         if flags.get_cache_option_enabled() {
+            registry.ts_override("FlaggedWithCache");
             registry.add(crate::described_member(
                 || panic!("RTTI export built a member"),
                 move |_| Member::Property {
@@ -201,7 +208,12 @@ impl Resource for Flagged {
 
 impl TypeInfo for Flagged {
     fn describe(cx: &mut Context) -> Type {
-        cx.structure::<Self>("Flagged", true, resource_members::<Self>)
+        let typescript = TypeScript {
+            ts_root: true,
+            ts_override: Some("FlaggedWithoutCache"),
+            ts_define: Some("type FlaggedMode = string;"),
+        };
+        cx.structure::<Self>("Flagged", typescript, resource_members::<Self>)
     }
 }
 
@@ -293,7 +305,11 @@ impl Resource for Outer {
 
 impl TypeInfo for Outer {
     fn describe(cx: &mut Context) -> Type {
-        cx.structure::<Self>("Outer", true, resource_members::<Self>)
+        let typescript = TypeScript {
+            ts_root: true,
+            ..TypeScript::default()
+        };
+        cx.structure::<Self>("Outer", typescript, resource_members::<Self>)
     }
 }
 
@@ -333,7 +349,7 @@ fn nested_types_contain_their_whole_structure() {
 }
 
 fn describe_named_after<T: 'static>(cx: &mut Context, _value: &T) {
-    cx.structure::<T>("Closure", false, |_| Vec::new());
+    cx.structure::<T>("Closure", TypeScript::default(), |_, _| Vec::new());
 }
 
 #[test]
@@ -355,7 +371,7 @@ struct HoldsCpp;
 
 impl TypeInfo for HoldsCpp {
     fn describe(cx: &mut Context) -> Type {
-        cx.structure::<Self>("HoldsCpp", false, |_| {
+        cx.structure::<Self>("HoldsCpp", TypeScript::default(), |_, _| {
             vec![Member::Property {
                 name: "fetcher",
                 ty: Type::CppStructure {
@@ -418,4 +434,34 @@ fn handles_are_described_as_their_values() {
         v8::TracedGlobal::<v8::Value>::describe(&mut cx),
         Type::Unknown
     ));
+}
+
+/// Describes `Flagged` and returns its TypeScript override and definitions.
+fn flagged_typescript(mut cx: Context) -> (String, String) {
+    Flagged::describe(&mut cx);
+    let message = read_context(&cx);
+    let root = message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap();
+    let structures = root.get_groups().unwrap().get(0).get_structures().unwrap();
+    let flagged = structures.get(0);
+    (
+        flagged.get_ts_override().unwrap().to_string().unwrap(),
+        flagged.get_ts_define().unwrap().to_string().unwrap(),
+    )
+}
+
+#[test]
+fn registration_replaces_the_declared_typescript_override() {
+    let define = "type FlaggedMode = string;".to_owned();
+    assert_eq!(
+        flagged_typescript(Context::default()),
+        ("FlaggedWithoutCache".to_owned(), define.clone())
+    );
+    assert_eq!(
+        flagged_typescript(Context::with_flags(|mut flags| {
+            flags.set_cache_option_enabled(true);
+        })),
+        ("FlaggedWithCache".to_owned(), define)
+    );
 }

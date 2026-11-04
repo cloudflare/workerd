@@ -18,7 +18,11 @@ use jsg_macros::jsg_struct;
 type Label = String;
 type OptionalLabel = Option<Label>;
 
-#[jsg_struct(name = "RustRttiResult")]
+#[jsg_struct(
+    name = "RustRttiResult",
+    ts_override = "{ count: RustRttiCount }",
+    ts_define = "type RustRttiCount = number;"
+)]
 struct ResultData {
     pub label: String,
     pub count: u32,
@@ -39,7 +43,11 @@ enum Payload<'a> {
     Text(String),
 }
 
-#[jsg_resource(name = "RustRttiFixture", ts_root)]
+#[jsg_resource(
+    name = "RustRttiFixture",
+    ts_root,
+    ts_override = "{ echo<T extends Uint8Array>(value: T): T }"
+)]
 struct Fixture {
     label: String,
     child: jsg::Cell<Option<jsg::Rc<Self>>>,
@@ -316,6 +324,7 @@ impl jsg::Resource for Versioned {
         registry.add(Self::get_mode_member(placement));
         if flags.get_cache_option_enabled() {
             registry.add(Self::cached_member());
+            registry.ts_override("{ cached(): true }");
         }
     }
 }

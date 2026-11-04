@@ -503,6 +503,10 @@ impl MemberRegistry for TemplateMembers {
     fn add(&mut self, member: impl MemberDefinition) {
         self.0.push(member.into_member());
     }
+
+    fn ts_override(&mut self, _ts_override: &'static str) {}
+
+    fn ts_define(&mut self, _ts_define: &'static str) {}
 }
 
 /// Builds a [`ResourceDescriptor`] from the members that `R`'s
@@ -797,6 +801,16 @@ impl Resources {
 /// `Registry` parameter of C++ `registerMembers`.
 pub trait MemberRegistry {
     fn add(&mut self, member: impl MemberDefinition);
+
+    /// Customizes the resource's generated TypeScript declaration, like C++
+    /// `JSG_TS_OVERRIDE`. Replaces any override registered earlier or given by
+    /// `#[jsg_resource(ts_override = "...")]`. Template creation ignores it.
+    fn ts_override(&mut self, ts_override: &'static str);
+
+    /// Emits TypeScript declarations next to the resource's declaration, like C++
+    /// `JSG_TS_DEFINE`. Replaces any definitions registered earlier or given by
+    /// `#[jsg_resource(ts_define = "...")]`. Template creation ignores it.
+    fn ts_define(&mut self, ts_define: &'static str);
 }
 
 /// A member that [`Resource::members`] can register: the result of a generated member factory,

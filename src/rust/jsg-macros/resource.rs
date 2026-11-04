@@ -23,13 +23,13 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
-use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
+use crate::utils::typescript_options;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -50,7 +50,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let ts_root = has_flag(&attr, "ts_root");
+    let typescript = typescript_options(attr.clone());
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -118,7 +118,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+                cx.structure::<Self>(
+                    #class_name,
+                    #typescript,
+                    jsg::rtti::resource_members::<Self>,
+                )
             }
         }
 
@@ -542,8 +546,8 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
-                            the struct)";
+                            #[jsg_resource] impl block (`name`, `custom_trace`, `ts_root`, \
+                            `ts_override` and `ts_define` belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;

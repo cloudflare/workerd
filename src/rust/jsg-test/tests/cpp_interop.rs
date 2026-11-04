@@ -112,17 +112,18 @@ fn rust_method_rejects_another_type() {
 #[test]
 fn rust_method_describes_a_cpp_resource_by_its_cpp_name() {
     let mut cx = jsg::rtti::Context::default();
-    let greet_with = jsg::rtti::resource_members::<Host>(&mut cx)
-        .into_iter()
-        .find_map(|member| match member {
-            jsg::rtti::Member::Method {
-                name: "greetWith",
-                args,
-                ..
-            } => Some(args),
-            _ => None,
-        })
-        .unwrap();
+    let greet_with =
+        jsg::rtti::resource_members::<Host>(&mut cx, &mut jsg::rtti::TypeScript::default())
+            .into_iter()
+            .find_map(|member| match member {
+                jsg::rtti::Member::Method {
+                    name: "greetWith",
+                    args,
+                    ..
+                } => Some(args),
+                _ => None,
+            })
+            .unwrap();
     assert!(matches!(
         greet_with[0].ty,
         jsg::rtti::Type::CppStructure {

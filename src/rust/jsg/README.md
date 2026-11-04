@@ -55,6 +55,12 @@ TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
 struct to mark such a root, analogous to C++ `JSG_TS_ROOT`. Internal module
 registration alone does not make a type an ambient declaration.
 
+`ts_override = "..."` and `ts_define = "..."` on the same structs customize the generated
+declaration and add declarations next to it, analogous to C++ `JSG_TS_OVERRIDE` and
+`JSG_TS_DEFINE`. A resource's `Resource::members` can choose them by compatibility flag with
+`MemberRegistry::ts_override` and `ts_define`. There is no counterpart to
+`JSG_STRUCT_TS_OVERRIDE_DYNAMIC` for `#[jsg_struct]`.
+
 ## Core Types
 
 ### `Lock`
