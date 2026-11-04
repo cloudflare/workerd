@@ -384,28 +384,90 @@ export const encodeWptTest = {
   },
 };
 
-// encodeInto() writes every code point that fits, also when the input is long enough for the
-// implementation to measure it in pieces.
-export const encodeIntoFillsTheDestination = {
+// The Encoding Standard's encodeInto(): code points in order, a lone surrogate as U+FFFD, up to
+// the last one that fits. Returns the code unit and byte offset after each code point.
+function referenceEncodeInto(input) {
+  const bytes = [];
+  const ends = [{ read: 0, written: 0 }];
+  for (let i = 0; i < input.length;) {
+    let c = input.charCodeAt(i);
+    let units = 1;
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < input.length) {
+      const next = input.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        c = 0x10000 + ((c - 0xd800) << 10) + (next - 0xdc00);
+        units = 2;
+      }
+    }
+    if (c >= 0xd800 && c <= 0xdfff) c = 0xfffd;
+    if (c < 0x80) {
+      bytes.push(c);
+    } else if (c < 0x800) {
+      bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    } else if (c < 0x10000) {
+      bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    } else {
+      bytes.push(
+        0xf0 | (c >> 18),
+        0x80 | ((c >> 12) & 0x3f),
+        0x80 | ((c >> 6) & 0x3f),
+        0x80 | (c & 0x3f)
+      );
+    }
+    i += units;
+    ends.push({ read: i, written: bytes.length });
+  }
+  return { bytes, ends };
+}
+
+// Every buffer size, across string lengths that are converted in one piece and in several.
+export const encodeIntoMatchesTheStandard = {
   test() {
     const enc = new TextEncoder();
-    const cases = [
-      // input, code units per character, UTF-8 bytes per character
-      ['\u{1F639}', 2, 4],
-      ['\u0436', 1, 2],
-      ['\u07ff', 1, 2],
-      ['\u6f22', 1, 3],
-    ];
-    for (const [char, units, bytes] of cases) {
-      const input = char.repeat(1000);
-      for (const size of [1, 2, 3, 4, 5, 7, 100, 1001, 1003, 2001, 2999]) {
-        const fit = Math.min(1000, Math.floor(size / bytes));
-        const { read, written } = enc.encodeInto(input, new Uint8Array(size));
-        deepStrictEqual(
-          { read, written },
-          { read: fit * units, written: fit * bytes },
-          `${JSON.stringify(char)} into ${size}`
-        );
+    const patterns = {
+      ascii: 'hello world ',
+      latin1: 'caf\xe9 cr\xe8me br\xfbl\xe9e ',
+      cyrillic: 'привет ',
+      cjk: '漢字仮名',
+      emoji: '\u{1F639}\u{1F389}',
+      mixed: 'Hi \u{1F44B} при 漢字 caf\xe9!',
+      pairThenAscii: '漢漢漢\u{1F639}a',
+      loneSurrogates: 'ab\ud800cd\udc00ef',
+      loneLead: 'abп\ud800',
+      loneTrail: '漢\udc00',
+      sparseLoneSurrogate: 'x'.repeat(500) + '\ud800' + 'п'.repeat(499),
+    };
+    const SENTINEL = 0x5a;
+    for (const [name, pattern] of Object.entries(patterns)) {
+      const lengths = [pattern.length, 300, 2500];
+      for (const repeats of new Set(
+        lengths.map((n) => Math.ceil(n / pattern.length))
+      )) {
+        const input = pattern.repeat(repeats);
+        const { bytes, ends } = referenceEncodeInto(input);
+        const sizes = [];
+        for (let size = 0; size <= bytes.length + 2; size++) sizes.push(size);
+        sizes.push(input.length * 3);
+        let fit = 0;
+        for (const size of sizes) {
+          while (fit + 1 < ends.length && ends[fit + 1].written <= size) fit++;
+          while (ends[fit].written > size) fit--;
+          const buffer = new Uint8Array(size + 8).fill(SENTINEL);
+          const { read, written } = enc.encodeInto(
+            input,
+            buffer.subarray(0, size)
+          );
+          const label = `${name} x${repeats} into ${size}`;
+          deepStrictEqual({ read, written }, ends[fit], label);
+          for (let i = 0; i < written; i++) {
+            if (buffer[i] !== bytes[i])
+              strictEqual(buffer[i], bytes[i], `${label} byte ${i}`);
+          }
+          for (let i = written; i < buffer.length; i++) {
+            if (buffer[i] !== SENTINEL)
+              strictEqual(buffer[i], SENTINEL, `${label} wrote ${i}`);
+          }
+        }
       }
     }
   },
