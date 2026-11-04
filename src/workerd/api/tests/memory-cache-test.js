@@ -399,6 +399,10 @@ export default {
   // Runs a fallback that never settles, and ends the request once it has started. Its promise
   // stays reachable, so that the garbage collector does not drop the reactions to it.
   async fetch(request, env) {
+    if (new URL(request.url).pathname === '/resolve-cross') {
+      globalThis.resolveCross({ value: 'cross' });
+      return new Response('resolved');
+    }
     const { promise: started, resolve } = Promise.withResolvers();
     env.CACHE.read('abandoned', () => {
       resolve();
@@ -421,6 +425,35 @@ export const fallbackAbandonedWhenRequestEnds = {
       scheduler.wait(1000).then(() => 'still waiting'),
     ]);
     strictEqual(value, 'taken over');
+  },
+};
+
+export const fallbackSettledFromAnotherRequest = {
+  async test(ctrl, env) {
+    const { promise: started, resolve: start } = Promise.withResolvers();
+    const read = env.CACHE.read('cross', () => {
+      const { promise, resolve } = Promise.withResolvers();
+      globalThis.resolveCross = resolve;
+      start();
+      return promise;
+    });
+    await started;
+    const response = await env.SELF.fetch('http://example.com/resolve-cross');
+    strictEqual(await response.text(), 'resolved');
+    if (Cloudflare.compatibilityFlags.handle_cross_request_promise_resolution) {
+      // The reactions to the fallback's promise run in the request that read.
+      strictEqual(await read, 'cross');
+      strictEqual(await env.CACHE.read('cross'), 'cross');
+      env.CACHE.delete('cross');
+    } else {
+      // They run in the request that resolved it, where the read's fallback is out of reach,
+      // so the read fails, and caches nothing.
+      await rejects(read, {
+        name: 'Error',
+        message: /^Cannot perform I\/O on behalf of a different request\./,
+      });
+      strictEqual(await env.CACHE.read('cross'), undefined);
+    }
   },
 };
 
