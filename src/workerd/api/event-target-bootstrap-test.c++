@@ -48,8 +48,16 @@ jsg::JsObject makeSeam(jsg::Lock& js) {
   });
   add("createTrustedMessageEvent"_kj,
       [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-    return EventTargetBootstrap::createTrustedMessageEvent(
-        js, jsg::JsValue(info[0]), jsg::JsValue(info[1]), jsg::JsValue(info[2]));
+    return EventTargetBootstrap::createTrustedMessageEvent(js, jsg::JsValue(info[0]),
+        jsg::JsValue(info[1]), jsg::JsValue(info[2]), jsg::JsValue(info[3]), jsg::JsValue(info[4]));
+  });
+  add("createTrustedOpenEvent"_kj,
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) -> v8::Local<v8::Value> {
+    return EventTargetBootstrap::createTrustedOpenEvent(js);
+  });
+  add("createTrustedErrorEvent"_kj,
+      [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    return EventTargetBootstrap::createTrustedErrorEvent(js, jsg::JsValue(info[0]));
   });
   // Stands in for a TypeScript MessagePort, which its constructor brands.
   add("brandAsMessagePort"_kj,
@@ -259,6 +267,51 @@ KJ_TEST("A trusted MessageEvent looks as the runtime fires one") {
       "true,messageerror,true,true,true,,\"\",0,,,false"_kj);
 }
 
+KJ_TEST("A trusted MessageEvent carries the lastEventId and origin given") {
+  expectSeamScript(R"js(
+    const event = seam.createTrustedMessageEvent('update', 'x', null, '7', 'https://a.example');
+    const nullOrigin = seam.createTrustedMessageEvent('message', 'x', null, '', null);
+    return [
+      event.type,
+      event.isTrusted,
+      event.lastEventId,
+      event.origin,
+      event.source,
+      JSON.stringify(nullOrigin.lastEventId),
+      nullOrigin.origin,
+    ].join();
+  )js"_kj,
+      "update,true,7,https://a.example,,\"\","_kj);
+}
+
+KJ_TEST("Trusted open and error events look as the runtime fires them") {
+  expectSeamScript(R"js(
+    const open = seam.createTrustedOpenEvent();
+    const error = new Error('boom');
+    const errorEvent = seam.createTrustedErrorEvent(error);
+    return [
+      open instanceof Event,
+      Object.getPrototypeOf(open).constructor.name,
+      open.type,
+      open.isTrusted,
+      open.bubbles,
+      open.cancelable,
+      errorEvent instanceof ErrorEvent,
+      errorEvent.type,
+      errorEvent.isTrusted,
+      errorEvent.bubbles,
+      errorEvent.cancelable,
+      errorEvent.error === error,
+      JSON.stringify(errorEvent.message),
+      JSON.stringify(errorEvent.filename),
+      errorEvent.lineno,
+      errorEvent.colno,
+    ].join();
+  )js"_kj,
+      "true,OpenEvent,open,true,false,false,"
+      "true,error,true,false,false,true,\"\",\"\",0,0"_kj);
+}
+
 KJ_TEST("A MessageEvent init accepts branded MessagePorts and rejects anything else") {
   expectSeamScript(R"js(
     const port = seam.brandAsMessagePort({});
@@ -331,6 +384,8 @@ KJ_TEST("The seam rejects bad arguments with TypeErrors") {
     attempt(() => seam.dispatchEvent(null, new Event('x'), true));
     attempt(() => seam.createTrustedMessageEvent(1, null, null));
     attempt(() => seam.createTrustedMessageEvent('message', null, {}));
+    attempt(() => seam.createTrustedMessageEvent('message', null, null, 7));
+    attempt(() => seam.createTrustedMessageEvent('message', null, null, '', {}));
     return messages.join('\n');
   )js"_kj,
       "TypeError: setListenerCountHook() expects an EventTarget\n"
@@ -341,7 +396,9 @@ KJ_TEST("The seam rejects bad arguments with TypeErrors") {
       "TypeError: dispatchEvent() expects an Event\n"
       "TypeError: dispatchEvent() expects an EventTarget\n"
       "TypeError: createTrustedMessageEvent() expects a string event type\n"
-      "TypeError: createTrustedMessageEvent() expects a MessagePort source"_kj);
+      "TypeError: createTrustedMessageEvent() expects a MessagePort source\n"
+      "TypeError: createTrustedMessageEvent() expects a string lastEventId\n"
+      "TypeError: createTrustedMessageEvent() expects a string origin"_kj);
 }
 
 }  // namespace
