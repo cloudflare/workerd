@@ -116,7 +116,11 @@ declare const tracing: {
   // Makes `span` the active span while invoking `callback(...args)`, then restores the previous
   // active span. Returns the callback result as-is and does not end the span. User spans and
   // built-in instrumentation created inside the callback, including after `await`, are children
-  // of `span`.
+  // of `span`. That includes ended spans, which can still parent new spans as in OpenTelemetry.
+  // The exception is a no-op span (created at module scope or in an untraced request): it has
+  // nothing to parent new spans under, so they stay under the enclosing span. Throws if `span` was
+  // created by a different request, except that requests to the same Durable Object can share
+  // spans.
   withActiveSpan<T, A extends unknown[]>(
     span: Span,
     callback: (...args: A) => T,
