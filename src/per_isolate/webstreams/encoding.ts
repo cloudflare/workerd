@@ -18,6 +18,7 @@ import type {
   WritableStream as WritableStreamType,
 } from './types';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 
 const {
   ObjectDefineProperties,
@@ -49,6 +50,8 @@ const {
   TransformerRecord,
   toStringTagProperty,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 
 // TextDecoderStream's options for every chunk's decode, made once.
 const kDecodeStreamOptions = ObjectFreeze({
@@ -94,6 +97,7 @@ class TextEncoderStream {
   }
 
   constructor() {
+    markUncloneable(this);
     const self = this;
     const transform = (chunk: unknown, controller: object): void => {
       // Spec: "encode and enqueue a chunk" ToString-coerces the input.
@@ -188,6 +192,7 @@ class TextDecoderStream {
   }
 
   constructor(label: string = 'utf-8', options?: TextDecoderStreamOptions) {
+    markUncloneable(this);
     const decoder = new TextDecoder(label, options);
     this.#decoder = decoder;
 

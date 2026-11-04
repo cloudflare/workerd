@@ -241,6 +241,15 @@ connection.
   hydration-fresh answers; see `JsReadableStream::isDisturbed`) or happen
   before the scope entirely (stream construction via
   `RpcDeserializerExternalHandler::prepare()`'s externals hydration).
+- Every instance user code can reach (streams, readers, writers,
+  controllers, BYOB requests, strategies, async iterators) is marked with
+  `markUncloneable()` (`serialization.ts`) where it is made, before any
+  early return, so that structuredClone() and storage reject it with
+  DataCloneError, as for the C++ classes, instead of copying it as a plain
+  object. A subclass (FixedLengthStream, DigestStream,
+  FileSystemWritableFileStream) inherits the mark through `super()`. RPC
+  still serializes ReadableStream and WritableStream: its external
+  handler takes them before the mark is consulted.
 
 ## NODE.JS INTEROP HOOKS
 

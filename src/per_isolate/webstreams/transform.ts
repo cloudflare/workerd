@@ -21,6 +21,7 @@ import type {
   WritableStream as WritableStreamType,
 } from './types';
 import type { CommonHelpers } from './common';
+import type { SerializationHelpers } from '../serialization';
 
 const {
   ObjectDefineProperties,
@@ -53,6 +54,8 @@ const {
   convertQueuingStrategy,
   convertTransformer,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
@@ -193,6 +196,7 @@ class TransformStreamDefaultController<
   }
 
   constructor(privateSymbol: symbol, stream: TransformStream<I, O>) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
   }
@@ -395,6 +399,7 @@ class TransformStream<I = unknown, O = unknown> {
     writableStrategy: QueuingStrategy<I> = kNullProtoObject as QueuingStrategy<I>,
     readableStrategy: QueuingStrategy<O> = kNullProtoObject as QueuingStrategy<O>
   ) {
+    markUncloneable(this);
     // WebIDL converts the arguments at the IDL layer, before the constructor
     // body runs: the transformer is typed `object` (null and every other
     // primitive throw, nothing is read), and each strategy is a
