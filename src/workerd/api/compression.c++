@@ -336,12 +336,13 @@ void CompressionCodec::end() {
   stage.end();
 }
 
-uint32_t CompressionCodec::pullInto(jsg::JsBufferSource view) {
-  return static_cast<uint32_t>(stage.pull(view.asArrayPtr()));
-}
-
-double CompressionCodec::available() {
-  return static_cast<double>(stage.available());
+jsg::JsValue CompressionCodec::pull(jsg::Lock& js, uint32_t maxBytes) {
+  auto size = kj::min(stage.available(), static_cast<size_t>(maxBytes));
+  if (size == 0) return js.undefined();
+  auto backingStore = js.allocBackingStore(size, jsg::Lock::AllocOption::UNINITIALIZED);
+  auto pulled = stage.pull(kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), size));
+  KJ_ASSERT(pulled == size);
+  return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, size);
 }
 
 void CompressionCodec::clear() {
