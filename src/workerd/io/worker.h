@@ -1124,9 +1124,17 @@ class Worker::Actor final: public kj::Refcounted {
   void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
 
   // Immediately, synchronously abort all work going on in the actor. All requests throw the
-  // given exception. All background work stops. Any async task that holds a strong reference on
-  // the Actor is canceled, so that there should be no more references floating around.
-  void abort(const kj::Exception& error);
+  // given exception, marked as delivered to the actor. All background work stops. Any async task
+  // that holds a strong reference on the Actor is canceled, so that there should be no more
+  // references floating around.
+  //
+  // `reasonCode` says why the actor stopped. It is passed to ActorObserver::shutdown(), so that
+  // the embedder's metrics can record it.
+  //
+  // If the actor's IoContext has already aborted, as when it exceeded a resource limit, abort()
+  // only reports `reasonCode`. It leaves the actor's requests alone, since they are already
+  // failing with their own outcomes.
+  void abort(const kj::Exception& error, uint16_t reasonCode = 0);
 
   // Get a promise that resolves when `shutdown()` has been called.
   kj::Promise<void> onShutdown();
