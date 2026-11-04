@@ -584,7 +584,6 @@ struct Worker::Isolate::Impl {
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   // The isolate `inspector` belongs to.
   v8::Isolate* v8Isolate;
-  InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
@@ -824,15 +823,11 @@ struct Worker::Isolate::Impl {
       kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm)), v8Isolate};
   }
 
-  Impl(IsolateObserver& metrics,
-      IsolateLimitEnforcer& limitEnforcer,
-      InspectorPolicy inspectorPolicy,
-      IsolateState state)
+  Impl(IsolateObserver& metrics, IsolateLimitEnforcer& limitEnforcer, IsolateState state)
       : metrics(metrics),
         inspectorClient(kj::mv(state.inspectorClient)),
         inspector(kj::mv(state.inspector)),
         v8Isolate(state.v8Isolate),
-        inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
         realm(kj::mv(state.realm)) {}
 
@@ -840,10 +835,7 @@ struct Worker::Isolate::Impl {
       IsolateObserver& metrics,
       IsolateLimitEnforcer& limitEnforcer,
       InspectorPolicy inspectorPolicy)
-      : Impl(metrics,
-            limitEnforcer,
-            inspectorPolicy,
-            initIsolate(api, limitEnforcer, inspectorPolicy)) {}
+      : Impl(metrics, limitEnforcer, initIsolate(api, limitEnforcer, inspectorPolicy)) {}
 };
 
 namespace {
