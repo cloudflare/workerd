@@ -7,11 +7,6 @@ CC_LIBRARY_LINKSTATIC = select({
     "//conditions:default": False,
 })
 
-# C++ toolchain features for binaries that link with //build/deps:linkopts_default. Downstream
-# toolchains also use reduced_lto_backend_optimization to tune ThinLTO backend actions; toolchains
-# that don't define a feature ignore it.
-LINKOPTS_DEFAULT_FEATURES = ["reduced_lto_backend_optimization"]
-
 # C++ toolchain features for statically linked binaries that aren't testonly but don't need full
 # ThinLTO, such as development tools. Downstream toolchains then use the shared non-LTO backends of
 # their dependencies, as they do for test binaries; toolchains that don't define the feature ignore

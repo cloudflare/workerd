@@ -1,5 +1,4 @@
 load("@rules_rust//rust:defs.bzl", "rust_test")
-load("//:build/linking.bzl", "LINKOPTS_DEFAULT_FEATURES")
 
 def split_rust_test_srcs(srcs):
     """Partitions a crate's sources into (production sources, unit test sources).
@@ -17,7 +16,6 @@ def wd_rust_test(
         env = {},
         link_deps = [],
         tags = [],
-        features = [],
         **kwargs):
     rust_test(
         name = name,
@@ -34,7 +32,6 @@ def wd_rust_test(
             "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
-        features = features + LINKOPTS_DEFAULT_FEATURES,
         malloc = "//src/workerd/server:malloc",
         tags = tags + ["no-coverage"],
         **kwargs

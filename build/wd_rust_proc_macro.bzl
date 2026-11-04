@@ -1,12 +1,10 @@
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro", "rust_test")
-load("//:build/linking.bzl", "LINKOPTS_DEFAULT_FEATURES")
 load("//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
 def wd_rust_proc_macro(
         name,
         deps = [],
         data = [],
-        features = [],
         test_env = {},
         test_tags = [],
         test_deps = [],
@@ -47,7 +45,6 @@ def wd_rust_proc_macro(
             "RUST_TEST_THREADS": "1",
         } | test_env,
         experimental_use_cc_common_link = 1,
-        features = features + LINKOPTS_DEFAULT_FEATURES,
         tags = test_tags + ["no-coverage"],
         deps = test_deps,
         link_deps = ["@@//deps:rust_runtime", "@workerd//build/deps:linkopts_default"],
