@@ -169,6 +169,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(alarm, tracing::AlarmEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::AlarmEventInfo>(trace, alarm));
       }
+      KJ_CASE_ONEOF(onHibernate, tracing::OnHibernateEventInfo) {
+        return kj::Maybe(js.alloc<TraceItem::OnHibernateEventInfo>(trace, onHibernate));
+      }
       KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::QueueEventInfo>(trace, queue));
       }
@@ -236,6 +239,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        return info.addRef();
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<OnHibernateEventInfo>) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
@@ -446,6 +452,14 @@ TraceItem::AlarmEventInfo::AlarmEventInfo(
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
   return scheduledTime;
+}
+
+TraceItem::OnHibernateEventInfo::OnHibernateEventInfo(
+    const Trace& trace, const tracing::OnHibernateEventInfo& eventInfo)
+    : reason(kj::str(eventInfo.reason)) {}
+
+kj::StringPtr TraceItem::OnHibernateEventInfo::getReason() {
+  return reason;
 }
 
 TraceItem::QueueEventInfo::QueueEventInfo(
@@ -820,6 +834,9 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<OnHibernateEventInfo>) {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
