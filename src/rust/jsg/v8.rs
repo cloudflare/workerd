@@ -208,6 +208,7 @@ pub mod ffi {
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_object_with_null_prototype(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;

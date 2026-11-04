@@ -23,6 +23,31 @@ impl Thrower {
         lock.throw_exception(&jsg::Error::invalid_string_length());
     }
 
+    /// Throws `value`, and then, if `then` is given, throws it too, which must not replace
+    /// `value`.
+    #[jsg_method]
+    fn throw_value<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: jsg::v8::Local<'s, jsg::v8::Value>,
+        then: Option<jsg::v8::Local<'s, jsg::v8::Value>>,
+    ) -> jsg::Result<()> {
+        let err = lock.throw_value(value);
+        assert!(err.is_pending());
+        if let Some(then) = then {
+            return Err(lock.throw_value(then));
+        }
+        Err(err)
+    }
+
+    #[jsg_method]
+    fn null_prototype_object<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::v8::Local<'s, jsg::v8::Object> {
+        lock.new_object_with_null_prototype()
+    }
+
     #[jsg_method]
     fn range_error<'s>(
         &self,
@@ -96,6 +121,44 @@ fn range_error_is_a_range_error_object() {
                 lock,
                 "const e = thrower.rangeError('out of range');
                  e instanceof RangeError && e.message === 'out of range'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn throw_value_throws_the_value_itself() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
+        assert!(caught(
+            lock,
+            ctx,
+            "globalThis.value = { thrown: true }; thrower.throwValue(value)",
+            "caught === value"
+        ));
+        assert!(caught(lock, ctx, "thrower.throwValue(42)", "caught === 42"));
+        // A second throw leaves the first exception pending.
+        assert!(caught(
+            lock,
+            ctx,
+            "thrower.throwValue('first', 'second')",
+            "caught === 'first'"
+        ));
+        Ok(())
+    });
+}
+
+#[test]
+fn null_prototype_object_has_no_prototype() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "{ const o = thrower.nullPrototypeObject();
+                   Object.getPrototypeOf(o) === null && Reflect.ownKeys(o).length === 0 }"
             )
             .unwrap()
         );

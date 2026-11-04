@@ -126,6 +126,11 @@ Local local_new_object(Isolate* isolate) {
   return to_ffi(kj::mv(object));
 }
 
+Local local_new_object_with_null_prototype(Isolate* isolate) {
+  v8::Local<v8::Object> object = v8::Object::New(isolate, v8::Null(isolate), nullptr, nullptr, 0);
+  return to_ffi(kj::mv(object));
+}
+
 Local local_new_null(Isolate* isolate) {
   v8::Local<v8::Primitive> null = v8::Null(isolate);
   return to_ffi(kj::mv(null));

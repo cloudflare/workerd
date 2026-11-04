@@ -656,6 +656,34 @@ impl<'s> Lock<'s> {
         unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.isolate().as_ffi())) }
     }
 
+    /// Creates an empty object whose prototype is `null`, like `Object.create(null)`. Setting
+    /// and reading its own properties runs no JavaScript, and nothing that resolves a promise
+    /// with it finds a `then` to follow.
+    pub fn new_object_with_null_prototype(&mut self) -> v8::Local<'s, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked.
+        unsafe {
+            v8::Local::from_ffi(v8::ffi::local_new_object_with_null_prototype(
+                self.isolate().as_ffi(),
+            ))
+        }
+    }
+
+    /// Throws `exception`, as JavaScript's `throw` does, and returns the error that stands for
+    /// it (see [`Error::is_pending`]), for a callback to return. Throws nothing while execution
+    /// is terminating, so that the termination is never replaced by a catchable exception, nor
+    /// while an exception is pending, which then keeps propagating.
+    pub fn throw_value(&mut self, exception: v8::Local<'s, v8::Value>) -> Error {
+        let isolate = self.isolate().as_ffi();
+        // SAFETY: Lock guarantees the isolate is valid and locked; `exception` is a handle of
+        // its scope. The shim throws nothing while execution is terminating.
+        unsafe {
+            if !v8::ffi::isolate_has_pending_exception(isolate) {
+                v8::ffi::isolate_throw_exception(isolate, exception.into_ffi());
+            }
+        }
+        Error::pending()
+    }
+
     /// Creates a JavaScript `Error` object with the given message.
     ///
     /// Mirrors C++ `jsg::Lock::error()`. The returned object can have additional

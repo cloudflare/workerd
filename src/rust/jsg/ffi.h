@@ -155,6 +155,7 @@ Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
+Local local_new_object_with_null_prototype(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
 Local local_new_undefined(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
