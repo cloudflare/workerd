@@ -34,7 +34,10 @@
       "owner": "capnproto",
       "repo": "capnproto",
       "branch": "v2",
-      "extra_strip_prefix": "/c++"
+      "extra_strip_prefix": "/c++",
+      "patches": [
+        "//:patches/capnp/0001-preserve-http-body-aborts.patch"
+      ]
     },
     // We want to avoid version skew with v8, so we use identical versions. Keep this
     // V8-aligned dependency marked as such in ci/v8_update.py.
