@@ -615,11 +615,11 @@ KJ_TEST("SpanLink context parsing preserves all ID bits and permits zero IDs") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(context.getTraceFlags()) == 0xfe);
   KJ_EXPECT(SpanLink::parseContext(
                 "00000000000000000000000000000000", "0000000000000000", TraceFlags(0)) != kj::none);
-  for (auto invalid: {"fedcba98765432100123456789abcde"_kj, "FEDCBA98765432100123456789ABCDEF"_kj,
-         "gedcba98765432100123456789abcdef"_kj}) {
+  for (const auto& invalid: {"fedcba98765432100123456789abcde"_kj,
+         "FEDCBA98765432100123456789ABCDEF"_kj, "gedcba98765432100123456789abcdef"_kj}) {
     KJ_EXPECT(SpanLink::parseContext(invalid, spanId, TraceFlags(0)) == kj::none);
   }
-  for (auto invalid: {"123456789abcdef"_kj, "F123456789ABCDEF"_kj, "z123456789abcdef"_kj}) {
+  for (const auto& invalid: {"123456789abcdef"_kj, "F123456789ABCDEF"_kj, "z123456789abcdef"_kj}) {
     KJ_EXPECT(SpanLink::parseContext(traceId, invalid, TraceFlags(0)) == kj::none);
   }
 }
@@ -628,8 +628,8 @@ KJ_TEST("SpanLink tracestate validation and normalization") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate(" \ta=one , ,1tenant@vendor=two\t,")) ==
       "a=one,1tenant@vendor=two");
   KJ_EXPECT(KJ_ASSERT_NONNULL(SpanLink::parseTracestate("a= leading space")) == "a= leading space");
-  for (auto invalid: {""_kj, " , \t"_kj, "a=1,a=2"_kj, "A=1"_kj, "1a=1"_kj, "a="_kj, "a=one=two"_kj,
-         "a=one\ntwo"_kj, "a@@b=1"_kj, "a@1b=1"_kj, "a@abcdefghijklmnop=1"_kj}) {
+  for (const auto& invalid: {""_kj, " , \t"_kj, "a=1,a=2"_kj, "A=1"_kj, "1a=1"_kj, "a="_kj,
+         "a=one=two"_kj, "a=one\ntwo"_kj, "a@@b=1"_kj, "a@1b=1"_kj, "a@abcdefghijklmnop=1"_kj}) {
     KJ_EXPECT(SpanLink::parseTracestate(invalid) == kj::none, invalid);
   }
   auto longValue = kj::str("a=", kj::repeat('x', 257));
