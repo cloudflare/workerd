@@ -76,7 +76,8 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   goes in a `jsg::Cell` or `jsg::RefCell`, whose `take`, `replace` and `borrow_mut` take the lock
   and make the contents strong (see "Cells" in `src/rust/jsg/README.md`). Prefer `Cell`: a
   `RefCell` borrow held across a call that can run JavaScript makes a re-entrant call panic.
-- **Static methods** (no receiver) are placed on the constructor.
+- **Static methods** (no receiver) are placed on the constructor. See "Static member names"
+  below for the names they cannot take.
 - **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
   method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
   C++ JSG. Use it when the method gives the resource to something that runs after the call,
@@ -269,6 +270,18 @@ impl WebSocket {
 }
 // JS: WebSocket.CONNECTING === 0 / instance.OPEN === 1
 ```
+
+### Static member names
+
+Static methods and static constants are properties of the constructor. A release build of V8
+adds them to the function without checking for an existing property, and aborts the process if
+one is already there (a debug build throws instead). So a static member cannot be named `length`, `name` or `prototype`, which every function
+already has, and no two static members can share a name. `#[jsg_resource]` rejects a reserved
+name at compile time, with automatic or custom registration, and two static members with the
+same name with automatic registration; use `name = "..."` to choose another JavaScript name.
+Creating the template of a type whose `Resource::members` breaks either rule panics. Instance
+methods are on the prototype, so they may use these names. A static constant is also a property
+of the prototype, where an instance method or prototype property with the same name replaces it.
 
 ---
 

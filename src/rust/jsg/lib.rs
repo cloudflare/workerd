@@ -1152,16 +1152,19 @@ pub enum Member {
         getter_callback: RawGetterCallback,
         read_only: bool,
     },
+    /// A method of the constructor. The names of a type's static methods and static constants
+    /// must differ from each other and from `length`, `name` and `prototype`, which every
+    /// function already has; creating the type's template panics otherwise.
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
         length: u32,
     },
-    StaticConstant {
-        name: String,
-        value: ConstantValue,
-    },
+    /// A read-only number on both the constructor and the prototype. Its name follows the rules
+    /// of [`Member::StaticMethod`]. It may share its name with a prototype member, such as an
+    /// instance method or a prototype property, which then replaces it on the prototype.
+    StaticConstant { name: String, value: ConstantValue },
     /// A property of every instance with any string name that is not a defined property of the
     /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
     /// one. `query_callback` tells V8 whether a property exists, for `in`.

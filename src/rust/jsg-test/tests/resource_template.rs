@@ -17,6 +17,7 @@ use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_static_constant;
 
+use super::panic_message;
 use crate::Harness;
 
 type OptionalNumber = Option<u32>;
@@ -349,6 +350,132 @@ fn custom_member_order_controls_instance_key_order() {
         eval_string(&Harness::new(), "Object.keys(new Sample('x')).join()"),
         "label,kind"
     );
+}
+
+// Static members that would abort V8 when it instantiates the constructor. `#[jsg_resource]`
+// cannot reject them because they are registered by hand.
+#[jsg_resource]
+struct StaticNames;
+
+#[jsg_resource(custom_members)]
+impl StaticNames {
+    #[jsg_method]
+    pub fn dup() -> String {
+        "method".to_owned()
+    }
+}
+
+fn static_constant(name: &str) -> jsg::Undescribed {
+    jsg::undescribed(jsg::Member::StaticConstant {
+        name: name.to_owned(),
+        value: jsg::ConstantValue::Number(1.0),
+    })
+}
+
+impl Resource for StaticNames {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
+        if flags.get_cache_option_enabled() {
+            registry.add(Self::dup_member());
+            registry.add(static_constant("dup"));
+        } else {
+            registry.add(static_constant("length"));
+        }
+    }
+}
+
+/// A static member named after a property every function has, or two static members with the
+/// same name, panic when the template is created, every time, rather than abort the process when
+/// V8 instantiates it.
+#[test]
+fn conflicting_static_member_names_panic() {
+    for (cache, message) in [
+        (
+            false,
+            "StaticNames has a static member named \"length\", which every JavaScript function \
+             already has",
+        ),
+        (
+            true,
+            "StaticNames has more than one static member named \"dup\"",
+        ),
+    ] {
+        let harness = Harness::with_flags(|mut flags| flags.set_cache_option_enabled(cache));
+        harness.run_in_context(|lock, ctx| {
+            for _ in 0..2 {
+                let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    jsg::resource::function_template_of::<StaticNames>(lock).unwrap();
+                }))
+                .expect_err("conflicting static names must panic");
+                assert_eq!(panic_message(&*payload), message);
+            }
+            assert!(ctx.eval::<bool>(lock, "true").unwrap());
+            Ok(())
+        });
+    }
+}
+
+// Instance members go on the prototype, which has no `name` or `length` of its own, and the
+// functions V8 creates from templates have no own `caller` or `arguments`, so all of these names
+// are allowed.
+#[jsg_resource]
+struct AllowedNames;
+
+#[jsg_resource]
+impl AllowedNames {
+    #[jsg_constructor]
+    fn constructor() -> Self {
+        Self
+    }
+
+    #[jsg_method]
+    pub fn name(&self) -> String {
+        "instance name".to_owned()
+    }
+
+    #[jsg_method(name = "length")]
+    pub fn instance_length(&self) -> u32 {
+        7
+    }
+
+    #[jsg_method]
+    pub fn caller() -> String {
+        "static caller".to_owned()
+    }
+
+    #[jsg_static_constant(name = "arguments")]
+    const ARGUMENTS: f64 = 3.0;
+
+    // A static constant is also a property of the prototype, where an instance method with the
+    // same name replaces it.
+    #[jsg_method]
+    pub fn shared(&self) -> String {
+        "instance shared".to_owned()
+    }
+
+    #[jsg_static_constant(name = "shared")]
+    const SHARED_CONSTANT: f64 = 5.0;
+}
+
+#[test]
+fn instance_members_may_use_names_reserved_for_static_members() {
+    let harness = Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<AllowedNames>(lock).unwrap();
+        ctx.set_global(lock, "AllowedNames", constructor);
+        let result: String = ctx
+            .eval(
+                lock,
+                "const a = new AllowedNames(); \
+                 [a.name(), a.length(), AllowedNames.caller(), AllowedNames.arguments, \
+                  AllowedNames.name, AllowedNames.shared, a.shared()].join()",
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            "instance name,7,static caller,3,AllowedNames,5,instance shared"
+        );
+        Ok(())
+    });
 }
 
 #[test]

@@ -272,6 +272,136 @@ fn factory_collision_with_user_associated_item_is_reported() {
     );
 }
 
+#[test]
+fn static_members_named_like_function_properties_are_rejected() {
+    for (input, (source, name)) in [
+        (
+            parse_quote! {
+                impl Sample {
+                    #[jsg_method]
+                    fn name() -> String { String::new() }
+                }
+            },
+            ("name", "name"),
+        ),
+        (
+            parse_quote! {
+                impl Sample {
+                    #[jsg_method(name = "length")]
+                    fn size() -> u32 { 0 }
+                }
+            },
+            ("size", "length"),
+        ),
+        (
+            parse_quote! {
+                impl Sample {
+                    #[jsg_static_constant(name = "prototype")]
+                    const PROTO: u32 = 1;
+                }
+            },
+            ("PROTO", "prototype"),
+        ),
+    ] {
+        let message = format!("static member `{source}` cannot be named \\\"{name}\\\"");
+        // A reserved name can never be registered, so custom registration rejects it too.
+        for mode in [quote!(), quote!(custom_members)] {
+            assert_validation_error_preserves_impl(mode, &input, &message);
+        }
+    }
+}
+
+/// The static-name error is reported alongside the generated bindings, so that a reference to a
+/// member factory or to the type as a `jsg::Resource` adds no errors of its own.
+#[test]
+fn static_name_error_retains_generated_bindings() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn name() -> String { String::new() }
+        }
+    };
+    let file: syn::File = syn::parse2(expand_resource_impl(quote!(), &input)).unwrap();
+    let error = file
+        .items
+        .iter()
+        .any(|item| matches!(item, syn::Item::Macro(item) if item.mac.path.segments.last().unwrap().ident == "compile_error"));
+    assert!(error, "missing compile_error!");
+    let factories = file.items.iter().any(|item| {
+        matches!(item, syn::Item::Impl(item) if item.trait_.is_none() && item.items.iter().any(|item| {
+            matches!(item, syn::ImplItem::Fn(f) if f.sig.ident == "name_member")
+        }))
+    });
+    assert!(factories, "missing member factories");
+    let resource = file.items.iter().any(|item| {
+        matches!(item, syn::Item::Impl(item) if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+            quote!(#path).to_string() == quote!(jsg::Resource).to_string()
+        }))
+    });
+    assert!(resource, "missing Resource implementation");
+}
+
+#[test]
+fn instance_members_and_other_static_names_are_accepted() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn name(&self) -> String { String::new() }
+            #[jsg_method(name = "length")]
+            fn size(&self) -> u32 { 0 }
+            #[jsg_method]
+            fn caller() -> String { String::new() }
+            #[jsg_static_constant]
+            const arguments: u32 = 1;
+        }
+    };
+    let mut registrations = collect_method_registrations(&input);
+    registrations.extend(collect_constant_registrations(&input));
+    validate_static_names(&registrations, RegistrationMode::Automatic).unwrap();
+}
+
+#[test]
+fn duplicate_static_names_are_rejected_with_automatic_registration() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn dup() -> String { String::new() }
+            #[jsg_static_constant(name = "dup")]
+            const DUPLICATE: u32 = 1;
+            #[jsg_method]
+            fn other(&self) {}
+        }
+    };
+    let mut registrations = collect_method_registrations(&input);
+    registrations.extend(collect_constant_registrations(&input));
+    let error = validate_static_names(&registrations, RegistrationMode::Automatic).unwrap_err();
+    let messages: Vec<_> = error.into_iter().map(|error| error.to_string()).collect();
+    assert_eq!(
+        messages,
+        [
+            "static member `DUPLICATE` has the same JavaScript name \"dup\" as `dup`",
+            "`dup` declared here",
+        ]
+    );
+    // Custom registration may choose between them by compatibility flag.
+    validate_static_names(&registrations, RegistrationMode::Custom).unwrap();
+    // An instance method and a static method may share a name: one is on the prototype, the
+    // other on the constructor.
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn shared() {}
+            #[jsg_method(name = "shared")]
+            fn shared_instance(&self) {}
+        }
+    };
+    validate_static_names(
+        &collect_method_registrations(&input),
+        RegistrationMode::Automatic,
+    )
+    .unwrap();
+}
+
 fn member_field<'a>(member: &'a syn::Expr, name: &str) -> &'a syn::Expr {
     let syn::Expr::Struct(member) = member else {
         panic!(
