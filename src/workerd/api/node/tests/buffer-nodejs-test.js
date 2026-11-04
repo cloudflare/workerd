@@ -3864,6 +3864,18 @@ export const overMaxLength = {
   },
 };
 
+export const atMaxLength = {
+  test(ctrl, env, ctx) {
+    // kMaxLength is the maximum valid buffer length and must not throw ERR_OUT_OF_RANGE.
+    try {
+      const b = Buffer.allocUnsafe(kMaxLength);
+      strictEqual(b.length, kMaxLength);
+    } catch (err) {
+      notStrictEqual(err.code, 'ERR_OUT_OF_RANGE');
+    }
+  },
+};
+
 export const read = {
   test(ctrl, env, ctx) {
     // Testing basic buffer read functions
