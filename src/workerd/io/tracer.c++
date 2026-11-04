@@ -283,13 +283,19 @@ void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& u
 }
 
 void WorkerTracer::addSpanLinks(tracing::SpanId spanId, tracing::SpanLinks links) {
+  if (maybeTailStreamWriter == kj::none) return;
+  addSpanLinksInternal(spanId, kj::mv(links), getTime());
+}
+
+void WorkerTracer::addSpanLinksInternal(
+    tracing::SpanId spanId, tracing::SpanLinks links, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE || links.links.size() == 0) return;
   auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
   auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
       topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
   auto size = links.size();
-  writer->report(context, kj::mv(links), getTime(), size);
+  writer->report(context, kj::mv(links), timestamp, size);
 }
 
 void WorkerTracer::addSpanUpdateInternal(
