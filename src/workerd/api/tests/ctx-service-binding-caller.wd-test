@@ -1,0 +1,6 @@
+using Workerd = import "/workerd/workerd.capnp";
+const unitTests :Workerd.Config = (services = [
+ (name="a",worker=(modules=[(name="a.js",esModule=embed "ctx-service-binding-caller-test.js")],compatibilityFlags=["nodejs_compat", "rpc", "enable_workload_identity_context", "enable_ctx_exports"],bindings=[(name="INGRESS",service=(name="b",suppressNativeCaller=true)),(name="B",service="b"),(name="NAMED",service=(name="b",entrypoint="Named")),(name="C",service="c")])),
+ (name="b",worker=(modules=[(name="b.js",esModule=embed "ctx-service-binding-caller-receiver.js")],compatibilityFlags=["nodejs_compat", "rpc", "enable_workload_identity_context", "enable_ctx_exports"],bindings=[(name="C",service="c") ])),
+ (name="c",worker=(modules=[(name="c.js",esModule=embed "ctx-service-binding-caller-receiver.js")],compatibilityFlags=["nodejs_compat", "rpc", "enable_workload_identity_context", "enable_ctx_exports"],bindings=[(name="B",service="b")]))
+]);

@@ -185,6 +185,7 @@ impl Channel for NullChannel {
 
 fn designator(service: &str, entrypoint: Option<&str>) -> Designator {
     Designator {
+        suppress_native_caller: false,
         service: service.to_owned(),
         entrypoint: entrypoint.map(str::to_owned),
         props_json: None,

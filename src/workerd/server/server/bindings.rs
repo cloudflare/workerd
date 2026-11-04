@@ -37,6 +37,7 @@ pub const SPECIAL_SUBREQUEST_CHANNEL_COUNT: u32 = 2;
 /// A `ServiceDesignator` from the config: what a subrequest or actor-class channel resolves to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Designator {
+    pub suppress_native_caller: bool,
     pub service: String,
     pub entrypoint: Option<String>,
     /// `props.json`; none for `props.empty`.
@@ -71,6 +72,7 @@ impl Designator {
             }
         };
         Ok(Self {
+            suppress_native_caller: reader.get_suppress_native_caller(),
             service,
             entrypoint,
             props_json,

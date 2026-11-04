@@ -569,8 +569,10 @@ TestFixture::Response TestFixture::runRequest(
     auto& globalScope = env.lock.getGlobalScope();
     return globalScope.request(method, url, requestHeaders, *requestBody, response, "{}"_kj,
         env.lock,
-        env.lock.getExportedHandler(/*entryPointName=*/kj::none, /*versionInfo=*/kj::none,
-            /*props=*/{}, /*actor=*/kj::none),
+        [&]() {
+      return env.lock.getExportedHandler(/*entryPointName=*/kj::none, /*versionInfo=*/kj::none,
+          /*props=*/{}, /*actor=*/kj::none);
+    },
         /*abortSignal=*/kj::none);
   });
 

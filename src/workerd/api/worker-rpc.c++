@@ -2374,6 +2374,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
         ctx.makeAsyncTraceScope(lock, kj::mv(traceParent));
     jsg::AsyncContextFrame::StorageScope userTraceScope =
         ctx.makeUserAsyncTraceScope(lock, kj::mv(userTraceParent));
+    auto callerScope = IdentityContext::makeRpcScope(lock, getTargetKind() == "entrypoint"_kjc);
     return dispatch().attach(kj::mv(jsRpcCallSpan));
   }
 

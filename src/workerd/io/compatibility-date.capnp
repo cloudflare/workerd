@@ -1799,4 +1799,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  enableWorkloadIdentityContext @204 :Bool
+      $compatEnableFlag("enable_workload_identity_context")
+      $compatDisableFlag("disable_workload_identity_context");
+  # Adds ctx.identity.caller() on an opt-in basis until the platform rollout completes.
+  # HTTP credential verification requires an embedder-supplied private service.
+
+  enableDelegatedIdentity @205 :Bool
+      $compatEnableFlag("enable_delegated_identity");
+  # Receiver configuration compilers require a runtime that recognizes the
+  # version-2 delegated verifier contract before enabling the profile.
+
 }
