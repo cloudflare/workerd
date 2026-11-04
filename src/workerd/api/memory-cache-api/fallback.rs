@@ -133,6 +133,20 @@ struct Fill {
     /// The key, for the span of the write.
     key: String,
     spans: RefCell<FillSpans>,
+    /// What the fallback produced, if it returned it rather than a promise for it.
+    produced: jsg::RefCell<Option<Produced>>,
+}
+
+/// The fields of what a fallback returned, read as it returned.
+struct Produced {
+    value: v8::TracedGlobal<v8::Value>,
+    expiration: Option<f64>,
+}
+
+impl jsg::Traced for Produced {
+    fn trace(&self, visitor: &mut jsg::GcVisitor) {
+        self.value.trace(visitor);
+    }
 }
 
 /// The spans that end once the fallback settles, when the reactions to its promise drop the
@@ -142,7 +156,11 @@ struct FillSpans {
     fallback: SpanBuilder,
 }
 
-impl jsg::Traced for Fill {}
+impl jsg::Traced for Fill {
+    fn trace(&self, visitor: &mut jsg::GcVisitor) {
+        self.produced.trace(visitor);
+    }
+}
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never
@@ -164,6 +182,7 @@ impl Fill {
                 _read: read_span,
                 fallback: fallback_span,
             }),
+            produced: jsg::RefCell::new(None),
         })
     }
 
@@ -174,14 +193,41 @@ impl Fill {
         resolver: v8::Local<'s, v8::PromiseResolver>,
         produced: v8::Local<'s, v8::Value>,
     ) {
-        let filled = v8::Promise::resolved(lock, produced)
-            .and_then(|produced| produced.then_or_catch(lock, self, fulfilled, rejected));
-        match filled {
+        let promise = match lock.try_catch(|lock| self.promise_for(lock, produced)) {
+            Ok(Ok(promise)) => promise,
+            // As if the fallback threw it.
+            Ok(Err(exception)) => return self.reject_now(lock, resolver, exception),
+            // Execution is terminating.
+            Err(_) => return,
+        };
+        match promise.then_or_catch(lock, self, fulfilled, rejected) {
             Ok(filled) => {
                 let _ = resolver.resolve(lock, filled.into());
             }
             Err(err) => reject(lock, resolver, &err),
         }
+    }
+
+    /// A promise for what the fallback produced, as C++ JSG converts the value a callback
+    /// returns to a `jsg::Promise<CacheValueProduceResult>`: a promise is taken as is, and a
+    /// thenable is followed if the `unwrap_custom_thenables` compatibility flag is on. Anything
+    /// else is read now, into [`Fill::produced`], and the promise resolves with `undefined`.
+    fn promise_for<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        produced: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        if let Ok(promise) = v8::Local::<v8::Promise>::try_from(produced) {
+            return Ok(promise);
+        }
+        if lock.feature_flags().get_unwrap_custom_thenables() && is_thenable(lock, produced)? {
+            return v8::Promise::resolved(lock, produced);
+        }
+        let (value, expiration) = read_result(lock, produced, Produce::Returned)?;
+        let value = v8::TracedGlobal::new(lock, value);
+        *self.produced.borrow_mut(lock) = Some(Produced { value, expiration });
+        let undefined = lock.undefined();
+        v8::Promise::resolved(lock, undefined)
     }
 
     /// Fails as [`Fill::fail`] does, for a fallback that threw, and rejects the read with what
@@ -269,9 +315,13 @@ fn fulfilled<'a>(
     fill: &Fill,
     result: v8::Local<'a, v8::Value>,
 ) -> jsg::Result<v8::Local<'a, v8::Value>> {
-    let (value, expiration) = match lock.try_catch(|lock| read_result(lock, result))? {
-        Ok(fields) => fields,
-        Err(exception) => return fill.reject(lock, exception),
+    let produced = fill.produced.borrow_mut(lock).take();
+    let (value, expiration) = match produced {
+        Some(Produced { value, expiration }) => (value.as_local(lock), expiration),
+        None => match lock.try_catch(|lock| read_result(lock, result, Produce::Resolved))? {
+            Ok(fields) => fields,
+            Err(exception) => return fill.reject(lock, exception),
+        },
     };
     let bytes = match serialize(lock, value)? {
         Ok(bytes) => bytes,
@@ -318,13 +368,45 @@ fn serialize<'a>(
     Ok(Err(lock.exception(&err)?))
 }
 
-/// The `value` and `expiration` of what a fallback produced.
+/// How a fallback produced a value.
+#[derive(Clone, Copy)]
+enum Produce {
+    /// It returned it.
+    Returned,
+    /// The promise it returned resolved with it.
+    Resolved,
+}
+
+/// Whether `value` is an object with a `then` property, as C++ JSG checks.
+fn is_thenable<'a>(lock: &mut jsg::Lock<'a>, value: v8::Local<'a, v8::Value>) -> jsg::Result<bool> {
+    match v8::Local::<v8::Object>::try_from(value) {
+        Ok(object) => object.has(lock, "then"),
+        Err(_) => Ok(false),
+    }
+}
+
+/// The `value` and `expiration` of what a fallback produced, read as C++ JSG reads a
+/// `CacheValueProduceResult`, and failing with the same messages. Those name the type as
+/// `jsg::typeName()` does, rather than mangled, as the C++ for an undefined or null value does.
 fn read_result<'a>(
     lock: &mut jsg::Lock<'a>,
     result: v8::Local<'a, v8::Value>,
+    produce: Produce,
 ) -> jsg::Result<(v8::Local<'a, v8::Value>, Option<f64>)> {
+    if result.is_null_or_undefined() {
+        return Err(jsg::Error::new_type_error(
+            "Cannot initialize CacheValueProduceResult with required members from an undefined \
+             or null value.",
+        ));
+    }
     let result = v8::Local::<v8::Object>::try_from(result).map_err(|_| {
-        jsg::Error::new_type_error("The fallback must produce an object with a value property.")
+        jsg::Error::new_type_error(match produce {
+            Produce::Returned => "Callback returned incorrect type; expected 'Promise'",
+            Produce::Resolved => {
+                "Incorrect type for Promise: the Promise did not resolve to \
+                 'CacheValueProduceResult'."
+            }
+        })
     })?;
     let value = result.get(lock, "value")?;
     let expiration = result.get(lock, "expiration")?;

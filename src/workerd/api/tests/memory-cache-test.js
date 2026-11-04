@@ -430,6 +430,96 @@ export const fallbackCalledWithGlobalThis = {
   },
 };
 
+export const fallbackProducesNoObject = {
+  async test(ctrl, env) {
+    // C++ names the type mangled, the Rust MemoryCache as jsg::typeName() does.
+    const noObject =
+      /^Cannot initialize \S*CacheValueProduceResult\S* with required members from an undefined or null value\.$/;
+    for (const produce of [
+      () => undefined,
+      () => null,
+      async () => undefined,
+      async () => null,
+    ]) {
+      await rejects(env.CACHE.read('noObject', produce), {
+        name: 'TypeError',
+        message: noObject,
+      });
+    }
+    await rejects(
+      env.CACHE.read('noObject', () => 42),
+      {
+        name: 'TypeError',
+        message: "Callback returned incorrect type; expected 'Promise'",
+      }
+    );
+    await rejects(
+      env.CACHE.read('noObject', async () => 42),
+      {
+        name: 'TypeError',
+        message:
+          "Incorrect type for Promise: the Promise did not resolve to 'CacheValueProduceResult'.",
+      }
+    );
+    // Nothing is cached, and the next read runs its own fallback.
+    strictEqual(
+      await env.CACHE.read('noObject', () => ({ value: 'next' })),
+      'next'
+    );
+    env.CACHE.delete('noObject');
+  },
+};
+
+export const fallbackResultReadAsReturned = {
+  async test(ctrl, env) {
+    // What the fallback returns, rather than a promise for, is read before it returns to the
+    // microtasks it queued.
+    const log = [];
+    const value = await env.CACHE.read('readAsReturned', () => {
+      queueMicrotask(() => log.push('microtask'));
+      return {
+        get value() {
+          log.push('value');
+          return 'read';
+        },
+      };
+    });
+    strictEqual(value, 'read');
+    strictEqual(log.join(), 'value,microtask');
+
+    // What reading it throws rejects the read, as if the fallback threw it.
+    const thrown = new Error('getter');
+    await rejects(
+      env.CACHE.read('readAsReturned2', () => ({
+        get value() {
+          throw thrown;
+        },
+      })),
+      (err) => err === thrown
+    );
+    env.CACHE.delete('readAsReturned');
+  },
+};
+
+export const fallbackReturnsThenable = {
+  async test(ctrl, env) {
+    // A thenable is followed only under unwrap_custom_thenables; otherwise it is the result.
+    const value = await env.CACHE.read('thenable', () => ({
+      then(resolve) {
+        resolve({ value: 'from then' });
+      },
+      value: 'own',
+    }));
+    strictEqual(
+      value,
+      Cloudflare.compatibilityFlags.unwrap_custom_thenables
+        ? 'from then'
+        : 'own'
+    );
+    env.CACHE.delete('thenable');
+  },
+};
+
 export const deleteNeedsRequest = {
   async test() {
     ok(deleteInGlobalScopeError instanceof Error);
