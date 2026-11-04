@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/jsg/code-cache.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
@@ -272,7 +273,8 @@ class ModuleRegistry {
         kj::StringPtr name,
         StaticExternalStringSource content,
         kj::ArrayPtr<const kj::byte> compileCache,
-        const CompilationObserver& observer);
+        const CompilationObserver& observer,
+        const kj::Maybe<CodeCacheKey>& codeCacheKey = kj::none);
 
     // Compiles a builtin module whose source V8 shares ownership of.
     ModuleInfo(jsg::Lock& js,
@@ -391,6 +393,7 @@ namespace _ {  // private
 struct StaticModuleSource {
   StaticExternalStringSource source;
   kj::ArrayPtr<const kj::byte> compileCache;
+  kj::Maybe<CodeCacheKey> codeCacheKey;
 };
 
 // Source of a builtin ESM module that ModuleRegistryImpl compiles on first resolve, shared with
@@ -442,8 +445,10 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   // If `wasmHolder` is given and `module` is a Wasm module, the module is instantiated from the
   // holder, so it is compiled only if no earlier registry using the holder has compiled it.
-  void addBuiltinModule(
-      Module::Reader module, kj::Maybe<const CompiledWasmModuleHolder&> wasmHolder = kj::none) {
+  // `codeCacheKey` is passed on for a source module.
+  void addBuiltinModule(Module::Reader module,
+      kj::Maybe<const CompiledWasmModuleHolder&> wasmHolder = kj::none,
+      kj::Maybe<CodeCacheKey> codeCacheKey = kj::none) {
     if (module.which() != Module::SRC) {
       auto specifier = module.getName();
       switch (module.which()) {
@@ -501,7 +506,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
     // TODO: asChars() might be wrong for wide characters
     addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType(),
-        module.getCompileCache().asBytes());
+        module.getCompileCache().asBytes(), kj::mv(codeCacheKey));
   }
 
   void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
@@ -513,14 +518,24 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // Like addBuiltinBundle() above, but instantiates the bundle's Wasm module from `wasmHolder`.
   // The holder must outlive this registry. The bundle may contain at most one Wasm module, since
   // a holder holds one.
-  void addBuiltinBundle(Bundle::Reader bundle, const CompiledWasmModuleHolder& wasmHolder) {
+  //
+  // `codeCacheKeys`, if not empty, has one entry per module of the bundle, in order: the key of
+  // each source module that the isolate's code cache store may serve, as described at
+  // addBuiltinModule() below.
+  void addBuiltinBundle(Bundle::Reader bundle,
+      const CompiledWasmModuleHolder& wasmHolder,
+      kj::ArrayPtr<const kj::Maybe<CodeCacheKey>> codeCacheKeys = nullptr) {
+    auto modules = bundle.getModules();
+    KJ_REQUIRE(codeCacheKeys.size() == 0 || codeCacheKeys.size() == modules.size(),
+        "codeCacheKeys must match the bundle's modules", codeCacheKeys.size(), modules.size());
     bool sawWasm = false;
-    for (auto module: bundle.getModules()) {
+    for (auto i: kj::indices(modules)) {
+      auto module = modules[i];
       if (module.which() == Module::WASM) {
         KJ_REQUIRE(!sawWasm, "bundle has more than one Wasm module", module.getName());
         sawWasm = true;
       }
-      addBuiltinModule(module, wasmHolder);
+      addBuiltinModule(module, wasmHolder, codeCacheKeys.size() == 0 ? kj::none : codeCacheKeys[i]);
     }
   }
 
@@ -546,11 +561,22 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   // everywhere else, so any non-ASCII character in it is misdecoded; for example, UTF-8 "é"
   // (c3 a9) reads as "Ã©". Builtin sources should therefore be ASCII. The new module registry
   // (modules-new.h) transcodes UTF-8 source and does not have this limitation.
+  //
+  // `codeCacheKey`, if given, must be the key of `sourceCode` compiled as
+  // CodeCacheKey::Unit::LEGACY_REGISTRY_BUILTIN_ESM. If `compileCache` is empty, the module is then
+  // compiled through the isolate's code cache store, if the isolate has one, so that isolates of
+  // the process share one cache of it.
   void addBuiltinModule(kj::StringPtr specifier,
       kj::ArrayPtr<const char> sourceCode,
       Type type = Type::BUILTIN,
-      kj::ArrayPtr<const kj::byte> compileCache = {}) {
-    addBuiltinModule(specifier, StaticExternalStringSource(sourceCode), type, compileCache);
+      kj::ArrayPtr<const kj::byte> compileCache = {},
+      kj::Maybe<CodeCacheKey> codeCacheKey = kj::none) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    auto path = kj::Path::parse(specifier);
+    entries.insert(kj::heap<Entry>(path, type,
+        _::StaticModuleSource{.source = StaticExternalStringSource(sourceCode),
+          .compileCache = compileCache,
+          .codeCacheKey = kj::mv(codeCacheKey)}));
   }
 
   void addBuiltinModule(kj::StringPtr specifier,
@@ -826,7 +852,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
         KJ_CASE_ONEOF(src, StaticSource) {
-          info = ModuleInfo(js, specifier.toString(), src.source, src.compileCache, observer);
+          info = ModuleInfo(
+              js, specifier.toString(), src.source, src.compileCache, observer, src.codeCacheKey);
           return info.tryGet<ModuleInfo>();
         }
         KJ_CASE_ONEOF(src, SharedSource) {

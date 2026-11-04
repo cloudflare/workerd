@@ -192,6 +192,25 @@ kj::Own<FakeStore> newStore() {
   return kj::atomicRefcounted<FakeStore>();
 }
 
+// Registers `code` as a legacy-registry builtin module with `codeCacheKey` and `compileCache`, then
+// compiles and evaluates it and returns the string value of its `value` export. The registry uses
+// its own observer, so the store's counters show how the compile used it.
+kj::String evalLegacyBuiltin(jsg::Lock& js,
+    kj::StringPtr code,
+    kj::Maybe<CodeCacheKey> codeCacheKey,
+    kj::ArrayPtr<const kj::byte> compileCache = {}) {
+  constexpr auto specifier = "test-internal:builtin"_kj;
+  auto modules = ModuleRegistryImpl<CodeCacheIsolate_TypeWrapper>::from(js);
+  modules->addBuiltinModule(
+      specifier, code.asArray(), ModuleRegistry::Type::BUILTIN, compileCache, kj::mv(codeCacheKey));
+  auto& info = KJ_REQUIRE_NONNULL(modules->resolve(
+      js, kj::Path::parse(specifier), kj::none, ModuleRegistry::ResolveOption::BUILTIN_ONLY));
+  auto module = info.module.getHandle(js);
+  instantiateModule(js, module);
+  auto ns = check(module->GetModuleNamespace()->ToObject(js.v8Context()));
+  return JsValue(check(ns->Get(js.v8Context(), js.str("value"_kj)))).toString(js);
+}
+
 // A module whose top level calls a function, which V8 compiles lazily when it is called.
 constexpr kj::StringPtr LAZY_MODULE =
     "function compute() { let s = 0; for (let i = 0; i < 4; ++i) s += i; return s; }\n"
@@ -204,10 +223,12 @@ KJ_TEST("CodeCacheKey identifies source content and unit") {
   // Same length, different content.
   auto b = CodeCacheKey::compute(Unit::LEGACY_REGISTRY_ESM, "export const v = 'bbbb';"_kj);
   auto c = CodeCacheKey::compute(Unit::NEW_REGISTRY_ESM, "export const v = 'aaaa';"_kj);
+  auto d = CodeCacheKey::compute(Unit::LEGACY_REGISTRY_BUILTIN_ESM, "export const v = 'aaaa';"_kj);
   KJ_EXPECT(a == a2);
   KJ_EXPECT(a.hashCode() == a2.hashCode());
   KJ_EXPECT(!(a == b));
   KJ_EXPECT(!(a == c));
+  KJ_EXPECT(!(a == d));
 }
 
 KJ_TEST("Legacy registry: a second isolate consumes the cache produced after evaluation") {
@@ -324,6 +345,60 @@ KJ_TEST("Modules of the same length but different content do not share a cache")
   auto lock = store->state.lockShared();
   KJ_EXPECT(lock->hits == 0);
   KJ_EXPECT(lock->inserts == 2);
+}
+
+KJ_TEST("Legacy registry: a builtin with a code cache key shares a cache across isolates") {
+  auto store = newStore();
+  CountingObserver observer;
+  auto key = CodeCacheKey::compute(CodeCacheKey::Unit::LEGACY_REGISTRY_BUILTIN_ESM, LAZY_MODULE);
+
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyBuiltin(js, LAZY_MODULE, key) == "6"); });
+  {
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 1);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(lock->entries.find(key) != kj::none);
+  }
+
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyBuiltin(js, LAZY_MODULE, key) == "6"); });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 2);
+  KJ_EXPECT(lock->hits == 1);
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(lock->rejects.size() == 0);
+}
+
+KJ_TEST("Legacy registry: a builtin without a code cache key does not use the store") {
+  auto store = newStore();
+  CountingObserver observer;
+
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyBuiltin(js, LAZY_MODULE, kj::none) == "6"); });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 0);
+  KJ_EXPECT(lock->inserts == 0);
+}
+
+KJ_TEST("Legacy registry: a builtin's static compile cache takes precedence over the store") {
+  auto key = CodeCacheKey::compute(CodeCacheKey::Unit::LEGACY_REGISTRY_BUILTIN_ESM, LAZY_MODULE);
+  CountingObserver observer;
+
+  // Produce a cache to use as the static one.
+  auto producingStore = newStore();
+  withIsolate(kj::atomicAddRef(*producingStore), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyBuiltin(js, LAZY_MODULE, key) == "6"); });
+  auto staticCache =
+      KJ_ASSERT_NONNULL(producingStore->state.lockShared()->entries.find(key)).addRef();
+
+  auto store = newStore();
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+    KJ_EXPECT(evalLegacyBuiltin(js, LAZY_MODULE, key, *staticCache) == "6");
+  });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 0);
+  KJ_EXPECT(lock->inserts == 0);
 }
 
 void expectRejected(kj::Function<CodeCacheStore::Bytes(kj::ArrayPtr<const kj::byte>)> mangle,

@@ -549,15 +549,24 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     StaticExternalStringSource content,
     kj::ArrayPtr<const kj::byte> compileCache,
-    const CompilationObserver& observer)
+    const CompilationObserver& observer,
+    const kj::Maybe<CodeCacheKey>& codeCacheKey)
     : ModuleInfo(js,
           compileEsmModule(js,
               name,
               ModuleInfoCompileOption::BUILTIN,
               observer,
-              [&](const v8::ScriptOrigin& origin) {
-                return compileWithStaticCache(
-                    js, jsg::newExternalString(js, content), origin, compileCache);
+              [&](const v8::ScriptOrigin& origin) -> v8::MaybeLocal<v8::Module> {
+                auto contentStr = jsg::newExternalString(js, content);
+                if (compileCache.size() == 0) {
+                  KJ_IF_SOME(key, codeCacheKey) {
+                    KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+                      return codeCache.compileModule(
+                          js.v8Isolate, key, contentStr, origin, observer);
+                    }
+                  }
+                }
+                return compileWithStaticCache(js, contentStr, origin, compileCache);
               })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
