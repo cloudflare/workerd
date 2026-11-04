@@ -1,6 +1,5 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
-load("@workerd//:build/linking.bzl", "LINKOPTS_DEFAULT_FEATURES")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
 load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
@@ -128,7 +127,7 @@ def wd_rust_binary(
             "//build/deps:linkopts_tool" if tool else "//build/deps:linkopts_default",
             "@@//deps:rust_runtime",
         ],
-        features = features + ([] if tool else LINKOPTS_DEFAULT_FEATURES),
+        features = features,
         visibility = visibility,
         data = data,
         experimental_use_cc_common_link = 1,
@@ -156,7 +155,6 @@ def wd_rust_binary(
         target_compatible_with = target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
-        features = LINKOPTS_DEFAULT_FEATURES,
         size = test_size,
         tags = ["no-coverage"],
     )
