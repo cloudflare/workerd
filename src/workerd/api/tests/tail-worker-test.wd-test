@@ -44,6 +44,7 @@ const unitTests :Workerd.Config = (
     (name = "alarms", worker = .alarmsWorker),
     (name = "hiber", worker = .hiberWorker),
     (name = "js-rpc-test", worker = .jsRpcWorker),
+    (name = "on-hibernate", worker = .onHibernateWorker),
     ( name = "connect-handler-test",
       worker = (
         modules = [
@@ -86,6 +87,8 @@ const unitTests :Workerd.Config = (
     (name = "TEST_TMPDIR", disk = (writable = true)),
     # Dummy buffered tail worker (gets traces from alarms worker and produces trace for main tracer)
     (name = "buffered", worker = .logBuffered, ),
+    # Buffered tail worker that logs each trace's event (gets traces from the onHibernate worker)
+    (name = "event-log", worker = .eventLogBuffered, ),
     # Receives trace events from STW, used to check that STW produces trace events properly
     (name = "receiver", worker = .logReceiver, ),
     # Unified tail worker with tests
@@ -184,6 +187,24 @@ const jsRpcWorker :Workerd.Worker = (
   streamingTails = ["log"],
 );
 
+const onHibernateWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-on-hibernate.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat", "unsafe_module"],
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "OnHibernateObject"),
+  ],
+  durableObjectNamespaces = [
+    (className = "OnHibernateObject", uniqueKey = "on-hibernate"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
+  tails = ["event-log"],
+  streamingTails = ["log"],
+);
+
 const logWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "tail-worker-test.js")
@@ -204,5 +225,12 @@ const logBuffered :Workerd.Worker = (
     (name = "worker", esModule = embed "tail-worker-test-dummy.js")
   ],
   compatibilityFlags = ["streaming_tail_worker"],
+  streamingTails = ["log"],
+);
+
+const eventLogBuffered :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-event-log.js")
+  ],
   streamingTails = ["log"],
 );

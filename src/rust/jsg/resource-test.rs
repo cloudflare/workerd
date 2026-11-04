@@ -16,7 +16,9 @@ impl Type for Bad {
     }
 }
 
-impl crate::Traced for Bad {}
+impl crate::Traced for Bad {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for Bad {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -56,7 +58,9 @@ impl Type for BadLazy {
     }
 }
 
-impl crate::Traced for BadLazy {}
+impl crate::Traced for BadLazy {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for BadLazy {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -94,7 +98,9 @@ impl Type for BadLazyReadonly {
     }
 }
 
-impl crate::Traced for BadLazyReadonly {}
+impl crate::Traced for BadLazyReadonly {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for BadLazyReadonly {
     fn memory_name(&self) -> &'static std::ffi::CStr {

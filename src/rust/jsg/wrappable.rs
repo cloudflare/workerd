@@ -123,22 +123,11 @@ use crate::v8;
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
-    /// Whether a value of this type can hold GC-visible references. It defaults to `true`, and
-    /// wrappers and collections take it from what they hold. A type whose `trace` is a no-op
-    /// should return `false`, as `jsg_traced!` does.
-    fn holds_gc_references() -> bool
-    where
-        Self: Sized,
-    {
-        true
-    }
-
     /// Visit GC-visible references held by this value.
     ///
-    /// The default implementation is a no-op, suitable for types with no
-    /// GC-visible references (primitives, plain data structs, etc.). Such a type
-    /// should also return `false` from `holds_gc_references`; `jsg_traced!`
-    /// generates both.
+    /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
+    /// GC-visible references (primitives, plain data structs, etc.) uses `jsg_traced!`, which
+    /// generates a no-op `trace` and implements [`HoldsNoGcReferences`].
     ///
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
@@ -147,7 +136,7 @@ pub trait Traced {
     /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
     /// `README.md` §Safety rules, rule 2. Other than through `visitor`, it must not change the
     /// value or anything that holds it: a [`crate::Cell`] visits its value in place.
-    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor);
 }
 
 /// Marks a `Traced` type that holds no GC references: no `jsg::Rc` and no `TracedGlobal` that
@@ -165,18 +154,17 @@ pub trait Traced {
 /// Every built-in `Traced` type implements it, except those that can hold GC references:
 /// `jsg::Rc`, `TracedGlobal`, `Lenient`, `TracedPromise`, `TracedPromiseResolver` and
 /// `TracedAsyncContextFrame`. Wrappers and collections implement it when their contents do.
-/// `jsg_traced!` implements it for the types it covers; `#[jsg_struct]` and `#[jsg_oneof]` don't,
-/// since their fields can hold GC references. Implement it for a hand-written `Traced` type, or
-/// a `#[jsg_struct]` of plain data, only if its `trace` visits nothing.
+/// `jsg_traced!` implements it for the types it covers, and `#[jsg_struct]` and `#[jsg_oneof]`
+/// implement it when every field or variant does, so for those types it is derived rather than
+/// claimed, and an impl by hand conflicts with it. Implement it for a hand-written `Traced` type
+/// only if its `trace` visits nothing.
 pub trait HoldsNoGcReferences: Traced {}
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {
         $(impl Traced for $t {
-            fn holds_gc_references() -> bool {
-                false
-            }
+            fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
         }
 
         impl HoldsNoGcReferences for $t {})*
@@ -206,10 +194,6 @@ impl_traced_noop!(
 );
 
 impl<T: Traced> Traced for Option<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
             inner.trace(visitor);
@@ -220,11 +204,6 @@ impl<T: Traced> Traced for Option<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
 
 impl<T: Traced> Traced for Lenient<T> {
-    // An unconvertable value is a `TracedGlobal`, whatever `T` is.
-    fn holds_gc_references() -> bool {
-        true
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -236,10 +215,6 @@ impl<T: Traced> Traced for Lenient<T> {
 }
 
 impl<T: Traced> Traced for Nullable<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -250,10 +225,6 @@ impl<T: Traced> Traced for Nullable<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Nullable<T> {}
 
 impl<T: Traced> Traced for NullOrUndefined<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -264,10 +235,6 @@ impl<T: Traced> Traced for NullOrUndefined<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NullOrUndefined<T> {}
 
 impl<T: Traced> Traced for NonCoercible<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
     }
@@ -276,10 +243,6 @@ impl<T: Traced> Traced for NonCoercible<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NonCoercible<T> {}
 
 impl<T: Traced> Traced for Vec<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -290,10 +253,6 @@ impl<T: Traced> Traced for Vec<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Vec<T> {}
 
 impl<V: Traced> Traced for Dict<V> {
-    fn holds_gc_references() -> bool {
-        V::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for (_, value) in self.iter() {
             value.trace(visitor);
@@ -304,10 +263,6 @@ impl<V: Traced> Traced for Dict<V> {
 impl<V: HoldsNoGcReferences> HoldsNoGcReferences for Dict<V> {}
 
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
-    fn holds_gc_references() -> bool {
-        V::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -321,10 +276,6 @@ impl<K, V: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
-    fn holds_gc_references() -> bool {
-        V::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -335,10 +286,6 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
 impl<K, V: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeMap<K, V> {}
 
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -352,10 +299,6 @@ impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -368,10 +311,6 @@ impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeSet<
 /// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` taken out of a std `Cell`
 /// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`].
 impl<T: HoldsNoGcReferences> Traced for std::cell::Cell<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // SAFETY: V8 GC tracing is single-threaded within an isolate and never
         // re-entrant on the same object during a single GC cycle. We only read
@@ -388,10 +327,6 @@ impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::Cell<T> {}
 /// `RefCell`'s mutable borrow would be neither strong nor traced. A cell that holds one is a
 /// [`crate::RefCell`].
 impl<T: HoldsNoGcReferences> Traced for std::cell::RefCell<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // `T` holds no GC references, so a mutably borrowed cell can be skipped: a visit would
         // find nothing in it. (`crate::RefCell` holds references, and makes them strong when it
@@ -409,10 +344,6 @@ impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::RefCell<T> {}
 /// `jsg::Ref` does, and a `TracedGlobal` would stay alive only while the last one to visit it
 /// does. Share a resource through a `jsg::Rc` or `jsg::Weak` to it instead.
 impl<T: HoldsNoGcReferences> Traced for std::rc::Rc<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         (**self).trace(visitor);
     }
