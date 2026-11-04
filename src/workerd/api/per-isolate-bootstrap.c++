@@ -381,30 +381,22 @@ static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
-static void SetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
+// scripts use as a property key: `object[key]` reads or writes the slot that
+// jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
+// (v8::Object::GetPrivate() is that same property read). A private key is never inherited,
+// reflected or seen by Proxy traps, and only code holding the key can name it. The API does
+// not type a private symbol as a v8::Value, so it is handed over as a template property, as
+// Node.js hands over its own.
+static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    // Argument 0 is an object.
-    // Argument 1 is a string label that is to be used to create a v8::Private
-    // Argument 2 is a value for that v8::Private
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
     auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto lbl = jsg::JsString(args[1].As<v8::String>());
-    auto val = jsg::JsValue(args[2]);
-    obj.setPrivate(js, lbl, jsg::JsValue(val));
-    return js.undefined();
-  });
-}
-
-static void GetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
-    auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto label = jsg::JsString(args[1].As<v8::String>());
-    return obj.getPrivate(js, label);
+    auto name = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError,
+        "getPrivateSymbol() expects a string argument");
+    v8::Local<v8::String> slot = js.strIntern("key"_kj);
+    auto holder = v8::ObjectTemplate::New(js.v8Isolate);
+    holder->Set(slot, v8::Private::ForApi(js.v8Isolate, name));
+    return jsg::check(jsg::check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot));
   });
 }
 
@@ -460,8 +452,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "addAbortAlgorithm",
     "utf8Length",
     "encodeUtf8",
-    "setPrivate",
-    "getPrivate",
+    "getPrivateSymbol",
     "setListenerCountHook",
     "getEventHandlerAttribute",
     "setEventHandlerAttribute",
@@ -492,8 +483,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
     getMethod(js, EncodeUtf8),
-    getMethod(js, SetPrivate),
-    getMethod(js, GetPrivate),
+    getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),
     getMethod(js, SetEventHandlerAttribute),

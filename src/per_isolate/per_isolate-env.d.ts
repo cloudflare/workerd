@@ -68,6 +68,16 @@ declare const primordials: {
     ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
     : (...args: any[]) => any;
 
+  // fn.call(thisArg, ...args), immune to a patched Function.prototype.call.
+  // Cheaper than uncurryThis(fn) for a function called a few times, as
+  // a stream's source, sink and transformer callbacks are: uncurryThis
+  // binds a new function.
+  readonly FunctionPrototypeCall: (
+    fn: Function,
+    thisArg: unknown,
+    ...args: unknown[]
+  ) => any;
+
   // Uncurries the getter of `proto`'s own accessor `name`, typed as T; throws
   // if there is none.
   readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
@@ -99,9 +109,10 @@ declare const utils: {
   isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
   markPromiseHandled(promise: Promise<unknown>): void;
   getApiSymbol(name: string): symbol;
-  // V8-private properties are neither reflected by JavaScript nor inherited.
-  setPrivate(object: object, name: string, value: unknown): void;
-  getPrivate(object: object, name: string): unknown;
+  // The key of the V8-private property `name`, which C++ reaches by that
+  // name (jsg::JsObject::getPrivate() and setPrivate()). V8-private
+  // properties are neither reflected by JavaScript nor inherited.
+  getPrivateSymbol(name: string): symbol;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;

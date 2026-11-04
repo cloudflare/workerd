@@ -166,7 +166,7 @@ const {
   TypeError,
   TypedArrayPrototypeGetByteLength,
   Uint8Array,
-  uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
@@ -188,17 +188,18 @@ const { createReadResult, filledView, unfilledView } =
 // ---------------------------------------------------------------------------
 // The construction-time handshake
 
-// These labels resolve V8-private slots, not JavaScript properties or symbols.
-const kNativeSource = 'kNativeSource';
+// These keys name V8-private slots (see utils.getPrivateSymbol), which C++
+// reaches by the same names.
+const kNativeSource = utils.getPrivateSymbol('kNativeSource');
 
 // Private markers are not inherited and cannot invoke user property traps.
 // Only native code and bootstrap utilities can install them.
 function hasOwnMarker(
   object: object,
-  marker: string,
+  marker: symbol,
   kind: 'source' | 'sink'
 ): boolean {
-  const value = utils.getPrivate(object, marker);
+  const value = (object as Record<symbol, unknown>)[marker];
   if (value === undefined) return false;
   if (value !== true) {
     throw new TypeError(`Invalid native stream ${kind} marker`);
@@ -221,26 +222,26 @@ function hasOwnMarker(
 //     write in flight) when the underlying connection is taken over
 //     (e.g. Socket startTls). Returns the error the stream's pending
 //     writes reject with.
-const kNativeSink = 'kNativeSink';
+const kNativeSink = utils.getPrivateSymbol('kNativeSink');
 
 // Private extraction slot for native-backed WritableStream instances.
 // It holds a shared extractor function, one-shot via locked precondition.
 // Writable has no "disturbed" concept — locked is the only precondition.
-const kExtractNativeSink = 'kExtractNativeSink';
+const kExtractNativeSink = utils.getPrivateSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
   return hasOwnMarker(sink, kNativeSink, 'sink');
 }
 
 // The JS-to-C++ extraction slot. Installed on native-backed
-// ReadableStream instances with utils.setPrivate; its value is a shared
+// ReadableStream instances by their constructor; its value is a shared
 // extractor function. The C++ bridge detects the private slot to classify the
 // stream: present -> extract the native source for a pure C++ data
 // path; absent -> acquire a DrainingReader instead. The marker is KEPT
 // after extraction (presence means "native-backed", not "extractable");
 // the extractor's locked/disturbed preconditions make it one-shot. The
 // slot is inaccessible to user code, including symbol reflection.
-const kExtractNativeSource = 'kExtractNativeSource';
+const kExtractNativeSource = utils.getPrivateSymbol('kExtractNativeSource');
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
 // sources.
@@ -1077,8 +1078,8 @@ function declaresMember(source: object, key: string): boolean {
 }
 
 // Extraction follows the queued controllers' conventions: properties are
-// read ONCE, validated, and invoked thereafter only via captured
-// uncurryThis wrappers with the source as `this` (spec
+// read ONCE, validated, and invoked thereafter only via the captured
+// FunctionPrototypeCall with the source as `this` (spec
 // CreateAlgorithmFromUnderlyingMethod / PromiseCall). `start` is
 // deliberately NOT read: native sources have no start algorithm (assumed
 // no-op per the contract; its presence is simply ignored).
@@ -1126,13 +1127,14 @@ function createNativeReadableStreamParts(
 
   let pullAlgorithm: PullAlgorithm | undefined;
   if (pullFn !== undefined) {
-    const callPull = uncurryThis(pullFn);
     pullAlgorithm = (
       controller: NativeReadableStreamController,
       signal: AbortSignal
     ) => {
       try {
-        return PromiseResolve(callPull(source, controller, signal));
+        return PromiseResolve(
+          FunctionPrototypeCall(pullFn, source, controller, signal)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1140,10 +1142,9 @@ function createNativeReadableStreamParts(
   }
   let cancelAlgorithm: CancelAlgorithm | undefined;
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancelAlgorithm = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(source, reason));
+        return PromiseResolve(FunctionPrototypeCall(cancelFn, source, reason));
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1151,9 +1152,8 @@ function createNativeReadableStreamParts(
   }
   let teeAlgorithm: (() => unknown) | undefined;
   if (teeFn !== undefined) {
-    const callTee = uncurryThis(teeFn);
     // Synchronous by contract: the branches exist upon return.
-    teeAlgorithm = () => callTee(source);
+    teeAlgorithm = () => FunctionPrototypeCall(teeFn, source);
   }
 
   const conduit = new NativePullConduit(
