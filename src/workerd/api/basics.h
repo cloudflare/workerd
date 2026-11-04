@@ -306,46 +306,6 @@ class ExtendableEvent: public Event {
   }
 };
 
-// An implementation of the Web Platform Standard CustomEvent API
-class CustomEvent: public Event {
- public:
-  struct CustomEventInit final {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-    JSG_STRUCT(bubbles, cancelable, composed, detail);
-
-    operator Event::Init();
-  };
-
-  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
-
-  static jsg::Ref<CustomEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init);
-
-  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(CustomEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
-    JSG_TS_OVERRIDE(<T = any> {
-      get detail(): T;
-    });
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("detail", detail);
-  }
-
- private:
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(detail);
-  }
-};
-
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
  public:
@@ -1077,8 +1037,7 @@ class Scheduler final: public jsg::Object {
   api::Event, api::Event::Init, api::EventTarget, api::EventTarget::EventListenerOptions,          \
       api::EventTarget::AddEventListenerOptions, api::EventTarget::HandlerObject,                  \
       api::AbortController, api::AbortSignal, api::AbortAlgorithmHandle, api::Scheduler,           \
-      api::Scheduler::WaitOptions, api::ExtendableEvent, api::CustomEvent,                         \
-      api::CustomEvent::CustomEventInit
+      api::Scheduler::WaitOptions, api::ExtendableEvent
 // The list of basics.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

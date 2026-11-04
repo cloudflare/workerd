@@ -67,6 +67,42 @@ class MessagePort {
 
 }  // namespace messageevent
 
+// An implementation of the Web Platform Standard CustomEvent API
+class CustomEvent: public Event {
+ public:
+  struct CustomEventInit final {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+    JSG_STRUCT(bubbles, cancelable, composed, detail);
+
+    operator Event::Init();
+  };
+
+  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
+
+  static jsg::Ref<CustomEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init);
+
+  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(CustomEvent) {
+    JSG_INHERIT(Event);
+    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+    JSG_TS_OVERRIDE(<T = any> {
+      get detail(): T;
+    });
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+
+  void visitForGc(jsg::GcVisitor& visitor);
+};
+
 class MessageEvent final: public Event {
  public:
   MessageEvent(jsg::Lock& js,
@@ -316,8 +352,8 @@ class PromiseRejectionEvent final: public Event {
 };
 
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
-  api::ErrorEvent, api::ErrorEvent::ErrorEventInit, api::MessageEvent,                             \
-      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent, api::CloseEvent, \
-      api::CloseEvent::Initializer
+  api::CustomEvent, api::CustomEvent::CustomEventInit, api::ErrorEvent,                            \
+      api::ErrorEvent::ErrorEventInit, api::MessageEvent, api::MessageEvent::Initializer,          \
+      api::PromiseRejectionEvent, api::OpenEvent, api::CloseEvent, api::CloseEvent::Initializer
 
 }  // namespace workerd::api
