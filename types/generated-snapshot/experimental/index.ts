@@ -1865,6 +1865,40 @@ export declare abstract class PromiseRejectionEvent extends Event {
   readonly reason: any;
 }
 /**
+ * A **`CloseEvent`** is sent to clients using WebSockets when the connection is closed. This is delivered to the listener indicated by the WebSocket object's onclose attribute.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent)
+ */
+export declare class CloseEvent extends Event {
+  constructor(type: string, initializer?: CloseEventInit);
+  /**
+   * The **`code`** read-only property of the CloseEvent interface returns a WebSocket connection close code indicating the reason the connection was closed.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/code)
+   */
+  readonly code: number;
+  /**
+   * The **`reason`** read-only property of the CloseEvent interface returns the WebSocket connection close reason the server gave for closing the connection; that is, a concise human-readable prose explanation for the closure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/reason)
+   */
+  readonly reason: string;
+  /**
+   * The **`wasClean`** read-only property of the CloseEvent interface returns true if the connection closed cleanly.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/wasClean)
+   */
+  readonly wasClean: boolean;
+}
+export interface CloseEventInit {
+  bubbles?: boolean;
+  cancelable?: boolean;
+  composed?: boolean;
+  code?: number;
+  reason?: string;
+  wasClean?: boolean;
+}
+/**
  * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the fetch(), XMLHttpRequest.send() or navigator.sendBeacon() methods. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
@@ -3894,40 +3928,6 @@ export interface URLPatternResult {
 }
 export interface URLPatternOptions {
   ignoreCase?: boolean;
-}
-/**
- * A **`CloseEvent`** is sent to clients using WebSockets when the connection is closed. This is delivered to the listener indicated by the WebSocket object's onclose attribute.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent)
- */
-export declare class CloseEvent extends Event {
-  constructor(type: string, initializer?: CloseEventInit);
-  /**
-   * The **`code`** read-only property of the CloseEvent interface returns a WebSocket connection close code indicating the reason the connection was closed.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/code)
-   */
-  readonly code: number;
-  /**
-   * The **`reason`** read-only property of the CloseEvent interface returns the WebSocket connection close reason the server gave for closing the connection; that is, a concise human-readable prose explanation for the closure.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/reason)
-   */
-  readonly reason: string;
-  /**
-   * The **`wasClean`** read-only property of the CloseEvent interface returns true if the connection closed cleanly.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/wasClean)
-   */
-  readonly wasClean: boolean;
-}
-export interface CloseEventInit {
-  bubbles?: boolean;
-  cancelable?: boolean;
-  composed?: boolean;
-  code?: number;
-  reason?: string;
-  wasClean?: boolean;
 }
 export type WebSocketEventMap = {
   close: CloseEvent;

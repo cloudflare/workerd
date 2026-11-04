@@ -237,6 +237,49 @@ class ErrorEvent final: public Event {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+class CloseEvent: public Event {
+ public:
+  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
+  CloseEvent(uint code, kj::String reason, bool clean);
+  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {});
+
+  struct Initializer {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<int> code;
+    jsg::Optional<jsg::USVString> reason;
+    jsg::Optional<bool> wasClean;
+
+    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
+    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
+  };
+  static jsg::Ref<CloseEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer);
+
+  int getCode();
+  kj::StringPtr getReason();
+  bool getWasClean();
+
+  JSG_RESOURCE_TYPE(CloseEvent) {
+    JSG_INHERIT(Event);
+
+    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
+    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
+    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
+
+    JSG_TS_ROOT();
+    // CloseEvent will be referenced from the `WebSocketEventMap` define
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  int code;
+  kj::String reason;
+  bool clean;
+};
+
 // ======================================================================================
 class PromiseRejectionEvent final: public Event {
  public:
@@ -274,6 +317,7 @@ class PromiseRejectionEvent final: public Event {
 
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
   api::ErrorEvent, api::ErrorEvent::ErrorEventInit, api::MessageEvent,                             \
-      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent
+      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent, api::CloseEvent, \
+      api::CloseEvent::Initializer
 
 }  // namespace workerd::api

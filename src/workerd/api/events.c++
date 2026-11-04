@@ -6,6 +6,7 @@
 namespace workerd::api {
 
 namespace {
+constexpr kj::StringPtr kCloseEventName = "close"_kj;
 constexpr kj::StringPtr kDefaultErrorEventName = "error"_kj;
 constexpr kj::StringPtr kMessageEventName = "message"_kj;
 constexpr kj::StringPtr kOpenEventName = "open"_kj;
@@ -274,6 +275,47 @@ void ErrorEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(init.error);
+}
+
+// ======================================================================================
+CloseEvent::CloseEvent(uint code, kj::String reason, bool clean)
+    : Event(kCloseEventName, {}, Trusted::YES),
+      code(code),
+      reason(kj::mv(reason)),
+      clean(clean) {}
+
+CloseEvent::CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init)
+    : Event(kj::mv(type), kj::mv(init)),
+      code(code),
+      reason(kj::mv(reason)),
+      clean(clean) {}
+
+jsg::Ref<CloseEvent> CloseEvent::constructor(
+    jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
+  Initializer init = kj::mv(initializer).orDefault({});
+  return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+      kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
+      Event::Init{
+        .bubbles = init.bubbles,
+        .cancelable = init.cancelable,
+        .composed = init.composed,
+      });
+}
+
+int CloseEvent::getCode() {
+  return code;
+}
+
+kj::StringPtr CloseEvent::getReason() {
+  return reason;
+}
+
+bool CloseEvent::getWasClean() {
+  return clean;
+}
+
+void CloseEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("reason", reason);
 }
 
 // ======================================================================================
