@@ -13,6 +13,7 @@
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/api/request-io.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/ser.h>
@@ -32,6 +33,9 @@
 #include <capnp/schema.h>
 
 namespace workerd {
+
+static_assert(jsg::SERIALIZATION_TAG_JS_SERIALIZABLE ==
+    static_cast<uint32_t>(rpc::SerializationTag::JS_SERIALIZABLE));
 
 namespace {
 
@@ -81,11 +85,34 @@ kj::StaticArrayPtr<const CompatFlagField> getCompatFlagFields() {
   return {table.begin(), table.size()};
 }
 
+// Normalize a require() specifier by stripping a leading "./" prefix.
+kj::StringPtr normalizeSpecifier(kj::StringPtr specifier) {
+  if (specifier.startsWith("./"_kj)) {
+    return specifier.slice(2);
+  }
+  return specifier;
+}
+
 // Per-context state for the bootstrap require() mechanism.
 // Heap-allocated and stored in the context's BOOTSTRAP_STATE embedder data slot
 // so that require() remains callable for lazy evaluation after the initial
-// bootstrap completes.
-struct BootstrapState {
+// bootstrap completes. The slot holds it as the jsg::BootstrapModules through which
+// the deserializer finds classes implemented in the bootstrap scripts.
+struct BootstrapState final: public jsg::BootstrapModules {
+  BootstrapState(const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts,
+      kj::Maybe<const EmbedderBootstrap&> embedder)
+      : scripts(scripts),
+        embedder(embedder) {}
+
+  kj::Maybe<jsg::JsValue> tryGetLoadedExports(jsg::Lock& js, kj::StringPtr specifier) override {
+    // The cache is populated by require() calls. If the module was never required, it won't be
+    // in the cache and we return none.
+    KJ_IF_SOME(cached, cache.find(normalizeSpecifier(specifier))) {
+      return cached.getHandle(js);
+    }
+    return kj::none;
+  }
+
   // Scripts is a const reference to the process-wide script lookup table built
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
   const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
@@ -562,19 +589,20 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
   return values;
 }
 
-// Retrieve the BootstrapState from the current context's embedder data.
-BootstrapState& getBootstrapState(jsg::Lock& js) {
-  return KJ_REQUIRE_NONNULL(jsg::getAlignedPointerFromEmbedderData<BootstrapState>(
-                                js.v8Context(), jsg::ContextPointerSlot::BOOTSTRAP_STATE),
-      "per-isolate bootstrap state not initialized");
+// Retrieve the BootstrapState from the given context's embedder data, if it has one.
+kj::Maybe<BootstrapState&> tryGetBootstrapState(v8::Local<v8::Context> context) {
+  KJ_IF_SOME(modules,
+      jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
+          context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
+    return kj::downcast<BootstrapState>(modules);
+  }
+  return kj::none;
 }
 
-// Normalize a require() specifier by stripping a leading "./" prefix.
-kj::StringPtr normalizeSpecifier(kj::StringPtr specifier) {
-  if (specifier.startsWith("./"_kj)) {
-    return specifier.slice(2);
-  }
-  return specifier;
+// Retrieve the BootstrapState from the current context's embedder data.
+BootstrapState& getBootstrapState(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(
+      tryGetBootstrapState(js.v8Context()), "per-isolate bootstrap state not initialized");
 }
 
 // Which scripts a require() function resolves: workerd's only, or the embedder's as well.
@@ -813,7 +841,7 @@ void runPerIsolateBootstrap(
   // We use new instead of the idiomatic kj::heap<...>, etc because the
   // pointer is being stored in a raw form in the embedder data slot.
 
-  auto* state = new BootstrapState{.scripts = scripts, .embedder = embedder};
+  auto* state = new BootstrapState(scripts, embedder);
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
   // Tell LSAN to ignore this allocation. The pointer is stored exclusively
   // in V8's embedder data (BOOTSTRAP_STATE slot), which LSAN can't trace.
@@ -824,7 +852,8 @@ void runPerIsolateBootstrap(
   // store them in a field in Worker::Isolate::Impl.
   __lsan_ignore_object(state);
 #endif
-  jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, state);
+  jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE,
+      static_cast<jsg::BootstrapModules*>(state));
 
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
@@ -874,9 +903,7 @@ void runPerIsolateBootstrap(
 }
 
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
-  KJ_IF_SOME(state,
-      jsg::getAlignedPointerFromEmbedderData<BootstrapState>(
-          context, jsg::ContextPointerSlot::BOOTSTRAP_STATE)) {
+  KJ_IF_SOME(state, tryGetBootstrapState(context)) {
     delete &state;
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, nullptr);
@@ -884,15 +911,7 @@ void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
 }
 
 kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr specifier) {
-  auto& state = getBootstrapState(js);
-  auto normalized = normalizeSpecifier(specifier);
-
-  // The cache is populated by require() calls during bootstrap. If the module
-  // was never required, it won't be in the cache and we return none.
-  KJ_IF_SOME(cached, state.cache.find(normalized)) {
-    return cached.getHandle(js);
-  }
-  return kj::none;
+  return getBootstrapState(js).tryGetLoadedExports(js, specifier);
 }
 
 kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(

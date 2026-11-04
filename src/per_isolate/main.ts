@@ -33,6 +33,10 @@
 //
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
+// Loaded whatever the compatibility flags, as every module that sets up a
+// cloneable class must be (see serialization.ts).
+require('serialization');
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,

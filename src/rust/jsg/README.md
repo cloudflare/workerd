@@ -945,7 +945,9 @@ of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default optio
 the same, and each reads what the other writes, so the two can share stored data. Native errors
 are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
 objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
-serialized. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
+serialized, and neither can instances of the runtime's classes implemented in JavaScript, which
+C++ JSG serializes through a protocol that runs JavaScript on deserialization: both directions
+throw `DataCloneError` for them. A `SharedArrayBuffer` is written as a reference to a buffer that is not part of the
 bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
 resolve, so data containing one can't be read back. Deserialization runs no JavaScript. Transfer
 lists, externals and the other options are not supported. The C++ side is `src/rust/jsg/ser.c++`.

@@ -108,6 +108,10 @@ class V8System {
 // bloat.
 class IsolateBase {
  public:
+  // The V8 private symbol named JS_SERIALIZE_MODE_KEY (see Serializer), which every Serializer
+  // uses: looked up once per isolate, rather than once per Serializer.
+  static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -665,6 +669,9 @@ class IsolateBase {
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
+
+  // Created by getJsSerializeModeKey() on first use.
+  v8::Global<v8::Private> jsSerializeModeKey;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
