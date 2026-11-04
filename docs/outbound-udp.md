@@ -1,7 +1,7 @@
 # Experimental outbound UDP sockets
 
 Implementation draft: enable `outbound_udp_sockets` and run workerd with `--experimental`.
-This adds connected UDP to `cloudflare:sockets` using the same Socket object as ingress.
+This adds outbound UDP to `cloudflare:sockets` using the same Socket object as ingress.
 UDP streams carry Uint8Array values; no Datagram wrapper is required.
 
 ```js
@@ -16,7 +16,7 @@ try {
   await writer.write(new TextEncoder().encode('requests:1|c'));
 } finally {
   writer.releaseLock();
-  await socket.close();
+  await socket.close().catch(() => {});
 }
 ```
 
@@ -25,6 +25,25 @@ their visible bytes. Bytes are copied before leaving the isolate lock. Writes ma
 issued before `opened` resolves; transport use waits for setup and the DO output gate.
 The draft rejects payloads larger than 65,507 bytes before copying them. The path and
 destination can impose smaller limits or drop fragmented packets.
+
+## Payload limits and write errors
+
+The 65,507-byte limit applies to standalone workerd's native backend. An embedding
+runtime may enforce a smaller payload limit. Check the limit for the deployment where
+the code runs; a successful standalone test does not establish the embedding's limit.
+Limits count `Uint8Array.byteLength`, including only the visible bytes of a slice.
+Each datagram is checked independently. For text, measure the encoded bytes, not the
+JavaScript string's length.
+
+Await `writer.write(packet)` to observe a size or transport error. A rejected write
+errors the writable stream: `writer.closed` and subsequent writes reject with that
+error. Close the socket and create a new one before sending more packets. Validate
+packet sizes before writing if the application needs to keep using the same stream.
+Cleanup should not replace the original write error, hence the caught close rejection
+in the example. Packets are never automatically split into smaller datagrams or
+silently truncated to the payload limit.
+
+## Socket behavior
 
 `opened` means the runtime's routed UDP flow is ready. A write completing means local
 acceptance by the egress path. Neither acknowledges delivery to the destination. The
