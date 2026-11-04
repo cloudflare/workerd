@@ -558,10 +558,11 @@ bool local_serialize(Isolate* isolate,
     const Local& value,
     bool errors_are_host_objects,
     ::rust::Vec<uint8_t>& result);
-// Reads a value as jsg::Deserializer does with its default options, and returns it, or
-// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
-// exception if the header is missing or of an unsupported version.
-MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Reads a value as jsg::Deserializer does with the preserveStackInErrors option given, and
+// returns it, or none if deserialization threw, leaving the exception pending. Runs no JavaScript.
+// Throws a KJ exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(
+    Isolate* isolate, ::rust::Slice<const uint8_t> data, bool preserve_stack_in_errors);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

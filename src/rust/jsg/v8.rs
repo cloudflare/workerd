@@ -669,7 +669,11 @@ pub mod ffi {
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
         // throws.
-        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+        pub unsafe fn value_deserialize(
+            isolate: *mut Isolate,
+            data: &[u8],
+            preserve_stack_in_errors: bool,
+        ) -> Result<MaybeLocal>;
 
         // Errors
         // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
