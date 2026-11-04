@@ -43,6 +43,85 @@ fn wd_test_invocation() {
 }
 
 #[test]
+fn run_invocation() {
+    let Command::Run {
+        file,
+        run,
+        serve_or_test,
+        serve,
+    } = parse(&[
+        "run",
+        "app.ts",
+        "--port=9000",
+        "--compat-date=2026-01-01",
+        "--compat-flag=nodejs_compat",
+        "--compat-flag=experimental",
+        "--autogate=v8-fast-api",
+        "--config=template.capnp",
+        "--watch",
+        "--socket-addr=http=*:0",
+        "--external-addr=api=localhost:1234",
+    ])
+    .command
+    else {
+        panic!("expected run")
+    };
+    assert_eq!(file.as_deref(), Some("app.ts"));
+    assert_eq!(run.eval, None);
+    assert!(!run.test);
+    assert_eq!(run.port, Some(9000));
+    assert_eq!(run.compat_date.as_deref(), Some("2026-01-01"));
+    assert_eq!(run.compat_flags, ["nodejs_compat", "experimental"]);
+    assert_eq!(run.autogates, ["v8-fast-api"]);
+    assert_eq!(run.config.as_deref(), Some("template.capnp"));
+    assert!(serve_or_test.watch);
+    assert_eq!(serve_or_test.external_overrides.len(), 1);
+    assert_eq!(serve.socket_addr_overrides.len(), 1);
+
+    let Command::Run { file, run, .. } = parse(&["run", "app.js"]).command else {
+        panic!("expected run")
+    };
+    assert_eq!(file.as_deref(), Some("app.js"));
+    assert_eq!(run.port, None);
+    assert_eq!(run.compat_date, None);
+    assert!(run.compat_flags.is_empty());
+}
+
+#[test]
+fn run_source() {
+    // `-e` is `--eval` under `run`, not `--external-addr`.
+    let Command::Run { file, run, .. } =
+        parse(&["run", "-e", "export default {}", "--test"]).command
+    else {
+        panic!("expected run")
+    };
+    assert_eq!(file, None);
+    assert_eq!(run.eval.as_deref(), Some("export default {}"));
+    assert!(run.test);
+
+    let Command::Run { file, .. } = parse(&["run", "-"]).command else {
+        panic!("expected run")
+    };
+    assert_eq!(file.as_deref(), Some("-"));
+
+    let try_parse = |args: &[&str]| {
+        Main::try_parse_from(std::iter::once("workerd").chain(args.iter().copied()))
+    };
+    // Exactly one of <file> and --eval.
+    assert!(try_parse(&["run"]).is_err());
+    assert!(try_parse(&["run", "app.js", "--eval=x"]).is_err());
+    // Nothing listens under --test.
+    assert!(try_parse(&["run", "app.js", "--test", "--port=1"]).is_err());
+    // `-e` keeps its meaning elsewhere.
+    let Command::Serve { serve_or_test, .. } =
+        parse(&["serve", "config.capnp", "-e", "api=localhost:1234"]).command
+    else {
+        panic!("expected serve")
+    };
+    assert_eq!(serve_or_test.external_overrides.len(), 1);
+}
+
+#[test]
 fn serve_options() {
     let Command::Serve {
         config,

@@ -333,6 +333,14 @@ bool fuzzilli_supported() {
 #endif
 }
 
+::rust::Vec<::rust::String> autogate_names() {
+  ::rust::Vec<::rust::String> names;
+  for (auto key: util::getAutogateKeys()) {
+    names.push_back(kj::str(key).as<RustCopyUncheckedUtf8>());
+  }
+  return names;
+}
+
 int32_t with_process_context(
     bool verbose, ::rust::Vec<uint64_t> config, ::rust::Box<PendingCommand> command) {
   kj::printStackTraceOnCrash();

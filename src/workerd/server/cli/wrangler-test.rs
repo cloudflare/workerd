@@ -8,7 +8,7 @@ use workerd_capnp::worker;
 use super::*;
 
 /// A fresh directory in the test's temp directory holding `files`.
-fn project(files: &[(&str, &str)]) -> PathBuf {
+pub fn project(files: &[(&str, &str)]) -> PathBuf {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -35,7 +35,7 @@ fn load_project(files: &[(&str, &str)]) -> Result<Config, String> {
     )
 }
 
-fn read(config: Config) -> capnp::message::Reader<capnp::serialize::OwnedSegments> {
+pub fn read(config: Config) -> capnp::message::Reader<capnp::serialize::OwnedSegments> {
     let bytes: Vec<u8> = config
         .into_words()
         .iter()
@@ -316,7 +316,7 @@ fn unbundled_typescript_main_is_an_error() {
 
 /// Held by every test that spawns a process. Writing the stub esbuild while another thread
 /// forks would leave the fork holding it open for writing, and running it would fail (ETXTBSY).
-static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn missing_esbuild_is_explained() {
@@ -324,9 +324,12 @@ fn missing_esbuild_is_explained() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = project(&[("index.ts", "export default {}")]);
-    let error = bundle(Path::new("/nonexistent/esbuild"), &dir, "index.ts", &|_| {
-        Ok(())
-    })
+    let error = bundle(
+        Path::new("/nonexistent/esbuild"),
+        &dir,
+        Input::File("index.ts"),
+        &|_| Ok(()),
+    )
     .err()
     .unwrap();
     assert!(error.contains("esbuild not found"), "{error}");
@@ -334,16 +337,19 @@ fn missing_esbuild_is_explained() {
 }
 
 /// A stand-in for esbuild: a shell script running `body` with `$out` and `$meta` set from
-/// `--outdir=` and `--metafile=`, and its arguments in `args.txt`.
+/// `--outdir=` (or the directory of `--outfile=`) and `--metafile=`, its arguments in `args.txt`
+/// and its stdin in `stdin.txt`.
 #[cfg(unix)]
-fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
+pub fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let path = dir.join("esbuild.sh");
     let script = format!(
         "#!/bin/sh\nprintf '%s\\n' \"$@\" > {args}\nfor a; do case $a in \
-         --outdir=*) out=${{a#*=}};; --metafile=*) meta=${{a#*=}};; esac; done\n{body}\n",
-        args = dir.join("args.txt").display()
+         --outdir=*) out=${{a#*=}};; --outfile=*) out=$(dirname \"${{a#*=}}\");; \
+         --metafile=*) meta=${{a#*=}};; esac; done\ncat > {stdin}\n{body}\n",
+        args = dir.join("args.txt").display(),
+        stdin = dir.join("stdin.txt").display()
     );
     fs::write(&path, script).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -367,7 +373,7 @@ fn bundle_reads_esbuild_output_and_watches_inputs() {
 echo '{"inputs":{"index.ts":{},"lib.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
     );
     let watched = std::cell::RefCell::new(Vec::new());
-    let sources = bundle(&esbuild, &dir, "index.ts", &|p| {
+    let sources = bundle(&esbuild, &dir, Input::File("index.ts"), &|p| {
         watched.borrow_mut().push(p.to_owned());
         Ok(())
     })
@@ -405,7 +411,7 @@ fn failed_bundle_watches_sources_and_missing_main() {
     let dir = project(&[("lib.ts", ""), ("README.md", "")]);
     let esbuild = stub_esbuild(&dir, "echo 'syntax error' >&2; exit 1");
     let watched = std::cell::RefCell::new(Vec::new());
-    let error = bundle(&esbuild, &dir, "index.ts", &|p| {
+    let error = bundle(&esbuild, &dir, Input::File("index.ts"), &|p| {
         watched.borrow_mut().push(p.to_owned());
         Ok(())
     })

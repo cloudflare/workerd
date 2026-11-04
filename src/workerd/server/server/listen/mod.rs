@@ -151,6 +151,43 @@ pub async fn listen(
     Ok(StreamListener::Socket(address.listen()?))
 }
 
+/// Listens on `address`, `<host>:<port>`, or on the first of the next ports that works, trying
+/// `attempts` ports in all; and the address it listens on.
+///
+/// If no port works, the error is the first port's. `listen` listens on one
+/// address.
+async fn listen_on_free_port(
+    address: &str,
+    attempts: u16,
+    mut listen: impl AsyncFnMut(&str) -> Result<StreamListener>,
+) -> Result<(StreamListener, String)> {
+    let Some((host, first)) = address
+        .rsplit_once(':')
+        .and_then(|(host, port)| Some((host, port.parse::<u16>().ok()?)))
+    else {
+        return Ok((listen(address).await?, address.to_owned()));
+    };
+    let mut error = None;
+    for port in (first..=u16::MAX).take(usize::from(attempts.max(1))) {
+        let candidate = format!("{host}:{port}");
+        match listen(&candidate).await {
+            Ok(listener) => return Ok((listener, candidate)),
+            Err(e) => {
+                error.get_or_insert(e);
+            }
+        }
+    }
+    let last = first.saturating_add(attempts.max(1) - 1);
+    Err(match error {
+        Some(e) if last != first => kj::failed!(
+            "no free port in {first}-{last}; {address}: {}",
+            e.description()
+        ),
+        Some(e) => e,
+        None => kj::failed!("{address}: no port to listen on"),
+    })
+}
+
 /// Binds the datagram socket `address` names.
 async fn bind_udp(address: &str, default_port: u16) -> Result<UdpSocket> {
     let address = TokioAddress::parse_str(address, default_port).await?;
@@ -179,6 +216,9 @@ pub struct BoundSockets {
 
 /// Binds every socket of the config, taking the CLI's overrides for it out of `addresses` and
 /// `inherited` (what is left in them matched no socket). Bind failures are config errors.
+///
+/// A socket in `port_attempts` without an override may move to the next free port (see
+/// [`listen_on_free_port`]).
 #[expect(
     clippy::implicit_hasher,
     reason = "the maps are the command line's, with the default hasher"
@@ -187,6 +227,7 @@ pub async fn bind_sockets(
     config: config::Reader<'_>,
     addresses: &mut HashMap<String, String>,
     inherited: &mut HashMap<String, socket2::Socket>,
+    port_attempts: &HashMap<String, u16>,
     loopback: &Loopback,
     report: &Reporter,
 ) -> Result<BoundSockets> {
@@ -198,7 +239,9 @@ pub async fn bind_sockets(
         let name = text(sock.get_name())?;
         let is_udp = matches!(sock.which(), Ok(socket::Which::Udp(_)));
         let inherited_listener = inherited.remove(&name);
-        let address = if let Some(address) = addresses.remove(&name) {
+        let mut attempts = port_attempts.get(&name).copied();
+        let mut address = if let Some(address) = addresses.remove(&name) {
+            attempts = None;
             address
         } else if inherited_listener.is_some() {
             String::new()
@@ -236,9 +279,18 @@ pub async fn bind_sockets(
             continue;
         }
 
-        let listener = match inherited_listener {
-            Some(socket) => wrap_inherited(socket),
-            None => listen(&address, default_port_for(sock), loopback).await,
+        let listener = match (inherited_listener, attempts) {
+            (Some(socket), _) => wrap_inherited(socket),
+            (None, Some(attempts)) => {
+                let listen = async |address: &str| listen(address, 0, loopback).await;
+                listen_on_free_port(&address, attempts, listen)
+                    .await
+                    .map(|(listener, bound)| {
+                        address = bound;
+                        listener
+                    })
+            }
+            (None, None) => listen(&address, default_port_for(sock), loopback).await,
         };
         let listener = match listener {
             Ok(listener) => listener,

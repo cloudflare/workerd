@@ -90,6 +90,22 @@ impl Config {
         )))
     }
 
+    /// Checks the message `builder` holds, and keeps it encoded.
+    pub fn from_builder(
+        builder: &capnp::message::Builder<capnp::message::HeapAllocator>,
+    ) -> capnp::Result<Self> {
+        Self::from_words(&words_from_bytes(
+            &capnp::serialize::write_message_to_words(builder),
+        ))
+    }
+
+    /// The message, to read or to copy into a builder.
+    pub fn message(
+        &self,
+    ) -> capnp::Result<capnp::message::Reader<capnp::serialize::OwnedSegments>> {
+        capnp::serialize::read_message(bytes_from_words(&self.0).as_slice(), reader_options())
+    }
+
     pub fn into_words(self) -> Vec<u64> {
         self.0
     }

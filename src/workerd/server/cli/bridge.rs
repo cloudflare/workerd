@@ -50,6 +50,9 @@ pub mod ffi {
         fn release_version() -> &'static [u8];
         fn perfetto_supported() -> bool;
         fn fuzzilli_supported() -> bool;
+        /// The names of the autogates this build has, without the `workerd-autogate-` prefix a
+        /// config's `autogates` gives them.
+        fn autogate_names() -> Vec<String>;
     }
 
     extern "Rust" {

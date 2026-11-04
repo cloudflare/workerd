@@ -36,6 +36,7 @@ struct BuildInfo;
 ::rust::Slice<const uint8_t> release_version();
 bool perfetto_supported();
 bool fuzzilli_supported();
+::rust::Vec<::rust::String> autogate_names();
 
 // See the bridge (server/bridge.rs).
 int32_t with_process_context(
