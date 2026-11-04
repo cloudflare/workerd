@@ -95,6 +95,40 @@ kj::Array<kj::String> LegacyHibernationManagerImpl::HibernatableWebSocket::getTa
   return tags;
 }
 
+LegacyHibernationManagerImpl::PendingReceive::PendingReceive(
+    kj::Promise<kj::WebSocket::Message> receive)
+    : received(
+          receive.then([this](kj::WebSocket::Message value) { message = kj::mv(value); }).fork()) {}
+
+kj::Promise<void> LegacyHibernationManagerImpl::PendingReceive::whenReceived() {
+  return received.addBranch();
+}
+
+kj::WebSocket::Message LegacyHibernationManagerImpl::PendingReceive::takeMessage() {
+  return kj::mv(KJ_ASSERT_NONNULL(message));
+}
+
+kj::Promise<kj::WebSocket::Message> LegacyHibernationManagerImpl::HibernatableWebSocket::receive() {
+  if (pendingReceive == kj::none) {
+    auto& socket = *KJ_REQUIRE_NONNULL(ws);
+    if (!transport->mayHaveHandle()) {
+      // Only a handoff stops the read loop of a socket that lives on, and this one can't be
+      // handed off.
+      return socket.receive();
+    }
+    pendingReceive = kj::heap<PendingReceive>(socket.receive());
+  }
+  return receivePending();
+}
+
+kj::Promise<kj::WebSocket::Message> LegacyHibernationManagerImpl::HibernatableWebSocket::
+    receivePending() {
+  co_await KJ_ASSERT_NONNULL(pendingReceive)->whenReceived();
+  auto message = KJ_ASSERT_NONNULL(pendingReceive)->takeMessage();
+  pendingReceive = kj::none;
+  co_return message;
+}
+
 kj::Promise<void> LegacyHibernationManagerImpl::HibernatableWebSocket::branchWriteBarrier() {
   KJ_IF_SOME(promise, maybeWriteBarrier) {
     return promise.addBranch();
@@ -563,9 +597,8 @@ kj::Own<WorkerInterface> LegacyHibernationManagerImpl::getWorkerForEvent(
 
 kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
-  auto& ws = *KJ_REQUIRE_NONNULL(hib.ws);
   while (true) {
-    kj::WebSocket::Message message = co_await ws.receive();
+    kj::WebSocket::Message message = co_await hib.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
     hib.transport->countConsumed();
 

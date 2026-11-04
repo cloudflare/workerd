@@ -88,6 +88,10 @@ struct LegacyHibernationManagerTestAccess {
     return getOnlyWebSocket(manager).transport.addRef();
   }
 
+  static bool hasPendingReceive(LegacyHibernationManagerImpl& manager) {
+    return getOnlyWebSocket(manager).pendingReceive != kj::none;
+  }
+
  private:
   static LegacyHibernationManagerImpl::HibernatableWebSocket& getOnlyWebSocket(
       LegacyHibernationManagerImpl& manager) {
@@ -1315,6 +1319,46 @@ KJ_TEST("HibernationManager: a WebSocket counts what it received since its trans
   end1->close(1000, "bye"_kj).wait(fixture.getWaitScope());
   fixture.pollEventLoop();
   KJ_EXPECT(transport->getConsumedCount() == 2, transport->getConsumedCount());
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a WebSocket receives directly once connected without a handle") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("direct-receive")));
+  auto hm = makeTestHm(fixture);
+  auto& impl = kj::downcast<LegacyHibernationManagerImpl>(*hm);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+  auto transport = LegacyHibernationManagerTestAccess::getOnlyTransport(impl);
+
+  // Until the socket is connected, it may yet get a handle and be handed off, so it receives in a
+  // way that survives its read loop.
+  fixture.pollEventLoop();
+  KJ_EXPECT(transport->mayHaveHandle());
+  KJ_EXPECT(LegacyHibernationManagerTestAccess::hasPendingReceive(impl));
+
+  // The receive already waiting delivers the next message, and the following receives are direct.
+  transport->attach(kj::none);
+  KJ_EXPECT(!transport->mayHaveHandle());
+  end1->send("first"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_EXPECT(stats.customEventCalls == 1, stats.customEventCalls);
+  KJ_EXPECT(!LegacyHibernationManagerTestAccess::hasPendingReceive(impl));
+  end1->send("second"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_EXPECT(stats.customEventCalls == 2, stats.customEventCalls);
+
+  // A later transport's handle doesn't make the socket movable again.
+  class UnpausedTransportHandle final: public HibernatableTransportHandle {
+   public:
+    kj::Promise<Pause> pause() override {
+      KJ_UNIMPLEMENTED("not paused in this test");
+    }
+  };
+  transport->attach(kj::heap<UnpausedTransportHandle>());
+  KJ_EXPECT(transport->getHandle() == kj::none);
+  KJ_EXPECT(!transport->mayHaveHandle());
 
   fixture.drainAndDestroy(kj::mv(request));
 }

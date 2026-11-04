@@ -102,6 +102,23 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     kj::Maybe<kj::List<TagListItem, &TagListItem::link>&> list;
   };
 
+  // A receive on a socket, which keeps running when the read loop waiting for it is cancelled.
+  // Cancelling the receive itself can end what feeds the socket, such as the pump from a coupled
+  // WebSocket, which the socket still needs if it moves to another manager.
+  class PendingReceive {
+   public:
+    explicit PendingReceive(kj::Promise<kj::WebSocket::Message> receive);
+    KJ_DISALLOW_COPY_AND_MOVE(PendingReceive);
+
+    // Resolves once the message has arrived, and then takeMessage() returns it.
+    kj::Promise<void> whenReceived();
+    kj::WebSocket::Message takeMessage();
+
+   private:
+    kj::Maybe<kj::WebSocket::Message> message;
+    kj::ForkedPromise<void> received;
+  };
+
   // api::WebSockets cannot survive hibernation, but kj::WebSockets do. This class helps us
   // manage the transition of an api::WebSocket from its active state to a hibernated state
   // and vice versa.
@@ -129,6 +146,13 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // to the api::WebSocket.
     jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js);
 
+    // Receives the next message, through `pendingReceive` unless the socket was connected to a
+    // transport that it can't be handed off from.
+    kj::Promise<kj::WebSocket::Message> receive();
+
+    // Waits for `pendingReceive` and takes its message.
+    kj::Promise<kj::WebSocket::Message> receivePending();
+
     kj::ListLink<HibernatableWebSocket> link;
 
     // An array of all the items/nodes that refer to this HibernatableWebSocket.
@@ -144,6 +168,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
     // This is the manager's strong reference to the websocket shared with api::WebSocket after
     // accepting as hibernatable.
     kj::Maybe<kj::Rc<kj::WebSocket>> ws;
+
+    // The receive on `ws` that the read loop is waiting for.
+    kj::Maybe<kj::Own<PendingReceive>> pendingReceive;
 
     LegacyHibernationManagerImpl& manager;
     // TODO(someday): We (currently) only use the LegacyHibernationManagerImpl reference to refer to
