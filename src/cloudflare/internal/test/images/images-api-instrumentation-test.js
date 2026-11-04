@@ -783,4 +783,76 @@ const expectedSpans = [
     'cloudflare.binding.type': 'Images',
     closed: true,
   },
+  // hosted images spans (JS RPC, no paired 'fetch' span)
+  {
+    name: 'images_details',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_details',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_fetch',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_fetch',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_upload',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_upload',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_update',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_update',
+    'cloudflare.binding.type': 'Images',
+    'error.type': 'Image not found',
+    closed: true,
+  },
+  {
+    name: 'images_delete',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_delete',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_list',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_list',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_upload',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
+  {
+    name: 'images_upload',
+    'cloudflare.binding.type': 'Images',
+    closed: true,
+  },
 ];
