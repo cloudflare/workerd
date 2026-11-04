@@ -1,0 +1,149 @@
+Backport of https://github.com/capnproto/capnproto/pull/2905.
+Preserve abortWrite() through HTTP entity writers and compression wrappers.
+Remove this patch once the Cap'n Proto dependency includes the upstream fix.
+
+diff --git a/src/kj/compat/brotli-test.c++ b/src/kj/compat/brotli-test.c++
+index 9cc4b6f1..644effc6 100644
+--- a/src/kj/compat/brotli-test.c++
++++ b/src/kj/compat/brotli-test.c++
+@@ -128,6 +128,21 @@ public:
+   Promise<void> whenWriteDisconnected() override { KJ_UNIMPLEMENTED("not used"); }
+ };
+ 
++KJ_TEST("async brotli forwards abortWrite") {
++  class AbortOutputStream final: public MockAsyncOutputStream {
++  public:
++    kj::Maybe<kj::Exception> error;
++    void abortWrite(kj::Exception&& exception) override { error = kj::mv(exception); }
++  } output;
++  BrotliAsyncOutputStream stream(output);
++  stream.abortWrite(KJ_EXCEPTION(FAILED, "synthetic body failure"));
++  KJ_IF_SOME(error, output.error) {
++    KJ_EXPECT(error.getDescription() == "synthetic body failure");
++  } else {
++    KJ_FAIL_EXPECT("abortWrite was not forwarded");
++  }
++}
++
+ KJ_TEST("brotli decompression") {
+   // Normal read.
+   {
+diff --git a/src/kj/compat/brotli.h b/src/kj/compat/brotli.h
+index dd901629..4c277515 100644
+--- a/src/kj/compat/brotli.h
++++ b/src/kj/compat/brotli.h
+@@ -167,6 +167,7 @@ public:
+   Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override;
+ 
+   Promise<void> whenWriteDisconnected() override { return inner.whenWriteDisconnected(); }
++  void abortWrite(kj::Exception&& exception) override { inner.abortWrite(kj::mv(exception)); }
+ 
+   inline Promise<void> flush() {
+     // brotli decoder does not use this parameter, but automatically flushes as much as it can.
+diff --git a/src/kj/compat/gzip-test.c++ b/src/kj/compat/gzip-test.c++
+index 861a33b8..569464d3 100644
+--- a/src/kj/compat/gzip-test.c++
++++ b/src/kj/compat/gzip-test.c++
+@@ -123,6 +123,21 @@ public:
+   Promise<void> whenWriteDisconnected() override { KJ_UNIMPLEMENTED("not used"); }
+ };
+ 
++KJ_TEST("async gzip forwards abortWrite") {
++  class AbortOutputStream final: public MockAsyncOutputStream {
++  public:
++    kj::Maybe<kj::Exception> error;
++    void abortWrite(kj::Exception&& exception) override { error = kj::mv(exception); }
++  } output;
++  GzipAsyncOutputStream stream(output);
++  stream.abortWrite(KJ_EXCEPTION(FAILED, "synthetic body failure"));
++  KJ_IF_SOME(error, output.error) {
++    KJ_EXPECT(error.getDescription() == "synthetic body failure");
++  } else {
++    KJ_FAIL_EXPECT("abortWrite was not forwarded");
++  }
++}
++
+ KJ_TEST("gzip decompression") {
+   // Normal read.
+   {
+diff --git a/src/kj/compat/gzip.h b/src/kj/compat/gzip.h
+index 6e54e57c..1e7984e9 100644
+--- a/src/kj/compat/gzip.h
++++ b/src/kj/compat/gzip.h
+@@ -128,6 +128,7 @@ public:
+   Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override;
+ 
+   Promise<void> whenWriteDisconnected() override { return inner.whenWriteDisconnected(); }
++  void abortWrite(kj::Exception&& exception) override { inner.abortWrite(kj::mv(exception)); }
+ 
+   inline Promise<void> flush() {
+     return pump(Z_SYNC_FLUSH);
+diff --git a/src/kj/compat/http-test.c++ b/src/kj/compat/http-test.c++
+index 06784e9f..7ce36b7f 100644
+--- a/src/kj/compat/http-test.c++
++++ b/src/kj/compat/http-test.c++
+@@ -4877,6 +4877,44 @@ KJ_TEST("HttpServer bad requests") {
+   }
+ }
+ 
++KJ_TEST("HttpServer aborted chunked response must not send a terminating chunk") {
++  KJ_HTTP_TEST_SETUP_IO;
++  kj::TimerImpl timer(kj::origin<kj::TimePoint>());
++  auto pipe = KJ_HTTP_TEST_CREATE_2PIPE;
++  HttpHeaderTable table;
++  class AbortedResponseService final: public HttpService, public HttpServerErrorHandler {
++  public:
++    explicit AbortedResponseService(HttpHeaderTable& table): table(table) {}
++    kj::Promise<void> request(HttpMethod method, kj::StringPtr url, const HttpHeaders& headers,
++        kj::AsyncInputStream& input, Response& response) override {
++      auto body = response.send(200, "OK", HttpHeaders(table), kj::none);
++      co_await body->write("prefix"_kjb);
++      body->abortWrite(KJ_EXCEPTION(FAILED, "synthetic body failure"));
++      body->abortWrite(KJ_EXCEPTION(FAILED, "repeated abort"));
++      body = nullptr;
++      kj::throwFatalException(KJ_EXCEPTION(FAILED, "synthetic body failure"));
++    }
++    kj::Promise<void> handleApplicationError(
++        kj::Exception exception, kj::Maybe<HttpService::Response&> response) override {
++      KJ_EXPECT(response == kj::none);
++      return kj::READY_NOW;
++    }
++  private:
++    HttpHeaderTable& table;
++  } service(table);
++  HttpServerSettings settings;
++  settings.errorHandler = service;
++  HttpServer server(timer, table, service, settings);
++  auto listening = server.listenHttp(kj::mv(pipe.ends[0]));
++  auto writing = pipe.ends[1]->write("GET / HTTP/1.1\r\nHost: synthetic\r\n\r\n"_kjb);
++  auto raw = pipe.ends[1]->readAllText().wait(waitScope);
++  KJ_EXPECT(raw.startsWith("HTTP/1.1 200 OK\r\n"));
++  KJ_EXPECT(raw.endsWith("6\r\nprefix\r\n"), raw);
++  KJ_EXPECT(!raw.endsWith("0\r\n\r\n"), raw);
++  writing.wait(waitScope);
++  listening.wait(waitScope);
++}
++
+ KJ_TEST("HttpServer rejects negative Content-Length") {
+   KJ_HTTP_TEST_SETUP_IO;
+   kj::TimerImpl timer(kj::origin<kj::TimePoint>());
+diff --git a/src/kj/compat/http.c++ b/src/kj/compat/http.c++
+index 14f5bfd9..945bf075 100644
+--- a/src/kj/compat/http.c++
++++ b/src/kj/compat/http.c++
+@@ -2658,6 +2658,15 @@ public:
+   HttpEntityBodyWriter(HttpOutputStream& inner) {
+     inner.setCurrentWrapper(weakInner);
+   }
++  void abortWrite(kj::Exception&& exception) override {
++    if (finished || weakInner == kj::none) return;
++    auto& inner = getInner();
++    inner.unsetCurrentWrapper(weakInner);
++    finished = true;
++    // Do not let a chunked writer's destructor finish an aborted body successfully.
++    inner.abortBody();
++  }
++
+   ~HttpEntityBodyWriter() noexcept(false) {
+     if (!finished) {
+       KJ_IF_SOME(inner, weakInner) {

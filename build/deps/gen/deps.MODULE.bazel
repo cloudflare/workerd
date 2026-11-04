@@ -27,6 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
+    patch_strip = 1,
+    patches = [
+        "//:patches/capnp/0001-preserve-http-body-aborts.patch",
+    ],
     sha256 = "c8eed3eccf8f839dcea831818e72e03c78a0f5ab4c458497fa380fd007797c57",
     strip_prefix = "capnproto-capnproto-2d48111/c++",
     type = "tgz",
