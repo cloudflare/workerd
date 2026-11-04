@@ -87,6 +87,9 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
   kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
 
+  // Starts `hib`'s read loop.
+  void startReadLoop(HibernatableWebSocket& hib);
+
   // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
   // in our kj::List.
   struct TagListItem {
@@ -171,6 +174,10 @@ class LegacyHibernationManagerImpl final: public Worker::Actor::HibernationManag
 
     friend LegacyHibernationManagerImpl;
   };
+
+  // Adds `hib` to `allWs` and to the list of each of its tags. It must have room for every tag.
+  HibernatableWebSocket& insertWebSocket(
+      kj::Own<HibernatableWebSocket> hib, kj::ArrayPtr<kj::String> tags);
 
   // Removes a HibernatableWebSocket from the HibernationManager's various collections.
   void dropHibernatableWebSocket(HibernatableWebSocket& hib);

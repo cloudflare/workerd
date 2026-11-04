@@ -166,18 +166,35 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
       " websockets can be accepted on a single Durable Object instance");
 
   auto hib = kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, *this);
-  HibernatableWebSocket& refToHibernatable = *hib.get();
 
   // TODO(mar): Improve accept span context capturing — route snapshotted user span context
   // to serialization point instead of capturing only the invocation root span here.
   auto invCtx = IoContext::current().getInvocationSpanContext();
-  refToHibernatable.userSpanContext = tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
+  hib->userSpanContext = tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
+
+  auto& refToHibernatable = insertWebSocket(kj::mv(hib), tags);
+
+  // Before starting the readLoop, share ownership of the kj::WebSocket with the
+  // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
+  refToHibernatable.ws =
+      refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
+          refToHibernatable.getTags());
+
+  // Finally, we initiate the readloop for this HibernatableWebSocket and
+  // give the task to the HibernationManager so it lives long.
+  startReadLoop(refToHibernatable);
+}
+
+LegacyHibernationManagerImpl::HibernatableWebSocket& LegacyHibernationManagerImpl::insertWebSocket(
+    kj::Own<HibernatableWebSocket> hib, kj::ArrayPtr<kj::String> tags) {
+  HibernatableWebSocket& refToHibernatable = *hib.get();
+  KJ_ASSERT(refToHibernatable.tagItems.size() == tags.size());
 
   allWs.push_front(kj::mv(hib));
   refToHibernatable.node = allWs.begin();
 
   // If the `tags` array is empty (i.e. user did not provide a tag), we skip the population of the
-  // `tagToWs` HashMap below and go straight to initiating the readLoop.
+  // `tagToWs` HashMap below.
 
   // It is the caller's responsibility to ensure all elements of `tags` are unique.
   // TODO(cleanup): Maybe we could enforce uniqueness by using an immutable type that
@@ -206,15 +223,11 @@ void LegacyHibernationManagerImpl::acceptWebSocket(
     tagListItem.list = *list.get();
   }
 
-  // Before starting the readLoop, share ownership of the kj::WebSocket with the
-  // HibernatableWebSocket and accept the api::WebSocket as hibernatable.
-  refToHibernatable.ws =
-      refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable(
-          refToHibernatable.getTags());
+  return refToHibernatable;
+}
 
-  // Finally, we initiate the readloop for this HibernatableWebSocket and
-  // give the task to the HibernationManager so it lives long.
-  readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
+void LegacyHibernationManagerImpl::startReadLoop(HibernatableWebSocket& hib) {
+  readLoopTasks.add(handleReadLoop(hib).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
       LOG_EXCEPTION_IF_INTERNAL("LegacyHibernationManagerImpl::handleReadLoop", e);
     }
