@@ -16107,6 +16107,7 @@ export type CloudflareServiceBindingCaller = Readonly<{
  * Your code must still authorize the caller and JWT issuer, subject and audience.
  */
 export type CloudflareWorkloadIdentity =
+  | CloudflareDelegatedRequestCaller
   | CloudflareServiceBindingCaller
   | Readonly<{
       kind: "signed-request";
@@ -16123,6 +16124,35 @@ export type CloudflareWorkloadIdentity =
       /** Signed version_id of the originating identity binding, preserved by forwarding. */
       originVersionId: string;
     }>;
+/** Verified delegated credential facts. Applications own session continuity and authorization. */
+export type CloudflareDelegatedRequestCaller = Readonly<{
+  kind: "delegated-request";
+  clientId: string;
+  userId: string;
+  sessionId: string;
+  agentId?: string;
+  account?: Readonly<{
+    issuer: string;
+    subject: string;
+    audience: string;
+    scopes: readonly string[];
+    /** Unix seconds, from the verified access token. */
+    expiresAt: number;
+  }>;
+}>;
+/** Safe response data; your handler chooses whether to send it. */
+export type CloudflareIdentityFailureResponse = Readonly<{
+  status: 400 | 401;
+  headers: Readonly<Record<string, string>>;
+  body: Readonly<{
+    error: "invalid_session";
+  }> | null;
+}>;
+/** A type alias for the DOMException; no additional global constructor. */
+export type CloudflareIdentityError = DOMException &
+  Readonly<{
+    response?: CloudflareIdentityFailureResponse;
+  }>;
 /** Saved authorization is a separate purpose; no token or assertion export. */
 export type IdentityConnectionState =
   | "consent_required"

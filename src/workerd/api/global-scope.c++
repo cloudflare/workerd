@@ -42,6 +42,8 @@
 
 #include <kj/encoding.h>
 
+#include <cmath>
+
 namespace workerd::api {
 
 namespace {
@@ -135,6 +137,144 @@ struct WorkloadIdentityInvocation {
   kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
       kj::str("jsg.DOMException(", name, "): ", message)));
 }
+
+void requireManagedIdentity(bool condition) {
+  if (!condition)
+    workloadIdentityFailure("WorkloadIdentityUnavailableError",
+        "The verifier returned an unsupported result. Retry on a supported runtime.");
+}
+
+jsg::JsObject managedObject(jsg::Lock& js, jsg::JsValue value, uint fields) {
+  auto handle = static_cast<v8::Local<v8::Value>>(value);
+  requireManagedIdentity(handle->IsObject() && !handle->IsArray());
+  auto object = handle.As<v8::Object>();
+  requireManagedIdentity(
+      object->GetOwnPropertyNames(js.v8Context()).ToLocalChecked()->Length() == fields);
+  return jsg::JsObject(object);
+}
+
+jsg::JsValue managedField(jsg::Lock& js, jsg::JsObject object, kj::StringPtr field) {
+  requireManagedIdentity(object.has(js, field, jsg::JsObject::HasOption::OWN));
+  return object.get(js, field);
+}
+
+jsg::JsValue managedString(
+    jsg::Lock& js, jsg::JsObject object, kj::StringPtr field, uint limit = 2048) {
+  auto value = managedField(js, object, field);
+  auto handle = static_cast<v8::Local<v8::Value>>(value);
+  requireManagedIdentity(handle->IsString());
+  auto text = value.toString(js);
+  requireManagedIdentity(text.size() > 0 && handle.As<v8::String>()->Length() <= limit);
+  for (auto c: text) requireManagedIdentity(static_cast<unsigned char>(c) >= 32 && c != 127);
+  return value;  // Copy the checked string primitive without re-encoding identifiers.
+}
+
+void freezeManagedObject(jsg::Lock& js, jsg::JsObject object) {
+  static_cast<v8::Local<v8::Object>>(object)
+      ->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen)
+      .Check();
+}
+
+// Rebuild only checked fields. Never recursively freeze objects received through RPC.
+jsg::JsObject managedDelegatedIdentity(jsg::Lock& js, jsg::JsValue value) {
+  auto handle = static_cast<v8::Local<v8::Value>>(value);
+  requireManagedIdentity(handle->IsObject());
+  jsg::JsObject input(handle.As<v8::Object>());
+  bool hasAgent = input.has(js, "agentId", jsg::JsObject::HasOption::OWN);
+  bool hasAccount = input.has(js, "account", jsg::JsObject::HasOption::OWN);
+  managedObject(js, value, 4 + hasAgent + hasAccount);
+  requireManagedIdentity(managedString(js, input, "kind").toString(js) == "delegated-request");
+  auto output = js.obj();
+  for (auto field: {"kind"_kj, "clientId"_kj, "userId"_kj, "sessionId"_kj})
+    output.createDataProperty(js, js.str(field), managedString(js, input, field));
+  if (hasAgent)
+    output.createDataProperty(js, js.str("agentId"_kj), managedString(js, input, "agentId", 256));
+  if (hasAccount) {
+    auto account = managedObject(js, managedField(js, input, "account"), 5);
+    auto checked = js.obj();
+    for (auto field: {"issuer"_kj, "subject"_kj, "audience"_kj})
+      checked.createDataProperty(js, js.str(field), managedString(js, account, field));
+    auto expiry = static_cast<v8::Local<v8::Value>>(managedField(js, account, "expiresAt"));
+    requireManagedIdentity(expiry->IsNumber());
+    double seconds = expiry.As<v8::Number>()->Value();
+    requireManagedIdentity(
+        seconds > 0 && seconds < 9007199254740992.0 && seconds == std::floor(seconds));
+    checked.createDataProperty(js, js.str("expiresAt"_kj), js.num(seconds));
+    auto scopes = static_cast<v8::Local<v8::Value>>(managedField(js, account, "scopes"));
+    requireManagedIdentity(scopes->IsArray());
+    auto array = scopes.As<v8::Array>();
+    requireManagedIdentity(array->Length() <= 256);
+    auto copy = v8::Array::New(js.v8Isolate, array->Length());
+    for (uint i = 0; i < array->Length(); ++i) {
+      auto scope = array->Get(js.v8Context(), i).ToLocalChecked();
+      requireManagedIdentity(scope->IsString() && scope.As<v8::String>()->Length() <= 1024);
+      copy->CreateDataProperty(js.v8Context(), i, scope).Check();
+    }
+    freezeManagedObject(js, jsg::JsObject(copy));
+    checked.createDataProperty(js, js.str("scopes"_kj), jsg::JsValue(copy));
+    freezeManagedObject(js, checked);
+    output.createDataProperty(js, js.str("account"_kj), checked);
+  }
+  freezeManagedObject(js, output);
+  return output;
+}
+
+jsg::JsObject managedFailureResponse(jsg::Lock& js, jsg::JsValue value) {
+  auto input = managedObject(js, value, 3);
+  auto status = static_cast<v8::Local<v8::Value>>(managedField(js, input, "status"));
+  requireManagedIdentity(status->IsUint32());
+  auto code = status.As<v8::Uint32>()->Value();
+  auto rawHeaders = managedField(js, input, "headers");
+  auto body = managedField(js, input, "body");
+  auto headers = managedObject(js, rawHeaders, 2);
+  requireManagedIdentity(managedString(js, headers, "Cache-Control").toString(js) == "no-store");
+  auto safeHeaders = js.obj();
+  safeHeaders.createDataProperty(js, js.str("Cache-Control"_kj), js.str("no-store"_kj));
+  auto safe = js.obj();
+  safe.createDataProperty(js, js.str("status"_kj), js.num(code));
+  if (!body.isNull()) {
+    auto json = managedObject(js, body, 1);
+    requireManagedIdentity(code == 400 &&
+        managedString(js, json, "error").toString(js) == "invalid_session" &&
+        managedString(js, headers, "Content-Type").toString(js) == "application/json");
+    safeHeaders.createDataProperty(js, js.str("Content-Type"_kj), js.str("application/json"_kj));
+    auto safeBody = js.obj();
+    safeBody.createDataProperty(js, js.str("error"_kj), js.str("invalid_session"_kj));
+    freezeManagedObject(js, safeBody);
+    safe.createDataProperty(js, js.str("body"_kj), safeBody);
+  } else {
+    auto challenge = managedString(js, headers, "WWW-Authenticate", 512).toString(js);
+    bool valid = code == 400
+        ? (challenge == "Bearer error=\"invalid_request\"" ||
+              challenge == "DPoP error=\"invalid_request\", algs=\"ES256\"" ||
+              challenge ==
+                  "Bearer error=\"invalid_request\", DPoP error=\"invalid_request\", algs=\"ES256\"")
+        : code == 401 &&
+            (challenge == "Bearer error=\"invalid_token\"" ||
+                challenge == "DPoP error=\"invalid_token\", algs=\"ES256\"" ||
+                challenge == "DPoP error=\"invalid_dpop_proof\", algs=\"ES256\"");
+    requireManagedIdentity(valid);
+    safeHeaders.createDataProperty(js, js.str("WWW-Authenticate"_kj), js.str(challenge));
+    safe.createDataProperty(js, js.str("body"_kj), js.null());
+  }
+  freezeManagedObject(js, safeHeaders);
+  safe.createDataProperty(js, js.str("headers"_kj), safeHeaders);
+  freezeManagedObject(js, safe);
+  return safe;
+}
+
+[[noreturn]] void delegatedIdentityFailure(jsg::Lock& js, jsg::JsObject result) {
+  auto response = managedFailureResponse(js, managedField(js, result, "response"));
+  auto error = js.exceptionToJs(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::str(
+          "jsg.DOMException(WorkloadIdentityError): The delegated credential is invalid. Send fresh credentials.")));
+  auto handle = error.getHandle(js).As<v8::Object>();
+  handle
+      ->DefineOwnProperty(js.v8Context(), static_cast<v8::Local<v8::String>>(js.str("response"_kj)),
+          response, static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete))
+      .Check();
+  js.throwException(kj::mv(error));
+}
 }  // namespace
 
 kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> IdentityContext::makeRpcScope(
@@ -194,13 +334,25 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
                     auth[6] == '\n');
           }
         }
-        if (!signedRequest && !bearer)
+        bool delegated = headers->has(kj::str("poppy-session")) || headers->has(kj::str("dpop"));
+        KJ_IF_SOME(auth, authorization) {
+          if (auth.size() >= 4) {
+            auto prefix = kj::str(auth.slice(0, 4));
+            for (auto& c: prefix)
+              if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            delegated = delegated ||
+                (prefix == "dpop" &&
+                    (auth.size() == 4 || auth[4] == ' ' || auth[4] == '\t' || auth[4] == '\r' ||
+                        auth[4] == '\n'));
+          }
+        }
+        if (!signedRequest && !bearer && !delegated)
           return js.resolvedPromise(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
         auto channel = invocation.channel;
         if (channel == kj::none)
           workloadIdentityFailure("WorkloadIdentityUnavailableError",
               "Workload verification is unavailable. Retry later or use a supported deployed runtime.");
-        auto request = originalRequest->cloneForWorkloadIdentity(js, signedRequest);
+        auto request = originalRequest->cloneForWorkloadIdentity(js, signedRequest && !delegated);
         auto fetcher = js.alloc<Fetcher>(
             KJ_ASSERT_NONNULL(channel), Fetcher::RequiresHostAndProtocol::NO, true);
         auto property = JSG_REQUIRE_NONNULL(fetcher->getRpcMethodInternal(js, kj::str("verify")),
@@ -211,21 +363,33 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         auto paf = js.newPromiseAndResolver<jsg::Value>();
         paf.resolver.resolve(js, call(js, kj::mv(request)));
         auto verification =
-            paf.promise.then(js, [](jsg::Lock& js, jsg::Value result) -> jsg::Value {
+            paf.promise.then(js, [delegated](jsg::Lock& js, jsg::Value result) -> jsg::Value {
           auto handle = result.getHandle(js);
           if (!handle->IsObject())
             workloadIdentityFailure("WorkloadIdentityUnavailableError",
                 "The verifier returned no result. Retry later.");
           jsg::JsObject object(handle.As<v8::Object>());
-          auto status = object.get(js, "status").toString(js);
-          if (status == "missing") return jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate));
+          if (delegated) {
+            auto version =
+                static_cast<v8::Local<v8::Value>>(managedField(js, object, "schemaVersion"));
+            requireManagedIdentity(version->IsUint32() && version.As<v8::Uint32>()->Value() == 2);
+          }
+          auto status = (delegated ? managedString(js, object, "status") : object.get(js, "status"))
+                            .toString(js);
+          if (delegated && status == "invalid") delegatedIdentityFailure(js, object);
+          if (status == "missing") {
+            requireManagedIdentity(!delegated);
+            return jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate));
+          }
           if (status == "invalid")
             workloadIdentityFailure("WorkloadIdentityError",
                 "The workload credential is invalid, expired, unsupported, or replayed. Send a fresh supported credential.");
           if (status != "verified")
             workloadIdentityFailure("WorkloadIdentityUnavailableError",
                 "Workload verification could not complete. Retry later.");
-          auto identity = object.get(js, "identity");
+          auto identity =
+              delegated ? managedField(js, object, "identity") : object.get(js, "identity");
+          if (delegated) return jsg::Value(js.v8Isolate, managedDelegatedIdentity(js, identity));
           if (!identity.isObject())
             workloadIdentityFailure("WorkloadIdentityUnavailableError",
                 "The verifier returned no identity. Retry later.");
@@ -240,8 +404,19 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         });
         // Bound transport failure as well as the managed service's own deadline.
         auto& context = IoContext::current();
-        auto persistent = verification.then(
-            js, [](jsg::Lock& js, jsg::Value value) { return js.v8Ref(value.getHandle(js)); });
+        // Keep the original DOMException through the native I/O bridge. Converting
+        // a rejected JS promise to a KJ exception discards its response data.
+        auto persistent = verification.then(js, [](jsg::Lock& js, jsg::Value value) {
+          auto settled = js.obj();
+          settled.createDataProperty(js, js.str("value"_kj), jsg::JsValue(value.getHandle(js)));
+          settled.createDataProperty(js, js.str("failed"_kj), js.num(0));
+          return js.v8Ref(static_cast<v8::Local<v8::Value>>(settled));
+        }, [](jsg::Lock& js, jsg::Value error) {
+          auto settled = js.obj();
+          settled.createDataProperty(js, js.str("value"_kj), jsg::JsValue(error.getHandle(js)));
+          settled.createDataProperty(js, js.str("failed"_kj), js.num(1));
+          return js.v8Ref(static_cast<v8::Local<v8::Value>>(settled));
+        });
         auto timeout =
             context.afterLimitTimeout(10 * kj::SECONDS).then([]() -> jsg::V8Ref<v8::Value> {
           workloadIdentityFailure("WorkloadIdentityUnavailableError",
@@ -250,7 +425,10 @@ jsg::Value IdentityContext::caller(jsg::Lock& js,
         return context.awaitIo(js,
             context.awaitJs(js, kj::mv(persistent)).exclusiveJoin(kj::mv(timeout)),
             [](jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-          return jsg::Value(js.v8Isolate, value.getHandle(js));
+          jsg::JsObject settled(value.getHandle(js).As<v8::Object>());
+          auto result = settled.get(js, "value");
+          if (settled.get(js, "failed").toString(js) == "1") js.throwException(result);
+          return jsg::Value(js.v8Isolate, result);
         });
       });
       auto handle = promise.consumeHandle(js);

@@ -1806,4 +1806,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Adds ctx.identity.caller() on an opt-in basis until the platform rollout completes.
   # HTTP credential verification requires an embedder-supplied private service.
 
+  enableDelegatedIdentity @205 :Bool
+      $compatEnableFlag("enable_delegated_identity");
+  # Receiver configuration compilers require a runtime that recognizes the
+  # version-2 delegated verifier contract before enabling the profile.
+
 }

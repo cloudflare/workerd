@@ -13,6 +13,10 @@ const handler = {
       strictEqual(first, ctx.identity.caller());
       const identity = await first;
       if (identity) strictEqual(Object.isFrozen(identity), true);
+      if (identity?.kind === 'delegated-request') {
+        strictEqual(Object.isFrozen(identity.account), true);
+        strictEqual(Object.isFrozen(identity.account.scopes), true);
+      }
       strictEqual(identity, await ctx.identity.caller());
       const body = request.bodyUsed ? null : await request.text();
       if (new URL(request.url).pathname === '/empty') {
@@ -31,7 +35,23 @@ const handler = {
         body,
       });
     } catch (error) {
-      return Response.json({ name: error.name, message: error.message });
+      if (error.response) {
+        strictEqual(error instanceof DOMException, true);
+        const descriptor = Object.getOwnPropertyDescriptor(error, 'response');
+        strictEqual(descriptor.writable, false);
+        strictEqual(descriptor.configurable, false);
+        for (const value of [
+          error.response,
+          error.response.headers,
+          error.response.body,
+        ])
+          if (value !== null) strictEqual(Object.isFrozen(value), true);
+      }
+      return Response.json({
+        name: error.name,
+        message: error.message,
+        response: error.response,
+      });
     }
   },
 };

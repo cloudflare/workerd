@@ -166,3 +166,27 @@ const pendingScopeSource: 'token_response' | 'requested' | 'unknown' = pendingFa
 // @ts-expect-error Pending authorization facts never expose provider credentials.
 pendingFacts.authorization.accessToken;
 void [pendingIssuer, pendingSubject, pendingScopeSource];
+
+if (caller?.kind === 'delegated-request') {
+  const client: string = caller.clientId;
+  const pairwiseUser: string = caller.userId;
+  const session: string = caller.sessionId;
+  const agent: string | undefined = caller.agentId;
+  const scopes: readonly string[] | undefined = caller.account?.scopes;
+  // @ts-expect-error Verified facts are immutable.
+  caller.sessionId = 'forged';
+  // @ts-expect-error Nested account facts are immutable.
+  if (caller.account) caller.account.subject = 'forged';
+  // @ts-expect-error Scope arrays are immutable.
+  caller.account?.scopes.push('admin');
+  // @ts-expect-error Pairwise user identity is separate from JWT subject.
+  caller.subject;
+  void [client, pairwiseUser, session, agent, scopes];
+}
+declare const identityError: CloudflareIdentityError;
+const protocolResponse: CloudflareIdentityFailureResponse | undefined = identityError.response;
+// @ts-expect-error Response data is immutable.
+identityError.response = undefined;
+// @ts-expect-error Error types do not expose a global constructor.
+new CloudflareIdentityError();
+void protocolResponse;

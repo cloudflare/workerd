@@ -15,6 +15,29 @@ export const workload = {
         })
       ).json();
     deepStrictEqual(await run('/', {}), { identity: null, body: 'original' });
+    const delegated = await run('/', { 'poppy-session': 'valid' });
+    strictEqual(delegated.identity.kind, 'delegated-request');
+    strictEqual(delegated.identity.agentId, '🤖'.repeat(100));
+    strictEqual(delegated.body, 'original');
+    const invalidDelegated = await run('/', { 'poppy-session': 'invalid' });
+    strictEqual(invalidDelegated.name, 'WorkloadIdentityError');
+    deepStrictEqual(invalidDelegated.response, {
+      status: 400,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json',
+      },
+      body: { error: 'invalid_session' },
+    });
+    for (const mode of ['old-schema', 'unsafe-response'])
+      strictEqual(
+        (await run('/', { 'poppy-session': mode })).name,
+        'WorkloadIdentityUnavailableError'
+      );
+    strictEqual(
+      (await run('/', { authorization: 'DPoP proof' })).identity.kind,
+      'delegated-request'
+    );
     const signed = { authorization: 'Bearer caller', signature: 'test' };
     const success = await run('/', signed);
     strictEqual(success.identity.signatureAgent, 'Bearer caller');
