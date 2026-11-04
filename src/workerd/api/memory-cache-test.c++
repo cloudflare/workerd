@@ -291,12 +291,10 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
   KJ_EXPECT(fallbacks[1].endsWith(" fallback_success=bool:false key=str:function"), fallbacks[1]);
 }
 
-// Reads that take every path of read(), with and without a fallback, and fill the cache past
-// its limits, then deletes of a cached key and of one never cached. The fallbacks of a key's
-// reads are coalesced: the second read of "b" waits for the first, and the second of "c" runs its
-// own once the first's fails.
-// TODO(#7951): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions. Rust
-// throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
+// Reads that take every path of read(), with and without a fallback, fill the cache past its
+// limits and produce a value that cannot be serialized, then deletes of a cached key and of one
+// never cached. The fallbacks of a key's reads are coalesced: the second read of "b" waits for
+// the first, and the second of "c" runs its own once the first's fails.
 constexpr auto PARITY_SCENARIO = R"SCRIPT(
   export default {
     async fetch() {
@@ -322,6 +320,7 @@ constexpr auto PARITY_SCENARIO = R"SCRIPT(
       await settle(cache.read("f", () => Promise.reject("not an error")));
       await settle(cache.read("g", () => ({ value: "y".repeat(100) })));
       await settle(cache.read("h", () => ({ value: 1, expiration: 0 })));
+      await settle(cache.read("j", () => ({ value: Symbol("s") })));
       await cache.read("i", () => ({ value: "evicts a" }));
 
       cache.delete("i");
@@ -373,6 +372,10 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
       describe());
   KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:Error: boom "
                      "fallback_success=bool:false key=str:c"_kj),
+      describe());
+  // kj::str() of a DOMException is empty, as Rust's to_detail_string() is.
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str: "
+                     "fallback_success=bool:false key=str:j"_kj),
       describe());
   KJ_EXPECT(contains("memory_cache_delete <- request: delete_completed=bool:true key=str:i"_kj),
       describe());

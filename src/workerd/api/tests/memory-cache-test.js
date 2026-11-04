@@ -96,6 +96,9 @@ export const valueNotSerializable = {
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'failed to serialize symbol');
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.code, 25);
+      ok(err instanceof DOMException);
     }
 
     try {
@@ -105,6 +108,9 @@ export const valueNotSerializable = {
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'failed to serialize function');
+      strictEqual(err.name, 'DataCloneError');
+      strictEqual(err.code, 25);
+      ok(err instanceof DOMException);
     }
   },
 };
