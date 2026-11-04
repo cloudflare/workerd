@@ -84,6 +84,10 @@ struct LegacyHibernationManagerTestAccess {
     return LegacyHibernationManagerImpl::findManagerForEvent(websocketId) != kj::none;
   }
 
+  static kj::Rc<HibernatableTransport> getOnlyTransport(LegacyHibernationManagerImpl& manager) {
+    return getOnlyWebSocket(manager).transport.addRef();
+  }
+
  private:
   static LegacyHibernationManagerImpl::HibernatableWebSocket& getOnlyWebSocket(
       LegacyHibernationManagerImpl& manager) {
@@ -1285,6 +1289,32 @@ KJ_TEST("HibernationManager: eyeball close dispatches webSocketClose to worker")
 
   KJ_ASSERT(stats.customEventCalls == 1, "expected exactly one customEvent dispatch",
       stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: a WebSocket counts what it received since its transport attached") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("transport-count")));
+  auto hm = makeTestHm(fixture);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+  auto transport = LegacyHibernationManagerTestAccess::getOnlyTransport(
+      kj::downcast<LegacyHibernationManagerImpl>(*hm));
+
+  end1->send("before"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_EXPECT(transport->getConsumedCount() == 1, transport->getConsumedCount());
+
+  // Attaching a transport restarts the count.
+  transport->attach(kj::none);
+  KJ_EXPECT(transport->getConsumedCount() == 0);
+
+  // A Close counts too.
+  end1->send("after"_kj).wait(fixture.getWaitScope());
+  end1->close(1000, "bye"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+  KJ_EXPECT(transport->getConsumedCount() == 2, transport->getConsumedCount());
 
   fixture.drainAndDestroy(kj::mv(request));
 }

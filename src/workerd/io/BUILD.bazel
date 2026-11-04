@@ -108,6 +108,7 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "async-trace-promises.h",
+        "hibernation-handoff.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",

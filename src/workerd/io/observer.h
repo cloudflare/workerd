@@ -12,9 +12,14 @@
 #include <workerd/util/sqlite.h>
 #include <workerd/util/strong-bool.h>
 
+#include <kj/async.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
+
+namespace kj {
+class HttpHeaders;
+}
 
 namespace workerd {
 
@@ -76,6 +81,47 @@ class WebSocketObserver: public kj::Refcounted {
   virtual void receivedMessage(size_t bytes) {};
 };
 
+// The embedder's handle to the transport that carries a hibernatable WebSocket between a Durable
+// Object and its client. An embedder that can move such a socket to another process supplies one
+// per request through RequestObserver::tryTakeWebSocketTransportHandle().
+class HibernatableTransportHandle {
+ public:
+  virtual ~HibernatableTransportHandle() noexcept(false) = default;
+
+  // Holds a pause. Dropping it before the transport ends resumes the transport.
+  class PauseLease {
+   public:
+    virtual ~PauseLease() noexcept(false) = default;
+
+    // Call once the Durable Object's side has sent what the pause's token says ends the
+    // transport. Resolves to true once the transport has ended there, or to false if the pause
+    // ended first, in which case the client got what was sent instead.
+    virtual kj::Promise<bool> confirmEnded() = 0;
+  };
+
+  struct Pause {
+    // Messages, including Close, that the transport has sent toward the Durable Object since it was
+    // attached to the socket.
+    uint64_t sentCount;
+
+    // Chosen by the transport for this pause. The embedder uses it to tell the transport where its
+    // part of the connection ends.
+    kj::Array<kj::byte> token;
+
+    // How much longer the pause can last. Once this much time has passed since pause() resolved,
+    // the transport may resume on its own, even while `lease` is held, and then messages sent
+    // after `sentCount` may reach the socket.
+    kj::Duration timeLimit;
+
+    kj::Own<PauseLease> lease;
+  };
+
+  // Stops the transport from sending client messages toward the Durable Object, and resolves once
+  // none is still on its way. Fails if the transport is already paused, no longer carries the
+  // socket, or has carried a Close in either direction, and if the pause ends while it waits.
+  virtual kj::Promise<Pause> pause() = 0;
+};
+
 // Observes a byte stream. Byte streams which use instances of this observer should call enqueue()
 // and dequeue() once for each chunk that passes through the stream. The order of enqueues should
 // match the order of dequeues.
@@ -124,6 +170,18 @@ class RequestObserver: public kj::Refcounted {
   virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() {
     return kj::none;
   };
+
+  // Called when the request's response is about to carry the client end of a WebSocket whose
+  // other end a Durable Object accepted as hibernatable, before the response is sent. An embedder
+  // that can move the socket to another process returns the handle of the transport carrying this
+  // response, and the socket keeps it for as long as that transport serves it. The embedder may
+  // change `responseHeaders` in the same call, for example to tell what receives the response
+  // that the WebSocket can move, so the headers and the handle always agree. Called at most once
+  // per request.
+  virtual kj::Maybe<kj::Own<HibernatableTransportHandle>> tryTakeWebSocketTransportHandle(
+      kj::HttpHeaders& responseHeaders) {
+    return kj::none;
+  }
 
   // This is called when a writable byte stream is created whilst processing this request. It will
   // be destroyed when the corresponding byte stream is destroyed.
