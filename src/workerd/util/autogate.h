@@ -82,9 +82,6 @@ namespace workerd::util {
      related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by           \
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
-  /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
-     tokens and receivers claim them. */                                                           \
-  V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
