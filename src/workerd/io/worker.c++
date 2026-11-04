@@ -1908,7 +1908,11 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       if (terminatedRaw >= 0) {
         terminatedOffset = static_cast<uint32_t>(terminatedRaw);
       }
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto backingStore = memory->GetBuffer()->GetBackingStore();
+#else
       auto backingStore = memory->Buffer()->GetBackingStore();
+#endif
       auto wasmMemory =
           kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
               .attach(kj::mv(backingStore));
@@ -4953,11 +4957,21 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
+  }
   // Cross-context actions queued while the actor was idle are dropped rather than run with the
   // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
   // start. Those queued once its request is current still run, since the handler may await them.
   incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
+
+  // A call canceled before the handler settles, e.g. by abort(), never reaches the reports below.
+  bool reported = false;
+  KJ_DEFER(if (!reported) {
+    observerRef.reportOnHibernateOutcome(EventOutcome::CANCELED);
+    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
+  });
 
   {
     // Nothing may run in the actor after its handler, including during the flush below. The
@@ -4983,6 +4997,10 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     }
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);
+    reported = true;
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setReturn(context.now());
+    }
   }
 
   // The writes the handler made must be flushed before a successor can read storage. A failed

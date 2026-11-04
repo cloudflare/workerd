@@ -21,8 +21,6 @@
 //!    makes the references traced.
 //! 4. Move to a fresh context (global is gone) → GC must collect parent and all children.
 
-use std::cell::Cell;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -44,13 +42,13 @@ static LEAF_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct Leaf {
     pub value: u32,
     /// The wrapper of the leaf's parent, which makes a cycle through the parent's field.
-    owner: RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    owner: jsg::RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 fn leaf(value: u32) -> jsg::Rc<Leaf> {
     jsg::Rc::new(Leaf {
         value,
-        owner: RefCell::new(None),
+        owner: jsg::RefCell::new(None),
     })
 }
 
@@ -62,7 +60,7 @@ fn keep_owner<'a>(
 ) {
     for leaf in leaves {
         let owner = jsg::v8::TracedGlobal::new(lock, owner);
-        *leaf.owner.borrow_mut() = Some(owner);
+        *leaf.owner.borrow_mut(lock) = Some(owner);
     }
 }
 
@@ -573,14 +571,14 @@ fn dict_rc_values_kept_alive_through_gc() {
 }
 
 // =============================================================================
-// Cell<Vec<jsg::Rc<T>>>
+// jsg::Cell<Vec<jsg::Rc<T>>>
 // =============================================================================
 
 static CELL_VEC_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct CellVecParent {
-    pub children: Cell<Vec<jsg::Rc<Leaf>>>,
+    pub children: jsg::Cell<Vec<jsg::Rc<Leaf>>>,
 }
 
 impl Drop for CellVecParent {
@@ -604,7 +602,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
         let c2 = leaf(22);
 
         let parent = jsg::Rc::new(CellVecParent {
-            children: Cell::new(vec![c1.clone(), c2.clone()]),
+            children: jsg::Cell::new(vec![c1.clone(), c2.clone()]),
         });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&c1, &c2]);
@@ -636,7 +634,7 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(CellVecParent {
-            children: Cell::new(vec![]),
+            children: jsg::Cell::new(vec![]),
         });
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
@@ -655,14 +653,14 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
 }
 
 // =============================================================================
-// Cell<HashMap<K, jsg::Rc<T>>>
+// jsg::Cell<HashMap<K, jsg::Rc<T>>>
 // =============================================================================
 
 static CELL_MAP_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 #[jsg_resource]
 struct CellHashMapParent {
-    pub children: Cell<HashMap<String, jsg::Rc<Leaf>>>,
+    pub children: jsg::Cell<HashMap<String, jsg::Rc<Leaf>>>,
 }
 
 impl Drop for CellHashMapParent {
@@ -688,7 +686,7 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
         map.insert("m".to_owned(), m.clone());
 
         let parent = jsg::Rc::new(CellHashMapParent {
-            children: Cell::new(map),
+            children: jsg::Cell::new(map),
         });
         let wrapped = parent.clone().to_js(lock)?;
         keep_owner(lock, wrapped, [&m]);

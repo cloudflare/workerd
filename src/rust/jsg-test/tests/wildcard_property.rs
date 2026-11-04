@@ -5,10 +5,8 @@
 //! `#[jsg_wildcard_property]` behaves as C++ JSG's `JSG_WILDCARD_PROPERTY`. The first test
 //! mirrors the "Named interceptor" test in `src/workerd/jsg/jsg-test.c++` case for case.
 
-use std::cell::RefCell;
-
 use jsg::ExceptionType;
-use jsg::Member;
+use jsg::MemberRegistry;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
@@ -65,7 +63,7 @@ impl Echo {
 /// new error, as an error that replaces whatever the call threw.
 #[jsg_resource]
 struct Caller {
-    callback: RefCell<Option<v8::TracedGlobal<v8::Function>>>,
+    callback: jsg::RefCell<Option<v8::TracedGlobal<v8::Function>>>,
 }
 
 #[jsg_resource]
@@ -78,7 +76,7 @@ impl Caller {
     ) -> Result<(), jsg::Error> {
         let callback = v8::Local::<v8::Function>::try_from(callback)
             .map_err(|_| jsg::Error::new_type_error("not a function"))?;
-        *self.callback.borrow_mut() = Some(v8::TracedGlobal::new(lock, callback));
+        *self.callback.borrow_mut(lock) = Some(v8::TracedGlobal::new(lock, callback));
         Ok(())
     }
 
@@ -144,11 +142,11 @@ impl Versioned {
 }
 
 impl Resource for Versioned {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         if flags.get_cache_option_enabled() {
-            vec![Self::get_new_member()]
+            registry.add(Self::get_new_member());
         } else {
-            vec![Self::get_old_member()]
+            registry.add(Self::get_old_member());
         }
     }
 }
@@ -410,7 +408,7 @@ fn error_does_not_replace_termination() {
                 lock,
                 "caller",
                 jsg::Rc::new(Caller {
-                    callback: RefCell::new(None),
+                    callback: jsg::RefCell::new(None),
                 }),
             );
             ctx.set_global(lock, "panicker", panicker());

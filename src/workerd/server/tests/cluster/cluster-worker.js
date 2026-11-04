@@ -41,8 +41,6 @@
 //                    separated by commas, creating the facets on the way.
 //   /facet-delete?path=P
 //                    Deletes the facet at P with its descendants.
-//   /facet-clone     Clones the facet named first in `path` onto the second.
-//   /delete-all      Deletes all of this DO's storage, its facets' too.
 //   /arm-constructor-failure
 //                    Sets a storage flag that makes the *next* instantiation of
 //                    this DO throw from its constructor (the flag is cleared and
@@ -73,6 +71,8 @@
 // waits that long *before* calling the DO. This lets a test put a request in
 // flight on a node and SIGTERM that node while the request has not yet routed
 // to the DO's owner.
+//
+// Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
 
 import {
   DurableObject,
@@ -84,6 +84,9 @@ import {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/on-hibernate/')) {
+      return env.ON_HIBERNATE.fetch(request);
+    }
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
@@ -332,13 +335,6 @@ export class Counter extends DurableObject {
       } else {
         await tally(this.ctx, name).remove(rest);
       }
-      return Response.json({ nodeId, id: idHex });
-    } else if (url.pathname === '/facet-clone') {
-      const [src, dst] = url.searchParams.get('path').split(',');
-      this.ctx.facets.clone(src, dst);
-      return Response.json({ nodeId, id: idHex });
-    } else if (url.pathname === '/delete-all') {
-      await this.state.storage.deleteAll();
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/break') {
       this.state.abort('broken on purpose');

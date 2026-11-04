@@ -48,6 +48,12 @@ impl<'s> ToJS<'s> for Unconvertible {
     }
 }
 
+impl jsg::TypeInfo for Unconvertible {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
+
 impl<'s> jsg::FromJS<'s> for Unconvertible {
     type ResultType = Self;
 

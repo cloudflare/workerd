@@ -1,6 +1,18 @@
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro", "rust_test")
 load("//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
+# rustc rejects proc-macro crates built with -Zsanitizer (rust-lang/rust#160585), and the ASan and
+# TSan configs pass it to every Rust crate built for the target platform. Proc macros run inside
+# rustc, so their dependents build them for the exec platform, which has no sanitizer. Only a
+# top-level build, such as of `//...`, builds one for the target platform, so under a sanitizer
+# that build and the macro's own tests are skipped. The constraints are the root repository's,
+# which must define them as workerd does.
+PROC_MACRO_TARGET_COMPATIBLE_WITH = select({
+    "@//build/platforms:sanitizer_address": ["@platforms//:incompatible"],
+    "@//build/platforms:sanitizer_thread": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
 def wd_rust_proc_macro(
         name,
         deps = [],
@@ -31,6 +43,7 @@ def wd_rust_proc_macro(
         visibility = visibility,
         data = data,
         lint_config = "@workerd//build/rust:lints",
+        target_compatible_with = PROC_MACRO_TARGET_COMPATIBLE_WITH,
     )
 
     rust_test(

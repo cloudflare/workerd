@@ -325,7 +325,7 @@ static CYCLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// Data that can hold a handle back to its own function.
 struct CycleData {
     _drops: DropCounter,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for CycleData {
@@ -340,10 +340,10 @@ fn cycle_through_data_is_collected() {
     harness.run_in_context(|lock, ctx| {
         let data = CycleData {
             _drops: DropCounter(&CYCLE_DROPS),
-            stored: RefCell::new(None),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();
@@ -395,7 +395,7 @@ static TEARDOWN_LEAF_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct TeardownData {
     _drops: DropCounter,
     leaf: jsg::Rc<Leaf>,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for TeardownData {
@@ -416,10 +416,10 @@ fn data_of_reachable_function_is_dropped_with_its_isolate() {
             leaf: jsg::Rc::new(Leaf {
                 _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
             }),
-            stored: RefCell::new(None),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();

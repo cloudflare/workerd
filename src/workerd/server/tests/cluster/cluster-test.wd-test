@@ -27,9 +27,28 @@ const config :Workerd.Config = (
         bindings = [
           ( name = "COUNTER", durableObjectNamespace = "Counter" ),
           ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+          ( name = "ON_HIBERNATE", service = "on-hibernate" ),
         ],
         durableObjectNamespaces = [
           ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+
+    ( name = "on-hibernate",
+      worker = (
+        modules = [
+          ( name = "cluster-on-hibernate-worker.js",
+            esModule = embed "cluster-on-hibernate-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental", "unsafe_module"],
+        bindings = [
+          ( name = "SLEEPER", durableObjectNamespace = "Sleeper" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Sleeper", uniqueKey = "on-hibernate-test-namespace" ),
         ],
         durableObjectStorage = ( localDisk = "local" ),
       )

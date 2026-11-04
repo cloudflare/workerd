@@ -30,6 +30,7 @@ use crate::UnionMember;
 use crate::UnionTypes;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
+use crate::rtti;
 use crate::v8;
 use crate::v8::ffi::Wrappable;
 
@@ -52,11 +53,13 @@ use crate::v8::ffi::Wrappable;
 ///   declaration order.
 ///
 /// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
-/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
-/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
-/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
-/// `README.md` §Safety rules, rule 2, and
-/// <https://github.com/cloudflare/workerd/issues/7976>.
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved
+/// out of the field by a bitwise move is then neither strong nor traced, unlike a moved C++
+/// `jsg::Ref`, whose move constructor makes it strong again. So a field that an `Rc` is moved
+/// out of is a [`crate::Cell`] or [`crate::RefCell`], which make it strong before it leaves
+/// the cell, as [`v8::GcVisitor::is_detaching`] describes; `std::cell::Cell` and
+/// `std::cell::RefCell` are not `Traced` for types that hold an `Rc`. See `README.md` §Safety
+/// rules, rule 2, and <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,
@@ -120,6 +123,16 @@ impl<R: Resource> Rc<R> {
         );
     }
 
+    /// Makes this `Rc` strong again and forgets its parent, as moving a C++ `jsg::Ref` does; see
+    /// [`v8::GcVisitor::is_detaching`].
+    pub(crate) fn detach(&self) {
+        if !self.strong.get() {
+            self.wrappable.add_strong_ref();
+            self.strong.set(true);
+        }
+        self.parent.set(None);
+    }
+
     /// Creates a [`Weak`] reference to this resource.
     ///
     /// The weak reference does not prevent GC collection. Use
@@ -159,7 +172,7 @@ impl<R: Resource> Deref for Rc<R> {
 
 impl<R: Resource> Clone for Rc<R> {
     fn clone(&self) -> Self {
-        let mut wrappable = self.wrappable.clone();
+        let wrappable = self.wrappable.clone();
         wrappable.add_strong_ref();
         Self {
             handle: std::rc::Rc::clone(&self.handle),
@@ -220,7 +233,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self>, Error> {
-        let Some(mut wrappable) = v8::WrappableRc::from_js(lock, value) else {
+        let Some(wrappable) = v8::WrappableRc::from_js(lock, value) else {
             return Ok(None);
         };
         let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
@@ -322,7 +335,7 @@ impl<R: Resource> Weak<R> {
         // is alive too (the Wrappable's Rc clone keeps the resource alive, which
         // means the Wrappable must still exist — its destruction via std::rc::Rc::from_raw
         // would have released the Rc and thus the resource).
-        let mut wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
+        let wrappable = unsafe { v8::WrappableRc::from_raw_wrappable(wrappable_ptr.as_ptr()) };
         wrappable.add_strong_ref();
         Some(Rc {
             handle,
@@ -365,6 +378,8 @@ impl<R: Resource> Traced for Weak<R> {
     }
 }
 
+impl<R: Resource> crate::HoldsNoGcReferences for Weak<R> {}
+
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.
@@ -397,7 +412,7 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// **Prototype**: The returned object's prototype is set up from the resource's
 /// [`FunctionTemplate`], which includes all `#[jsg_method]` instance methods and
-/// `#[jsg_static_constant]` values registered via [`Resource::members(flags)`](Resource::members).
+/// `#[jsg_static_constant]` values registered via [`Resource::members`].
 ///
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
@@ -487,7 +502,17 @@ pub unsafe fn ffi_is<R: Resource + 'static>(
     .into()
 }
 
-/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
+/// The registry through which template creation collects the members of a resource type.
+struct TemplateMembers(Vec<Member>);
+
+impl MemberRegistry for TemplateMembers {
+    fn add(&mut self, member: impl MemberDefinition) {
+        self.0.push(member.into_member());
+    }
+}
+
+/// Builds a [`ResourceDescriptor`] from the members that `R`'s
+/// [`Resource::members`] registers under `flags`.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
@@ -510,7 +535,9 @@ fn get_resource_descriptor<R: Resource>(
         wildcard_property: KjMaybe::None,
     };
 
-    for m in R::members(flags) {
+    let mut members = TemplateMembers(Vec::new());
+    R::members(&mut members, flags);
+    for m in members.0 {
         match m {
             Member::Constructor { callback, length } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
@@ -658,14 +685,16 @@ pub struct NestedType {
         compatibility_flags::Reader<'f>,
         &mut Nesting,
     ) -> &'a v8::Global<v8::FunctionTemplate>,
+    describe: fn(&mut rtti::Context) -> &'static str,
 }
 
 impl NestedType {
     /// The nested type `R`.
     #[must_use]
-    pub fn of<R: Resource>() -> Self {
+    pub fn of<R: Resource + rtti::TypeInfo>() -> Self {
         Self {
             template: Resources::get_nested_constructor::<R>,
+            describe: rtti::Context::describe_structure::<R>,
         }
     }
 }
@@ -767,22 +796,119 @@ impl Resources {
     }
 }
 
+/// Receives the members that [`Resource::members`] registers.
+///
+/// Template creation collects each member's callbacks, while RTTI export collects its
+/// JavaScript type description, so both follow the same registration code, like the
+/// `Registry` parameter of C++ `registerMembers`.
+pub trait MemberRegistry {
+    fn add(&mut self, member: impl MemberDefinition);
+}
+
+/// A member that [`Resource::members`] can register: the result of a generated member factory,
+/// a [`nested_type`], or an [`undescribed`] member built by hand.
+pub trait MemberDefinition {
+    /// Builds the member for template creation.
+    fn into_member(self) -> Member;
+
+    /// Describes the member for RTTI, or returns `None` if the member has no TypeScript
+    /// declaration.
+    fn describe(self, cx: &mut rtti::Context) -> Option<rtti::Member>;
+}
+
+/// A member that RTTI omits from the TypeScript declarations; see [`undescribed`].
+pub struct Undescribed(Member);
+
+/// Registers `member`, which is built by hand, without a TypeScript declaration.
+pub fn undescribed(member: Member) -> Undescribed {
+    Undescribed(member)
+}
+
+impl MemberDefinition for Undescribed {
+    fn into_member(self) -> Member {
+        self.0
+    }
+
+    fn describe(self, _cx: &mut rtti::Context) -> Option<rtti::Member> {
+        None
+    }
+}
+
+/// A nested resource type, which describes itself; see [`nested_type`].
+pub struct NestedTypeMember {
+    name: String,
+    nested_type: NestedType,
+}
+
+/// Registers the resource type `R` as a nested type, exposed as a constructor property named
+/// `name`.
+pub fn nested_type<R: Resource + rtti::TypeInfo>(name: impl Into<String>) -> NestedTypeMember {
+    NestedTypeMember {
+        name: name.into(),
+        nested_type: NestedType::of::<R>(),
+    }
+}
+
+impl MemberDefinition for NestedTypeMember {
+    fn into_member(self) -> Member {
+        Member::NestedType {
+            name: self.name,
+            nested_type: self.nested_type,
+        }
+    }
+
+    fn describe(self, cx: &mut rtti::Context) -> Option<rtti::Member> {
+        Some(rtti::Member::Nested {
+            name: self.name,
+            identity: (self.nested_type.describe)(cx),
+        })
+    }
+}
+
+/// A member definition that builds the member and describes its type on demand. Template
+/// creation never runs the description, and RTTI export never builds the member.
+pub struct DescribedMember<M, D> {
+    member: M,
+    describe: D,
+}
+
+/// Returns a member definition built by `member` and described by `describe`.
+pub fn described_member<M, D>(member: M, describe: D) -> DescribedMember<M, D>
+where
+    M: FnOnce() -> Member,
+    D: FnOnce(&mut rtti::Context) -> rtti::Member,
+{
+    DescribedMember { member, describe }
+}
+
+impl<M, D> MemberDefinition for DescribedMember<M, D>
+where
+    M: FnOnce() -> Member,
+    D: FnOnce(&mut rtti::Context) -> rtti::Member,
+{
+    fn into_member(self) -> Member {
+        (self.member)()
+    }
+
+    fn describe(self, cx: &mut rtti::Context) -> Option<rtti::Member> {
+        Some((self.describe)(cx))
+    }
+}
+
 /// Rust types exposed to JavaScript as resource types.
 ///
 /// Resource types are passed by reference and call back into Rust when JavaScript accesses
 /// their members. This is analogous to `JSG_RESOURCE_TYPE` in C++ JSG. Resources must provide
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type + GarbageCollected + Sized + 'static {
-    /// Returns the list of methods, properties, and constructors exposed to JavaScript.
+    /// Registers the methods, properties, and constructors exposed to JavaScript.
     ///
-    /// `flags` are the compatibility flags of the isolate the template is built for, so the
-    /// member list can vary with them, as with the `CompatibilityFlags::Reader flags`
-    /// parameter of C++ `JSG_RESOURCE_TYPE`. Templates are cached per resource type in the realm.
-    /// Use `#[jsg_resource(custom_members)]` to generate member factories while supplying
-    /// this implementation yourself.
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member>
-    where
-        Self: Sized;
+    /// `flags` are the compatibility flags of the isolate the template is built for, or of the
+    /// RTTI export, so the members can vary with them, as with the
+    /// `CompatibilityFlags::Reader flags` parameter of C++ `JSG_RESOURCE_TYPE`. Templates are
+    /// cached per resource type in the realm. Use `#[jsg_resource(custom_members)]` to generate
+    /// member factories while supplying this implementation yourself.
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>);
 }
 
 #[cfg(test)]

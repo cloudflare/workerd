@@ -6,7 +6,7 @@ at context creation, before any user code. C++ entry point:
 
 ## EXECUTION MODEL
 
-- Scripts are compiled as functions with a context-extension object — the
+- Scripts are compiled as functions whose parameters are the
   pseudo-globals `require`, `module`, `exports`, `compatFlags`,
   `autogates`, `primordials`, `utils` are in scope but NOT on
   `globalThis` (see `per_isolate-env.d.ts`).
@@ -22,6 +22,8 @@ at context creation, before any user code. C++ entry point:
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`.
+- EventTarget subclasses reach the (still C++) EventTarget they extend only
+  through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
@@ -49,10 +51,12 @@ at context creation, before any user code. C++ entry point:
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
-- C++/bootstrap-only markers and extraction hooks use `utils.setPrivate` /
-  `utils.getPrivate`, backed by `v8::Private::ForApi`. Labels are strings;
-  the properties are neither reflected nor inherited. Ordinary symbols,
-  including `getApiSymbol` results, are reflection-visible and are not secrets.
+- C++/bootstrap-only markers and extraction hooks are V8-private
+  properties, keyed by `utils.getPrivateSymbol(name)` (`v8::Private::ForApi`)
+  and read and written as `object[key]`; C++ reaches them by the same name.
+  The properties are neither reflected nor inherited, and the keys must stay
+  in module scope. Ordinary symbols, including `getApiSymbol` results, are
+  reflection-visible and are not secrets.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as
@@ -199,9 +203,21 @@ path, and the same pollution breaks the user's own code in every engine:
   through the C++ bridge, which resolves a null-prototype record (see
   KEY RULES in `webstreams/AGENTS.md`).
 
-Internal-only records should still be null-prototype
-(`{ __proto__: null, ... }`) wherever nothing requires the
-`Object.prototype` chain.
+Internal-only records should still be null-prototype wherever nothing
+requires the `Object.prototype` chain. How depends on how often the record
+is made:
+
+- Made once (module scope, a frozen constant): an object literal,
+  `{ __proto__: kNullProtoObject, ... }`. Avoid `{ __proto__: null, ... }`,
+  which creates a dictionary-mode object with slow properties.
+- Made per chunk, per operation or per stream, and never reachable by user
+  code: an instance of a class passed through `nullPrototypeRecord`
+  (`webstreams/common.ts`), whose constructor sets every member. Any
+  object literal with a `__proto__` member sets its prototype with a
+  runtime call each time it is evaluated, about 20 times the cost of a
+  plain literal or a class instance.
+- With constant contents, however often it is used: hoist one frozen
+  module-level constant instead of making it each time.
 
 ### Never expose primordials to user code
 

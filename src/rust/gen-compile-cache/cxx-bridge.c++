@@ -56,8 +56,9 @@ State& getState(::rust::Slice<const ::rust::String> v8Flags) {
   return state;
 }
 
-// For scripts the runtime loads via CompileFunction with one context extension (see
-// per-isolate-bootstrap.c++). The extension count must match the consumer.
+// For scripts the runtime loads via CompileFunction with the pseudo-global parameters (see
+// PSEUDO_GLOBAL_NAMES in per-isolate-bootstrap.c++). The parameter list must match the
+// consumer's.
 //
 // TODO(cormick): Only the top-level wrapper is compiled here (everything, with `eager`), so inner
 // functions are still lazily compiled per isolate. Executing the scripts first would need the
@@ -68,9 +69,21 @@ v8::ScriptCompiler::CachedData* compileAsFunction(jsg::Lock& js,
     v8::ScriptCompiler::CompileOptions compileOptions) {
   v8::ScriptOrigin origin(resourceName);
   auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
-  v8::Local<v8::Object> ext = v8::Object::New(js.v8Isolate);
+  static constexpr kj::StringPtr PSEUDO_GLOBAL_NAMES[] = {
+    "require"_kj,
+    "compatFlags"_kj,
+    "autogates"_kj,
+    "module"_kj,
+    "exports"_kj,
+    "primordials"_kj,
+    "utils"_kj,
+  };
+  v8::Local<v8::String> params[kj::size(PSEUDO_GLOBAL_NAMES)];
+  for (auto i: kj::indices(params)) {
+    params[i] = js.strIntern(PSEUDO_GLOBAL_NAMES[i]);
+  }
   auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-      js.v8Context(), &source, 0, nullptr, 1, &ext, compileOptions));
+      js.v8Context(), &source, kj::size(params), params, 0, nullptr, compileOptions));
   return v8::ScriptCompiler::CreateCodeCacheForFunction(fn);
 }
 

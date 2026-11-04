@@ -690,10 +690,15 @@ type DurableObjectRoutingMode = "primary-only";
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
   routingMode?: DurableObjectRoutingMode;
+  retry?: DurableObjectRetryOptions;
 }
 interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
+interface DurableObjectRetryOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
@@ -16186,6 +16191,12 @@ interface JsonWebKeyWithKid extends JsonWebKey {
 }
 interface RateLimitOptions {
   key: string;
+  /**
+   * Amount to add to the counter for this call. Must be a positive integer;
+   * defaults to `1`. The call is allowed while the counter is below the limit,
+   * even if `delta` takes it past the limit.
+   */
+  delta?: number;
 }
 interface RateLimitOutcome {
   success: boolean;

@@ -677,12 +677,6 @@ export type DurableObjectJurisdiction =
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
-export interface DurableObjectClass<
-  _T extends Rpc.DurableObjectBranded | undefined = undefined,
-> {}
-export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
-  cohort?: string;
-}
 export type DurableObjectLocationHint =
   | "wnam"
   | "enam"
@@ -703,6 +697,12 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
     cohort?: string;
   };
   retry?: DurableObjectRetryOptions;
+}
+export interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
 }
 export interface DurableObjectRetryOptions {
   maxRetries?: number;
@@ -16462,6 +16462,12 @@ export interface JsonWebKeyWithKid extends JsonWebKey {
 }
 export interface RateLimitOptions {
   key: string;
+  /**
+   * Amount to add to the counter for this call. Must be a positive integer;
+   * defaults to `1`. The call is allowed while the counter is below the limit,
+   * even if `delta` takes it past the limit.
+   */
+  delta?: number;
 }
 export interface RateLimitOutcome {
   success: boolean;

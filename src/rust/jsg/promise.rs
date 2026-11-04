@@ -10,8 +10,6 @@
     reason = "settles and reacts to promises through the V8 FFI"
 )]
 
-use std::cell::RefCell;
-
 use crate::Error;
 use crate::FromJS;
 use crate::Lock;
@@ -20,6 +18,7 @@ use crate::UnitType;
 use crate::v8::Function;
 use crate::v8::FunctionCallbackInfo;
 use crate::v8::Local;
+use crate::v8::Object;
 use crate::v8::PromiseState;
 use crate::v8::Value;
 use crate::v8::ffi;
@@ -37,8 +36,8 @@ use crate::v8::ffi;
 /// is true, as [`Local::<Function>::call`] does, so that returning it propagates the exception.
 ///
 /// The handles are untyped, like C++ JSG's `JsPromise`: values are JavaScript values, converted
-/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. C++ JSG's typed `jsg::Promise<T>`,
-/// which can carry C++ values through JavaScript, has no counterpart.
+/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. The counterpart of C++ JSG's typed
+/// `jsg::Promise<T>`, which carries Rust values, is [`jsg::Promise`](crate::Promise).
 pub struct Promise;
 
 /// Marker for a `v8::Promise::Resolver` handle: the capability to settle one promise.
@@ -176,7 +175,7 @@ impl Promise {
 /// The data of a promise's reactions, which the first of them to run drops once it returns, as
 /// C++ JSG drops a `ThenCatchPair`: a promise settles once, so the other can no longer run. Until
 /// then, the garbage collector traces it through the reactions.
-struct ReactionData<T>(RefCell<Option<T>>);
+struct ReactionData<T>(crate::RefCell<Option<T>>);
 
 impl<T: Traced> Traced for ReactionData<T> {
     fn holds_gc_references() -> bool {
@@ -212,7 +211,7 @@ where
         None => unreachable!("a promise reaction ran after another reaction to the promise"),
     };
     // Dropped after the borrow ends, so that what its drop does cannot find the cell borrowed.
-    let data = data.0.borrow_mut().take();
+    let data = data.0.borrow_mut(lock).take();
     drop(data);
     result
 }
@@ -274,6 +273,13 @@ impl<'s> Local<'s, Promise> {
     pub fn mark_as_handled(self) {
         // SAFETY: self is a valid promise handle.
         unsafe { ffi::local_promise_mark_as_handled(self.raw()) }
+    }
+
+    /// Whether the promise has a reaction or was marked as handled, so that its rejection is not
+    /// reported as unhandled.
+    pub fn has_handler(self) -> bool {
+        // SAFETY: self is a valid promise handle.
+        unsafe { ffi::local_promise_has_handler(self.raw()) }
     }
 
     /// Registers `on_fulfilled` to run when the promise is fulfilled, like
@@ -372,7 +378,7 @@ impl<'s> Local<'s, Promise> {
     {
         self.debug_assert_isolate(lock);
         let _ = (on_fulfilled, on_rejected);
-        let data = ReactionData(RefCell::new(Some(data)));
+        let data = ReactionData(crate::RefCell::new(Some(data)));
         let [on_fulfilled, on_rejected] =
             Function::new_sharing_data(lock, data, [reaction::<T, F>(), reaction::<T, R>()])?;
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; all three
@@ -396,6 +402,57 @@ impl<'s> FromJS<'s> for Local<'s, Promise> {
     /// a promise resolved with it; see [`Promise::resolved`].
     fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
         Promise::resolved(lock, value)
+    }
+
+    fn type_name() -> String {
+        "Promise".to_owned()
+    }
+}
+
+/// A promise for nothing, which converts from JavaScript as C++ JSG converts a
+/// `jsg::Promise<void>` argument. A `kj::Promise<void>` argument, such as `ctx.waitUntil()`
+/// takes, converts the same way.
+///
+/// A promise is taken as is. A thenable (an object with a `then` property) is followed, as
+/// [`Promise::resolved`] follows it, only if the `unwrap_custom_thenables` compatibility flag is
+/// on. Any other value, including a thenable when the flag is off, becomes a promise resolved
+/// with `undefined`; the value is ignored.
+///
+/// [`FromJS`] for `Local<Promise>` instead follows every thenable, whatever the flag, keeping
+/// the value, as C++ JSG does for other promise types. As in C++ JSG, a `VoidPromise` argument
+/// may not be omitted, but may be `undefined`, and is called `Promise` in argument errors.
+#[derive(Clone, Copy)]
+pub struct VoidPromise<'s>(Local<'s, Promise>);
+
+impl<'s> From<VoidPromise<'s>> for Local<'s, Promise> {
+    fn from(promise: VoidPromise<'s>) -> Self {
+        promise.0
+    }
+}
+
+impl<'s> FromJS<'s> for VoidPromise<'s> {
+    type ResultType = Self;
+
+    /// Checks for a thenable's `then` with `in` before following it, as C++ JSG does, which a
+    /// Proxy's `has` trap can observe.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy's `has` trap throws, or V8 fails (see [`Promise`]), the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true. A `then` getter
+    /// that throws rejects the promise instead, as for [`Local::resolve`].
+    fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
+        if let Ok(promise) = Local::<Promise>::try_from(value) {
+            return Ok(Self(promise));
+        }
+        if lock.feature_flags().get_unwrap_custom_thenables()
+            && let Ok(object) = Local::<Object>::try_from(value)
+            && object.has(lock, "then")?
+        {
+            return Promise::resolved(lock, value).map(Self);
+        }
+        let undefined = lock.undefined();
+        Promise::resolved(lock, undefined).map(Self)
     }
 
     fn type_name() -> String {

@@ -110,6 +110,7 @@ impl<'a> Union<'a> {
         let from_js_impl = self.generate_from_js(input);
         let traced_impl = self.generate_traced(input);
         let to_js_impl = self.generate_to_js(input);
+        let type_info_impl = self.generate_type_info(input);
         quote! {
             #input
             #checks
@@ -117,6 +118,7 @@ impl<'a> Union<'a> {
             #from_js_impl
             #traced_impl
             #to_js_impl
+            #type_info_impl
         }
     }
 
@@ -295,9 +297,35 @@ impl<'a> Union<'a> {
                 #(#inner_types: jsg::ToJS<#s>,)*
             {
                 fn to_js(self, lock: &mut jsg::Lock<#s>) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
+                    jsg::ToJS::to_js_with_creator(self, lock, None)
+                }
+
+                fn to_js_with_creator(
+                    self,
+                    lock: &mut jsg::Lock<#s>,
+                    creator: Option<jsg::v8::Local<#s, jsg::v8::Object>>,
+                ) -> Result<jsg::v8::Local<#s, jsg::v8::Value>, jsg::Error> {
                     match self {
-                        #(Self::#variant_names(value) => jsg::ToJS::to_js(value, lock),)*
+                        #(Self::#variant_names(value) => jsg::ToJS::to_js_with_creator(value, lock, creator),)*
                     }
+                }
+            }
+        }
+    }
+
+    /// `jsg::TypeInfo`, which describes the union as its variants' types, as C++ RTTI describes
+    /// a `kj::OneOf`.
+    fn generate_type_info(&self, input: &DeriveInput) -> proc_macro2::TokenStream {
+        let self_type = self.self_type(input);
+        let lifetime = self.lifetime.into_iter();
+        let inner_types = &self.inner_types;
+        quote! {
+            #[automatically_derived]
+            impl<#(#lifetime)*> jsg::TypeInfo for #self_type {
+                fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+                    jsg::rtti::Type::OneOf(vec![
+                        #(<#inner_types as jsg::TypeInfo>::describe(cx)),*
+                    ])
                 }
             }
         }
