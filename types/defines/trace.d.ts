@@ -28,6 +28,11 @@ interface AlarmEventInfo {
   readonly scheduledTime: Date;
 }
 
+interface OnHibernateEventInfo {
+  readonly type: "onHibernate";
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
+
 interface QueueEventInfo {
   readonly type: "queue";
   readonly queueName: string;
@@ -109,8 +114,8 @@ interface Onset {
   readonly scriptVersion?: ScriptVersion;
   readonly preview?: TracePreviewInfo;
   readonly info: FetchEventInfo | ConnectEventInfo | JsRpcEventInfo |
-                 ScheduledEventInfo | AlarmEventInfo | QueueEventInfo |
-                 EmailEventInfo | TraceEventInfo |
+                 ScheduledEventInfo | AlarmEventInfo | OnHibernateEventInfo |
+                 QueueEventInfo | EmailEventInfo | TraceEventInfo |
                  HibernatableWebSocketEventInfo | CustomEventInfo;
 }
 
@@ -266,6 +271,7 @@ type TailEventHandlerObject = {
   diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
   exception?: TailEventHandler<Exception>;
   log?: TailEventHandler<Log>;
+  streamDiagEvent?: TailEventHandler<StreamDiagnostic>;
   return?: TailEventHandler<Return>;
   attributes?: TailEventHandler<Attributes>;
 };

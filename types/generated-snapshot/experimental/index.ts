@@ -677,12 +677,6 @@ export type DurableObjectJurisdiction =
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
-export interface DurableObjectClass<
-  _T extends Rpc.DurableObjectBranded | undefined = undefined,
-> {}
-export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
-  cohort?: string;
-}
 export type DurableObjectLocationHint =
   | "wnam"
   | "enam"
@@ -703,6 +697,12 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
     cohort?: string;
   };
   retry?: DurableObjectRetryOptions;
+}
+export interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
 }
 export interface DurableObjectRetryOptions {
   maxRetries?: number;
@@ -3424,6 +3424,7 @@ export interface TraceItem {
         | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
+        | TraceItemOnHibernateEventInfo
         | TraceItemQueueEventInfo
         | TraceItemEmailEventInfo
         | TraceItemTailEventInfo
@@ -3489,6 +3490,9 @@ export interface TraceItemFetchEventInfoResponse {
 }
 export interface TraceItemJsRpcEventInfo {
   readonly rpcMethod: string;
+}
+export interface TraceItemOnHibernateEventInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 export interface TraceItemHibernatableWebSocketEventInfo {
   readonly getWebSocketEvent:
@@ -16462,6 +16466,12 @@ export interface JsonWebKeyWithKid extends JsonWebKey {
 }
 export interface RateLimitOptions {
   key: string;
+  /**
+   * Amount to add to the counter for this call. Must be a positive integer;
+   * defaults to `1`. The call is allowed while the counter is below the limit,
+   * even if `delta` takes it past the limit.
+   */
+  delta?: number;
 }
 export interface RateLimitOutcome {
   success: boolean;
@@ -18176,6 +18186,10 @@ export declare namespace TailStream {
     readonly type: "alarm";
     readonly scheduledTime: Date;
   }
+  interface OnHibernateEventInfo {
+    readonly type: "onHibernate";
+    readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+  }
   interface QueueEventInfo {
     readonly type: "queue";
     readonly queueName: string;
@@ -18263,6 +18277,7 @@ export declare namespace TailStream {
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo
+      | OnHibernateEventInfo
       | QueueEventInfo
       | EmailEventInfo
       | TraceEventInfo
@@ -18421,6 +18436,7 @@ export declare namespace TailStream {
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
+    streamDiagEvent?: TailEventHandler<StreamDiagnostic>;
     return?: TailEventHandler<Return>;
     attributes?: TailEventHandler<Attributes>;
   };

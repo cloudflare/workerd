@@ -63,6 +63,7 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         "//src/workerd/util",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
@@ -93,6 +94,7 @@ wd_cc_library(
     name = "jsg-core",
     srcs = [
         "async-context.c++",
+        "compilation.c++",
         "dom-exception.c++",
         "jsg.c++",
         "jsvalue.c++",
@@ -108,6 +110,7 @@ wd_cc_library(
     ],
     hdrs = [
         "async-context.h",
+        "compilation.h",
         "dom-exception.h",
         "fast-api.h",
         "jsg.h",
@@ -403,6 +406,7 @@ kj_test(
     deps = [
         ":jsg",
         ":script",
+        "@capnp-cpp//src/capnp",
     ],
 )
 

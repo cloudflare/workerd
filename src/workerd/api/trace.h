@@ -93,6 +93,7 @@ class TraceItem final: public jsg::Object {
   class ConnectEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
+  class OnHibernateEventInfo;
   class QueueEventInfo;
   class EmailEventInfo;
   class TailEventInfo;
@@ -106,6 +107,7 @@ class TraceItem final: public jsg::Object {
       jsg::Ref<ConnectEventInfo>,
       jsg::Ref<ScheduledEventInfo>,
       jsg::Ref<AlarmEventInfo>,
+      jsg::Ref<OnHibernateEventInfo>,
       jsg::Ref<QueueEventInfo>,
       jsg::Ref<EmailEventInfo>,
       jsg::Ref<TailEventInfo>,
@@ -192,6 +194,9 @@ class TraceItem final: public jsg::Object {
         }
         KJ_CASE_ONEOF(alarm, jsg::Ref<AlarmEventInfo>) {
           visitor.visit(alarm);
+        }
+        KJ_CASE_ONEOF(onHibernate, jsg::Ref<OnHibernateEventInfo>) {
+          visitor.visit(onHibernate);
         }
         KJ_CASE_ONEOF(queue, jsg::Ref<QueueEventInfo>) {
           visitor.visit(queue);
@@ -405,6 +410,27 @@ class TraceItem::AlarmEventInfo final: public jsg::Object {
 
  private:
   kj::Date scheduledTime;
+};
+
+class TraceItem::OnHibernateEventInfo final: public jsg::Object {
+ public:
+  explicit OnHibernateEventInfo(const Trace& trace, const tracing::OnHibernateEventInfo& eventInfo);
+
+  kj::StringPtr getReason();
+
+  JSG_RESOURCE_TYPE(OnHibernateEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(reason, getReason);
+    JSG_TS_OVERRIDE({
+      readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+    });
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("reason", reason);
+  }
+
+ private:
+  kj::String reason;
 };
 
 class TraceItem::QueueEventInfo final: public jsg::Object {
@@ -752,9 +778,19 @@ class UnsafeTraceMetrics final: public jsg::Object {
 
 class TraceCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TraceCustomEvent(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
+  // `completion`, if given, is kept until the receiving tail Worker has finished handling the
+  // traces: once its request drains, times out, or aborts, rather than when delivery is
+  // acknowledged. It is forwarded as is over RPC.
+  TraceCustomEvent(uint16_t typeId,
+      kj::Array<kj::Own<Trace>> traces,
+      kj::Maybe<rpc::TraceCompletion::Client> completion = kj::none)
       : typeId(typeId),
-        traces(kj::mv(traces)) {}
+        traces(kj::mv(traces)),
+        completion(kj::mv(completion)) {}
+
+  // Builds the event that a sendTraces() callee runs, keeping the caller's completion.
+  static kj::Own<TraceCustomEvent> fromRpc(
+      uint16_t typeId, rpc::EventDispatcher::SendTracesParams::Reader params);
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -780,9 +816,15 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
 
   static constexpr uint16_t TYPE = 2;
 
+  // Sets `completion` (see the constructor) on an event created without one.
+  void setCompletion(rpc::TraceCompletion::Client value) {
+    completion = kj::mv(value);
+  }
+
  private:
   uint16_t typeId;
   kj::Array<kj::Own<workerd::Trace>> traces;
+  kj::Maybe<rpc::TraceCompletion::Client> completion;
 };
 
 #define EW_TRACE_ISOLATE_TYPES                                                                     \
@@ -793,7 +835,7 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
       api::TraceItem::TailEventInfo, api::TraceItem::TailEventInfo::TailItem,                      \
       api::TraceItem::FetchEventInfo, api::TraceItem::FetchEventInfo::Request,                     \
       api::TraceItem::FetchEventInfo::Response, api::TraceItem::JsRpcEventInfo,                    \
-      api::TraceItem::HibernatableWebSocketEventInfo,                                              \
+      api::TraceItem::OnHibernateEventInfo, api::TraceItem::HibernatableWebSocketEventInfo,        \
       api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
       api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
       api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog,                        \

@@ -10,6 +10,7 @@
 #include "form-data.h"
 #include "headers.h"
 #include "queue.h"
+#include "request-io.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
@@ -1128,6 +1129,9 @@ class Response final: public Body {
 
   int getStatus();
   kj::StringPtr getStatusText();
+  // The reason phrase for the HTTP status line and for error messages. Unlike getStatusText(), an
+  // unset status message falls back to the status code's conventional phrase.
+  kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
   bool getOk();
@@ -1217,8 +1221,8 @@ class Response final: public Body {
 
  private:
   int statusCode;
-  // If the statusText is empty, we will derive it from the statusCode. If there's no
-  // match, it will be empty.
+  // The status message, if one was set. When unset, getStatusText() returns "", as the Fetch spec
+  // requires, while getReasonPhrase() derives the status code's conventional phrase.
   kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
@@ -1327,7 +1331,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
       api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
       api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
       api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
-      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher
+      api::Fetcher::ServiceBindingQueueMessage, api::ExtendedFetcher, api::RequestIo
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

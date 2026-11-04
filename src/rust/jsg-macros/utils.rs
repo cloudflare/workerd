@@ -44,6 +44,10 @@ pub fn is_attr(attr: &syn::Attribute, name: &str) -> bool {
 /// When set, `#[jsg_resource]` on a struct suppresses the auto-generated `Traced`
 /// impl, letting the user write their own.
 pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
+    has_flag(attr, "custom_trace")
+}
+
+pub fn has_flag(attr: &TokenStream, name: &str) -> bool {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
@@ -56,7 +60,7 @@ pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
 
     parsed
         .iter()
-        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident("custom_trace")))
+        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident(name)))
 }
 
 /// Emits a `compile_error!` token stream anchored to `tokens` with message `msg`.
@@ -187,6 +191,12 @@ pub fn this_param(sig: &syn::Signature) -> Option<&syn::PatType> {
     }
 }
 
+/// Returns true if `ty` is `NullOrUndefined<T>`.
+pub fn is_null_or_undefined_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "NullOrUndefined"))
+}
+
 /// Returns true if `ty` is `Option<T>`.
 pub fn is_option_type(ty: &syn::Type) -> bool {
     matches!(ty, syn::Type::Path(p)
@@ -231,14 +241,14 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 }
 
 /// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
-const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "Number"];
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
-const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
-/// Types are matched by name: an alias stays on the slow path, and another type named `Number`
-/// fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
+/// Types are matched by name: an alias stays on the slow path, and a type that shadows one of
+/// the names fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
 /// parameter stays on the slow path, which is where the `jsg::Rc` of the receiver is made.
 pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
@@ -270,7 +280,7 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     fast_return.then_some(args)
 }
 
-/// Whether `ty` is one of `names` written bare, or `jsg::Number`.
+/// Whether `ty` is one of `names`, written bare.
 fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
     let syn::Type::Path(type_path) = ty else {
         return false;
@@ -278,13 +288,44 @@ fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
     if type_path.qself.is_some() {
         return false;
     }
-    let segments: Vec<_> = type_path.path.segments.iter().collect();
-    let last = match segments.as_slice() {
-        [last] => last,
-        [module, last] if module.ident == "jsg" && last.ident == "Number" => last,
-        _ => return false,
+    let mut segments = type_path.path.segments.iter();
+    let (Some(segment), None) = (segments.next(), segments.next()) else {
+        return false;
     };
-    last.arguments.is_none() && names.iter().any(|name| last.ident == name)
+    segment.arguments.is_none() && names.iter().any(|name| segment.ident == name)
+}
+
+/// Generates the Web IDL `.length` of a method or constructor: the number of leading
+/// JavaScript arguments that are required.
+///
+/// The caller omits a method's `this: jsg::Rc<Self>` receiver. Constructors have no such
+/// receiver, so their parameters named `this` are JavaScript arguments. A leading
+/// `&mut Lock` is not a JavaScript argument.
+/// Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
+pub fn required_argument_count<'a>(
+    inputs: impl Iterator<Item = &'a syn::FnArg>,
+) -> proc_macro2::TokenStream {
+    let mut params = inputs
+        .filter_map(|arg| match arg {
+            syn::FnArg::Typed(pat_type) => Some(pat_type.ty.as_ref()),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .peekable();
+    if params.peek().is_some_and(|ty| is_lock_ref(ty)) {
+        params.next();
+    }
+    let types = params.map(elide_named_lifetimes);
+    quote::quote! {{
+        let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
+        let mut length = 0u32;
+        for &is_optional in optional {
+            if is_optional {
+                break;
+            }
+            length += 1;
+        }
+        length
+    }}
 }
 
 #[cfg(test)]

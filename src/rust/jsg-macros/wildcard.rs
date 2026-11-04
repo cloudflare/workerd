@@ -75,7 +75,11 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #lookup
                 // An error from converting the value is thrown as one the method returns.
                 let converted = match result {
-                    Ok(Some(value)) => jsg::ToJS::to_js(value, lock).map(Some),
+                    // Like a property getter, passes the receiver as the value's creator.
+                    Ok(Some(value)) => {
+                        let creator = jsg::v8::Local::<jsg::v8::Object>::try_from(args.this()).ok();
+                        jsg::ToJS::to_js_with_creator(value, lock, creator).map(Some)
+                    }
                     Ok(None) => Ok(None),
                     Err(err) => Err(err),
                 };
@@ -202,11 +206,8 @@ impl Signature {
             // V8 calls an interceptor only on objects made from the resource's instance
             // template, so this is the resource's own wrapper; a mismatch is still a
             // TypeError rather than a panic.
-            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock, this) else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
-                return jsg::Intercepted::Yes;
-            };
-            let Some(resource) = wrappable.resolve_resource::<Self>() else {
+            let resource = jsg::v8::WrappableRc::resolve_receiver::<Self>(lock, this);
+            let Some(resource) = resource else {
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
                 return jsg::Intercepted::Yes;
             };

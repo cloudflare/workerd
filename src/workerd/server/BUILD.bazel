@@ -86,12 +86,15 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["config-compiler.h"],
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
+    test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
         "@crates_vendor//:socket2",
         "@crates_vendor//:tokio",
     ] + select({
@@ -208,7 +211,21 @@ wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
-    ],
+        "workerd-api-isolate.h",
+    ] + select({
+        # See WORKERD_API_UNSPLIT_TEMPLATES in workerd-api-isolate.h.
+        "@platforms//os:windows": [],
+        "//conditions:default": [
+            "workerd-api-templates-0.c++",
+            "workerd-api-templates-1.c++",
+            "workerd-api-templates-2.c++",
+            "workerd-api-templates-3.c++",
+            "workerd-api-templates-4.c++",
+            "workerd-api-templates-5.c++",
+            "workerd-api-templates-6.c++",
+            "workerd-api-templates-7.c++",
+        ],
+    }),
     hdrs = [
         "workerd-api.h",
     ],
@@ -225,9 +242,10 @@ wd_cc_library(
     local_defines = select({
         ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
         "//conditions:default": [],
+    }) + select({
+        "@platforms//os:windows": ["WORKERD_API_UNSPLIT_TEMPLATES"],
+        "//conditions:default": [],
     }),
-    # TODO(EW-11081): This is temporarily disabled because it takes a lifetime to complete.
-    tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",

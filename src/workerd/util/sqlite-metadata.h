@@ -75,7 +75,7 @@ class SqliteMetadata final: private SqliteDatabase::ResetListener {
   // first write.
 
   // ResetListener interface:
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(SqliteDatabase::CloseReason reason) override;
 };
 
 }  // namespace workerd

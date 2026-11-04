@@ -85,7 +85,9 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           timer, entropySource, headerTableBuilder, httpOverCapnpFactory, byteStreamFactory),
       headerTable(buildHeaderTable(headerTableBuilder, this->config)),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenHandler(factory),
+      channelTokenHandler(factory,
+          this->config.hasCluster() ? kj::Maybe<kj::StringPtr>(this->config.getCluster().getKey())
+                                    : kj::none),
       tasks(*this) {
   // The config's logging settings go on top of the caller's.
   auto& logging = this->options->loggingOptions;
@@ -394,7 +396,7 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -1178,6 +1180,14 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   }
   return createEntrypoint(impl, kj::mv(meta), entrypointName, kj::mv(propsValue), kj::mv(actorRef),
       kj::mv(channels), kj::mv(tails), kj::none);
+}
+
+kj::Promise<void> worker_run_actor_on_hibernate(
+    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels) {
+  auto ioChannelFactory =
+      kj::rc<RustIoChannelFactory>(kj::addRef(worker.getImpl()), kj::mv(channels));
+  return actor.getActor().runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::mv(ioChannelFactory), kj::refcounted<RequestObserver>(), kj::none);
 }
 
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(

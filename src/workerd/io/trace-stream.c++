@@ -65,6 +65,7 @@ namespace {
   V(METHOD, "method")                                                                              \
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
+  V(ONHIBERNATE, "onHibernate")                                                                    \
   V(ONSET, "onset")                                                                                \
   V(OUTCOME, "outcome")                                                                            \
   V(PREVIEW, "preview")                                                                            \
@@ -72,6 +73,7 @@ namespace {
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
   V(RCPTTO, "rcptTo")                                                                              \
+  V(REASON, "reason")                                                                              \
   V(RESPONSESTREAMDISCONNECTED, "responseStreamDisconnected")                                      \
   V(RETURN, "return")                                                                              \
   V(SCHEDULED, "scheduled")                                                                        \
@@ -252,6 +254,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache)
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const OnHibernateEventInfo& info, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, ONHIBERNATE_STR));
+  obj.set(js, REASON_STR, cache.get(js, kj::str(info.reason)));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
@@ -411,6 +420,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
     }
     KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, alarm, cache));
+    }
+    KJ_CASE_ONEOF(onHibernate, OnHibernateEventInfo) {
+      obj.set(js, INFO_STR, ToJs(js, onHibernate, cache));
     }
     KJ_CASE_ONEOF(queue, QueueEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, queue, cache));
@@ -1087,6 +1099,15 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
 };
 }  // namespace
 
+kj::Own<TailStreamCustomEvent> TailStreamCustomEvent::fromRpc(
+    rpc::EventDispatcher::TailStreamSessionParams::Reader params) {
+  kj::Maybe<rpc::TraceCompletion::Client> completion;
+  if (params.hasCompletion()) {
+    completion = params.getCompletion();
+  }
+  return kj::heap<TailStreamCustomEvent>(kj::mv(completion));
+}
+
 EventInfo TailStreamCustomEvent::getEventInfo() const {
   return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
 }
@@ -1106,6 +1127,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
       kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller), isDynamicDispatch));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
+
+  // The request is kept until it has drained (below): until its background work finishes, times
+  // out, or aborts. The completion goes with it.
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    incomingRequest = kj::mv(incomingRequest).attach(kj::mv(c));
+  }
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -1144,7 +1171,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
     }
   });
 
-  auto req = dispatcher.tailStreamSessionRequest(capnp::MessageSize{0, 0});
+  auto req = dispatcher.tailStreamSessionRequest(capnp::MessageSize{4, 1});
+  KJ_IF_SOME(c, kj::mv(completion)) {
+    req.setCompletion(kj::mv(c));
+  }
   auto sent = req.send();
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();

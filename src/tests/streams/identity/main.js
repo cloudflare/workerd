@@ -62,6 +62,7 @@ export {
   alreadyDetachedViewAtWrite,
   outOfBoundsViewAtWrite,
   lyingAboutLength,
+  readChunkDetachedByReader,
 } from 'buffer-lifecycle';
 
 export {
@@ -226,3 +227,22 @@ export {
 export { structuredCloneIdentity } from 'transfer';
 
 export { internalDictionariesIgnorePollution } from 'pollution';
+
+export {
+  fixedLengthBodyContentLength,
+  fixedLengthTeeAfterReadContentLength,
+} from 'content-length';
+
+// Echo handler for content-length.js: reports the Content-Length the
+// subrequest actually carried and echoes the body.
+export default {
+  async fetch(request) {
+    return new Response(request.body, {
+      headers: {
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
+    });
+  },
+};

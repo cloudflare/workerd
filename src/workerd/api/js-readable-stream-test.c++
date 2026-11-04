@@ -868,6 +868,65 @@ KJ_TEST("ReadableStreamNativeSource pull from another request leaves no pull in 
   testFixture.runInIoContext([&](const TestFixture::Environment& env) { held.clear(); });
 }
 
+KJ_TEST("ReadableStreamNativeSource rejects pulls reentered from metadata getters") {
+  TestFixture fixture;
+  for (const auto& field: kj::arr("byobRequest"_kj, "view"_kj, "atLeast"_kj, "elementSize"_kj)) {
+    fixture.runInIoContext([field](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto& handler =
+          KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+      auto source = jsg::JsValue(handler.wrap(
+          js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
+      auto script = jsg::NonModuleScript::compile(js, R"js(
+        (async (source, field) => {
+          const signal = new AbortController().signal;
+          const view = new Uint8Array(65536);
+          let responded;
+          let nested;
+          const request = {
+            view,
+            atLeast: 65536,
+            elementSize: 1,
+            respond(amount) { responded = amount; },
+          };
+          const controller = { byobRequest: request, close() {} };
+          const target = field === 'byobRequest' ? controller : request;
+          const value = target[field];
+          Object.defineProperty(target, field, {
+            get() {
+              try {
+                nested = source.pull({ byobRequest: null, enqueue() {}, close() {} }, signal);
+              } catch (error) {
+                nested = Promise.reject(error);
+              }
+              nested.catch(() => {});
+              return value;
+            },
+          });
+          await source.pull(controller, signal);
+          let rejected = false;
+          try {
+            await nested;
+          } catch (error) {
+            if (!(error instanceof TypeError) || !error.message.includes('already in flight')) {
+              throw error;
+            }
+            rejected = true;
+          }
+          if (!rejected) throw new Error(`nested pull from ${field} was accepted`);
+          if (responded !== 11 || new TextDecoder().decode(view.subarray(0, 11)) !== 'hello world') {
+            throw new Error(`outer pull from ${field} lost its own bytes`);
+          }
+        })
+      )js"_kj,
+          "native-pull-reentry.js"_kj);
+      auto fn = KJ_ASSERT_NONNULL(script.runAndReturn(js).tryCast<jsg::JsFunction>());
+      auto result = fn.call(js, js.undefined(), source, js.str(field));
+      return env.context.awaitJs(js, js.toPromise(result)).ignoreResult();
+    });
+  }
+}
+
 KJ_TEST("ReadableStreamNativeSource BYOB under-delivery responds then closes (fused EOF)") {
   TestFixture testFixture;
   MockControllerState state;
@@ -1629,10 +1688,7 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
   testFixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // Wrap an instance via the Lock-acquired TypeHandler -- the same path create()'s
-    // TypeScript arm will use -- then verify the contract's detection shape: an own data
-    // property keyed by the kNativeSource API-registry symbol whose value is the symbol
-    // itself, re-acquirable by name at any time.
+    // Template-created instances carry a private marker, not an ordinary API symbol.
     auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
     auto handle = handler.wrap(
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData)));
@@ -1640,8 +1696,8 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
 
     auto symbol = jsg::JsValue(
         v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
-    KJ_EXPECT(obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
-    KJ_EXPECT(obj.get(js, symbol) == symbol);
+    KJ_EXPECT(obj.getPrivate(js, "kNativeSource"_kj).isTrue());
+    KJ_EXPECT(!obj.has(js, symbol, jsg::JsObject::HasOption::OWN));
   });
 }
 
@@ -1909,7 +1965,7 @@ KJ_TEST("JsReadableStream pumpTo rejects when a queued stream produces non-byte 
             js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
       auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
       auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
-      enqueue.call(js, controller, js.str("not bytes"_kj));
+      enqueue.call(js, controller, js.num(42));
     })));
 
     auto stream = makeTsStream(js, underlying);
@@ -2080,6 +2136,35 @@ KJ_TEST("JsReadableStream pumpTo of a queued TypeScript stream dropped in IoCont
   KJ_EXPECT(!ended);
 }
 
+KJ_TEST("JsReadableStream pumpTo writes a queued stream's string chunks as UTF-8") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> collected;
+  bool ended = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Bytes, then strings, in one batch, as the legacy pump's valueToBytes() writes them.
+    auto underlying = js.obj();
+    underlying.set(js, "start"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      auto enqueue = KJ_ASSERT_NONNULL(controller.get(js, "enqueue"_kj).tryCast<jsg::JsFunction>());
+      enqueue.call(js, controller, jsg::JsUint8Array::create(js, "ab"_kjb));
+      enqueue.call(js, controller, js.str("cd"_kj));
+      enqueue.call(js, controller, js.str("\xc3\xa9"_kj));
+      auto close = KJ_ASSERT_NONNULL(controller.get(js, "close"_kj).tryCast<jsg::JsFunction>());
+      close.call(js, controller);
+    })));
+
+    auto stream = makeTsStream(js, underlying);
+    return stream.pumpTo(js, kj::heap<CollectingSink>(collected, ended), EndStream::YES)
+        .then([](DeferredProxy<void> proxy) { return kj::mv(proxy.proxyTask); });
+  });
+  KJ_EXPECT(collected.asPtr() == "abcd\xc3\xa9"_kjb);
+  KJ_EXPECT(ended);
+}
+
 KJ_TEST("JsReadableStream text() over the limit cancels a queued TypeScript stream") {
   auto fixture = makeTsStreamsFixture();
   kj::Maybe<kj::String> cancelReason;
@@ -2139,6 +2224,156 @@ KJ_TEST("JsReadableStream text() rejects a declared length over the limit before
   auto& e = KJ_ASSERT_NONNULL(canceled);
   KJ_EXPECT(e.getDescription().contains("Memory limit would be exceeded before EOF."),
       e.getDescription());
+}
+
+// A source that delivers `data` while declaring a total of `declared` bytes, if any, which may
+// be untrue. Records the minimum of each read and the reason it is canceled with.
+class DeclaringSource final: public ReadableStreamSource {
+ public:
+  DeclaringSource(kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<uint64_t> declared,
+      kj::Vector<size_t>& minimums,
+      kj::Maybe<kj::Exception>& canceled)
+      : data(data),
+        declared(declared),
+        minimums(minimums),
+        canceled(canceled) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    minimums.add(minBytes);
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount));
+    offset += amount;
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding != StreamEncoding::IDENTITY) return kj::none;
+    return declared.map([&](uint64_t total) { return total - kj::min(total, offset); });
+  }
+
+  void cancel(kj::Exception reason) override {
+    canceled = kj::mv(reason);
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> data;
+  kj::Maybe<uint64_t> declared;
+  size_t offset = 0;
+  kj::Vector<size_t>& minimums;
+  kj::Maybe<kj::Exception>& canceled;
+};
+
+// Consumes a native TypeScript stream over a DeclaringSource with arrayBuffer() and reports
+// the rejection's description, or the bytes it resolves with.
+struct DeclaringConsumption {
+  kj::Vector<size_t> minimums;
+  kj::Maybe<kj::Exception> canceled;
+  kj::Maybe<kj::String> rejection;
+  kj::Maybe<kj::Array<kj::byte>> bytes;
+  bool lockedAfter = false;
+  bool disturbedAfter = false;
+};
+
+DeclaringConsumption consumeDeclaring(
+    kj::ArrayPtr<const kj::byte> data, kj::Maybe<uint64_t> declared, uint64_t limit) {
+  auto fixture = makeTsStreamsFixture();
+  DeclaringConsumption result;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(js, env.context,
+        kj::heap<DeclaringSource>(data, declared, result.minimums, result.canceled));
+    auto promise = stream.arrayBuffer(js, limit).then(
+        js, [&result](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+      result.bytes = kj::heapArray(buffer.getHandle(js).asArrayPtr().asConst());
+    }, [&result](jsg::Lock& js, jsg::Value exception) {
+      result.rejection = kj::str(js.exceptionToKj(kj::mv(exception)).getDescription());
+    });
+    result.lockedAfter = stream.isLocked(js);
+    result.disturbedAfter = stream.isDisturbed(js);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  return result;
+}
+
+KJ_TEST("JsReadableStream consumption collects a native TypeScript stream from its source") {
+  // The bytes are collected in C++ straight from the source, in reads of the whole declared
+  // length (the JavaScript conduit asks for at least one byte at a time), and the stream is
+  // handed off: locked and disturbed from the start of the consumption.
+  auto result = consumeDeclaring(kData.asBytes(), kData.size(), kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.bytes).asPtr() == kData.asBytes());
+  KJ_ASSERT(result.minimums.size() == 1, result.minimums.size());
+  KJ_EXPECT(result.minimums[0] > kData.size(), result.minimums[0]);
+  KJ_EXPECT(result.lockedAfter);
+  KJ_EXPECT(result.disturbedAfter);
+  KJ_EXPECT(result.canceled == kj::none);
+
+  // Without a declared length, the reads are bounded by the read size, not the limit.
+  auto undeclared = consumeDeclaring(kData.asBytes(), kj::none, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == kData.asBytes());
+}
+
+KJ_TEST("JsReadableStream consumption reads a declared length of up to 512 KiB at once") {
+  // As the legacy AllReader does. Without a declaration, the same bytes take 128 KiB reads.
+  auto data = kj::heapArray<kj::byte>(300 * 1024);
+  data.asPtr().fill('x');
+  auto declared = consumeDeclaring(data, data.size(), kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(declared.bytes).asPtr() == data.asPtr());
+  KJ_ASSERT(declared.minimums.size() == 1, declared.minimums.size());
+  KJ_EXPECT(declared.minimums[0] == data.size() + 1, declared.minimums[0]);
+
+  auto undeclared = consumeDeclaring(data, kj::none, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == data.asPtr());
+  KJ_EXPECT(undeclared.minimums.size() == 3, undeclared.minimums.size());
+}
+
+KJ_TEST("JsReadableStream consumption of a native stream holds it to its declared length") {
+  // As the native conduit does: more bytes than declared, or fewer, fail the consumption
+  // without canceling the source.
+  auto over = consumeDeclaring(kData.asBytes(), 5, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(over.rejection) ==
+          "jsg.RangeError: native source delivered more bytes than its declared expectedLength",
+      over.rejection);
+  KJ_EXPECT(over.canceled == kj::none);
+
+  auto under = consumeDeclaring(kData.asBytes(), kData.size() + 5, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(under.rejection) ==
+          "jsg.RangeError: native source closed before producing its declared expectedLength",
+      under.rejection);
+  KJ_EXPECT(under.canceled == kj::none);
+}
+
+KJ_TEST("JsReadableStream consumption of a native stream over the limit cancels its source") {
+  auto result = consumeDeclaring(kData.asBytes(), kj::none, kData.size() - 1);
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(result.rejection) == "jsg.TypeError: Memory limit exceeded before EOF.",
+      result.rejection);
+  auto& e = KJ_ASSERT_NONNULL(result.canceled);
+  KJ_EXPECT(e.getDescription().contains("Memory limit exceeded before EOF."), e.getDescription());
+}
+
+KJ_TEST("JsReadableStream text() of a native stream strips a BOM across several reads") {
+  // Longer than one read, so the collected bytes come in several buffers.
+  auto data = kj::heapArray<kj::byte>(UTF8_BOM_SIZE + 600 * 1024);
+  data.first(UTF8_BOM_SIZE).copyFrom(kj::arrayPtr(UTF8_BOM, UTF8_BOM_SIZE));
+  data.slice(UTF8_BOM_SIZE).fill('x');
+  for (auto declared: {kj::Maybe<uint64_t>(data.size()), kj::Maybe<uint64_t>(kj::none)}) {
+    auto fixture = makeTsStreamsFixture();
+    kj::Vector<size_t> minimums;
+    kj::Maybe<kj::Exception> canceled;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto stream = JsReadableStream::create(
+          js, env.context, kj::heap<DeclaringSource>(data, declared, minimums, canceled));
+      auto promise = stream.text(js, kLimit).then(js, [&](jsg::Lock& js, kj::String text) {
+        KJ_EXPECT(text.size() == data.size() - UTF8_BOM_SIZE, text.size());
+        KJ_EXPECT(text.asBytes() == data.slice(UTF8_BOM_SIZE).asConst());
+      });
+      return env.context.awaitJs(js, kj::mv(promise));
+    });
+    KJ_EXPECT(minimums.size() > 1, minimums.size());
+  }
 }
 
 KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
@@ -2213,7 +2448,7 @@ KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
 // each pull itself, and can break the contract.
 
 // Every conduit script runs after this prologue, as the body of an async function whose
-// `markers` argument holds the api-registry symbols, which JavaScript cannot name.
+// `markers` argument provides private-slot labels and test-only native accessors.
 // scriptedSource() builds a native source whose pull() records { controller, signal,
 // resolve, reject } in `pulls` and stays pending until the script settles it.
 // erroredBy(reader, read) waits for `read` and the reader's closed promise to reject with
@@ -2227,17 +2462,20 @@ constexpr kj::StringPtr kConduitScriptPrologue = R"js(
   const microtasks = async () => {
     for (let i = 0; i < 10; i++) await undefined;
   };
+  const markNativeSource = (source) => {
+    markers.setPrivate(source, markers.kNativeSource, true);
+    return source;
+  };
   const scriptedSource = (members = {}) => {
     const pulls = [];
-    const source = {
-      [markers.kNativeSource]: markers.kNativeSource,
+    const source = markNativeSource({
       pull(controller, signal) {
         const { promise, resolve, reject } = Promise.withResolvers();
         pulls.push({ controller, signal, resolve, reject });
         return promise;
       },
       ...members,
-    };
+    });
     return { source, pulls };
   };
   const erroredBy = async (reader, read) => {
@@ -2264,8 +2502,23 @@ kj::Promise<void> runConduitScript(const TestFixture::Environment& env, kj::Stri
   auto markers = js.obj();
   for (auto& name: kj::arr("kNativeSource"_kj, "kExtractNativeSource"_kj, "kNativeSink"_kj,
            "kExtractNativeSink"_kj)) {
-    markers.set(js, name, js.symbolInternal(name));
+    markers.set(js, name, js.str(name));
   }
+  markers.set(js, "setPrivate"_kj,
+      jsg::JsValue(js.wrapSimpleFunction(
+          js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+    object.setPrivate(js, name, jsg::JsValue(args[2]));
+  })));
+  markers.set(js, "getPrivate"_kj,
+      jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
+          [](jsg::Lock& js,
+              const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
+    auto object = KJ_ASSERT_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsObject>());
+    auto name = KJ_ASSERT_NONNULL(jsg::JsValue(args[1]).tryCast<jsg::JsString>());
+    return object.getPrivate(js, name);
+  })));
   auto code = kj::str("(async (markers) => {", kConduitScriptPrologue, body, "})");
   auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "conduit-script.js"_kj)
                                   .runAndReturn(js)
@@ -2281,12 +2534,11 @@ KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk
     // which it signals with close(). The refusal errors the stream, so the read rejects with
     // it rather than handing the reader an empty chunk.
     return runConduitScript(env, R"js(
-      const reader = new ReadableStream({
-        [markers.kNativeSource]: markers.kNativeSource,
+      const reader = new ReadableStream(markNativeSource({
         pull(controller) {
           controller.enqueue(new Uint8Array(0));
         },
-      }).getReader();
+      })).getReader();
       const error = await erroredBy(reader, reader.read());
       assert(error instanceof TypeError && error.message ===
         'enqueue() of an empty chunk is not supported for native streams; an empty ' +
@@ -2303,12 +2555,11 @@ KJ_TEST("TypeScript native stream errors when its source responds with zero byte
     // which the source signals with close(). The refusal errors the stream, so the read
     // rejects with it.
     return runConduitScript(env, R"js(
-      const reader = new ReadableStream({
-        [markers.kNativeSource]: markers.kNativeSource,
+      const reader = new ReadableStream(markNativeSource({
         pull(controller) {
           controller.byobRequest.respond(0);
         },
-      }).getReader({ mode: 'byob' });
+      })).getReader({ mode: 'byob' });
       const error = await erroredBy(reader, reader.read(new Uint8Array(4)));
       assert(error instanceof TypeError && error.message ===
         'respond(0) is not supported for native streams; an empty answer means ' +
@@ -2371,6 +2622,41 @@ KJ_TEST("TypeScript native stream waits out a pull its reader abandoned") {
         const { done, value } = await read;
         assert(!done && value[0] === 7, `${outcome}: the new read missed the next chunk`);
       }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream starts every pull with an unaborted signal") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // A pull whose signal settles unaborted hands it on to the next pull; a pull after an
+    // aborted one gets a new signal.
+    return runConduitScript(env, R"js(
+      const { source, pulls } = scriptedSource();
+      const stream = new ReadableStream(source);
+      let reader = stream.getReader();
+      for (let i = 0; i < 2; i++) {
+        const read = reader.read();
+        pulls[i].controller.enqueue(new Uint8Array([i]));
+        pulls[i].resolve();
+        assert((await read).value[0] === i, `read ${i} missed its chunk`);
+      }
+      assert(pulls[1].signal === pulls[0].signal, 'a settled pull did not hand on its signal');
+      const abandoned = reader.read().then(() => undefined, () => undefined);
+      reader.releaseLock();
+      await abandoned;
+      assert(pulls[2].signal === pulls[1].signal && pulls[2].signal.aborted,
+        'releasing the reader did not abort the reused signal');
+      reader = stream.getReader();
+      const read = reader.read();
+      pulls[2].resolve();
+      await microtasks();
+      assert(pulls.length === 4, 'the new read did not pull');
+      assert(pulls[3].signal !== pulls[2].signal && !pulls[3].signal.aborted,
+        'the pull after an abort did not get a new signal');
+      pulls[3].controller.enqueue(new Uint8Array([3]));
+      pulls[3].resolve();
+      assert((await read).value[0] === 3, 'the new read missed its chunk');
     )js"_kj);
   });
 }
@@ -2515,22 +2801,32 @@ KJ_TEST("TypeScript native stream settles every read a cancel or close answers")
   });
 }
 
-KJ_TEST("TypeScript streams take a native marker only as an own data property") {
+KJ_TEST("TypeScript streams recognize only private native markers and hide extractors") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    // An inherited marker, as from a polluted Object.prototype, must not make a plain source
-    // or sink native, and a marker accessor never runs. Any other value at the marker is a
-    // broken native or mock object, never user input, and throws.
+    // Native classification does not consult ordinary properties, symbols, or proxy traps.
+    // Only the fixture's native accessor can create or inspect these private slots.
     return runConduitScript(env, R"js(
       const kinds = [
         [ReadableStream, markers.kNativeSource, markers.kExtractNativeSource, 'source'],
         [WritableStream, markers.kNativeSink, markers.kExtractNativeSink, 'sink'],
       ];
       for (const [Stream, marker, extractor, kind] of kinds) {
-        // Only a native-backed stream carries the extractor.
-        const isNative = (underlying) => Object.hasOwn(new Stream(underlying), extractor);
-        assert(isNative({ [marker]: marker }), `an own ${kind} marker was not taken`);
-        assert(!isNative(Object.create({ [marker]: marker })),
+        const mark = (object, value = true) => {
+          markers.setPrivate(object, marker, value);
+          return object;
+        };
+        const native = new Stream(mark({}));
+        assert(typeof markers.getPrivate(native, extractor) === 'function',
+          `a private ${kind} marker was not taken`);
+        assert(Object.getOwnPropertySymbols(native).length === 0,
+          `the ${kind} extractor or brand was reflected`);
+        assert(!Reflect.ownKeys(native).includes(extractor), `the ${kind} extractor was a property`);
+        const isNative = (underlying) =>
+          markers.getPrivate(new Stream(underlying), extractor) !== undefined;
+        assert(!isNative({ [marker]: true, [Symbol.for(marker)]: true }),
+          `an ordinary ${kind} marker was taken`);
+        assert(!isNative(Object.create(mark({}))),
           `an inherited ${kind} marker was taken`);
         const accessor = Object.defineProperty({}, marker, {
           get() {
@@ -2538,9 +2834,12 @@ KJ_TEST("TypeScript streams take a native marker only as an own data property") 
           },
         });
         assert(!isNative(accessor), `a ${kind} marker accessor was taken`);
+        assert(!isNative(new Proxy({}, {
+          getOwnPropertyDescriptor() { throw new Error(`the ${kind} descriptor trap ran`); },
+        })), `a ${kind} proxy was taken`);
         let error;
         try {
-          new Stream({ [marker]: true });
+          new Stream(mark({}, 'invalid'));
         } catch (e) {
           error = e;
         }
@@ -2594,21 +2893,16 @@ KJ_TEST("JsReadableStream::tryUnwrapTs adopts TypeScript streams and rejects imp
         js, js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData))));
     KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, sourceObj) == kj::none);
 
-    // The brand is recognition, not authentication: an api symbol stays reflection-visible,
-    // so an object carrying a copy of it unwraps. Recognition grants nothing on its own --
-    // the TypeScript internal algorithms re-check the real #-brand, so the first operation
-    // on the adopted impostor throws.
+    // An ordinary API symbol cannot forge the constructor's private brand.
     auto impostorObj = js.obj();
     impostorObj.setNonEnumerable(js, js.symbolInternal("kReadableStreamBrand"), js.boolean(true));
-    auto impostor = KJ_ASSERT_NONNULL(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)));
-    bool threw = false;
-    js.tryCatch(
-        [&]() { auto locked KJ_UNUSED = impostor.isLocked(js); }, [&](jsg::Value exception) {
-      threw = true;
-      auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().contains("TypeError"), e.getDescription());
-    });
-    KJ_EXPECT(threw, "expected the impostor to fail the TypeScript #-brand check");
+    KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          js.v8Isolate, v8::Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+      KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(streamObj)) != kj::none);
+      KJ_EXPECT(JsReadableStream::tryUnwrapTs(js, jsg::JsValue(impostorObj)) == kj::none);
+    }
   });
 }
 
@@ -3104,15 +3398,21 @@ KJ_TEST("JsReadableStream tryGetLength answers none for encoded queries on non-n
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
 
-    // A queued byte stream declaring the (identity) expectedLength extension: the identity
-    // query reports it, but an encoded query must NOT (an identity byte count is never a
-    // valid encoded length).
+    // Queued streams declaring the (identity) expectedLength extension, from a byte source
+    // or a default one: the identity query reports it, but an encoded query must NOT (an
+    // identity byte count is never a valid encoded length).
     auto underlying = js.obj();
     underlying.set(js, "type"_kj, js.str("bytes"_kj));
     underlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(11)));
     auto queued = makeTsStream(js, jsg::JsValue(underlying));
     KJ_EXPECT(KJ_ASSERT_NONNULL(queued.tryGetLength(js)) == 11);
     KJ_EXPECT(queued.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
+
+    auto defaultUnderlying = js.obj();
+    defaultUnderlying.set(js, "expectedLength"_kj, jsg::JsValue(js.num(7)));
+    auto queuedDefault = makeTsStream(js, jsg::JsValue(defaultUnderlying));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(queuedDefault.tryGetLength(js)) == 7);
+    KJ_EXPECT(queuedDefault.tryGetLength(js, StreamEncoding::GZIP) == kj::none);
 
     // Buffer-backed streams sit on the in-memory source, which is identity-only.
     JsReadableStream buffered(js, kj::str(kData));
@@ -3323,9 +3623,10 @@ KJ_TEST("JsReadableStream onEof fires for DrainingReader consumption of a native
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // S1 semantics: C++ consumption reads through the conduit rather than detaching the
-    // source, so the EOF signal fires. (Deliberate divergence from the legacy arm, whose
-    // readAllBytes detaches the source before EOF; see the plan's decision log.)
+    // S1 semantics: the EOF signal fires when C++ consumption reaches the source's EOF,
+    // whether the conduit reads it or the bridge collects the extracted source. (Deliberate
+    // divergence from the legacy arm, whose readAllBytes detaches the source before EOF; see
+    // the plan's decision log.)
     auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
     stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
 
@@ -3609,6 +3910,67 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
   });
 }
 
+KJ_TEST("JsReadableStream consumption of a TypeScript stream ignores Object.prototype.then") {
+  // The bytes reach C++ through a promise TypeScript resolves. Resolving one with an object
+  // looks up its then, so a patched Object.prototype.then would replace them; here it would hand
+  // each helper 'intercepted' instead.
+  auto fixture = makeTsStreamsFixture();
+  uint thenCalls = 0;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto objectPrototype = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    objectPrototype.set(js, "then"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(js.v8Context(),
+            [&thenCalls](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      ++thenCalls;
+      auto onFulfilled = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsFunction>());
+      onFulfilled.call(js, js.undefined(), js.str("intercepted"_kj));
+    })));
+
+    JsReadableStream forArrayBuffer(js, kj::str(kData));
+    JsReadableStream forBytes(js, kj::str(kData));
+    JsReadableStream forText(js, kj::str(kData));
+    JsReadableStream forJson(js, kj::str("{\"hello\":\"world\"}"));
+    JsReadableStream forBlob(js, kj::str(kData));
+
+    auto promise =
+        forArrayBuffer.arrayBuffer(js, kLimit)
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBytes = kj::mv(forBytes)), (forBytes),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsArrayBuffer> buffer) mutable {
+                      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forBytes.bytes(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forText = kj::mv(forText)), (forText),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsUint8Array> bytes) mutable {
+                      KJ_EXPECT(bytes.getHandle(js).asArrayPtr() == kData.asBytes());
+                      return forText.text(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forJson = kj::mv(forJson)), (forJson),
+                    (jsg::Lock & js, kj::String text) mutable {
+                      KJ_EXPECT(text == kData);
+                      return forJson.json(js, kLimit);
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((forBlob = kj::mv(forBlob)), (forBlob),
+                    (jsg::Lock & js, jsg::JsRef<jsg::JsValue> value) mutable {
+                      auto obj = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsObject>());
+                      KJ_EXPECT(js.toString(obj.get(js, "hello"_kj)) == "world"_kj);
+                      return forBlob.blob(js, kLimit, kj::str("text/plain"));
+                    }))
+            .then(js,
+                JSG_VISITABLE_LAMBDA((objectPrototype = jsg::JsRef(js, objectPrototype)),
+                    (objectPrototype), (jsg::Lock& js, jsg::Ref<Blob> blob) {
+                      KJ_EXPECT(blob->getSize() == kData.size());
+                      objectPrototype.getHandle(js).delete_(js, "then"_kj);
+                    }));
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(thenCalls == 0);
+}
+
 KJ_TEST("JsReadableStream addRef shares a TypeScript-backed stream") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -3651,9 +4013,11 @@ KJ_TEST("JsReadableStream pipeThrough pipes TypeScript-backed endpoints") {
     auto promise = result.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
       KJ_EXPECT(text == "pair"_kj);
     });
-    return env.context.awaitJs(js, kj::mv(promise));
+    // The pipe, marked handled by pipeThrough, settles on its own: wait until nothing else is
+    // left to run.
+    return env.context.awaitJs(js, kj::mv(promise)).then([]() { return kj::evalLast([]() {}); });
   });
-  // The pipe (marked handled by pipeThrough) pumped this stream into the pair's writable.
+  // The pipe pumped this stream into the pair's writable.
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(ended);
 }

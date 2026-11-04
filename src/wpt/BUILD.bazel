@@ -51,9 +51,21 @@ wpt_test(
 )
 
 wpt_test(
+    name = "webmessaging",
+    config = "webmessaging-test.ts",
+    wpt_directory = "@wpt//:webmessaging@module",
+)
+
+wpt_test(
     name = "dom/events",
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
+)
+
+wpt_test(
+    name = "html/webappapis/microtask-queuing",
+    config = "html/webappapis/microtask-queuing-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/microtask-queuing@module",
 )
 
 wpt_test(
@@ -204,9 +216,21 @@ wpt_test(
 )
 
 wpt_test(
+    name = "hr-time",
+    config = "hr-time-test.ts",
+    wpt_directory = "@wpt//:hr-time@module",
+)
+
+wpt_test(
     name = "performance-timeline",
     config = "performance-timeline-test.ts",
     wpt_directory = "@wpt//:performance-timeline@module",
+)
+
+wpt_test(
+    name = "user-timing",
+    config = "user-timing-test.ts",
+    wpt_directory = "@wpt//:user-timing@module",
 )
 
 wpt_test(
@@ -256,4 +280,45 @@ wpt_test(
     ],
     extra_wpt_files = ["@wpt//:wasm/incrementer.wasm"],
     wpt_directory = "@wpt//:wasm/jsapi@module",
+)
+
+wpt_test(
+    name = "FileAPI",
+    config = "FileAPI-test.ts",
+    wpt_directory = "@wpt//:FileAPI@module",
+)
+
+wpt_test(
+    name = "console",
+    config = "console-test.ts",
+    wpt_directory = "@wpt//:console@module",
+)
+
+wpt_test(
+    name = "mimesniff/mime-types",
+    config = "mimesniff/mime-types-test.ts",
+    wpt_directory = "@wpt//:mimesniff/mime-types@module",
+)
+
+wpt_test(
+    name = "html/webappapis/atob",
+    config = "html/webappapis/atob-test.ts",
+    # base64.any.js fetches ../../../fetch/data-urls/resources/base64.json
+    extra_wpt_directories = ["@wpt//:fetch/data-urls@module"],
+    wpt_directory = "@wpt//:html/webappapis/atob@module",
+)
+
+wpt_test(
+    name = "html/webappapis/timers",
+    config = "html/webappapis/timers-test.ts",
+    wpt_directory = "@wpt//:html/webappapis/timers@module",
+)
+
+wpt_test(
+    name = "html/webappapis/structured-clone",
+    config = "html/webappapis/structured-clone-test.ts",
+    # META scripts name the battery helpers by absolute path, e.g.
+    # /html/webappapis/structured-clone/structured-clone-battery-of-tests.js
+    extra_wpt_directories = ["@wpt//:html/webappapis/structured-clone@module"],
+    wpt_directory = "@wpt//:html/webappapis/structured-clone@module",
 )

@@ -810,8 +810,10 @@ class StreamCancelerImpl final: public rpc::StreamCanceler::Server {
 
   kj::Promise<void> cancel(CancelContext context) override {
     kj::Maybe<kj::Array<kj::byte>> serializedReason;
-    auto reason = context.getParams().getReason();
-    if (reason.hasV8Serialized() && reason.getV8Serialized().size() > 0) {
+    auto params = context.getParams();
+    auto reason = params.getReason();
+    if (params.getReasonUsesEnhancedErrorSerialization() && reason.hasV8Serialized() &&
+        reason.getV8Serialized().size() > 0) {
       serializedReason = kj::heapArray<kj::byte>(reason.getV8Serialized());
     }
     signal->runIfAlive([&](ReceiverCancelSignal& signal) {
@@ -885,11 +887,10 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
   // capability that we host; its calls fire `canceled`, which the sink below exposes to the pump.
   kj::Maybe<kj::Own<ReceiverCancelSignal>> canceled;
   kj::Maybe<rpc::StreamCanceler::Client> canceler;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
-    auto signal = kj::heap<ReceiverCancelSignal>();
-    canceler = rpc::StreamCanceler::Client(kj::heap<StreamCancelerImpl>(signal->addWeakRef()));
-    canceled = kj::mv(signal);
-  }
+
+  auto signal = kj::heap<ReceiverCancelSignal>();
+  canceler = rpc::StreamCanceler::Client(kj::heap<StreamCancelerImpl>(signal->addWeakRef()));
+  canceled = kj::mv(signal);
 
   capnp::ByteStream::Client streamCap = [&]() {
     auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
@@ -1005,11 +1006,13 @@ class RpcStreamCancelerState final: public kj::Refcounted {
   // kj::Exception), so forwarding it needs neither the isolate lock nor any JavaScript, and this
   // runs from KJ-side teardown as readily as from a JavaScript-initiated cancel(). An exception
   // without that detail -- a cancel() with no reason, a reason that could not be serialized, or a
-  // failure that originated in KJ -- sends no reason, and the origin synthesizes one. The reason
-  // is subject to the same size limit as any other value sent over JS RPC; one that exceeds it is
-  // left out likewise.
+  // failure that originated in KJ -- sends no reason, and the origin synthesizes one. So does one
+  // whose detail was written without enhanced error serialization: V8's native error encoding
+  // would give the origin the stack of any error in the reason. The reason is subject to the same
+  // size limit as any other value sent over JS RPC; one that exceeds it is left out likewise.
   void rememberReason(const kj::Exception& reason) {
     if (canceler == kj::none) return;
+    if (reason.getDetail(jsg::TUNNELED_EXCEPTION_ENHANCED_DETAIL_ID) == kj::none) return;
     KJ_IF_SOME(detail, reason.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
       if (detail.size() <= MAX_JS_RPC_MESSAGE_SIZE) {
         serializedReason = kj::heapArray<kj::byte>(detail);
@@ -1023,6 +1026,7 @@ class RpcStreamCancelerState final: public kj::Refcounted {
       auto req = c.cancelRequest();
       KJ_IF_SOME(r, serializedReason) {
         req.getReason().setV8Serialized(r);
+        req.setReasonUsesEnhancedErrorSerialization(true);
       }
       // Fire and forget: a failure here means the origin is already gone.
       req.send().detach([](kj::Exception&&) {});
@@ -1144,8 +1148,7 @@ kj::Own<ReadableStreamSource> newRpcReadableStreamSource(
   kj::Own<ReadableStreamSource> source = kj::heap<NoDeferredProxyReadableStream>(
       newSystemStream(kj::mv(in), encoding, ioctx, identityLength), ioctx);
 
-  if (reader.hasCanceler() &&
-      util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
+  if (reader.hasCanceler()) {
     source = kj::heap<RpcReadableStreamSource>(
         kj::mv(source), kj::rc<RpcStreamCancelerState>(reader.getCanceler()));
   }
@@ -1165,31 +1168,13 @@ JsReadableStream ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   // No JavaScript may execute here: V8's deserializer forbids it for the duration of the value
   // graph read. Everything JS-executing happened in hydrateRpcReadableStream() during
-  // RpcDeserializerExternalHandler::prepare(); this function only claims the result (or, when
-  // the rpc-externals-hydration autogate is off, constructs the legacy stream in place, which
-  // requires no JS).
+  // RpcDeserializerExternalHandler::prepare(); this function only claims the result.
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
 
-  KJ_IF_SOME(prebuilt, externalHandler->claimPrebuiltReadable()) {
-    return kj::mv(prebuilt);
-  }
-
-  // Not hydrated: the rpc-externals-hydration autogate is off, which
-  // RpcDeserializerExternalHandler::prepare() only permits for legacy-streams isolates (the
-  // typescript_implemented_streams flag requires the gate), so constructing the legacy
-  // stream in place -- which runs no JS -- is the only case here.
-  auto reader = externalHandler->read();
-  KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
-
-  auto& ioctx = IoContext::current();
-  // Legacy-streams isolates only (see above), and JsReadableStream::create() may run JS, which is
-  // forbidden here.
-  // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
-  return JsReadableStream(js.alloc<ReadableStream>(
-      ioctx, newRpcReadableStreamSource(ioctx, reader.getReadableStream())));
+  return externalHandler->claimPrebuiltReadable();
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const {

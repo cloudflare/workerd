@@ -41,10 +41,10 @@ index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..9795025976d26792bcc16c0f7120949c
    indexed_interceptor: InterceptorInfo;
    // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index 04454f14e747b714d49503bf5a3b451131903939..bd4887167d34837d8821be84c93b51b71a742dc2 100644
+index e4ed13a840472b05093dbf537ca5a99be5a0d2f1..b64523914a3670aa150a6d6998264e0cfa2e61e9 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1260,7 +1260,7 @@ static_assert(offsetof(Map, instance_type_) ==
+@@ -1259,7 +1259,7 @@ static_assert(offsetof(Map, instance_type_) ==
                Internals::kMapInstanceTypeOffset);
  
  // Base class for Maps with extra fields. Subclasses must be defined with
@@ -53,7 +53,7 @@ index 04454f14e747b714d49503bf5a3b451131903939..bd4887167d34837d8821be84c93b51b7
  V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    V8_IT_REUSE_PARENT;
  
-@@ -1293,7 +1293,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1292,7 +1292,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
    std::atomic<BitsEx> bit_field_ex_;

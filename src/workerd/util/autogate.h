@@ -48,6 +48,8 @@ namespace workerd::util {
 //    config option in the test's config file.
 // 4. You can set the `WORKERD_ALL_AUTOGATES=1` environment variable to enable
 //    all gates for a test run.
+// 5. In a Rust test, `jsg_test::set_autogates(&["my-new-feature"])` configures exactly the
+//    named gates for as long as the returned guard lives.
 //
 // Removing the gate after rollout:
 //
@@ -88,15 +90,6 @@ namespace workerd::util {
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
-  /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
-     is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
-     prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
-     the only phase in which TypeScript-implemented streams (whose construction runs JS) can be    \
-     built; the mechanism itself is implementation-agnostic and runs for legacy streams too. When  \
-     disabled, deserialization constructs legacy streams in place, exactly as before the gate      \
-     existed; the typescript_implemented_streams compat flag requires this gate to receive         \
-     streams over RPC (that combination is rejected, not degraded). */                             \
-  V(RPC_EXTERNALS_HYDRATION)                                                                       \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \
@@ -110,17 +103,6 @@ namespace workerd::util {
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
   V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
-  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
-     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
-     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
-     without abort. */                                                                             \
-  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
-  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
-     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
-     canceled or released before EOF, and the origin's pump cancels the source (running its       \
-     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
-     the origin learns of the loss only when its next write fails. */                              \
-  V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
@@ -128,7 +110,39 @@ namespace workerd::util {
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)
+  V(NODEJS_I18N_RUST)                                                                              \
+  /* Writes to the stdio file descriptors (0, 1, 2) through node:fs are line-buffered and          \
+     logged by the TypeScript implementation (src/node/internal/internal_fs_stdio.ts) rather       \
+     than by StdioFile in io/worker-fs.c++. The C++ implementation is retained for rollback. */    \
+  V(TS_STDIO)                                                                                      \
+  /* MessageChannel and MessagePort are the TypeScript implementations from the per-isolate        \
+     bootstrap (src/per_isolate/messagechannel/) rather than the C++ classes in                    \
+     api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
+     cloudflare-internal:messagechannel. */                                                        \
+  V(TS_MESSAGE_CHANNEL)                                                                            \
+  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
+     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
+  V(TS_EVENT_SOURCE)                                                                               \
+  /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
+     before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
+     arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
+     uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
+     fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
+  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* Cross-context actions queued on an actor between events wait for its next request instead     \
+     of aborting it, and IoContext::run() without a current request fails with a typed error.      \
+     An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
+     actor's onHibernate event drops the actions queued before it. Also counts the copies of an    \
+     abort's reason its queued deliveries share as external memory, and queues at most one         \
+     request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
+     actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
+     open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
+     opening one more fails with an Error. Enabling this gate removes that limit, making them      \
+     unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

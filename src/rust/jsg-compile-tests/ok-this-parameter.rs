@@ -26,8 +26,8 @@ impl Counter {
     }
 
     #[jsg_method]
-    pub fn imported(this: Rc<Self>) -> jsg::Number {
-        jsg::Number::from(this.count.get())
+    pub fn imported(this: Rc<Self>) -> u32 {
+        this.count.get()
     }
 
     #[jsg_method]
@@ -37,7 +37,7 @@ impl Counter {
         by: u32,
     ) -> jsg::Result<v8::Local<'s, v8::Value>> {
         this.count.set(this.count.get() + by);
-        jsg::Number::from(this.count.get()).to_js(lock)
+        this.count.get().to_js(lock)
     }
 
     #[jsg_method]
@@ -56,8 +56,8 @@ impl Counter {
     }
 
     #[jsg_property]
-    pub fn get_total(this: jsg::Rc<Self>) -> jsg::Number {
-        jsg::Number::from(this.count.get())
+    pub fn get_total(this: jsg::Rc<Self>) -> u32 {
+        this.count.get()
     }
 
     #[jsg_property]
@@ -66,8 +66,8 @@ impl Counter {
     }
 
     #[jsg_property(instance)]
-    pub fn get_current(this: jsg::Rc<Self>) -> jsg::Number {
-        jsg::Number::from(this.count.get())
+    pub fn get_current(this: jsg::Rc<Self>) -> u32 {
+        this.count.get()
     }
 
     #[jsg_inspect_property]

@@ -28,7 +28,7 @@ struct Args {
 enum Kind {
     /// `v8::ScriptCompiler::CompileModule` (ESM bundles)
     Module,
-    /// `v8::ScriptCompiler::CompileFunction` with one context extension
+    /// `v8::ScriptCompiler::CompileFunction` with the pseudo-global parameters
     /// (per-isolate bootstrap scripts)
     Function,
 }

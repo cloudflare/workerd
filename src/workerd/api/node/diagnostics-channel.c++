@@ -11,13 +11,14 @@ void DiagnosticsChannelModule::publishToTracer(
     jsg::Lock& js, jsg::JsValue nameValue, jsg::JsValue message) {
   auto& context = IoContext::current();
   KJ_IF_SOME(tracer, context.getWorkerTracer()) {
-    // Converted here rather than taken as jsg::Name and jsg::Value parameters, so that publish()
-    // stays cheap when there is no tracer. The TypeScript side passes a string or a symbol.
+    // Converted here rather than taken as a string parameter, so that publish() stays cheap when
+    // there is no tracer. The TypeScript side passes a string or a symbol.
     auto name = [&] {
       KJ_IF_SOME(symbol, nameValue.tryCast<jsg::JsSymbol>()) {
-        return jsg::Name(js, symbol);
+        v8::Local<v8::Symbol> handle = symbol;
+        return kj::str("Symbol(", handle->Description(js.v8Isolate), ")");
       }
-      return jsg::Name(nameValue.toString(js));
+      return nameValue.toString(js);
     }();
     // clang-format off
     JSG_TRY(js) {
@@ -32,7 +33,7 @@ void DiagnosticsChannelModule::publishToTracer(
           "Diagnostic events cannot be published with SharedArrayBuffer or "
           "transferred ArrayBuffer instances");
       tracer.addDiagnosticChannelEvent(
-          context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
+          context.getInvocationSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
     } JSG_CATCH(exception KJ_UNUSED) {
       // There was an error serializing the message. This is most likely due to
       // the message containing a non-serializable value. That's ok, we'll just
@@ -46,7 +47,7 @@ void DiagnosticsChannelModule::publishToTracer(
         ser.write(js, js.str("[[ Diagnostic event was not serializable ]]"_kj));
         auto tmp = ser.release();
         tracer.addDiagnosticChannelEvent(
-            context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
+            context.getInvocationSpanContext(), context.now(), kj::str(name), kj::mv(tmp.data));
       } JSG_CATCH(exception) {
         // This should not happen, but if it does, we don't want to crash. We'll
         // log the error and continue.

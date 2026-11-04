@@ -53,7 +53,7 @@ fn functions_keep_their_own_data() {
         .unwrap();
         let count = v8::Function::new(lock, Cell::new(0u32), |lock, calls, _args| {
             calls.set(calls.get() + 1);
-            jsg::Number::from(calls.get()).to_js(lock)
+            calls.get().to_js(lock)
         })
         .unwrap();
         ctx.set_global(lock, "hello", v8::Local::<v8::Value>::from(hello));
@@ -162,7 +162,9 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {}
+impl jsg::Traced for DropCounter {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -204,9 +206,7 @@ impl TerminatingCreator {
     ) -> Result<(), jsg::Error> {
         lock.terminate_execution();
         let spin: v8::Local<v8::Function> = spin.try_into().unwrap();
-        let err = spin
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
+        let err = spin.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
         let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
         self.saw_pending.set(err.is_pending());
@@ -255,9 +255,7 @@ impl ThrowingCreator {
         throws: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
         let throws: v8::Local<v8::Function> = throws.try_into().unwrap();
-        let err = throws
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
+        let err = throws.call(lock, None, &[]).unwrap_err();
         assert!(err.is_pending());
         let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
         self.saw_pending.set(err.is_pending());
@@ -329,7 +327,7 @@ static CYCLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// Data that can hold a handle back to its own function.
 struct CycleData {
     _drops: DropCounter,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for CycleData {
@@ -344,10 +342,10 @@ fn cycle_through_data_is_collected() {
     harness.run_in_context(|lock, ctx| {
         let data = CycleData {
             _drops: DropCounter(&CYCLE_DROPS),
-            stored: RefCell::new(None),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();
@@ -371,12 +369,12 @@ fn reentrant_call_sees_its_own_data() {
         // Each call logs its depth on entry and exit, and calls `again` in between, which calls
         // the same function again. No `RefCell` borrow is held across the call into JavaScript.
         let f = v8::Function::new(lock, RefCell::new(Vec::new()), |lock, log, args| {
-            let depth = jsg::Number::from_js(lock, args.get(0))?.value();
+            let depth = u32::from_js(lock, args.get(0))?;
             log.borrow_mut().push(format!("+{depth}"));
-            if depth > 0.0 {
+            if depth > 0 {
                 let again: v8::Local<v8::Function> = args.get(1).try_into().unwrap();
-                let next = jsg::Number::from(depth - 1.0).to_js(lock)?;
-                again.call::<v8::Local<v8::Value>>(lock, None, &[next])?;
+                let next = (depth - 1).to_js(lock)?;
+                again.call(lock, None, &[next])?;
             }
             log.borrow_mut().push(format!("-{depth}"));
             log.borrow().join(" ").to_js(lock)
@@ -399,7 +397,7 @@ static TEARDOWN_LEAF_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct TeardownData {
     _drops: DropCounter,
     leaf: jsg::Rc<Leaf>,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for TeardownData {
@@ -420,10 +418,10 @@ fn data_of_reachable_function_is_dropped_with_its_isolate() {
             leaf: jsg::Rc::new(Leaf {
                 _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
             }),
-            stored: RefCell::new(None),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();

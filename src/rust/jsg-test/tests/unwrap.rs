@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use jsg::Number;
 use jsg::ToJS;
 
 #[test]
@@ -32,7 +31,7 @@ fn v8_is_boolean_returns_true_for_booleans() {
 fn v8_is_number_returns_true_for_numbers() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let float_val = Number::new(2.5).to_js(lock)?;
+        let float_val = 2.5_f64.to_js(lock)?;
         assert!(float_val.is_number());
 
         let int_val = 42u32.to_js(lock)?;
@@ -57,7 +56,7 @@ fn v8_type_checks_are_mutually_exclusive() {
         assert!(!b.is_string() && b.is_boolean() && !b.is_number());
 
         // Number is only number
-        let n = Number::new(42.0).to_js(lock)?;
+        let n = 42_i32.to_js(lock)?;
         assert!(!n.is_string() && !n.is_boolean() && n.is_number());
         Ok(())
     });
@@ -86,8 +85,8 @@ fn v8_unwrap_boolean_returns_correct_values() {
 fn v8_unwrap_number_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        for expected in [2.5, 0.0, -42.5] {
-            let num = Number::new(expected).to_js(lock)?;
+        for expected in [2.5_f64, 0.0, -42.5] {
+            let num = expected.to_js(lock)?;
             let mut unwrapped = f64::NAN;
             // SAFETY: The isolate is locked and the value is a valid V8 local handle.
             let ok = unsafe {

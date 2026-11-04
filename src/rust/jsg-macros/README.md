@@ -16,7 +16,7 @@ boilerplate when implementing the JSG type system for Rust-backed JavaScript API
 
 ## `#[jsg_struct]`
 
-Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS` for a plain data
+Generates `jsg::Struct`, `jsg::Type`, `jsg::TypeInfo`, `jsg::ToJS`, and `jsg::FromJS` for a plain data
 struct. Only `pub` fields are projected into the JavaScript object. Use
 `#[jsg_struct(name = "MyName")]` to override the JavaScript class name.
 
@@ -25,12 +25,44 @@ it, the fields are defined as data properties, an absent optional field as `unde
 JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
 setter on `Object.prototype` runs, and what it throws is passed on.
 
+Optional fields can use `Option<T>` (`None` is absent) or `jsg::NullOrUndefined<T>`
+(`Undefined` is absent). Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>`
+when a field must distinguish `null` from `undefined`; its `Null` state always
+produces a property whose value is `null`. An absent input property becomes `None`
+or `Undefined`, respectively. If all public fields are optional, a `null` or
+`undefined` input is accepted as an empty dictionary.
+
+A field that holds a JavaScript value, as a C++ `jsg::JsRef<jsg::JsValue>` field does, is a
+`jsg::v8::TracedGlobal<M>`. It converts as a `Local<'s, M>` does: `TracedGlobal<Value>` takes any
+value, an absent property included, and `TracedGlobal<Object>` only an object. The struct then
+holds GC references, and a resource that keeps it traces the value. Once GC has visited it there,
+the handle is weak and relies on that trace, so a resource that sets or takes the struct after
+construction keeps it in a `jsg::Cell` or `jsg::RefCell`, which make the handle strong again
+before the struct can leave; a `std::cell::Cell` or `RefCell` of it doesn't compile. See "Cells"
+in `src/rust/jsg/README.md`.
+
+`ts_root` marks a TypeScript generation root; it can be combined with `name`.
+RTTI describes the public fields using their types' `TypeInfo` implementations.
+
+The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
+`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
+contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
+`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
+leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
+reference.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
-    pub critical: f64,
+    pub critical: u8,
     pub tag: String,
     pub value: String,
+}
+
+#[jsg_struct]
+pub struct ProduceResult {
+    pub value: jsg::v8::TracedGlobal<jsg::v8::Value>,
+    pub expiration: Option<f64>,
 }
 
 #[jsg_struct(name = "CustomName")]
@@ -47,12 +79,10 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 
 - **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
   a resource while one of its methods runs, so methods never get `&mut self`; keep state
-  they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
-  call that can run JavaScript makes a re-entrant call panic, and tracing skips a mutably borrowed
-  `RefCell`, so while a `borrow_mut()` is held across a call that can allocate on the V8 heap,
-  wrap the resource or create or drop a `jsg::Rc` to it, the values of the `TracedGlobal`s in it
-  and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
-  abort instead).
+  they change in `Cell` or `RefCell` fields; state that holds a `jsg::Rc` or a `TracedGlobal`
+  goes in a `jsg::Cell` or `jsg::RefCell`, whose `take`, `replace` and `borrow_mut` take the lock
+  and make the contents strong (see "Cells" in `src/rust/jsg/README.md`). Prefer `Cell`: a
+  `RefCell` borrow held across a call that can run JavaScript makes a re-entrant call panic.
 - **Static methods** (no receiver) are placed on the constructor.
 - **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
   method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
@@ -64,14 +94,26 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
   does an error from converting the return value with `jsg::ToJS`.
+- The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
+  as the creator for an instance method and `None` for a static one, as C++ JSG passes
+  `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
   `this`, the lock comes right after `this`.
+- `Option<T>`, `jsg::NullOrUndefined<T>`, and `jsg::Lenient<T>` arguments may be omitted.
+  Prefer `NullOrUndefined<T>` to `Option<jsg::Nullable<T>>` for three distinct
+  `Some(T)`, `Null`, and `Undefined` states; omission produces `Undefined`.
+  A `jsg::Nullable<T>` argument remains required, although explicitly passing
+  `undefined` converts to `Null`. See [nullish value conversions](../jsg/README.md#nullablet-and-nullorundefinedt).
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
+  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
+  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
+  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -87,7 +129,7 @@ impl DnsUtil {
     // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
     #[jsg_method]
     pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
-        watcher.targets.borrow_mut().push(this);
+        watcher.targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
     }
 
     // Static — DnsUtil.create(…)
@@ -104,18 +146,24 @@ Eligible methods also get a V8 Fast API callback; see "Fast API" in `src/rust/js
 
 Generates JSG boilerplate for a resource type and its impl block.
 
-**On a struct** — emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`, and
+**On a struct** — emits `jsg::Type`, `jsg::TypeInfo`, `jsg::ToJS`, `jsg::FromJS`, and
 `jsg::GarbageCollected`. The `trace()` body is synthesised automatically for every
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
+The optional `ts_root` argument marks a TypeScript generation root.
 
-**On an impl block** — emits `jsg::Resource::members(flags)`, registering every
+**On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
 `#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
+Each factory also describes its member for RTTI, which describes a resource type with the
+members its `Resource::members` registers, in registration order. Methods, properties,
+constructors, and constants are described; inspect and wildcard properties are not. Parameter
+names are retained, injected `this` and lock parameters are excluded, and fallible return types
+describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
 ```rust
 #[jsg_resource]
@@ -137,14 +185,21 @@ impl DnsUtil {
 ### Custom member registration
 
 Use `#[jsg_resource(custom_members)]` on the impl block to generate the bindings and member
-factories without an automatic `Resource` implementation. Implement `Resource::members(flags)`
-to choose which members to expose, their order, and property placement using ordinary Rust.
-The flags belong to the realm constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`.
-Templates are cached per resource type within that realm; registration runs when a template is
-created, not on each property access.
+factories without an automatic `Resource` implementation. Implement
+`Resource::members(registry, flags)` to choose which members to expose, their order, and property
+placement using ordinary Rust, adding each to `registry`. The flags belong to the realm
+constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`. Templates are cached per
+resource type within that realm; registration runs when a template is created, not on each
+property access.
+
+RTTI export runs the same function with its own registry and the flags of the export, so the
+TypeScript declarations follow the same choices, like the `Registry` parameter of C++
+`registerMembers`. Template creation never runs the type descriptions, and RTTI export never
+builds callbacks. A `jsg::Member` built by hand carries no type description, so it is added as
+`jsg::undescribed(member)`, which RTTI omits from the TypeScript declarations.
 
 ```rust
-use jsg::{Member, PropertyPlacement, Resource};
+use jsg::{MemberRegistry, PropertyPlacement, Resource};
 use jsg::feature_flags::compatibility_flags;
 use jsg_macros::{jsg_constructor, jsg_property, jsg_resource};
 
@@ -164,25 +219,22 @@ impl Example {
 }
 
 impl Resource for Example {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         let placement = if flags.get_jsg_property_on_prototype_template() {
             PropertyPlacement::Prototype
         } else {
             PropertyPlacement::Instance
         };
-        let mut members = vec![
-            Self::constructor_member(),
-            Self::get_label_member(placement),
-        ];
+        registry.add(Self::constructor_member());
+        registry.add(Self::get_label_member(placement));
         if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
-            members.push(Self::get_cache_member(PropertyPlacement::Prototype));
+            registry.add(Self::get_cache_member(PropertyPlacement::Prototype));
         }
-        members
     }
 }
 ```
 
-Factories are private associated functions returning `jsg::Member`. Their names derive from
+Factories are private associated functions returning `impl jsg::MemberDefinition`. Their names derive from
 the **Rust declaration**, independently of any JavaScript `name = "..."` override:
 
 | Annotated declaration | Factory |
@@ -201,10 +253,10 @@ handling apply in both modes. Getter and setter annotations must agree on placem
 Inspect properties remain symbol-keyed and do not take a placement argument.
 `LazyInstance` keeps the getter's `readonly` (see `lazy_instance` below); asking for it for a
 property with a setter panics when the template is created.
-Property registration follows the returned member list's order. V8 enumerates instance native
+Properties are registered in the order they are added to `registry`. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
-`nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
-types itself, as `jsg::Member::NestedType { name, nested_type: jsg::NestedType::of::<Foo>() }`.
+`nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
+types itself, as `jsg::nested_type::<Foo>(name)`.
 
 ---
 
@@ -234,7 +286,8 @@ JavaScript constructor. An `Err` is converted with `Into<jsg::Error>` and thrown
 `#[jsg_method]`. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
 isolate lock and is not counted as a JavaScript argument. Calling the constructor without
-`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
+`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG. Parameter
+conversion and `.length` follow the [`#[jsg_method]`](#jsg_method) rules.
 
 ```rust
 #[jsg_resource]
@@ -305,16 +358,16 @@ use std::cell::{Cell, RefCell};
 use jsg_macros::{jsg_resource, jsg_property};
 
 #[jsg_resource]
-struct Counter { value: Cell<f64>, id: RefCell<String>, kind: String }
+struct Counter { value: Cell<u32>, id: RefCell<String>, kind: String }
 
 #[jsg_resource]
 impl Counter {
     // Prototype — read/write (setter detected from `set_` prefix)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { jsg::Number::new(self.value.get()) }
+    pub fn get_value(&self) -> u32 { self.value.get() }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { self.value.set(v.value()); }
+    pub fn set_value(&self, v: u32) { self.value.set(v); }
 
     // Prototype — read-only (explicit `readonly`)
     #[jsg_property(prototype, readonly)]
@@ -409,18 +462,26 @@ impl Env {
 
 ## `#[jsg_oneof]`
 
-Generates `jsg::Type` and `jsg::FromJS` for a union enum — the Rust equivalent of
-`kj::OneOf<…>`. Each variant must be a single-field tuple whose inner type implements
-`jsg::Type` + `jsg::FromJS`. Variants are tried in declaration order using
-exact-type matching; if none matches, a `TypeError` is thrown listing all expected
-types.
+Generates `jsg::Type`, `jsg::FromJS`, `jsg::Traced` and `jsg::TypeInfo` for a union enum —
+the Rust equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it.
+Each variant must be a single-field tuple whose inner type converts from JavaScript and is
+`jsg::Type` and `jsg::TypeInfo`; RTTI describes the union as its variants' types. A union that holds handles has one lifetime parameter,
+their scope, and no `jsg::Traced` that can be used; a union has no other generic
+parameters. Like a `#[jsg_struct]`, a union implements `jsg::HoldsNoGcReferences` when every
+variant does, and `custom_holds_no_gc_references` leaves it to the author. A value converts as it
+would to the equivalent `kj::OneOf`: variants are
+tried in passes that leave coercion for last, in declaration order within a pass. If no
+variant converts the value, a `TypeError` is thrown naming the expected types, such as
+`Expected string or number but got symbol`. Like `kj::OneOf`, a union that breaks Web
+IDL's rules for unions, such as one with two string types, doesn't compile. See
+[Union Types](../jsg/README.md#union-types).
 
 ```rust
 #[jsg_oneof]
 #[derive(Debug, Clone)]
 enum StringOrNumber {
     String(String),
-    Number(jsg::Number),
+    Number(f64),
 }
 
 #[jsg_resource]
@@ -429,7 +490,7 @@ impl MyResource {
     pub fn process(&self, value: StringOrNumber) -> String {
         match value {
             StringOrNumber::String(s) => format!("string: {s}"),
-            StringOrNumber::Number(n) => format!("number: {}", n.value()),
+            StringOrNumber::Number(n) => format!("number: {n}"),
         }
     }
 }
@@ -453,7 +514,8 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls; containers/wrappers recurse to inner values.
+use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to inner values.
+`Traced::trace` has no default, so a hand-written impl must spell out its visits.
 
 ### Supported field shapes
 
@@ -463,16 +525,18 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
-| `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
-| `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
-| `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
-| `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
+| `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
+| `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
+| `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
-| `#[jsg_struct]` types | Delegates to each field, like a resource |
+| `#[jsg_struct]` types | Delegates to each field, like a resource; implements `jsg::HoldsNoGcReferences` when every field does |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
-The `Cell<…>` variants are required whenever a traced field needs to be mutated
-after construction, because `Traced::trace` receives `&self`.
+A cell is required whenever a traced field needs to be mutated after construction,
+because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
+`TracedGlobal` uses the `jsg::` cells.
 
 ### Manual tracing with `custom_trace`
 
@@ -510,7 +574,6 @@ pub struct MySocket {
 ```
 
 ```rust
-use std::cell::Cell;
 use std::collections::HashMap;
 
 #[jsg_resource]
@@ -523,7 +586,7 @@ pub struct EventRouter {
 
     // Interior-mutable callback set after construction; dual-mode TracedGlobal enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    on_error: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,

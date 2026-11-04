@@ -108,12 +108,19 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
       }
     })();
 
+    auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
+    if (spec == "node:process") {
+      targetPath =
+          kj::Path::parse(jsg::isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                            : "node-internal:legacy_process"_kj);
+      resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
+    }
+
     // require() is only exposed to worker bundle modules so the resolve here is only
     // permitted to require worker bundle or built-in modules. Internal modules are
     // excluded.
-    auto& info = JSG_REQUIRE_NONNULL(
-        registry->resolve(js, targetPath, ref, jsg::ModuleRegistry::ResolveOption::DEFAULT,
-            jsg::ModuleRegistry::ResolveMethod::REQUIRE, spec.asPtr()),
+    auto& info = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath, ref, resolveOption,
+                                         jsg::ModuleRegistry::ResolveMethod::REQUIRE, spec.asPtr()),
         Error, "No such module \"", targetPath.toString(), "\".");
 
     jsg::ModuleRegistry::RequireImplOptions options =

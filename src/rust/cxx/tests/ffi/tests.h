@@ -275,6 +275,7 @@ size_t c_fail_return_primitive();
 size_t c_fail_kj_exception_return_primitive();
 size_t c_fail_kj_exception_disconnected_return_primitive();
 size_t c_fail_kj_exception_with_details_return_primitive();
+size_t c_fail_kj_exception_with_empty_detail_return_primitive();
 size_t c_cancel_return_primitive();
 size_t c_cancel_via_rust_return_primitive();
 size_t c_cancel_roundtrip_return_primitive();

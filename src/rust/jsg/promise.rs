@@ -18,6 +18,7 @@ use crate::UnitType;
 use crate::v8::Function;
 use crate::v8::FunctionCallbackInfo;
 use crate::v8::Local;
+use crate::v8::Object;
 use crate::v8::PromiseState;
 use crate::v8::Value;
 use crate::v8::ffi;
@@ -35,8 +36,8 @@ use crate::v8::ffi;
 /// is true, as [`Local::<Function>::call`] does, so that returning it propagates the exception.
 ///
 /// The handles are untyped, like C++ JSG's `JsPromise`: values are JavaScript values, converted
-/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. C++ JSG's typed `jsg::Promise<T>`,
-/// which can carry C++ values through JavaScript, has no counterpart.
+/// with [`ToJS`](crate::ToJS) and [`FromJS`] at the edges. The counterpart of C++ JSG's typed
+/// `jsg::Promise<T>`, which carries Rust values, is [`jsg::Promise`](crate::Promise).
 pub struct Promise;
 
 /// Marker for a `v8::Promise::Resolver` handle: the capability to settle one promise.
@@ -171,12 +172,23 @@ impl Promise {
     }
 }
 
+/// The data of a promise's reactions, which the first of them to run drops once it returns, as
+/// C++ JSG drops a `ThenCatchPair`: a promise settles once, so the other can no longer run. Until
+/// then, the garbage collector traces it through the reactions.
+struct ReactionData<T>(crate::RefCell<Option<T>>);
+
+impl<T: Traced> Traced for ReactionData<T> {
+    fn trace(&self, visitor: &mut crate::GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
 /// The callback of a reaction that [`Local::then`], [`Local::catch`] or
 /// [`Local::then_or_catch`] registers: calls `F` with the reaction's data and its argument, the
-/// fulfillment value or rejection reason.
+/// fulfillment value or rejection reason, then drops the data.
 fn react<'a, T, F>(
     lock: &mut Lock<'a>,
-    data: &T,
+    data: &ReactionData<T>,
     args: &mut FunctionCallbackInfo<'a>,
 ) -> Result<Local<'a, Value>, Error>
 where
@@ -187,10 +199,20 @@ where
 {
     // SAFETY: `then`, `catch` and `then_or_catch` were handed a value of `F`.
     let f = unsafe { crate::scope::unit_value::<F>() };
-    f(lock, data, args.get(0))
+    // The data stays in the cell, where the garbage collector traces it, while `f` runs.
+    let result = match data.0.borrow().as_ref() {
+        Some(data) => f(lock, data, args.get(0)),
+        // Only one of the reactions sharing the data ever runs, and only once: V8 never exposes
+        // the reaction functions to JavaScript, and a promise settles once.
+        None => unreachable!("a promise reaction ran after another reaction to the promise"),
+    };
+    // Dropped after the borrow ends, so that what its drop does cannot find the cell borrowed.
+    let data = data.0.borrow_mut(lock).take();
+    drop(data);
+    result
 }
 
-/// The callback of a function created with data `T` that calls the reaction `F`.
+/// The callback of a function created with reaction data `T` that calls the reaction `F`.
 fn reaction<T, F>() -> crate::RawFunctionCallback
 where
     T: Traced + 'static,
@@ -198,7 +220,32 @@ where
         + 'static
         + for<'b> Fn(&mut Lock<'b>, &T, Local<'b, Value>) -> Result<Local<'b, Value>, Error>,
 {
-    Function::callback::<T, _>(react::<T, F>)
+    Function::callback::<ReactionData<T>, _>(react::<T, F>)
+}
+
+/// The reaction [`Local::catch`] registers for a fulfillment: resolves the derived promise with
+/// it, as C++ JSG's `identityPromiseContinuation()` does.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "has the signature of a reaction, which can fail"
+)]
+fn pass_fulfillment<'a, T>(
+    _lock: &mut Lock<'a>,
+    _data: &T,
+    value: Local<'a, Value>,
+) -> Result<Local<'a, Value>, Error> {
+    Ok(value)
+}
+
+/// The reaction [`Local::then`] registers for a rejection: passes it through.
+fn pass_rejection<'a, T>(
+    lock: &mut Lock<'a>,
+    _data: &T,
+    reason: Local<'a, Value>,
+) -> Result<Local<'a, Value>, Error> {
+    // SAFETY: `lock` guarantees the isolate is locked; `reason` is a handle in its scope.
+    unsafe { ffi::isolate_throw_exception(lock.isolate().as_ffi(), reason.into_ffi()) };
+    Err(Error::pending())
 }
 
 impl<'s> Local<'s, Promise> {
@@ -224,6 +271,13 @@ impl<'s> Local<'s, Promise> {
         unsafe { ffi::local_promise_mark_as_handled(self.raw()) }
     }
 
+    /// Whether the promise has a reaction or was marked as handled, so that its rejection is not
+    /// reported as unhandled.
+    pub fn has_handler(self) -> bool {
+        // SAFETY: self is a valid promise handle.
+        unsafe { ffi::local_promise_has_handler(self.raw()) }
+    }
+
     /// Registers `on_fulfilled` to run when the promise is fulfilled, like
     /// `promise.then(onFulfilled)`, and returns the promise for its result. A rejection passes
     /// through to the returned promise unchanged.
@@ -237,12 +291,16 @@ impl<'s> Local<'s, Promise> {
     /// no JavaScript runs until the promise settles.
     ///
     /// As with [`Function::new`], the callback must capture nothing, which a compile-time
-    /// assertion checks, and whatever it needs comes from `data`. The garbage collector traces
-    /// `data` until the promise settles and drops it once the callback can no longer run, so it
-    /// may hold `TracedGlobal`s and `jsg::Rc`s, including ones that lead back to the promise. It
-    /// must be their only owner that the garbage collector traces: to share a resource's state,
-    /// hold a `jsg::Rc` or `jsg::Weak` to the resource rather than an `std::rc::Rc` of the
-    /// state.
+    /// assertion checks, and whatever it needs comes from `data`. As in C++ JSG, `data` is
+    /// dropped once a reaction to the promise has run: after the callback returns, or once a
+    /// rejection has passed through. The callback can rely on `data` being traced while it runs.
+    /// If no reaction ever runs, as when the promise never settles, execution is terminated or
+    /// the isolate is torn down, or if the callback panics, the garbage collector drops `data`
+    /// once the reactions are unreachable, or the teardown does. Until then the garbage collector
+    /// traces `data`, so it may hold `TracedGlobal`s and `jsg::Rc`s, including ones that lead
+    /// back to the promise. It must be their only owner that the garbage collector traces: to
+    /// share a resource's state, hold a `jsg::Rc` or `jsg::Weak` to the resource rather than an
+    /// `std::rc::Rc` of the state.
     ///
     /// # Errors
     ///
@@ -254,28 +312,24 @@ impl<'s> Local<'s, Promise> {
             + 'static
             + for<'a> Fn(&mut Lock<'a>, &T, Local<'a, Value>) -> Result<Local<'a, Value>, Error>,
     {
-        self.debug_assert_isolate(lock);
-        let _ = on_fulfilled;
-        let [on_fulfilled] = Function::new_sharing_data(lock, data, [reaction::<T, F>()])?;
-        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; both are
-        // valid handles, and a non-empty result is a promise in the lock's scope.
-        unsafe {
-            Local::from_ffi_maybe(ffi::local_promise_then(
-                lock.isolate().as_ffi(),
-                self.raw(),
-                on_fulfilled.raw(),
-            ))
-        }
-        .ok_or_else(Error::pending)
+        // As C++ JSG does, a rejection passes through a reaction of its own, so that `data` is
+        // dropped then too.
+        self.then_or_catch(lock, data, on_fulfilled, pass_rejection::<T>)
     }
 
     /// Registers `on_rejected` to run when the promise is rejected, like
-    /// `promise.catch(onRejected)`, and returns the promise for its result. A fulfillment passes
-    /// through to the returned promise unchanged.
+    /// `promise.catch(onRejected)`, and returns the promise for its result. A fulfillment
+    /// resolves the returned promise.
     ///
-    /// Like [`Local::then`] otherwise, with the rejection reason as the callback's argument.
-    /// Unlike `promise.catch()`, this does not call `promise.then`. Registering `on_rejected`
-    /// marks the promise as handled, as in JavaScript.
+    /// Like [`Local::then`] otherwise, with the rejection reason as the callback's argument, and
+    /// `data` dropped once a fulfillment has passed through. Unlike `promise.catch()`, this does
+    /// not call `promise.then`. Registering `on_rejected` marks the promise as handled, as in
+    /// JavaScript.
+    ///
+    /// As with C++ JSG's `catch_()`, the fulfillment passes through a reaction that returns it,
+    /// so the returned promise is resolved with the value rather than fulfilled with it: if the
+    /// value is an object, its `then` is read, and a thenable is followed. A getter or Proxy can
+    /// therefore run JavaScript then, and even reject the returned promise.
     ///
     /// # Errors
     ///
@@ -287,19 +341,9 @@ impl<'s> Local<'s, Promise> {
             + 'static
             + for<'a> Fn(&mut Lock<'a>, &T, Local<'a, Value>) -> Result<Local<'a, Value>, Error>,
     {
-        self.debug_assert_isolate(lock);
-        let _ = on_rejected;
-        let [on_rejected] = Function::new_sharing_data(lock, data, [reaction::<T, R>()])?;
-        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; both are
-        // valid handles, and a non-empty result is a promise in the lock's scope.
-        unsafe {
-            Local::from_ffi_maybe(ffi::local_promise_catch(
-                lock.isolate().as_ffi(),
-                self.raw(),
-                on_rejected.raw(),
-            ))
-        }
-        .ok_or_else(Error::pending)
+        // As C++ JSG does, a fulfillment passes through a reaction of its own, so that `data` is
+        // dropped then too.
+        self.then_or_catch(lock, data, pass_fulfillment::<T>, on_rejected)
     }
 
     /// Registers `on_fulfilled` and `on_rejected` to run when the promise settles, like
@@ -330,6 +374,7 @@ impl<'s> Local<'s, Promise> {
     {
         self.debug_assert_isolate(lock);
         let _ = (on_fulfilled, on_rejected);
+        let data = ReactionData(crate::RefCell::new(Some(data)));
         let [on_fulfilled, on_rejected] =
             Function::new_sharing_data(lock, data, [reaction::<T, F>(), reaction::<T, R>()])?;
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; all three
@@ -353,6 +398,57 @@ impl<'s> FromJS<'s> for Local<'s, Promise> {
     /// a promise resolved with it; see [`Promise::resolved`].
     fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
         Promise::resolved(lock, value)
+    }
+
+    fn type_name() -> String {
+        "Promise".to_owned()
+    }
+}
+
+/// A promise for nothing, which converts from JavaScript as C++ JSG converts a
+/// `jsg::Promise<void>` argument. A `kj::Promise<void>` argument, such as `ctx.waitUntil()`
+/// takes, converts the same way.
+///
+/// A promise is taken as is. A thenable (an object with a `then` property) is followed, as
+/// [`Promise::resolved`] follows it, only if the `unwrap_custom_thenables` compatibility flag is
+/// on. Any other value, including a thenable when the flag is off, becomes a promise resolved
+/// with `undefined`; the value is ignored.
+///
+/// [`FromJS`] for `Local<Promise>` instead follows every thenable, whatever the flag, keeping
+/// the value, as C++ JSG does for other promise types. As in C++ JSG, a `VoidPromise` argument
+/// may not be omitted, but may be `undefined`, and is called `Promise` in argument errors.
+#[derive(Clone, Copy)]
+pub struct VoidPromise<'s>(Local<'s, Promise>);
+
+impl<'s> From<VoidPromise<'s>> for Local<'s, Promise> {
+    fn from(promise: VoidPromise<'s>) -> Self {
+        promise.0
+    }
+}
+
+impl<'s> FromJS<'s> for VoidPromise<'s> {
+    type ResultType = Self;
+
+    /// Checks for a thenable's `then` with `in` before following it, as C++ JSG does, which a
+    /// Proxy's `has` trap can observe.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy's `has` trap throws, or V8 fails (see [`Promise`]), the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true. A `then` getter
+    /// that throws rejects the promise instead, as for [`Local::resolve`].
+    fn from_js(lock: &mut Lock<'s>, value: Local<'s, Value>) -> Result<Self, Error> {
+        if let Ok(promise) = Local::<Promise>::try_from(value) {
+            return Ok(Self(promise));
+        }
+        if lock.feature_flags().get_unwrap_custom_thenables()
+            && let Ok(object) = Local::<Object>::try_from(value)
+            && object.has(lock, "then")?
+        {
+            return Promise::resolved(lock, value).map(Self);
+        }
+        let undefined = lock.undefined();
+        Promise::resolved(lock, undefined).map(Self)
     }
 
     fn type_name() -> String {

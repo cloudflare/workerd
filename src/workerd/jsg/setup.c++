@@ -149,12 +149,6 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   }
   argv[argc] = nullptr;  // V8 probably doesn't need this but technically argv is NULL-terminated.
 
-  // V8 ships Temporal enabled by default, but Workers don't expose it yet: exposing it needs a
-  // compatibility flag, and a real clock for Temporal.Now (see the placeholder
-  // temporalNowCallback in resource.h). This is set before the configured flags so that
-  // `--harmony-temporal` in v8Flags can still turn Temporal on for local experiments.
-  v8::V8::SetFlagsFromString("--noharmony-temporal");
-
   v8::V8::SetFlagsFromCommandLine(&argc, argv.begin(), true);
 
   KJ_REQUIRE(argc == 1, "unrecognized V8 flag", argv[1]);

@@ -463,8 +463,7 @@ async def response_unit_tests(env):
     response_json = Response.json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
     assert (
-        repr(response_json)
-        == "Response(status=200, status_text='OK', content_type='application/json')"
+        repr(response_json) == "Response(status=200, content_type='application/json')"
     )
 
     response_json = Response.from_json([1, 2, 3])

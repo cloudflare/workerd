@@ -41,3 +41,18 @@ fn python_workers_makes_the_cpp_global_prototype_read_only() {
         Ok(())
     });
 }
+
+/// A second guard while one is alive would replace its configuration and then discard it.
+#[test]
+#[should_panic(expected = "an Autogates guard is already alive")]
+fn autogate_guards_do_not_nest() {
+    let _outer = crate::set_autogates(&[]);
+    let _inner = crate::set_autogates(&["jsg-integer-enforce-range"]);
+}
+
+/// Dropping the guard lets the next one be made.
+#[test]
+fn autogate_guards_follow_each_other() {
+    drop(crate::set_autogates(&["jsg-integer-enforce-range"]));
+    let _again = crate::set_autogates(&[]);
+}

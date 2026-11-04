@@ -37,6 +37,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "draining-reader", esModule = embed "draining-reader.js"),
   (name = "payload-helpers", esModule = embed "payload-helpers.js"),
   (name = "body-integration", esModule = embed "body-integration.js"),
+  (name = "content-length", esModule = embed "content-length.js"),
   (name = "pipe-integration", esModule = embed "pipe-integration.js"),
   (name = "reentrancy", esModule = embed "reentrancy.js"),
   (name = "lock-release", esModule = embed "lock-release.js"),

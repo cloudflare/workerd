@@ -4,7 +4,6 @@
 
 use jsg::ExceptionType;
 use jsg::NonCoercible;
-use jsg::Number;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -26,7 +25,7 @@ impl MyResource {
     }
 
     #[jsg_method]
-    pub fn number(&self, nc: NonCoercible<Number>) -> Result<Number, jsg::Error> {
+    pub fn number(&self, nc: NonCoercible<f64>) -> Result<f64, jsg::Error> {
         Ok(*nc.as_ref())
     }
 }
@@ -47,8 +46,8 @@ fn non_coercible_bool_new_and_as_ref() {
 
 #[test]
 fn non_coercible_number_new_and_as_ref() {
-    let nc: NonCoercible<Number> = NonCoercible::new(Number::new(2.5));
-    assert!((nc.as_ref().value() - 2.5).abs() < f64::EPSILON);
+    let nc: NonCoercible<f64> = NonCoercible::new(2.5);
+    assert!((nc.as_ref() - 2.5).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -59,8 +58,8 @@ fn non_coercible_from_trait() {
     let nc_bool: NonCoercible<bool> = true.into();
     assert!(*nc_bool.as_ref());
 
-    let nc_num: NonCoercible<Number> = Number::new(42.0).into();
-    assert!((nc_num.as_ref().value() - 42.0).abs() < f64::EPSILON);
+    let nc_num: NonCoercible<f64> = 42.0.into();
+    assert!((nc_num.as_ref() - 42.0).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -85,9 +84,9 @@ fn non_coercible_deref_trait() {
     // Deref to bool
     assert!(*nc_bool);
 
-    let nc_num: NonCoercible<Number> = NonCoercible::new(Number::new(2.5));
-    // Deref to Number, then get value
-    assert!(nc_num.value() > 2.0);
+    let nc_num: NonCoercible<f64> = NonCoercible::new(2.5);
+    // Deref to f64
+    assert!(*nc_num > 2.0);
 }
 
 #[test]
@@ -156,12 +155,12 @@ fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
         assert!(err.message.contains("bool"));
 
         // Number method accepts number
-        let result: Number = ctx.eval(lock, "resource.number(42.5)").unwrap();
-        assert!((result.value() - 42.5).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "resource.number(42.5)").unwrap();
+        assert!((result - 42.5).abs() < f64::EPSILON);
 
         // Number method rejects string
         let err = ctx
-            .eval::<Number>(lock, "resource.number('42')")
+            .eval::<f64>(lock, "resource.number('42')")
             .unwrap_err()
             .unwrap_jsg_err(lock);
         assert_eq!(err.name, ExceptionType::TypeError);

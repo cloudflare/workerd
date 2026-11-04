@@ -6,10 +6,13 @@
 // machinery must neither invoke the interceptor as a thenable nor leak
 // it into results, and what the interceptor does to the stream while a
 // result settles must not disturb the other consumers of a tee, or the
-// other reads a cancel() or close() answered.
+// other reads a cancel() or close() answered. Consuming a body consults the
+// interceptor only for the result it hands the caller.
 
 import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+
+const enc = new TextEncoder();
 
 const TIMEOUT = Symbol('timeout');
 function settled(promise) {
@@ -489,6 +492,58 @@ export const thenGetterPerIteratorReturn = {
         await finished(it);
       } else {
         await rejects(it.return('v'), (e) => e === boom);
+      }
+    }
+  },
+};
+
+// Consuming a body consults a patched Object.prototype.then only when the
+// promise returned to the caller resolves, with the result: the runtime's
+// internal steps are not intercepted (parity). The patch removes itself on
+// first use, as WPT's response-stream-with-broken-then does, and answers
+// 'intercepted'. text() resolves with a string, which has no then to look
+// up.
+export const thenPatchOnlyInterceptsConsumptionResult = {
+  async test() {
+    const form = {
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    };
+    const bodies = {
+      native: (text) => text,
+      queued: (text) =>
+        new ReadableStream({
+          start(c) {
+            c.enqueue(enc.encode(text));
+            c.close();
+          },
+        }),
+    };
+    const consumers = [
+      ['arrayBuffer', 'hello', undefined, 'intercepted', 1],
+      ['bytes', 'hello', undefined, 'intercepted', 1],
+      ['blob', 'hello', undefined, 'intercepted', 1],
+      ['text', 'hello', undefined, 'hello', 0],
+      ['json', '{"a":1}', undefined, 'intercepted', 1],
+      ['formData', 'a=1', form, 'intercepted', 1],
+    ];
+    for (const [kind, makeBody] of Object.entries(bodies)) {
+      for (const [method, text, init, expected, calls] of consumers) {
+        const response = new Response(makeBody(text), init);
+        let thenCalls = 0;
+        Object.prototype.then = function (onFulfilled) {
+          thenCalls++;
+          delete Object.prototype.then;
+          onFulfilled('intercepted');
+        };
+        let result;
+        try {
+          result = await response[method]();
+        } finally {
+          delete Object.prototype.then;
+        }
+        const label = `${kind} ${method}()`;
+        strictEqual(result, expected, label);
+        strictEqual(thenCalls, calls, label);
       }
     }
   },

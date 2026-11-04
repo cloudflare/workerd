@@ -1682,10 +1682,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   webCryptoModernAlgorithms @191 :Bool
       $compatEnableFlag("webcrypto_modern_algorithms");
   # Enables opt-in WebCrypto modern algorithm support. This currently exposes the subset of
-  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA, related
-  # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
-  # explicitly gated because the draft is still changing and workerd does not implement the full
-  # proposal. The API may change as the draft evolves.
+  # the evolving WICG Modern Algorithms draft implemented by workerd: ML-KEM, ML-DSA,
+  # ChaCha20-Poly1305, MLKEM768-X25519, SHA-3 digests, related key encapsulation helpers,
+  # getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is explicitly gated because
+  # the draft is still changing and workerd does not implement the full proposal. The API may
+  # change as the draft evolves.
 
   wasmEsmIntegrationBuiltins @192 :Bool
       $compatEnableFlag("wasm_esm_integration_builtins");
@@ -1744,7 +1745,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # unsupported.
 
   pythonSharedStandardLibrary @198 :Bool
-      $compatEnableFlag("python_shared_standard_library");
+      $compatEnableFlag("python_shared_standard_library")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
   # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
   # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
@@ -1761,4 +1763,40 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
   # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
   # and module name.
+
+  temporal @200 :Bool
+      $compatEnableFlag("temporal")
+      $compatDisableFlag("no_temporal")
+      $compatEnableDate("2026-12-01");
+  # Exposes the Temporal date/time API: the `Temporal` global and
+  # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
+  # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
+
+  nodeJsProcessVersion24 @202 :Bool
+      $compatEnableFlag("nodejs_process_version_24")
+      $compatDisableFlag("no_nodejs_process_version_24")
+      $compatEnableDate("2026-11-24");
+  # Reports the latest Node.js 24 release, instead of Node.js 22, as `process.version` and
+  # `process.versions.node`. Libraries feature-sniff on these values, so a Worker that enables the
+  # flag may take code paths written for Node.js 24, even where the Node.js compatibility layer
+  # does not match Node.js 24 behavior. Requires `nodejs_compat` and `enable_nodejs_process_v2`.
+
+  r2BindingsJsrpc @203 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The binding must specify a named entrypoint implementing the R2 backend
+  # methods: head, get, put, delete, list, createMultipartUpload, uploadPart,
+  # abortMultipartUpload, and completeMultipartUpload. Object results use the
+  # corresponding native R2 API types; createMultipartUpload returns an object
+  # containing uploadId. The expected TypeScript interface is type-checked in
+  # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
 }
