@@ -63,7 +63,10 @@ use utils::this_param;
 /// impl, and a field whose conversion fails fails the struct's conversion with that error.
 /// The generated `Traced` impl visits every field, so a field can be a `jsg::Rc<R>`.
 /// Optional fields use `Option<T>` or `jsg::NullOrUndefined<T>`; prefer the latter to
-/// `Option<jsg::Nullable<T>>` to distinguish `null` from `undefined`.
+/// `Option<jsg::Nullable<T>>` to distinguish `null` from `undefined`. A field that holds a
+/// JavaScript value, as a C++ `jsg::JsRef<T>` field does, is a `jsg::v8::TracedGlobal<M>`;
+/// a resource that moves such a struct out of a field keeps it in a `jsg::Cell` or
+/// `jsg::RefCell`, which make the handle strong before it leaves.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata and the TypeScript declaration name; it does not define a JS class.
 #[proc_macro_attribute]
