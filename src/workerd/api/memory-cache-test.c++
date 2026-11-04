@@ -321,6 +321,9 @@ constexpr auto PARITY_SCENARIO = R"SCRIPT(
       await settle(cache.read("g", () => ({ value: "y".repeat(100) })));
       await settle(cache.read("h", () => ({ value: 1, expiration: 0 })));
       await settle(cache.read("j", () => ({ value: Symbol("s") })));
+      await settle(cache.read("k", () => ({ value: { get x() { throw new RangeError("getter"); } } })));
+      await settle(cache.read("l", () => 42));
+      await settle(cache.read("n", () => ({ get value() { throw new Error("result getter"); } })));
       await cache.read("i", () => ({ value: "evicts a" }));
 
       cache.delete("i");
@@ -376,6 +379,9 @@ KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
   // kj::str() of a DOMException is empty, as Rust's to_detail_string() is.
   KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str: "
                      "fallback_success=bool:false key=str:j"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:RangeError: "
+                     "getter fallback_success=bool:false key=str:k"_kj),
       describe());
   KJ_EXPECT(contains("memory_cache_delete <- request: delete_completed=bool:true key=str:i"_kj),
       describe());

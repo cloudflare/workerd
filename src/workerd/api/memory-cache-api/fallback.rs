@@ -359,13 +359,28 @@ fn serialize<'a>(
         Ok(bytes) => return Ok(Ok(bytes)),
         Err(exception) => exception,
     };
-    if !is_data_clone_error(lock, exception)? {
-        return Ok(Err(exception));
+    // What memory-cache.c++ rejects with, or what converting the exception threw.
+    let rejection = lock.try_catch(|lock| serialization_error(lock, value, exception))?;
+    Ok(Err(rejection.unwrap_or_else(|thrown| thrown)))
+}
+
+/// What memory-cache.c++ makes of what serializing `value` threw, which it throws on as a
+/// `kj::Exception`: an exception with an empty detail string, such as the `DataCloneError` that
+/// the serializer throws, becomes a `DataCloneError` that says only what type failed, and any
+/// other exception becomes the copy that tunnelling it through the `kj::Exception` makes.
+fn serialization_error<'a>(
+    lock: &mut jsg::Lock<'a>,
+    value: v8::Local<'a, v8::Value>,
+    exception: v8::Local<'a, v8::Value>,
+) -> jsg::Result<v8::Local<'a, v8::Value>> {
+    if exception.to_detail_string(lock)?.is_empty() {
+        let err = jsg::Error::new_data_clone_error(format!(
+            "failed to serialize {}",
+            value.type_of(lock)
+        ));
+        return lock.exception(&err);
     }
-    // As memory-cache.c++, whose DataCloneError says only what type failed.
-    let err =
-        jsg::Error::new_data_clone_error(format!("failed to serialize {}", value.type_of(lock)));
-    Ok(Err(lock.exception(&err)?))
+    jsg::TunneledException::from_js(lock, exception)?.to_js(lock)
 }
 
 /// How a fallback produced a value.
@@ -416,20 +431,4 @@ fn read_result<'a>(
         Some(f64::from_js(lock, expiration)?)
     };
     Ok((value, expiration))
-}
-
-/// Whether the serializer threw a `DataCloneError`, rather than passed on what a getter threw.
-fn is_data_clone_error<'a>(
-    lock: &mut jsg::Lock<'a>,
-    exception: v8::Local<'a, v8::Value>,
-) -> jsg::Result<bool> {
-    let Ok(exception) = v8::Local::<v8::Object>::try_from(exception) else {
-        return Ok(false);
-    };
-    // What a getter threw may run JavaScript when read, and throw.
-    let Ok(name) = lock.try_catch(|lock| exception.get(lock, "name"))? else {
-        return Ok(false);
-    };
-    Ok(v8::Local::<v8::String>::try_from(name)
-        .is_ok_and(|name| name.to_string(lock) == "DataCloneError"))
 }

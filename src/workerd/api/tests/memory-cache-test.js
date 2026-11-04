@@ -115,6 +115,52 @@ export const valueNotSerializable = {
   },
 };
 
+export const valueGetterThrows = {
+  async test(ctrl, env) {
+    // What a getter of the value throws while it is serialized reaches the read as C++ tunnels
+    // it through a kj::Exception: as a copy, which only enhanced_error_serialization builds
+    // from the serialized exception, keeping its own properties.
+    const enhanced = Cloudflare.compatibilityFlags.enhanced_error_serialization;
+    class Custom extends Error {}
+    const thrown = Object.assign(new Custom('g'), { code: 7 });
+    const readThrowing = (key, exception) =>
+      env.CACHE.read(key, () => ({
+        value: {
+          get x() {
+            throw exception;
+          },
+        },
+      }));
+
+    let err = await readThrowing('getter', thrown).catch((e) => e);
+    ok(err !== thrown);
+    strictEqual(Object.getPrototypeOf(err), Error.prototype);
+    strictEqual(err.message, 'g');
+    strictEqual(err.code, enhanced ? 7 : undefined);
+
+    err = await readThrowing('getter', 'a string').catch((e) => e);
+    strictEqual(Object.getPrototypeOf(err), Error.prototype);
+    strictEqual(err.message, 'a string');
+
+    err = await readThrowing(
+      'getter',
+      Object.assign(new RangeError('r'), { retryable: true })
+    ).catch((e) => e);
+    strictEqual(Object.getPrototypeOf(err), RangeError.prototype);
+    strictEqual(err.message, 'r');
+    strictEqual(err.retryable, true);
+
+    // A DOMException's detail string is empty, so it becomes a DataCloneError.
+    err = await readThrowing(
+      'getter',
+      new DOMException('m', 'AbortError')
+    ).catch((e) => e);
+    ok(err instanceof DOMException);
+    strictEqual(err.name, 'DataCloneError');
+    strictEqual(err.message, 'failed to serialize object');
+  },
+};
+
 export const evictionsHappen = {
   async test(ctrl, env) {
     // Our cache has a max of two items, let's fill it...
