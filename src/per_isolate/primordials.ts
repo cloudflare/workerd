@@ -77,6 +77,7 @@ const WeakSetCtor = WeakSet;
 
 // Function
 const FunctionPrototypeBind = uncurryThis(FunctionPrototype.bind);
+const FunctionPrototypeCall = uncurryThis(call);
 
 // Object
 const ObjectCreate = Object.create;
@@ -246,6 +247,7 @@ const WeakSetPrototypeDelete = uncurryThis(WeakSet.prototype.delete);
 const StringPrototypeCharCodeAt = uncurryThis(String.prototype.charCodeAt);
 const StringPrototypeSlice = uncurryThis(String.prototype.slice);
 const StringPrototypeStartsWith = uncurryThis(String.prototype.startsWith);
+const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
 
 // Symbol
 const SymbolIterator = Symbol.iterator;
@@ -668,6 +670,7 @@ module.exports = ObjectFreeze({
   uncurryThis,
   applyBind,
   getProtoGetter,
+  captureJsgGetter,
 
   // Global types
   AbortController: AbortControllerCtor,
@@ -700,6 +703,7 @@ module.exports = ObjectFreeze({
   // Function
   FunctionPrototype,
   FunctionPrototypeBind,
+  FunctionPrototypeCall,
 
   // Object
   ObjectPrototype,
@@ -817,6 +821,7 @@ module.exports = ObjectFreeze({
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   StringPrototypeStartsWith,
+  StringPrototypeIndexOf,
 
   // Symbol
   SymbolAsyncIterator,

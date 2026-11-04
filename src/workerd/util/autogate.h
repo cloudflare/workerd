@@ -131,6 +131,9 @@ namespace workerd::util {
      api/messagechannel.h, both as globals (under expose_global_message_channel) and in            \
      cloudflare-internal:messagechannel. */                                                        \
   V(TS_MESSAGE_CHANNEL)                                                                            \
+  /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
+     (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
+  V(TS_EVENT_SOURCE)                                                                               \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
@@ -144,7 +147,13 @@ namespace workerd::util {
      abort's reason its queued deliveries share as external memory, and queues at most one         \
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
-  V(DEFER_CROSS_CONTEXT_ACTIONS)
+  V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
+     open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
+     opening one more fails with an Error. Enabling this gate removes that limit, making them      \
+     unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

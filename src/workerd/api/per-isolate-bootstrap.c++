@@ -5,10 +5,13 @@
 #include "per-isolate-bootstrap.h"
 
 #include <workerd/api/abort-bootstrap.h>
+#include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/request-io.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -253,8 +256,9 @@ static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>&
     auto& js = jsg::Lock::from(args.GetIsolate());
     js.withinHandleScope([&] {
       args.GetReturnValue().Set(
-          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(
-              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]))));
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(js,
+              jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]),
+              jsg::JsValue(args[3]), jsg::JsValue(args[4]))));
     });
   });
 }
@@ -264,6 +268,59 @@ static void CreateTrustedEvent(const v8::FunctionCallbackInfo<v8::Value>& args) 
     auto& js = jsg::Lock::from(args.GetIsolate());
     return v8::Local<v8::Value>(
         api::EventTargetBootstrap::createTrustedEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void CreateTrustedOpenEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedOpenEvent(js));
+  });
+}
+
+static void CreateTrustedErrorEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedErrorEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+// The request-bound I/O handle (see request-io.h) and the helpers of bootstrap-utils.h. Plain
+// methods: they allocate and can throw.
+static void CreateRequestIo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::RequestIo::createForBootstrap(js));
+  });
+}
+
+static void IsFetcher(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.boolean(api::BootstrapUtils::isFetcher(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ParseUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::parseUrl(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::readableStreamState(js, jsg::JsValue(args[0])));
   });
 }
 
@@ -314,30 +371,32 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
-static void SetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// TextEncoder.encode() for the TypeScript TextEncoderStream: see api::encodeUtf8Chunk.
+static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    // Argument 0 is an object.
-    // Argument 1 is a string label that is to be used to create a v8::Private
-    // Argument 2 is a value for that v8::Private
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
     auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto lbl = jsg::JsString(args[1].As<v8::String>());
-    auto val = jsg::JsValue(args[2]);
-    obj.setPrivate(js, lbl, jsg::JsValue(val));
-    return js.undefined();
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "encodeUtf8() expects a string");
+    return api::encodeUtf8Chunk(js, str);
   });
 }
 
-static void GetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
+// scripts use as a property key: `object[key]` reads or writes the slot that
+// jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
+// (v8::Object::GetPrivate() is that same property read). A private key is never inherited,
+// reflected or seen by Proxy traps, and only code holding the key can name it. The API does
+// not type a private symbol as a v8::Value, so it is handed over as a template property, as
+// Node.js hands over its own.
+static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
     auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto label = jsg::JsString(args[1].As<v8::String>());
-    return obj.getPrivate(js, label);
+    auto name = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError,
+        "getPrivateSymbol() expects a string argument");
+    v8::Local<v8::String> slot = js.strIntern("key"_kj);
+    auto holder = v8::ObjectTemplate::New(js.v8Isolate);
+    holder->Set(slot, v8::Private::ForApi(js.v8Isolate, name));
+    return jsg::check(jsg::check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot));
   });
 }
 
@@ -392,8 +451,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
-    "setPrivate",
-    "getPrivate",
+    "encodeUtf8",
+    "getPrivateSymbol",
     "setListenerCountHook",
     "getEventHandlerAttribute",
     "setEventHandlerAttribute",
@@ -402,6 +461,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createTrustedEvent",
     "cloneMessageData",
     "queueReaction",
+    "createTrustedOpenEvent",
+    "createTrustedErrorEvent",
+    "createRequestIo",
+    "isFetcher",
+    "parseUrl",
+    "mimeTypeEssence",
+    "readableStreamState",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -416,8 +482,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
-    getMethod(js, SetPrivate),
-    getMethod(js, GetPrivate),
+    getMethod(js, EncodeUtf8),
+    getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),
     getMethod(js, SetEventHandlerAttribute),
@@ -426,6 +492,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
     getMethod(js, QueueReaction),
+    getMethod(js, CreateTrustedOpenEvent),
+    getMethod(js, CreateTrustedErrorEvent),
+    getMethod(js, CreateRequestIo),
+    getMethod(js, IsFetcher),
+    getMethod(js, ParseUrl),
+    getMethod(js, MimeTypeEssence),
+    getMethod(js, ReadableStreamState),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
