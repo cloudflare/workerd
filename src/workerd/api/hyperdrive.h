@@ -27,6 +27,14 @@ class Hyperdrive: public jsg::Object {
       kj::String user,
       kj::String password,
       kj::String scheme);
+
+  // A binding transfers through a startup snapshot as its channel number, credentials and the
+  // random host name the constructor drew; the connect override is registered lazily, on the
+  // first host/ip/connectionString read, which needs an IoContext and so never happens in the
+  // zygote.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<Hyperdrive>(SnapshotCloneTag{}, *this));
+  }
   jsg::Ref<Socket> connect(jsg::Lock& js);
   kj::StringPtr getDatabase();
   kj::StringPtr getUser();
@@ -63,6 +71,19 @@ class Hyperdrive: public jsg::Object {
     tracker.trackField("password", password);
     tracker.trackField("scheme", scheme);
   }
+
+ private:
+  struct SnapshotCloneTag {};
+
+ public:
+  // The copy snapshotClone() makes.
+  Hyperdrive(SnapshotCloneTag, const Hyperdrive& original)
+      : clientIndex(original.clientIndex),
+        randomHost(kj::str(original.randomHost)),
+        database(kj::str(original.database)),
+        user(kj::str(original.user)),
+        password(kj::str(original.password)),
+        scheme(kj::str(original.scheme)) {}
 
  private:
   uint clientIndex;
