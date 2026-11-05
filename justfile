@@ -189,7 +189,7 @@ eslint:
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/pyodide/tools:patch_pyodide_asm_lib@eslint \
+    //src/pyodide/bundle:patch_pyodide_asm_lib@eslint \
     //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 
