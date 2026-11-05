@@ -166,9 +166,9 @@ fn reference_search(haystack: &[u16], needle: &[u16], start: usize, is_forward: 
 fn search_one_byte_matches_reference() {
     let mut bytes = Bytes(0xdead_beef_cafe_f00d);
     for _ in 0..2000 {
-        let haystack_len = 1 + usize::from(bytes.next()) % 40;
+        let haystack_len = 1 + usize::from(bytes.next()) % 80;
         let haystack = bytes.string(b"ab", haystack_len);
-        let needle_len = 1 + usize::from(bytes.next()) % haystack.len().min(4);
+        let needle_len = 1 + usize::from(bytes.next()) % haystack.len().min(LONG_NEEDLE + 3);
         let needle = bytes.string(b"ab", needle_len);
         let wide = |s: &[u8]| s.iter().map(|&c| u16::from(c)).collect::<Vec<_>>();
         for is_forward in [true, false] {
@@ -211,11 +211,11 @@ fn search_two_byte_matches_reference() {
     // Units whose bytes repeat across unit boundaries, to produce odd-offset byte matches.
     let units = [0x0101u16, 0x0102, 0x0201, 0x0202];
     for _ in 0..2000 {
-        let haystack_len = 1 + usize::from(bytes.next()) % 30;
+        let haystack_len = 1 + usize::from(bytes.next()) % 80;
         let haystack: Vec<u16> = (0..haystack_len)
             .map(|_| units[usize::from(bytes.next()) % units.len()])
             .collect();
-        let needle_len = 1 + usize::from(bytes.next()) % haystack.len().min(4);
+        let needle_len = 1 + usize::from(bytes.next()) % haystack.len().min(LONG_NEEDLE + 3);
         let needle: Vec<u16> = (0..needle_len)
             .map(|_| units[usize::from(bytes.next()) % units.len()])
             .collect();
@@ -233,6 +233,89 @@ fn search_two_byte_matches_reference() {
                     "{haystack:?} {needle:?} {start} {is_forward}"
                 );
             }
+        }
+    }
+}
+
+/// Checks `search_two_byte` against `reference_search` in both directions, from every start.
+fn check_two_byte(haystack: &[u16], needle: &[u16]) {
+    let as_bytes = |s: &[u16]| s.iter().flat_map(|u| u.to_ne_bytes()).collect::<Vec<_>>();
+    for start in 0..=haystack.len() - needle.len() {
+        assert_eq!(
+            search_two_byte(&as_bytes(haystack), &as_bytes(needle), start, true),
+            reference_search(haystack, needle, start, true),
+            "forward from {start}"
+        );
+    }
+    for start in 0..=haystack.len() + 2 {
+        assert_eq!(
+            search_two_byte(&as_bytes(haystack), &as_bytes(needle), start, false),
+            reference_search(haystack, needle, start, false),
+            "backward from {start}"
+        );
+    }
+}
+
+#[test]
+fn search_two_byte_falls_back_to_memmem() {
+    let a = u16::from(b'a');
+    let b = u16::from(b'b');
+    // A long needle whose first and last code units match almost everywhere uses up the search
+    // by the first code unit, and then the Horspool search's budget.
+    let mut needle = vec![a; LONG_NEEDLE + 1];
+    needle[1] = b;
+    let mut haystack = vec![a; 200];
+    haystack.extend(&needle);
+    haystack.extend(vec![a; 200]);
+    check_two_byte(&haystack, &needle);
+    needle.reverse();
+    check_two_byte(&haystack, &needle);
+    // One whose first code unit is common but whose last is not.
+    let mut needle = vec![a; LONG_NEEDLE + 1];
+    needle[LONG_NEEDLE] = b;
+    check_two_byte(&haystack, &needle);
+    needle.reverse();
+    check_two_byte(&haystack, &needle);
+    // A short needle whose first code unit is everywhere uses up the search by it.
+    check_two_byte(&haystack, &[a, b]);
+    check_two_byte(&haystack, &[b, a]);
+    check_two_byte(&haystack, &[a, a, a, b]);
+    // Code units with zero, equal and nonzero high bytes.
+    for unit in [0x0061, 0x6100, 0x6161, 0x0000, 0xd83d] {
+        let haystack: Vec<u16> = (0..100)
+            .map(|i| if i % 7 == 3 { unit } else { a })
+            .collect();
+        check_two_byte(&haystack, &[unit, a]);
+        check_two_byte(&haystack, &[a, unit]);
+        check_two_byte(&haystack, &[unit, a, a, a, a, a, a, unit]);
+    }
+}
+
+#[test]
+fn search_one_byte_falls_back_to_memmem() {
+    let mut haystack = vec![b'a'; 200];
+    haystack.extend(b"ab");
+    haystack.extend(vec![b'a'; 200]);
+    let wide = |s: &[u8]| s.iter().map(|&c| u16::from(c)).collect::<Vec<_>>();
+    for needle in [
+        &b"ab"[..],
+        b"ba",
+        b"aaab",
+        b"baaaaaaa",
+        b"aaaaaaab",
+        b"abaaaaaa",
+    ] {
+        for start in 0..=haystack.len() - needle.len() {
+            assert_eq!(
+                search_one_byte(&haystack, needle, start, true),
+                reference_search(&wide(&haystack), &wide(needle), start, true),
+            );
+        }
+        for start in 0..=haystack.len() {
+            assert_eq!(
+                search_one_byte(&haystack, needle, start, false),
+                reference_search(&wide(&haystack), &wide(needle), start, false),
+            );
         }
     }
 }

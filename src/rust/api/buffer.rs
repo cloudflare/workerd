@@ -230,6 +230,33 @@ fn decode_base64_group_slow(
 // =================================================================================================
 // Search
 
+// Searches follow the strategies of V8's `StringSearch`, which the C++ used. A needle shorter
+// than `LONG_NEEDLE` is found by scanning with `memchr` for its first byte or code unit, which
+// costs nothing to set up and skips most of a haystack in which that is rare. A longer one of
+// bytes goes to `memmem`, and of code units to a scan by its first code unit and then
+// Boyer-Moore-Horspool, since `memmem`'s prefilter finds few rare bytes in a needle whose code
+// units' high bytes are all zero. A scan by the first byte or code unit hands the rest of the
+// haystack on, to `memmem` or Boyer-Moore-Horspool, once the positions it finds come too close
+// together for it to skip much (see `sparse`).
+
+/// Needles at least this long, in bytes or code units, are long, as V8's `kBMMinPatternLength`.
+const LONG_NEEDLE: usize = 8;
+
+/// How many positions a scan by the first byte or code unit checks however close together they
+/// are.
+const CANDIDATES: usize = 16;
+
+/// The average distance in bytes between the positions a scan by the first byte or code unit
+/// checks, below which a call to `memchr` per position costs more than `memmem` does.
+const SPARSE_GAP: usize = 64;
+
+/// Whether a scan by the first byte or code unit goes on, after checking `checked` positions in
+/// the first `scanned` bytes of the haystack: while they are on average at least `gap` bytes
+/// apart, once the first [`CANDIDATES`] are checked.
+const fn sparse(checked: usize, scanned: usize, gap: usize) -> bool {
+    checked <= CANDIDATES + scanned / gap
+}
+
 /// Finds `needle` in `haystack` as `SearchString` does in the C++: the first match at or after
 /// `start` when `is_forward`, and otherwise the last match at or before `start`. Returns the
 /// match's position, or `haystack.len()` if there is none.
@@ -238,44 +265,243 @@ fn decode_base64_group_slow(
 /// leave room for it.
 fn search_one_byte(haystack: &[u8], needle: &[u8], start: usize, is_forward: bool) -> usize {
     let found = if is_forward {
-        memmem::find(&haystack[start..], needle).map(|position| position + start)
+        find_bytes(&haystack[start..], needle).map(|position| position + start)
     } else {
         let last_start = start.min(haystack.len() - needle.len());
-        memmem::rfind(&haystack[..last_start + needle.len()], needle)
+        rfind_bytes(&haystack[..last_start + needle.len()], needle)
     };
     found.unwrap_or(haystack.len())
+}
+
+/// The first position of `needle` in `haystack`, which is at least as long.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() >= LONG_NEEDLE {
+        return memmem::find(haystack, needle);
+    }
+    let last = haystack.len() - needle.len();
+    let mut from = 0;
+    let mut checked = 0;
+    loop {
+        let at = from + memchr::memchr(needle[0], &haystack[from..=last])?;
+        if haystack[at..].starts_with(needle) {
+            return Some(at);
+        }
+        from = at + 1;
+        checked += 1;
+        if from > last {
+            return None;
+        }
+        if !sparse(checked, from, SPARSE_GAP) {
+            return memmem::find(&haystack[from..], needle).map(|position| position + from);
+        }
+    }
+}
+
+/// The last position of `needle` in `haystack`, which is at least as long.
+fn rfind_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() >= LONG_NEEDLE {
+        return memmem::rfind(haystack, needle);
+    }
+    // The positions left to check are those before `end`.
+    let start_end = haystack.len() - needle.len() + 1;
+    let mut end = start_end;
+    let mut checked = 0;
+    loop {
+        let at = memchr::memrchr(needle[0], &haystack[..end])?;
+        if haystack[at..].starts_with(needle) {
+            return Some(at);
+        }
+        end = at;
+        checked += 1;
+        if !sparse(checked, start_end - end, SPARSE_GAP) {
+            return memmem::rfind(&haystack[..end + needle.len() - 1], needle);
+        }
+    }
 }
 
 /// [`search_one_byte`] over UTF-16 code units, held as native-endian bytes in `haystack` and
 /// `needle`, both of even length. `start` and the result are in code units, and the result is
 /// `haystack.len() / 2` if there is no match.
-///
-/// A match of the code units is a match of their bytes at an even offset, so this searches the
-/// bytes and skips matches at odd offsets, which needs no aligned copy of either.
 fn search_two_byte(haystack: &[u8], needle: &[u8], start: usize, is_forward: bool) -> usize {
-    let not_found = haystack.len() / 2;
-    if is_forward {
-        let finder = memmem::Finder::new(needle);
-        let mut from = start * 2;
-        while let Some(position) = finder.find(&haystack[from..]) {
-            let position = from + position;
-            if position.is_multiple_of(2) {
-                return position / 2;
-            }
-            from = position + 1;
-        }
+    let (haystack, _) = haystack.as_chunks::<2>();
+    let (needle, _) = needle.as_chunks::<2>();
+    let found = if is_forward {
+        find_units(&haystack[start..], needle).map(|position| position + start)
     } else {
-        let finder = memmem::FinderRev::new(needle);
-        let last_start = start.min(not_found - needle.len() / 2) * 2;
-        let mut end = last_start + needle.len();
-        while let Some(position) = finder.rfind(&haystack[..end]) {
-            if position.is_multiple_of(2) {
-                return position / 2;
-            }
-            end = position - 1 + needle.len();
+        let last_start = start.min(haystack.len() - needle.len());
+        rfind_units(&haystack[..last_start + needle.len()], needle)
+    };
+    found.unwrap_or(haystack.len())
+}
+
+/// The byte of `unit` that a search by it scans for, and its index in the unit: the larger byte,
+/// which is the nonzero one for most text.
+fn scan_byte(unit: [u8; 2]) -> (u8, usize) {
+    let lane = usize::from(unit[1] > unit[0]);
+    (unit[lane], lane)
+}
+
+/// The average distance in bytes between the positions a scan by the first code unit checks,
+/// below which it hands the haystack on, for `needle`. Boyer-Moore-Horspool skips more of the
+/// haystack at each step the longer the needle is.
+fn sparse_gap(needle: &[[u8; 2]]) -> usize {
+    if needle.len() >= LONG_NEEDLE {
+        SPARSE_GAP.max(needle.len() * 5)
+    } else {
+        SPARSE_GAP
+    }
+}
+
+/// The first position of `needle` in `haystack`, which is at least as long.
+fn find_units(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let (byte, lane) = scan_byte(needle[0]);
+    let gap = sparse_gap(needle);
+    let bytes = haystack.as_flattened();
+    // The bytes at which a match's scanned byte can be.
+    let end = (haystack.len() - needle.len()) * 2 + lane + 1;
+    let mut from = lane;
+    let mut checked = 0;
+    loop {
+        let at = from + memchr::memchr(byte, &bytes[from..end])?;
+        if at % 2 == lane && haystack[at / 2..].starts_with(needle) {
+            return Some(at / 2);
+        }
+        from = at + 1;
+        checked += 1;
+        if from >= end {
+            return None;
+        }
+        if !sparse(checked, from, gap) {
+            break;
         }
     }
-    not_found
+    let unit = from / 2;
+    let rest = &haystack[unit..];
+    let found = if needle.len() >= LONG_NEEDLE {
+        find_units_horspool(rest, needle)
+    } else {
+        find_units_memmem(rest, needle)
+    };
+    found.map(|position| position + unit)
+}
+
+/// The last position of `needle` in `haystack`, which is at least as long.
+fn rfind_units(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let (byte, lane) = scan_byte(needle[0]);
+    let gap = sparse_gap(needle);
+    let bytes = haystack.as_flattened();
+    // The bytes left to check are those before `end`.
+    let start_end = (haystack.len() - needle.len()) * 2 + lane + 1;
+    let mut end = start_end;
+    let mut checked = 0;
+    loop {
+        let at = memchr::memrchr(byte, &bytes[..end])?;
+        if at % 2 == lane && haystack[at / 2..].starts_with(needle) {
+            return Some(at / 2);
+        }
+        end = at;
+        checked += 1;
+        if !sparse(checked, start_end - end, gap) {
+            break;
+        }
+    }
+    // The code units left to check are those whose scanned byte is before `end`, which are
+    // before `end.div_ceil(2)`. That can include the last one checked, which did not match.
+    let units = end.div_ceil(2);
+    let rest = &haystack[..units + needle.len() - 1];
+    if needle.len() >= LONG_NEEDLE {
+        rfind_units_horspool(rest, needle)
+    } else {
+        rfind_units_memmem(rest, needle)
+    }
+}
+
+/// The key of a code unit in a Horspool shift table: the low byte of its value, as in V8.
+fn unit_key(unit: [u8; 2]) -> usize {
+    usize::from(u16::from_ne_bytes(unit).to_le_bytes()[0])
+}
+
+/// Boyer-Moore-Horspool over code units, which skips most of a haystack of text. A needle that
+/// matches the haystack in many places can make it compare most of the needle at most
+/// positions, so once it has compared about as many code units as the haystack holds, it
+/// finishes with [`find_units_memmem`], which takes linear time.
+fn find_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let (&last, prefix) = needle.split_last()?;
+    let mut shift = [needle.len(); 256];
+    for (i, &unit) in prefix.iter().enumerate() {
+        shift[unit_key(unit)] = prefix.len() - i;
+    }
+    let mut budget = haystack.len();
+    let mut at = 0;
+    while at + needle.len() <= haystack.len() {
+        let tail = haystack[at + prefix.len()];
+        if tail == last {
+            if haystack[at..at + prefix.len()] == *prefix {
+                return Some(at);
+            }
+            let Some(rest) = budget.checked_sub(needle.len()) else {
+                return find_units_memmem(&haystack[at..], needle).map(|position| position + at);
+            };
+            budget = rest;
+        }
+        at += shift[unit_key(tail)];
+    }
+    None
+}
+
+/// [`find_units_horspool`] from the end.
+fn rfind_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let (&first, suffix) = needle.split_first()?;
+    let mut shift = [needle.len(); 256];
+    for (i, &unit) in suffix.iter().enumerate().rev() {
+        shift[unit_key(unit)] = i + 1;
+    }
+    let mut budget = haystack.len();
+    let mut at = haystack.len().checked_sub(needle.len())?;
+    loop {
+        let head = haystack[at];
+        if head == first {
+            if haystack[at + 1..at + needle.len()] == *suffix {
+                return Some(at);
+            }
+            let Some(rest) = budget.checked_sub(needle.len()) else {
+                return rfind_units_memmem(&haystack[..at + needle.len()], needle);
+            };
+            budget = rest;
+        }
+        at = at.checked_sub(shift[unit_key(head)])?;
+    }
+}
+
+/// Searches the bytes with `memmem` and skips matches at odd offsets, which are not matches of
+/// code units.
+fn find_units_memmem(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let bytes = haystack.as_flattened();
+    let finder = memmem::Finder::new(needle.as_flattened());
+    let mut from = 0;
+    while let Some(position) = finder.find(&bytes[from..]) {
+        let position = from + position;
+        if position.is_multiple_of(2) {
+            return Some(position / 2);
+        }
+        from = position + 1;
+    }
+    None
+}
+
+/// [`find_units_memmem`] from the end.
+fn rfind_units_memmem(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
+    let bytes = haystack.as_flattened();
+    let needle = needle.as_flattened();
+    let finder = memmem::FinderRev::new(needle);
+    let mut end = bytes.len();
+    while let Some(position) = finder.rfind(&bytes[..end]) {
+        if position.is_multiple_of(2) {
+            return Some(position / 2);
+        }
+        end = position - 1 + needle.len();
+    }
+    None
 }
 
 // =================================================================================================
