@@ -1,0 +1,202 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Live API objects across a startup snapshot; see startup-snapshot-wrappables-test.js. The
+# runner's test() fetches every case service and asserts its report. The @all-autogates variant
+# turns the startup-snapshot autogate on, so every service here goes through the zygote; the @
+# variant runs them as plain Workers.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "global_navigator",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
+];
+
+# Every case gets the same TEXT/JSON/DATA bindings, so that one set of checks covers them all.
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "control", service = "control"),
+          (name = "state", service = "state"),
+          (name = "state-url-standard", service = "state-url-standard"),
+          (name = "fs", service = "fs"),
+          (name = "gc", service = "gc"),
+          (name = "finalization", service = "finalization"),
+          (name = "bindings", service = "bindings"),
+          (name = "unclonable", service = "unclonable"),
+          (name = "searchparams", service = "searchparams"),
+          (name = "no-ts-streams", service = "no-ts-streams"),
+        ],
+      )
+    ),
+    ( name = "control",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"control\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "state",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"state\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # The spec-compliant URL implementation has its own URL::snapshotClone().
+    ( name = "state-url-standard",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "url_standard",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"state-url-standard\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "fs",
+      worker = (
+        modules = [
+          (name = "fs.js", esModule = embed "startup-snapshot-wrappables-fs-test.js"),
+          (name = "worker.js", esModule = embed "startup-snapshot-wrappables-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "enable_nodejs_fs_module",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"fs\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "gc",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"gc\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # A FinalizationRegistry cleanup left due by the top level. enable_weak_ref keeps the
+    # FinalizationRegistry global in place under the default compatibility date.
+    ( name = "finalization",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "global_navigator",
+          "typescript_implemented_streams",
+          "experimental",
+          "unsafe_module",
+          "enable_weak_ref",
+        ],
+        bindings = [
+          (name = "MODE", json = "\"finalization\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # Capability bindings interleaved with value bindings.
+    ( name = "bindings",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        durableObjectNamespaces = [
+          (className = "Counter", uniqueKey = "5f1c4b8e0d2a4b6c9e7f1a3c5d7e9b1f"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "MODE", json = "\"bindings\""),
+          (name = "TEXT", text = "hello"),
+          (name = "RPC", service = (name = "bindings", entrypoint = "Rpc")),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "NS", durableObjectNamespace = "Counter"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "unclonable",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"unclonable\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "searchparams",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"searchparams\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    # Without typescript_implemented_streams the Worker does not qualify for the pipeline.
+    ( name = "no-ts-streams",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = ["nodejs_compat", "global_navigator", "experimental", "unsafe_module"],
+        bindings = [
+          (name = "MODE", json = "\"no-ts-streams\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+  # The gc case calls gc() at the top level and at request time.
+  v8Flags = ["--expose-gc"],
+);
