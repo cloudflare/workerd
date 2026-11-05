@@ -21,7 +21,8 @@
 
 namespace workerd {
 class ActorObserver;
-}
+struct NonHibernatableWebSocketCount;
+}  // namespace workerd
 
 namespace workerd::api {
 
@@ -752,6 +753,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     kj::Promise<void> whenAbortedTask = nullptr;
 
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
+
+    // Set when this WebSocket counts toward its actor's limit on non-hibernatable WebSockets. The
+    // destructor gives the count back.
+    kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> nonHibernatableWebSocketCount;
 
    private:
     // Cancels the operations started with wrapIo() when leaving the Accepted state.

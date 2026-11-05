@@ -12,7 +12,34 @@
 
 #include <kj/test.h>
 
+#if !_WIN32
+#include <sys/resource.h>
+#endif
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
+
 namespace workerd::jsg::test {
+
+// Call first inside a KJ_EXPECT_SIGNAL() block whose code crashes with V8 initialized. The
+// forked child inherits V8's multi-gigabyte pointer compression cage, and once any of its pages
+// has been used the kernel writes the whole reservation into a core dump, which takes seconds
+// per crash. The expected crash needs no core dump, so this turns them off for the process.
+//
+// A zero RLIMIT_CORE stops dumps to a file. When core_pattern pipes dumps to a handler, Linux
+// ignores RLIMIT_CORE and leaves it to the handler, which still has to be fed the dump, so on
+// Linux the process is also marked non-dumpable: the kernel then skips the dump before
+// consulting core_pattern. The process can still read its own /proc entries, and its parent
+// still sees the terminating signal.
+inline void disableCoreDumps() {
+#if !_WIN32
+  struct rlimit limit = {0, 0};
+  KJ_SYSCALL(setrlimit(RLIMIT_CORE, &limit));
+#endif
+#ifdef __linux__
+  KJ_SYSCALL(prctl(PR_SET_DUMPABLE, 0, 0, 0, 0));
+#endif
+}
 
 // Checks the evaluation of a blob of JS code under the given context and isolate types.
 template <typename ContextType,

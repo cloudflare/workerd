@@ -82,12 +82,6 @@ namespace workerd::util {
      related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by           \
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
-  /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
-     tokens and receivers claim them. */                                                           \
-  V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
-  /* Enables Durable Object JSRPC retry requests. Requires the DURABLE_OBJECT_RETRIES_JSRPC        \
-     observe gate. */                                                                              \
-  V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
@@ -103,17 +97,6 @@ namespace workerd::util {
      suspends through the event loop on every iteration (only the write suspension is elided),     \
      leaving the JS-visible pull() ordering unchanged. */                                          \
   V(STREAM_CONTROLLER_SYNC_FAST_PATHS)                                                             \
-  /* When a native WritableStream sent over JS RPC is dropped or revoked without a clean end(),   \
-     abort its underlying sink so that anything connected to it (e.g. the readable half of an      \
-     IdentityTransformStream) errors instead of hanging. When disabled, the sink is dropped        \
-     without abort. */                                                                             \
-  V(JSRPC_WRITABLE_DROP_ABORTS_SINK)                                                               \
-  /* Propagate cancellation of a ReadableStream sent over JS RPC back to its origin: the sender    \
-     attaches a StreamCanceler capability, the receiver calls it when its copy of the stream is    \
-     canceled or released before EOF, and the origin's pump cancels the source (running its       \
-     cancel algorithm with the receiver's reason). When disabled, neither side participates and    \
-     the origin learns of the loss only when its next write fails. */                              \
-  V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
   V(STARTUP_SNAPSHOT)                                                                              \
@@ -148,12 +131,18 @@ namespace workerd::util {
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
   V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
-  /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can  \
+  /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
      be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
      covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
      settles can be collected. When disabled, they stay strong roots and keep such a stream alive  \
      until its isolate is torn down, and jsg::TracedOwn behaves like kj::Own. */                   \
-  V(GC_COMPLETE_TRACING)
+  V(GC_COMPLETE_TRACING)                                                                           \
+  /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
+     By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
+     open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
+     opening one more fails with an Error. Enabling this gate removes that limit, making them      \
+     unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

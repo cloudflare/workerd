@@ -32,10 +32,6 @@ use crate::v8::ffi;
 struct Opaque<T>(RefCell<Option<T>>);
 
 impl<T: Traced> Traced for Opaque<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::GcVisitor) {
         self.0.trace(visitor);
     }
@@ -64,7 +60,7 @@ pub fn wrap_opaque<'s, T: Traced + 'static>(
     let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
     let mut wrappable: WrappableRc =
         ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<Opaque<T>>()).into();
-    let wrapper = wrappable.attach_opaque_wrapper(lock, T::holds_gc_references());
+    let wrapper = wrappable.attach_opaque_wrapper(lock);
     // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only the
     // wrapper owns it, so the reference is dropped and the garbage collector decides.
     wrappable.remove_strong_ref(true);

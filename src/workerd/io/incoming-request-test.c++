@@ -650,7 +650,11 @@ class RecordingTracer final: public BaseTracer {
   kj::String events;
 
   void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&& info) override {
-    events = kj::str(events, info.is<tracing::CustomEventInfo>() ? "customOnset;" : "onset;");
+    KJ_IF_SOME(onHibernate, info.tryGet<tracing::OnHibernateEventInfo>()) {
+      events = kj::str(events, "onHibernateOnset:", onHibernate.reason, ";");
+    } else {
+      events = kj::str(events, "onset;");
+    }
   }
   void setReturn(kj::Maybe<kj::Date>, kj::Maybe<tracing::FetchResponseInfo>) override {
     events = kj::str(events, "return;");
@@ -686,7 +690,7 @@ class RecordingTracer final: public BaseTracer {
   void markUnused() override {}
 };
 
-KJ_TEST("runOnHibernate() reports the handler to the tracer as a custom event") {
+KJ_TEST("runOnHibernate() reports the handler to the tracer as an onHibernate event") {
   constexpr kj::StringPtr source = R"SCRIPT(
     import { DurableObject } from "cloudflare:workers";
     import { onHibernate } from "cloudflare:durable-objects";
@@ -701,7 +705,7 @@ KJ_TEST("runOnHibernate() reports the handler to the tracer as a custom event") 
         kj::Rc<BaseTracer>(tracer.addRef()))
         .wait(fixture.getWaitScope());
 
-    KJ_EXPECT(tracer->events == "customOnset;return;", tracer->events);
+    KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;return;", tracer->events);
   });
 }
 
@@ -715,7 +719,7 @@ KJ_TEST("canceling runOnHibernate() reports the handler's onset but no return") 
 
     promise = nullptr;
 
-    KJ_EXPECT(tracer->events == "customOnset;", tracer->events);
+    KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;", tracer->events);
   });
 }
 

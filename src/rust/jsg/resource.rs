@@ -90,7 +90,7 @@ impl<R: Resource> Rc<R> {
 
         // Leak an Rc clone as a fat pointer to dyn GarbageCollected and hand
         // ownership to a new Wrappable on the KJ heap. Since R: GarbageCollected,
-        // the vtable dispatches trace/get_name directly to R's implementations.
+        // the vtable dispatches trace/memory_name directly to R's implementations.
         let raw: *const R = std::rc::Rc::into_raw(std::rc::Rc::clone(&handle));
         let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
         let trait_object = v8::ffi::TraitObjectPtr::from_raw(fat, std::any::TypeId::of::<R>());
@@ -371,14 +371,8 @@ impl<R: Resource> Traced for Rc<R> {
     }
 }
 
-/// Weak references don't keep the target alive and have no GC edges to trace.
-impl<R: Resource> Traced for Weak<R> {
-    fn holds_gc_references() -> bool {
-        false
-    }
-}
-
-impl<R: Resource> crate::HoldsNoGcReferences for Weak<R> {}
+// Weak references don't keep the target alive and have no GC edges to trace.
+crate::jsg_traced!(<R: Resource> Weak<R>);
 
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
