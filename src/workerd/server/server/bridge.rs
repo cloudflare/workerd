@@ -728,6 +728,8 @@ pub mod ffi {
             params: &'a [u64],
         ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
+        fn add_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
+        fn add_skipped_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
         async unsafe fn accept<'a>(

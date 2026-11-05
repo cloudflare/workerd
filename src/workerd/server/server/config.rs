@@ -11,6 +11,8 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -143,16 +145,55 @@ pub fn optional_text(
     if has { text(get).map(Some) } else { Ok(None) }
 }
 
-/// Where config errors and warnings go.
+/// Reports config errors and warnings.
 ///
-/// Every error is reported; once the services are built the server refuses to serve if there was
-/// one, unless the reporter is `tolerant` (`--watch`, where someone is about to fix the config,
-/// and the in-process server).
+/// Every error in the node's config is reported. Once the services are built, the server refuses
+/// to serve if there was one, unless the reporter is `tolerant` (`--watch`, where someone is about
+/// to fix the config, and the in-process server).
+///
+/// `workerd serve` supplies [`Deployments`] to attribute an error in a deployment's service to
+/// that deployment. The error does not make the server refuse. It marks the service as broken, so
+/// every request and actor construction fails. An error in a node-owned reference to a
+/// deployment's service, a service of a skipped deployment, or an otherwise undefined service in
+/// cluster mode is logged as a deployment error but marks no service as broken. `workerd test`
+/// does not enable this attribution.
 pub struct Reporter {
     error: Box<dyn Fn(String)>,
     warning: Box<dyn Fn(String)>,
     tolerant: bool,
     had_errors: Cell<bool>,
+    deployments: Deployments,
+    /// Where the deployments' errors and warnings go.
+    deployment_error: Option<Box<dyn Fn(String)>>,
+    deployment_warning: Option<Box<dyn Fn(String)>>,
+    /// The deployments' services an error was reported for, by deployment.
+    broken: RefCell<BTreeMap<String, BTreeSet<String>>>,
+    /// The services the node's own config defines (`set_node_services`).
+    node_services: RefCell<HashSet<String>>,
+}
+
+/// Tracks which services came from cluster deployments.
+#[derive(Debug, Default)]
+pub struct Deployments {
+    /// The deployment name for each service appended to the node's config, by service name.
+    pub services: HashMap<String, String>,
+    /// The deployment name for each service absent because its deployment was skipped, by service
+    /// name.
+    pub skipped: HashMap<String, String>,
+    /// Whether the node serves cluster deployments. A reference from the node's config to a
+    /// service that the node does not define is then treated as a deployment reference.
+    pub enabled: bool,
+    /// The deployments that could not be read, whose services are unknown.
+    pub unreadable: Vec<String>,
+    /// Messages from reading and composing the deployments, in the order the server prints them.
+    pub log: Vec<DeploymentLog>,
+}
+
+/// One line of [`Deployments::log`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeploymentLog {
+    Info(String),
+    Error(String),
 }
 
 impl Reporter {
@@ -163,7 +204,45 @@ impl Reporter {
             warning,
             tolerant,
             had_errors: Cell::new(false),
+            deployments: Deployments::default(),
+            deployment_error: None,
+            deployment_warning: None,
+            broken: RefCell::new(BTreeMap::new()),
+            node_services: RefCell::default(),
         }
+    }
+
+    /// Enables deployment attribution for `workerd serve`.
+    ///
+    /// Errors and warnings attributed to a deployment go to `error` and `warning`. The `error`
+    /// callback must not count them as errors in the node's config.
+    #[must_use]
+    pub fn with_deployments(
+        self,
+        deployments: Deployments,
+        error: Box<dyn Fn(String)>,
+        warning: Box<dyn Fn(String)>,
+    ) -> Self {
+        Self {
+            deployments,
+            deployment_error: Some(error),
+            deployment_warning: Some(warning),
+            ..self
+        }
+    }
+
+    /// Records the services of `config` that the node's own config defines, before the services
+    /// are built: the implicit `internet` service and every service that no deployment defined.
+    pub fn set_node_services(&self, config: config::Reader<'_>) -> Result<()> {
+        let mut node = HashSet::from(["internet".to_owned()]);
+        for service in config.get_services().map_err(capnp_error)? {
+            let name = text(service.get_name())?;
+            if !self.from_deployment(&name) {
+                node.insert(name);
+            }
+        }
+        *self.node_services.borrow_mut() = node;
+        Ok(())
     }
 
     pub fn error(&self, message: impl Into<String>) {
@@ -181,13 +260,143 @@ impl Reporter {
         (self.warning)(message.into());
     }
 
-    /// An error of one service: `service <name>: <message>`.
-    pub fn service_error(&self, service: &str, message: impl AsRef<str>) {
-        self.error(format!("service {service}: {}", message.as_ref()));
+    /// Reports an error in the config of `service`.
+    ///
+    /// An error in a deployment's service is attributed to that deployment and marks the service
+    /// as broken. Any other error is an error in the node's config.
+    pub fn error_in(&self, service: &str, message: impl Into<String>) {
+        match self.deployments.services.get(service) {
+            Some(deployment) => {
+                self.broken
+                    .borrow_mut()
+                    .entry(deployment.clone())
+                    .or_default()
+                    .insert(service.to_owned());
+                self.deployment_log(deployment, &message.into());
+            }
+            None => self.error(message),
+        }
     }
 
+    /// Reports an error as `service <name>: <message>` through [`error_in`](Self::error_in).
+    pub fn service_error(&self, service: &str, message: impl AsRef<str>) {
+        self.error_in(service, format!("service {service}: {}", message.as_ref()));
+    }
+
+    /// Reports a warning as `service <name>: <message>`, attributed to `service`'s deployment if
+    /// it came from one.
     pub fn service_warning(&self, service: &str, message: impl AsRef<str>) {
-        self.warning(format!("service {service}: {}", message.as_ref()));
+        let message = format!("service {service}: {}", message.as_ref());
+        match (
+            self.deployments.services.get(service),
+            &self.deployment_warning,
+        ) {
+            (Some(deployment), Some(warning)) => {
+                warning(format!("deployment \"{deployment}\": {message}"));
+            }
+            _ => self.warning(message),
+        }
+    }
+
+    /// Reports an invalid reference from `referrer` to service `target`.
+    ///
+    /// `None` means a socket refers to `target`. A reference to a skipped deployment's service is
+    /// that deployment's error. Otherwise, an error from a deployment service belongs to that
+    /// service and marks it broken. An error from the node's config is logged as a deployment
+    /// error when `target` belongs to a deployment or, in cluster mode, when the node does not
+    /// define it. These reference errors mark no service as broken; the reference fails its
+    /// requests. Every other error belongs to the node's config.
+    pub fn reference_error(&self, referrer: Option<&str>, target: &str, message: String) {
+        if let Some(deployment) = self.deployments.skipped.get(target) {
+            let message =
+                format!("{message} \"{target}\" is defined by this deployment, which was skipped.");
+            self.deployment_log(deployment, &message);
+        } else if let Some(referrer) = referrer.filter(|referrer| self.from_deployment(referrer)) {
+            self.error_in(referrer, message);
+        } else if let Some(deployment) = self.deployments.services.get(target) {
+            let message = format!("{message} \"{target}\" is defined by this deployment.");
+            self.deployment_log(deployment, &message);
+        } else if self.deployments.enabled && !self.node_services.borrow().contains(target) {
+            // TODO(soon): Name the deployment from the manifests, which should record each
+            //   deployment's services and actor namespace keys, unreadable ones' included.
+            let unreadable = &self.deployments.unreadable;
+            let message = if unreadable.is_empty() {
+                format!(
+                    "cluster: {message} Neither the instance's config nor a deployment defines \
+                     \"{target}\"."
+                )
+            } else {
+                let names: Vec<_> = unreadable.iter().map(|name| format!("{name:?}")).collect();
+                format!(
+                    "cluster: {message} Neither the instance's config nor a deployment that was \
+                     read defines \"{target}\". It may belong to a deployment that could not be \
+                     read: {}.",
+                    names.join(", ")
+                )
+            };
+            self.unattributed(message);
+        } else if let Some(referrer) = referrer {
+            self.error_in(referrer, message);
+        } else {
+            self.error(message);
+        }
+    }
+
+    /// Reports a service reference error as `service <name>: <message>`.
+    pub fn service_reference_error(&self, service: &str, target: &str, message: impl AsRef<str>) {
+        let message = format!("service {service}: {}", message.as_ref());
+        self.reference_error(Some(service), target, message);
+    }
+
+    /// Returns whether `service` came from a deployment that was merged.
+    #[must_use]
+    pub fn from_deployment(&self, service: &str) -> bool {
+        self.deployments.services.contains_key(service)
+    }
+
+    /// Returns whether an error marked the deployment service `service` as broken.
+    #[must_use]
+    pub fn is_broken(&self, service: &str) -> bool {
+        let Some(deployment) = self.deployments.services.get(service) else {
+            return false;
+        };
+        self.broken
+            .borrow()
+            .get(deployment)
+            .is_some_and(|services| services.contains(service))
+    }
+
+    /// Reports the broken services of each deployment.
+    ///
+    /// The report says that each listed service fails every request.
+    pub fn report_broken(&self) {
+        for (deployment, services) in self.broken.borrow().iter() {
+            let names: Vec<_> = services.iter().map(|s| format!("\"{s}\"")).collect();
+            let message = if names.len() == 1 {
+                format!(
+                    "service {} cannot handle requests because of the errors above.",
+                    names[0]
+                )
+            } else {
+                format!(
+                    "services {} cannot handle requests because of the errors above.",
+                    names.join(", ")
+                )
+            };
+            self.deployment_log(deployment, &message);
+        }
+    }
+
+    fn deployment_log(&self, deployment: &str, message: &str) {
+        self.unattributed(format!("deployment \"{deployment}\": {message}"));
+    }
+
+    /// Logs an error without adding a deployment prefix.
+    fn unattributed(&self, message: String) {
+        match &self.deployment_error {
+            Some(error) => error(message),
+            None => self.error(message),
+        }
     }
 }
 
@@ -230,16 +439,23 @@ impl Service {
     }
 }
 
-/// The channel of a service whose config is invalid. workerd refuses to serve a config with
-/// errors, so only its `start_request` can be reached (by another service's link stage).
+/// Rejects every request to a service whose config is invalid.
+///
+/// A deployment service that fails construction is replaced by this channel and remains served.
+/// Other invalid services use it while the server collects config errors before deciding whether
+/// to serve.
 pub struct InvalidConfigChannel;
+
+/// The error of a request to a service whose config is invalid.
+#[must_use]
+pub fn invalid_config_error() -> crate::Error {
+    kj::failed!("jsg.Error: Service cannot handle requests because its config is invalid.")
+}
 
 impl Channel for InvalidConfigChannel {
     fn start_request(&self, metadata: KjOwn<RequestMetadata>) -> Result<KjOwn<WorkerInterface>> {
         let _ = metadata;
-        Err(kj::failed!(
-            "jsg.Error: Service cannot handle requests because its config is invalid."
-        ))
+        Err(invalid_config_error())
     }
 
     fn token(&self, _usage: TokenUsage) -> Result<KjOwn<PendingToken>> {
@@ -343,9 +559,9 @@ impl Server {
         &self.report
     }
 
-    /// What a `ServiceDesignator` resolves to; see [`lookup_service`].
+    /// What a socket's `ServiceDesignator` resolves to; see [`lookup_service`].
     pub fn lookup(&self, designator: &Designator) -> Rc<dyn Channel> {
-        lookup_service(&self.services.0, &self.report, designator)
+        lookup_service(&self.services.0, &self.report, None, designator)
     }
 
     #[must_use]
@@ -416,14 +632,22 @@ pub fn collect_actor_configs(
     experimental: bool,
     report: &Reporter,
 ) -> capnp::Result<ActorConfigs> {
-    // Every `uniqueKey` in the config, which no Workflow's namespace key may collide with.
+    // Every `uniqueKey` in the config, which no Workflow namespace key may collide with. The pass
+    // over each service below reports a key that cannot be read.
     let mut durable_namespace_keys = HashSet::new();
     for service_conf in config.get_services()? {
-        if let Ok(service::Which::Worker(worker_conf)) = service_conf.which() {
-            for ns in worker_conf?.get_durable_object_namespaces()? {
-                if let Ok(worker::durable_object_namespace::Which::UniqueKey(key)) = ns.which() {
-                    durable_namespace_keys.insert(key?.to_string()?);
-                }
+        let Ok(service::Which::Worker(Ok(worker_conf))) = service_conf.which() else {
+            continue;
+        };
+        for ns in worker_conf
+            .get_durable_object_namespaces()
+            .into_iter()
+            .flatten()
+        {
+            if let Ok(worker::durable_object_namespace::Which::UniqueKey(Ok(key))) = ns.which()
+                && let Ok(key) = key.to_string()
+            {
+                durable_namespace_keys.insert(key);
             }
         }
     }
@@ -432,88 +656,22 @@ pub fn collect_actor_configs(
     let mut actor_configs = ActorConfigs::new();
     for (service_index, service_conf) in (0..).zip(config.get_services()?) {
         let name = service_conf.get_name()?.to_string()?;
-        let mut configs = ActorConfigMap::new();
-
-        if let Ok(service::Which::Worker(worker_conf)) = service_conf.which() {
-            let worker_conf = worker_conf?;
-            let mut had_durable = false;
-            for (namespace_index, ns) in (0..).zip(worker_conf.get_durable_object_namespaces()?) {
-                let class_name = ns.get_class_name()?.to_string()?;
-                match ns.which() {
-                    Ok(worker::durable_object_namespace::Which::UniqueKey(unique_key)) => {
-                        had_durable = true;
-                        configs.insert(
-                            class_name,
-                            ActorConfig::Durable {
-                                unique_key: unique_key?.to_string()?,
-                                evictable: !ns.get_prevent_eviction(),
-                                enable_sql: ns.get_enable_sql(),
-                                workflow: None,
-                                container: ns.has_container().then_some(ffi::ContainerRef {
-                                    service_index,
-                                    namespace_index,
-                                }),
-                            },
-                        );
-                    }
-                    Ok(worker::durable_object_namespace::Which::EphemeralLocal(())) => {
-                        if !experimental {
-                            report.error(
-                                "Ephemeral objects (Durable Object namespaces with type \
-                                 'ephemeralLocal') are an experimental feature which may change \
-                                 or go away in the future. You must run workerd with \
-                                 `--experimental` to use this feature.",
-                            );
-                        }
-                        configs.insert(
-                            class_name,
-                            ActorConfig::Ephemeral {
-                                evictable: !ns.get_prevent_eviction(),
-                                enable_sql: ns.get_enable_sql(),
-                            },
-                        );
-                    }
-                    Err(capnp::NotInSchema(_)) => report.error(format!(
-                        "Encountered unknown DurableObjectNamespace type in service \"{name}\", \
-                         class \"{class_name}\". Was the config compiled with a newer version of \
-                         the schema?"
-                    )),
-                }
+        let configs = collect_service_actor_configs(
+            &name,
+            service_index,
+            service_conf,
+            experimental,
+            &durable_namespace_keys,
+            &mut workflow_namespace_keys,
+            report,
+        );
+        let configs = match configs {
+            Err(error) if report.from_deployment(&name) => {
+                report.service_error(&name, capnp_error(error).description());
+                ActorConfigMap::new()
             }
-
-            if worker_conf.has_workflows_engine() {
-                collect_workflow_configs(
-                    &name,
-                    worker_conf.get_workflows_engine()?,
-                    &durable_namespace_keys,
-                    &mut workflow_namespace_keys,
-                    &mut configs,
-                    report,
-                )?;
-            }
-
-            match worker_conf.get_durable_object_storage().which() {
-                Ok(worker::durable_object_storage::Which::None(())) if had_durable => {
-                    report.error(format!(
-                        "Worker service \"{name}\" implements durable object classes but has \
-                         `durableObjectStorage` set to `none`."
-                    ));
-                }
-                Ok(_) => {}
-                Err(capnp::NotInSchema(_)) => report.error(format!(
-                    "Encountered unknown durableObjectStorage type in service \"{name}\". Was the \
-                     config compiled with a newer version of the schema?"
-                )),
-            }
-
-            // Meant for parameterized workers; nothing implements it, so nothing may set it.
-            if worker_conf.has_durable_object_unique_key_modifier() {
-                return Err(capnp::Error::failed(
-                    "durableObjectUniqueKeyModifier is not implemented yet".to_owned(),
-                ));
-            }
-        }
-
+            configs => configs?,
+        };
         if actor_configs.insert(name.clone(), configs).is_some() {
             report.error(format!(
                 "Config defines multiple services named \"{name}\"."
@@ -521,6 +679,111 @@ pub fn collect_actor_configs(
         }
     }
     Ok(actor_configs)
+}
+
+/// [`collect_actor_configs`] for the service `name`, whose config is `service_conf`.
+fn collect_service_actor_configs(
+    name: &str,
+    service_index: u32,
+    service_conf: service::Reader<'_>,
+    experimental: bool,
+    durable_namespace_keys: &HashSet<String>,
+    workflow_namespace_keys: &mut HashSet<String>,
+    report: &Reporter,
+) -> capnp::Result<ActorConfigMap> {
+    let mut configs = ActorConfigMap::new();
+    let Ok(service::Which::Worker(worker_conf)) = service_conf.which() else {
+        return Ok(configs);
+    };
+    let worker_conf = worker_conf?;
+    let mut had_durable = false;
+    for (namespace_index, ns) in (0..).zip(worker_conf.get_durable_object_namespaces()?) {
+        let class_name = ns.get_class_name()?.to_string()?;
+        match ns.which() {
+            Ok(worker::durable_object_namespace::Which::UniqueKey(unique_key)) => {
+                had_durable = true;
+                configs.insert(
+                    class_name,
+                    ActorConfig::Durable {
+                        unique_key: unique_key?.to_string()?,
+                        evictable: !ns.get_prevent_eviction(),
+                        enable_sql: ns.get_enable_sql(),
+                        workflow: None,
+                        container: ns.has_container().then_some(ffi::ContainerRef {
+                            service_index,
+                            namespace_index,
+                        }),
+                    },
+                );
+            }
+            Ok(worker::durable_object_namespace::Which::EphemeralLocal(())) => {
+                if !experimental {
+                    report.error_in(
+                        name,
+                        "Ephemeral objects (Durable Object namespaces with type \
+                         'ephemeralLocal') are an experimental feature which may change \
+                         or go away in the future. You must run workerd with \
+                         `--experimental` to use this feature.",
+                    );
+                }
+                configs.insert(
+                    class_name,
+                    ActorConfig::Ephemeral {
+                        evictable: !ns.get_prevent_eviction(),
+                        enable_sql: ns.get_enable_sql(),
+                    },
+                );
+            }
+            Err(capnp::NotInSchema(_)) => report.error_in(
+                name,
+                format!(
+                    "Encountered unknown DurableObjectNamespace type in service \"{name}\", \
+                 class \"{class_name}\". Was the config compiled with a newer version of \
+                 the schema?"
+                ),
+            ),
+        }
+    }
+
+    if worker_conf.has_workflows_engine() {
+        collect_workflow_configs(
+            name,
+            worker_conf.get_workflows_engine()?,
+            durable_namespace_keys,
+            workflow_namespace_keys,
+            &mut configs,
+            report,
+        )?;
+    }
+
+    match worker_conf.get_durable_object_storage().which() {
+        Ok(worker::durable_object_storage::Which::None(())) if had_durable => {
+            report.error_in(
+                name,
+                format!(
+                    "Worker service \"{name}\" implements durable object classes but has \
+                 `durableObjectStorage` set to `none`."
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(capnp::NotInSchema(_)) => report.error_in(
+            name,
+            format!(
+                "Encountered unknown durableObjectStorage type in service \"{name}\". Was the \
+             config compiled with a newer version of the schema?"
+            ),
+        ),
+    }
+
+    // Meant for parameterized workers; nothing implements it, so nothing may set it.
+    if worker_conf.has_durable_object_unique_key_modifier() {
+        report.service_error(
+            name,
+            "durableObjectUniqueKeyModifier is not implemented yet",
+        );
+    }
+    Ok(configs)
 }
 
 /// The first pass over one worker's `workflowsEngine`: checks it, and for every valid Workflow
@@ -535,10 +798,11 @@ fn collect_workflow_configs(
     configs: &mut ActorConfigMap,
     report: &Reporter,
 ) -> capnp::Result<()> {
+    let error = |message: String| report.error_in(name, message);
     let has_actor_class =
         engine.has_actor_class() && !engine.get_actor_class()?.get_name()?.is_empty();
     if !has_actor_class {
-        report.error(format!(
+        error(format!(
             "Worker service \"{name}\"'s workflowsEngine is missing actorClass."
         ));
     }
@@ -550,12 +814,12 @@ fn collect_workflow_configs(
         let mut valid = has_actor_class;
 
         if class_name.is_empty() {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\" configures a Workflow without className."
             ));
             valid = false;
         } else if !classes.insert(class_name.clone()) {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\" configures multiple Workflows for class \
                  \"{class_name}\"."
             ));
@@ -563,18 +827,18 @@ fn collect_workflow_configs(
         }
 
         if workflow_name.is_empty() {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\" configures a Workflow without name."
             ));
             valid = false;
         } else if workflow_name.contains(['/', '\\']) {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\" configures Workflow name \"{workflow_name}\" \
                  containing a path separator."
             ));
             valid = false;
         } else if !names.insert(workflow_name.clone()) {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\" configures multiple Workflows named \
                  \"{workflow_name}\"."
             ));
@@ -583,7 +847,7 @@ fn collect_workflow_configs(
 
         if !workflow.has_binding_service() || workflow.get_binding_service()?.get_name()?.is_empty()
         {
-            report.error(format!(
+            error(format!(
                 "Worker service \"{name}\"'s Workflow \"{workflow_name}\" is missing \
                  bindingService."
             ));
@@ -593,26 +857,24 @@ fn collect_workflow_configs(
         if !valid {
             continue;
         }
-
         let key = workflow_namespace_key(&workflow_name);
-        if configs.contains_key(&key) {
-            report.error(format!(
+        let conflict = if configs.contains_key(&key) {
+            format!(
                 "Worker service \"{name}\"'s Workflow namespace conflicts with Durable Object \
                  class \"{key}\"."
-            ));
-            continue;
-        }
-        if durable_namespace_keys.contains(&key) {
-            report.error(format!(
+            )
+        } else if durable_namespace_keys.contains(&key) {
+            format!(
                 "Workflow ActorNamespace key \"{key}\" conflicts with a Durable Object namespace \
                  unique key."
-            ));
-            continue;
-        }
-        if !workflow_namespace_keys.insert(key.clone()) {
-            report.error(format!(
-                "Workflow ActorNamespace key \"{key}\" is configured by more than one Worker."
-            ));
+            )
+        } else if !workflow_namespace_keys.insert(key.clone()) {
+            format!("Workflow ActorNamespace key \"{key}\" is configured by more than one Worker.")
+        } else {
+            String::new()
+        };
+        if !conflict.is_empty() {
+            error(conflict);
             continue;
         }
         let mut errors = Vec::new();
@@ -656,40 +918,76 @@ fn init_workflows(
     namespaces_by_unique_key: &mut HashMap<String, Rc<ActorNamespace>>,
 ) -> Result<()> {
     for service_conf in config.get_services().map_err(capnp_error)? {
+        let name = text(service_conf.get_name())?;
         let Ok(service::Which::Worker(worker_conf)) = service_conf.which() else {
             continue;
         };
-        let worker_conf = worker_conf.map_err(capnp_error)?;
-        if !worker_conf.has_workflows_engine() {
-            continue;
-        }
-        let name = text(service_conf.get_name())?;
-        let Some(Service::Worker(app)) = services.get(&name) else {
-            report.service_error(
-                &name,
-                format!("Worker service \"{name}\" could not initialize its workflowsEngine."),
-            );
-            continue;
-        };
-        let conf = worker_conf.get_workflows_engine().map_err(capnp_error)?;
-        let Some(engine) = WorkflowEngine::resolve(&name, conf, app, services, report)? else {
-            continue;
-        };
-
-        for (key, config) in actor_configs.get(&name).into_iter().flatten() {
-            let ActorConfig::Durable {
-                workflow: Some(workflow),
-                ..
-            } = config
-            else {
-                continue;
-            };
-            if let Some(namespace) = engine.init_workflow(workflow, key, config, cluster)? {
-                namespaces_by_unique_key.insert(key.clone(), namespace);
+        let result = worker_conf.map_err(capnp_error).and_then(|worker_conf| {
+            if !worker_conf.has_workflows_engine() {
+                return Ok(());
             }
+            let conf = worker_conf.get_workflows_engine().map_err(capnp_error)?;
+            init_service_workflows(
+                &name,
+                conf,
+                services,
+                actor_configs,
+                report,
+                cluster,
+                namespaces_by_unique_key,
+            )
+        });
+        tolerate_deployment(report, &name, result)?;
+    }
+    Ok(())
+}
+
+/// [`init_workflows`] for the worker `name`, whose `workflowsEngine` is `conf`.
+fn init_service_workflows(
+    name: &str,
+    conf: workflows_engine::Reader<'_>,
+    services: &LinkedHashMap<String, Service>,
+    actor_configs: &ActorConfigs,
+    report: &Reporter,
+    cluster: Option<&Rc<ClusterNode>>,
+    namespaces_by_unique_key: &mut HashMap<String, Rc<ActorNamespace>>,
+) -> Result<()> {
+    let Some(Service::Worker(app)) = services.get(name) else {
+        report.service_error(
+            name,
+            format!("Worker service \"{name}\" could not initialize its workflowsEngine."),
+        );
+        return Ok(());
+    };
+    let Some(engine) = WorkflowEngine::resolve(name, conf, app, services, report)? else {
+        return Ok(());
+    };
+    for (key, config) in actor_configs.get(name).into_iter().flatten() {
+        let ActorConfig::Durable {
+            workflow: Some(workflow),
+            ..
+        } = config
+        else {
+            continue;
+        };
+        if let Some(namespace) = engine.init_workflow(workflow, key, config, cluster)? {
+            namespaces_by_unique_key.insert(key.clone(), namespace);
         }
     }
     Ok(())
+}
+
+/// Converts a setup failure for a deployment service into a reported config error.
+///
+/// The error marks that service as broken. A setup failure for a node-owned service is returned.
+fn tolerate_deployment(report: &Reporter, name: &str, result: Result<()>) -> Result<()> {
+    match result {
+        Err(error) if report.from_deployment(name) => {
+            report.service_error(name, error.description());
+            Ok(())
+        }
+        result => result,
+    }
 }
 
 /// One worker's `workflowsEngine`, resolved: the app worker whose Workflows it runs, the engine
@@ -735,8 +1033,9 @@ impl<'a> WorkflowEngine<'a> {
             return Ok(None);
         }
         let Some(engine_service) = services.get(&engine_name) else {
-            report.service_error(
+            report.service_reference_error(
                 name,
+                &engine_name,
                 format!(
                     "workflowsEngine.actorClass refers to a service \"{engine_name}\", but no \
                      such service is defined."
@@ -745,8 +1044,9 @@ impl<'a> WorkflowEngine<'a> {
             return Ok(None);
         };
         let Service::Worker(engine) = engine_service else {
-            report.service_error(
+            report.service_reference_error(
                 name,
+                &engine_name,
                 format!(
                     "workflowsEngine.actorClass refers to service \"{engine_name}\", but it is \
                      not a Worker."
@@ -817,8 +1117,9 @@ impl<'a> WorkflowEngine<'a> {
 
         let engine_class = self.engine_class.as_deref();
         let Some(actor_class) = self.engine.actor_class(engine_class, Some(props), false) else {
-            self.report.service_error(
+            self.report.service_reference_error(
                 self.name,
+                &self.engine_name,
                 format!(
                     "workflowsEngine.actorClass refers to service \"{}\" with Durable Object \
                      entrypoint \"{}\", but no such class is exported.",
@@ -861,8 +1162,9 @@ impl<'a> WorkflowEngine<'a> {
     fn binding_storage(&self, workflow_name: &str, designator: &Designator) -> Option<&'a str> {
         let binding_name = &designator.service;
         let Some(binding_service) = self.services.get(binding_name) else {
-            self.report.service_error(
+            self.report.service_reference_error(
                 self.name,
+                binding_name,
                 format!(
                     "Workflow \"{workflow_name}\"'s bindingService refers to a service \
                      \"{binding_name}\", but no such service is defined."
@@ -871,8 +1173,9 @@ impl<'a> WorkflowEngine<'a> {
             return None;
         };
         let Service::Worker(binding) = binding_service else {
-            self.report.service_error(
+            self.report.service_reference_error(
                 self.name,
+                binding_name,
                 format!(
                     "Workflow \"{workflow_name}\"'s bindingService refers to service \
                      \"{binding_name}\", but it is not a Worker."
@@ -882,8 +1185,9 @@ impl<'a> WorkflowEngine<'a> {
         };
         let entrypoint = designator.entrypoint.as_deref();
         if !binding.has_stateless_entrypoint(entrypoint) {
-            self.report.service_error(
+            self.report.service_reference_error(
                 self.name,
+                binding_name,
                 format!(
                     "Workflow \"{workflow_name}\"'s bindingService Worker does not export \
                      WorkerEntrypoint \"{}\".",
@@ -906,11 +1210,12 @@ impl<'a> WorkflowEngine<'a> {
     }
 }
 
-/// What a `ServiceDesignator` resolves to, or the invalid-config stand-in after the error was
-/// reported.
+/// What a `ServiceDesignator` in the config of `referrer` (a service, or with `None` a socket)
+/// resolves to, or the invalid-config stand-in after the error was reported.
 pub fn lookup_service(
     services: &LinkedHashMap<String, Service>,
     report: &Reporter,
+    referrer: Option<&str>,
     designator: &Designator,
 ) -> Rc<dyn Channel> {
     let Designator {
@@ -920,41 +1225,59 @@ pub fn lookup_service(
         error_context: context,
     } = designator;
     let Some(service) = services.get(target) else {
-        report.error(format!(
-            "{context} refers to a service \"{target}\", but no such service is defined."
-        ));
+        report.reference_error(
+            referrer,
+            target,
+            format!("{context} refers to a service \"{target}\", but no such service is defined."),
+        );
         return Rc::new(InvalidConfigChannel);
     };
     let props = configured_props(props_json.as_deref());
 
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
-            report.error(format!(
-                "{context} refers to service \"{target}\" with a named entrypoint \
+            report.reference_error(
+                referrer,
+                target,
+                format!(
+                    "{context} refers to service \"{target}\" with a named entrypoint \
                  \"{entrypoint}\", but \"{target}\" is not a Worker, so does not have any \
                  named entrypoints."
-            ));
+                ),
+            );
         } else if !ffi::frankenvalue_is_empty(&props) {
-            report.error(format!(
-                "{context} refers to service \"{target}\" and provides a `props` value, but \
+            report.reference_error(
+                referrer,
+                target,
+                format!(
+                    "{context} refers to service \"{target}\" and provides a `props` value, but \
                  \"{target}\" is not a Worker, so cannot accept `props`"
-            ));
+                ),
+            );
         }
         return service.channel();
     };
     if let Some(channel) = worker.entrypoint(entrypoint.as_deref(), Some(props), false) {
         channel
     } else if let Some(entrypoint) = entrypoint {
-        report.error(format!(
-            "{context} refers to service \"{target}\" with a named entrypoint \
+        report.reference_error(
+            referrer,
+            target,
+            format!(
+                "{context} refers to service \"{target}\" with a named entrypoint \
              \"{entrypoint}\", but \"{target}\" has no such named entrypoint."
-        ));
+            ),
+        );
         Rc::new(InvalidConfigChannel)
     } else {
-        report.error(format!(
-            "{context} refers to service \"{target}\", but does not specify an \
+        report.reference_error(
+            referrer,
+            target,
+            format!(
+                "{context} refers to service \"{target}\", but does not specify an \
              entrypoint, and the service does not have a default entrypoint."
-        ));
+            ),
+        );
         Rc::new(InvalidConfigChannel)
     }
 }
@@ -965,11 +1288,12 @@ fn configured_props(props_json: Option<&str>) -> KjOwn<ffi::Frankenvalue> {
     props_json.map_or_else(ffi::frankenvalue_new, ffi::frankenvalue_from_json)
 }
 
-/// What a `ServiceDesignator` naming a Durable Object class resolves to, or the invalid-config
-/// stand-in after the error was reported.
+/// What a `ServiceDesignator` naming a Durable Object class in the config of service `referrer`
+/// resolves to, or the invalid-config stand-in after the error was reported.
 pub fn lookup_actor_class(
     services: &LinkedHashMap<String, Service>,
     report: &Reporter,
+    referrer: Option<&str>,
     designator: &Designator,
 ) -> Rc<dyn ActorClass> {
     let Designator {
@@ -979,42 +1303,60 @@ pub fn lookup_actor_class(
         error_context: context,
     } = designator;
     let Some(service) = services.get(target) else {
-        report.error(format!(
-            "{context} refers to a service \"{target}\", but no such service is defined."
-        ));
+        report.reference_error(
+            referrer,
+            target,
+            format!("{context} refers to a service \"{target}\", but no such service is defined."),
+        );
         return Rc::new(InvalidConfigActorClass);
     };
     let props = configured_props(props_json.as_deref());
 
     let Service::Worker(worker) = service else {
         if let Some(entrypoint) = entrypoint {
-            report.error(format!(
-                "{context} refers to service \"{target}\" with a named Durable Object \
+            report.reference_error(
+                referrer,
+                target,
+                format!(
+                    "{context} refers to service \"{target}\" with a named Durable Object \
                  entrypoint \"{entrypoint}\", but \"{target}\" is not a Worker, so does not \
                  have any named entrypoints."
-            ));
+                ),
+            );
         } else {
-            report.error(format!(
-                "{context} refers to service \"{target}\" as a Durable Object class, but \
+            report.reference_error(
+                referrer,
+                target,
+                format!(
+                    "{context} refers to service \"{target}\" as a Durable Object class, but \
                  \"{target}\" is not a Worker, so cannot be used as a class."
-            ));
+                ),
+            );
         }
         return Rc::new(InvalidConfigActorClass);
     };
     if let Some(class) = worker.actor_class(entrypoint.as_deref(), Some(props), false) {
         class
     } else if let Some(entrypoint) = entrypoint {
-        report.error(format!(
-            "{context} refers to service \"{target}\" with a Durable Object entrypoint \
+        report.reference_error(
+            referrer,
+            target,
+            format!(
+                "{context} refers to service \"{target}\" with a Durable Object entrypoint \
              \"{entrypoint}\", but \"{target}\" has no such exported entrypoint class."
-        ));
+            ),
+        );
         Rc::new(InvalidConfigActorClass)
     } else {
-        report.error(format!(
-            "{context} refers to service \"{target}\", but does not specify an \
+        report.reference_error(
+            referrer,
+            target,
+            format!(
+                "{context} refers to service \"{target}\", but does not specify an \
              entrypoint, and the service does export a Durable Object class as its \
              default entrypoint."
-        ));
+            ),
+        );
         Rc::new(InvalidConfigActorClass)
     }
 }
@@ -1035,6 +1377,7 @@ impl Server {
     ) -> Result<Rc<Self>> {
         let message = factory.config()?;
         let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
+        report.set_node_services(config)?;
 
         // First pass: the actor configs, which bindings to other workers' classes are checked
         // against.
@@ -1057,7 +1400,13 @@ impl Server {
                 overrides,
                 &report,
             )
-            .await?;
+            .await;
+            let service = match service {
+                Err(error) if report.from_deployment(&name) => {
+                    invalid_on_error(&name, &report, Err(error))
+                }
+                service => service?,
+            };
             if let Service::Worker(worker) = &service {
                 for (_, namespace) in worker.namespaces() {
                     if let Some(unique_key) = namespace.unique_key() {
@@ -1121,8 +1470,16 @@ impl Server {
 
         // Third pass: the links.
         for (name, worker) in server.workers() {
-            server.link_worker(name, worker)?;
+            tolerate_deployment(&server.report, name, server.link_worker(name, worker))?;
         }
+
+        // A deployment's service with errors fails every request.
+        for (name, worker) in server.workers() {
+            if server.report.is_broken(name) {
+                worker.set_broken();
+            }
+        }
+        server.report.report_broken();
         Ok(server)
     }
 
@@ -1133,9 +1490,10 @@ impl Server {
         };
         let report = &self.report;
         let services = &self.services.0;
-        let lookup = |designator: &Designator| lookup_service(services, report, designator);
+        let lookup =
+            |designator: &Designator| lookup_service(services, report, Some(name), designator);
         let lookup_class =
-            |designator: &Designator| lookup_actor_class(services, report, designator);
+            |designator: &Designator| lookup_actor_class(services, report, Some(name), designator);
 
         // Both special channels ("next" and "null") reach the global outbound; the difference is
         // a legacy artifact.
@@ -1151,23 +1509,11 @@ impl Server {
         }
         // The access binding's entrypoint is a template: its props are each request's identity.
         let mut access_binding_channel = None;
-        if let Some(designator) = &pending.access_binding {
-            let target = &designator.service;
-            match services.get(target) {
-                Some(Service::Worker(target_worker)) => {
-                    access_binding_channel = Some(len_u32(&subrequest));
-                    subrequest
-                        .push(target_worker.loopback_entrypoint(designator.entrypoint.as_deref())?);
-                }
-                Some(_) => report.error(format!(
-                    "Worker accessBindingService refers to service \"{target}\", but it is not a \
-                     Worker."
-                )),
-                None => report.error(format!(
-                    "Worker accessBindingService refers to a service \"{target}\", but no such \
-                     service is defined."
-                )),
-            }
+        if let Some(designator) = &pending.access_binding
+            && let Some(channel) = self.access_binding(name, designator)?
+        {
+            access_binding_channel = Some(len_u32(&subrequest));
+            subrequest.push(channel);
         }
 
         let mut actor_class: Vec<Rc<dyn ActorClass>> = Vec::new();
@@ -1194,8 +1540,9 @@ impl Server {
 
         let storage_path = self.storage_path(name, pending.storage.as_deref());
 
-        let mut tails: Vec<_> = pending.tails.iter().map(lookup).collect();
-        let mut streaming_tails: Vec<_> = pending.streaming_tails.iter().map(lookup).collect();
+        let tail = |designator: &Designator| self.tail(name, designator);
+        let mut tails: Vec<_> = pending.tails.iter().filter_map(tail).collect();
+        let mut streaming_tails: Vec<_> = pending.streaming_tails.iter().filter_map(tail).collect();
         // Without tail workers, the tails are only looked up, for their config errors.
         if !self.factory.tail_workers() {
             tails.clear();
@@ -1227,6 +1574,51 @@ impl Server {
             },
             storage_path.as_deref(),
         )
+    }
+
+    /// The entrypoint of the `accessBindingService` `designator` of worker `name`, or `None`
+    /// after reporting why there is none.
+    fn access_binding(
+        &self,
+        name: &str,
+        designator: &Designator,
+    ) -> Result<Option<Rc<dyn Channel>>> {
+        let target = &designator.service;
+        let context = &designator.error_context;
+        let entrypoint = designator.entrypoint.as_deref();
+        let error = match self.services.0.get(target) {
+            Some(Service::Worker(worker)) if worker.has_loopback_entrypoint(entrypoint) => {
+                return worker.loopback_entrypoint(entrypoint).map(Some);
+            }
+            Some(Service::Worker(_)) => match entrypoint {
+                Some(entrypoint) => format!(
+                    "{context} refers to service \"{target}\" with a named entrypoint \
+                     \"{entrypoint}\", but \"{target}\" has no such named entrypoint."
+                ),
+                None => format!(
+                    "{context} refers to service \"{target}\", but does not specify an \
+                     entrypoint, and the service does not have a default entrypoint."
+                ),
+            },
+            Some(_) => format!("{context} refers to service \"{target}\", but it is not a Worker."),
+            None => {
+                format!(
+                    "{context} refers to a service \"{target}\", but no such service is defined."
+                )
+            }
+        };
+        self.report.reference_error(Some(name), target, error);
+        Ok(None)
+    }
+
+    /// The channel of the tail worker `designator` of worker `name`, or `None` for a tail that
+    /// could only fail, which would fail every request it tails: one whose service is missing
+    /// (the lookup reported it) or already known to be broken. A worker found broken later is
+    /// skipped when a request starts (`WorkerService::start_tail`).
+    fn tail(&self, name: &str, designator: &Designator) -> Option<Rc<dyn Channel>> {
+        let channel = lookup_service(&self.services.0, &self.report, Some(name), designator);
+        let target = &designator.service;
+        (self.services.0.contains_key(target) && !self.report.is_broken(target)).then_some(channel)
     }
 
     /// The directory a worker's Durable Objects persist to: the writable path of its
@@ -1289,8 +1681,10 @@ impl Server {
     }
 }
 
-/// A service whose construction failed is a config error: reported, and replaced by a service
-/// that fails every request.
+/// Replaces a service that fails construction with one that rejects every request.
+///
+/// The construction error is reported against `name`. Deployment attribution can let the server
+/// serve the replacement; an error in a node-owned service counts toward refusal.
 fn invalid_on_error(name: &str, report: &Reporter, service: Result<Service>) -> Service {
     match service {
         Ok(service) => service,
@@ -1318,14 +1712,20 @@ async fn make_service(
 ) -> Result<Service> {
     match conf.which() {
         Ok(service::Which::Unspecified(())) => {
-            report.error(format!(
-                "Service named \"{name}\" does not specify what to serve."
-            ));
+            report.error_in(
+                name,
+                format!("Service named \"{name}\" does not specify what to serve."),
+            );
             Ok(Service::Leaf(Rc::new(InvalidConfigChannel)))
         }
         Ok(service::Which::External(external)) => {
             let external = external.map_err(capnp_error)?;
-            let address = overrides.externals.get(name).map(String::as_str);
+            // The command line's overrides are for the node's own services.
+            let address = overrides
+                .externals
+                .get(name)
+                .filter(|_| !report.from_deployment(name))
+                .map(String::as_str);
             Ok(invalid_on_error(
                 name,
                 report,
@@ -1357,7 +1757,11 @@ async fn make_service(
         }
         Ok(service::Which::Disk(disk)) => {
             let disk = disk.map_err(capnp_error)?;
-            let path = overrides.directories.get(name).map(String::as_str);
+            let path = overrides
+                .directories
+                .get(name)
+                .filter(|_| !report.from_deployment(name))
+                .map(String::as_str);
             Ok(invalid_on_error(
                 name,
                 report,
@@ -1366,7 +1770,7 @@ async fn make_service(
             ))
         }
         Err(capnp::NotInSchema(_)) => {
-            report.error(format!(
+            report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
                  newer version of the schema?"
             ));
