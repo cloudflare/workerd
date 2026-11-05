@@ -1660,8 +1660,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
     auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
         IsolateObserver::StartType::COLD, SpanParent(nullptr),
-        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
-        zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
+        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
+        api::pyodide::ArtifactBundler::makeDisabledBundler());
     // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
     // zygote isolate breaks snapshot creation.
     auto zygote =
@@ -1738,7 +1738,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), false, errorReporter,
+      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the
