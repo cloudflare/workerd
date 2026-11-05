@@ -1692,9 +1692,8 @@ MaybeLocal dom_exception_create_from_bytes(
     Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message) {
   // Creating a DOMException instantiates a template in the current context.
   if (exceptionPending(isolate)) return {};
-  // kj::heapString() copies `name` and adds the NUL that a rust::Str lacks.
   return maybe_local_to_ffi(::workerd::jsg::newDOMException(
-      isolate, kj::heapString(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
+      isolate, kj::arrayPtr(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
 }
 
 namespace {
