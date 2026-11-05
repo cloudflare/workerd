@@ -63,6 +63,9 @@ pub enum Type {
         name: &'static str,
         fully_qualified_name: &'static str,
     },
+    /// A rest parameter, [`jsg::Arguments`](crate::Arguments), which C++ RTTI describes without
+    /// its element type, so TypeScript declares it as `...name: any[]`.
+    Varargs,
 }
 
 pub struct Parameter {
@@ -95,6 +98,12 @@ pub enum Member {
     Constant {
         name: &'static str,
         value: crate::ConstantValue,
+    },
+    /// The signature of calling an instance as a function. It is not a member of the encoded
+    /// structure but its `callable` field, as C++ RTTI writes a `JSG_CALLABLE`.
+    Callable {
+        args: Vec<Parameter>,
+        result: Type,
     },
 }
 
@@ -238,9 +247,19 @@ impl Context {
         }
         nesting.push(index);
         builder.set_ts_root(structure.root);
-        let mut members = builder.init_members(length(structure.members.len()));
-        for (i, member) in structure.members.iter().enumerate() {
-            member.write(self, members.reborrow().get(length(i)), nesting);
+        let (callables, members): (Vec<_>, Vec<_>) = structure
+            .members
+            .iter()
+            .partition(|member| matches!(member, Member::Callable { .. }));
+        // Template creation rejects a type that is callable more than one way.
+        if let Some(Member::Callable { args, result }) = callables.first() {
+            let mut callable = builder.reborrow().init_callable();
+            result.write(callable.reborrow().init_return_type());
+            write_args(args, callable.init_args(length(args.len())));
+        }
+        let mut builders = builder.init_members(length(members.len()));
+        for (i, member) in members.into_iter().enumerate() {
+            member.write(self, builders.reborrow().get(length(i)), nesting);
         }
         nesting.pop();
     }
@@ -334,6 +353,9 @@ impl Type {
                 structure.set_name(*name);
                 structure.set_fully_qualified_name(*fully_qualified_name);
             }
+            Self::Varargs => builder
+                .init_jsg_impl()
+                .set_type(rtti_capnp::jsg_impl_type::Type::JsgVarargs),
         }
     }
 }
@@ -404,6 +426,9 @@ impl Member {
                 match value {
                     crate::ConstantValue::Number(value) => constant.set_number_value(*value),
                 }
+            }
+            Self::Callable { .. } => {
+                unreachable!("Context::write_structure writes a callable as the structure's")
             }
         }
     }

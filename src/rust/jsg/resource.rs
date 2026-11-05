@@ -527,6 +527,7 @@ fn get_resource_descriptor<R: Resource>(
         static_methods: Vec::new(),
         static_constants: Vec::new(),
         wildcard_property: KjMaybe::None,
+        callable: KjMaybe::None,
     };
 
     let mut members = TemplateMembers(Vec::new());
@@ -633,6 +634,14 @@ fn get_resource_descriptor<R: Resource>(
                     getter_callback: getter_callback as usize,
                     query_callback: query_callback as usize,
                 });
+            }
+            Member::Callable { callback } => {
+                assert!(
+                    descriptor.callable.is_none(),
+                    "{} is callable more than one way",
+                    R::class_name()
+                );
+                descriptor.callable = KjMaybe::Some(callback as usize);
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
