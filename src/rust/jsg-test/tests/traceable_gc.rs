@@ -13,7 +13,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::ToJS;
-use jsg::Traced;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -173,18 +172,15 @@ struct PlainStruct {
 struct PlainData;
 jsg::jsg_traced!(PlainData);
 
-/// `jsg::Rc` and resources can hold GC references; `jsg::Weak` and `jsg_traced!` types cannot,
-/// and a `#[jsg_struct]` type can when a field can.
+/// `jsg::Weak`, `jsg_traced!` types and a `#[jsg_struct]` of plain data hold no GC references.
+/// (That a `#[jsg_struct]` with a `jsg::Rc` field does is checked by the
+/// `gc-reference-in-std-cell-is-not-traced` compile test.)
 #[test]
-fn holds_gc_references_of_jsg_types() {
+fn holds_no_gc_references_of_jsg_types() {
     fn holds_no_gc_references<T: jsg::HoldsNoGcReferences>() {}
-    assert!(<jsg::Rc<Leaf>>::holds_gc_references());
-    assert!(Leaf::holds_gc_references());
-    assert!(!<jsg::Weak<Leaf>>::holds_gc_references());
     holds_no_gc_references::<jsg::Weak<Leaf>>();
-    assert!(!PlainStruct::holds_gc_references());
-    assert!(Link::holds_gc_references());
-    assert!(!PlainData::holds_gc_references());
+    holds_no_gc_references::<PlainStruct>();
+    holds_no_gc_references::<std::cell::Cell<Option<PlainStruct>>>();
     holds_no_gc_references::<PlainData>();
 }
 
@@ -300,7 +296,6 @@ impl Holder {
 /// collected: `Holder` keeps a `ValueLink` whose value is the `Holder`'s own wrapper.
 #[test]
 fn cycle_through_struct_js_value_field_is_collected() {
-    assert!(ValueLink::holds_gc_references());
     HOLDER_DROPS.store(0, Ordering::SeqCst);
 
     let harness = jsg_test::Harness::new();

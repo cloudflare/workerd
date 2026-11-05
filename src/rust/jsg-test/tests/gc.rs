@@ -908,9 +908,7 @@ struct NativeState {
     value: u32,
 }
 
-impl jsg::Traced for NativeState {}
-
-impl jsg::HoldsNoGcReferences for NativeState {}
+jsg::jsg_traced!(NativeState);
 
 impl Drop for NativeState {
     fn drop(&mut self) {

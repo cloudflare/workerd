@@ -4,10 +4,8 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use super::*;
 
@@ -19,42 +17,7 @@ fn unused_visitor() -> v8::GcVisitor {
     }
 }
 
-/// Asserts that wrapper `W` holds GC references exactly when what it wraps does.
-macro_rules! assert_forwards {
-    ($($w:ident)::+) => {
-        assert!(<$($w)::+<v8::TracedGlobal<v8::Value>>>::holds_gc_references());
-        assert!(!<$($w)::+<String>>::holds_gc_references());
-    };
-}
-
-#[test]
-fn holds_gc_references_follows_the_contents() {
-    assert!(!String::holds_gc_references());
-    assert!(!f64::holds_gc_references());
-    assert!(<v8::TracedGlobal<v8::Value>>::holds_gc_references());
-    assert_forwards!(Option);
-    assert_forwards!(Nullable);
-    assert_forwards!(NullOrUndefined);
-    assert_forwards!(NonCoercible);
-    assert_forwards!(Vec);
-    assert_forwards!(HashSet);
-    assert_forwards!(BTreeSet);
-    assert!(!<std::rc::Rc<String>>::holds_gc_references());
-    assert!(!<Cell<String>>::holds_gc_references());
-    assert!(!<RefCell<String>>::holds_gc_references());
-    assert!(<crate::Cell<v8::TracedGlobal<v8::Value>>>::holds_gc_references());
-    assert!(!<crate::Cell<String>>::holds_gc_references());
-    assert!(<crate::RefCell<v8::TracedGlobal<v8::Value>>>::holds_gc_references());
-    assert!(!<crate::RefCell<String>>::holds_gc_references());
-    assert!(<HashMap<String, v8::TracedGlobal<v8::Value>>>::holds_gc_references());
-    assert!(!<HashMap<String, String>>::holds_gc_references());
-    assert!(<BTreeMap<String, v8::TracedGlobal<v8::Value>>>::holds_gc_references());
-    assert!(!<BTreeMap<String, String>>::holds_gc_references());
-    // An unconvertable value is a `TracedGlobal`.
-    assert!(<Lenient<String>>::holds_gc_references());
-}
-
-/// `HoldsNoGcReferences` follows the contents too. (That a `jsg::Rc`, a `TracedGlobal` or a
+/// `HoldsNoGcReferences` follows the contents. (That a `jsg::Rc`, a `TracedGlobal` or a
 /// `Lenient` does not qualify is checked by the `gc-reference-in-std-cell-is-not-traced`
 /// compile test.)
 #[test]

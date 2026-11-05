@@ -654,7 +654,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperOps<Self>,
                    public TypeWrapperBase<Self, T>...,
                    public PrimitiveWrapper,
-                   public NameWrapper,
                    public StringWrapper,
                    public OptionalWrapper,
                    public LenientOptionalWrapper,
@@ -778,7 +777,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::tryUnwrap
 
   USING_WRAPPER(PrimitiveWrapper);
-  USING_WRAPPER(NameWrapper);
   USING_WRAPPER(StringWrapper);
   USING_WRAPPER(OptionalWrapper);
   USING_WRAPPER(LenientOptionalWrapper);
