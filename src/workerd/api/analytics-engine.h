@@ -53,6 +53,12 @@ class AnalyticsEngine: public jsg::Object {
   void writeDataPoint(
       jsg::Lock& js, jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent> event);
 
+  // A binding transfers through a startup snapshot as its channel number and dataset.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(
+        kj::refcounted<AnalyticsEngine>(logfwdrChannel, kj::str(dataset), version, ownerId));
+  }
+
   JSG_RESOURCE_TYPE(AnalyticsEngine) {
     JSG_METHOD(writeDataPoint);
     JSG_TS_ROOT();
