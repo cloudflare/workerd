@@ -21,7 +21,9 @@ at context creation, before any user code. C++ entry point:
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
-  `expose_draining_reader`.
+  `expose_draining_reader`, and the internal-testing cloneable
+  `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
+  `src/tests/serialization/`) under `expose_serialization_test_class`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob

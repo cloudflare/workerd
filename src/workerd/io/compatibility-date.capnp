@@ -1818,4 +1818,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The promises returned by a service binding's `scheduled()` and `queue()` methods, available
   # with `service_binding_extra_handlers`, are disposable the same way: disposing one while the
   # event is in flight cancels the event and ends the callee's request.
+
+  exposeSerializationTestClass @205 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox class on globalThis: a class implemented in the
+  # per-isolate bootstrap that is structured cloneable, for testing the protocol by which such
+  # classes are serialized (src/per_isolate/serialization.ts), such as over RPC. This flag is
+  # intended for internal testing only and may never have its experimental annotation removed.
 }

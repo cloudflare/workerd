@@ -1815,6 +1815,11 @@ changing an instance's prototype does not change which `clone()` runs. A
 `deserializeInfo` is part of the format: like a tag, it must never change.
 `src/workerd/jsg/ser.h` describes the protocol in full.
 
+`src/per_isolate/testing/cloneable-test-box.ts` follows the same pattern. It is
+exposed as `CloneableTestBox` under the experimental
+`expose_serialization_test_class` flag, for tests such as
+`src/tests/serialization/`, which sends instances over RPC.
+
 ### Versioning Serializable Types
 
 List the current tag first, then old tags:
