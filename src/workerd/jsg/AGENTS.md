@@ -18,7 +18,8 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `promise.h`       | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                                                                                                                                                               |
 | `modules.h`       | Legacy `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                                                                                                                                                                  |
 | `modules-new.h`   | New module registry (`jsg::modules::ModuleRegistry`): URL-based specifiers, shareable across isolate replicas, gated by the `new_module_registry` compat flag via `workerd::isNewModuleRegistryEnabled()`. Full reference: `docs/reference/detail/new-module-registry.md` |
-| `setup.h`         | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                                                                                                                                                                 |
+| `setup.h`         | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`; the startup-snapshot pipeline (`IsolateBase::createSnapshotBlob`, restore-time globals, wrappable restore)                                                                     |
+| `snapshot.{h,c++}` | Startup snapshots: `SnapshotArtifact` (everything a zygote hands a worker started from its snapshot besides the blob) and the V8 (de)serializer callbacks for wrapper internal fields and API wrappers. Guide: `docs/startup-snapshot.md`                                 |
 | `sandbox.{h,c++}` | Cage-relative byte views for ArrayBuffer-backed native objects                                                                                                                                                                                                            |
 | `function.h`      | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                                                                                                                                                                |
 | `memory.h`        | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support; `pushRetainer`/`pushContainer`/`popNode`/`depth` for non-C++ objects (Rust JSG)                                                                                                                                |
@@ -162,6 +163,15 @@ These rules MUST be followed when writing or modifying JSG code:
     `Wrappable` does not. Breaking either rule would corrupt the `HeapTracer`'s lists,
     so destroying a bound Wrappable off the lock aborts, and wrapping it in another
     isolate throws.
+
+16. **A resource type that can be alive when a Worker's top level has run MUST say how it
+    crosses a startup snapshot.** Either `static constexpr bool jsgSnapshotStateless = true`
+    (any fresh instance is interchangeable; the restored wrapper gets one from the type's
+    `Lock&` or default constructor) or an override of `Wrappable::snapshotClone()` returning a
+    deep, isolate-independent copy (no V8 handles, no `jsg::Ref` members, no IoContext).
+    Neither may throw. A type with neither is not a bug, but every Worker whose top level
+    leaves such an object reachable starts without a snapshot. See
+    `docs/startup-snapshot.md` §Making a type transferable.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
