@@ -19,8 +19,4 @@ const unitTests :Workerd.Config = (
     )),
     (name = "platform", worker = NativeR2.platformWorker),
   ],
-  autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
-    "workerd-autogate-rpc-externals-hydration",
-  ],
 );

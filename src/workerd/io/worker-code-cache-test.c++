@@ -142,7 +142,7 @@ struct IsolateWithStore {
   kj::Own<const Worker::Script> newScript(const Worker::Script::Source& source,
       kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> registry = kj::none) {
     return isolate->newScript("code-cache-script"_kj, source, IsolateObserver::StartType::COLD,
-        SpanParent(nullptr), newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()), false,
+        SpanParent(nullptr), newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
         kj::none, kj::none, kj::mv(registry));
   }
 

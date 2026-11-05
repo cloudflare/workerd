@@ -75,10 +75,6 @@ impl<'a, T> IntoIterator for &'a Arguments<T> {
 }
 
 impl<T: Traced> Traced for Arguments<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.0.trace(visitor);
     }

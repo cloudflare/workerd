@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/jsg/compilation.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
@@ -102,12 +103,6 @@ class CompiledWasmModuleHolder {
   kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> compiled[2];
 };
 
-// Whether a bundle ES module is compiled so that V8 records compile hints for it: from then on,
-// V8 records the start position of each of the module's functions when it first compiles it,
-// which for a lazily compiled function is when it first runs. Read them with
-// ModuleRegistry::getProducedCompileHints() or getProducedCompileHints().
-WD_STRONG_BOOL(ProduceCompileHints);
-
 // Returns the compile hints V8 has recorded so far for `module`, a source text module compiled
 // with ProduceCompileHints::YES, sorted and without duplicates, in the form that
 // ModuleRegistry::ModuleInfo accepts as `compileHints`. Empty for a module compiled without it.
@@ -174,14 +169,12 @@ class ModuleRegistry {
 
     static jsg::Function<void()> initEvalFunc(
         auto& lock, CommonJsModuleProvider& provider, kj::StringPtr name, kj::StringPtr content) {
-      v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));
-      v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
-      auto context = lock.v8Context();
-      v8::Local<v8::Object> handle = provider.getContext(lock);
-      auto fn =
-          jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
-      return lock.template unwrap<jsg::Function<void()>>(context, fn);
+      auto fn = compileEvalFunc(lock, provider, name, content);
+      return lock.template unwrap<jsg::Function<void()>>(lock.v8Context(), fn);
     }
+
+    static v8::Local<v8::Function> compileEvalFunc(
+        Lock& js, CommonJsModuleProvider& provider, kj::StringPtr name, kj::StringPtr content);
   };
 
   template <typename T>

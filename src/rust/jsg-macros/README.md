@@ -44,6 +44,13 @@ in `src/rust/jsg/README.md`.
 `ts_root` marks a TypeScript generation root; it can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
+The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
+`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
+contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
+`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
+leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
+reference.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
@@ -464,7 +471,9 @@ the Rust equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant i
 Each variant must be a single-field tuple whose inner type converts from JavaScript and is
 `jsg::Type` and `jsg::TypeInfo`; RTTI describes the union as its variants' types. A union that holds handles has one lifetime parameter,
 their scope, and no `jsg::Traced` that can be used; a union has no other generic
-parameters. A value converts as it would to the equivalent `kj::OneOf`: variants are
+parameters. Like a `#[jsg_struct]`, a union implements `jsg::HoldsNoGcReferences` when every
+variant does, and `custom_holds_no_gc_references` leaves it to the author. A value converts as it
+would to the equivalent `kj::OneOf`: variants are
 tried in passes that leave coercion for last, in declaration order within a pass. If no
 variant converts the value, a `TypeError` is thrown naming the expected types, such as
 `Expected string or number but got symbol`. Like `kj::OneOf`, a union that breaks Web
@@ -509,7 +518,8 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls; containers/wrappers recurse to inner values.
+use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to inner values.
+`Traced::trace` has no default, so a hand-written impl must spell out its visits.
 
 ### Supported field shapes
 
@@ -525,7 +535,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
 | `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
-| `#[jsg_struct]` types | Delegates to each field, like a resource |
+| `#[jsg_struct]` types | Delegates to each field, like a resource; implements `jsg::HoldsNoGcReferences` when every field does |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
 A cell is required whenever a traced field needs to be mutated after construction,
