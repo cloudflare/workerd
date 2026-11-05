@@ -216,8 +216,15 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
         // what makes it safe for cppgc to clear `weakShim` without a GC visitation; see the
         // comment on Wrappable::strongRefcount.
         KJ_DASSERT(active.wrappable->strongWrapper.IsEmpty());
-        // Can't go through detachWrapper(): on the major-GC path cppgc already cleared the
-        // Wrappable's `weakShim`, so it can no longer find us. Hand it the shim directly.
+        // cppgc cleared the Wrappable's `weakShim` when it found this shim dead, in the same
+        // GC that is now finalizing it. Anything else there is a pointer cppgc will not clear
+        // for us, and detachFromShim() would follow it to its heap page. Stop here instead and
+        // report the state, with this finalizer on the stack.
+        if (auto* stale = active.wrappable->weakShim.Get(); stale != nullptr) {
+          reportStaleWeakShim(*active.wrappable, *this, stale);
+        }
+        // Can't go through detachWrapper(): cppgc already cleared the Wrappable's `weakShim`, so
+        // it can no longer find us. Hand it the shim directly.
         active.wrappable->detachFromShim(*this, false);
       }
       KJ_CASE_ONEOF(freelisted, Freelisted) {
@@ -331,7 +338,22 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   mutable kj::OneOf<Active, Freelisted, Dead, Restoring> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
   // the main thread so concurrency is not a concern.
+
+ private:
+  [[noreturn]] static void reportStaleWeakShim(
+      JSGWrappable& wrappable, CppgcShim& shim, void* stale);
 };
+
+void Wrappable::CppgcShim::reportStaleWeakShim(
+    JSGWrappable& wrappable, CppgcShim& shim, void* stale) {
+  // Logged in two lines, plain facts first: if the Wrappable is itself freed memory, its fields
+  // read as the allocator's fill pattern and the virtual call in the second line may not return.
+  KJ_LOG(FATAL, "Wrappable still has a weak shim while its shim is being finalized", stale, &shim,
+      stale == &shim, wrappable.isolate, v8::Isolate::TryGetCurrent(), wrappable.strongRefcount,
+      wrappable.link.isLinked(), wrappable.linkedInWrappers, wrappable.isShared());
+  KJ_LOG(FATAL, "Wrappable type", wrappable.jsgGetMemoryName());
+  abort();
+}
 
 kj::Maybe<JSGWrappable::CppgcShim&>& HeapTracer::freelistHeadFor(v8::CppHeapPointerTag tag) {
   auto index = wrappableTagBucketIndex(static_cast<uint16_t>(tag));
@@ -687,6 +709,16 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   KJ_REQUIRE(!hasWrapper());
   KJ_REQUIRE(strongWrapper.IsEmpty());
+  if (isCondemned()) {
+    // The GC has collected this Wrappable's wrapper, and a shim that will release it is waiting
+    // to be finalized. Giving it a second shim now would leave that finalizer to detach the wrong
+    // wrapper, and re-adding it to HeapTracer::wrappers would corrupt the HeapTracer's lists.
+    // Abort with the caller on the stack, since whoever holds this Wrappable obtained it after
+    // the GC had already decided it was dead.
+    KJ_LOG(FATAL, "wrapper attached to a condemned Wrappable", jsgGetMemoryName(), this->isolate,
+        isolate, strongRefcount);
+    abort();
+  }
   // A bound Wrappable is in its isolate's HeapTracer lists, so it can't be wrapped in another.
   KJ_ASSERT(this->isolate == nullptr || this->isolate == isolate);
 
