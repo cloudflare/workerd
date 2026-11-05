@@ -59,7 +59,6 @@ Web IDL's `[EnforceRange]` and V8's `kEnforceRangeBit` fast API arguments do, de
 | `kj::OneOf<T...>`             | Union                       | Web IDL validated at compile time                           |
 | `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                              |
 | `jsg::Promise<T>`             | `Promise`                   | Full `.then()`/`.catch_()` API                              |
-| `jsg::Name`                   | `string` or `Symbol`        | Property name wrapper                                       |
 | `jsg::V8Ref<T>`               | Any V8 type                 | Persistent strong reference                                 |
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
@@ -256,9 +255,6 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
-
-`jsg::Name` is also not visitable (private `visitForGc`): its symbol handle is
-a strong root, and a `v8::Symbol` cannot form a JS↔C++ cycle.
 
 ## Weak References
 

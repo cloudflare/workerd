@@ -129,6 +129,20 @@ declare const tracing: {
   // outside an invocation or when execution is detached into the root async context.
   getActiveSpan(): Span | undefined;
 
+  // Makes `span` the active span while invoking `callback(...args)`, then restores the previous
+  // active span. Returns the callback result as-is and does not end the span. User spans and
+  // built-in instrumentation created inside the callback, including after `await`, are children
+  // of `span`. That includes ended spans, which can still parent new spans as in OpenTelemetry.
+  // The exception is a no-op span (created at module scope or in an untraced request): it has
+  // nothing to parent new spans under, so they stay under the enclosing span. Throws if `span` was
+  // created by a different request, except that requests to the same Durable Object can share
+  // spans.
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
+
   // The `Span` class is exposed as a nested type so callers can reference the type via
   // `InstanceType<typeof tracing.Span>` (see `tracing-helpers.ts`).
   readonly Span: typeof Span;

@@ -119,12 +119,33 @@ impl Thrower {
     ) -> jsg::Result<()> {
         self.throw_then(lock, first, |lock| v8::Utf8Value::new(lock, &value))
     }
+
+    /// Parses JSON (`JSON::Parse`).
+    #[jsg_method]
+    fn throw_then_json_parse<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| jsg::json::parse(lock, "[1]"))
+    }
+
+    /// Stringifies `value` (`JSON::Stringify`), whose `toJSON` must not run.
+    #[jsg_method]
+    fn throw_then_json_stringify<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| jsg::json::stringify(lock, value))
+    }
 }
 
 /// Evaluates `obj.{call}`, where `obj` is a `Thrower` and the call's first argument is
 /// `first`, a function that throws. Checks that the operation failed with a pending error, that
 /// JavaScript catches the exception `first` threw, and that no other JavaScript ran. Only the
-/// `Utf8Value` case passes JavaScript that would set `secondRan`; for the others, the pending
+/// `Utf8Value` and JSON stringify cases pass JavaScript that would set `secondRan`; for the others, the pending
 /// error and the caught exception are what tell a guarded shim from one that isn't.
 fn exception_survives(call: &str) {
     crate::Harness::new().run_in_context(|lock, ctx| {
@@ -181,6 +202,18 @@ fn detaching_while_exception_pending_fails() {
 fn utf8_value_while_exception_pending_runs_nothing() {
     exception_survives(
         "throwThenUtf8Value(first, { toString() { globalThis.secondRan = true; return 'x'; } })",
+    );
+}
+
+#[test]
+fn json_parse_while_exception_pending_fails() {
+    exception_survives("throwThenJsonParse(first)");
+}
+
+#[test]
+fn json_stringify_while_exception_pending_runs_nothing() {
+    exception_survives(
+        "throwThenJsonStringify(first, { toJSON() { globalThis.secondRan = true; return 1; } })",
     );
 }
 

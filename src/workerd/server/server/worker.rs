@@ -742,25 +742,11 @@ impl WorkerService {
 
         // The test event is not traced; a test of span tracing can still tail a request the
         // test makes.
-        let mut tails = Vec::new();
-        if entrypoint != Some("test") {
-            for tail in &channels.tails {
-                if let Some(worker) = self.start_tail(tail, is_tracer)? {
-                    tails.push(Tail {
-                        streaming: false,
-                        worker: Some(worker),
-                    });
-                }
-            }
-            for tail in &channels.streaming_tails {
-                if let Some(worker) = self.start_tail(tail, is_tracer)? {
-                    tails.push(Tail {
-                        streaming: true,
-                        worker: Some(worker),
-                    });
-                }
-            }
-        }
+        let tails = if entrypoint == Some("test") {
+            Vec::new()
+        } else {
+            self.start_tails(&channels, is_tracer)?
+        };
 
         ffi::worker_start_request(
             &self.worker,
@@ -774,10 +760,26 @@ impl WorkerService {
         .map_err(Into::into)
     }
 
-    /// Starts a tail worker for one of this worker's requests. A tail that is an entrypoint of
-    /// this same worker is started as a tracer, and not at all when the request being tailed is
-    /// already a tracer's: a worker tailing itself must not recurse. Only the direct
-    /// self-reference is caught; a cycle through another worker is not.
+    /// Starts the worker's tails, buffered and streaming, for one of its events.
+    fn start_tails(&self, channels: &LinkedChannels, is_tracer: bool) -> Result<Vec<Tail>> {
+        let mut tails = Vec::new();
+        for (list, streaming) in [(&channels.tails, false), (&channels.streaming_tails, true)] {
+            for tail in list {
+                if let Some(worker) = self.start_tail(tail, is_tracer)? {
+                    tails.push(Tail {
+                        streaming,
+                        worker: Some(worker),
+                    });
+                }
+            }
+        }
+        Ok(tails)
+    }
+
+    /// Starts a tail worker for one of this worker's events: a request or an onHibernate handler.
+    /// A tail that is an entrypoint of this same worker is started as a tracer, and not at all
+    /// when the event being tailed is already a tracer's: a worker tailing itself must not
+    /// recurse. Only the direct self-reference is caught; a cycle through another worker is not.
     fn start_tail(
         &self,
         tail: &Rc<dyn Channel>,
@@ -920,13 +922,19 @@ impl ActorClass for ActorClassImpl {
 
     fn run_on_hibernate<'a>(
         &'a self,
+        metadata: KjOwn<RequestMetadata>,
         actor: &'a ffi::ActorHandle,
     ) -> LocalBoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            let channels = self.worker.channels()?;
+            let tails = self.worker.start_tails(&channels, false)?;
             Ok(ffi::worker_run_actor_on_hibernate(
                 &self.worker.worker,
                 actor,
-                Box::new(ChannelFactory(self.worker.channels()?)),
+                &self.class_name,
+                Box::new(ChannelFactory(channels)),
+                WorkerInterfaceList::new(tails),
+                metadata,
             )
             .await?)
         })

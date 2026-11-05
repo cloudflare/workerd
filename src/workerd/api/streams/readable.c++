@@ -887,11 +887,10 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
   // capability that we host; its calls fire `canceled`, which the sink below exposes to the pump.
   kj::Maybe<kj::Own<ReceiverCancelSignal>> canceled;
   kj::Maybe<rpc::StreamCanceler::Client> canceler;
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
-    auto signal = kj::heap<ReceiverCancelSignal>();
-    canceler = rpc::StreamCanceler::Client(kj::heap<StreamCancelerImpl>(signal->addWeakRef()));
-    canceled = kj::mv(signal);
-  }
+
+  auto signal = kj::heap<ReceiverCancelSignal>();
+  canceler = rpc::StreamCanceler::Client(kj::heap<StreamCancelerImpl>(signal->addWeakRef()));
+  canceled = kj::mv(signal);
 
   capnp::ByteStream::Client streamCap = [&]() {
     auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
@@ -1149,8 +1148,7 @@ kj::Own<ReadableStreamSource> newRpcReadableStreamSource(
   kj::Own<ReadableStreamSource> source = kj::heap<NoDeferredProxyReadableStream>(
       newSystemStream(kj::mv(in), encoding, ioctx, identityLength), ioctx);
 
-  if (reader.hasCanceler() &&
-      util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {
+  if (reader.hasCanceler()) {
     source = kj::heap<RpcReadableStreamSource>(
         kj::mv(source), kj::rc<RpcStreamCancelerState>(reader.getCanceler()));
   }

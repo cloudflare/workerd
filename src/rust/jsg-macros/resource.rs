@@ -325,24 +325,77 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
 }
 
 /// Scans `impl_block` for `#[jsg_wildcard_property]` methods. A resource type has at most one
-/// wildcard property, so with automatic registration a second method is a compile error, which
-/// is returned alongside the registrations so that the type is still registered and adds no
-/// errors of its own. Custom registration may choose between several by compatibility flag;
-/// registering more than one at once fails at runtime.
+/// wildcard property.
 fn collect_wildcard_registrations(
     impl_block: &ItemImpl,
     mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    collect_at_most_one(
+        impl_block,
+        mode,
+        "jsg_wildcard_property",
+        member_factory_name,
+        |method| {
+            let rust_name = &method.sig.ident;
+            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
+            let query_callback = crate::wildcard::query_callback_name(rust_name);
+            let member = quote! {
+                jsg::Member::WildcardProperty {
+                    getter_callback: Self::#getter_callback(),
+                    query_callback: Self::#query_callback(),
+                }
+            };
+            // C++ RTTI does not describe wildcard properties either.
+            (member, None)
+        },
+    )
+}
+
+/// Scans `impl_block` for `#[jsg_callable]` methods. As with wildcard properties, a resource
+/// type is callable at most one way. The factory is `{name}_callable_member`, so that a method
+/// can also be a `#[jsg_method]`, whose factory is `{name}_member`.
+fn collect_callable_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let factory_name = |rust_name: &syn::Ident| {
+        syn::Ident::new(&format!("{rust_name}_callable_member"), rust_name.span())
+    };
+    collect_at_most_one(impl_block, mode, "jsg_callable", factory_name, |method| {
+        let callback = crate::callable_callback_name(&method.sig.ident);
+        let member = quote! { jsg::Member::Callable { callback: Self::#callback() } };
+        let args = describe_args(method, Callable::Method);
+        let result = describe_result(method);
+        let description = quote! {
+            jsg::rtti::Member::Callable {
+                args: vec![#(#args),*],
+                result: #result,
+            }
+        };
+        (member, Some(description))
+    })
+}
+
+/// Registers each method of `impl_block` annotated with `#[attr]`, a member a resource type has
+/// at most one of, in a factory named by `factory_name`; `registration` gives the member and its
+/// RTTI description. With automatic registration a second such method is a compile error,
+/// which is returned alongside the registrations so that the type is still registered and adds
+/// no errors of its own. Custom registration may choose between several by compatibility flag;
+/// registering more than one at once fails at runtime.
+fn collect_at_most_one(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+    attr: &str,
+    factory_name: impl Fn(&syn::Ident) -> syn::Ident,
+    registration: impl Fn(
+        &syn::ImplItemFn,
+    ) -> (proc_macro2::TokenStream, Option<proc_macro2::TokenStream>),
 ) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
     let methods: Vec<_> = impl_block
         .items
         .iter()
         .filter_map(|item| match item {
-            syn::ImplItem::Fn(method)
-                if method
-                    .attrs
-                    .iter()
-                    .any(|a| is_attr(a, "jsg_wildcard_property")) =>
-            {
+            syn::ImplItem::Fn(method) if method.attrs.iter().any(|a| is_attr(a, attr)) => {
                 Some(method)
             }
             _ => None,
@@ -354,8 +407,10 @@ fn collect_wildcard_registrations(
         .map(|second| {
             syn::Error::new_spanned(
                 &second.sig.ident,
-                "a resource type has at most one #[jsg_wildcard_property]; use \
-                 `custom_members` to choose between several by compatibility flag",
+                format!(
+                    "a resource type has at most one #[{attr}]; use `custom_members` to choose \
+                     between several by compatibility flag"
+                ),
             )
             .to_compile_error()
         });
@@ -363,19 +418,112 @@ fn collect_wildcard_registrations(
         .iter()
         .map(|method| {
             let rust_name = &method.sig.ident;
-            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
-            let query_callback = crate::wildcard::query_callback_name(rust_name);
-            let member = quote! {
-                jsg::Member::WildcardProperty {
-                    getter_callback: Self::#getter_callback(),
-                    query_callback: Self::#query_callback(),
-                }
-            };
-            // C++ RTTI does not describe wildcard properties either.
-            MemberRegistration::new(rust_name, member, None)
+            let (member, description) = registration(method);
+            MemberRegistration::with_factory_name(
+                rust_name,
+                factory_name(rust_name),
+                member,
+                description,
+            )
         })
         .collect();
     (registrations, error)
+}
+
+/// The attributes of members that take a receiver but are registered without the type's
+/// `v8::Signature`, which a disposer cannot also be. (A constructor has no receiver.)
+pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
+    "jsg_property",
+    "jsg_inspect_property",
+    "jsg_wildcard_property",
+];
+
+/// Scans `impl_block` for `#[jsg_dispose]` and `#[jsg_async_dispose]` methods, returning their
+/// registrations and the compile errors of those that are invalid.
+///
+/// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
+/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
+/// registration a second one of a kind is an error too; custom registration may choose between
+/// several by compatibility flag, and registering two of a kind at once panics when the template
+/// is created. A method rejected for its shape is not registered; a second disposer is, so that
+/// the type adds no errors of its own.
+fn collect_dispose_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Vec<proc_macro2::TokenStream>) {
+    let mut registrations = Vec::new();
+    let mut errors = Vec::new();
+    // The first sync and the first async disposer.
+    let mut first: [Option<&syn::Ident>; 2] = [None, None];
+    for item in &impl_block.items {
+        let syn::ImplItem::Fn(method) = item else {
+            continue;
+        };
+        let has_dispose = method.attrs.iter().any(|a| is_attr(a, "jsg_dispose"));
+        let is_async = method.attrs.iter().any(|a| is_attr(a, "jsg_async_dispose"));
+        if !has_dispose && !is_async {
+            continue;
+        }
+        let attr_name = if is_async {
+            "jsg_async_dispose"
+        } else {
+            "jsg_dispose"
+        };
+        let rust_name = &method.sig.ident;
+        let mut error = |message: String| {
+            errors.push(syn::Error::new_spanned(rust_name, message).to_compile_error());
+        };
+        let has_receiver = method.sig.receiver().is_some() || this_param(&method.sig).is_some();
+        if !has_receiver {
+            error(format!(
+                "a #[{attr_name}] method takes `&self`, or `this: jsg::Rc<Self>` in its place"
+            ));
+            continue;
+        }
+        if let Some(other) = method
+            .attrs
+            .iter()
+            .find_map(|a| NON_DISPOSER_MEMBERS.iter().find(|name| is_attr(a, name)))
+        {
+            error(format!(
+                "a #[{attr_name}] method cannot be a #[{other}]; only #[jsg_method] and \
+                 #[jsg_callable] combine with it"
+            ));
+            continue;
+        }
+        if has_dispose && is_async {
+            error(
+                "a method cannot be both #[jsg_dispose] and #[jsg_async_dispose]: a sync \
+                 disposer and an async one are different methods"
+                    .to_owned(),
+            );
+        }
+        if mode == RegistrationMode::Automatic {
+            let first = &mut first[usize::from(is_async)];
+            if let Some(first) = first {
+                error(format!(
+                    "a resource type has at most one #[{attr_name}], and `{first}` is one already. \
+                     Use `custom_members` to choose between several by compatibility flag"
+                ));
+            }
+            first.get_or_insert(rust_name);
+        }
+        let callback_name = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
+        let (variant, suffix) = if is_async {
+            (quote! { AsyncDispose }, "async_dispose_member")
+        } else {
+            (quote! { Dispose }, "dispose_member")
+        };
+        // C++ RTTI describes disposers, but the TypeScript generator ignores them.
+        registrations.push(MemberRegistration::with_factory_name(
+            rust_name,
+            syn::Ident::new(&format!("{rust_name}_{suffix}"), rust_name.span()),
+            quote! { jsg::Member::#variant { callback: Self::#callback_name() } },
+            None,
+        ));
+    }
+    (registrations, errors)
 }
 
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts.
@@ -653,6 +801,10 @@ fn generate_resource_bindings(
     registrations.extend(collect_constant_registrations(impl_block));
     let (wildcard, wildcard_error) = collect_wildcard_registrations(impl_block, mode);
     registrations.extend(wildcard);
+    let (disposers, dispose_errors) = collect_dispose_registrations(impl_block, mode);
+    registrations.extend(disposers);
+    let (callable, callable_error) = collect_callable_registrations(impl_block, mode);
+    registrations.extend(callable);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
@@ -678,6 +830,8 @@ fn generate_resource_bindings(
 
     Ok(quote! {
         #wildcard_error
+        #(#dispose_errors)*
+        #callable_error
 
         #[automatically_derived]
         impl #self_ty {
@@ -854,16 +1008,7 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
-            let elided_ty = elide_named_lifetimes(ty);
-            let unwrap = quote! {
-                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        lock.throw_exception(&err);
-                        return;
-                    }
-                };
-            };
+            let unwrap = crate::unwrap_argument(ty, &var, js_index, None);
             (unwrap, quote! { #var })
         })
         .unzip();
@@ -906,6 +1051,9 @@ fn generate_constructor_registration(
     let call = quote! { #self_ty::#rust_method_name };
 
     let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
+    // Reported inside the callback, so that the type is still registered and adds no errors of
+    // its own.
+    let rest_error = crate::rest_parameter_error(&method.sig).map(|error| error.to_compile_error());
     let length = required_argument_count(method.sig.inputs.iter());
     let lock_arg = if has_lock_param {
         quote! { &mut *lock, }
@@ -941,6 +1089,7 @@ fn generate_constructor_registration(
                     return;
                 }
 
+                #rest_error
                 #(#unwraps)*
 
                 #construct

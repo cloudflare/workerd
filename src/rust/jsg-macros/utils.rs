@@ -149,6 +149,32 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
     }
 }
 
+/// Returns `T` if `ty` is `jsg::Arguments<T>` or `Arguments<T>`, a rest parameter.
+pub fn arguments_element(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    if type_path.qself.is_some() {
+        return None;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" => last,
+        _ => return None,
+    };
+    if last.ident != "Arguments" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    match args.args.iter().collect::<Vec<_>>().as_slice() {
+        [syn::GenericArgument::Type(element)] => Some(element),
+        _ => None,
+    }
+}
+
 /// Returns true if the type is `jsg::Rc<Self>` or `Rc<Self>`.
 pub fn is_rc_self(ty: &syn::Type) -> bool {
     let syn::Type::Path(type_path) = ty else {
@@ -300,8 +326,8 @@ fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
 ///
 /// The caller omits a method's `this: jsg::Rc<Self>` receiver. Constructors have no such
 /// receiver, so their parameters named `this` are JavaScript arguments. A leading
-/// `&mut Lock` is not a JavaScript argument.
-/// Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
+/// `&mut Lock` is not a JavaScript argument, and neither is a trailing `jsg::Arguments<T>`, as
+/// in C++ JSG. Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
 pub fn required_argument_count<'a>(
     inputs: impl Iterator<Item = &'a syn::FnArg>,
 ) -> proc_macro2::TokenStream {
@@ -314,7 +340,9 @@ pub fn required_argument_count<'a>(
     if params.peek().is_some_and(|ty| is_lock_ref(ty)) {
         params.next();
     }
-    let types = params.map(elide_named_lifetimes);
+    let types = params
+        .take_while(|ty| arguments_element(ty).is_none())
+        .map(elide_named_lifetimes);
     quote::quote! {{
         let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
         let mut length = 0u32;

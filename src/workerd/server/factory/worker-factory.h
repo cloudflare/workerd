@@ -213,8 +213,12 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
-kj::Promise<void> worker_run_actor_on_hibernate(
-    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels);
+kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
+    const ActorHandle& actor,
+    ::rust::Str className,
+    ::rust::Box<ChannelFactory> channels,
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Own<RequestMetadata> metadata);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(

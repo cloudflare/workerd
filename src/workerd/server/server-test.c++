@@ -3913,6 +3913,133 @@ KJ_TEST("Server: a failed onHibernate retirement leaves the replacement actor in
   test.connect("test-addr").httpGet200("/", "2:0");
 }
 
+KJ_TEST("Server: a tail worker gets the outcome of an onHibernate handler that runs out of time") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `export class Actor extends DurableObject {
+          `  fetch() {
+          `    return new Response("OK");
+          `  }
+          `  async [onHibernate]() {
+          `    await this.env.GATE.fetch("http://hook/");
+          `  }
+          `}
+          `export default {
+          `  fetch(request, env) {
+          `    return env.NS.getByName("test").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "Actor"),
+          (name = "GATE", service = "gate"),
+        ],
+        durableObjectNamespaces = [(className = "Actor", uniqueKey = "on-hibernate")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["tail"],
+      )),
+      (name = "tail", worker = (
+        compatibilityDate = "2026-01-01",
+        modules = [(name = "main.js", esModule =
+          `export default {
+          `  async tail(traces, env) {
+          `    for (const trace of traces.filter((trace) => trace.event.reason)) {
+          `      await env.OUT.fetch(`http://tail/${trace.event.reason}/${trace.outcome}`);
+          `    }
+          `  }
+          `};
+        )],
+        bindings = [(name = "OUT", service = "tail-out")],
+      )),
+      (name = "gate", external = (address = "hook-addr")),
+      (name = "tail-out", external = (address = "tail-addr")),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  // Never answered, so the handler runs until its budget is spent.
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET / HTTP/1.1\n[\\s\\S]*\n\n");
+  test.wait(10);
+  auto tail = test.receiveSubrequest("tail-addr");
+  tail.recvRegex("GET /inactive/exceededWallTime HTTP/1.1\n[\\s\\S]*\n\n");
+  tail.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+}
+
+KJ_TEST("Server: a stub that onHibernate restores reaches the actor's next instance") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental", "allow_irrevocable_stub_storage"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject, RpcTarget, restore } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `let nextInstance = 0;
+          `class Callback extends RpcTarget {
+          `  constructor(instance, job) { super(); this.instance = instance; this.job = job; }
+          `  done() { return `${this.instance}:${this.job}`; }
+          `}
+          `export class Actor extends DurableObject {
+          `  instance = ++nextInstance;
+          `  fetch() { return new Response("OK"); }
+          `  [restore](params) { return new Callback(this.instance, params.job); }
+          `  async [onHibernate]() {
+          `    const callback = await this.ctx.restore({ job: "report" });
+          `    await this.env.REGISTRY.getByName("registry").register(callback);
+          `  }
+          `}
+          `export class Registry extends DurableObject {
+          `  register(callback) { return this.ctx.storage.put("callback", callback); }
+          `  async call() {
+          `    const callback = await this.ctx.storage.get("callback");
+          `    return callback ? await callback.done() : "none";
+          `  }
+          `}
+          `export default {
+          `  async fetch(request, env) {
+          `    if (new URL(request.url).pathname === "/call") {
+          `      return new Response(await env.REGISTRY.getByName("registry").call());
+          `    }
+          `    return env.NS.getByName("test").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "Actor"),
+          (name = "REGISTRY", durableObjectNamespace = "Registry"),
+        ],
+        durableObjectNamespaces = [
+          (className = "Actor", uniqueKey = "on-hibernate-restore"),
+          (className = "Registry", uniqueKey = "on-hibernate-registry"),
+        ],
+        durableObjectStorage = (localDisk = "my-disk"),
+      )),
+      (name = "my-disk", disk = (path = "../../do-storage", writable = true)),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  // Waits for the retirement, then starts the next instance.
+  test.connect("test-addr").httpGet200("/", "OK");
+  test.connect("test-addr").httpGet200("/call", "2:report");
+}
+
 KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   TestServer test(R"((
     services = [

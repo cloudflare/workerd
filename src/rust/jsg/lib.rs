@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod arguments;
 mod async_context;
 mod buffer;
 mod cell;
@@ -14,6 +15,7 @@ mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
+pub mod json;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
@@ -31,6 +33,7 @@ mod typed_promise;
 pub mod v8;
 mod wrappable;
 
+pub use arguments::Arguments;
 pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
@@ -1168,6 +1171,25 @@ pub enum Member {
     WildcardProperty {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
+    },
+    /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
+    /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
+    /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
+    Dispose {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
+    /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
+    /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
+    /// one, and may also have a [`Member::Dispose`].
+    AsyncDispose {
+        callback: RawFunctionCallback,
+    },
+    /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
+    /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
+    /// call names it. A type has at most one.
+    Callable {
+        callback: RawFunctionCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

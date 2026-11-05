@@ -48,7 +48,8 @@ class WorkerdApi final: public Worker::Api {
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
       kj::Array<Worker::Api::InboundListener> inboundListeners = nullptr,
-      kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none);
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig = kj::none,
+      kj::Maybe<const EmbedderBootstrap&> embedderBootstrap = kj::none);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -56,6 +57,7 @@ class WorkerdApi final: public Worker::Api {
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
   kj::ArrayPtr<const Worker::Api::InboundListener> getInboundListeners() const override;
+  kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const override;
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
       jsg::Lock& lock, Worker::Api::NewContextOptions options = {}) const override;
   jsg::Dict<NamedExport> unwrapExports(
@@ -123,6 +125,7 @@ class WorkerdApi final: public Worker::Api {
   struct Impl;
   kj::Own<Impl> impl;
   kj::Array<Worker::Api::InboundListener> inboundListeners;
+  kj::Maybe<const EmbedderBootstrap&> embedderBootstrap;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

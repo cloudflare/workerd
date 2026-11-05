@@ -795,3 +795,151 @@ fn property_descriptions_follow_the_requested_placement() {
     .unwrap();
     assert!(inspect.description.is_none());
 }
+
+#[test]
+fn dispose_factories_register_undescribed_symbol_members() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_async_dispose]
+            fn close_async<'s>(&self, lock: &mut Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+                todo!()
+            }
+        }
+    };
+    let (registrations, errors) = collect_dispose_registrations(&input, RegistrationMode::Custom);
+    assert!(errors.is_empty());
+    let factories: Vec<_> = registrations
+        .iter()
+        .map(|r| {
+            (
+                r.factory_name.to_string(),
+                r.member.to_string(),
+                r.description.is_none(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        factories,
+        [
+            (
+                "close_dispose_member".to_owned(),
+                quote!(jsg::Member::Dispose {
+                    callback: Self::close_callback()
+                })
+                .to_string(),
+                true,
+            ),
+            (
+                "close_async_async_dispose_member".to_owned(),
+                quote!(jsg::Member::AsyncDispose {
+                    callback: Self::close_async_callback()
+                })
+                .to_string(),
+                true,
+            ),
+        ]
+    );
+
+    // A type registers one disposer of each kind automatically, and not a second of a kind.
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert!(errors.is_empty());
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_dispose]
+            fn close_again(&self) {}
+        }
+    };
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn callable_factory_registers_and_describes_the_callable_callback() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            fn call(&self, value: String) -> bool { true }
+        }
+    };
+    let (registrations, error) =
+        collect_callable_registrations(&input, RegistrationMode::Automatic);
+    assert!(error.is_none());
+    let [registration] = registrations.as_slice() else {
+        panic!("expected one registration");
+    };
+    assert_eq!(registration.factory_name, "call_callable_member");
+    let factory = registration.factory().to_string();
+    assert!(
+        factory
+            .contains("jsg :: Member :: Callable { callback : Self :: call_callable_callback () }"),
+        "{factory}"
+    );
+    assert!(
+        factory.contains("jsg :: rtti :: Member :: Callable"),
+        "{factory}"
+    );
+    let expanded = expand_resource_impl(quote!(), &input).to_string();
+    assert!(
+        expanded.contains("Self :: call_callable_member ()"),
+        "{expanded}"
+    );
+}
+
+// A method can be both a method and the callable, since their factories and callbacks differ.
+#[test]
+fn method_can_also_be_the_callable() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            #[jsg_method]
+            fn call(&self) {}
+        }
+    };
+    let expanded = expand_resource_impl(quote!(), &input);
+    let file: syn::File = syn::parse2(expanded.clone()).unwrap();
+    assert!(
+        !file
+            .items
+            .iter()
+            .any(|item| matches!(item, syn::Item::Macro(_))),
+        "{expanded}"
+    );
+    let expanded = expanded.to_string();
+    assert!(expanded.contains("Self :: call_member ()"), "{expanded}");
+    assert!(
+        expanded.contains("Self :: call_callable_member ()"),
+        "{expanded}"
+    );
+}
+
+#[test]
+fn second_callable_is_rejected_only_with_automatic_registration() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_callable]
+            fn first(&self) {}
+            #[jsg_callable]
+            fn second(&self) {}
+        }
+    };
+    let (registrations, error) =
+        collect_callable_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    let error = error.unwrap().to_string();
+    assert!(
+        error.contains("a resource type has at most one #[jsg_callable]"),
+        "{error}"
+    );
+    let (registrations, error) = collect_callable_registrations(&input, RegistrationMode::Custom);
+    assert_eq!(registrations.len(), 2);
+    assert!(error.is_none());
+}

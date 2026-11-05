@@ -12,6 +12,9 @@
  *
  * Results are cached: repeated require() calls return the same exports object.
  * Circular dependencies throw a fatal error.
+ *
+ * Embedder bootstrap scripts are named under their prefix, e.g.
+ * require('embedder/foo'), and only the embedder's scripts can require them.
  */
 declare function require(specifier: string): any;
 

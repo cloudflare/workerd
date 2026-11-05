@@ -62,6 +62,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace api
 
 class BaseTracer;
+class EmbedderBootstrap;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -315,7 +316,6 @@ class Worker::Script: public kj::AtomicRefcounted {
       kj::StringPtr id,
       const Source& source,
       IsolateObserver::StartType startType,
-      bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan,
@@ -341,14 +341,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Determines whether a devtools inspector client can be attached.
   enum class InspectorPolicy {
     DISALLOW,
-    ALLOW_UNTRUSTED,
     ALLOW_FULLY_TRUSTED,
   };
 
   // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
-  // Usually it matches the script ID. An exception is preview isolates: there, each preview
-  // session has one isolate which may load many iterations of the script (this allows the
-  // inspector session to stay open across them).
+  // Usually it matches the script ID.
   // The Isolate object owns the Api object and outlives it in order to report teardown timing.
   // The Api object is created before the Isolate object and does not strictly require
   // request-specific information.
@@ -422,7 +419,6 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
       kj::Own<workerd::VirtualFileSystem> vfs,
-      bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
       // Must be provided if and only if the worker's compatibility flags
@@ -455,26 +451,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   uint getLockSuccessCount() const;
 
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  // Also adds a special JSON value to the header identified by `controlHeaderId`, for compatibility
-  // with internal Cloudflare systems.
   //
-  // This overload will dispatch all inspector messages on the _calling thread's_ `kj::Executor`.
-  // When linked against vanilla V8, this means that CPU profiling will only profile JavaScript
-  // running on the _calling thread_, which will most likely only be inspector console commands, and
-  // is not typically desired.
-  //
-  // For the above reason , this overload is currently only suitable for use by the internal Workers
-  // Runtime codebase, which patches V8 to profile whichever thread currently holds the `v8::Locker`
-  // for this Isolate.
-  kj::Promise<void> attachInspector(kj::Timer& timer,
-      kj::Duration timerOffset,
-      kj::HttpService::Response& response,
-      const kj::HttpHeaderTable& headerTable,
-      kj::HttpHeaderId controlHeaderId) const;
-
-  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  //
-  // This overload will dispatch all inspector messages on the `kj::Executor` passed in via
+  // All inspector messages are dispatched on the `kj::Executor` passed in via
   // `isolateThreadExecutor`. For CPU profiling to work as expected, this `kj::Executor` must be
   // associated with the same thread which executes the Worker's JavaScript.
   kj::Promise<void> attachInspector(kj::Own<const kj::Executor> isolateThreadExecutor,
@@ -658,6 +636,13 @@ class Worker::Api {
   // on. Empty when the embedder does not declare listeners.
   virtual kj::ArrayPtr<const InboundListener> getInboundListeners() const {
     return nullptr;
+  }
+
+  // Bootstrap scripts the embedder contributes to the per-isolate bootstrap, run after workerd's
+  // own in every context the bootstrap runs in. The result must outlive every such context. See
+  // EmbedderBootstrap in api/per-isolate-bootstrap.h.
+  virtual kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const {
+    return kj::none;
   }
 
   struct NewContextOptions {
@@ -1105,10 +1090,13 @@ class Worker::Actor final: public kj::Refcounted {
   // unless this call is canceled before the handler finishes. Failures of the handler itself don't
   // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
   // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
+  //
+  // `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's requests.
   kj::Promise<void> runOnHibernate(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
-      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
@@ -1259,7 +1247,8 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Promise<void> runOnHibernateImpl(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
-      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 };
 
 WD_STRONG_BOOL(PopulateVersionInfoMetadata);
