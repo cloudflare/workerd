@@ -94,6 +94,17 @@ impl Control {
             "{{\"event\":\"listen-inspector\",\"port\":{port}}}\n"
         ));
     }
+
+    fn listen_cluster(&mut self, listener: &tokio::net::TcpListener) -> Result<()> {
+        let port = listener
+            .local_addr()
+            .map_err(|e| kj::failed!("{e}"))?
+            .port();
+        self.write(&format!(
+            "{{\"event\":\"listen-cluster\",\"port\":{port}}}\n"
+        ));
+        Ok(())
+    }
 }
 
 /// Everything set up before either command diverges: the graph, the listeners, the drain
@@ -199,11 +210,14 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
+    // The cluster's event goes before the sockets', so a consumer that stops reading at a
+    // socket's has it.
+    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        control.listen_cluster(&listener)?;
+        start_cluster(&factory, node, listener);
+    }
     for (name, port) in ports {
         control.listen(&name, port);
-    }
-    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        start_cluster(&factory, node, listener);
     }
 
     if let Some(address) = &options.debug_port {

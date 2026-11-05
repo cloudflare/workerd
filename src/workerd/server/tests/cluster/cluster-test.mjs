@@ -34,7 +34,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { connect, createServer } from 'node:net';
+import { connect } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
@@ -75,6 +75,7 @@ class ClusterNode {
   #nodeId;
   #child = null;
   #httpPort = null;
+  #clusterPort = null;
   #closed = null;
   #stderrBuffer = '';
   #extraArgs;
@@ -99,6 +100,12 @@ class ClusterNode {
   get httpPort() {
     assert(this.#httpPort !== null, 'node not started');
     return this.#httpPort;
+  }
+
+  // The port the node's cluster peer port is bound to.
+  get clusterPort() {
+    assert(this.#clusterPort !== null, 'node has no cluster port');
+    return this.#clusterPort;
   }
 
   // Returns the contents of the node's stderr observed so far.
@@ -142,7 +149,8 @@ class ClusterNode {
       process.stderr.write(`[${this.#nodeId}] ${chunk}`);
     });
 
-    // Watch the control fd for the assigned http port.
+    // Watch the control fd for the assigned ports. The cluster port's event,
+    // if any, comes before the sockets'.
     const portPromise = new Promise((resolve, reject) => {
       let buffer = '';
       const onData = (data) => {
@@ -154,6 +162,9 @@ class ClusterNode {
           if (!line) continue;
           try {
             const parsed = JSON.parse(line);
+            if (parsed.event === 'listen-cluster') {
+              this.#clusterPort = parsed.port;
+            }
             if (parsed.event === 'listen' && parsed.socket === 'http') {
               child.stdio[CONTROL_FD].off('data', onData);
               resolve(parsed.port);
@@ -210,6 +221,7 @@ class ClusterNode {
     const result = await this.#closed;
     clearTimeout(killTimer);
     this.#httpPort = null;
+    this.#clusterPort = null;
     return result;
   }
 }
@@ -752,32 +764,21 @@ function objectPrefix(id, uniqueKey = 'counter-test-namespace') {
   return `do/${hash.digest().subarray(0, 16).toString('base64url')}/${id}`;
 }
 
-// A port that was free a moment ago.
-async function freePort() {
-  const server = createServer();
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
-
 test('cluster: an instance bound to a wildcard advertises --cluster-advertise', async () => {
-  const ports = [];
-  const extraArgs = async (i) => {
-    ports[i] = await freePort();
-    return [
-      `--cluster-addr=0.0.0.0:${ports[i]}`,
-      `--cluster-advertise=127.0.0.1:${ports[i]}`,
-    ];
-  };
+  // Port 0 for both: the advertised address takes the port the kernel chose.
+  const extraArgs = () => [
+    '--cluster-addr=0.0.0.0:0',
+    '--cluster-advertise=127.0.0.1:0',
+  ];
   await withCluster(
     2,
     async ({ nodes, bucket, nodeKeys }) => {
-      for (const [i, node] of nodes.entries()) {
+      for (const node of nodes) {
         const record = JSON.parse(
           await bucket.get(`nodes/${nodeKeys.get(node.nodeId)}.json`)
         );
-        assert.strictEqual(record.address, `127.0.0.1:${ports[i]}`);
+        assert.notStrictEqual(node.clusterPort, 0);
+        assert.strictEqual(record.address, `127.0.0.1:${node.clusterPort}`);
       }
       // Peers reach each other at the advertised addresses.
       const first = await fetchJson(
@@ -824,23 +825,18 @@ function clusterAuth(target, ms = Date.now(), nonce = randomBytes(16)) {
 }
 
 test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigned', async () => {
-  const port = await freePort();
-  const extraArgs = async () => [`--cluster-addr=127.0.0.1:${port}`];
-  await withCluster(
-    1,
-    async () => {
-      const target = `127.0.0.1:${port}`;
-      const auth = clusterAuth(target);
-      assert.match(await clusterConnect(port, auth), / 200 /);
-      assert.match(await clusterConnect(port, auth), / 403 /, 'replayed');
-      const stale = clusterAuth(target, Date.now() - 60_000);
-      assert.match(await clusterConnect(port, stale), / 403 /, 'stale');
-      const elsewhere = clusterAuth(`127.0.0.1:${port + 1}`);
-      assert.match(await clusterConnect(port, elsewhere), / 403 /, 'target');
-      assert.match(await clusterConnect(port), / 403 /, 'unsigned');
-    },
-    { extraArgs }
-  );
+  await withCluster(1, async ({ nodes }) => {
+    const port = nodes[0].clusterPort;
+    const target = `127.0.0.1:${port}`;
+    const auth = clusterAuth(target);
+    assert.match(await clusterConnect(port, auth), / 200 /);
+    assert.match(await clusterConnect(port, auth), / 403 /, 'replayed');
+    const stale = clusterAuth(target, Date.now() - 60_000);
+    assert.match(await clusterConnect(port, stale), / 403 /, 'stale');
+    const elsewhere = clusterAuth(`127.0.0.1:${port + 1}`);
+    assert.match(await clusterConnect(port, elsewhere), / 403 /, 'target');
+    assert.match(await clusterConnect(port), / 403 /, 'unsigned');
+  });
 });
 
 test('cluster: a public cluster address is refused', async () => {

@@ -343,8 +343,8 @@ pub struct ServeArgs {
     pub cluster_address: Option<String>,
 
     /// Advertise <addr> to the cluster's other instances instead of the config's
-    /// `cluster.advertise` or the bound address. A public IP is refused unless the config sets
-    /// `cluster.unsafePublicAddress`.
+    /// `cluster.advertise` or the bound address; a port of 0 is the port bound. A public IP is
+    /// refused unless the config sets `cluster.unsafePublicAddress`.
     #[arg(long = "cluster-advertise", value_name = "addr")]
     pub cluster_advertise: Option<String>,
 

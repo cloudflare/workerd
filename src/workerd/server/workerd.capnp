@@ -139,8 +139,9 @@ struct ClusterConfig {
   advertise @4 :Text;
   # The address other instances reach this one at, which goes in its lease record in the bucket.
   # Optional: by default, the address bound, with the port it got. Required when that is a
-  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). Overridden by
-  # `--cluster-advertise`. A public IP is refused unless `unsafePublicAddress` is set.
+  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). A port of 0 is the
+  # port bound. Overridden by `--cluster-advertise`. A public IP is refused unless
+  # `unsafePublicAddress` is set.
 
   key @3 :Text;
   # A secret known only to members of the cluster, at least 32 bytes: random, such as the output

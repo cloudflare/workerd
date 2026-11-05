@@ -140,8 +140,8 @@ pub async fn bind(
         .map_err(|e| kj::failed!("cluster address {address}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| kj::failed!("{e}"))?;
     let advertise = match advertise {
-        Some(a) => a.to_owned(),
-        None if conf.has_advertise() => text(conf.get_advertise())?,
+        Some(a) => with_bound_port(a, bound.port()),
+        None if conf.has_advertise() => with_bound_port(&text(conf.get_advertise())?, bound.port()),
         None if bound.ip().is_unspecified() => {
             return Err(kj::failed!(
                 "cluster address {address} is a wildcard, which peers cannot reach: set \
@@ -152,6 +152,14 @@ pub async fn bind(
     };
     refuse_public(conf, &advertise)?;
     Ok((listener, advertise))
+}
+
+/// `advertise` with a port of 0 replaced by `port`, the one bound; any other address as it is.
+fn with_bound_port(advertise: &str, port: u16) -> String {
+    match advertise.rsplit_once(':') {
+        Some((host, "0")) => format!("{host}:{port}"),
+        _ => advertise.to_owned(),
+    }
 }
 
 /// Fails for an `address` that is a public IP, unless the config allows it.
