@@ -1001,6 +1001,15 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     return KJ_REQUIRE_NONNULL(input)->tryGetLength();
   }
 
+  kj::Promise<uint64_t> pumpTo(
+      kj::AsyncOutputStream& destination, uint64_t amount = kj::maxValue) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return propagatePumpFailure(
+        canceler.wrap(KJ_REQUIRE_NONNULL(input)->pumpTo(destination, amount)));
+  }
+
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     KJ_IF_SOME(exception, disconnectException) {
       return exception.clone();
@@ -1015,6 +1024,19 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(pieces));
   }
 
+  // Until Port.connect() has returned, the caller falls back to write(). A pump into `up` can
+  // redirect its source with getSubstream(), and if the tunnel fails to open, getSubstream() fails
+  // and drops its callback, which owns the source's end of the pump. The source then fails with a
+  // generic error that bypasses this stream and can reach the caller before connect()'s error.
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& source, uint64_t amount = kj::maxValue) override {
+    if (disconnectException != kj::none || connectState != ConnectState::SETTLED) return kj::none;
+    KJ_IF_SOME(promise, KJ_REQUIRE_NONNULL(output)->tryPumpFrom(source, amount)) {
+      return propagatePumpFailure(kj::mv(promise));
+    }
+    return kj::none;
+  }
+
   kj::Promise<void> whenWriteDisconnected() override {
     // rejectWhenDisconnected() has exactly one failure mode -- the disconnect exception -- and
     // whenWriteDisconnected()'s contract is to *resolve* (not reject) once writes would fail, so
@@ -1024,11 +1046,12 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
 
   // Returns a promise that rejects when the connection is disconnected, or immediately if it is
   // already disconnected.
-  kj::Promise<void> rejectWhenDisconnected() {
+  template <typename T = void>
+  kj::Promise<T> rejectWhenDisconnected() {
     KJ_IF_SOME(exception, disconnectException) {
       return exception.clone();
     }
-    return canceler.wrap(kj::Promise<void>(kj::NEVER_DONE));
+    return canceler.wrap(kj::Promise<T>(kj::NEVER_DONE));
   }
 
   void shutdownWrite() override {
@@ -1092,31 +1115,37 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     connectTask = task.eagerlyEvaluate(nullptr);
   }
 
-  // Called when an output-side signal (down-drop callback or whenWriteDisconnected()) reports an
-  // unclean disconnect. While the connect RPC is still outstanding we cannot tell an ordinary
-  // teardown apart from the container refusing/failing the connection, and the latter carries a
-  // more specific exception. So during the connecting window we merely remember that a disconnect
-  // is pending and let the connect result decide; once settled, we tear down immediately.
-  void notifyUncleanDisconnect() {
+  // Called when an output-side signal (down-drop callback, whenWriteDisconnected(), or a failed
+  // pump) reports an unclean disconnect, with the signal's exception if it has one. While the
+  // connect RPC is still outstanding we cannot tell an ordinary teardown apart from the container
+  // refusing/failing the connection, and the latter carries a more specific exception. So during
+  // the connecting window we merely remember the first such signal and let the connect result
+  // decide; once settled, we tear down immediately.
+  void notifyUncleanDisconnect(kj::Maybe<kj::Exception> exception = kj::none) {
     if (connectState == ConnectState::SETTLED) {
-      disconnect();
-    } else {
+      KJ_IF_SOME(e, exception) {
+        disconnect(kj::mv(e));
+      } else {
+        disconnect();
+      }
+    } else if (connectState == ConnectState::PENDING) {
       connectState = ConnectState::PENDING_WITH_DISCONNECT;
+      pendingDisconnect = kj::mv(exception);
     }
   }
 
   // The connect RPC resolved successfully. If an unclean-disconnect signal arrived during the
-  // connecting window, honor it now with a generic exception.
+  // connecting window, honor it now.
   void connectSucceeded() {
     bool disconnectPending = connectState == ConnectState::PENDING_WITH_DISCONNECT;
     connectState = ConnectState::SETTLED;
     if (disconnectPending) {
-      disconnect();
+      notifyUncleanDisconnect(kj::mv(pendingDisconnect));
     }
   }
 
   // The connect RPC failed. Tear the stream down with the specific connect exception, which (by
-  // disconnect()'s first-wins rule) takes precedence over any buffered generic disconnect.
+  // disconnect()'s first-wins rule) takes precedence over any buffered disconnect.
   void connectFailed(kj::Exception exception) {
     connectState = ConnectState::SETTLED;
     disconnect(kj::mv(exception));
@@ -1149,6 +1178,8 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     SETTLED,
   };
   ConnectState connectState = ConnectState::PENDING;
+  // The exception of the signal that moved connectState to PENDING_WITH_DISCONNECT, if it had one.
+  kj::Maybe<kj::Exception> pendingDisconnect;
 
   // Background watcher for the connect RPC; see adoptConnectTask().
   kj::Promise<void> connectTask = nullptr;
@@ -1159,6 +1190,21 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     return promise.catch_([weak = addWeakToThis()](kj::Exception&& exception) -> kj::Promise<void> {
       KJ_IF_SOME(stream, weak) {
         stream->disconnect(exception.clone());
+      }
+      return kj::mv(exception);
+    });
+  }
+
+  // A failed pump is an unclean disconnect, and rejects with the stream's disconnect exception, so
+  // that a pump broken by the tunnel failing to open reports connect()'s error. For example, when
+  // `down` is redirected to the pump's destination with getSubstream(), dropping `down` cancels the
+  // pump with a generic error, which can happen before connect() fails.
+  kj::Promise<uint64_t> propagatePumpFailure(kj::Promise<uint64_t> promise) {
+    return promise.catch_(
+        [weak = addWeakToThis()](kj::Exception&& exception) -> kj::Promise<uint64_t> {
+      KJ_IF_SOME(stream, weak) {
+        stream->notifyUncleanDisconnect(kj::mv(exception));
+        return stream->rejectWhenDisconnected<uint64_t>();
       }
       return kj::mv(exception);
     });
