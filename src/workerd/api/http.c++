@@ -1483,10 +1483,14 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
 
   if (IoContext::current().hasOutputGate()) {
     // Once a Response is returned, we need to apply the output lock.
-    promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
+    promise = promise.then(
+        js, [](jsg::Lock& js, jsg::Ref<Response>&& response) -> jsg::Promise<jsg::Ref<Response>> {
       auto& context = IoContext::current();
-      return context.awaitIo(js, context.waitForOutputLocks(),
-          [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
+      KJ_IF_SOME(outputLocks, context.waitForOutputLocksIfNecessary()) {
+        return context.awaitIo(js, kj::mv(outputLocks),
+            [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
+      }
+      return js.resolvedPromise(kj::mv(response));
     });
   }
 
