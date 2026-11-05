@@ -12,7 +12,7 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [
-    ( name = "local",
+    ( name = "do-storage",
       disk = (
         writable = true,
         allowDotfiles = true,

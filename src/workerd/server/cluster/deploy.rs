@@ -315,20 +315,28 @@ async fn write_once(
 
 /// Publishes `config`, an encoded `Config`, as deployment `name`.
 ///
-/// Checks it, uploads it, and points the catalog at it, unless the catalog does already. It is
-/// refused, and the catalog left unchanged, when the bucket ignores conditional writes, or when
-/// it breaks a rule of `compose.rs` against the other deployments of the catalog it replaces.
+/// Checks it against the catalog's other deployments before uploading it. The catalog points to
+/// the uploaded deployment unless it already does. Every catalog write repeats the composition
+/// check. The catalog stays unchanged if the deployment breaks a rule in `compose.rs` or the bucket
+/// ignores conditional writes. A deployment refused by the first check is not uploaded.
 pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Published> {
     check_name(name)?;
     let config = compose::deployment_config(name, config)?;
-    check_conditional_writes(bucket).await?;
-    let version = upload(bucket, name, &config).await?;
     let ours = Deployment {
         name: name.to_owned(),
-        version: version.clone(),
+        version: version_of(&config),
         config,
     };
+    // The other deployments' versions read so far.
     let mut others: HashMap<(String, String), Deployment> = HashMap::new();
+    // Unless the catalog names this version already, which changes nothing.
+    if let Some((current, _)) = catalog(bucket).await?
+        && current.deployments.get(name).map(|c| &c.version) != Some(&ours.version)
+    {
+        check_against(bucket, &current, &ours, &mut others).await?;
+    }
+    check_conditional_writes(bucket).await?;
+    let version = upload(bucket, name, &ours.config).await?;
     for _ in 0..PUBLISH_ATTEMPTS {
         let base = catalog(bucket).await?;
         let base_version = base.as_ref().map(|(_, version)| version.clone());
@@ -350,20 +358,7 @@ pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Publi
                 version,
             });
         }
-        for (other, entry) in current.deployments.iter().filter(|(n, _)| *n != name) {
-            let key = (other.clone(), entry.version.clone());
-            if let Entry::Vacant(vacant) = others.entry(key) {
-                vacant.insert(read(bucket, other, &entry.version).await?);
-            }
-        }
-        let mut all: Vec<_> = current
-            .deployments
-            .iter()
-            .filter(|(n, _)| *n != name)
-            .filter_map(|(n, entry)| others.get(&(n.clone(), entry.version.clone())))
-            .collect();
-        all.push(&ours);
-        compose::check_deployments(&all)?;
+        check_against(bucket, &current, &ours, &mut others).await?;
 
         let mut next = current;
         next.revision += 1;
@@ -395,6 +390,36 @@ pub async fn publish(bucket: &Bucket, name: &str, config: &[u8]) -> Result<Publi
         }
     }
     Err(Error::Contended(CATALOG.to_owned()))
+}
+
+/// Checks `ours` against the deployments `current` names other than it, by the rules of
+/// `compose.rs`. `others` holds the versions read so far, and gains those read now. A deployment
+/// that cannot be read refuses the publish, with an error that names it.
+async fn check_against(
+    bucket: &Bucket,
+    current: &Catalog,
+    ours: &Deployment,
+    others: &mut HashMap<(String, String), Deployment>,
+) -> Result<()> {
+    let named = || current.deployments.iter().filter(|(n, _)| **n != ours.name);
+    for (other, entry) in named() {
+        let key = (other.clone(), entry.version.clone());
+        if let Entry::Vacant(vacant) = others.entry(key) {
+            let deployment = read(bucket, other, &entry.version).await.map_err(|error| {
+                Error::Deploy(format!(
+                    "cannot publish deployment \"{}\": deployment \"{other}\" at version {} \
+                     could not be read to check for conflicts: {error}",
+                    ours.name, entry.version
+                ))
+            })?;
+            vacant.insert(deployment);
+        }
+    }
+    let mut all: Vec<_> = named()
+        .filter_map(|(n, entry)| others.get(&(n.clone(), entry.version.clone())))
+        .collect();
+    all.push(ours);
+    compose::check_deployments(&all)
 }
 
 /// Refuses a bucket that ignores conditional writes, on an object no other deploy writes: a `.`

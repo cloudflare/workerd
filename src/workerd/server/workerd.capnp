@@ -164,6 +164,26 @@ struct ClusterConfig {
   # `src/workerd/server/cluster/deploy.rs` documents the bucket layout for tools that write
   # deployments.
   #
+  # `workerd deploy` publishes a wrangler project or a Cap'n Proto config:
+  #
+  #     workerd deploy --experimental [<project>] --bucket s3://bucket/prefix
+  #
+  # See `workerd deploy --help` for details. A wrangler project's worker becomes a service named
+  # after the deployment. Its Durable Objects use the disk service named `do-storage`. Every
+  # instance that serves the project with Durable Objects must define this service in its own
+  # config.
+  #
+  # For a wrangler project, each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here,
+  # `<name>` is the deployment name. `<key>` is the class's storage key from the project's
+  # migrations. The storage key defaults to the class name and stays the same after a rename.
+  # Deploying the project under another name creates separate Durable Objects. They start empty.
+  # A Cap'n Proto deployment's Durable Object `uniqueKey`s and every Workflow namespace key are
+  # used as written.
+  #
+  # An instance reads the catalog only at startup. Restart it to serve a published catalog
+  # revision. `workerd deploy` checks a deployment against the catalog's other deployments. It
+  # does not read any instance config.
+  #
   # A deployment has the authority granted by each instance's config. Its services can reach the
   # instance's network, container engine, and named services. Anyone who can publish deployments
   # can run code with that authority on every instance. Restricting a writer to the deployment area

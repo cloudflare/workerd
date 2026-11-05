@@ -297,6 +297,9 @@ impl Names {
                 map.insert(name, who.clone());
             }
         };
+        // TODO(someday): Scope a Cap'n Proto deployment's Durable Object `uniqueKey`s and all
+        //   Workflow namespace keys to the deployment, as `workerd deploy` does for a wrangler
+        //   project's Durable Objects.
         for service in config.get_services()? {
             record(&mut self.services, "service", text(service.get_name())?);
             let Ok(service::Which::Worker(worker)) = service.which() else {

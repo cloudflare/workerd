@@ -4,7 +4,8 @@
 //! command line), parses the command line, produces the encoded config (C++ compiles schema
 //! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
 //! driver (bootstrap.c++) sets up the process and runs the Rust server. In cluster mode `serve`
-//! first adds the deployments in the cluster's bucket to the config ([`deployments`]).
+//! first adds the deployments in the cluster's bucket to the config ([`deployments`]), and
+//! `deploy` publishes one ([`deploy`]).
 //! [`process::Process`] is the `--watch` half: the files to watch, and the reload.
 
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
@@ -14,6 +15,7 @@
 mod args;
 mod bridge;
 mod config;
+mod deploy;
 mod deployments;
 mod process;
 mod socket_fd;
@@ -194,6 +196,85 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             python_version,
             output_directory,
         } => run_baseline_snapshot(verbose, &python_version, output_directory, executable),
+        args::Command::Deploy {
+            project,
+            const_name,
+            deploy,
+        } => Ok(run_deploy(&project, const_name, &deploy, executable)),
+    }
+}
+
+/// `workerd deploy`: publishes the project as a deployment of the cluster whose bucket
+/// `--bucket` names; the exit status.
+fn run_deploy(
+    project: &str,
+    const_name: Option<String>,
+    args: &args::DeployArgs,
+    executable: Option<Executable>,
+) -> i32 {
+    type T = args::Main;
+
+    if !args.experimental {
+        usage_error::<T>("The deploy command is experimental. Pass --experimental to use it.");
+    }
+    let failed = |errors: Vec<String>| {
+        for error in errors {
+            eprintln!("deploy: {error}");
+        }
+        1
+    };
+    let process = Process::new(executable, None, Vec::new());
+    let (name, deployment) = match deploy::project(project, args.binary) {
+        Ok(deploy::Project::Wrangler(path)) => {
+            if let Some(name) = const_name {
+                usage_error::<T>(format!(
+                    "A wrangler config has no named constants. Remove the <const-name> argument \
+                     \"{name}\"."
+                ));
+            }
+            if !args.import_paths.is_empty() {
+                usage_error::<T>(
+                    "--import-path applies to Cap'n Proto configs, not wrangler configs.",
+                );
+            }
+            let path = path.to_string_lossy();
+            match wrangler::load_deployment(&path, args.name.as_deref(), &process) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    let error = format!("{path}: {error}");
+                    return failed(error.lines().map(str::to_owned).collect());
+                }
+            }
+        }
+        Ok(deploy::Project::Capnp(config_file)) => {
+            let Some(name) = args.name.clone() else {
+                usage_error::<T>(format!(
+                    "{config_file} is a Cap'n Proto deployment. Pass --name to name it."
+                ));
+            };
+            let config = args::ConfigFileArgs {
+                import_paths: args.import_paths.clone(),
+                binary: args.binary,
+                config_file,
+            };
+            (name, load_config::<T>(config, const_name, &process))
+        }
+        Err(error) => usage_error::<T>(error),
+    };
+    let deployment = deployment.to_bytes();
+    if let Err(errors) = deploy::check(&name, &deployment) {
+        return failed(errors);
+    }
+    let options = args.bucket_options();
+    match deploy::publish(&args.bucket, &options, &name, &deployment) {
+        Ok(published) => {
+            println!(
+                "catalog revision {} selects deployment \"{name}\" version {}",
+                published.revision, published.version
+            );
+            0
+        }
+        Err(errors) => failed(errors),
     }
 }
 

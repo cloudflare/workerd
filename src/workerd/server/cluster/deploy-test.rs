@@ -277,6 +277,8 @@ fn deployments_compose_and_conflicts_are_refused() {
              deployment \"b\"."
         );
         assert_eq!(catalog_of(&bucket).await, before);
+        // Refused before it was uploaded.
+        assert!(bucket.list("deploy/c/").await.unwrap().is_empty());
 
         let names: Vec<_> = load(&bucket)
             .await
@@ -457,6 +459,28 @@ fn a_deploy_that_keeps_losing_the_race_gives_up() {
         store.contend.set(true);
         let result = publish(&bucket, "b", &services(&["two"])).await;
         assert!(matches!(result, Err(Error::Contended(key)) if key == CATALOG));
+        assert_eq!(catalog_of(&bucket).await, before);
+    });
+}
+
+#[test]
+fn an_unreadable_deployment_refuses_a_publish_and_is_named() {
+    block_on(async {
+        let bucket = Bucket::memory("");
+        let published = publish(&bucket, "app", &services(&["app"])).await.unwrap();
+        let key = format!("deploy/app/{}/manifest.json", published.version);
+        bucket.delete(&key).await.unwrap();
+        let before = catalog_of(&bucket).await;
+
+        let refused = refusal(publish(&bucket, "other", &services(&["other"])).await);
+        assert_eq!(
+            refused,
+            format!(
+                "cannot publish deployment \"other\": deployment \"app\" at version {} could \
+                 not be read to check for conflicts: {key} is missing",
+                published.version
+            )
+        );
         assert_eq!(catalog_of(&bucket).await, before);
     });
 }
