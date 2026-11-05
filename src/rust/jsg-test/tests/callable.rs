@@ -58,10 +58,13 @@ impl Counter {
     }
 }
 
-fn counter() -> jsg::Rc<Counter> {
-    jsg::Rc::new(Counter {
-        total: Cell::new(0.0),
-    })
+fn counter(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Counter> {
+    jsg::Rc::new(
+        lock,
+        Counter {
+            total: Cell::new(0.0),
+        },
+    )
 }
 
 /// Returns itself when called, and fails when called with `"fail"`.
@@ -97,10 +100,13 @@ impl Stub {
         clippy::unnecessary_wraps,
         reason = "a wildcard property returns an Option"
     )]
-    fn get(&self, name: &str) -> Option<jsg::Rc<Self>> {
-        Some(jsg::Rc::new(Self {
-            path: format!("{}.{name}", self.path),
-        }))
+    fn get(&self, lock: &mut jsg::Lock, name: &str) -> Option<jsg::Rc<Self>> {
+        Some(jsg::Rc::new(
+            lock,
+            Self {
+                path: format!("{}.{name}", self.path),
+            },
+        ))
     }
 }
 
@@ -151,17 +157,21 @@ fn with_globals(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalConte
     harness.run_in_context(|lock, ctx| {
         let my_callable = jsg::resource::function_template_of::<MyCallable>(lock).unwrap();
         ctx.set_global(lock, "MyCallable", my_callable);
-        ctx.set_global(lock, "getCallable", jsg::Rc::new(MyCallable));
-        ctx.set_global(lock, "counter", counter());
-        ctx.set_global(lock, "itself", jsg::Rc::new(Itself));
-        ctx.set_global(
+        let get_callable = jsg::Rc::new(lock, MyCallable);
+        ctx.set_global(lock, "getCallable", get_callable);
+        let counter = counter(lock);
+        ctx.set_global(lock, "counter", counter);
+        let itself = jsg::Rc::new(lock, Itself);
+        ctx.set_global(lock, "itself", itself);
+        let stub = jsg::Rc::new(
             lock,
-            "stub",
-            jsg::Rc::new(Stub {
+            Stub {
                 path: "stub".to_owned(),
-            }),
+            },
         );
-        ctx.set_global(lock, "plain", jsg::Rc::new(Plain));
+        ctx.set_global(lock, "stub", stub);
+        let plain = jsg::Rc::new(lock, Plain);
+        ctx.set_global(lock, "plain", plain);
         f(lock, ctx);
         Ok(())
     });
@@ -260,7 +270,8 @@ fn custom_members_choose_how_it_is_callable() {
         let harness =
             crate::Harness::with_flags(|mut flags| flags.set_cache_option_enabled(enabled));
         harness.run_in_context(|lock, ctx| {
-            ctx.set_global(lock, "v", jsg::Rc::new(Versioned));
+            let v = jsg::Rc::new(lock, Versioned);
+            ctx.set_global(lock, "v", v);
             expect_eval(lock, ctx, "v()", expected);
             Ok(())
         });

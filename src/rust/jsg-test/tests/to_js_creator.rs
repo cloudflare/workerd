@@ -92,7 +92,8 @@ impl Creator {
 #[test]
 fn instance_members_convert_for_their_receiver() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "creator", jsg::Rc::new(Creator));
+        let creator = jsg::Rc::new(lock, Creator);
+        ctx.set_global(lock, "creator", creator);
         for expression in [
             "creator.direct() === creator",
             "creator.fallible() === creator",

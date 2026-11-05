@@ -128,7 +128,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
                 self,
                 lock: &mut jsg::Lock<'s>,
             ) -> ::std::result::Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
-                let r = jsg::Rc::new(self);
+                let r = jsg::Rc::new(lock, self);
                 jsg::ToJS::to_js(r, lock)
             }
         }
@@ -1093,7 +1093,7 @@ fn generate_constructor_registration(
                 #(#unwraps)*
 
                 #construct
-                let rc = jsg::Rc::new(resource);
+                let rc = jsg::Rc::new(lock, resource);
                 rc.attach_to_this(args);
             }),
             length: #length,
