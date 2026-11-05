@@ -680,6 +680,13 @@ struct ErrorInfo final {
   KJ_DISALLOW_COPY(ErrorInfo);
   ~ErrorInfo() noexcept(false) = default;
 
+  // Makes the ErrorInfo for an error whose `name`, `message` and `stack` properties are as given.
+  // This defines how an error is represented in traces, however its properties were obtained. A
+  // `stack` normally begins by repeating the name and the message, which are stored as separate
+  // fields, so that part is stripped off, and a stack that has nothing else to it is dropped.
+  static ErrorInfo fromErrorProperties(
+      kj::String name, kj::String message, kj::Maybe<kj::StringPtr> stack);
+
   kj::String name;
   kj::String message;
   kj::Maybe<kj::String> stack;

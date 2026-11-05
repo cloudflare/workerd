@@ -186,14 +186,13 @@ void sendExceptionToInspector(jsg::Lock& js,
   jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
-// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is the single
-// source of truth for how an error is represented in traces, shared by the uncaught-exception
-// path (addExceptionToTrace) and the console.* logging path (handleLog), so that an error
-// reported either way produces an identical representation.
+// Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is shared by the
+// uncaught-exception path (addExceptionToTrace) and the console.* logging path (handleLog), so
+// that an error reported either way produces an identical representation.
 //
 // `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
-// and the redundant leading "Name: message" prefix is stripped off `stack` (since name and message
-// are stored as separate fields).
+// and tracing::ErrorInfo::fromErrorProperties() defines the rest, as it does for an exception
+// that is traced without the isolate lock.
 tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -230,32 +229,8 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
     }
   }
 
-  kj::Maybe<kj::String> stack;
-  KJ_IF_SOME(s, error.stack) {
-    kj::StringPtr slice = s;
-
-    // Normally `error.stack` repeats the error type and message first. We don't want send two
-    // copies of that to the trace so we'll strip it off.
-    if (slice.startsWith(name)) {
-      slice = slice.slice(name.size());
-      if (slice.startsWith(": "_kj)) {
-        slice = slice.slice(2);
-      }
-    }
-
-    if (slice.startsWith(message)) {
-      slice = slice.slice(message.size());
-      if (slice.startsWith("\n")) {
-        slice = slice.slice(1);
-      }
-    }
-
-    if (slice.size() > 0) {
-      stack = kj::str(slice);
-    }
-  }
-
-  return tracing::ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack));
+  return tracing::ErrorInfo::fromErrorProperties(kj::mv(name), kj::mv(message),
+      error.stack.map([](kj::String& stack) -> kj::StringPtr { return stack; }));
 }
 
 void addExceptionToTrace(jsg::Lock& js,
@@ -2824,6 +2799,11 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     }
   }
 
+  logUncaughtExceptionToConsole(source, exception, message);
+}
+
+void Worker::Lock::logUncaughtExceptionToConsole(
+    UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {
     JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(),
         [&](jsg::Lock& js) { sendExceptionToInspector(js, *i.get(), source, exception, message); });
@@ -2848,16 +2828,19 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   }
 }
 
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+void Worker::Lock::logUncaughtExceptionToConsole(UncaughtExceptionSource source,
     kj::Exception&& exception,
-    kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
+    const jsg::JsErrorDescription& error) {
   jsg::Lock& js = *this;
   try {
+    // Describing an internal exception logged and reported it, so the conversion is told not to
+    // do so again and to refer to it by the same internal error id.
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
           .trusted = true,
+          .alreadyDescribed = error,
         });
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   } catch (const jsg::JsExceptionThrown&) {
     // An exception occurred while trying to convert the exception to a JS value.
     // With exceptionToJs, this should only happen if the isolate is terminating
@@ -2866,8 +2849,9 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     // so let's try exceptionToJs again but this time ignoring the detail, and
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
-    auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
-    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
+    auto jsError =
+        js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true, .alreadyDescribed = error});
+    logUncaughtExceptionToConsole(source, jsError.getHandle(js), jsg::JsMessage());
   }
 }
 
