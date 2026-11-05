@@ -273,6 +273,7 @@ impl ActorClass for InvalidConfigActorClass {
 
     fn run_on_hibernate<'a>(
         &'a self,
+        _metadata: KjOwn<RequestMetadata>,
         _actor: &'a ffi::ActorHandle,
     ) -> LocalBoxFuture<'a, Result<()>> {
         Box::pin(async {

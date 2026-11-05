@@ -385,13 +385,15 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerInterface>>;
         /// Runs an idle actor's captured hook and flushes its writes, without starting a request
         /// through the container's retirement gate or counting the actor as active. `tails`
-        /// receive the hook's trace, as they would a request's on `class_name`.
+        /// receive the hook's trace, as they would a request's on `class_name`. Only
+        /// `metadata`'s self token is used.
         async fn worker_run_actor_on_hibernate(
             worker: &CompiledWorker,
             actor: &ActorHandle,
             class_name: &str,
             channels: Box<ChannelFactory>,
             tails: Box<WorkerInterfaceList>,
+            metadata: KjOwn<RequestMetadata>,
         ) -> Result<()>;
         /// `inner` with `keep` attached: dropped once `inner` has been.
         fn worker_interface_attach(
