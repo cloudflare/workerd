@@ -548,13 +548,16 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::setSnapshotDefaultContext(
-    v8::Local<v8::Context> defaultContext, uint32_t* badTagFieldsCount) {
+void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+    uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
   *badTagFieldsCount = 0;
   KJ_ASSERT_NONNULL(snapshotCreator)
       ->SetDefaultContext(defaultContext,
-          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount));
+          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount),
+          v8::SerializeContextDataCallback(),
+          v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
 }
 
 void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
@@ -572,10 +575,13 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
-    const uint32_t* badTagFieldsCount) {
+    const uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  wrappablesMetadata->cloneAndRecordLiveWrappables(heapTracer, artifact);
 
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
@@ -633,6 +639,8 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
       "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
       "workerd wrapper markers",
       *badTagFieldsCount);
+
+  wrappablesMetadata->dropUnreachableWrappables(artifact);
 }
 
 void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
@@ -661,6 +669,16 @@ void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
         "START_FROM_SNAPSHOT: template slot enumeration drifted vs PREPARE_SNAPSHOT", cursor,
         indices.size());
   });
+}
+
+void IsolateBase::prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.preallocateCppgcShims(ptr, heapTracer, finalizedSnapshotArtifact());
+}
+
+void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.releaseSlotsWithChecks();
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
