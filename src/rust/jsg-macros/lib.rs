@@ -456,7 +456,7 @@ fn generate_callbacks(
         return Err(error);
     }
     if let Some(error) = rest_parameter_error(fn_sig) {
-        return reject(&input_fn, callback_kinds, &error).into();
+        return Err(reject(input_fn, callback_kinds, &error));
     }
     let has_self = fn_sig.receiver().is_some();
     let has_this = this_param(fn_sig).is_some();
