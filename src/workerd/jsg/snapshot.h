@@ -53,6 +53,10 @@ class Wrappable;
 //   CreateBlob. A worker started from the snapshot rebuilds its C++ BootstrapState from it instead
 //   of running the bootstrap scripts again. None when the zygote ran without the per-isolate
 //   bootstrap.
+// * `restoreTimeGlobalsIndex` is the context-level AddData index of the record of what the
+//   zygote's top level left of the properties V8 adds to a context only on restore
+//   (see setup.h), pinned right before CreateBlob. None until the zygote has run
+//   removeRestoreTimeGlobalsBeforeSnapshot().
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -72,6 +76,8 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   kj::Vector<LiveWrappable> liveWrappables;
 
   kj::Maybe<size_t> bootstrapStateIndex;
+
+  kj::Maybe<size_t> restoreTimeGlobalsIndex;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
