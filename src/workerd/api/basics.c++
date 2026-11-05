@@ -5,7 +5,6 @@
 #include "basics.h"
 
 #include "abort-bootstrap.h"
-#include "actor-state.h"
 #include "global-scope.h"
 
 #include <workerd/io/features.h>
@@ -1446,21 +1445,6 @@ kj::Promise<void> Scheduler::wait(
   }
 
   return kj::mv(promise);
-}
-
-void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  JSG_REQUIRE(
-      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
-  IoContext& context = IoContext::current();
-  return context.getActor().map([&](Worker::Actor& actor) {
-    auto& lock = context.getCurrentLock();
-    auto persistent = actor.makeStorageForSwSyntax(lock);
-    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
-  });
 }
 
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {

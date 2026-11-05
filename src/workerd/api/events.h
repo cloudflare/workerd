@@ -8,6 +8,7 @@
 
 namespace workerd::api {
 
+class ActorState;
 class Blob;
 
 namespace messageevent {
@@ -66,6 +67,30 @@ class MessagePort {
 };
 
 }  // namespace messageevent
+
+class ExtendableEvent: public Event {
+ public:
+  // Runtime-only (the JS constructor is deleted); always trusted.
+  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
+
+  // While ExtendableEvent is defined by the spec to be constructable, there's really not a
+  // lot of reason currently to do so, especially with the restriction that waitUntil can
+  // only be called on trusted events (which have to originate from within the system).
+  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
+
+  void waitUntil(kj::Promise<void> promise);
+
+  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ExtendableEvent) {
+    JSG_INHERIT(Event);
+    JSG_METHOD(waitUntil);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(actorState, getActorState);
+
+    JSG_TS_OVERRIDE({ actorState: never });
+    // Omit `actorState` from definitions
+  }
+};
 
 // An implementation of the Web Platform Standard CustomEvent API
 class CustomEvent: public Event {
@@ -352,7 +377,7 @@ class PromiseRejectionEvent final: public Event {
 };
 
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
-  api::CustomEvent, api::CustomEvent::CustomEventInit, api::ErrorEvent,                            \
+  api::ExtendableEvent, api::CustomEvent, api::CustomEvent::CustomEventInit, api::ErrorEvent,      \
       api::ErrorEvent::ErrorEventInit, api::MessageEvent, api::MessageEvent::Initializer,          \
       api::PromiseRejectionEvent, api::OpenEvent, api::CloseEvent, api::CloseEvent::Initializer
 

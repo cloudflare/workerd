@@ -1,7 +1,10 @@
 #include "events.h"
 
+#include "actor-state.h"
 #include "blob.h"
 #include "messagechannel.h"
+
+#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 
@@ -71,6 +74,21 @@ void MessagePort::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace messageevent
+
+void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
+  JSG_REQUIRE(
+      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
+  IoContext::current().addWaitUntil(kj::mv(promise));
+}
+
+jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
+  IoContext& context = IoContext::current();
+  return context.getActor().map([&](Worker::Actor& actor) {
+    auto& lock = context.getCurrentLock();
+    auto persistent = actor.makeStorageForSwSyntax(lock);
+    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
+  });
+}
 
 CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
     : Event(kj::mv(ownType), Event::Init(init)),

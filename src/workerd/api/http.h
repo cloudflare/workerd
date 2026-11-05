@@ -7,6 +7,7 @@
 #include "actor-call-retry.h"
 #include "basics.h"
 #include "blob.h"
+#include "events.h"
 #include "form-data.h"
 #include "headers.h"
 #include "queue.h"
