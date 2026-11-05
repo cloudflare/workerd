@@ -154,7 +154,7 @@ The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_callable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
@@ -244,6 +244,7 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
 | Wildcard property `get_var` | `Self::get_var_member()` |
+| Callable `call` | `Self::call_callable_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -458,6 +459,34 @@ impl Env {
 // JS: env.HOME        // "/home/user"
 //     env.MISSING     // undefined
 //     'HOME' in env   // true
+```
+
+## `#[jsg_callable]`
+
+Makes the instances of a `#[jsg_resource]` type callable as functions, running the method.
+Equivalent to C++ `JSG_CALLABLE`.
+
+The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape of
+a `#[jsg_method]`. The attribute takes no arguments. A type is callable at most one way; with
+automatic registration a second `#[jsg_callable]` is a compile error, and a custom `members` list
+that includes two fails at runtime. The macro generates `<name>_callable_callback()` and, through
+`#[jsg_resource]`, the factory `<name>_callable_member()`, which differ from a `#[jsg_method]`'s,
+so a method may also be a `#[jsg_method]`. See [Callable resources](../jsg/README.md#callable-resources)
+for how they behave.
+
+```rust
+use jsg_macros::{jsg_callable, jsg_resource};
+
+#[jsg_resource]
+struct Greeter { greeting: String }
+
+#[jsg_resource]
+impl Greeter {
+    #[jsg_callable]
+    pub fn greet(&self, name: String) -> String { format!("{}, {name}", self.greeting) }
+}
+// JS: greeter('world')   // "Hello, world"
+//     typeof greeter     // "function"
 ```
 
 ## `#[jsg_oneof]`

@@ -1298,6 +1298,44 @@ A wildcard property behaves as in C++ JSG:
 - A wildcard property named `then` makes the object a thenable, which `await` would call.
   Return `None` for `then` unless that is intended.
 
+## Callable resources
+
+`#[jsg_callable]`, the equivalent of C++ JSG's `JSG_CALLABLE`, makes the instances of a resource
+type callable as functions:
+
+```rust
+#[jsg_resource]
+impl Statement {
+    // `statement(1, 2)` runs the method.
+    #[jsg_callable]
+    pub fn run(&self, lock: &mut jsg::Lock, a: f64, b: Option<f64>) -> String {
+        /* ... */
+    }
+}
+```
+
+A callable resource behaves as in C++ JSG:
+
+- The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape
+  of a `#[jsg_method]`: an optional `lock: &mut jsg::Lock`, then the JavaScript arguments, which
+  are converted as a method's are. An argument error names the method `(called as function)`.
+  A type is callable at most one way, though `custom_members` may choose between several by
+  compatibility flag. The method may also be a `#[jsg_method]`, to be callable both ways.
+- The method runs whether the instance is called with or without `new`.
+- `this` is always the instance, however the call names it: a callable read from another object
+  (`const f = obj.method; f()`), or called with `Reflect.apply()` and another receiver, still runs
+  on the instance. The resource cannot tell how it was called.
+- `typeof` is `"function"`, but the instance is an ordinary instance of the resource type: its
+  prototype is the type's prototype, not `Function.prototype`, so it has no `call`, `apply` or
+  `bind`, and `instanceof Function` is false.
+- Only the instance is callable: an object that inherits from it, as `Object.create(obj)` does,
+  is not.
+- With a [wildcard property](#wildcard-properties) as well, every property can be callable, which
+  is how C++ JSG's RPC stubs are built.
+- RTTI describes the method as the type's call signature (the `callable` of its structure), as
+  C++ RTTI describes a `JSG_CALLABLE`. The TypeScript generator does not read it, so C++ types
+  declare their call signatures with `JSG_TS_OVERRIDE`.
+
 ## Static Constants
 
 To expose numeric constants on a resource class (equivalent to `JSG_STATIC_CONSTANT` in C++), use `#[jsg_static_constant]` on `const` items inside a `#[jsg_resource]` impl block:

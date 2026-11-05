@@ -407,6 +407,83 @@ fn bridge_contexts_take_canonical_flags() {
     );
 }
 
+struct CallableNode;
+
+impl TypeInfo for CallableNode {
+    fn describe(cx: &mut Context) -> Type {
+        cx.structure::<Self>("CallableNode", true, |_| {
+            vec![
+                Member::Callable {
+                    args: vec![Parameter {
+                        name: "value",
+                        ty: Type::String,
+                    }],
+                    result: Type::Boolean,
+                },
+                Member::Constant {
+                    name: "LIMIT",
+                    value: crate::ConstantValue::Number(1.0),
+                },
+            ]
+        })
+    }
+}
+
+// As C++ RTTI writes a `JSG_CALLABLE`, the signature is the structure's `callable`, not one of
+// its members.
+#[test]
+fn callable_is_the_structures_callable_signature() {
+    let mut cx = Context::default();
+    CallableNode::describe(&mut cx);
+    let message = read_context(&cx);
+    let root = message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap();
+    let structure = root
+        .get_groups()
+        .unwrap()
+        .get(0)
+        .get_structures()
+        .unwrap()
+        .get(0);
+    assert!(structure.has_callable());
+    let callable = structure.get_callable().unwrap();
+    assert!(matches!(
+        callable.get_return_type().unwrap().which().unwrap(),
+        rtti_capnp::type_::Boolt(())
+    ));
+    let args = callable.get_args().unwrap();
+    assert_eq!(args.len(), 1);
+    assert!(matches!(
+        args.get(0).which().unwrap(),
+        rtti_capnp::type_::String(_)
+    ));
+    let members = structure.get_members().unwrap();
+    assert_eq!(members.len(), 1);
+    assert!(matches!(
+        members.get(0).which().unwrap(),
+        rtti_capnp::member::Constant(_)
+    ));
+}
+
+#[test]
+fn structure_without_callable_has_none() {
+    let mut cx = Context::default();
+    Node::describe(&mut cx);
+    let message = read_context(&cx);
+    let root = message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap();
+    let structure = root
+        .get_groups()
+        .unwrap()
+        .get(0)
+        .get_structures()
+        .unwrap()
+        .get(0);
+    assert!(!structure.has_callable());
+}
+
 #[test]
 fn handles_are_described_as_their_values() {
     let mut cx = Context::default();
