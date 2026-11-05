@@ -556,6 +556,7 @@ pub mod ffi {
         pub unsafe fn local_typed_array_length(array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(array: &Local) -> usize;
+        pub unsafe fn local_typed_array_contents(array: &Local, byte_length: &mut usize) -> usize;
         pub unsafe fn local_typed_array_byte_length(array: &Local) -> usize;
         pub unsafe fn local_uint8_array_get(array: &Local, index: usize) -> u8;
         pub unsafe fn local_uint16_array_get(array: &Local, index: usize) -> u16;
@@ -2896,15 +2897,9 @@ macro_rules! impl_typed_array {
             /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
-                if self.is_empty() {
-                    return &[];
-                }
-                // SAFETY: handle is valid; non-empty guarantees non-null data pointer.
-                // data() returns the ArrayBuffer base; byte_offset() gives this view's start.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts(ptr.cast_const(), self.len())
-                }
+                // SAFETY: the elements are this view's, and the borrow of `lock` keeps them in
+                // place and unchanged.
+                unsafe { &*self.as_raw_slice() }
             }
 
             /// Returns a mutable slice view of the typed array's data.
@@ -2933,15 +2928,29 @@ macro_rules! impl_typed_array {
                 &mut self,
                 _lock: &'b mut crate::Lock<'a>,
             ) -> &'b mut [$elem] {
-                if self.is_empty() {
-                    return &mut [];
+                // SAFETY: caller guarantees exclusive access to this buffer region.
+                unsafe { &mut *self.as_raw_slice() }
+            }
+
+            /// A raw pointer to the elements of this view, read from V8 in one call. It is
+            /// dangling, with no elements, for an empty or detached view, and it is valid only
+            /// while the buffer is neither detached nor resized; [`as_slice`](Self::as_slice) and
+            /// [`as_mut_slice`](Self::as_mut_slice) borrow the lock to make sure of that.
+            #[inline]
+            pub fn as_raw_slice(&self) -> *mut [$elem] {
+                let mut byte_length = 0;
+                // SAFETY: handle is valid within the current HandleScope.
+                let data = unsafe { ffi::local_typed_array_contents(self.raw(), &mut byte_length) };
+                let len = byte_length / std::mem::size_of::<$elem>();
+                if len == 0 {
+                    return std::ptr::slice_from_raw_parts_mut(
+                        NonNull::<$elem>::dangling().as_ptr(),
+                        0,
+                    );
                 }
-                // SAFETY: caller guarantees exclusive access to this buffer region;
-                // handle is valid and non-empty guarantees a non-null data pointer.
-                unsafe {
-                    let ptr = self.data().byte_add(self.byte_offset());
-                    std::slice::from_raw_parts_mut(ptr, self.len())
-                }
+                // The address of the view's first byte, in its buffer's backing store, which
+                // V8 aligns for every element type.
+                std::ptr::slice_from_raw_parts_mut(data as *mut $elem, len)
             }
 
             /// Returns an iterator over the elements.
