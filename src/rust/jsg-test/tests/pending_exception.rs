@@ -106,7 +106,7 @@ impl Thrower {
         })
     }
 
-    /// Creates the exception for an `Error` of a DOMException type.
+    /// Creates the exception for an `Error` of a `DOMException` type.
     #[jsg_method]
     fn throw_then_create_dom_error<'s>(
         &self,
@@ -118,7 +118,7 @@ impl Thrower {
         })
     }
 
-    /// Fails with an `Error` of a DOMException type in place of the pending error, as code that
+    /// Fails with an `Error` of a `DOMException` type in place of the pending error, as code that
     /// breaks the rule does. Throwing it creates nothing, so the exception `first` threw
     /// propagates.
     #[jsg_method]

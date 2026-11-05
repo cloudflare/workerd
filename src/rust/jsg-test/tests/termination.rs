@@ -59,7 +59,7 @@ impl Terminator {
         Err(jsg::Error::new_type_error("thrown while terminating"))
     }
 
-    /// Is terminated and then fails with an `Error` of a DOMException type.
+    /// Is terminated and then fails with an `Error` of a `DOMException` type.
     #[jsg_method]
     fn terminate_then_fail_with_dom_error(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
         crate::Harness::terminate_and_deliver(lock);

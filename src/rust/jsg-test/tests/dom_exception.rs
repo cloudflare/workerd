@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! An `Error` of a DOMException type is thrown as a `DOMException`, and `Lock::dom_exception`
+//! An `Error` of a `DOMException` type is thrown as a `DOMException`, and `Lock::dom_exception`
 //! creates one with any name. Creating one while an exception or a termination is pending is
 //! tested in `pending_exception.rs` and `termination.rs`.
 
@@ -43,7 +43,7 @@ impl Errors {
     }
 }
 
-/// The DOMException names of `ExceptionType`, with their legacy codes.
+/// The `DOMException` names of `ExceptionType`, with their legacy codes.
 const DOM_EXCEPTION_TYPES: &[(&str, u32)] = &[
     ("OperationError", 0),
     ("DataError", 0),
