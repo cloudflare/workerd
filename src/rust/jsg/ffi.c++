@@ -885,13 +885,12 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
-MaybeLocal wrappable_attach_opaque_wrapper(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing) {
+MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
   if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
   // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h), and
   // the values wrapOpaque() carries through promises.
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
-      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), needs_gc_tracing)));
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), /*needsGcTracing=*/true)));
 }
 
 namespace {

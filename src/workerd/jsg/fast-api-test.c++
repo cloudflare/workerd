@@ -312,6 +312,7 @@ KJ_TEST("fast dispatch rejects substituted wrapper identity") {
   KJ_DEFER(fastCallbackEntered = nullptr);
 
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     signal(SIGABRT, recordFastCallback);
     runSubstitutedFastDispatch();
   });

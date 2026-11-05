@@ -580,7 +580,9 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {}
+impl jsg::Traced for DropCounter {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 

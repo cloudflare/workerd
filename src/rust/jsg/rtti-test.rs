@@ -158,7 +158,9 @@ impl crate::Type for Flagged {
     }
 }
 
-impl crate::Traced for Flagged {}
+impl crate::Traced for Flagged {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl crate::GarbageCollected for Flagged {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -273,7 +275,9 @@ impl crate::Type for Outer {
     }
 }
 
-impl crate::Traced for Outer {}
+impl crate::Traced for Outer {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl crate::GarbageCollected for Outer {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -401,4 +405,17 @@ fn bridge_contexts_take_canonical_flags() {
             ("cache".to_owned(), Some(false))
         ]
     );
+}
+
+#[test]
+fn handles_are_described_as_their_values() {
+    let mut cx = Context::default();
+    assert!(matches!(
+        v8::TracedGlobal::<v8::Object>::describe(&mut cx),
+        Type::Object
+    ));
+    assert!(matches!(
+        v8::TracedGlobal::<v8::Value>::describe(&mut cx),
+        Type::Unknown
+    ));
 }

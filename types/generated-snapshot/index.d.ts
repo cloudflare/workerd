@@ -3263,6 +3263,7 @@ interface TraceItem {
         | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
+        | TraceItemOnHibernateEventInfo
         | TraceItemQueueEventInfo
         | TraceItemEmailEventInfo
         | TraceItemTailEventInfo
@@ -3328,6 +3329,9 @@ interface TraceItemFetchEventInfoResponse {
 }
 interface TraceItemJsRpcEventInfo {
   readonly rpcMethod: string;
+}
+interface TraceItemOnHibernateEventInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 interface TraceItemHibernatableWebSocketEventInfo {
   readonly getWebSocketEvent:
@@ -4583,6 +4587,11 @@ interface Tracing {
   ): T;
   startSpan(name: string): Span;
   getActiveSpan(): Span | undefined;
+  withActiveSpan<T, A extends unknown[]>(
+    span: Span,
+    callback: (...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 declare abstract class Span {
@@ -16191,6 +16200,12 @@ interface JsonWebKeyWithKid extends JsonWebKey {
 }
 interface RateLimitOptions {
   key: string;
+  /**
+   * Amount to add to the counter for this call. Must be a positive integer;
+   * defaults to `1`. The call is allowed while the counter is below the limit,
+   * even if `delta` takes it past the limit.
+   */
+  delta?: number;
 }
 interface RateLimitOutcome {
   success: boolean;
@@ -17540,6 +17555,10 @@ declare namespace TailStream {
     readonly type: "alarm";
     readonly scheduledTime: Date;
   }
+  interface OnHibernateEventInfo {
+    readonly type: "onHibernate";
+    readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+  }
   interface QueueEventInfo {
     readonly type: "queue";
     readonly queueName: string;
@@ -17627,6 +17646,7 @@ declare namespace TailStream {
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo
+      | OnHibernateEventInfo
       | QueueEventInfo
       | EmailEventInfo
       | TraceEventInfo

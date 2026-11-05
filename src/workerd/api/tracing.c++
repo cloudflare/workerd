@@ -128,6 +128,7 @@ class UserSpanState final: public SpanState {
  public:
   UserSpanState(kj::Rc<workerd::SpanObserver> observer, kj::ConstString operationName)
       : spanContext(observer->toSpanContext()),
+        childParent(observer.addRef()),
         builder(kj::mv(observer), kj::mv(operationName)) {}
 
   ~UserSpanState() noexcept(false) override {
@@ -152,7 +153,7 @@ class UserSpanState final: public SpanState {
   }
 
   workerd::SpanParent makeSpanParent() override {
-    return workerd::SpanParent(builder);
+    return childParent.addRef();
   }
 
   void updateName(kj::ConstString operationName) override {
@@ -209,6 +210,9 @@ class UserSpanState final: public SpanState {
 
  private:
   kj::Maybe<tracing::SpanContext> spanContext;
+  // Unlike `builder`, this keeps the observer after end() so the span can still parent spans that
+  // are created later, as OpenTelemetry allows.
+  workerd::SpanParent childParent;
   workerd::SpanBuilder builder;
 };
 
@@ -512,6 +516,18 @@ void Span::end() {
   }
 }
 
+workerd::SpanParent Span::makeSpanParent() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      return s->makeSpanParent();
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      return s->makeSpanParent();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api::user_tracing
 
 // ======================================================================================
@@ -584,6 +600,45 @@ CreatedSpan createSpan(jsg::Lock& js, kj::String operationName) {
     .span = kj::mv(span), .childSpanForAsyncContext = kj::mv(childSpanForAsyncContext)};
 }
 
+// Runs `func` with `span` as the active span. The JS span object is stored for getActiveSpan(), and
+// `parent`, if any, becomes the current user trace span that built-in instrumentation and new user
+// spans attach to (via IoContext::getCurrentUserTraceSpan()). The StorageScope RAII objects restore
+// the prior async-context storage on scope exit; any async continuations captured during `func`
+// will already have snapshotted the new frame and will see `span` as "current".
+template <typename Func>
+v8::Local<v8::Value> runWithActiveSpan(jsg::Lock& js,
+    jsg::Ref<user_tracing::Span>& span,
+    kj::Maybe<SpanParent> parent,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
+    Func&& func) {
+  auto runWithJsSpan = [&]() -> v8::Local<v8::Value> {
+    auto activeSpan = spanHandler.wrap(js, span.addRef());
+    jsg::AsyncContextFrame::StorageScope activeSpanScope(js,
+        jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(), js.v8Ref(activeSpan));
+    return func();
+  };
+
+  KJ_IF_SOME(p, kj::mv(parent)) {
+    auto& context = IoContext::current();
+    jsg::AsyncContextFrame::StorageScope traceScope =
+        context.makeUserAsyncTraceScope(context.getCurrentLock(), kj::mv(p));
+    return runWithJsSpan();
+  } else {
+    return runWithJsSpan();
+  }
+}
+
+// Calls callback(...args) with the global object as `this`.
+v8::Local<v8::Value> invokeCallback(
+    jsg::Lock& js, v8::Local<v8::Function> callback, jsg::Arguments<jsg::Value>& args) {
+  v8::LocalVector<v8::Value> argv(js.v8Isolate);
+  for (auto& arg: args) {
+    argv.push_back(arg.getHandle(js));
+  }
+  auto v8Context = js.v8Context();
+  return jsg::check(callback->Call(v8Context, v8Context->Global(), argv.size(), argv.data()));
+}
+
 v8::Local<v8::Value> runSpan(jsg::Lock& js,
     kj::String operationName,
     v8::Local<v8::Function> callback,
@@ -644,26 +699,9 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
     });
   };
 
-  auto executeWithActiveSpan = [&]() -> v8::Local<v8::Value> {
-    auto activeSpan = spanHandler.wrap(js, jsSpan.addRef());
-    jsg::AsyncContextFrame::StorageScope activeSpanScope(js,
-        jsg::IsolateBase::from(js.v8Isolate).getActiveSpanAsyncContextKey(), js.v8Ref(activeSpan));
-    return executeCallback();
-  };
-
-  // If we have an IoContext and an observed child span, push it onto the AsyncContextFrame
-  // for the duration of the callback. The StorageScope RAII object restores the prior
-  // async-context storage on scope exit; any async continuations captured during the
-  // callback will already have snapshotted the new frame and will see our child span as
-  // "current".
-  KJ_IF_SOME(span, kj::mv(createdSpan.childSpanForAsyncContext)) {
-    auto& context = IoContext::current();
-    jsg::AsyncContextFrame::StorageScope traceScope =
-        context.makeUserAsyncTraceScope(context.getCurrentLock(), kj::mv(span));
-    return executeWithActiveSpan();
-  } else {
-    return executeWithActiveSpan();
-  }
+  // childSpanForAsyncContext is only set when we have an IoContext and an observed child span.
+  return runWithActiveSpan(
+      js, jsSpan, kj::mv(createdSpan.childSpanForAsyncContext), spanHandler, executeCallback);
 }
 
 }  // namespace
@@ -689,6 +727,25 @@ v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
 
 jsg::Ref<user_tracing::Span> Tracing::startSpan(jsg::Lock& js, kj::String operationName) {
   return createSpan(js, kj::mv(operationName)).span;
+}
+
+v8::Local<v8::Value> Tracing::withActiveSpan(jsg::Lock& js,
+    jsg::Ref<user_tracing::Span> span,
+    v8::Local<v8::Function> callback,
+    jsg::Arguments<jsg::Value> args,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
+  // An unobserved parent would suppress built-in instrumentation inside the callback, so only an
+  // observed parent replaces the current one.
+  kj::Maybe<SpanParent> parent;
+  if (IoContext::hasCurrent()) {
+    auto spanParent = span->makeSpanParent();
+    if (spanParent.isObserved()) {
+      parent = kj::mv(spanParent);
+    }
+  }
+
+  return runWithActiveSpan(js, span, kj::mv(parent), spanHandler,
+      [&]() -> v8::Local<v8::Value> { return invokeCallback(js, callback, args); });
 }
 
 jsg::Optional<jsg::Ref<user_tracing::Span>> Tracing::getActiveSpan(

@@ -80,8 +80,8 @@ kj::Maybe<uint64_t> getReadableStreamExpectedLength(jsg::Lock& js, jsg::JsObject
   return kj::none;
 }
 
-// Starts collecting the stream's bytes. Every body consumption of a TypeScript stream builds its
-// result from them in C++, as the legacy implementation does from readAllBytes() and
+// Starts collecting the stream's bytes in JavaScript. Every body consumption of a TypeScript stream
+// builds its result from them in C++, as the legacy implementation does from readAllBytes() and
 // readAllText(). The promise resolves with a null-prototype record holding an ArrayBuffer, not
 // with the ArrayBuffer itself: resolving a promise with an object looks up its then, which a
 // patched Object.prototype.then would supply. Unwrap the record with consumedBuffer().
@@ -99,30 +99,175 @@ jsg::JsArrayBuffer consumedBuffer(jsg::Lock& js, jsg::Value& record) {
   return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(obj.get(js, "buffer"_kj)));
 }
 
+// The bytes collectNativeSource() read, in the buffers it read them into.
+struct CollectedNativeBytes {
+  struct Part {
+    kj::Array<kj::byte> buffer;
+    size_t filled;
+  };
+  kj::Vector<Part> parts;
+  size_t length = 0;
+
+  void copyTo(kj::ArrayPtr<kj::byte> out) {
+    size_t offset = 0;
+    for (auto& part: parts) {
+      out.slice(offset, offset + part.filled).copyFrom(part.buffer.first(part.filled));
+      offset += part.filled;
+    }
+  }
+};
+
+// Large reads, as the legacy AllReader makes: a body declaring a length of up to
+// kNativeCollectDeclaredReadSize takes one.
+constexpr size_t kNativeCollectReadSize = 128 * 1024;
+constexpr size_t kNativeCollectDeclaredReadSize = 512 * 1024;
+
+// Collects every byte of a native source that a body consumption extracted
+// (extractNativeSourceForCollection in webstreams/readable.ts), failing as the JavaScript
+// collector would for the same stream. `bound` is the stream's declared expectedLength if
+// `declared`, an exact total that the native conduit enforces (see #accountDelivery and
+// closeFromSource in webstreams/native.ts); a breach fails with the conduit's error and, as
+// there, leaves the source uncanceled. Otherwise it is the memory limit, whose breach
+// collectChunks() reports and cancels the source with.
+kj::Promise<CollectedNativeBytes> collectNativeSource(
+    kj::Own<ReadableStreamSource> source, uint64_t bound, bool declared) {
+  CollectedNativeBytes collected;
+  size_t readSize = declared ? kNativeCollectDeclaredReadSize : kNativeCollectReadSize;
+  while (true) {
+    // Room for one byte more than the bound allows, so a breach shows without reading on.
+    size_t size = kj::min(bound - collected.length + 1, readSize);
+    auto buffer = kj::heapArray<kj::byte>(size);
+    size_t amount = co_await source->tryRead(buffer.begin(), size, size);
+    if (amount == 0) break;
+    if (collected.length + amount > bound) {
+      JSG_REQUIRE(!declared, RangeError,
+          "native source delivered more bytes than its declared expectedLength");
+      auto error = JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
+      source->cancel(error.clone());
+      kj::throwFatalException(kj::mv(error));
+    }
+    collected.length += amount;
+    collected.parts.add(CollectedNativeBytes::Part{kj::mv(buffer), amount});
+    // A read returns fewer than its minimum only at EOF.
+    if (amount < size) break;
+  }
+  JSG_REQUIRE(!declared || collected.length == bound, RangeError,
+      "native source closed before producing its declared expectedLength");
+  co_return kj::mv(collected);
+}
+
+// The native source of a native-backed stream that a body consumption can collect in C++,
+// extracted from the stream, with the bound to collect it under; kj::none, leaving the stream
+// untouched, when the JavaScript collector must consume it. See
+// extractNativeSourceForCollection in webstreams/readable.ts.
+struct NativeCollection {
+  kj::Own<ReadableStreamSource> source;
+  uint64_t bound;
+  bool declared;
+  // The stream's onEof subscription, resolved once the source reaches EOF, before the
+  // consumption resolves, as the conduit resolves it.
+  kj::Maybe<jsg::JsRef<jsg::JsFunction>> onEof;
+
+  kj::Promise<CollectedNativeBytes> collect() {
+    return collectNativeSource(kj::mv(source), bound, declared);
+  }
+
+  static void signalEof(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsFunction>>& onEof) {
+    KJ_IF_SOME(resolve, onEof) {
+      resolve.getHandle(js).call(js, js.undefined());
+    }
+  }
+};
+
+kj::Maybe<NativeCollection> tryExtractNativeSourceForCollection(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  // Only native-backed streams carry the private extraction slot; collecting needs the
+  // IoContext that the native source's reads belong to.
+  if (!IoContext::hasCurrent() || !obj.hasPrivate(js, "kExtractNativeSource"_kj)) {
+    return kj::none;
+  }
+  auto result =
+      webstreams::dispatchCall(js, "extractNativeSourceForCollection", obj, js.bigInt(limit));
+  KJ_IF_SOME(record, JSG_TRY_CAST_OBJECT(result)) {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto source = KJ_ASSERT_NONNULL(handler.tryUnwrap(js, record.get(js, "source"_kj)),
+        "extractNativeSourceForCollection() did not return a ReadableStreamNativeSource");
+    auto bound = KJ_ASSERT_NONNULL(
+        KJ_ASSERT_NONNULL(record.get(js, "bound"_kj).tryCast<jsg::JsNumber>()).value(js));
+    return NativeCollection{
+      .source = source->releaseForPump(js),
+      .bound = static_cast<uint64_t>(bound),
+      .declared = record.get(js, "declared"_kj).isTrue(),
+      .onEof =
+          record.get(js, "onEof"_kj).tryCast<jsg::JsFunction>().map([&](jsg::JsFunction resolve) {
+      return resolve.addRef(js);
+    }),
+    };
+  }
+  return kj::none;
+}
+
+// Calls `func` with the stream's bytes in an ArrayBuffer once they are all collected: in C++
+// from a native source the stream hands over, and otherwise by the JavaScript collector.
+template <typename Func>
+auto consumeReadableStreamArrayBuffer(jsg::Lock& js, jsg::JsObject obj, uint64_t limit, Func func) {
+  KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
+    return IoContext::current().awaitIo(js, collection.collect(),
+        [func = kj::mv(func), onEof = kj::mv(collection.onEof)](
+            jsg::Lock& js, CollectedNativeBytes collected) mutable {
+      NativeCollection::signalEof(js, onEof);
+      auto buffer = jsg::JsArrayBuffer::create(js, collected.length);
+      collected.copyTo(buffer.asArrayPtr());
+      return func(js, buffer);
+    });
+  }
+  return consumeReadableStreamBuffer(js, obj, limit)
+      .then(js, [func = kj::mv(func)](jsg::Lock& js, jsg::Value record) mutable {
+    return func(js, consumedBuffer(js, record));
+  });
+}
+
+// The text of a body's bytes, with a UTF-8 byte order mark removed, as the legacy readAllText()
+// builds it: see JsReadableStream::text().
+kj::String consumedText(kj::ArrayPtr<const kj::byte> bytes) {
+  if (hasUtf8Bom(bytes)) {
+    bytes = bytes.slice(UTF8_BOM_SIZE);
+  }
+  return kj::heapString(bytes.asChars());
+}
+
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> getReadableStreamArrayBuffer(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    return consumedBuffer(js, record).addRef(js);
-  });
+  return consumeReadableStreamArrayBuffer(
+      js, obj, limit, [](jsg::Lock& js, jsg::JsArrayBuffer buffer) { return buffer.addRef(js); });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    auto buffer = consumedBuffer(js, record);
+  return consumeReadableStreamArrayBuffer(
+      js, obj, limit, [](jsg::Lock& js, jsg::JsArrayBuffer buffer) {
     return jsg::JsUint8Array::create(js, buffer).addRef(js);
   });
 }
 
 jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
   // Collects bytes rather than decoded text, matching the legacy readAllText(): see
-  // JsReadableStream::text().
+  // JsReadableStream::text(). Bytes collected in C++ never become an ArrayBuffer.
+  KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
+    return IoContext::current().awaitIo(js, collection.collect(),
+        [onEof = kj::mv(collection.onEof)](jsg::Lock& js, CollectedNativeBytes collected) mutable {
+      NativeCollection::signalEof(js, onEof);
+      if (collected.parts.size() == 1) {
+        auto& part = collected.parts[0];
+        return consumedText(part.buffer.first(part.filled));
+      }
+      auto bytes = kj::heapArray<kj::byte>(collected.length);
+      collected.copyTo(bytes);
+      return consumedText(bytes);
+    });
+  }
   return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    kj::ArrayPtr<const kj::byte> bytes = consumedBuffer(js, record).asArrayPtr();
-    if (hasUtf8Bom(bytes)) {
-      bytes = bytes.slice(UTF8_BOM_SIZE);
-    }
-    return kj::heapString(bytes.asChars());
+    return consumedText(consumedBuffer(js, record).asArrayPtr());
   });
 }
 
@@ -137,9 +282,9 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
 
 jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit, kj::String contentType) {
-  return consumeReadableStreamBuffer(js, obj, limit)
-      .then(js, [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::Value record) mutable {
-    return js.alloc<Blob>(js, jsg::JsBufferSource(consumedBuffer(js, record)), kj::mv(contentType));
+  return consumeReadableStreamArrayBuffer(js, obj, limit,
+      [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::JsArrayBuffer buffer) mutable {
+    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer), kj::mv(contentType));
   });
 }
 

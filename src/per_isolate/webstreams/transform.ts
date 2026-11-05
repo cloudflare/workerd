@@ -34,6 +34,7 @@ const {
   TypeError,
   getProtoGetter,
   uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { markPromiseHandled } = utils;
@@ -115,7 +116,6 @@ function makeTransformerAlgorithms<I, O>(
 ): TransformerAlgorithms<I> {
   let transform: TransformerAlgorithms<I>['transform'];
   if (transformFn !== undefined) {
-    const callTransform = uncurryThis(transformFn);
     // Adopts the result (PromiseResolve) rather than settling a new
     // promise with it as cancel and flush do: on the per-chunk path
     // that would cost an allocation and a microtask or two per write.
@@ -123,7 +123,9 @@ function makeTransformerAlgorithms<I, O>(
     // the spec.
     transform = (chunk: I) => {
       try {
-        return PromiseResolve(callTransform(transformer, chunk, controller));
+        return PromiseResolve(
+          FunctionPrototypeCall(transformFn, transformer, chunk, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -131,10 +133,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let flush: TransformerAlgorithms<I>['flush'];
   if (flushFn !== undefined) {
-    const callFlush = uncurryThis(flushFn);
     flush = () => {
       try {
-        return promiseResolvedWith(callFlush(transformer, controller));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(flushFn, transformer, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -142,10 +145,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let cancel: TransformerAlgorithms<I>['cancel'];
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancel = (reason: unknown) => {
       try {
-        return promiseResolvedWith(callCancel(transformer, reason));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(cancelFn, transformer, reason)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -590,7 +594,7 @@ class TransformStream<I = unknown, O = unknown> {
       const startResult: unknown =
         startFn === undefined
           ? undefined
-          : uncurryThis(startFn)(transformer, controller);
+          : FunctionPrototypeCall(startFn, transformer, controller);
       startHolder.resolve(startResult as void | PromiseLike<void>);
     }
 

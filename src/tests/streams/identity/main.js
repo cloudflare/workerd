@@ -62,6 +62,7 @@ export {
   alreadyDetachedViewAtWrite,
   outOfBoundsViewAtWrite,
   lyingAboutLength,
+  readChunkDetachedByReader,
 } from 'buffer-lifecycle';
 
 export {
