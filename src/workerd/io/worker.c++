@@ -2600,6 +2600,21 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               }
             }
 
+            if (lock.isPreparingSnapshot()) {
+              // The zygote's top level has run. Run the FinalizationRegistry cleanups it left due
+              // now, while the context is still a normal one and nothing of it has been recorded
+              // for the snapshot. The callbacks run without an IoContext, as they do at request
+              // time (IoContext::runImpl()), and under the startup limits, as the top level did.
+              auto limitScope =
+                  script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
+              isolateBase.settleFinalizationRegistriesForSnapshot(js);
+              if (lock.v8Isolate->IsExecutionTerminating()) {
+                // A limit cut a callback short. reportStartupError() reads the limit error that
+                // `limitScope` leaves in `limitErrorOrTime`, as for the top level itself.
+                throw jsg::JsExceptionThrown();
+              }
+            }
+
             KJ_IF_SOME(s, startupTime) {
               KJ_SWITCH_ONEOF(limitErrorOrTime) {
                 KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {
