@@ -23,8 +23,10 @@ export const teeClonesChunksPerBranch = {
       },
     });
     const [b1, b2] = rs.tee();
-    const p1 = b1.getReader().read();
-    const p2 = b2.getReader().read();
+    const r1 = b1.getReader();
+    const r2 = b2.getReader();
+    const p1 = r1.read();
+    const p2 = r2.read();
     const chunk = new Uint8Array([1, 2, 3]);
     controller.enqueue(chunk);
     const [v1, v2] = [(await p1).value, (await p2).value];
@@ -34,6 +36,20 @@ export const teeClonesChunksPerBranch = {
     strictEqual(chunk.byteLength, 0); // enqueue detached the original
     v1[0] = 99;
     strictEqual(v2[0], 1);
+
+    // A buffered chunk, read by one branch while the other still needs
+    // it: under TypeScript that branch's copy spans its own buffer,
+    // whatever the original view's offset into a larger one. (C++ reads
+    // the chunk into a buffer of its auto-allocation size.)
+    controller.enqueue(new Uint8Array(new ArrayBuffer(8), 2, 3).fill(7));
+    const copy = (await r1.read()).value;
+    deepStrictEqual([...copy], [7, 7, 7]);
+    if (usingTsImpl) {
+      strictEqual(copy.byteOffset, 0);
+      strictEqual(copy.buffer.byteLength, 3);
+    }
+    copy[0] = 99;
+    deepStrictEqual([...(await r2.read()).value], [7, 7, 7]);
   },
 };
 

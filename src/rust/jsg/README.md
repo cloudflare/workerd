@@ -437,7 +437,9 @@ impl Scheduler {
 
 `std::cell::Cell` and `std::cell::RefCell` are `Traced` only for types that hold no GC
 references, which the marker trait `jsg::HoldsNoGcReferences` marks; a `jsg::Rc` or a
-`TracedGlobal` in one is a compile error. So a `jsg::Rc` or `TracedGlobal` that leaves a traced
+`TracedGlobal` in one is a compile error. Wrappers and collections have the marker when their
+contents do, and `#[jsg_struct]` and `#[jsg_oneof]` derive it when every field or variant has it,
+so for them it can't be claimed by hand. So a `jsg::Rc` or `TracedGlobal` that leaves a traced
 field of a live resource is strong, unless a hand-written `impl Traced` reaches it through a std
 cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 
@@ -482,7 +484,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls; wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
@@ -728,8 +730,8 @@ resource. The garbage collector traces `data` (`T: Traced`) through the function
 once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data` traces may
 lead back to the function. Two things break this:
 
-- A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
-  nothing by default). If it can reach the function, the cycle is invisible to the garbage
+- A reference that `T::trace` does not visit, such as a `v8::Global` (which has no `Traced`
+  impl, but can hide inside a type with a hand-written one). If it can reach the function, the cycle is invisible to the garbage
   collector, and the function and `data` are freed only when the isolate is torn down.
 - Another owner that the garbage collector also traces, such as a resource sharing part of
   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it traces:
@@ -963,6 +965,27 @@ entries instead, so with it a setter on `Object.prototype` runs and a `__proto__
 the prototype or is dropped; with Rust JSG, no JavaScript runs and `__proto__` is an own property,
 as with `Object.fromEntries()`. `Local<Object>::keys()` and
 `get_by_name()` list and read properties the same way.
+
+### Rest parameters
+
+`jsg::Arguments<T>`, C++ JSG's `jsg::Arguments<T>`, is a rest parameter: as the last parameter of
+a `#[jsg_method]` or a `#[jsg_constructor]`, it takes every argument from its position on, each
+converted to `T`.
+
+```rust
+#[jsg_method]
+pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor { /* ... */ }
+// JS: sql.exec("SELECT ?, ?", 1, "a")  // bindings == [1, "a"]
+```
+
+- Without remaining arguments it is empty; omitting them is never an error.
+- Each argument converts as a parameter of type `T` would, and a mismatch is the same
+  `TypeError`, which names the rest parameter's position for every argument, as C++ JSG's does.
+- It is not counted in `.length`, and a parameter after it is a compile error.
+- It holds the values in a `Vec`: it dereferences to `[T]`, iterates, and `into_inner()` returns
+  the `Vec`. It converts only from the arguments of a call; a JavaScript array is a `Vec<T>`.
+- RTTI describes it as C++ RTTI does, without the element type, so TypeScript declares it as
+  `...name: any[]`; give a precise type with a TypeScript override.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
 
@@ -1348,6 +1371,44 @@ As for C++ JSG (see the comment on `JSG_DISPOSE` in `src/workerd/jsg/jsg.h`):
   must also be safe to re-enter: a disposer that runs JavaScript, such as a callback or an event
   listener, can be called again before it returns. Mark the resource disposed before calling out,
   so the nested call finds nothing left to do, and hold no `RefCell` borrow across the call.
+
+## Callable resources
+
+`#[jsg_callable]`, the equivalent of C++ JSG's `JSG_CALLABLE`, makes the instances of a resource
+type callable as functions:
+
+```rust
+#[jsg_resource]
+impl Statement {
+    // `statement(1, 2)` runs the method.
+    #[jsg_callable]
+    pub fn run(&self, lock: &mut jsg::Lock, a: f64, b: Option<f64>) -> String {
+        /* ... */
+    }
+}
+```
+
+A callable resource behaves as in C++ JSG:
+
+- The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape
+  of a `#[jsg_method]`: an optional `lock: &mut jsg::Lock`, then the JavaScript arguments, which
+  are converted as a method's are. An argument error names the method `(called as function)`.
+  A type is callable at most one way, though `custom_members` may choose between several by
+  compatibility flag. The method may also be a `#[jsg_method]`, to be callable both ways.
+- The method runs whether the instance is called with or without `new`.
+- `this` is always the instance, however the call names it: a callable read from another object
+  (`const f = obj.method; f()`), or called with `Reflect.apply()` and another receiver, still runs
+  on the instance. The resource cannot tell how it was called.
+- `typeof` is `"function"`, but the instance is an ordinary instance of the resource type: its
+  prototype is the type's prototype, not `Function.prototype`, so it has no `call`, `apply` or
+  `bind`, and `instanceof Function` is false.
+- Only the instance is callable: an object that inherits from it, as `Object.create(obj)` does,
+  is not.
+- With a [wildcard property](#wildcard-properties) as well, every property can be callable, which
+  is how C++ JSG's RPC stubs are built.
+- RTTI describes the method as the type's call signature (the `callable` of its structure), as
+  C++ RTTI describes a `JSG_CALLABLE`. The TypeScript generator does not read it, so C++ types
+  declare their call signatures with `JSG_TS_OVERRIDE`.
 
 ## Static Constants
 

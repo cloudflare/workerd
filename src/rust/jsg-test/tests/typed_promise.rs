@@ -35,7 +35,9 @@ struct Token {
     name: String,
 }
 
-impl jsg::Traced for Token {}
+impl jsg::Traced for Token {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 // =============================================================================
 // Carrying Rust values
@@ -187,7 +189,9 @@ impl Drop for Carried {
     }
 }
 
-impl jsg::Traced for Carried {}
+impl jsg::Traced for Carried {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// The reaction takes the value out of its wrapper, so the value is dropped when the callback is
 /// done with it, and the wrapper, which the garbage collector frees later, holds nothing.
@@ -223,7 +227,9 @@ impl Drop for Untaken {
     }
 }
 
-impl jsg::Traced for Untaken {}
+impl jsg::Traced for Untaken {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// A value that no reaction takes is dropped with its wrapper, by the garbage collector.
 #[test]
@@ -418,7 +424,9 @@ fn try_consume_resolved_returns_pending_and_rejected_promises() {
 /// A value whose conversion to JavaScript fails.
 struct Unconvertible;
 
-impl jsg::Traced for Unconvertible {}
+impl jsg::Traced for Unconvertible {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
@@ -1184,7 +1192,9 @@ impl Drop for WaiterDrops {
     }
 }
 
-impl jsg::Traced for WaiterDrops {}
+impl jsg::Traced for WaiterDrops {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// Returns promises that a `Source` settles.
 #[jsg_resource]

@@ -803,11 +803,6 @@ public:
 };
 ```
 
-### Symbols with `jsg::Name`
-
-`jsg::Name` wraps values that can be used as property names in JavaScript (strings and
-symbols). It is used when an API needs to accept either and treat them the same.
-
 ### Reference Types (`jsg::V8Ref<T>`, `jsg::Value`, `jsg::Ref<T>`)
 
 #### `jsg::V8Ref<T>` (and `jsg::Value`, and `jsg::HashableV8Ref<T>`)

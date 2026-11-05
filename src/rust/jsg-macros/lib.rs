@@ -15,6 +15,7 @@
 //! | `#[jsg_property]`        | fn inside impl   | Register a resource accessor property (getter/setter)          |
 //! | `#[jsg_inspect_property]` | fn inside impl  | Register a debug-inspect-only symbol property                  |
 //! | `#[jsg_wildcard_property]` | fn inside impl | Answer reads of any property the object does not have          |
+//! | `#[jsg_callable]`        | fn inside impl   | Make instances callable as functions                           |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
 //!
@@ -38,6 +39,7 @@ use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
 use trace::generate_trace_statements;
+use utils::arguments_element;
 use utils::elide_named_lifetimes;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
@@ -86,7 +88,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
-    let traced_impl = struct_traced_impl(name, &named_fields);
+    let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
+    let traced_impl = struct_traced_impl(name, &named_fields, custom_marker);
 
     for field in &named_fields {
         // Only public fields are projected into JavaScript objects.
@@ -198,26 +201,38 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field and holds GC
-/// references when a field does.
+/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field, and, unless
+/// `custom_holds_no_gc_references` leaves it to the author, its `HoldsNoGcReferences` impl, which
+/// applies when every field's type implements it.
 fn struct_traced_impl(
     name: &syn::Ident,
     fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+    custom_holds_no_gc_references: bool,
 ) -> proc_macro2::TokenStream {
     let field_types = fields.iter().map(|field| &field.ty);
     let trace_statements = generate_trace_statements(fields);
+    let marker_impl = (!custom_holds_no_gc_references).then(|| {
+        quote! {
+            // Higher-ranked, so that a field that holds a GC reference leaves the struct without the
+            // impl instead of failing to compile as a trivially false bound.
+            #[automatically_derived]
+            impl jsg::HoldsNoGcReferences for #name
+            where
+                #(for<'__jsgl> #field_types: jsg::HoldsNoGcReferences,)*
+            {
+            }
+        }
+    });
     quote! {
         #[automatically_derived]
         impl jsg::Traced for #name {
-            fn holds_gc_references() -> bool {
-                false #(|| <#field_types as jsg::Traced>::holds_gc_references())*
-            }
-
             fn trace(&self, visitor: &mut jsg::GcVisitor) {
                 let _ = visitor;
                 #(#trace_statements)*
             }
         }
+
+        #marker_impl
     }
 }
 
@@ -383,24 +398,71 @@ fn callback_with_instance(
     method_attr: Option<TokenStream>,
     receiver_check: ReceiverCheck,
 ) -> TokenStream {
-    let input_fn = parse_macro_input!(item as ItemFn);
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+    // A disposer's callback has the name this callback has. It is this one for a method that is
+    // also a disposer, and the combination is an error for any other member, so the disposer's
+    // attribute must not generate a second one if it comes later. `#[jsg_resource]` has already
+    // read it.
+    input_fn.attrs.retain(|a| !is_disposer_attr(a));
     let fn_name = &input_fn.sig.ident;
     let method_name = method_attr.map(|attr| {
         extract_name_attribute(attr).unwrap_or_else(|| snake_to_camel(&fn_name.to_string()))
     });
-    let fn_vis = &input_fn.vis;
+    let callbacks = match generate_callbacks(
+        &input_fn,
+        callback_names(fn_name, kind, instance_kind),
+        method_name.as_deref(),
+        receiver_check,
+    ) {
+        Ok(callbacks) => callbacks,
+        Err(error) => return error.into(),
+    };
+    // The method keeps its other attributes, so that a `#[jsg_callable]` after the attribute
+    // being expanded still expands.
+    let method = reemit_method(&input_fn);
+    quote! {
+        #method
+        #callbacks
+    }
+    .into()
+}
+
+/// Re-emits `input_fn` with its other attributes. The body is wrapped in braces spanned at the
+/// macro call, as the methods have always been emitted, so that clippy treats the method as
+/// macro output and does not lint the signature against its generated callbacks.
+fn reemit_method(input_fn: &ItemFn) -> proc_macro2::TokenStream {
+    let ItemFn {
+        attrs,
+        vis,
+        sig,
+        block,
+    } = input_fn;
+    quote! { #(#attrs)* #vis #sig { #block } }
+}
+
+/// Generates the callbacks named in `callback_kinds`, each calling `input_fn`, or returns the
+/// method with an error and stubs of the callbacks (see [`reject`]). `method_name` is a method's
+/// JS name; its errors match C++ JSG's.
+fn generate_callbacks(
+    input_fn: &ItemFn,
+    callback_kinds: impl Iterator<Item = (Callback, syn::Ident)> + Clone,
+    method_name: Option<&str>,
+    receiver_check: ReceiverCheck,
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
+    let fn_name = &input_fn.sig.ident;
     let fn_sig = &input_fn.sig;
-    let fn_block = &input_fn.block;
 
     // Methods with a `&self` receiver, or a `this: jsg::Rc<Self>` parameter in its place, become
     // instance methods on the prototype. Methods with neither become static methods on the
     // constructor.
-    let callback_kinds = callback_names(fn_name, kind, instance_kind);
-    if let Some(error) = receiver_error(&input_fn, callback_kinds.clone()) {
-        return error.into();
+    if let Some(error) = receiver_error(input_fn, callback_kinds.clone()) {
+        return Err(error);
     }
-    if let Some(error) = this_error(&input_fn, callback_kinds.clone()) {
-        return error.into();
+    if let Some(error) = this_error(input_fn, callback_kinds.clone()) {
+        return Err(error);
+    }
+    if let Some(error) = rest_parameter_error(fn_sig) {
+        return Err(reject(input_fn, callback_kinds, &error));
     }
     let has_self = fn_sig.receiver().is_some();
     let has_this = this_param(fn_sig).is_some();
@@ -440,7 +502,7 @@ fn callback_with_instance(
 
             let js_index = i - injected_params;
             let arg = syn::Ident::new(&format!("arg{js_index}"), fn_name.span());
-            let unwrap = unwrap_argument(ty, &arg, js_index, method_name.as_deref());
+            let unwrap = unwrap_argument(ty, &arg, js_index, method_name);
             // For reference types (like &str), FromJS returns an owned type (String),
             // so we need to borrow it when passing to the function.
             let is_ref = matches!(ty.as_ref(), syn::Type::Reference(_));
@@ -479,11 +541,7 @@ fn callback_with_instance(
         }
     });
 
-    quote! {
-        #fn_vis #fn_sig { #fn_block }
-        #(#callbacks)*
-    }
-    .into()
+    Ok(quote! { #(#callbacks)* })
 }
 
 /// The statements that convert the call's `result` and return it to JavaScript, or throw what
@@ -605,18 +663,46 @@ fn callback_names(
         })
 }
 
-/// Unwraps JS argument `js_index` into `arg`, or throws and returns.
+/// Unwraps JS argument `js_index` into `arg`, or throws and returns. A `jsg::Arguments<T>`
+/// parameter takes the arguments from `js_index` on instead, each unwrapped as a `T`.
 /// `method_name` is a method's JS name; its errors match C++ JSG's.
-fn unwrap_argument(
+pub(crate) fn unwrap_argument(
     ty: &syn::Type,
     arg: &syn::Ident,
+    js_index: usize,
+    method_name: Option<&str>,
+) -> proc_macro2::TokenStream {
+    let Some(element) = arguments_element(ty) else {
+        return unwrap_value(ty, arg, &quote! { #js_index }, js_index, method_name);
+    };
+    // Like C++ JSG (TypeWrapper::unwrap() in type-wrapper.h), each remaining argument is
+    // unwrapped as a parameter at the rest parameter's position would be, so an error names that
+    // position; there are none to miss.
+    let value = syn::Ident::new("value", arg.span());
+    let unwrap = unwrap_value(element, &value, &quote! { index }, js_index, method_name);
+    quote! {
+        let mut values = Vec::with_capacity(args.len().saturating_sub(#js_index));
+        for index in #js_index..args.len() {
+            #unwrap
+            values.push(#value);
+        }
+        let #arg = jsg::Arguments::from(values);
+    }
+}
+
+/// Unwraps the JS argument at `index`, an expression, into `arg` as a `ty`, or throws and
+/// returns. `js_index` is the parameter's position, which errors name.
+fn unwrap_value(
+    ty: &syn::Type,
+    arg: &syn::Ident,
+    index: &proc_macro2::TokenStream,
     js_index: usize,
     method_name: Option<&str>,
 ) -> proc_macro2::TokenStream {
     let ty = elide_named_lifetimes(ty);
     let Some(method_name) = method_name else {
         return quote! {
-            let #arg = match <#ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
+            let #arg = match <#ty as jsg::FromJS<'_>>::from_js(lock, args.get(#index)) {
                 Ok(v) => v,
                 Err(err) => {
                     lock.throw_exception(&err);
@@ -636,11 +722,11 @@ fn unwrap_argument(
             #js_index + 1,
             <#ty as jsg::FromJS<'_>>::type_name(),
         ));
-        if !<#ty as jsg::FromJS<'_>>::is_optional() && #js_index >= args.len() {
+        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= args.len() {
             lock.throw_exception(&not_of_type());
             return;
         }
-        let #arg = match <#ty as jsg::FromJS<'_>>::try_from_js(lock, args.get(#js_index)) {
+        let #arg = match <#ty as jsg::FromJS<'_>>::try_from_js(lock, args.get(#index)) {
             Ok(Some(v)) => v,
             Ok(None) => {
                 lock.throw_exception(&not_of_type());
@@ -652,6 +738,23 @@ fn unwrap_argument(
             }
         };
     }
+}
+
+/// Returns an error if a `jsg::Arguments<T>` parameter of `sig` is not its last parameter: it
+/// takes every argument from its position on, so a parameter after it would get none.
+pub(crate) fn rest_parameter_error(sig: &syn::Signature) -> Option<syn::Error> {
+    let mut params = sig.inputs.iter().filter_map(|arg| match arg {
+        FnArg::Typed(param) => Some(param),
+        FnArg::Receiver(_) => None,
+    });
+    let rest = params.find(|param| arguments_element(&param.ty).is_some())?;
+    params.next().is_some().then(|| {
+        syn::Error::new_spanned(
+            rest,
+            "a `jsg::Arguments` parameter takes the remaining arguments, so it is the last \
+             parameter",
+        )
+    })
 }
 
 /// Generates `{name}_fast_api()`, which returns the V8 Fast API callback of a `#[jsg_method]`
@@ -783,9 +886,9 @@ fn reject(
 ///
 /// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
-/// `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_constructor]`, and `#[jsg_static_constant]`
-/// item, plus member factories, which also
-/// describe their members for RTTI.
+/// `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, `#[jsg_constructor]`, and
+/// `#[jsg_static_constant]` item, plus member factories, which also describe their members for
+/// RTTI.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
 ///
@@ -922,10 +1025,16 @@ pub fn jsg_async_dispose(attr: TokenStream, item: TokenStream) -> TokenStream {
     disposer("jsg_async_dispose", attr, item)
 }
 
+/// Whether `attr` is `#[jsg_dispose]` or `#[jsg_async_dispose]`.
+fn is_disposer_attr(attr: &syn::Attribute) -> bool {
+    is_attr(attr, "jsg_dispose") || is_attr(attr, "jsg_async_dispose")
+}
+
 /// Generates the callback of a `#[jsg_dispose]` or `#[jsg_async_dispose]` method, which
 /// `#[jsg_resource]` registers. A method that is also a `#[jsg_method]` gets its callback from
-/// that attribute instead: when `#[jsg_method]` expands first it drops the other attributes, and
-/// when it comes second it is still on the method here.
+/// that attribute instead: an attribute that generates a `<name>_callback` (`#[jsg_method]`,
+/// `#[jsg_property]`, `#[jsg_inspect_property]`) drops the disposer attributes when it expands
+/// first, and when it comes second it is still on the method here.
 fn disposer(attr_name: &str, attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
         let mut output: TokenStream = syn::Error::new_spanned(
@@ -937,13 +1046,23 @@ fn disposer(attr_name: &str, attr: TokenStream, item: TokenStream) -> TokenStrea
         output.extend(disposer(attr_name, TokenStream::new(), item));
         return output;
     }
-    let is_method = syn::parse::<ItemFn>(item.clone())
-        .is_ok_and(|f| f.attrs.iter().any(|a| is_attr(a, "jsg_method")));
-    if is_method {
-        return item;
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+    // Another member attribute generates the callback, or the combination is an error that
+    // `#[jsg_resource]` reports; either way this one generates none.
+    let combined = input_fn.attrs.iter().any(|a| {
+        is_attr(a, "jsg_method")
+            || resource::NON_DISPOSER_MEMBERS
+                .iter()
+                .any(|name| is_attr(a, name))
+    });
+    if combined {
+        return quote! { #input_fn }.into();
     }
+    // A method that is both kinds of disposer is an error that `#[jsg_resource]` reports, so the
+    // other disposer attribute must not generate the callback again.
+    input_fn.attrs.retain(|a| !is_disposer_attr(a));
     callback(
-        item,
+        quote! { #input_fn }.into(),
         Callback::Function,
         Some(TokenStream::new()),
         ReceiverCheck::Signature,
@@ -989,6 +1108,76 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 }
 
 // =============================================================================
+// #[jsg_callable]
+// =============================================================================
+
+/// The name that errors from converting the arguments of a `#[jsg_callable]` method give the
+/// method, as C++ JSG's `registerCallable()` does.
+const CALLED_AS_FUNCTION: &str = "(called as function)";
+
+/// Makes the instances of a `#[jsg_resource]` type callable as functions, running the method.
+///
+/// Equivalent to C++ JSG's `JSG_CALLABLE`. The method takes `&self`, or `this: jsg::Rc<Self>` as
+/// its first parameter in place of it, and otherwise has the shape of a `#[jsg_method]`: an
+/// optional `&mut jsg::Lock`, then the JavaScript arguments. It runs whether the instance is
+/// called with or without `new`, and always with the instance as `this`, so a callable taken off
+/// the object it was read from still calls the instance. A type is callable at most one way.
+/// The method may also be a `#[jsg_method]`, to be callable both ways.
+/// See `src/rust/jsg/README.md` for how callable resources behave.
+#[proc_macro_attribute]
+pub fn jsg_callable(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as Member::Callable is handled by #[jsg_resource] on the enclosing impl block.
+    let input_fn = parse_macro_input!(item as ItemFn);
+    let fn_name = &input_fn.sig.ident;
+    let callback_names = std::iter::once((Callback::Function, callable_callback_name(fn_name)));
+    let error = if attr.is_empty() {
+        let has_receiver =
+            input_fn.sig.receiver().is_some() || input_fn.sig.inputs.iter().any(is_named_this);
+        (!has_receiver).then(|| {
+            syn::Error::new_spanned(
+                fn_name,
+                "a #[jsg_callable] method takes `&self`, or `this: jsg::Rc<Self>` in its place: \
+                 it runs on the instance that is called",
+            )
+        })
+    } else {
+        Some(syn::Error::new_spanned(
+            proc_macro2::TokenStream::from(attr),
+            "#[jsg_callable] takes no arguments",
+        ))
+    };
+    if let Some(error) = error {
+        return reject(&input_fn, callback_names, &error).into();
+    }
+    // A call handler has no `v8::Signature`. V8 passes the instance that is called as `this`,
+    // but the callback still checks the receiver, as an accessor's does.
+    let callbacks = generate_callbacks(
+        &input_fn,
+        callback_names,
+        Some(CALLED_AS_FUNCTION),
+        ReceiverCheck::Marker,
+    );
+    // The method keeps its other attributes, so that a `#[jsg_method]` after this one expands.
+    match callbacks {
+        Ok(callbacks) => {
+            let method = reemit_method(&input_fn);
+            quote! {
+                #method
+                #callbacks
+            }
+        }
+        Err(error) => error,
+    }
+    .into()
+}
+
+/// The name of the callback that `#[jsg_callable]` generates for `fn_name`. It differs from the
+/// callback of a `#[jsg_method]`, so that a method can be both.
+fn callable_callback_name(fn_name: &syn::Ident) -> syn::Ident {
+    syn::Ident::new(&format!("{fn_name}_callable_callback"), fn_name.span())
+}
+
+// =============================================================================
 // #[jsg_oneof]
 // =============================================================================
 
@@ -1015,6 +1204,6 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    oneof::expand(item)
+pub fn jsg_oneof(attr: TokenStream, item: TokenStream) -> TokenStream {
+    oneof::expand(&attr, item)
 }
