@@ -1001,6 +1001,14 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
     return KJ_REQUIRE_NONNULL(input)->tryGetLength();
   }
 
+  kj::Promise<uint64_t> pumpTo(
+      kj::AsyncOutputStream& destination, uint64_t amount = kj::maxValue) override {
+    KJ_IF_SOME(exception, disconnectException) {
+      return exception.clone();
+    }
+    return canceler.wrap(KJ_REQUIRE_NONNULL(input)->pumpTo(destination, amount));
+  }
+
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     KJ_IF_SOME(exception, disconnectException) {
       return exception.clone();
@@ -1013,6 +1021,19 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
       return exception.clone();
     }
     return propagateWriteFailure(KJ_REQUIRE_NONNULL(output)->write(pieces));
+  }
+
+  // Delegates to the capnp `up` stream, so a body arriving on a capnp ByteStream can be redirected
+  // to the container with getSubstream() instead of passing through this process. Returns none
+  // until Port.connect() has returned, so getSubstream() is never pipelined: the production
+  // container service has mishandled ByteStream calls pipelined on `up`.
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& source, uint64_t amount = kj::maxValue) override {
+    if (disconnectException != kj::none || connectState != ConnectState::SETTLED) return kj::none;
+    KJ_IF_SOME(promise, KJ_REQUIRE_NONNULL(output)->tryPumpFrom(source, amount)) {
+      return propagateWriteFailure(kj::mv(promise));
+    }
+    return kj::none;
   }
 
   kj::Promise<void> whenWriteDisconnected() override {
@@ -1153,10 +1174,11 @@ class ContainerPortAsyncIoStream final: public kj::AsyncIoStream, public kj::Ref
   // Background watcher for the connect RPC; see adoptConnectTask().
   kj::Promise<void> connectTask = nullptr;
 
-  kj::Promise<void> propagateWriteFailure(kj::Promise<void> promise) {
+  template <typename T>
+  kj::Promise<T> propagateWriteFailure(kj::Promise<T> promise) {
     // The returned promise is handed to the caller and can, in principle, outlive the stream, so
     // capture a weak reference and upgrade it before recording the disconnect.
-    return promise.catch_([weak = addWeakToThis()](kj::Exception&& exception) -> kj::Promise<void> {
+    return promise.catch_([weak = addWeakToThis()](kj::Exception&& exception) -> kj::Promise<T> {
       KJ_IF_SOME(stream, weak) {
         stream->disconnect(exception.clone());
       }
