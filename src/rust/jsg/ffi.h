@@ -584,8 +584,8 @@ Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
 // Builds a DOMException named `name`, with a message read from raw bytes as
 // exception_create_from_bytes() reads it, through jsg::newDOMException(). Requires an entered
-// context. Returns none, leaving the exception pending, if one already was or if creating the
-// DOMException threw.
+// context. Returns none, leaving it pending, if an exception or a termination already was, or if
+// creating the DOMException threw.
 MaybeLocal dom_exception_create_from_bytes(
     Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
