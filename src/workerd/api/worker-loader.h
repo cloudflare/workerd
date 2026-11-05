@@ -141,6 +141,11 @@ class WorkerLoader: public jsg::Object {
   // Shortcut for `get(null, () => code)`.
   jsg::Ref<WorkerStub> load(jsg::Lock& js, WorkerCode code);
 
+  // A binding transfers through a startup snapshot as its channel number.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<WorkerLoader>(channel, compatDateValidation));
+  }
+
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);
     JSG_METHOD(load);

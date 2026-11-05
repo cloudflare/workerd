@@ -97,6 +97,9 @@ class WorkerdDebugPortConnector: public jsg::Object {
  public:
   WorkerdDebugPortConnector() = default;
 
+  // Stateless binding object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   // Connect to a remote workerd debug port at the given address.
   // Returns synchronously using kj::newPromisedStream() to defer the TCP connection.
   // Cap'n Proto pipelining ensures that all subsequent RPC calls (getEntrypoint, getActor)
