@@ -104,6 +104,86 @@ class V8System {
       JitCodeEventTracking);
 };
 
+// Properties V8 adds to a context only when it is not building a startup snapshot.
+//
+// V8's bootstrapper adds some properties to a context only in an isolate that is not building a
+// snapshot: Genesis::InstallSpecialObjects() (Error.stackTraceLimit, WebAssembly), which
+// Bootstrapper::InstallExtensions() skips in a serializer-enabled isolate, and
+// Genesis::InitializeExperimentalGlobal() (the Iterator helpers behind shipped flags,
+// SharedArrayBuffer), skipped there too. Both run on every context a normal isolate creates,
+// including one deserialized from a snapshot, through JSObject::AddProperty(), which assumes the
+// property is absent and the holder extensible: a name already present on a fast-mode holder
+// (Error, Iterator, Iterator.prototype) trips a release-mode CHECK in DescriptorArray::Append(),
+// a non-extensible holder the CHECK on AddDataProperty()'s result, and a name already present on
+// the dictionary-mode global object silently becomes a duplicate dictionary entry. The CHECKs
+// abort the process from inside v8::Context::New() of the Worker started from the snapshot,
+// after the zygote has succeeded, where nothing can catch them.
+//
+// The zygote's own top level creates those conditions, prompted by the very absence of the
+// properties: a write to Error.stackTraceLimit creates an own property,
+// `if (!Iterator.concat) Iterator.concat = ...` installs a polyfill a normal isolate never
+// would, `typeof WebAssembly === 'undefined'` bakes a wrong feature test into the snapshot, and
+// Object.freeze(Error) makes a holder non-extensible. Without Error.stackTraceLimit, new Error()
+// in the zygote also captures no stack at all (Isolate::GetStackTraceLimit() reads it as a data
+// property).
+//
+// IsolateBase makes the zygote context look like a normal isolate's before any JavaScript runs in
+// it, and look like what V8 expects again right before creating the snapshot:
+// * Error.stackTraceLimit is installed as the data property V8 installs. Its final state is
+//   recorded into the snapshot and the property removed. The restored context replays the
+//   recorded state after V8 has re-added the default. Node's mksnapshot does the same.
+// * Every other such property is installed as a native data property whose getter and setter
+//   throw and record the use on the isolate: top-level code can neither use nor capture it, so
+//   instead of baking a wrong feature test in, the zygote fails and the Worker starts without a
+//   snapshot. Catching the error, letting it reject a promise, or reading the property from C++
+//   under a v8::TryCatch changes nothing: the recorded use fails the zygote before CreateBlob().
+//   The property is removed before CreateBlob().
+// Either way, a property the top level (re)defined so that V8 cannot re-add it, and a
+// non-extensible holder, fail the zygote.
+
+// The intrinsic a restore-time property lives on. The zygote captures each one except the global
+// object in a ContextDataSlot before any JavaScript runs, so that user code rebinding the global
+// name (`globalThis.Error = ...`) cannot divert the checks from the object V8 adds to.
+enum class RestoreTimeHolder {
+  GLOBAL,
+  ERROR_CTOR,
+  ITERATOR_CTOR,
+  ITERATOR_PROTOTYPE,
+};
+
+enum class RestoreTimeKind {
+  // Installed in the zygote as the data property V8 installs; its final state is recorded and
+  // replayed on the restored context.
+  DATA_DEFAULT,
+  // Installed in the zygote as a native data property whose getter and setter throw and record
+  // the use; a recorded use fails the zygote before the snapshot.
+  FAIL_CLOSED,
+};
+
+struct RestoreTimeGlobal {
+  RestoreTimeHolder holder;
+  kj::StringPtr name;
+  RestoreTimeKind kind;
+};
+
+// Every property V8 adds on restore and not in the zygote, for the V8 version and flags workerd
+// builds with.
+constexpr RestoreTimeGlobal RESTORE_TIME_GLOBALS[] = {
+  // Genesis::InstallSpecialObjects()
+  {RestoreTimeHolder::ERROR_CTOR, "stackTraceLimit"_kj, RestoreTimeKind::DATA_DEFAULT},
+  {RestoreTimeHolder::GLOBAL, "WebAssembly"_kj, RestoreTimeKind::FAIL_CLOSED},
+  // Genesis::InitializeExperimentalGlobal()
+  {RestoreTimeHolder::GLOBAL, "SharedArrayBuffer"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "concat"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "zip"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_CTOR, "zipKeyed"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_PROTOTYPE, "join"_kj, RestoreTimeKind::FAIL_CLOSED},
+  {RestoreTimeHolder::ITERATOR_PROTOTYPE, "includes"_kj, RestoreTimeKind::FAIL_CLOSED},
+};
+
+// The holder's JavaScript name ("globalThis", "Error", "Iterator.prototype", ...).
+kj::StringPtr jsNameOf(RestoreTimeHolder holder);
+
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
 class IsolateBase {
@@ -536,6 +616,22 @@ class IsolateBase {
     return value;
   }
 
+  // Zygote, right after `context` is created and before any JavaScript runs in it: captures the
+  // holders and installs the properties.
+  void installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context);
+
+  // Zygote, after its top level has run and before CreateBlob(): records what the top level left
+  // of Error.stackTraceLimit into the snapshot, and removes every property so that V8 can add them
+  // on restore. Throws when the top level used a FAIL_CLOSED property, whether or not it caught
+  // the error, and when V8 could not add one (the top level defined a property in its place, made
+  // Error.stackTraceLimit non-configurable or an accessor, or made a holder non-extensible); the
+  // zygote then fails and the Worker starts without a snapshot.
+  void removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8::Context> context);
+
+  // Restored context, right after v8::Context::New() has re-added the defaults and before any
+  // JavaScript runs in it: re-applies the state the zygote recorded.
+  void replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context);
+
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
   }
@@ -625,6 +721,16 @@ class IsolateBase {
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
+  // Getter and setter of a FAIL_CLOSED restore-time property; the callback data is the property's
+  // index in RESTORE_TIME_GLOBALS. Both call failClosed().
+  static void failClosedGetter(
+      v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
+  static void failClosedSetter(v8::Local<v8::Name> property,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info);
+  // Records the use of `entry` in `restoreTimeGlobalUsed` and throws a JavaScript error.
+  void failClosed(const RestoreTimeGlobal& entry);
+
   // The internals of a jsg::Ref<T> to be deleted.
   class RefToDelete {
    public:
@@ -675,6 +781,9 @@ class IsolateBase {
   //    to serialize a startup snapshot.
   //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
   kj::Maybe<SnapshotConfig> snapshotConfig;
+  // The first FAIL_CLOSED restore-time property the zygote's top level used, if any. Set by the
+  // property's getter or setter; removeRestoreTimeGlobalsBeforeSnapshot() fails the zygote on it.
+  kj::Maybe<const RestoreTimeGlobal&> restoreTimeGlobalUsed;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -1287,6 +1396,14 @@ class Isolate: public IsolateBase {
           badTagFieldsCount);
       if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+      }
+      // V8 leaves some properties out of a context built in a serializer-enabled isolate and
+      // adds them to a context restored from the snapshot, see
+      // IsolateBase::installRestoreTimeGlobalsForZygote().
+      if (jsgIsolate.isPreparingSnapshot()) {
+        jsgIsolate.installRestoreTimeGlobalsForZygote(*this, context.getHandle(v8Isolate));
+      } else if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.replayRestoreTimeGlobalsAfterLoad(*this, context.getHandle(v8Isolate));
       }
       return context;
     }
