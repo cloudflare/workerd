@@ -1007,7 +1007,7 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The method takes `&self`, or `this: jsg::Rc<Self>` as its first parameter in place of it,
 /// and is called like a `#[jsg_method]`. Combined with `#[jsg_method]` on the same function, it
 /// is also exposed under its own name, like `JSG_METHOD(close); JSG_DISPOSE(close);`. A type has
-/// at most one, and not along with a `#[jsg_async_dispose]`. See `src/rust/jsg/README.md` for
+/// at most one, and may also have a `#[jsg_async_dispose]`. See `src/rust/jsg/README.md` for
 /// how to write one.
 #[proc_macro_attribute]
 pub fn jsg_dispose(attr: TokenStream, item: TokenStream) -> TokenStream {

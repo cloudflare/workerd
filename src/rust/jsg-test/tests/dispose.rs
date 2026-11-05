@@ -407,11 +407,68 @@ fn custom_members_choose_a_disposer() {
     assert_eq!(chosen_disposer(&harness), "false|true|new");
 }
 
+/// Has one disposer of each kind, as C++ JSG allows, and counts the calls of each.
 #[jsg_resource]
-struct Both;
+struct Both {
+    sync_disposals: Cell<u32>,
+    async_disposals: Cell<u32>,
+}
+
+#[jsg_resource]
+impl Both {
+    #[jsg_dispose]
+    fn dispose(&self) {
+        self.sync_disposals.set(self.sync_disposals.get() + 1);
+    }
+
+    #[jsg_async_dispose]
+    fn dispose_async<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        self.async_disposals.set(self.async_disposals.get() + 1);
+        jsg::Promise::resolved(lock, ())
+    }
+
+    #[jsg_property(readonly)]
+    fn get_disposals(&self) -> String {
+        format!(
+            "{}/{}",
+            self.sync_disposals.get(),
+            self.async_disposals.get()
+        )
+    }
+}
+
+#[test]
+fn using_calls_the_sync_disposer_and_await_using_the_async_one() {
+    Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(
+            lock,
+            "both",
+            jsg::Rc::new(Both {
+                sync_disposals: Cell::new(0),
+                async_disposals: Cell::new(0),
+            }),
+        );
+        let log = log_after_microtasks(
+            lock,
+            ctx,
+            "globalThis.log = [];
+             { using b = both; }
+             log.push(both.disposals);
+             (async () => {
+               { await using b = both; }
+               log.push(both.disposals);
+             })();",
+        );
+        assert_eq!(log, "1/0|1/1");
+        Ok(())
+    });
+}
+
+#[jsg_resource]
+struct BothCustom;
 
 #[jsg_resource(custom_members)]
-impl Both {
+impl BothCustom {
     #[jsg_dispose]
     fn dispose(&self) {}
 
@@ -421,7 +478,7 @@ impl Both {
     }
 }
 
-impl Resource for Both {
+impl Resource for BothCustom {
     fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
         registry.add(Self::dispose_dispose_member());
         registry.add(Self::dispose_async_async_dispose_member());
@@ -429,10 +486,16 @@ impl Resource for Both {
 }
 
 #[test]
-#[should_panic(expected = "Both has both a dispose and an async dispose method")]
-fn custom_members_reject_both_disposers() {
-    Harness::new().run_in_context(|lock, _ctx| {
-        jsg::resource::function_template_of::<Both>(lock).unwrap();
+fn custom_members_may_register_both_disposers() {
+    Harness::new().run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "both", jsg::Rc::new(BothCustom));
+        let kinds: String = ctx
+            .eval(
+                lock,
+                "`${typeof both[Symbol.dispose]}|${typeof both[Symbol.asyncDispose]}`",
+            )
+            .unwrap();
+        assert_eq!(kinds, "function|function");
         Ok(())
     });
 }

@@ -475,9 +475,10 @@ Registers a method as `Symbol.dispose` (for `using`) or `Symbol.asyncDispose` (f
 `#[jsg_method]`; with `#[jsg_method]` on the same function it is also exposed under its own name.
 An async disposer should return `jsg::Promise<'s, T>` or `jsg::v8::Local<'s, jsg::v8::Promise>`,
 optionally in a `Result`. The attributes take no arguments, and a disposer cannot also be a
-property, inspect property or wildcard property. A type has at most one disposer, sync or async;
-with automatic registration a second is a compile error, and a custom `members` list that
-includes two panics when the template is created.
+property, inspect property or wildcard property. A type has at most one disposer of each kind,
+sync and async, and one method cannot be both; with automatic registration a second of a kind is
+a compile error, and a custom `members` list that includes two of a kind panics when the template
+is created.
 
 A disposer must be idempotent and safe to re-enter. JavaScript can call it directly any number of
 times, and from inside itself when it runs JavaScript: mark the resource disposed before calling

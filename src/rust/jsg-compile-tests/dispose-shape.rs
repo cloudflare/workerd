@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// A resource type has at most one disposer, `#[jsg_dispose]` or `#[jsg_async_dispose]`, which
-// takes `&self` or `this: jsg::Rc<Self>`.
+// A resource type has at most one `#[jsg_dispose]` and at most one `#[jsg_async_dispose]`, which
+// take `&self` or `this: jsg::Rc<Self>`. Having one of each is in `ok-dispose.rs`.
 
 use jsg_macros::jsg_async_dispose;
 use jsg_macros::jsg_dispose;
@@ -21,23 +21,22 @@ impl Twice {
 
     #[jsg_dispose]
     pub fn second(&self) {}
-    //~^ ERROR a resource type has at most one disposer
+    //~^ ERROR a resource type has at most one #[jsg_dispose]
 }
 
 #[jsg_resource]
-pub struct SyncAndAsync;
+pub struct TwiceAsync;
 
 #[jsg_resource]
-impl SyncAndAsync {
-    #[jsg_dispose]
-    pub fn dispose(&self) {}
+impl TwiceAsync {
+    #[jsg_async_dispose]
+    pub fn first<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        jsg::Promise::resolved(lock, ())
+    }
 
     #[jsg_async_dispose]
-    pub fn dispose_async<'s>(
-        //~^ ERROR a resource type has at most one disposer
-        &self,
-        lock: &mut jsg::Lock<'s>,
-    ) -> jsg::Result<jsg::Promise<'s, ()>> {
+    pub fn second<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        //~^ ERROR a resource type has at most one #[jsg_async_dispose]
         jsg::Promise::resolved(lock, ())
     }
 }

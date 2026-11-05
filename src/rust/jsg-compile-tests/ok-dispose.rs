@@ -79,3 +79,40 @@ impl UntypedPromise {
         v8::Promise::resolved(lock, undefined)
     }
 }
+
+// One disposer of each kind, as C++ JSG allows.
+#[jsg_resource]
+pub struct SyncAndAsync;
+
+#[jsg_resource]
+impl SyncAndAsync {
+    #[jsg_dispose]
+    pub fn dispose(&self) {}
+
+    #[jsg_async_dispose]
+    pub fn dispose_async<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        jsg::Promise::resolved(lock, ())
+    }
+}
+
+// A disposer can also be the callable, in either order: their callbacks differ.
+#[jsg_resource]
+pub struct CallableFirst;
+
+#[jsg_resource]
+impl CallableFirst {
+    #[jsg_macros::jsg_callable]
+    #[jsg_dispose]
+    pub fn close(&self) {}
+}
+
+#[jsg_resource]
+pub struct DisposeBeforeCallable;
+
+#[jsg_resource]
+impl DisposeBeforeCallable {
+    #[jsg_dispose]
+    #[jsg_macros::jsg_callable]
+    #[jsg_method]
+    pub fn close(&self) {}
+}

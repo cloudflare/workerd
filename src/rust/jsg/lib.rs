@@ -1173,14 +1173,14 @@ pub enum Member {
     },
     /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
     /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
-    /// `v8::Signature`. A type has at most one, and not along with a [`Member::AsyncDispose`].
+    /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
     Dispose {
         callback: RawFunctionCallback,
     },
     /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
     /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
     /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
-    /// one, and not along with a [`Member::Dispose`].
+    /// one, and may also have a [`Member::Dispose`].
     AsyncDispose {
         callback: RawFunctionCallback,
     },

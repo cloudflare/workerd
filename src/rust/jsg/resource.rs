@@ -664,11 +664,6 @@ fn get_resource_descriptor<R: Resource>(
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
     }
-    assert!(
-        descriptor.dispose.is_none() || descriptor.async_dispose.is_none(),
-        "{} has both a dispose and an async dispose method",
-        R::class_name()
-    );
 
     (descriptor, nested_types)
 }

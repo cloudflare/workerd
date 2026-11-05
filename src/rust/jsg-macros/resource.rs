@@ -443,17 +443,19 @@ pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
 ///
 /// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
 /// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
-/// type has at most one disposer, sync or async, so with automatic registration a second one is
-/// an error too; custom registration may choose between several by compatibility flag, and
-/// registering more than one at once panics when the template is created. A method rejected for
-/// its shape is not registered; a second disposer is, so that the type adds no errors of its own.
+/// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
+/// registration a second one of a kind is an error too; custom registration may choose between
+/// several by compatibility flag, and registering two of a kind at once panics when the template
+/// is created. A method rejected for its shape is not registered; a second disposer is, so that
+/// the type adds no errors of its own.
 fn collect_dispose_registrations(
     impl_block: &ItemImpl,
     mode: RegistrationMode,
 ) -> (Vec<MemberRegistration>, Vec<proc_macro2::TokenStream>) {
     let mut registrations = Vec::new();
     let mut errors = Vec::new();
-    let mut first: Option<&syn::Ident> = None;
+    // The first sync and the first async disposer.
+    let mut first: [Option<&syn::Ident>; 2] = [None, None];
     for item in &impl_block.items {
         let syn::ImplItem::Fn(method) = item else {
             continue;
@@ -492,17 +494,17 @@ fn collect_dispose_registrations(
         }
         if has_dispose && is_async {
             error(
-                "a method cannot be both #[jsg_dispose] and #[jsg_async_dispose]; a type has at \
-                 most one disposer"
+                "a method cannot be both #[jsg_dispose] and #[jsg_async_dispose]: a sync \
+                 disposer and an async one are different methods"
                     .to_owned(),
             );
         }
         if mode == RegistrationMode::Automatic {
+            let first = &mut first[usize::from(is_async)];
             if let Some(first) = first {
                 error(format!(
-                    "a resource type has at most one disposer, and `{first}` is one already; a \
-                     type is either #[jsg_dispose] or #[jsg_async_dispose]. Use `custom_members` \
-                     to choose between several by compatibility flag"
+                    "a resource type has at most one #[{attr_name}], and `{first}` is one already. \
+                     Use `custom_members` to choose between several by compatibility flag"
                 ));
             }
             first.get_or_insert(rust_name);

@@ -843,7 +843,19 @@ fn dispose_factories_register_undescribed_symbol_members() {
         ]
     );
 
-    // A type registers at most one disposer automatically.
+    // A type registers one disposer of each kind automatically, and not a second of a kind.
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert!(errors.is_empty());
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_dispose]
+            fn close_again(&self) {}
+        }
+    };
     let (registrations, errors) =
         collect_dispose_registrations(&input, RegistrationMode::Automatic);
     assert_eq!(registrations.len(), 2);

@@ -1354,10 +1354,13 @@ impl Flusher {
   `v8::Local<'s, v8::Promise>`, optionally in a `Result`). `await using` awaits whatever it
   returns, so any other value makes it a sync disposer that finishes a microtask later: write a
   `#[jsg_dispose]` instead, which `await using` calls too.
-- A type has at most one disposer, sync or async; C++ JSG allows both, but discourages it. With
-  automatic registration a second is a compile error; `custom_members` may choose between several
-  by compatibility flag, registering `Self::<name>_dispose_member()` or
-  `Self::<name>_async_dispose_member()`, and registering two panics when the template is created.
+- A type has at most one disposer of each kind, as in C++ JSG. It may have both a sync and an
+  async one, as Node.js's `readline/promises` `Interface` does, though C++ JSG discourages it:
+  `using` calls only the sync one and `await using` prefers the async one. One method cannot be
+  both. With automatic registration a second disposer of a kind is a compile error;
+  `custom_members` may choose between several by compatibility flag, registering
+  `Self::<name>_dispose_member()` or `Self::<name>_async_dispose_member()`, and registering two of
+  a kind panics when the template is created.
 - RTTI does not describe disposers. C++ RTTI does, but its TypeScript generator ignores them.
 
 As for C++ JSG (see the comment on `JSG_DISPOSE` in `src/workerd/jsg/jsg.h`):
