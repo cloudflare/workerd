@@ -9,8 +9,9 @@
 // compared side by side.
 //
 // Wherever the C++ calls into V8, libc, simdutf, nbytes, kj, i18n, or the
-// string search in buffer-string-search.h, this module calls the same function
-// through `node-internal:buffer_native` rather than reimplementing it.
+// string search in buffer-string-search.h, this module calls the equivalent
+// primitive of `node-internal:buffer_native` (src/rust/api/buffer.rs), which
+// calls V8 for string conversions and implements the rest in Rust.
 // Everything else is ported directly.
 //
 // The C++ receives its arguments through JSG, which converts them to the
@@ -397,7 +398,7 @@ function writeInto(
     // Falls through
     case BASE64URL: {
       const str = jsStringToString(string);
-      return native.nbytesBase64Decode(buffer, destStart, destEnd, str);
+      return native.decodeBase64Into(buffer, destStart, destEnd, str);
     }
     case HEX: {
       const buf = stackArrayOf(string.length);
@@ -902,19 +903,19 @@ export function swap(buffer: Uint8Array, size: 16 | 32 | 64): void {
   if (buffer.length <= 1) return;
   switch (unwrappedSize) {
     case 16: {
-      if (!native.nbytesSwapBytes16(buffer)) {
+      if (!native.swapBytes16(buffer)) {
         throw new Error('Swap bytes failed');
       }
       break;
     }
     case 32: {
-      if (!native.nbytesSwapBytes32(buffer)) {
+      if (!native.swapBytes32(buffer)) {
         throw new Error('Swap bytes failed');
       }
       break;
     }
     case 64: {
-      if (!native.nbytesSwapBytes64(buffer)) {
+      if (!native.swapBytes64(buffer)) {
         throw new Error('Swap bytes failed');
       }
       break;
@@ -1285,13 +1286,13 @@ export function flush(state: Uint8Array): string {
 export function isAscii(bytes: ArrayBufferView): boolean {
   const buffer = unwrapUint8Array(bytes, 'isAscii', 0);
   if (buffer.length === 0) return true;
-  return native.simdutfValidateAscii(buffer);
+  return native.validateAscii(buffer);
 }
 
 export function isUtf8(bytes: ArrayBufferView): boolean {
   const buffer = unwrapUint8Array(bytes, 'isUtf8', 0);
   if (buffer.length === 0) return true;
-  return native.simdutfValidateUtf8(buffer);
+  return native.validateUtf8(buffer);
 }
 
 export function transcode(

@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "f71e2df3c9aef5ba9da16402b46afbdffabfcca3ee6b73ce667a7147b780a453",
+  "checksum": "b4252a1063e752d55c15225aff5296400d310b0d322f8d5b9f379c2ff87ca45f",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -2888,6 +2888,10 @@
             "target": "base64"
           },
           {
+            "id": "base64-simd 0.8.0",
+            "target": "base64_simd"
+          },
+          {
             "id": "bytes 1.12.1",
             "target": "bytes"
           },
@@ -2996,6 +3000,10 @@
             "target": "lolhtml"
           },
           {
+            "id": "memchr 2.8.3",
+            "target": "memchr"
+          },
+          {
             "id": "nix 0.31.3",
             "target": "nix"
           },
@@ -3062,6 +3070,10 @@
           {
             "id": "sha1 0.11.0",
             "target": "sha1"
+          },
+          {
+            "id": "simdutf8 0.1.5",
+            "target": "simdutf8"
           },
           {
             "id": "socket2 0.6.5",
@@ -11089,6 +11101,7 @@
       "common_attrs": {
         "crate_features": [
           "aarch64_neon",
+          "default",
           "public_imp",
           "std"
         ],
@@ -15956,6 +15969,7 @@
     "anyhow 1.0.104",
     "async-trait 0.1.92",
     "base64 0.23.1",
+    "base64-simd 0.8.0",
     "bytes 1.12.1",
     "capnp 0.27.3",
     "capnp-rpc 0.27.3",
@@ -15983,6 +15997,7 @@
     "libm 0.2.16",
     "libz-rs-sys 0.6.8",
     "lol_html_c_api 1.4.0",
+    "memchr 2.8.3",
     "nix 0.31.3",
     "notify 8.2.1",
     "percent-encoding 2.3.2",
@@ -16001,6 +16016,7 @@
     "serde 1.0.229",
     "serde_json 1.0.154",
     "sha1 0.11.0",
+    "simdutf8 0.1.5",
     "socket2 0.6.5",
     "static_assertions 1.1.0",
     "swc_common 26.0.0",

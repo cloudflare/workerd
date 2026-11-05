@@ -85,7 +85,7 @@ namespace workerd::util {
   /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* When enabled, `node-internal:buffer` is provided by the TypeScript                             \
-     implementation (src/node/internal/buffer.ts, backed by the C++                                \
+     implementation (src/node/internal/buffer.ts, backed by the Rust                               \
      `node-internal:buffer_native` primitives) instead of the C++ BufferUtil. The C++              \
      implementation is retained for rollback. */                                                   \
   V(NODEJS_BUFFER_TS)                                                                              \

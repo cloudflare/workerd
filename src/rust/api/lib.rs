@@ -4,10 +4,12 @@
 
 use std::pin::Pin;
 
+use crate::buffer::BufferNative;
 use crate::dns::DnsUtil;
 use crate::inspector::InspectorModule;
 use crate::url::UrlUtil;
 
+pub mod buffer;
 pub mod dns;
 pub mod inspector;
 pub mod url;
@@ -51,6 +53,14 @@ mod ffi {
 }
 
 pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
+    // Imported only by the TypeScript `node-internal:buffer`, which the `NODEJS_BUFFER_TS`
+    // autogate selects (see `src/workerd/api/node/node.h`).
+    jsg::modules::add_builtin(
+        registry.as_mut(),
+        "node-internal:buffer_native",
+        |_lock| Ok(BufferNative::new()),
+        jsg::modules::ModuleType::Internal,
+    );
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:dns",
