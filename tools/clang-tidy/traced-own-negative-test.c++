@@ -49,12 +49,22 @@ class Vector {
   T* end();
 };
 
+template <typename T>
+class Array {};
+
 }  // namespace kj
 
 namespace workerd {
 
 template <typename T, int N>
-class RingBuffer {};
+class RingBuffer {
+ public:
+  RingBuffer() = default;
+  RingBuffer(RingBuffer&& other): storage(kj::mv(other.storage)) {}
+
+ private:
+  kj::Array<T> storage;
+};
 
 namespace jsg {
 
@@ -167,3 +177,26 @@ struct MovesPointers {
     auto all = kj::mv(owners);
   }
 };
+
+// N9: moving a struct that holds one TracedOwn, not a container of them, moves the TracedOwn.
+struct MovesStructWithOneTracedOwn {
+  struct Holder {
+    jsg::TracedOwn<Request> request;
+  };
+  Holder holder;
+
+  void take() {
+    auto taken = kj::mv(holder);
+  }
+};
+
+// N10: moving a container passed by value, which the function owns.
+void consumesByValue(kj::Vector<jsg::TracedOwn<Request>> requests) {
+  auto all = kj::mv(requests);
+}
+
+// N11: a RingBuffer moving its own storage, here instantiated by moving a local.
+void movesLocalRingBuffer() {
+  workerd::RingBuffer<jsg::TracedOwn<Request>, 8> requests;
+  auto moved = kj::mv(requests);
+}

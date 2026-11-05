@@ -15,7 +15,8 @@ readonly CHECK="jsg-traced-own"
 readonly CHECKS="-*,${CHECK}"
 
 readonly VISIT_MESSAGE="visitForGc visits through a kj::Own"
-readonly MOVE_MESSAGE="moving a container of jsg::TracedOwn moves none of its elements"
+readonly MOVE_MESSAGE="moving a container of jsg::TracedOwn, or a value that holds one,"
+readonly SWAP_MESSAGE="swapping a container of jsg::TracedOwn, or a value that holds one,"
 
 set +e
 positive_output=$("${CLANG_TIDY}" "--load=${PLUGIN}" --checks="${CHECKS}" \
@@ -63,9 +64,14 @@ expect_diag "visitor.visit(request->resolver);  // P7" "${VISIT_MESSAGE}" \
   "P7: visiting through an Own in a helper"
 expect_diag "auto all = kj::mv(events);" "${MOVE_MESSAGE}" \
   "P8: moving a RingBuffer of structs holding a TracedOwn"
+expect_diag "auto old = kj::mv(requireActive());" "${MOVE_MESSAGE}" \
+  "P9: moving an enclosing struct returned by reference"
+expect_diag "auto all = kj::mv(pending);" "${MOVE_MESSAGE}" "P10: moving through a reference"
+expect_diag "std::swap(requests, other);" "${SWAP_MESSAGE}" "P11: swapping a container"
+expect_diag "auto all = kj::mv(sets);" "${MOVE_MESSAGE}" "P12: moving nested containers"
 
 # Exact-count lock: one diagnostic per positive case, no more, no fewer.
-expected_count=8
+expected_count=12
 actual_count=$(grep -c "\[${CHECK}" <<<"${positive_output}" || true)
 if [[ "${actual_count}" -ne "${expected_count}" ]]; then
   printf 'Expected exactly %s %s diagnostics, got %s\n' "${expected_count}" "${CHECK}" \

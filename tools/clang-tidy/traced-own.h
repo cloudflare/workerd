@@ -15,10 +15,12 @@ namespace workerd::clang_tidy {
 //   the pointer but not the handles behind it, so an object moved out of the owner that visited it
 //   keeps traced handles that nothing visits, and the GC can free their targets while the object
 //   still uses them. jsg::TracedOwn<T> makes the handles strong again when it moves.
-// - Moving a whole container field whose elements hold a jsg::TracedOwn<T>, directly or inside a
-//   struct, kj::Maybe or kj::OneOf, as in `auto all = kj::mv(pending)` on a
-//   `kj::Vector<jsg::TracedOwn<T>>`. Moving a container moves none of its elements, so their
-//   handles stay traced; move the elements out one at a time.
+// - Moving or swapping a whole container whose elements hold a jsg::TracedOwn<T>, directly or
+//   inside a struct, kj::Maybe or kj::OneOf, or a value that holds such a container, as in
+//   `auto all = kj::mv(pending)` on a `kj::Vector<jsg::TracedOwn<T>>` or
+//   `kj::mv(state.requireActiveUnsafe())` on a struct with that field. Moving a container moves
+//   none of its elements, so their handles stay traced; move the elements out one at a time.
+//   Moving a non-reference local is not flagged, since the function that moves it filled it.
 //
 // Sites that are known to be safe carry `// NOLINT(jsg-traced-own)` with the reason.
 class TracedOwnCheck: public clang::tidy::ClangTidyCheck {

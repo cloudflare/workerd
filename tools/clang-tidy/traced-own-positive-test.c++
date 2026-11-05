@@ -57,6 +57,13 @@ class Vector {
 
 }  // namespace kj
 
+namespace std {
+
+template <typename T>
+void swap(T& a, T& b) {}
+
+}  // namespace std
+
 namespace workerd {
 
 template <typename T, int N>
@@ -171,5 +178,53 @@ struct MovesStructElements {
 
   void drop() {
     auto all = kj::mv(events);
+  }
+};
+
+// P9: moving a struct that holds a RingBuffer of TracedOwns, returned by reference.
+struct MovesEnclosingStruct {
+  struct Ready {
+    workerd::RingBuffer<jsg::TracedOwn<Request>, 8> requests;
+  };
+  Ready ready;
+
+  Ready& requireActive() {
+    return ready;
+  }
+
+  void close() {
+    auto old = kj::mv(requireActive());
+  }
+};
+
+// P10: moving a container of TracedOwns through a reference variable.
+struct MovesThroughReference {
+  kj::Vector<jsg::TracedOwn<Request>> requests;
+
+  void drop() {
+    auto& pending = requests;
+    auto all = kj::mv(pending);
+  }
+};
+
+// P11: swapping a container of TracedOwns.
+struct SwapsContainer {
+  kj::Vector<jsg::TracedOwn<Request>> requests;
+
+  void exchange(kj::Vector<jsg::TracedOwn<Request>>& other) {
+    std::swap(requests, other);
+  }
+};
+
+// P12: moving a container whose elements each hold a container of TracedOwns, as a map of
+// handler sets does.
+struct MovesNestedContainers {
+  struct HandlerSet {
+    kj::Vector<jsg::TracedOwn<Request>> handlers;
+  };
+  kj::Vector<HandlerSet> sets;
+
+  void drop() {
+    auto all = kj::mv(sets);
   }
 };

@@ -39,10 +39,10 @@ that adds workerd-specific static checks:
   `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/
   `OneOf` and `jsg::Optional` wrappers thereof) are missing from `visitForGc()`.
 - `jsg-traced-own`: flags visiting through a `kj::Own` from a function handed
-  the `jsg::GcVisitor`, and moving a whole container whose elements hold a
-  `jsg::TracedOwn`; either leaves visited handles traced with nothing visiting
-  them. It matches only a `kj::mv` of a container field, not of a struct holding
-  one, a local, or a swap. Test: `//tools/clang-tidy:traced-own-test`.
+  the `jsg::GcVisitor`, and moving or swapping a whole container whose elements
+  hold a `jsg::TracedOwn`, or a struct holding one; either leaves visited
+  handles traced with nothing visiting them. Moving a non-reference local isn't
+  flagged. Test: `//tools/clang-tidy:traced-own-test`.
 - `workerd-angled-includes` - requires includes of workers/capnproto code from
     different directories to use angled brackets
 - `workerd-consume`: flags calls to methods annotated with `WD_CONSUME` when
