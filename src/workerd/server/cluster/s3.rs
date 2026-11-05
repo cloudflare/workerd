@@ -355,7 +355,7 @@ impl S3 {
                 (head, REQUEST_TIMEOUT),
             )
             .await
-            .map_err(|error| Error::Http(format!("{method} {key}: {error}")))?;
+            .map_err(|error| request_error(method, key, &error))?;
         if let Some(date) = http_date_ms(&response.date) {
             // The bucket stamped the header, in whole seconds, between the
             // send and the answer: this clock is off only by what lies
@@ -497,6 +497,15 @@ pub fn format_rfc3339_nano(unix_millis: i64) -> String {
         out = out + "." + digits.trim_end_matches('0');
     }
     out + "Z"
+}
+
+/// Converts `error` from a request for `key` to a bucket error.
+fn request_error(method: &str, key: &str, error: &str) -> Error {
+    if error == crate::http::TOO_LARGE {
+        Error::TooLarge(format!("{method} {key}"))
+    } else {
+        Error::Http(format!("{method} {key}: {error}"))
+    }
 }
 
 #[cfg(test)]

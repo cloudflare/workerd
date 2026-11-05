@@ -59,6 +59,9 @@ const CHUNK: usize = 256 << 10;
 /// The most of a response body held in memory rather than written to a file.
 pub const MAX_BODY: usize = 16 << 20;
 
+/// Error text for a response body larger than [`MAX_BODY`].
+pub const TOO_LARGE: &str = "response body too large";
+
 pub struct Http {
     client: legacy::Client<Connector, Body>,
 }
@@ -129,7 +132,7 @@ impl Http {
             if writer.is_none() {
                 // Records, listings, deployments and errors: an endpoint sending more is broken.
                 if body.len() + chunk.len() > MAX_BODY {
-                    return Err("response body too large".to_owned());
+                    return Err(TOO_LARGE.to_owned());
                 }
                 body.extend(chunk);
             } else if tx.send(chunk).await.is_err() {

@@ -120,19 +120,46 @@ struct ClusterConfig {
   # only services. A catalog record in the bucket selects the current version of every deployment.
   #
   # Each workerd process is one cluster instance. Each instance reads the catalog at startup and
-  # serves its deployments beside the services in its own config. It refuses to start when a
-  # deployment breaks any of these rules:
+  # serves accepted deployments beside the services in its own config. It considers deployments
+  # in catalog order and skips a deployment as a whole when it breaks any of these rules, alone
+  # or against the instance's config or a deployment accepted before it. Instances with the same
+  # config and catalog skip the same deployments:
   #
   # - Service names must be unique across the instance's config and every deployment.
   # - Actor namespace keys must also be unique. These keys are Durable Object `uniqueKey` values
-  #   and Workflow namespace keys.
+  #   and Workflow namespace keys. Each Durable Object `uniqueKey` must be one path component.
+  # - Every `Text` value must be valid UTF-8.
   # - A deployment cannot define a `disk` service or a service named `internet`. It can refer to a
   #   disk service in the instance's config by name.
   # - A deployment cannot have `fromEnvironment` bindings, so it cannot read the instance's
   #   environment variables.
   #
-  # An instance that cannot read the bucket at startup exits. Run each instance under a supervisor
-  # that restarts it.
+  # An instance also skips a deployment whose objects are missing, invalid, or larger than its
+  # bucket client can read. A catalog entry whose name is not a valid deployment name is unreadable
+  # and skipped in the same way.
+  #
+  # An error in a deployment's service, such as a worker that throws while loading, is logged with
+  # the deployment's name and does not stop the instance. The broken service fails requests and
+  # actor construction. Warnings from deployment services are also attributed to their
+  # deployments.
+  #
+  # A reference in the instance's own config to a service that neither that config nor a
+  # deployment that was read defines is treated as a deployment reference. It is logged,
+  # naming any unreadable deployments, and fails its requests without stopping the instance.
+  # A reference to a skipped deployment's service fails in the same way. When a deployment's
+  # service cannot satisfy a reference, the deployment's error names the referring service or
+  # socket.
+  #
+  # A tail whose service is missing or cannot handle requests is not started; the request it would
+  # tail proceeds. A broken deployment service's Durable Object namespace fails requests before
+  # the instance claims an object in the bucket and does not adopt dead peers' alarms.
+  #
+  # `--external-addr` and `--directory-path` overrides apply only to services in the instance's
+  # own config. An override that names only a deployment's service is unmatched and is an error in
+  # the instance's config.
+  #
+  # Only a failure to open the bucket or to reach or read its catalog ends the process. Run each
+  # instance under a supervisor that restarts it.
   #
   # `src/workerd/server/cluster/deploy.rs` documents the bucket layout for tools that write
   # deployments.

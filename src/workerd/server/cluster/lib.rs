@@ -106,6 +106,9 @@ pub enum Error {
     /// reason.
     #[error("{0}")]
     Deploy(String),
+    /// The bucket returned an object larger than [`http::MAX_BODY`]. The value names the request.
+    #[error("bucket: {0}: {too_large}", too_large = http::TOO_LARGE)]
+    TooLarge(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

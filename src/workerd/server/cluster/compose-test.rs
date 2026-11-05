@@ -7,6 +7,8 @@ use capnp::message::ReaderSegments;
 use workerd_capnp::config;
 use workerd_capnp::service;
 
+use super::Composed;
+use super::Composition;
 use super::check_deployments;
 use super::deployment_config;
 use super::merge;
@@ -143,6 +145,16 @@ fn names(config: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// The deployments `composed` skipped, by name, with their errors joined by newlines.
+fn skipped(composed: &Composed) -> Vec<(&str, String)> {
+    composed
+        .deployments
+        .iter()
+        .filter(|c| !c.errors.is_empty())
+        .map(|c| (c.name.as_str(), c.errors.join("\n")))
+        .collect()
+}
+
 fn refusal(result: crate::Result<impl std::fmt::Debug>) -> String {
     match result {
         Err(Error::Deploy(message)) => message,
@@ -157,7 +169,7 @@ fn merging_appends_the_deployments_services_and_keeps_the_nodes_config() {
         "b",
         &services(&[("api", WORKER), ("egress", Kind::Network)]),
     );
-    let merged = merge(&node(), &[a, b]).unwrap();
+    let merged = merge(&node(), &[a, b]).unwrap().config;
     assert_eq!(names(&merged), ["local", "main", "app", "api", "egress"]);
 
     let message = read(&merged).unwrap();
@@ -176,7 +188,7 @@ fn merging_appends_the_deployments_services_and_keeps_the_nodes_config() {
 #[test]
 fn the_merged_config_holds_nothing_unreachable() {
     let a = deployment("a", &services(&[("app", WORKER)]));
-    let merged = merge(&node(), &[a]).unwrap();
+    let merged = merge(&node(), &[a]).unwrap().config;
     let message = read(&merged).unwrap();
     let root = message.get_root::<config::Reader<'_>>().unwrap();
     let words = root.total_size().unwrap().word_count;
@@ -221,13 +233,18 @@ fn a_deployment_defines_no_disk_and_no_internet() {
 fn service_names_are_unique_across_the_node_and_its_deployments() {
     let a = deployment("a", &services(&[("main", WORKER), ("shared", WORKER)]));
     let b = deployment("b", &services(&[("shared", WORKER)]));
+    // "a" is skipped, so "b" may define "shared".
+    let composed = merge(&node(), &[a.clone(), b.clone()]).unwrap();
     assert_eq!(
-        refusal(merge(&node(), &[a.clone(), b.clone()])),
-        "deployment \"a\" defines service \"main\". The same service is already defined by the \
-         instance's config.\n\
-         deployment \"b\" defines service \"shared\". The same service is already defined by \
-         deployment \"a\"."
+        skipped(&composed),
+        [(
+            "a",
+            "deployment \"a\" defines service \"main\". The same service is already defined by \
+             the instance's config."
+                .to_owned()
+        )]
     );
+    assert_eq!(names(&composed.config), ["local", "main", "shared"]);
     assert_eq!(
         refusal(check_deployments(&[&a, &b])),
         "deployment \"b\" defines service \"shared\". The same service is already defined by \
@@ -251,13 +268,26 @@ fn durable_object_unique_keys_are_unique_across_the_node_and_its_deployments() {
     let a = deployment("a", &services(&[("one", keyed("node-key"))]));
     let b = deployment("b", &services(&[("two", keyed("app-key"))]));
     let c = deployment("c", &services(&[("three", keyed("app-key"))]));
+    let composed = merge(&node(), &[a, b.clone(), c.clone()]).unwrap();
     assert_eq!(
-        refusal(merge(&node(), &[a, b.clone(), c.clone()])),
-        "deployment \"a\" defines Durable Object namespace uniqueKey \"node-key\". The same \
-         Durable Object namespace uniqueKey is already defined by the instance's config.\n\
-         deployment \"c\" defines Durable Object namespace uniqueKey \"app-key\". The same \
-         Durable Object namespace uniqueKey is already defined by deployment \"b\"."
+        skipped(&composed),
+        [
+            (
+                "a",
+                "deployment \"a\" defines Durable Object namespace uniqueKey \"node-key\". The \
+                 same Durable Object namespace uniqueKey is already defined by the instance's \
+                 config."
+                    .to_owned()
+            ),
+            (
+                "c",
+                "deployment \"c\" defines Durable Object namespace uniqueKey \"app-key\". The \
+                 same Durable Object namespace uniqueKey is already defined by deployment \"b\"."
+                    .to_owned()
+            ),
+        ]
     );
+    assert_eq!(names(&composed.config), ["local", "main", "two"]);
     assert!(check_deployments(&[&b]).is_ok());
     assert!(check_deployments(&[&b, &c]).is_err());
     let twice = deployment("d", &services(&[("x", keyed("k")), ("y", keyed("k"))]));
@@ -295,9 +325,13 @@ fn workflow_namespace_keys_are_unique_across_the_node_and_its_deployments() {
     );
     let node = services(&[("main", flow("orders"))]);
     assert_eq!(
-        refusal(merge(&node, &[a])),
-        "deployment \"a\" defines Workflow namespace key \"miniflare-workflows-orders\". The \
-         same Workflow namespace key is already defined by the instance's config."
+        skipped(&merge(&node, &[a]).unwrap()),
+        [(
+            "a",
+            "deployment \"a\" defines Workflow namespace key \"miniflare-workflows-orders\". The \
+             same Workflow namespace key is already defined by the instance's config."
+                .to_owned()
+        )]
     );
 }
 
@@ -376,8 +410,97 @@ fn the_nodes_own_config_may_read_the_environment() {
         ..Worker::default()
     });
     let node = services(&[("main", worker)]);
-    let merged = merge(&node, &[]).unwrap();
+    let merged = merge(&node, &[]).unwrap().config;
     assert_eq!(names(&merged), ["main"]);
+}
+
+/// A deployment as a tool other than workerd may publish it: `config` as it is.
+fn unchecked(name: &str, config: Vec<u8>) -> Deployment {
+    Deployment {
+        name: name.to_owned(),
+        version: version_of(&config),
+        config,
+    }
+}
+
+#[test]
+fn a_deployment_that_breaks_a_rule_is_skipped_as_a_whole() {
+    let first = deployment("a", &services(&[("x", WORKER), ("y", WORKER)]));
+    // "y" clashes with "a"; "z" is only "b"'s.
+    let clashing = deployment("b", &services(&[("y", WORKER), ("z", WORKER)]));
+    let env = Kind::Worker(Worker {
+        env: Some("TOKEN"),
+        ..Worker::default()
+    });
+    let reading = unchecked("c", services(&[("reads-env", env)]));
+    let malformed = unchecked("d", b"not a message".to_vec());
+    let last = deployment("e", &services(&[("w", WORKER)]));
+    let composed = merge(
+        &node(),
+        &[
+            first.clone(),
+            clashing.clone(),
+            reading.clone(),
+            malformed,
+            last,
+        ],
+    )
+    .unwrap();
+    assert_eq!(names(&composed.config), ["local", "main", "x", "y", "w"]);
+    assert_eq!(
+        composed.deployments[..3],
+        [
+            Composition {
+                name: "a".to_owned(),
+                version: first.version,
+                services: vec!["x".to_owned(), "y".to_owned()],
+                errors: Vec::new(),
+            },
+            Composition {
+                name: "b".to_owned(),
+                version: clashing.version,
+                services: vec!["z".to_owned()],
+                errors: vec![
+                    "deployment \"b\" defines service \"y\". The same service is already \
+                     defined by deployment \"a\"."
+                        .to_owned()
+                ],
+            },
+            Composition {
+                name: "c".to_owned(),
+                version: reading.version,
+                services: vec!["reads-env".to_owned()],
+                errors: vec![
+                    "service \"reads-env\" in deployment \"c\" has `fromEnvironment` binding \
+                     \"SECRET\". A deployment cannot read the instance's environment variables."
+                        .to_owned()
+                ],
+            },
+        ]
+    );
+    let malformed = &composed.deployments[3];
+    assert!(malformed.services.is_empty());
+    assert!(
+        malformed.errors[0].starts_with("deployment \"d\" is not a valid config: "),
+        "{:?}",
+        malformed.errors
+    );
+    assert!(composed.deployments[4].errors.is_empty());
+}
+
+#[test]
+fn a_deployment_with_fields_of_a_newer_schema_is_skipped() {
+    let a = unchecked("a", newer(true));
+    let composed = merge(&node(), &[a]).unwrap();
+    assert_eq!(
+        skipped(&composed),
+        [(
+            "a",
+            "deployment \"a\" defines service \"\" with fields this workerd does not know."
+                .to_owned()
+        )]
+    );
+    assert_eq!(names(&composed.config), ["local", "main"]);
 }
 
 #[test]
@@ -413,7 +536,7 @@ fn a_large_deployment_is_checked_and_merged() {
     let config = services(&[("app", worker)]);
     let a = deployment("a", &config);
     assert!(a.config.len() > 1 << 20);
-    let merged = merge(&node(), &[a]).unwrap();
+    let merged = merge(&node(), &[a]).unwrap().config;
     assert_eq!(names(&merged), ["local", "main", "app"]);
 }
 
@@ -452,6 +575,37 @@ fn a_deployment_with_text_that_is_not_utf8_is_refused() {
         config: not_utf8(),
     };
     assert_eq!(refusal(check_deployments(&[&a])), error);
+}
+
+#[test]
+fn a_deployment_with_text_that_is_not_utf8_or_a_unique_key_outside_its_directory_is_skipped() {
+    let escaping = Kind::Worker(Worker {
+        unique_key: Some("../../x"),
+        ..Worker::default()
+    });
+    let deployments = [
+        unchecked("a", not_utf8()),
+        unchecked("b", services(&[("escapes", escaping)])),
+        deployment("c", &services(&[("w", WORKER)])),
+    ];
+    let composed = merge(&node(), &deployments).unwrap();
+    assert_eq!(names(&composed.config), ["local", "main", "w"]);
+    let skipped = skipped(&composed);
+    assert_eq!(skipped.len(), 2, "{skipped:?}");
+    assert_eq!(
+        skipped[0],
+        (
+            "a",
+            "deployment \"a\" has text that is not valid UTF-8 at \
+             Config.services[0].worker.modules[0].esModule."
+                .to_owned()
+        )
+    );
+    assert_eq!(skipped[1].0, "b");
+    assert!(
+        skipped[1].1.contains("uniqueKey \"../../x\""),
+        "{skipped:?}"
+    );
 }
 
 #[test]

@@ -2,20 +2,23 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The rules deployments (`deploy.rs`) compose by, and the config a node serves: its own
-//! `Config` with the services of every deployment in the catalog appended, in the catalog's
-//! order of names.
+//! Defines how deployments (`deploy.rs`) compose with a node's config.
+//!
+//! The composed config contains the node's own `Config` followed by the services of each accepted
+//! deployment in catalog order. [`merge`] skips a deployment as a whole when it breaks a rule.
 //!
 //! - A deployment holds only `services`. Every other field of `Config` (sockets, the cluster
 //!   block, extensions, V8 flags, autogates, logging) is the node's, and a deployment that sets
-//!   one is refused rather than trimmed. So is a `disk` service, whose path is the node's, and a
-//!   service named `internet`, which would replace the node's implicit one for every worker.
+//!   one is skipped rather than trimmed. So is one that defines a `disk` service, whose path is
+//!   the node's, or a service named `internet`, which would replace the node's implicit one for
+//!   every worker.
 //! - Service names are unique across the node's config and every deployment, and so are the keys
 //!   of actor namespaces: Durable Object `uniqueKey`s and the key of each Workflow's namespace
 //!   (`workflow_namespace_key`). A deployment refers to what the node provides, such as the disk
 //!   service its `durableObjectStorage` names, by service name.
-//! - A service with fields this build's schema does not know, the node's included, is refused:
-//!   merging would drop them.
+//! - A service with fields this build's schema does not know cannot be composed because merging
+//!   would drop them. During [`merge`], one in the node's config fails the merge and one in a
+//!   deployment causes that deployment to be skipped.
 //! - A deployment has no `fromEnvironment` binding, wrapped ones included. It cannot read the
 //!   node's environment.
 
@@ -77,28 +80,120 @@ pub fn check_deployments(deployments: &[&Deployment]) -> Result<()> {
     refuse(&errors)
 }
 
-/// The node's encoded `Config` with the services of `deployments` appended, encoded, once every
-/// rule holds.
-pub fn merge(node: &[u8], deployments: &[Deployment]) -> Result<Vec<u8>> {
+/// Contains the config a node serves and the result for every deployment.
+#[derive(Debug)]
+pub struct Composed {
+    /// The node's encoded `Config` with every accepted deployment's services appended.
+    pub config: Vec<u8>,
+    /// The result for every deployment, in the order passed to [`merge`].
+    pub deployments: Vec<Composition>,
+}
+
+/// Describes whether one deployment was accepted or skipped.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Composition {
+    /// The deployment's name.
+    pub name: String,
+    /// The deployment's version.
+    pub version: String,
+    /// The services this deployment contributes or leaves absent.
+    ///
+    /// For a skipped deployment, this lists only names absent from the composed config. A
+    /// reference to one of them cannot be served.
+    pub services: Vec<String>,
+    /// The reasons it was skipped, one per line, or empty when the deployment was accepted.
+    pub errors: Vec<String>,
+}
+
+/// Composes a node config with deployments in their given order.
+///
+/// A deployment is skipped as a whole when it breaks a rule alone, against the node's config, or
+/// against a deployment accepted before it. Nodes with the same config and catalog skip the same
+/// deployments. Only an error in the node's own config fails the merge.
+pub fn merge(node: &[u8], deployments: &[Deployment]) -> Result<Composed> {
     let node_message = parse(&Owner::Node, node)?;
     let node = root(&Owner::Node, &node_message)?;
-    let mut messages = Vec::with_capacity(deployments.len());
-    for deployment in deployments {
-        let owner = Owner::Deployment(deployment.name.clone());
-        messages.push(parse(&owner, &deployment.config)?);
-    }
     let mut names = Names::default();
     let mut errors = Vec::new();
     check_node(node, &mut names, &mut errors).map_err(|e| malformed(&Owner::Node, &e))?;
-    let mut roots = Vec::with_capacity(messages.len());
+    refuse(&errors)?;
+
+    let messages: Vec<_> = deployments
+        .iter()
+        .map(|deployment| {
+            parse(
+                &Owner::Deployment(deployment.name.clone()),
+                &deployment.config,
+            )
+        })
+        .collect();
+    let mut merged = Vec::new();
+    let mut compositions = Vec::with_capacity(deployments.len());
     for (deployment, message) in deployments.iter().zip(&messages) {
         let owner = Owner::Deployment(deployment.name.clone());
-        let root = root(&owner, message)?;
-        admit(&owner, root, &mut names, &mut errors).map_err(|e| malformed(&owner, &e))?;
-        roots.push(root);
+        let (services, errors) = match message {
+            Ok(message) => match compose(&owner, message, &mut names) {
+                Ok((root, services, errors)) => {
+                    if errors.is_empty() {
+                        merged.push(root);
+                    }
+                    (services, errors)
+                }
+                Err(error) => (Vec::new(), lines(&error)),
+            },
+            Err(error) => (Vec::new(), lines(error)),
+        };
+        compositions.push(Composition {
+            name: deployment.name.clone(),
+            version: deployment.version.clone(),
+            services,
+            errors,
+        });
     }
-    refuse(&errors)?;
-    append(node, &roots).map_err(|e| Error::Deploy(format!("could not merge the deployments: {e}")))
+    for skipped in compositions.iter_mut().filter(|c| !c.errors.is_empty()) {
+        skipped
+            .services
+            .retain(|service| !names.services.contains_key(service));
+    }
+    let config = append(node, &merged)
+        .map_err(|e| Error::Deploy(format!("could not merge the deployments: {e}")))?;
+    Ok(Composed {
+        config,
+        deployments: compositions,
+    })
+}
+
+/// Checks one deployment against itself and the names accepted before it.
+///
+/// Returns its config, service names, and broken rules. `names` gains the deployment's names only
+/// when it breaks no rules.
+fn compose<'a>(
+    owner: &Owner,
+    message: &'a Message,
+    names: &mut Names,
+) -> Result<(config::Reader<'a>, Vec<String>, Vec<String>)> {
+    let root = root(owner, message)?;
+    check_text(owner, root)?;
+    let services = service_names(root).map_err(|e| malformed(owner, &e))?;
+    let mut with_these = names.clone();
+    let mut errors = Vec::new();
+    admit(owner, root, &mut with_these, &mut errors).map_err(|e| malformed(owner, &e))?;
+    if errors.is_empty() {
+        *names = with_these;
+    }
+    Ok((root, services, errors))
+}
+
+fn service_names(config: config::Reader<'_>) -> capnp::Result<Vec<String>> {
+    config
+        .get_services()?
+        .iter()
+        .map(|service| text(service.get_name()))
+        .collect()
+}
+
+fn lines(error: &Error) -> Vec<String> {
+    error.to_string().lines().map(str::to_owned).collect()
 }
 
 /// Records the node's names, and reports its services with fields this build does not know.
@@ -173,7 +268,7 @@ impl std::fmt::Display for Owner {
 }
 
 /// The names deployments must not share, and who defined each.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Names {
     services: HashMap<String, String>,
     /// Durable Object `uniqueKey`s and Workflow namespace keys: the server makes an actor

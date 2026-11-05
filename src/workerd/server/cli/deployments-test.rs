@@ -34,7 +34,7 @@ fn node(endpoint: Option<&str>) -> Config {
 fn without_a_cluster_the_config_is_unchanged() {
     let config = node(None);
     let bytes = config.to_bytes();
-    assert_eq!(add(config, None, None).unwrap().to_bytes(), bytes);
+    assert_eq!(add(config, None, None).unwrap().0.to_bytes(), bytes);
 }
 
 #[test]
@@ -52,7 +52,10 @@ fn without_a_catalog_the_config_is_unchanged() {
     });
     let config = node(Some(&endpoint));
     let bytes = config.to_bytes();
-    assert_eq!(add(config, None, None).unwrap().to_bytes(), bytes);
+    let (config, deployments) = add(config, None, None).unwrap();
+    assert_eq!(config.to_bytes(), bytes);
+    // The node's references to services it does not define are still deployment references.
+    assert!(deployments.enabled);
     let request = bucket.join().unwrap();
     assert!(
         request.starts_with("GET ") && request.contains("/prefix/v1/deploy/catalog.json "),

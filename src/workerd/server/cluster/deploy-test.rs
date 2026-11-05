@@ -75,6 +75,10 @@ struct Flaky {
     follow: RefCell<Option<Vec<u8>>>,
     contend: Cell<bool>,
     catalog_writes: Cell<u32>,
+    /// A key whose reads return a body-too-large error.
+    too_large: RefCell<Option<String>>,
+    /// A key whose reads fail.
+    unreachable: RefCell<Option<String>>,
 }
 
 impl Flaky {
@@ -86,6 +90,12 @@ impl Flaky {
 #[async_trait::async_trait(?Send)]
 impl Store for Rc<Flaky> {
     async fn get(&self, key: &str, to: Option<&Path>) -> Result<Option<(Vec<u8>, Version)>> {
+        if self.too_large.borrow().as_deref() == Some(key) {
+            return Err(Error::TooLarge(format!("GET {key}")));
+        }
+        if self.unreachable.borrow().as_deref() == Some(key) {
+            return Err(Error::Http(format!("GET {key}: 503")));
+        }
         self.inner.get(key, to).await
     }
 
@@ -451,14 +461,32 @@ fn a_deploy_that_keeps_losing_the_race_gives_up() {
     });
 }
 
+/// Loads unreadable deployment "app" beside readable deployment "other" and returns the error.
+async fn unreadable_app(bucket: &Bucket) -> String {
+    let loaded = load(bucket).await.unwrap().unwrap();
+    let names: Vec<_> = loaded.deployments.iter().map(|d| d.name.as_str()).collect();
+    assert_eq!(names, ["other"]);
+    let [unreadable] = &loaded.unreadable[..] else {
+        panic!(
+            "expected one unreadable deployment, got {:?}",
+            loaded.unreadable
+        );
+    };
+    assert_eq!(unreadable.name, "app");
+    unreadable.error.clone()
+}
+
 #[test]
-fn a_node_refuses_what_it_cannot_load() {
+fn a_node_skips_a_deployment_it_cannot_read() {
     block_on(async {
         let bucket = Bucket::memory("");
         let published = publish(&bucket, "app", &services(&["app"])).await.unwrap();
+        publish(&bucket, "other", &services(&["other"]))
+            .await
+            .unwrap();
         let prefix = format!("deploy/app/{}", published.version);
 
-        // A config.bin that does not hash to its version.
+        // The node skips a deployment whose config.bin does not hash to its version.
         let config = bucket
             .get(&format!("{prefix}/config.bin"))
             .await
@@ -466,18 +494,18 @@ fn a_node_refuses_what_it_cannot_load() {
             .unwrap()
             .0;
         let key = format!("{prefix}/config.bin");
-        bucket.put(&key, services(&["other"]), &[]).await.unwrap();
+        bucket.put(&key, services(&["changed"]), &[]).await.unwrap();
         assert_eq!(
-            refusal(load(&bucket).await),
+            unreadable_app(&bucket).await,
             format!(
                 "the SHA-256 hash of {key} does not match version {}.",
                 published.version
             )
         );
         bucket.put(&key, config, &[]).await.unwrap();
-        assert!(load(&bucket).await.is_ok());
+        assert!(load(&bucket).await.unwrap().unwrap().unreadable.is_empty());
 
-        // A manifest that requires a feature.
+        // The node skips a deployment whose manifest requires a feature or is missing.
         let key = format!("{prefix}/manifest.json");
         let manifest = bucket.get(&key).await.unwrap().unwrap().0;
         let mut requiring: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
@@ -487,16 +515,29 @@ fn a_node_refuses_what_it_cannot_load() {
             .await
             .unwrap();
         assert_eq!(
-            refusal(load(&bucket).await),
+            unreadable_app(&bucket).await,
             format!("{key} requires features this workerd does not support: teleportation.")
         );
         bucket.delete(&key).await.unwrap();
-        assert_eq!(refusal(load(&bucket).await), format!("{key} is missing"));
+        assert_eq!(unreadable_app(&bucket).await, format!("{key} is missing"));
         bucket.put(&key, manifest, &[]).await.unwrap();
 
-        // A catalog of a later format.
-        let mut later: serde_json::Value =
+        // The node skips a deployment whose version in the catalog is not a SHA-256 hex string.
+        let catalog: serde_json::Value =
             serde_json::from_slice(&bucket.get(CATALOG).await.unwrap().unwrap().0).unwrap();
+        let mut odd = catalog.clone();
+        odd["deployments"]["app"]["version"] = serde_json::json!("../other");
+        bucket
+            .put(CATALOG, serde_json::to_vec(&odd).unwrap(), &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            unreadable_app(&bucket).await,
+            "\"../other\" is not a valid version for deployment \"app\"."
+        );
+
+        // The node exits on a catalog of a later format.
+        let mut later = catalog;
         later["format"] = serde_json::json!(2);
         bucket
             .put(CATALOG, serde_json::to_vec(&later).unwrap(), &[])
@@ -506,18 +547,60 @@ fn a_node_refuses_what_it_cannot_load() {
             refusal(load(&bucket).await),
             "deploy/catalog.json uses format 2. This workerd supports format 1."
         );
+    });
+}
 
-        // A catalog naming something other than a version.
-        let mut odd = later;
-        odd["format"] = serde_json::json!(1);
-        odd["deployments"]["app"]["version"] = serde_json::json!("../other");
-        bucket
-            .put(CATALOG, serde_json::to_vec(&odd).unwrap(), &[])
+#[test]
+fn a_node_skips_a_deployment_it_cannot_fetch_or_with_an_invalid_name() {
+    block_on(async {
+        let store = Rc::new(Flaky::default());
+        let bucket = Bucket::new(Rc::clone(&store), "");
+        let published = publish(&bucket, "app", &services(&["app"])).await.unwrap();
+        publish(&bucket, "other", &services(&["other"]))
             .await
             .unwrap();
+
+        let key = format!("deploy/app/{}/config.bin", published.version);
+        *store.too_large.borrow_mut() = Some(key.clone());
         assert_eq!(
-            refusal(load(&bucket).await),
-            "\"../other\" is not a valid version for deployment \"app\"."
+            unreadable_app(&bucket).await,
+            format!("bucket: GET {key}: response body too large")
+        );
+        *store.too_large.borrow_mut() = None;
+
+        // A failed request for a deployment's object skips only that deployment.
+        let key = format!("deploy/app/{}/manifest.json", published.version);
+        *store.unreachable.borrow_mut() = Some(key.clone());
+        assert_eq!(
+            unreadable_app(&bucket).await,
+            format!("bucket: GET {key}: 503")
+        );
+        *store.unreachable.borrow_mut() = None;
+
+        // An entry whose name is not a deployment name is skipped, and the rest load.
+        let mut catalog: serde_json::Value =
+            serde_json::from_slice(&bucket.get(CATALOG).await.unwrap().unwrap().0).unwrap();
+        catalog["deployments"]["../evil"] = serde_json::json!({ "version": published.version });
+        bucket
+            .put(CATALOG, serde_json::to_vec(&catalog).unwrap(), &[])
+            .await
+            .unwrap();
+        let loaded = load(&bucket).await.unwrap().unwrap();
+        let names: Vec<_> = loaded.deployments.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["app", "other"]);
+        let [unreadable] = &loaded.unreadable[..] else {
+            panic!(
+                "expected one unreadable deployment, got {:?}",
+                loaded.unreadable
+            );
+        };
+        assert_eq!(unreadable.name, "../evil");
+        assert!(
+            unreadable
+                .error
+                .starts_with("\"../evil\" is not a valid deployment name."),
+            "{}",
+            unreadable.error
         );
     });
 }

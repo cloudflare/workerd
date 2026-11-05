@@ -97,7 +97,7 @@ fn run_compiled(
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
     let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
     let process = Process::new(executable, watcher, inherited_sockets);
-    let config = with_deployments(config, &args.serve_or_test, &options, &process);
+    let (config, options) = with_deployments(config, &args.serve_or_test, options, &process);
     entry::serve(
         args.global.verbose,
         config.into_words(),
@@ -124,7 +124,7 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
             let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
             let process = Process::new(executable, watcher, inherited_sockets);
             let config = load_config::<T>(config, const_name.const_name, &process);
-            let config = with_deployments(config, &serve_or_test, &options, &process);
+            let (config, options) = with_deployments(config, &serve_or_test, options, &process);
             entry::serve(
                 verbose,
                 config.into_words(),
@@ -381,23 +381,28 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Adds the deployments in `config`'s cluster bucket when `--experimental` is enabled. It reports a
-/// public cluster address or a deployment that cannot be composed with `config` as a config error.
-/// A bucket that cannot be opened or read ends the process, even under `--watch`, because the cause
-/// may lie outside the config files. See `deployments.rs`.
+/// Adds cluster deployments to `config` and records their service sources in `options`.
+///
+/// Deployments are added only with `--experimental`. A public cluster address or an error in
+/// `config` found during composition is a config error. A deployment that does not compose is
+/// skipped. A bucket that cannot be opened or read ends the process, even under `--watch`, because
+/// the cause may lie outside the config files. See `deployments.rs`.
 fn with_deployments(
     config: Config,
     serve_or_test: &args::ServeOrTestArgs,
-    options: &RunOptions,
+    mut options: RunOptions,
     process: &Process,
-) -> Config {
+) -> (Config, RunOptions) {
     if !serve_or_test.experimental {
-        return config;
+        return (config, options);
     }
     let address = options.cluster_address.as_deref();
     let advertise = options.cluster_advertise.as_deref();
     match deployments::add(config, address, advertise) {
-        Ok(config) => config,
+        Ok((config, deployments)) => {
+            options.deployments = deployments;
+            (config, options)
+        }
         Err(deployments::Failure::Config(errors)) => config_errors(&errors, process),
         Err(deployments::Failure::Remote(errors)) => {
             for error in errors {

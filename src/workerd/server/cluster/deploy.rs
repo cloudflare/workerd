@@ -14,8 +14,8 @@
 //! - `deploy/<name>/<version>/manifest.json`, written after `config.bin`:
 //!   `{"format": 1, "name": "<name>", "version": "<version>", "requires": []}`. `requires` lists
 //!   features a node must support to load the deployment. Format 1 defines none, so a node
-//!   refuses a manifest that lists any. Metadata about the version, such as who deployed it or
-//!   its source revision, belongs here.
+//!   skips a deployment whose manifest lists any. Metadata about the version, such as who deployed
+//!   it or its source revision, belongs here.
 //! - `deploy/catalog.json`: `{"format": 1, "revision": <n>, "deployments": {"<name>":
 //!   {"version": "<version>"}, ...}}`, the current version of every deployment. A deploy
 //!   replaces it with a conditional write: `If-None-Match: *` while it is absent, `If-Match`
@@ -28,9 +28,10 @@
 //!
 //! A name is 1 to 64 ASCII letters, digits, `-` and `_`, and starts with a letter or digit. A
 //! version's objects are never rewritten or removed. To roll back, deploy an earlier version,
-//! or edit `catalog.json` by hand to name it and raise `revision`. A node refuses a catalog or a
-//! manifest whose format it does not read. It reads the catalog and its deployments once, at
-//! startup.
+//! or edit `catalog.json` by hand to name it and raise `revision`. A node refuses a catalog whose
+//! format it does not read. It skips an entry whose name is invalid and a deployment whose objects
+//! are missing, invalid, or too large to read, including a manifest whose format it does not read.
+//! It reads the catalog and its deployments once, at startup.
 //!
 //! A deployment runs with the authority of each node's config. Its services can reach the node's
 //! network, container engine and named services. Whoever can write `deploy/` has that authority
@@ -41,7 +42,6 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use futures::StreamExt;
-use futures::TryStreamExt;
 use ring::rand::SecureRandom;
 use ring::rand::SystemRandom;
 use serde::Deserialize;
@@ -106,11 +106,21 @@ pub struct Deployment {
     pub config: Vec<u8>,
 }
 
-/// The deployments a catalog names, in order of name.
+/// Holds the result of loading every deployment a catalog names, in order of name.
 #[derive(Debug)]
 pub struct Loaded {
     pub revision: u64,
     pub deployments: Vec<Deployment>,
+    /// The deployments whose objects are missing or invalid and why, in order of name.
+    pub unreadable: Vec<Unreadable>,
+}
+
+/// Describes a deployment whose objects are missing or invalid and why.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Unreadable {
+    pub name: String,
+    pub version: String,
+    pub error: String,
 }
 
 /// What a publish left in the catalog.
@@ -134,7 +144,7 @@ pub fn check_name(name: &str) -> Result<()> {
         Ok(())
     } else {
         Err(Error::Deploy(format!(
-            "\"{name}\" is not a valid deployment name. Use 1 to 64 ASCII letters, digits, \
+            "{name:?} is not a valid deployment name. Use 1 to 64 ASCII letters, digits, \
              hyphens, or underscores. Start with a letter or digit."
         )))
     }
@@ -152,13 +162,13 @@ pub async fn catalog(bucket: &Bucket) -> Result<Option<(Catalog, crate::Version)
     let catalog: Catalog = serde_json::from_slice(&body)
         .map_err(|e| Error::Deploy(format!("could not parse {CATALOG}: {e}")))?;
     check_format(CATALOG, catalog.format)?;
-    for name in catalog.deployments.keys() {
-        check_name(name)?;
-    }
     Ok(Some((catalog, version)))
 }
 
-/// Every deployment the catalog names, in its order, or `None` when there is no catalog.
+/// Loads every deployment the catalog names, in order, or returns `None` without a catalog.
+///
+/// It puts deployments with an invalid name and those whose objects are missing, invalid, or too
+/// large in `Loaded::unreadable`. Only a failure to reach or read the catalog fails the load.
 pub async fn load(bucket: &Bucket) -> Result<Option<Loaded>> {
     let Some((catalog, _)) = catalog(bucket).await? else {
         return Ok(None);
@@ -166,15 +176,33 @@ pub async fn load(bucket: &Bucket) -> Result<Option<Loaded>> {
     let reads = catalog
         .deployments
         .iter()
-        .map(|(name, current)| read(bucket, name, &current.version));
-    let deployments = futures::stream::iter(reads)
+        .map(|(name, current)| async move {
+            // Whatever keeps a deployment from being read, even a failed request, skips only
+            // that deployment.
+            read(bucket, name, &current.version)
+                .await
+                .map_err(|error| Unreadable {
+                    name: name.clone(),
+                    version: current.version.clone(),
+                    error: error.to_string(),
+                })
+        });
+    let results: Vec<_> = futures::stream::iter(reads)
         .buffered(CONCURRENT_READS)
-        .try_collect()
-        .await?;
-    Ok(Some(Loaded {
+        .collect()
+        .await;
+    let mut loaded = Loaded {
         revision: catalog.revision,
-        deployments,
-    }))
+        deployments: Vec::new(),
+        unreadable: Vec::new(),
+    };
+    for result in results {
+        match result {
+            Ok(deployment) => loaded.deployments.push(deployment),
+            Err(unreadable) => loaded.unreadable.push(unreadable),
+        }
+    }
+    Ok(Some(loaded))
 }
 
 /// Reads version `version` of deployment `name` and checks its manifest and hash.

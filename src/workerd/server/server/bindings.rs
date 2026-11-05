@@ -151,6 +151,8 @@ pub struct CompiledBindings {
     pub has_debug_port: bool,
     /// Config errors, without the `service <name>: ` prefix (the caller adds it).
     pub errors: Vec<String>,
+    /// Config errors for bindings that name another service, paired with that target service.
+    pub reference_errors: Vec<(String, String)>,
 }
 
 /// What the worker exports, as its compilation reported them, in that order.
@@ -637,18 +639,22 @@ impl Compiler<'_> {
         let actor_configs = self.actor_configs;
         let config = if let Some(service) = service {
             let Some(classes) = actor_configs.get(service) else {
-                self.error(format!(
-                    "{error_context} refers to a service \"{service}\", but no such service \
-                     is defined."
+                self.out.reference_errors.push((
+                    service.to_owned(),
+                    format!(
+                        "{error_context} refers to a service \"{service}\", but no such service \
+                         is defined."
+                    ),
                 ));
                 return Ok(false);
             };
             let Some(config) = classes.get(class_name) else {
-                self.error(format!(
+                let error = format!(
                     "{error_context} refers to a Durable Object namespace named \
                      \"{class_name}\" in service \"{service}\", but no such Durable Object \
                      namespace is defined by that service."
-                ));
+                );
+                self.out.reference_errors.push((service.to_owned(), error));
                 return Ok(false);
             };
             config
