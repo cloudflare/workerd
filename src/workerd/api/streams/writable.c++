@@ -348,7 +348,6 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
       canceler.cancel(cancellationException());
     }
     if (ended) return;
-    if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_WRITABLE_DROP_ABORTS_SINK)) return;
     KJ_IF_SOME(i, inner) {
       i->abort(cancellationException());
     }

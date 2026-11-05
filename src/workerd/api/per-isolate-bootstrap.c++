@@ -90,6 +90,8 @@ struct BootstrapState {
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
   const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
+  // Functions found by tryGetBootstrapFunction(), by module specifier, then name.
+  kj::HashMap<kj::String, kj::HashMap<kj::String, jsg::JsRef<jsg::JsFunction>>> functionCache;
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
@@ -806,6 +808,30 @@ kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr speci
   // was never required, it won't be in the cache and we return none.
   KJ_IF_SOME(cached, state.cache.find(normalized)) {
     return cached.getHandle(js);
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
+    jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+
+  KJ_IF_SOME(functions, state.functionCache.find(normalized)) {
+    KJ_IF_SOME(cached, functions.find(name)) {
+      return cached.getHandle(js);
+    }
+  }
+
+  KJ_IF_SOME(cached, state.cache.find(normalized)) {
+    KJ_IF_SOME(obj, cached.getHandle(js).tryCast<jsg::JsObject>()) {
+      KJ_IF_SOME(func, obj.get(js, name).tryCast<jsg::JsFunction>()) {
+        auto& functions = state.functionCache.findOrCreate(normalized,
+            [&]() -> decltype(state.functionCache)::Entry { return {kj::str(normalized), {}}; });
+        functions.insert(kj::str(name), func.addRef(js));
+        return func;
+      }
+    }
   }
   return kj::none;
 }

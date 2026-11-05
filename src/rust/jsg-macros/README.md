@@ -44,6 +44,13 @@ in `src/rust/jsg/README.md`.
 `ts_root` marks a TypeScript generation root; it can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
+The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
+`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
+contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
+`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
+leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
+reference.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
@@ -104,10 +111,14 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- A last parameter of type `jsg::Arguments<T>` takes the remaining arguments, each converted
+  to `T`, like C++ JSG's `jsg::Arguments<T>`; it is empty when there are none. It must be the
+  last parameter, of a method or a `#[jsg_constructor]`, and TypeScript declares it as
+  `...name: any[]`. See [Rest parameters](../jsg/README.md#rest-parameters).
 - When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
-  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
-  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
-  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
+  Web IDL count of leading required arguments: `this`, the lock and a `jsg::Arguments` are not
+  counted, and counting stops at the first type whose `FromJS::is_optional()` returns true (such
+  as `Option<T>` or `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -148,7 +159,7 @@ The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_callable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
@@ -238,6 +249,7 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
 | Wildcard property `get_var` | `Self::get_var_member()` |
+| Callable `call` | `Self::call_callable_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -466,6 +478,34 @@ impl Env {
 //     'HOME' in env   // true
 ```
 
+## `#[jsg_callable]`
+
+Makes the instances of a `#[jsg_resource]` type callable as functions, running the method.
+Equivalent to C++ `JSG_CALLABLE`.
+
+The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape of
+a `#[jsg_method]`. The attribute takes no arguments. A type is callable at most one way; with
+automatic registration a second `#[jsg_callable]` is a compile error, and a custom `members` list
+that includes two fails at runtime. The macro generates `<name>_callable_callback()` and, through
+`#[jsg_resource]`, the factory `<name>_callable_member()`, which differ from a `#[jsg_method]`'s,
+so a method may also be a `#[jsg_method]`. See [Callable resources](../jsg/README.md#callable-resources)
+for how they behave.
+
+```rust
+use jsg_macros::{jsg_callable, jsg_resource};
+
+#[jsg_resource]
+struct Greeter { greeting: String }
+
+#[jsg_resource]
+impl Greeter {
+    #[jsg_callable]
+    pub fn greet(&self, name: String) -> String { format!("{}, {name}", self.greeting) }
+}
+// JS: greeter('world')   // "Hello, world"
+//     typeof greeter     // "function"
+```
+
 ## `#[jsg_oneof]`
 
 Generates `jsg::Type`, `jsg::FromJS`, `jsg::Traced` and `jsg::TypeInfo` for a union enum —
@@ -473,7 +513,9 @@ the Rust equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant i
 Each variant must be a single-field tuple whose inner type converts from JavaScript and is
 `jsg::Type` and `jsg::TypeInfo`; RTTI describes the union as its variants' types. A union that holds handles has one lifetime parameter,
 their scope, and no `jsg::Traced` that can be used; a union has no other generic
-parameters. A value converts as it would to the equivalent `kj::OneOf`: variants are
+parameters. Like a `#[jsg_struct]`, a union implements `jsg::HoldsNoGcReferences` when every
+variant does, and `custom_holds_no_gc_references` leaves it to the author. A value converts as it
+would to the equivalent `kj::OneOf`: variants are
 tried in passes that leave coercion for last, in declaration order within a pass. If no
 variant converts the value, a `TypeError` is thrown naming the expected types, such as
 `Expected string or number but got symbol`. Like `kj::OneOf`, a union that breaks Web
@@ -518,7 +560,8 @@ jsg::Traced::trace(&self.field_b, visitor);
 ```
 
 This means tracing behavior is now fully trait-driven. Types with no GC edges
-use no-op `Traced` impls; containers/wrappers recurse to inner values.
+use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to inner values.
+`Traced::trace` has no default, so a hand-written impl must spell out its visits.
 
 ### Supported field shapes
 
@@ -534,7 +577,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
 | `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
-| `#[jsg_struct]` types | Delegates to each field, like a resource |
+| `#[jsg_struct]` types | Delegates to each field, like a resource; implements `jsg::HoldsNoGcReferences` when every field does |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
 A cell is required whenever a traced field needs to be mutated after construction,

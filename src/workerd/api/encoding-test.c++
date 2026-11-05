@@ -86,5 +86,46 @@ KJ_TEST("BestFitASCII") {
   KJ_ASSERT(bestFit(u"012345678😹😹😹😹😹😹", 9) == 9);  // 0123456 is 9 and takes 9.
 }
 
+KJ_TEST("BestFitTwoByteBmp") {
+  // U+0080 to U+07FF take two bytes, U+0800 and up three.
+  KJ_ASSERT(bestFit(u"жжжжж", 1) == 0);
+  KJ_ASSERT(bestFit(u"жжжжж", 2) == 1);
+  KJ_ASSERT(bestFit(u"жжжжж", 3) == 1);
+  KJ_ASSERT(bestFit(u"жжжжж", 4) == 2);
+  KJ_ASSERT(bestFit(u"\u07ff", 2) == 1);
+  KJ_ASSERT(bestFit(u"\u0800", 2) == 0);
+  KJ_ASSERT(bestFit(u"\u0800", 3) == 1);
+
+  constexpr size_t COUNT = 1000;
+  auto text = kj::heapArray<char16_t>(COUNT + 1);
+  for (auto i: kj::zeroTo(COUNT)) text[i] = u'ж';
+  text[COUNT] = 0;
+  for (auto bufferSize: kj::zeroTo(2 * COUNT + 2)) {
+    KJ_ASSERT(bestFit(text.begin(), bufferSize) == kj::min(COUNT, bufferSize / 2), bufferSize);
+  }
+}
+
+KJ_TEST("BestFitLongSurrogatePairRuns") {
+  // Long enough to be measured in several chunks, which must not split a pair. A leading ASCII
+  // character shifts the pairs relative to the chunks.
+  constexpr size_t PAIRS = 1000;
+  for (size_t prefix: kj::zeroTo(2)) {
+    auto text = kj::heapArray<char16_t>(prefix + 2 * PAIRS + 1);
+    if (prefix) text[0] = u'a';
+    for (auto i: kj::zeroTo(PAIRS)) {
+      text[prefix + 2 * i] = 0xd83d;
+      text[prefix + 2 * i + 1] = 0xde39;  // U+1F639
+    }
+    text[prefix + 2 * PAIRS] = 0;
+    for (auto bufferSize: kj::zeroTo(4 * PAIRS + 2)) {
+      size_t expected = 0;
+      if (bufferSize >= prefix) {
+        expected = prefix + 2 * kj::min(PAIRS, (bufferSize - prefix) / 4);
+      }
+      KJ_ASSERT(bestFit(text.begin(), bufferSize) == expected, prefix, bufferSize);
+    }
+  }
+}
+
 }  // namespace test
 }  // namespace workerd::api

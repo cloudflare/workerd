@@ -40,14 +40,8 @@ import type {
 import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
-const {
-  MathMin,
-  ObjectDefineProperties,
-  SymbolToStringTag,
-  TypeError,
-  Uint8Array,
-  uncurryThis,
-} = primordials;
+const { ObjectDefineProperties, SymbolToStringTag, TypeError, uncurryThis } =
+  primordials;
 
 const { isSharedArrayBuffer } = utils;
 
@@ -104,8 +98,7 @@ const byteControllerError = uncurryThis(
 interface CodecHandle {
   push(chunk: ArrayBuffer | ArrayBufferView): void;
   end(): void;
-  pullInto(view: ArrayBufferView): number;
-  available(): number;
+  pull(maxBytes: number): Uint8Array | undefined;
   clear(): void;
 }
 
@@ -208,10 +201,8 @@ function createCodecPair(
   // errored/canceled writable rejects writes before the sink hooks run).
   const drainStage = (): void => {
     while (!finished) {
-      const available = handle.available();
-      if (available <= 0) return;
-      const out = new Uint8Array(MathMin(available, kPieceSize));
-      handle.pullInto(out);
+      const out = handle.pull(kPieceSize);
+      if (out === undefined) return;
       byteControllerEnqueue(readableController, out);
     }
   };
