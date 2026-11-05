@@ -898,7 +898,7 @@ error, as C++ JSG fails with a `KJ_ASSERT`.
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), including with `Utf8Value::new`; `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`), and `json::parse` and `json::stringify` (a `SyntaxError`; a getter, `toJSON()` or Proxy trap). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
 
 A `#[jsg_method]`, property getter or wildcard property converts its return value with `ToJS::to_js_with_creator`, passing the resource's wrapper for an instance member and `None` for a static one, as C++ JSG's `wrap()` takes a `creator`. Only a value that stays pending, a `jsg::Promise`, uses it, and a container passes it on; a `ToJS` impl that holds such values should forward it too.
 
@@ -942,6 +942,26 @@ serialized. A `SharedArrayBuffer` is written as a reference to a buffer that is 
 bytes, which neither `ser::deserialize` nor a `jsg::Deserializer` given only the bytes can
 resolve, so data containing one can't be read back. Deserialization runs no JavaScript. Transfer
 lists, externals and the other options are not supported. The C++ side is `src/rust/jsg/ser.c++`.
+
+## JSON
+
+`jsg::json::parse` and `jsg::json::stringify` are C++ JSG's `jsg::Lock::parseJson()` and
+`serializeJson()`: `JSON.parse()` without a reviver and `JSON.stringify()` without a replacer,
+through V8 directly, so a script that replaces the `JSON` global doesn't affect them.
+`jsg::json::stringify_with_gap` indents the result, as `JSON.stringify()`'s third argument does.
+
+```rust
+let value = jsg::json::parse(lock, r#"{"a": [1, 2]}"#)?;
+assert_eq!(jsg::json::stringify(lock, value)?, r#"{"a":[1,2]}"#);
+```
+
+Invalid JSON leaves a `SyntaxError` pending. What stringifying runs (getters, `toJSON()`, Proxy
+traps) can throw, as can a cycle or a `BigInt`. Both return a pending error then (see
+[Errors from JavaScript](#errors-from-javascript)). A `text` or `gap` longer than
+`v8::String::MAX_LENGTH` bytes fails with `Error::invalid_string_length()`, as converting a
+`&str` to JavaScript does. A value that JSON can't represent, which
+`JSON.stringify()` returns `undefined` for (such as `undefined`, a function or a symbol), gives
+the string `"undefined"`, as in C++ JSG.
 
 ## Type Conversions
 
@@ -1335,6 +1355,64 @@ A wildcard property behaves as in C++ JSG:
 - An object that inherits from the resource, as `Object.create(obj)` does, reads them too.
 - A wildcard property named `then` makes the object a thenable, which `await` would call.
   Return `None` for `then` unless that is intended.
+
+## Explicit resource management
+
+`#[jsg_dispose]` installs a method as `Symbol.dispose` of the prototype, which `using` calls when
+the variable goes out of scope, like C++ JSG's `JSG_DISPOSE`. `#[jsg_async_dispose]` installs one
+as `Symbol.asyncDispose`, which `await using` calls and whose returned promise it awaits, like
+`JSG_ASYNC_DISPOSE`:
+
+```rust
+#[jsg_resource]
+impl Connection {
+    // close() and [Symbol.dispose](), like JSG_METHOD(close); JSG_DISPOSE(close);
+    #[jsg_method]
+    #[jsg_dispose]
+    pub fn close(&self) { /* ... */ }
+}
+
+#[jsg_resource]
+impl Flusher {
+    // Only [Symbol.asyncDispose](). The Rust name is irrelevant: without #[jsg_method], the
+    // method has no JavaScript name of its own.
+    #[jsg_async_dispose]
+    pub fn shutdown<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        /* ... */
+    }
+}
+```
+
+- The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and is called like a
+  `#[jsg_method]`, with the type's `v8::Signature`. It is a non-enumerable property of the
+  prototype, with `.length` 0, that cannot be called with `new`. It may also be a
+  `#[jsg_method]` or a `#[jsg_callable]`, but not a `#[jsg_property]`, an
+  `#[jsg_inspect_property]` or a `#[jsg_wildcard_property]`, which are registered without the
+  signature its callback uses.
+- An async disposer should return a promise (`jsg::Promise<'s, T>` or
+  `v8::Local<'s, v8::Promise>`, optionally in a `Result`). `await using` awaits whatever it
+  returns, so any other value makes it a sync disposer that finishes a microtask later: write a
+  `#[jsg_dispose]` instead, which `await using` calls too.
+- A type has at most one disposer of each kind, as in C++ JSG. It may have both a sync and an
+  async one, as Node.js's `readline/promises` `Interface` does, though C++ JSG discourages it:
+  `using` calls only the sync one and `await using` prefers the async one. One method cannot be
+  both. With automatic registration a second disposer of a kind is a compile error;
+  `custom_members` may choose between several by compatibility flag, registering
+  `Self::<name>_dispose_member()` or `Self::<name>_async_dispose_member()`, and registering two of
+  a kind panics when the template is created.
+- RTTI does not describe disposers. C++ RTTI does, but its TypeScript generator ignores them.
+
+As for C++ JSG (see the comment on `JSG_DISPOSE` in `src/workerd/jsg/jsg.h`):
+
+- Prefer `#[jsg_dispose]`: `await using` accepts a sync disposer too.
+- Disposal usually runs because the scope threw. Expose clean shutdown as an explicit method, and
+  make the disposer only release the resource.
+- The disposer is not told about the exception, and an error it returns replaces the exception,
+  which becomes the `suppressed` of a `SuppressedError`.
+- JavaScript can call the disposer directly, any number of times, so it must be idempotent. It
+  must also be safe to re-enter: a disposer that runs JavaScript, such as a callback or an event
+  listener, can be called again before it returns. Mark the resource disposed before calling out,
+  so the nested call finds nothing left to do, and hold no `RefCell` borrow across the call.
 
 ## Callable resources
 

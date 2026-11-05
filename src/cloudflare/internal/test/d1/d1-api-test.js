@@ -18,6 +18,21 @@ export const testExec = {
   },
 };
 
+export const testInnerFetcherIsPrivate = {
+  test(_ctr, env) {
+    // User code must reach the inner service stub only through the D1 API.
+    const session = env.d1.withSession();
+    const statement = env.d1.prepare('select 1');
+    assert.deepStrictEqual(Object.keys(env.d1), []);
+    assert.deepStrictEqual(Object.keys(session), []);
+    assert.deepStrictEqual(Object.keys(statement), ['statement', 'params']);
+    assert.strictEqual(env.d1.fetcher, undefined);
+    assert.strictEqual(env.d1.alwaysPrimarySession, undefined);
+    assert.strictEqual(session.fetcher, undefined);
+    assert.strictEqual(statement.dbSession, undefined);
+  },
+};
+
 export const testDirectQuery = {
   async test(_ctr, env) {
     if (!Cloudflare.compatibilityFlags['d1_binding_jsrpc']) {

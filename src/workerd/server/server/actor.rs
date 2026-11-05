@@ -470,6 +470,20 @@ impl ActorNamespace {
         }
     }
 
+    /// Gives `metadata` a self token naming the root actor `id`, for `ctx.restore()`. An
+    /// ephemeral namespace's actors have none.
+    fn set_self_token(&self, metadata: &mut KjOwn<RequestMetadata>, id: &ActorIdHandle) {
+        if let Some(unique_key) = self.unique_key() {
+            ffi::request_metadata_set_actor_self_token(
+                self.factory.raw(),
+                metadata.as_mut(),
+                unique_key,
+                id,
+                self.persistent_self_tokens,
+            );
+        }
+    }
+
     /// Where the config has the class's `container` options, if it has any.
     fn container(&self) -> Option<&ffi::ContainerRef> {
         match &self.config {
@@ -1082,15 +1096,7 @@ impl Client {
                 // container that would block eviction. A facet is only ever called by its
                 // parent, or through a restored channel the parent set up, which brings its own
                 // trusted factory.
-                if let Some(unique_key) = ns.unique_key() {
-                    ffi::request_metadata_set_actor_self_token(
-                        ns.factory.raw(),
-                        metadata.as_mut(),
-                        unique_key,
-                        id,
-                        ns.persistent_self_tokens,
-                    );
-                }
+                ns.set_self_token(&mut metadata, id);
             }
             class.start_request(metadata, actor)?
         };
@@ -1344,13 +1350,15 @@ impl ActorContainer {
             let ns = self.namespace()?;
             ns.require_lease()?;
             let class = self.class()?;
+            let mut metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+            ns.set_self_token(&mut metadata, &*self.id()?);
             let container = Weak::clone(&self.this);
             let reason = reason.to_owned();
             let retirement = ns
                 .factory
-                .spawn(
-                    async move { retire_actor(container, actor, class, reason, hibernate).await },
-                )
+                .spawn(async move {
+                    retire_actor(container, actor, class, metadata, reason, hibernate).await
+                })
                 .shared();
             *self.retirement.borrow_mut() = Some(retirement.clone());
             self.cancel_shutdown();
@@ -1402,10 +1410,11 @@ async fn retire_actor(
     container: Weak<ActorContainer>,
     actor: Rc<KjOwn<ffi::ActorHandle>>,
     class: Rc<dyn ActorClass>,
+    metadata: KjOwn<RequestMetadata>,
     reason: String,
     hibernate: bool,
 ) -> Result<()> {
-    let hook = class.run_on_hibernate(&actor).await;
+    let hook = class.run_on_hibernate(metadata, &actor).await;
     let container = container
         .upgrade()
         .ok_or_else(|| kj::disconnected!("the retiring actor's container is gone"))?;
