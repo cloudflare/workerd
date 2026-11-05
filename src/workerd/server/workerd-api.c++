@@ -460,6 +460,49 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 // placed on the private `env` of a `cloudflare-internal:` module, not on the worker's own `env`.
 WD_STRONG_BOOL(IsInternalBinding);
 
+// The object a binding compiles to is a description that each request resolves through its own
+// IoContext (a channel number, names, flags): creating it does no I/O, and it transfers through a
+// startup snapshot by its snapshotClone() (jsg::Wrappable) like any other live object. The
+// exceptions, whose kinds keep a Worker out of the pipeline:
+// * CRYPTO_KEY: a CryptoKey owns its key material in BoringSSL objects (an RSA key V8 handles
+//   too), which no snapshotClone() copies.
+// * MEMORY_CACHE: a MemoryCache holds a binding into the factory-wide shared cache, acquired
+//   from the provider at construction.
+// * WRAPPED: the binding is whatever JS an internal module returns, and the Hyperdrive wrapper
+//   registers a connect override on the zygote's global scope, which the restored Worker's
+//   fresh global scope would lack.
+// * LOOPBACK_*: only ever `ctx.exports` entries, built for the real Worker after the zygote has
+//   run; their classes do not transfer.
+bool WorkerdApi::isBindingTransferableThroughSnapshot(Global::Reader global) {
+  switch (global.which()) {
+    case Global::TEXT:
+    case Global::DATA:
+    case Global::JSON:
+    case Global::FETCHER:
+    case Global::KV_NAMESPACE:
+    case Global::R2_BUCKET:
+    case Global::QUEUE:
+    case Global::ANALYTICS_ENGINE:
+    case Global::HYPERDRIVE:
+    case Global::EPHEMERAL_ACTOR_NAMESPACE:
+    case Global::DURABLE_ACTOR_NAMESPACE:
+    case Global::ACTOR_CLASS:
+    case Global::UNSAFE_EVAL:
+    case Global::WORKER_LOADER:
+    case Global::WORKERD_DEBUG_PORT:
+      return true;
+    case Global::CRYPTO_KEY:
+    case Global::MEMORY_CACHE:
+    case Global::WRAPPED:
+    case Global::LOOPBACK_SERVICE_STUB:
+    case Global::LOOPBACK_EPHEMERAL_ACTOR_NAMESPACE:
+    case Global::LOOPBACK_DURABLE_ACTOR_NAMESPACE:
+    case Global::LOOPBACK_ACTOR_CLASS:
+      return false;
+  }
+  KJ_UNREACHABLE;
+}
+
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     Global::Reader global,
     CompatibilityFlags::Reader featureFlags,
@@ -467,6 +510,11 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   auto context = lock.v8Context();
+
+  KJ_REQUIRE(!jsg::IsolateBase::from(lock.v8Isolate).isPreparingSnapshot() ||
+          WorkerdApi::isBindingTransferableThroughSnapshot(global),
+      "a binding that cannot transfer through a startup snapshot reached the zygote",
+      global.getName());
 
   // When new binding types are created. If their value resolves to be a string
   // or a JSON stringified/stringifiable value, then it should be added to
