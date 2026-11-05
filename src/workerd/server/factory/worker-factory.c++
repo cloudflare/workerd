@@ -1569,9 +1569,34 @@ bool hasWasmModules(const WorkerSource& source) {
   return false;
 }
 
-bool supportsStartupSnapshot(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
-  return !featureFlags.getPythonWorkers() && !featureFlags.getNewModuleRegistry() &&
-      !source.variant.is<WorkerSource::ScriptSource>() && !hasWasmModules(source);
+// Whether a Worker's top level can be evaluated in a zygote isolate and baked into a startup
+// snapshot.
+//
+// Every binding must be of a kind that transfers through the snapshot
+// (WorkerdApi::isBindingTransferableThroughSnapshot()): the zygote compiles the real bindings
+// into `env`, and the Worker started from the snapshot takes `env` out of it complete. `globals`
+// is the Worker's encoded Globals message; a dynamic Worker has none (its `env` arrives as
+// capabilities rather than channel numbers) and never qualifies.
+bool supportsStartupSnapshot(kj::StringPtr name,
+    CompatibilityFlags::Reader featureFlags,
+    const WorkerSource& source,
+    kj::Maybe<kj::ArrayPtr<const uint64_t>> globals) {
+  if (featureFlags.getPythonWorkers() || featureFlags.getNewModuleRegistry() ||
+      source.variant.is<WorkerSource::ScriptSource>() || hasWasmModules(source)) {
+    return false;
+  }
+  KJ_IF_SOME(words, globals) {
+    capnp::FlatArrayMessageReader reader(asWords(words), CONFIG_READER_OPTIONS);
+    for (auto global: reader.getRoot<Globals>().getGlobals()) {
+      if (!WorkerdApi::isBindingTransferableThroughSnapshot(global)) {
+        KJ_LOG(INFO, "startup snapshot skipped: a binding of this kind cannot be transferred", name,
+            global.getName(), static_cast<uint>(global.which()));
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -1686,9 +1711,11 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
 
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code
   // to produce a V8 startup snapshot of it.
+  kj::Maybe<kj::ArrayPtr<const uint64_t>> envGlobals;
+  if (!impl->isDynamic) envGlobals = kj::from<Rust>(spec.globals);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
-      supportsStartupSnapshot(featureFlags, workerSource)) {
+      supportsStartupSnapshot(impl->name, featureFlags, workerSource, envGlobals)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
     ErrorReporter zygoteErrors;
@@ -1788,7 +1815,11 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {
     impl->ctxExportsHandle = lock.v8Ref(ctxExports);
-    compileBindings(lock, api, target);
+    // A Worker started from a startup snapshot takes `env` out of the snapshot complete with the
+    // bindings the zygote compiled into it.
+    if (!jsg::IsolateBase::from(lock.v8Isolate).isStartingFromSnapshot()) {
+      compileBindings(lock, api, target);
+    }
   },
       IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
