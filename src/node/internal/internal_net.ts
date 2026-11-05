@@ -56,6 +56,7 @@ import {
   ENOBUFS,
   ConnectException,
   GetAddrInfoException,
+  SocketErrnoException,
 } from 'node-internal:internal_errors';
 
 import {
@@ -1101,6 +1102,7 @@ Socket.prototype._writeGeneric = function (
       cb(new ERR_SOCKET_CLOSED());
       return false;
     }
+    const handle = this._handle;
 
     this._unrefTimer();
 
@@ -1137,7 +1139,7 @@ Socket.prototype._writeGeneric = function (
       }
       this._unrefTimer();
 
-      this._handle.writer.write(Buffer.concat(buffers)).then(
+      handle.writer.write(Buffer.concat(buffers)).then(
         () => {
           if (this._handle != null) {
             this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0;
@@ -1151,7 +1153,7 @@ Socket.prototype._writeGeneric = function (
         (err: unknown): void => {
           this[kLastWriteQueueSize] = 0;
           this._unrefTimer();
-          cb(err as Error);
+          cb(streamFailureError(handle.socket, 'write', err as Error));
         }
       );
     } else {
@@ -1161,7 +1163,7 @@ Socket.prototype._writeGeneric = function (
       } else {
         bufferData = data as unknown as Buffer;
       }
-      this._handle.writer.write(bufferData).then(
+      handle.writer.write(bufferData).then(
         () => {
           if (this._handle != null) {
             this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0;
@@ -1175,7 +1177,7 @@ Socket.prototype._writeGeneric = function (
         (err: unknown): void => {
           this[kLastWriteQueueSize] = 0;
           this._unrefTimer();
-          cb(err as Error);
+          cb(streamFailureError(handle.socket, 'write', err as Error));
         }
       );
       lastWriteSize = bufferData.byteLength;
@@ -1726,6 +1728,20 @@ function connectFailureError(
   return new ConnectException(code, address, port);
 }
 
+// A failed read or write whose cause the platform recognized is reported the
+// way Node does; any other failure keeps the platform's error.
+function streamFailureError(
+  handle: ReturnType<typeof inner.connect>,
+  syscall: 'read' | 'write',
+  err: Error
+): Error {
+  const code =
+    syscall === 'read'
+      ? inner.getReadFailureCode(handle)
+      : inner.getWriteFailureCode(handle);
+  return code === undefined ? err : new SocketErrnoException(code, syscall);
+}
+
 function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
@@ -2132,7 +2148,7 @@ async function startRead(socket: Socket): Promise<void> {
     // (above), a read the runtime refuses - destroys the socket with the
     // error rather than leaving it open and silent.
     if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
-      socket.destroy(err as Error);
+      socket.destroy(streamFailureError(handle.socket, 'read', err as Error));
     }
   } finally {
     handle.readLoopActive = false;
