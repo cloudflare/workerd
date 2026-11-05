@@ -139,12 +139,18 @@ class UnsafeModule: public jsg::Object {
   // This is used to verify that the all-autogates test variant is working correctly.
   bool isTestAutogateEnabled();
 
+  // Whether this Worker's isolate was started from a startup snapshot rather than evaluating its
+  // top level itself (docs/startup-snapshot.md). Meaningful at request time only: asked at module
+  // scope, the answer is the zygote's and is baked into the snapshot.
+  bool startedFromStartupSnapshot(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
     JSG_METHOD(deleteAllDurableObjects);
     JSG_METHOD(evict);
     JSG_METHOD(evictAllDurableObjects);
     JSG_METHOD(isTestAutogateEnabled);
+    JSG_METHOD(startedFromStartupSnapshot);
   }
 };
 

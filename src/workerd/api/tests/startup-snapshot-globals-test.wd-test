@@ -1,0 +1,180 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Top-level code that touches what V8 adds to a context only when it is not building a startup
+# snapshot (RESTORE_TIME_GLOBALS in jsg/setup.h). The runner's test() fetches every case service and
+# asserts its report; see startup-snapshot-globals-test.js. The @all-autogates variant turns the
+# startup-snapshot autogate on, so every service here goes through the zygote; the @ variant runs
+# them as plain Workers.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "control", service = "control"),
+          (name = "stl-set", service = "stl-set"),
+          (name = "stl-save-raise-restore", service = "stl-save-raise-restore"),
+          (name = "stl-delete", service = "stl-delete"),
+          (name = "stl-nonconfigurable", service = "stl-nonconfigurable"),
+          (name = "error-frozen", service = "error-frozen"),
+          (name = "iter-assign", service = "iter-assign"),
+          (name = "iter-define", service = "iter-define"),
+          (name = "wasm-probe", service = "wasm-probe"),
+          (name = "wasm-probe-caught", service = "wasm-probe-caught"),
+          (name = "wasm-assign", service = "wasm-assign"),
+          (name = "wasm-assign-caught", service = "wasm-assign-caught"),
+          (name = "iter-polyfill-caught", service = "iter-polyfill-caught"),
+          (name = "wasm-use", service = "wasm-use"),
+          (name = "sab-probe", service = "sab-probe"),
+        ],
+      )
+    ),
+    ( name = "control",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"control\""),
+        ],
+      )
+    ),
+    ( name = "stl-set",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"stl-set\""),
+        ],
+      )
+    ),
+    ( name = "stl-save-raise-restore",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"stl-save-raise-restore\""),
+        ],
+      )
+    ),
+    ( name = "stl-delete",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"stl-delete\""),
+        ],
+      )
+    ),
+    ( name = "stl-nonconfigurable",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"stl-nonconfigurable\""),
+        ],
+      )
+    ),
+    ( name = "error-frozen",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"error-frozen\""),
+        ],
+      )
+    ),
+    ( name = "iter-assign",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"iter-assign\""),
+        ],
+      )
+    ),
+    ( name = "iter-define",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"iter-define\""),
+        ],
+      )
+    ),
+    ( name = "wasm-probe",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-probe\""),
+        ],
+      )
+    ),
+    ( name = "wasm-probe-caught",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-probe-caught\""),
+        ],
+      )
+    ),
+    ( name = "wasm-assign",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-assign\""),
+        ],
+      )
+    ),
+    ( name = "wasm-assign-caught",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-assign-caught\""),
+        ],
+      )
+    ),
+    ( name = "iter-polyfill-caught",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"iter-polyfill-caught\""),
+        ],
+      )
+    ),
+    ( name = "wasm-use",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-use\""),
+        ],
+      )
+    ),
+    ( name = "sab-probe",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"sab-probe\""),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);
