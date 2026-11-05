@@ -580,10 +580,11 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // The caller holds the isolate lock. The references are valid only for the duration of the
   // call: `fn` must not attach or detach wrappers (the list is being iterated) and must not
   // allocate on the V8 or cppgc heap, since a GC drops collected wrappers from the list. What
-  // `fn` may keep past the call is the shim's address: on snapshot preparation
-  // destroyLiveWrappableInstances() retires shims instead of freelisting them, so the address
-  // stays unique until the isolate is torn down and serves as the key under which V8 later
-  // reports the wrapper to the API-wrapper serializer.
+  // `fn` may keep past the call is the shim's address, the key under which V8 later reports the
+  // wrapper to the API-wrapper serializer, provided `fn` also roots the shim (a
+  // cppgc::Persistent): destroyLiveWrappableInstances() retires shims instead of freelisting
+  // them, so a retired shim is never handed out again, but one that no wrapper reaches any more
+  // is swept by the next major GC, and a shim allocated afterwards can take its address.
   void forEachLiveWrapper(
       kj::FunctionParam<void(Wrappable&, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag)>
           fn);
