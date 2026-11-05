@@ -6,7 +6,6 @@
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
-#include <workerd/api/node/buffer-native.h>
 #include <workerd/api/node/buffer.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
@@ -72,12 +71,12 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
 }
 
 // `node-internal:buffer` has both a C++ (`BufferUtil`) and a TypeScript
-// implementation, the latter in the NODE_BUNDLE and backed by the C++
-// `node-internal:buffer_native` module (`BufferNative`). The NODEJS_BUFFER_TS
-// autogate selects the TypeScript one; exactly one of the two registers the
+// implementation, the latter in the NODE_BUNDLE and backed by the Rust
+// `node-internal:buffer_native` module (src/rust/api/buffer.rs), which
+// register_nodejs_modules() registers. The NODEJS_BUFFER_TS autogate selects
+// the TypeScript one; exactly one of the two registers the
 // `node-internal:buffer` specifier.
 constexpr kj::StringPtr kNodeBufferSpecifier = "node-internal:buffer"_kj;
-constexpr kj::StringPtr kNodeBufferNativeSpecifier = "node-internal:buffer_native"_kj;
 
 inline bool useTsBuffer() {
   return util::Autogate::isEnabled(util::AutogateKey::NODEJS_BUFFER_TS);
@@ -117,10 +116,7 @@ void registerNodeJsCompatModules(
 #undef V
 
   bool tsBuffer = useTsBuffer();
-  if (tsBuffer) {
-    registry.template addBuiltinModule<BufferNative>(
-        kNodeBufferNativeSpecifier, workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  } else {
+  if (!tsBuffer) {
     registry.template addBuiltinModule<BufferUtil>(
         kNodeBufferSpecifier, workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
@@ -272,10 +268,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   // See registerNodeJsCompatModules(): the NODEJS_BUFFER_TS autogate selects
   // between the C++ and TypeScript implementations of `node-internal:buffer`.
   bool tsBuffer = useTsBuffer();
-  if (tsBuffer) {
-    static const auto kBufferNativeSpecifier = "node-internal:buffer_native"_url;
-    builder.addObject<BufferNative, TypeWrapper>(kBufferNativeSpecifier);
-  } else {
+  if (!tsBuffer) {
     static const auto kBufferUtilSpecifier = "node-internal:buffer"_url;
     builder.addObject<BufferUtil, TypeWrapper>(kBufferUtilSpecifier);
   }
@@ -425,7 +418,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
 }  // namespace workerd::api::node
 
 #define EW_NODE_ISOLATE_TYPES                                                                      \
-  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_BUFFER_NATIVE_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES, \
+  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
       EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES

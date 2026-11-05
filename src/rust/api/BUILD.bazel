@@ -19,8 +19,12 @@ wd_rust_crate(
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/i18n",
         "//src/rust/jsg",
         "@crates_vendor//:ada-url",
+        "@crates_vendor//:base64-simd",
+        "@crates_vendor//:memchr",
+        "@crates_vendor//:simdutf8",
         "@crates_vendor//:thiserror",
     ],
 )

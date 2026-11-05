@@ -78,12 +78,10 @@ wd_cc_library(
     name = "node-core",
     srcs = [
         "buffer.c++",
-        "buffer-native.c++",
         "i18n.c++",
     ],
     hdrs = [
         "buffer.h",
-        "buffer-native.h",
         "buffer-string-search.h",
         "i18n.h",
         "node-version.h",

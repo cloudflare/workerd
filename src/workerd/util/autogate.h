@@ -83,7 +83,7 @@ namespace workerd::util {
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* When enabled, `node-internal:buffer` is provided by the TypeScript                             \
-     implementation (src/node/internal/buffer.ts, backed by the C++                                \
+     implementation (src/node/internal/buffer.ts, backed by the Rust                               \
      `node-internal:buffer_native` primitives) instead of the C++ BufferUtil. The C++              \
      implementation is retained for rollback. */                                                   \
   V(NODEJS_BUFFER_TS)                                                                              \
