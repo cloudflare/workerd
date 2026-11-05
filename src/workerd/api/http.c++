@@ -2369,6 +2369,18 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
+kj::Maybe<kj::Own<jsg::Wrappable>> Fetcher::snapshotClone() const {
+  // A Fetcher bound to a live channel or factory belongs to one IoContext. One that registered a
+  // connect override (ctx.mapVirtualHost()) left that override on the zygote's global scope,
+  // which the restored Worker's fresh global scope does not have.
+  KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
+    if (registeredConnectOverride) return kj::none;
+    return ownAsWrappable(
+        kj::refcounted<Fetcher>(channel, requiresHost, isInHouse, rpcCompatGateBypassed));
+  }
+  return kj::none;
+}
+
 void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
   if (registeredConnectOverride) {
     return;
