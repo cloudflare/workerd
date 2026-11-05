@@ -436,6 +436,8 @@ export const encodeIntoMatchesTheStandard = {
       loneLead: 'abп\ud800',
       loneTrail: '漢\udc00',
       sparseLoneSurrogate: 'x'.repeat(500) + '\ud800' + 'п'.repeat(499),
+      latin1Boundaries: '\x7f\x80\xff',
+      utf16Boundaries: '\x7f\x80\u07ff\u0800\uffff\u{10000}',
     };
     const SENTINEL = 0x5a;
     for (const [name, pattern] of Object.entries(patterns)) {

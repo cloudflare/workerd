@@ -643,12 +643,17 @@ EncodedPrefix encodeLatin1Prefix(kj::ArrayPtr<const char> input, kj::ArrayPtr<ch
 }
 
 EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> output) {
+  size_t read;
+  size_t written;
   if (output.size() / 3 >= input.size()) {
     auto result =
         simdutf::convert_utf16_to_utf8_with_errors(input.begin(), input.size(), output.begin());
     if (result.error == simdutf::SUCCESS) {
       return {input.size(), result.count};
     }
+    // The output before the error is complete, which simdutf's bounded conversions also rely on.
+    read = result.count;
+    written = simdutf::utf8_length_from_utf16(input.begin(), read);
   } else {
     auto result = simdutf::convert_utf16_to_utf8_safe_with_details(
         input.begin(), input.size(), output.begin(), output.size());
@@ -663,17 +668,25 @@ EncodedPrefix encodeUtf16Prefix(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr
     if (result.error != simdutf::SURROGATE) {
       return {result.input_count, result.output_count};
     }
+    read = result.input_count;
+    written = result.output_count;
   }
   // A lone surrogate becomes U+FFFD in place, so a well-formed copy reads and writes the same
   // counts. simdutf's replacing conversions restart at every lone surrogate, which is far slower
-  // when they are dense. Each code unit takes at least one byte, so at most output.size() of them
-  // are read, and one more keeps a pair on that boundary whole.
-  size_t length = kj::min(input.size(), output.size() + 1);
+  // when they are dense. Each code unit takes at least one byte, so at most restOut.size() of
+  // them are read, and one more keeps a pair on that boundary whole.
+  auto restIn = input.slice(read);
+  auto restOut = output.slice(written);
+  size_t length = kj::min(restIn.size(), restOut.size() + 1);
   kj::SmallArray<char16_t, MAX_SIZE_FOR_STACK_ALLOC> wellFormed(length);
-  simdutf::to_well_formed_utf16(input.begin(), length, wellFormed.begin());
+  simdutf::to_well_formed_utf16(restIn.begin(), length, wellFormed.begin());
+  if (restOut.size() / 3 >= length) {
+    return {read + length,
+      written + simdutf::convert_utf16_to_utf8(wellFormed.begin(), length, restOut.begin())};
+  }
   auto result = simdutf::convert_utf16_to_utf8_safe_with_details(
-      wellFormed.begin(), length, output.begin(), output.size());
-  return {result.input_count, result.output_count};
+      wellFormed.begin(), length, restOut.begin(), restOut.size());
+  return {read + result.input_count, written + result.output_count};
 }
 
 }  // namespace
