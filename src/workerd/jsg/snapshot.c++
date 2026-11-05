@@ -45,7 +45,10 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
       }
     }
     entries.insert(&shim,
-        Entry{.index = index, .tag = tag, .typeName = kj::str(wrappable.jsgGetMemoryName())});
+        Entry{.index = index,
+          .tag = tag,
+          .typeName = kj::str(wrappable.jsgGetMemoryName()),
+          .shim = cppgc::Persistent<v8::Object::Wrappable>(&shim)});
   });
 }
 
