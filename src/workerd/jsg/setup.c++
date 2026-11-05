@@ -628,6 +628,47 @@ void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contex
   });
 }
 
+namespace {
+// The counter of the createSnapshotBlob() step 3b drain running on this thread, if any.
+thread_local uint32_t* refusedCleanupCounter = nullptr;
+
+// Message listener installed around that drain. V8 reports every cleanup callback call the
+// DisallowJavascriptExecutionScope refused as a message.
+void countRefusedCleanup(v8::Local<v8::Message> message, v8::Local<v8::Value> data) {
+  ++KJ_ASSERT_NONNULL(refusedCleanupCounter);
+}
+}  // namespace
+
+void IsolateBase::settleFinalizationRegistriesForSnapshot(Lock& js) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  v8::HandleScope scope(ptr);
+  // A round is a full GC followed by every task it made V8 post. One round is rarely enough:
+  // cppgc sweeps atomically, so the GC of a round destroys the C++ side of a collected wrapper
+  // and releases the handles it held, and the objects behind those handles die only in the next
+  // round's GC. A cleanup callback can register more doomed objects too. The pump reports
+  // whether it ran anything at all rather than cleanup tasks specifically; a task of another kind
+  // merely costs one more round.
+  constexpr uint kMaxRounds = 8;
+  for (uint round = 0;; ++round) {
+    js.runMicrotasks();
+    ptr->ClearKeptObjects();
+    ptr->LowMemoryNotification();
+    bool ranTask = false;
+    while (pumpMsgLoop()) {
+      ranTask = true;
+      if (ptr->IsExecutionTerminating()) return;
+      js.runMicrotasks();
+      ptr->ClearKeptObjects();
+    }
+    KJ_LOG(INFO, "TEMP settle round", round, ranTask);
+    if (!ranTask) return;
+    KJ_REQUIRE(round < kMaxRounds,
+        "PREPARE_SNAPSHOT: FinalizationRegistry cleanups did not settle; cleanup callbacks keep "
+        "registering objects that are collected right away",
+        kMaxRounds);
+  }
+}
+
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
     kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
     const uint32_t* badTagFieldsCount,
@@ -654,7 +695,8 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // 2. Record the native side of every live wrapper while it still exists: a stateless type by
   // its tag alone, a stateful one as a clone. The Wrappables themselves are destroyed in step 3,
   // before CreateBlob() checks that no V8 handles are left; by the time the serializer callbacks
-  // run, the shim pointer V8 reports is all that remains of a wrapper's native side.
+  // run, the shim pointer V8 reports is all that remains of a wrapper's native side. No
+  // JavaScript runs from here until CreateBlob() returns: see step 3b.
   wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
       [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
 
@@ -666,18 +708,41 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // lock, after CreateBlob().
   applyDeferredActions();
 
-  // 3b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
-  // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
-  // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
-  // runner, and the startup serializer then rejects the isolate
-  // (StartupSerializer::CheckNoDirtyFinalizationRegistries).
+  // 3b. Collect what destroying the graph released, and retire the FinalizationRegistry
+  // cleanups that makes due without running them. No JavaScript may run past step 2: a cleanup
+  // callback would find every wrapper detached (an unwrap aborts), and could allocate a shim at
+  // the address of one recorded in step 2 and swept since. The cleanups that were due before the
+  // graph was destroyed ran in settleFinalizationRegistriesForSnapshot(); the ones that become
+  // due here are for registered objects that only C++ state reached, which the snapshot does not
+  // carry.
+  //
+  // CreateBlob() runs a full GC of its own before serializing, and its startup serializer rejects
+  // an isolate with a cleared cell in any registry
+  // (StartupSerializer::CheckNoDirtyFinalizationRegistries). The GC here finds such cells first.
+  // V8 then posts its cleanup task, which pops a cleared cell before calling the callback; under
+  // DisallowJavascriptExecutionScope the call throws instead of running, so pumping the task
+  // runner drains every registry without a JavaScript frame. V8 reports each refused call as a
+  // message. A zygote with any is rejected: snapshotting it would drop those cleanups silently.
   {
     v8::HandleScope scope(ptr);
-    ptr->LowMemoryNotification();
-    while (pumpMsgLoop()) {
-      ptr->PerformMicrotaskCheckpoint();
-    }
     ptr->ClearKeptObjects();
+    ptr->LowMemoryNotification();
+    uint32_t refusedCleanups = 0;
+    refusedCleanupCounter = &refusedCleanups;
+    ptr->AddMessageListener(countRefusedCleanup);
+    KJ_DEFER({
+      ptr->RemoveMessageListeners(countRefusedCleanup);
+      refusedCleanupCounter = nullptr;
+    });
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          ptr, v8::Isolate::DisallowJavascriptExecutionScope::THROW_ON_FAILURE);
+      while (pumpMsgLoop()) {}
+    }
+    KJ_REQUIRE(refusedCleanups == 0,
+        "PREPARE_SNAPSHOT: FinalizationRegistry cleanups became due only once the zygote's "
+        "objects were destroyed; their targets were held by C++ state the snapshot does not carry",
+        refusedCleanups);
   }
 
   // 4. Reset isolate level handles.

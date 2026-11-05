@@ -146,9 +146,16 @@ struct WrappablesSerializeMetadata {
 
     // Whether the serializer emitted `index`, i.e. the wrapper was reachable at CreateBlob().
     bool serialized = false;
+
+    // The shim itself, rooted so that it stays allocated for as long as this metadata lives: the
+    // entry's key is its address, and a shim swept by a GC could otherwise be reallocated at the
+    // same address for a wrapper created afterwards, which the serializer would then report
+    // under this entry.
+    cppgc::Persistent<v8::Object::Wrappable> shim;
   };
 
-  // Keyed by the v8::Object::Wrappable base of the CppgcShim.
+  // Keyed by the v8::Object::Wrappable base of the CppgcShim, the pointer V8 reports to the
+  // API-wrapper serializer. Each entry roots its shim; see Entry::shim.
   kj::HashMap<const void*, Entry> entries;
 
   // Findings the callback cannot raise itself (V8 is built without exceptions); checked by

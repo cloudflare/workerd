@@ -651,10 +651,28 @@ class IsolateBase {
       uint32_t* badTagFieldsCount,
       WrappablesSerializeMetadata* wrappablesMetadata);
 
+  // Zygote only, right after its top level has run and before anything of the context is
+  // recorded for the snapshot. Runs the FinalizationRegistry cleanups the top level left due, the
+  // way the event loop would after the top level's job: a microtask checkpoint, the WeakRef kept
+  // objects cleared, a full GC, then every task V8 posted (its cleanup tasks among them), each
+  // followed by a checkpoint of its own, round after round until a GC posts nothing more. This is
+  // the last point at which the zygote runs JavaScript: the record steps that follow (listeners,
+  // bootstrap state, createSnapshotBlob()) capture state a cleanup callback could still change,
+  // and the shim addresses recordLiveWrappables() keys by are unique only while nothing allocates.
+  //
+  // The callbacks run without an IoContext, as they do at request time. An exception one throws
+  // is reported through the isolate's message listeners, as at request time, and does not fail
+  // the zygote. Returns early when execution is terminating (a startup limit cut a callback
+  // short); the caller decides what to do about it. Throws if the cleanups do not settle within
+  // a fixed number of rounds: callbacks that keep registering objects that die right away.
+  void settleFinalizationRegistriesForSnapshot(Lock& js);
+
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
   // setSnapshotDefaultContext(); the metadata records the live wrappers right before CreateBlob()
-  // and both are checked afterwards.
+  // and both are checked afterwards. No JavaScript runs from the moment the metadata records the
+  // wrappers until CreateBlob() returns; the caller runs
+  // settleFinalizationRegistriesForSnapshot() beforehand.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
   //
