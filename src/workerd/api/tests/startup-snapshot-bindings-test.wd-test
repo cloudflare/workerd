@@ -1,0 +1,105 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Capability bindings captured at module scope and used at request time; see
+# startup-snapshot-bindings-test.js. The runner's test() fetches every case service and asserts
+# its report. The @all-autogates variant turns the startup-snapshot autogate on, so every service
+# here goes through the zygote; the @ variant runs them as plain Workers.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
+const modules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = embed "startup-snapshot-bindings-test.js"),
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"runner\""),
+          (name = "rpc", service = "rpc"),
+          (name = "durable-object", service = "durable-object"),
+          (name = "rpc-property", service = "rpc-property"),
+          (name = "wrapped", service = "wrapped"),
+          (name = "crypto-key", service = "crypto-key"),
+        ],
+      )
+    ),
+    ( name = "rpc",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"rpc\""),
+          (name = "RPC", service = (name = "rpc", entrypoint = "Rpc")),
+        ],
+      )
+    ),
+    ( name = "durable-object",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        durableObjectNamespaces = [
+          (className = "Counter", uniqueKey = "2b7f0c1d9e8a4f6b8c3d5e7f9a1b2c3d"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "MODE", json = "\"durable-object\""),
+          (name = "NS", durableObjectNamespace = "Counter"),
+        ],
+      )
+    ),
+    ( name = "rpc-property",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"rpc-property\""),
+          (name = "RPC", service = (name = "rpc-property", entrypoint = "Rpc")),
+        ],
+      )
+    ),
+    ( name = "wrapped",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wrapped\""),
+          ( name = "AI",
+            wrapped = (
+              moduleName = "cloudflare-internal:ai-api",
+              innerBindings = [
+                (name = "fetcher", service = (name = "wrapped", entrypoint = "Rpc"))
+              ],
+            )
+          ),
+        ],
+      )
+    ),
+    ( name = "crypto-key",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"crypto-key\""),
+          ( name = "KEY",
+            cryptoKey = (
+              raw = "0123456789abcdef0123456789abcdef",
+              algorithm = (json = "{\"name\": \"HMAC\", \"hash\": \"SHA-256\"}"),
+              usages = [sign, verify],
+            )
+          ),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);
