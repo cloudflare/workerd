@@ -723,6 +723,89 @@ KJ_TEST("canceling runOnHibernate() reports the handler's onset but no return") 
   });
 }
 
+KJ_TEST("logUncaughtExceptionAsync() traces after its request is destroyed during the lock wait") {
+  auto io = kj::setupAsyncIo();
+  FrozenTimerChannel timer;
+  TestFixture fixture({.waitScope = io.waitScope,
+    .useRealTimers = false,
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timer);
+  })});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
+  auto context = fixture.newIoContext();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto traceRef = kj::addRef(*trace);
+  kj::Rc<BaseTracer> tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  request->delivered();
+
+  // A thread queues for one isolate at a time. Hold another isolate's turn to keep the logger
+  // waiting while the request goes away, without needing timing-dependent thread coordination.
+  auto blocker = other.takeAsyncLock();
+  timer.advance(1 * kj::SECONDS);
+  auto timestamp = timer.getWallTime();
+  auto logged = context->logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK,
+      KJ_EXCEPTION(FAILED, "jsg.Error: delayed exception"), *request);
+  KJ_ASSERT(!logged.poll(io.waitScope));
+  fixture.drainAndDestroy(kj::mv(request));
+  timer.advance(5 * kj::SECONDS);
+  { auto released = kj::mv(blocker); }
+
+  logged.wait(io.waitScope);
+  KJ_ASSERT(traceRef->exceptions.size() == 1);
+  KJ_EXPECT(traceRef->exceptions[0].name == "Error");
+  KJ_EXPECT(traceRef->exceptions[0].message == "delayed exception");
+  KJ_EXPECT(traceRef->exceptions[0].timestamp == timestamp);
+}
+
+KJ_TEST("runOnHibernate() cancels leftover work before awaiting failure logging") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from 'cloudflare:workers';
+    import { onHibernate } from 'cloudflare:durable-objects';
+    export default class extends DurableObject {
+      async [onHibernate]() { throw new Error('handler failed'); }
+    }
+  )SCRIPT"_kj;
+  for (bool traceFailure: {false, true}) {
+    withOnHibernateActor(source, "on-hibernate-failure-cleanup-test"_kj,
+        [traceFailure](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+      bool leftoverRan = false;
+      struct Observer final: public RequestObserver {
+        IoContext& context;
+        bool& leftoverRan;
+        uint failures = 0;
+        kj::Maybe<EventOutcome> outcome;
+        Observer(IoContext& context, bool& leftoverRan)
+            : context(context),
+              leftoverRan(leftoverRan) {}
+        void reportFailure(const kj::Exception&, FailureSource) override {
+          ++failures;
+          // Make background work runnable exactly when the handler fails. It must be canceled
+          // before yielding to log the exception, even when logging needs no isolate lock.
+          context.addTask(kj::evalLater([&flag = leftoverRan]() { flag = true; }));
+        }
+        void reportOnHibernateOutcome(EventOutcome reported) override {
+          outcome = reported;
+        }
+      };
+      auto observer = kj::refcounted<Observer>(context, leftoverRan);
+      kj::Maybe<kj::Rc<BaseTracer>> tracer;
+      if (traceFailure) {
+        tracer = kj::Rc<BaseTracer>(kj::rc<RecordingTracer>());
+      }
+      runOnHibernate(fixture, actor, kj::addRef(*observer), kj::none, kj::mv(tracer))
+          .wait(fixture.getWaitScope());
+      fixture.pollEventLoop();
+      KJ_EXPECT(!leftoverRan);
+      KJ_EXPECT(observer->failures == 1);
+      KJ_EXPECT(observer->outcome == EventOutcome::EXCEPTION);
+    });
+  }
+}
+
 KJ_TEST("runOnHibernate() resolves when the handler throws, reporting the failure") {
   constexpr kj::StringPtr source = R"SCRIPT(
     import { DurableObject } from "cloudflare:workers";

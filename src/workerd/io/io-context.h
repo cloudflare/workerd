@@ -487,7 +487,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Reporting to a tracer or the inspector requires the isolate lock, so the returned promise
   // waits for an async lock. Callers should await it before recording the request's return
   // event, so that the exception precedes it in the trace. The promise holds a reference to the
-  // request's tracer, so the exception is still traced if the request completes in the meantime.
+  // request's tracer and captures the timestamp before waiting, so the exception is still traced
+  // at the time it was reported if the request completes in the meantime.
   // If the promise is canceled before the lock is acquired, the exception is only logged to
   // syslog. The IoContext must outlive the returned promise.
   kj::Promise<void> logUncaughtExceptionAsync(UncaughtExceptionSource source,
@@ -1447,6 +1448,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   struct PendingExceptionTrace {
     kj::Rc<BaseTracer> tracer;
     tracing::InvocationSpanContext spanContext;
+    kj::Date timestamp;
   };
 
   // Second half of logUncaughtExceptionAsync(): logs `exception` once `lockPromise` resolves.

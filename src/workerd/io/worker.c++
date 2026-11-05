@@ -258,9 +258,9 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
 }
 
 void addExceptionToTrace(jsg::Lock& js,
-    IoContext& ioContext,
     BaseTracer& tracer,
-    kj::Maybe<const tracing::InvocationSpanContext&> spanContext,
+    kj::Date timestamp,
+    const tracing::InvocationSpanContext& spanContext,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -276,17 +276,9 @@ void addExceptionToTrace(jsg::Lock& js,
     return;
   }
 
-  auto timestamp = ioContext.now();
   auto errorInfo = getErrorInfoForTrace(js, exception, errorTypeHandler);
-
-  // Without an explicit span context, report the exception under the current user span.
-  KJ_IF_SOME(context, spanContext) {
-    tracer.addException(context, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
-        kj::mv(errorInfo.stack));
-  } else {
-    tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(errorInfo.name),
-        kj::mv(errorInfo.message), kj::mv(errorInfo.stack));
-  }
+  tracer.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
+      kj::mv(errorInfo.stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -1261,7 +1253,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         // Only add exception to trace when running within an I/O context with a tracer.
         KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
           KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-            addExceptionToTrace(js, ioContext, tracer, kj::none,
+            addExceptionToTrace(js, tracer, ioContext.now(), ioContext.getInvocationSpanContext(),
                 UncaughtExceptionSource::REQUEST_HANDLER, error,
                 api->getErrorInterfaceTypeHandler(js));
           }
@@ -2807,7 +2799,8 @@ void Worker::Lock::logUncaughtException(
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
-        addExceptionToTrace(impl->inner, ioContext, tracer, kj::none, source, exception,
+        addExceptionToTrace(impl->inner, tracer, ioContext.now(),
+            ioContext.getInvocationSpanContext(), source, exception,
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }
@@ -2823,7 +2816,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   auto log = [&](const jsg::JsValue& jsError) {
     KJ_IF_SOME(target, traceTarget) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock&) {
-        addExceptionToTrace(impl->inner, IoContext::current(), target.tracer, target.spanContext,
+        addExceptionToTrace(impl->inner, target.tracer, target.timestamp, target.spanContext,
             source, jsError, worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }
@@ -4862,20 +4855,15 @@ kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
 
 // Classifies a failed handler run like a failed alarm: a limit the handler exceeded, otherwise
 // EXCEPTION for an error attributable to the handler and CANCELED for an internal one.
-// Resolves once the failure has been logged.
-kj::Promise<EventOutcome> onHibernateFailureOutcome(
-    IoContext& context, IoContext::IncomingRequest& request, kj::Exception&& e) {
+EventOutcome onHibernateFailureOutcome(
+    IoContext& context, IoContext::IncomingRequest& request, const kj::Exception& e) {
   request.getMetrics().reportFailure(e);
   bool isUserError = jsg::isTunneledException(e.getDescription()) ||
       e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
-  auto logged = context.logUncaughtExceptionAsync(
-      UncaughtExceptionSource::ON_HIBERNATE_HANDLER, kj::mv(e), request);
-
-  EventOutcome outcome = isUserError ? EventOutcome::EXCEPTION : EventOutcome::CANCELED;
-  KJ_IF_SOME(limitOutcome, context.getLimitEnforcer().getLimitsExceeded()) {
-    outcome = limitOutcome;
+  KJ_IF_SOME(outcome, context.getLimitEnforcer().getLimitsExceeded()) {
+    return outcome;
   }
-  return logged.then([outcome]() { return outcome; });
+  return isUserError ? EventOutcome::EXCEPTION : EventOutcome::CANCELED;
 }
 
 }  // namespace
@@ -4931,8 +4919,8 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   });
 
   {
-    // Nothing may run in the actor after its handler, including during the flush below. The
-    // cleanup also runs if the caller cancels this call while the handler is pending.
+    // Cancel leftover work before flushing writes, including work started by error getters
+    // during logging. This also runs if the handler or its failure reporting is canceled.
     KJ_DEFER(incomingRequest->cancelPendingWorkForHibernation());
 
     EventOutcome outcome;
@@ -4950,7 +4938,12 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
       });
     }
     KJ_CATCH(e) {
-      outcome = co_await onHibernateFailureOutcome(context, *incomingRequest, kj::mv(e));
+      outcome = onHibernateFailureOutcome(context, *incomingRequest, e);
+      // Stop the handler's remaining work before yielding for the logging lock. The scope-exit
+      // cleanup above still applies to any work started while inspecting the error itself.
+      incomingRequest->cancelPendingWorkForHibernation();
+      co_await context.logUncaughtExceptionAsync(
+          UncaughtExceptionSource::ON_HIBERNATE_HANDLER, kj::mv(e), *incomingRequest);
     }
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);

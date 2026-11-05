@@ -742,10 +742,12 @@ class Worker::Lock {
     //   out how to work around it, so here we are with a raw pointer. :/
   };
 
-  // The trace an uncaught exception is added to, and the span it is reported under.
+  // The trace, span and timestamp an uncaught exception is reported under. These are captured
+  // before waiting for the isolate lock, so reporting needs no current IncomingRequest.
   struct ExceptionTraceTarget {
     BaseTracer& tracer;
     const tracing::InvocationSpanContext& spanContext;
+    kj::Date timestamp;
   };
 
   KJ_DISALLOW_COPY_AND_MOVE(Lock);

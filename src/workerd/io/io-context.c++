@@ -641,9 +641,11 @@ kj::Promise<void> IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource s
       // The exception belongs to the request as a whole rather than to whichever user span is
       // active in the current async context, so report it under the request's root user span.
       auto userSpan = r.getRootUserTraceSpan();
+      r.ioChannelFactory->getTimer().syncTime();
       trace = PendingExceptionTrace{
         .tracer = tracer.addRef(),
         .spanContext = r.getInvocationSpanContextForUserSpan(userSpan),
+        .timestamp = r.now(),
       };
     }
   }
@@ -707,7 +709,8 @@ kj::Promise<void> IoContext::logUncaughtExceptionWithLock(
   };
 
   RunnableImpl runnable(source, exception, trace.map([](PendingExceptionTrace& t) {
-    return Worker::Lock::ExceptionTraceTarget{.tracer = *t.tracer, .spanContext = t.spanContext};
+    return Worker::Lock::ExceptionTraceTarget{
+      .tracer = *t.tracer, .spanContext = t.spanContext, .timestamp = t.timestamp};
   }));
   runImpl(runnable, asyncLock, kj::none, Runnable::Exceptional(true));
 }
@@ -1775,7 +1778,11 @@ void IoContext::runImpl(Runnable& runnable,
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
 
-  getIoChannelFactory().getTimer().syncTime();
+  // Exception reporting can outlive the last request. It carries its own timestamp and must
+  // not access a request's channel factory once the request is gone.
+  if (!exceptional || !incomingRequests.empty()) {
+    getIoChannelFactory().getTimer().syncTime();
+  }
 
   // Spans the lock wait, the JavaScript, and the microtask drain, and ends before the lock is
   // released. Without a better-known cause (set by whatever resumed JavaScript), the turn is
@@ -1784,6 +1791,12 @@ void IoContext::runImpl(Runnable& runnable,
       incomingRequests.empty() ? 0 : incomingRequests.front().getAsyncTraceId());
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
+    // Without a request, inspector callbacks and error getters must not see an active IoContext.
+    // Keep the usual CPU limit, exception handling and microtask cleanup around the reporting.
+    kj::Maybe<SuppressIoContextScope> noRequest;
+    if (exceptional && incomingRequests.empty()) {
+      noRequest.emplace();
+    }
     turnScope.locked();
     // Declared before the microtask drain's KJ_DEFER below, so it runs after it, still under the
     // lock.
