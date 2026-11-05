@@ -909,16 +909,7 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
-            let elided_ty = elide_named_lifetimes(ty);
-            let unwrap = quote! {
-                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        lock.throw_exception(&err);
-                        return;
-                    }
-                };
-            };
+            let unwrap = crate::unwrap_argument(ty, &var, js_index, None);
             (unwrap, quote! { #var })
         })
         .unzip();
@@ -961,6 +952,9 @@ fn generate_constructor_registration(
     let call = quote! { #self_ty::#rust_method_name };
 
     let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
+    // Reported inside the callback, so that the type is still registered and adds no errors of
+    // its own.
+    let rest_error = crate::rest_parameter_error(&method.sig).map(|error| error.to_compile_error());
     let length = required_argument_count(method.sig.inputs.iter());
     let lock_arg = if has_lock_param {
         quote! { &mut *lock, }
@@ -996,6 +990,7 @@ fn generate_constructor_registration(
                     return;
                 }
 
+                #rest_error
                 #(#unwraps)*
 
                 #construct

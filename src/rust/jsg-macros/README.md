@@ -110,10 +110,14 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- A last parameter of type `jsg::Arguments<T>` takes the remaining arguments, each converted
+  to `T`, like C++ JSG's `jsg::Arguments<T>`; it is empty when there are none. It must be the
+  last parameter, of a method or a `#[jsg_constructor]`, and TypeScript declares it as
+  `...name: any[]`. See [Rest parameters](../jsg/README.md#rest-parameters).
 - When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
-  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
-  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
-  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
+  Web IDL count of leading required arguments: `this`, the lock and a `jsg::Arguments` are not
+  counted, and counting stops at the first type whose `FromJS::is_optional()` returns true (such
+  as `Option<T>` or `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]

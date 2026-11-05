@@ -966,6 +966,27 @@ the prototype or is dropped; with Rust JSG, no JavaScript runs and `__proto__` i
 as with `Object.fromEntries()`. `Local<Object>::keys()` and
 `get_by_name()` list and read properties the same way.
 
+### Rest parameters
+
+`jsg::Arguments<T>`, C++ JSG's `jsg::Arguments<T>`, is a rest parameter: as the last parameter of
+a `#[jsg_method]` or a `#[jsg_constructor]`, it takes every argument from its position on, each
+converted to `T`.
+
+```rust
+#[jsg_method]
+pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor { /* ... */ }
+// JS: sql.exec("SELECT ?, ?", 1, "a")  // bindings == [1, "a"]
+```
+
+- Without remaining arguments it is empty; omitting them is never an error.
+- Each argument converts as a parameter of type `T` would, and a mismatch is the same
+  `TypeError`, which names the rest parameter's position for every argument, as C++ JSG's does.
+- It is not counted in `.length`, and a parameter after it is a compile error.
+- It holds the values in a `Vec`: it dereferences to `[T]`, iterates, and `into_inner()` returns
+  the `Vec`. It converts only from the arguments of a call; a JavaScript array is a `Vec<T>`.
+- RTTI describes it as C++ RTTI does, without the element type, so TypeScript declares it as
+  `...name: any[]`; give a precise type with a TypeScript override.
+
 ### Arrays, typed arrays and `ArrayBuffer`s
 
 A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:

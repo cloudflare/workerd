@@ -49,6 +49,7 @@ mod resource_lazy_properties;
 mod resource_properties;
 mod resource_template;
 mod resource_this;
+mod rest_arguments;
 mod serialization;
 mod string;
 mod symbol;

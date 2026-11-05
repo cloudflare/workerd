@@ -39,6 +39,7 @@ use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
 use trace::generate_trace_statements;
+use utils::arguments_element;
 use utils::elide_named_lifetimes;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
@@ -454,6 +455,9 @@ fn generate_callbacks(
     if let Some(error) = this_error(input_fn, callback_kinds.clone()) {
         return Err(error);
     }
+    if let Some(error) = rest_parameter_error(fn_sig) {
+        return reject(&input_fn, callback_kinds, &error).into();
+    }
     let has_self = fn_sig.receiver().is_some();
     let has_this = this_param(fn_sig).is_some();
     let receiver = if has_self {
@@ -653,18 +657,46 @@ fn callback_names(
         })
 }
 
-/// Unwraps JS argument `js_index` into `arg`, or throws and returns.
+/// Unwraps JS argument `js_index` into `arg`, or throws and returns. A `jsg::Arguments<T>`
+/// parameter takes the arguments from `js_index` on instead, each unwrapped as a `T`.
 /// `method_name` is a method's JS name; its errors match C++ JSG's.
-fn unwrap_argument(
+pub(crate) fn unwrap_argument(
     ty: &syn::Type,
     arg: &syn::Ident,
+    js_index: usize,
+    method_name: Option<&str>,
+) -> proc_macro2::TokenStream {
+    let Some(element) = arguments_element(ty) else {
+        return unwrap_value(ty, arg, &quote! { #js_index }, js_index, method_name);
+    };
+    // Like C++ JSG (TypeWrapper::unwrap() in type-wrapper.h), each remaining argument is
+    // unwrapped as a parameter at the rest parameter's position would be, so an error names that
+    // position; there are none to miss.
+    let value = syn::Ident::new("value", arg.span());
+    let unwrap = unwrap_value(element, &value, &quote! { index }, js_index, method_name);
+    quote! {
+        let mut values = Vec::with_capacity(args.len().saturating_sub(#js_index));
+        for index in #js_index..args.len() {
+            #unwrap
+            values.push(#value);
+        }
+        let #arg = jsg::Arguments::from(values);
+    }
+}
+
+/// Unwraps the JS argument at `index`, an expression, into `arg` as a `ty`, or throws and
+/// returns. `js_index` is the parameter's position, which errors name.
+fn unwrap_value(
+    ty: &syn::Type,
+    arg: &syn::Ident,
+    index: &proc_macro2::TokenStream,
     js_index: usize,
     method_name: Option<&str>,
 ) -> proc_macro2::TokenStream {
     let ty = elide_named_lifetimes(ty);
     let Some(method_name) = method_name else {
         return quote! {
-            let #arg = match <#ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
+            let #arg = match <#ty as jsg::FromJS<'_>>::from_js(lock, args.get(#index)) {
                 Ok(v) => v,
                 Err(err) => {
                     lock.throw_exception(&err);
@@ -684,11 +716,11 @@ fn unwrap_argument(
             #js_index + 1,
             <#ty as jsg::FromJS<'_>>::type_name(),
         ));
-        if !<#ty as jsg::FromJS<'_>>::is_optional() && #js_index >= args.len() {
+        if !<#ty as jsg::FromJS<'_>>::is_optional() && #index >= args.len() {
             lock.throw_exception(&not_of_type());
             return;
         }
-        let #arg = match <#ty as jsg::FromJS<'_>>::try_from_js(lock, args.get(#js_index)) {
+        let #arg = match <#ty as jsg::FromJS<'_>>::try_from_js(lock, args.get(#index)) {
             Ok(Some(v)) => v,
             Ok(None) => {
                 lock.throw_exception(&not_of_type());
@@ -700,6 +732,23 @@ fn unwrap_argument(
             }
         };
     }
+}
+
+/// Returns an error if a `jsg::Arguments<T>` parameter of `sig` is not its last parameter: it
+/// takes every argument from its position on, so a parameter after it would get none.
+pub(crate) fn rest_parameter_error(sig: &syn::Signature) -> Option<syn::Error> {
+    let mut params = sig.inputs.iter().filter_map(|arg| match arg {
+        FnArg::Typed(param) => Some(param),
+        FnArg::Receiver(_) => None,
+    });
+    let rest = params.find(|param| arguments_element(&param.ty).is_some())?;
+    params.next().is_some().then(|| {
+        syn::Error::new_spanned(
+            rest,
+            "a `jsg::Arguments` parameter takes the remaining arguments, so it is the last \
+             parameter",
+        )
+    })
 }
 
 /// Generates `{name}_fast_api()`, which returns the V8 Fast API callback of a `#[jsg_method]`
