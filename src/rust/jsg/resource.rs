@@ -527,6 +527,8 @@ fn get_resource_descriptor<R: Resource>(
         static_methods: Vec::new(),
         static_constants: Vec::new(),
         wildcard_property: KjMaybe::None,
+        dispose: KjMaybe::None,
+        async_dispose: KjMaybe::None,
         callable: KjMaybe::None,
     };
 
@@ -634,6 +636,22 @@ fn get_resource_descriptor<R: Resource>(
                     getter_callback: getter_callback as usize,
                     query_callback: query_callback as usize,
                 });
+            }
+            Member::Dispose { callback } => {
+                assert!(
+                    descriptor.dispose.is_none(),
+                    "{} has more than one dispose method",
+                    R::class_name()
+                );
+                descriptor.dispose = KjMaybe::Some(callback as usize);
+            }
+            Member::AsyncDispose { callback } => {
+                assert!(
+                    descriptor.async_dispose.is_none(),
+                    "{} has more than one async dispose method",
+                    R::class_name()
+                );
+                descriptor.async_dispose = KjMaybe::Some(callback as usize);
             }
             Member::Callable { callback } => {
                 assert!(

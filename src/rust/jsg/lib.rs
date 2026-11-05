@@ -1172,6 +1172,19 @@ pub enum Member {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
     },
+    /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
+    /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
+    /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
+    Dispose {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
+    /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
+    /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
+    /// one, and may also have a [`Member::Dispose`].
+    AsyncDispose {
+        callback: RawFunctionCallback,
+    },
     /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.

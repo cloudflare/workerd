@@ -1339,6 +1339,64 @@ A wildcard property behaves as in C++ JSG:
 - A wildcard property named `then` makes the object a thenable, which `await` would call.
   Return `None` for `then` unless that is intended.
 
+## Explicit resource management
+
+`#[jsg_dispose]` installs a method as `Symbol.dispose` of the prototype, which `using` calls when
+the variable goes out of scope, like C++ JSG's `JSG_DISPOSE`. `#[jsg_async_dispose]` installs one
+as `Symbol.asyncDispose`, which `await using` calls and whose returned promise it awaits, like
+`JSG_ASYNC_DISPOSE`:
+
+```rust
+#[jsg_resource]
+impl Connection {
+    // close() and [Symbol.dispose](), like JSG_METHOD(close); JSG_DISPOSE(close);
+    #[jsg_method]
+    #[jsg_dispose]
+    pub fn close(&self) { /* ... */ }
+}
+
+#[jsg_resource]
+impl Flusher {
+    // Only [Symbol.asyncDispose](). The Rust name is irrelevant: without #[jsg_method], the
+    // method has no JavaScript name of its own.
+    #[jsg_async_dispose]
+    pub fn shutdown<'s>(&self, lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+        /* ... */
+    }
+}
+```
+
+- The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and is called like a
+  `#[jsg_method]`, with the type's `v8::Signature`. It is a non-enumerable property of the
+  prototype, with `.length` 0, that cannot be called with `new`. It may also be a
+  `#[jsg_method]` or a `#[jsg_callable]`, but not a `#[jsg_property]`, an
+  `#[jsg_inspect_property]` or a `#[jsg_wildcard_property]`, which are registered without the
+  signature its callback uses.
+- An async disposer should return a promise (`jsg::Promise<'s, T>` or
+  `v8::Local<'s, v8::Promise>`, optionally in a `Result`). `await using` awaits whatever it
+  returns, so any other value makes it a sync disposer that finishes a microtask later: write a
+  `#[jsg_dispose]` instead, which `await using` calls too.
+- A type has at most one disposer of each kind, as in C++ JSG. It may have both a sync and an
+  async one, as Node.js's `readline/promises` `Interface` does, though C++ JSG discourages it:
+  `using` calls only the sync one and `await using` prefers the async one. One method cannot be
+  both. With automatic registration a second disposer of a kind is a compile error;
+  `custom_members` may choose between several by compatibility flag, registering
+  `Self::<name>_dispose_member()` or `Self::<name>_async_dispose_member()`, and registering two of
+  a kind panics when the template is created.
+- RTTI does not describe disposers. C++ RTTI does, but its TypeScript generator ignores them.
+
+As for C++ JSG (see the comment on `JSG_DISPOSE` in `src/workerd/jsg/jsg.h`):
+
+- Prefer `#[jsg_dispose]`: `await using` accepts a sync disposer too.
+- Disposal usually runs because the scope threw. Expose clean shutdown as an explicit method, and
+  make the disposer only release the resource.
+- The disposer is not told about the exception, and an error it returns replaces the exception,
+  which becomes the `suppressed` of a `SuppressedError`.
+- JavaScript can call the disposer directly, any number of times, so it must be idempotent. It
+  must also be safe to re-enter: a disposer that runs JavaScript, such as a callback or an event
+  listener, can be called again before it returns. Mark the resource disposed before calling out,
+  so the nested call finds nothing left to do, and hold no `RefCell` borrow across the call.
+
 ## Callable resources
 
 `#[jsg_callable]`, the equivalent of C++ JSG's `JSG_CALLABLE`, makes the instances of a resource
