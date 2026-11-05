@@ -1576,6 +1576,14 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     setWildcardProperty(instance, wildcard, registerExternalRef);
   }
 
+  // Mirrors registerCallable() (resource.h): the call handler goes on the instance, not the
+  // prototype, and V8 runs it with the instance as `this`.
+  KJ_IF_SOME(callable, descriptor.callable) {
+    instance->SetCallAsFunctionHandler(
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callable)));
+    registerExternalRef(callable);
+  }
+
   auto result = scope.Escape(constructor);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
