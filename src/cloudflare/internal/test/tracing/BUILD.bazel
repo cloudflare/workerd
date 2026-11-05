@@ -22,6 +22,5 @@ wd_test(
 
 wd_test(
     src = "span-links-test.wd-test",
-    args = ["--experimental"],
     data = glob(["*.js"]),
 )

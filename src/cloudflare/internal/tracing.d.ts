@@ -87,8 +87,7 @@ declare class Span {
   // for errors.
   setStatus(status: TracingSpanStatus): this;
 
-  // Requires the experimental span_links compatibility flag. Links are snapshots
-  // and do not change the span's parent, active context, or sampling decision.
+  // Links are snapshots and do not change the span's parent, active context, or sampling decision.
   addLink(link: TracingSpanLink): this;
   addLinks(links: readonly TracingSpanLink[]): this;
 
