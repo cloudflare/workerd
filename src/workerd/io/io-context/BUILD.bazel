@@ -44,6 +44,7 @@ wd_rust_compile_test(
     proc_macro_deps = ["//src/rust/jsg-macros"],
     deps = [
         ":io-context",
+        "//src/rust/cxx/kj-rs",
         "//src/rust/jsg",
     ],
 )

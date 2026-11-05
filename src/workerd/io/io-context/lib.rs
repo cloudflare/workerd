@@ -129,21 +129,26 @@ impl<'s> IoContext<'s> {
     /// is logged as an uncaught exception and recorded in the request's `waitUntil()` status. A
     /// panic in `callback` also terminates JavaScript execution, as in a `#[jsg_method]`.
     ///
-    /// `future` and its output are `Send` because the future's later polls run without the
-    /// isolate lock.
-    /// A `jsg::Rc` or `jsg::Weak` it holds can only be dropped, since every other use takes a
-    /// [`jsg::Lock`], which the future doesn't have.
+    /// `future` and its output need not be `Send`, since they never leave this `IoContext`'s event
+    /// loop. The future may hold values that aren't `Send`, such as an `std::rc::Rc` of its own
+    /// or KJ objects of this `IoContext`. A `jsg::Rc` or `jsg::Weak` it holds can only be
+    /// dropped, since every other use takes a [`jsg::Lock`], which the future doesn't have, and
+    /// what it takes from a resource is `Send`, since resources hold only [`jsg::Traced`] types.
+    /// The event loop, with the future, may move to another OS thread between polls, so the
+    /// future must not hold values bound to the OS thread, such as `thread_local!`-backed values
+    /// or a `MutexGuard`, across an `.await`. Clippy checks this only for the std lock guards and
+    /// the guards that `clippy.toml` lists.
     ///
     /// # Errors
     /// Fails with an internal error if this `IoContext` is no longer the current one.
     pub fn await_io_and_run<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
     where
-        T: Send + 'static,
-        F: Future<Output = T> + Send + 'static,
+        T: 'static,
+        F: Future<Output = T> + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<()> + 'static,
     {
         let future = ffi::IoFuture(Box::pin(async move {
-            let output: Box<dyn Any + Send> = Box::new(future.await);
+            let output: Box<dyn Any> = Box::new(future.await);
             output
         }));
         let callback = ffi::IoCallback(Box::new(move |lock, output| {
@@ -162,7 +167,8 @@ impl<'s> IoContext<'s> {
 
     /// Waits for `future` as part of this request, then returns a promise for what `callback`
     /// returns when called with its output, as C++ `IoContext::awaitIo()` does. Waiting and
-    /// running `callback` work as in [`await_io_and_run`](Self::await_io_and_run).
+    /// running `callback`, and what `future` may hold, work as in
+    /// [`await_io_and_run`](Self::await_io_and_run).
     ///
     /// The returned promise settles in a reaction, as in C++, which costs a microtask:
     ///
@@ -187,8 +193,8 @@ impl<'s> IoContext<'s> {
         callback: C,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>>
     where
-        T: Send + 'static,
-        F: Future<Output = T> + Send + 'static,
+        T: 'static,
+        F: Future<Output = T> + 'static,
         C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) -> jsg::Result<v8::Local<'t, v8::Value>> + 'static,
     {
         let resolver = v8::PromiseResolver::new(lock)?;
@@ -238,9 +244,9 @@ impl<'s> IoContext<'s> {
         future: F,
     ) -> jsg::Result<v8::Local<'s, v8::Promise>>
     where
-        T: for<'t> jsg::ToJS<'t> + Send + 'static,
-        E: Into<jsg::Error> + Send + 'static,
-        F: Future<Output = Result<T, E>> + Send + 'static,
+        T: for<'t> jsg::ToJS<'t> + 'static,
+        E: Into<jsg::Error> + 'static,
+        F: Future<Output = Result<T, E>> + 'static,
     {
         self.await_io(lock, future, |lock, output| {
             output.map_err(Into::into)?.to_js(lock)

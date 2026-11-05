@@ -4,3 +4,14 @@ allow-panic-in-tests = true
 max-fn-params-bools = 2
 # Proper nouns beyond clippy's default list, so doc comments need not backtick them.
 doc-valid-idents = ["SQLite", "WebSockets", ".."]
+# Guards of thread-local state, which an `.await` must not hold: KJ may resume a future on another
+# OS thread (see `src/rust/jsg/README.md`, safety rule 5). `await_holding_lock` covers the std lock
+# guards.
+await-holding-invalid-types = [
+  { path = "tokio::runtime::EnterGuard", reason = "it enters the runtime on this OS thread only" },
+  { path = "tracing::dispatcher::DefaultGuard", reason = "it sets this OS thread's subscriber" },
+  { path = "tracing::span::Entered", reason = "it enters the span on this OS thread only" },
+  { path = "tracing::span::EnteredSpan", reason = "it enters the span on this OS thread only" },
+  { path = "tokio::task::LocalEnterGuard", reason = "it enters the LocalSet on this OS thread only" },
+  { path = "rand::rngs::ThreadRng", reason = "it shares this OS thread's generator, without synchronization" },
+]

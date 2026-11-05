@@ -192,15 +192,16 @@ fn pending_unless(succeeded: bool) -> jsg::Result<()> {
     }
 }
 
-/// The future that `IoContext::await_io_and_run()` waits for, with its output type erased.
-pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>);
+/// The future that `IoContext::await_io_and_run()` waits for, with its output type erased. Neither
+/// is `Send`: both stay on the `IoContext`'s event loop.
+pub struct IoFuture(pub Pin<Box<dyn Future<Output = Box<dyn Any>>>>);
 
 /// The output of an [`IoFuture`].
-pub struct IoOutput(Box<dyn Any + Send>);
+pub struct IoOutput(Box<dyn Any>);
 
 /// What [`IoCallback`] calls.
 pub type IoCallbackFn =
-    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any + Send>) -> jsg::Result<()>>;
+    Box<dyn for<'s> FnOnce(&mut jsg::Lock<'s>, Box<dyn Any>) -> jsg::Result<()>>;
 
 /// The callback that `IoContext::await_io_and_run()` runs with the output of its future.
 pub struct IoCallback(pub IoCallbackFn);

@@ -404,14 +404,24 @@ aborts:
   while a visit or a heap snapshot reads one in place, a `jsg::RefCell` is borrowed while it is
   visited, and a std `Cell` or `RefCell`, which holds no GC references, is not read at all.
 
+`IoContext::await_io` and its relatives don't require their future to be `Send`. It never leaves
+its `IoContext`'s event loop, which one OS thread runs at a time, so it may hold its own
+`std::rc::Rc`s and KJ objects, and what it takes from resources is `Send`. The event loop may
+move to another OS thread between polls (in production, each connection is a green thread run by
+a pool of OS threads), so the future must not hold a value bound to the OS thread, such as a
+`thread_local!`-backed value, a `MutexGuard` or `tracing::span::Entered`, across an `.await`.
+Clippy rejects holding a std lock guard (`await_holding_lock`), or a guard of thread-local state
+that `clippy.toml` lists (`await_holding_invalid_type`), across an `.await`; nothing checks other
+values.
+
 Bad: a resource field `counter: std::rc::Rc<Cell<u32>>` cloned into a future, which doesn't
 compile. Fix: an `Arc<AtomicU32>`, or read the counter under the lock in the callback that runs
 when the future completes.
 
 Tested by: the `rc-needs-the-lock`, `lock-is-not-send`, `lock-is-not-sync`,
 `traced-requires-send` and `ok-send-resource-state` compile tests in `src/rust/jsg-compile-tests`;
-`await-io-future-cannot-borrow-a-resource` and `span-is-not-traced` in
-`src/workerd/io/io-context/compile-tests`; the `wrappable-rc-is-private` and
+`await-io-future-cannot-borrow-a-resource`, `ok-await-io-future-is-not-send` and
+`span-is-not-traced` in `src/workerd/io/io-context/compile-tests`; the `wrappable-rc-is-private` and
 `cpp-ref-bridge-is-private` compile tests; and the tests of operations in another isolate, and of
 drops without the lock, in `src/rust/jsg-test/tests/isolates.rs` and `cpp_interop.rs`. No test checks an `unsafe impl Send`;
 reviewers check those.

@@ -423,7 +423,7 @@ fn start_await_io<'s, F>(
     ending: ffi::PromiseEnding,
 ) -> jsg::Result<v8::Local<'s, v8::Promise>>
 where
-    F: Future<Output = i32> + Send + 'static,
+    F: Future<Output = i32> + 'static,
 {
     let callback_observer = CallbackDropObserver;
     context.await_io(lock, future, move |lock, value| {
