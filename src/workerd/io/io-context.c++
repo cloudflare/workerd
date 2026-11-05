@@ -594,6 +594,25 @@ void IoContext::logWarningOnce(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logWarningOnce(description);
 }
 
+void IoContext::logWarningLater(kj::String description) {
+  logWarningLaterImpl(kj::mv(description), WarnOnce::NO);
+}
+
+void IoContext::logWarningOnceLater(kj::String description) {
+  logWarningLaterImpl(kj::mv(description), WarnOnce::YES);
+}
+
+void IoContext::logWarningLaterImpl(kj::String description, WarnOnce once) {
+  if (!hasCurrentIncomingRequest()) return;
+  addTask(run([description = kj::mv(description), once](Worker::Lock& lock) {
+    if (once) {
+      lock.logWarningOnce(description);
+    } else {
+      lock.logWarning(description);
+    }
+  }));
+}
+
 void IoContext::logErrorOnce(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logErrorOnce(description);
 }

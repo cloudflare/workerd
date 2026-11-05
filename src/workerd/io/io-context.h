@@ -70,6 +70,8 @@ WD_STRONG_BOOL(ReportRunWithoutRequest);
 // Whether IoContext::IncomingRequest::delivered() drops the cross-context actions queued while the
 // actor had no request, rather than run them.
 WD_STRONG_BOOL(DropQueuedCrossContextActions);
+// Whether a warning IoContext logs later deduplicates like logWarningOnce().
+WD_STRONG_BOOL(WarnOnce);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -468,6 +470,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Log a warning, deduplicating so that each unique message is only logged once for the lifetime
   // of an isolate. Emits to the same destinations as logWarning().
   void logWarningOnce(kj::StringPtr description);
+
+  // Like logWarning() and logWarningOnce(), but logged later, from a task of this context running
+  // under its locks (see run()). For callers that must not touch V8 where they detect the problem:
+  // a destructor the garbage collector runs on an unreachable API object, for one, since with an
+  // inspector attached logging captures a JS stack trace, which allocates on the V8 heap inside a
+  // GC callback. The warning is dropped if the context has no current IncomingRequest, as it then
+  // can no longer run tasks.
+  void logWarningLater(kj::String description);
+  void logWarningOnceLater(kj::String description);
 
   // Log an internal error message. Deduplicates log messages such that a single unique message will
   // only be logged once for the lifetime of an isolate.
@@ -1317,6 +1328,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
  private:
   jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
   jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
+  void logWarningLaterImpl(kj::String description, WarnOnce once);
 
   ThreadContext& thread;
 
