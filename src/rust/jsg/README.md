@@ -1368,8 +1368,10 @@ impl Flusher {
 
 - The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and is called like a
   `#[jsg_method]`, with the type's `v8::Signature`. It is a non-enumerable property of the
-  prototype, with `.length` 0, that cannot be called with `new`. Besides `#[jsg_method]`, it
-  cannot have another member attribute.
+  prototype, with `.length` 0, that cannot be called with `new`. It may also be a
+  `#[jsg_method]` or a `#[jsg_callable]`, but not a `#[jsg_property]`, an
+  `#[jsg_inspect_property]` or a `#[jsg_wildcard_property]`, which are registered without the
+  signature its callback uses.
 - An async disposer should return a promise (`jsg::Promise<'s, T>` or
   `v8::Local<'s, v8::Promise>`, optionally in a `Result`). `await using` awaits whatever it
   returns, so any other value makes it a sync disposer that finishes a microtask later: write a

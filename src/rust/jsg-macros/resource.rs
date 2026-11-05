@@ -487,8 +487,8 @@ fn collect_dispose_registrations(
             .find_map(|a| NON_DISPOSER_MEMBERS.iter().find(|name| is_attr(a, name)))
         {
             error(format!(
-                "a #[{attr_name}] method cannot be a #[{other}]; only #[jsg_method] combines \
-                 with it"
+                "a #[{attr_name}] method cannot be a #[{other}]; only #[jsg_method] and \
+                 #[jsg_callable] combine with it"
             ));
             continue;
         }
