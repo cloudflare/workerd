@@ -173,6 +173,7 @@ KJ_TEST("inheritance") {
 
 KJ_TEST("native dispatch rejects same-type shim substitution") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval("let target = new NumberBox(123);"
                  "let source = new NumberBox(456);"
@@ -184,6 +185,7 @@ KJ_TEST("native dispatch rejects same-type shim substitution") {
 
 KJ_TEST("native dispatch rejects inheritance-compatible shim substitution") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval("let target = new NumberBox(123);"
                  "let source = new ExtendedNumberBox(456, 'source');"
@@ -195,6 +197,7 @@ KJ_TEST("native dispatch rejects inheritance-compatible shim substitution") {
 
 KJ_TEST("ResetRoot rejects substituted shim ownership") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval(R"(
       let target = new NumberBox(123);
@@ -208,6 +211,7 @@ KJ_TEST("ResetRoot rejects substituted shim ownership") {
 
 KJ_TEST("native dispatch rejects stale handle after same-tag shim reuse") {
   KJ_EXPECT_SIGNAL(SIGABRT, {
+    disableCoreDumps();
     InheritEvaluator e(v8System);
     e.expectEval(R"(
       const target = new NumberBox(123);
