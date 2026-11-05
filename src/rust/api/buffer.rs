@@ -326,13 +326,8 @@ fn with_zeroed_scratch<R>(len: usize, f: impl FnOnce(&mut [u8]) -> R) -> R {
 /// that run no JavaScript: writing or creating strings and allocating buffers. Those can collect
 /// garbage, which neither moves nor frees a backing store that a live handle refers to.
 unsafe fn bytes(array: v8::Local<'_, v8::Uint8Array>) -> &[u8] {
-    let len = array.len();
-    if len == 0 {
-        return &[];
-    }
-    // SAFETY: a non-empty typed array's data pointer is non-null, and its `len()` bytes from
-    // `byte_offset()` are within its buffer. The caller upholds the rest.
-    unsafe { std::slice::from_raw_parts(array.data().add(array.byte_offset()).cast_const(), len) }
+    // SAFETY: the bytes are `array`'s, and the caller upholds the rest.
+    unsafe { &*array.as_raw_slice() }
 }
 
 /// The bytes of `array`, mutably.
@@ -341,19 +336,14 @@ unsafe fn bytes(array: v8::Local<'_, v8::Uint8Array>) -> &[u8] {
 ///
 /// As for [`bytes`], and no other slice may overlap this one.
 unsafe fn bytes_mut(array: v8::Local<'_, v8::Uint8Array>) -> &mut [u8] {
-    let len = array.len();
-    if len == 0 {
-        return &mut [];
-    }
     // SAFETY: as in `bytes`.
-    unsafe { std::slice::from_raw_parts_mut(array.data().add(array.byte_offset()), len) }
+    unsafe { &mut *array.as_raw_slice() }
 }
 
-/// The addresses of the bytes of `array`.
-fn address_range(array: v8::Local<'_, v8::Uint8Array>) -> Range<usize> {
-    // SAFETY: only the address is used.
-    let start = unsafe { array.data() } as usize + array.byte_offset();
-    start..start + array.len()
+/// The addresses of `bytes`.
+fn address_range(bytes: *mut [u8]) -> Range<usize> {
+    let start = bytes.cast::<u8>() as usize;
+    start..start + bytes.len()
 }
 
 /// The `[start, end)` range of an array of `len` bytes, or a `RangeError` if it is out of bounds.
@@ -480,9 +470,10 @@ impl BufferNative {
         flags: u8,
     ) -> jsg::Result<f64> {
         let flags = write_flags(flags)?;
-        let range = range(dest.len(), start, end)?;
         // SAFETY: writing a string runs no JavaScript, and `string` is not in an ArrayBuffer.
-        let dest = unsafe { &mut bytes_mut(dest)[range] };
+        let dest = unsafe { bytes_mut(dest) };
+        let range = range(dest.len(), start, end)?;
+        let dest = &mut dest[range];
         if dest.is_empty() {
             return Ok(0.0);
         }
@@ -504,9 +495,10 @@ impl BufferNative {
         flags: u8,
     ) -> jsg::Result<f64> {
         let flags = write_flags(flags)?;
-        let range = range(dest.len(), start, end)?;
         // SAFETY: as in `write_one_byte`.
-        let dest = unsafe { &mut bytes_mut(dest)[range] };
+        let dest = unsafe { bytes_mut(dest) };
+        let range = range(dest.len(), start, end)?;
+        let dest = &mut dest[range];
         if dest.is_empty() {
             return Ok(0.0);
         }
@@ -526,9 +518,10 @@ impl BufferNative {
         flags: u8,
     ) -> jsg::Result<f64> {
         let flags = write_flags(flags)?;
-        let range = range(dest.len(), start, end)?;
         // SAFETY: as in `write_one_byte`.
-        let dest = unsafe { &mut bytes_mut(dest)[range] };
+        let dest = unsafe { bytes_mut(dest) };
+        let range = range(dest.len(), start, end)?;
+        let dest = &mut dest[range];
         let length = string_length(string);
         let written = (dest.len() / 2).min(length as usize);
         if written == 0 {
@@ -563,9 +556,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         new_one_byte_string(lock, data)
     }
 
@@ -578,9 +572,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         v8::String::new_from_utf8(lock, data)
             .map(JsString::from)
             .ok_or_else(jsg::Error::invalid_string_length)
@@ -596,9 +591,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         let length = data.len() / 2;
         // SAFETY: every bit pattern is a valid `u16`.
         let (prefix, aligned, _) = unsafe { data.align_to::<u16>() };
@@ -653,12 +649,10 @@ impl BufferNative {
         start_index: f64,
         is_forward: bool,
     ) -> jsg::Result<f64> {
-        let haystack_range = range(haystack.len(), 0.0, haystack_length * 2.0)?;
-        let needle_range = range(needle.len(), 0.0, needle_length * 2.0)?;
         let haystack = haystack.as_slice(lock);
         let needle = needle.as_slice(lock);
-        let haystack = &haystack[..haystack_range.end / 2 * 2];
-        let needle = &needle[..needle_range.end / 2 * 2];
+        let haystack = &haystack[..range(haystack.len(), 0.0, haystack_length * 2.0)?.end / 2 * 2];
+        let needle = &needle[..range(needle.len(), 0.0, needle_length * 2.0)?.end / 2 * 2];
         let start = search_start(
             haystack.len() / 2,
             needle.len() / 2,
@@ -682,10 +676,10 @@ impl BufferNative {
         two_start: f64,
         length: f64,
     ) -> jsg::Result<i32> {
-        let one_range = range(one.len(), one_start, one_start + length)?;
-        let two_range = range(two.len(), two_start, two_start + length)?;
-        let one = &one.as_slice(lock)[one_range];
-        let two = &two.as_slice(lock)[two_range];
+        let one = one.as_slice(lock);
+        let two = two.as_slice(lock);
+        let one = &one[range(one.len(), one_start, one_start + length)?];
+        let two = &two[range(two.len(), two_start, two_start + length)?];
         Ok(one.cmp(two) as i32)
     }
 
@@ -724,9 +718,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         with_scratch(STANDARD.encoded_length(data.len()), |out| {
             let encoded = STANDARD.encode(data, Out::from_uninit_slice(out));
             new_one_byte_string(lock, encoded)
@@ -742,9 +737,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         with_scratch(URL_SAFE_NO_PAD.encoded_length(data.len()), |out| {
             let encoded = URL_SAFE_NO_PAD.encode(data, Out::from_uninit_slice(out));
             new_one_byte_string(lock, encoded)
@@ -761,19 +757,21 @@ impl BufferNative {
         end: f64,
         input: v8::Local<'s, v8::Uint8Array>,
     ) -> jsg::Result<f64> {
+        let output = output.as_raw_slice();
+        let input = input.as_raw_slice();
         let range = range(output.len(), start, end)?;
         let output_addresses = address_range(output);
         let input_addresses = address_range(input);
         let overlapping = output_addresses.start < input_addresses.end
             && input_addresses.start < output_addresses.end;
-        // SAFETY: decoding runs no JavaScript, and an `input` that overlaps `output` is copied
-        // out before `output` is borrowed.
+        // SAFETY: both are the bytes of arrays, decoding runs no JavaScript, and an `input` that
+        // overlaps `output` is copied out before `output` is borrowed.
         let written = unsafe {
             if overlapping {
-                let input = bytes(input).to_vec();
-                decode_base64_legacy(&mut bytes_mut(output)[range], &input)
+                let input = (*input).to_vec();
+                decode_base64_legacy(&mut (&mut *output)[range], &input)
             } else {
-                decode_base64_legacy(&mut bytes_mut(output)[range], bytes(input))
+                decode_base64_legacy(&mut (&mut *output)[range], &*input)
             }
         };
         Ok(to_f64(written))
@@ -790,9 +788,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        let range = range(bytes.len(), start, end)?;
         // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { &self::bytes(bytes)[range] };
+        let data = unsafe { self::bytes(bytes) };
+        let range = range(data.len(), start, end)?;
+        let data = &data[range];
         with_zeroed_scratch(data.len() * 2, |out| {
             for (digits, &byte) in out.chunks_exact_mut(2).zip(data) {
                 digits.copy_from_slice(&HEX_PAIRS[usize::from(byte)]);
