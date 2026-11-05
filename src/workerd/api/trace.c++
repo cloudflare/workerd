@@ -752,7 +752,8 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     // attached. This also has the effect of logging internal errors to syslog. (Note that
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), request);
+    return context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), request);
   }));
 
   // drain() keeps the request until its background work, including the handler above, finishes,

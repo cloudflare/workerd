@@ -607,62 +607,109 @@ void IoContext::logUncaughtException(
   KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
 }
 
-void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
+namespace {
+
+// Logs an uncaught exception that won't be reported to a tracer or the inspector. This needs no
+// isolate lock.
+void logUncaughtExceptionWithoutLock(const kj::Exception& exception) {
+  if (!jsg::isTunneledException(exception.getDescription()) &&
+      !jsg::isDoNotLogException(exception.getDescription()) &&
+      // TODO(soon): Figure out why client disconnects are getting logged here if we don't
+      // ignore DISCONNECTED. If we fix that, do we still want to filter these?
+      exception.getType() != kj::Exception::Type::DISCONNECTED) {
+    LOG_EXCEPTION("jsgInternalError", exception);
+  } else {
+    KJ_LOG(INFO, "uncaught exception", exception);  // Run with --verbose to see exception logs.
+  }
+}
+
+}  // namespace
+
+kj::Promise<void> IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     kj::Exception&& exception,
     kj::Maybe<IncomingRequest&> incomingRequest) {
-  kj::Maybe<BaseTracer&> tracer;
-  kj::Maybe<RequestObserver&> metrics;
-  KJ_IF_SOME(request, incomingRequest) {
-    KJ_DASSERT(&request.getContext() == this);
-    tracer = request.getWorkerTracer();
-    metrics = request.getMetrics();
-  } else if (!incomingRequests.empty()) {
-    tracer = getWorkerTracer();
-    metrics = getMetrics();
+  // Resolve the fallback now: by the time we hold the lock, the current request may have changed.
+  kj::Maybe<IncomingRequest&> request = incomingRequest;
+  if (request == kj::none && !incomingRequests.empty()) {
+    request = incomingRequests.front();
   }
 
-  if (tracer == kj::none && !worker->getIsolate().isInspectorEnabled()) {
-    // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
-    // do still want to syslog if relevant, but we can do that without a lock.
-    if (!jsg::isTunneledException(exception.getDescription()) &&
-        !jsg::isDoNotLogException(exception.getDescription()) &&
-        // TODO(soon): Figure out why client disconnects are getting logged here if we don't
-        // ignore DISCONNECTED. If we fix that, do we still want to filter these?
-        exception.getType() != kj::Exception::Type::DISCONNECTED) {
-      LOG_EXCEPTION("jsgInternalError", exception);
-    } else {
-      KJ_LOG(INFO, "uncaught exception", exception);  // Run with --verbose to see exception logs.
+  kj::Maybe<PendingExceptionTrace> trace;
+  KJ_IF_SOME(r, request) {
+    KJ_DASSERT(&r.getContext() == this);
+    KJ_IF_SOME(tracer, r.workerTracer) {
+      // The exception belongs to the request as a whole rather than to whichever user span is
+      // active in the current async context, so report it under the request's root user span.
+      auto userSpan = r.getRootUserTraceSpan();
+      trace = PendingExceptionTrace{
+        .tracer = tracer.addRef(),
+        .spanContext = r.getInvocationSpanContextForUserSpan(userSpan),
+      };
     }
-    return;
   }
+
+  if (trace == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+    // Neither inspecting nor tracing is enabled, so we don't need the isolate lock.
+    logUncaughtExceptionWithoutLock(exception);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<Worker::AsyncLock> lockPromise = nullptr;
+  KJ_IF_SOME(r, request) {
+    lockPromise = worker->takeAsyncLock(r.getMetrics());
+  } else {
+    lockPromise = worker->takeAsyncLockWithoutRequest(nullptr);
+  }
+  return logUncaughtExceptionWithLock(
+      kj::mv(lockPromise), source, kj::mv(exception), kj::mv(trace));
+}
+
+kj::Promise<void> IoContext::logUncaughtExceptionWithLock(
+    kj::Promise<Worker::AsyncLock> lockPromise,
+    UncaughtExceptionSource source,
+    kj::Exception exception,
+    kj::Maybe<PendingExceptionTrace> trace,
+    kj::CoUnwindAware) {
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  KJ_DEFER({
+    switch (invocation.scopeOutcome()) {
+      case kj::CoScopeOutcome::SUCCESS:
+        break;
+      case kj::CoScopeOutcome::FAILURE:
+        // Make sure this is logged even if reporting it to the inspector or tracer fails. This is
+        // useful for tests (and in fact only affects tests, since it's logged at an INFO level).
+        KJ_LOG(INFO, "uncaught exception", source, exception);
+        break;
+      case kj::CoScopeOutcome::CANCELED:
+        // Canceled while waiting for the lock, so nothing has been logged yet.
+        logUncaughtExceptionWithoutLock(exception);
+        break;
+    }
+  });
+
+  auto asyncLock = co_await lockPromise;
 
   struct RunnableImpl: public Runnable {
     UncaughtExceptionSource source;
-    kj::Exception exception;
-    kj::Maybe<IncomingRequest&> incomingRequest;
+    const kj::Exception& exception;
+    kj::Maybe<Worker::Lock::ExceptionTraceTarget> traceTarget;
 
     RunnableImpl(UncaughtExceptionSource source,
-        kj::Exception&& exception,
-        kj::Maybe<IncomingRequest&> incomingRequest)
+        const kj::Exception& exception,
+        kj::Maybe<Worker::Lock::ExceptionTraceTarget> traceTarget)
         : source(source),
-          exception(kj::mv(exception)),
-          incomingRequest(incomingRequest) {}
+          exception(exception),
+          traceTarget(traceTarget) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, kj::mv(exception), incomingRequest);
+      lock.logUncaughtException(source, exception.clone(), traceTarget);
     }
   };
 
-  // Make sure this is logged even if another exception occurs trying to log it to the devtools inspector,
-  // e.g. if `runImpl` throws before calling logUncaughtException.
-  // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
-  KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
-  RunnableImpl runnable(source, kj::mv(exception), incomingRequest);
-  // TODO(perf): Is it worth using an async lock here? The only case where it really matters is
-  //   when a trace worker is active, but maybe they'll be more common in the future. To take an
-  //   async lock here, we'll probably have to update all the call sites of this method... ick.
-  runImpl(
-      runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
+  RunnableImpl runnable(source, exception, trace.map([](PendingExceptionTrace& t) {
+    return Worker::Lock::ExceptionTraceTarget{.tracer = *t.tracer, .spanContext = t.spanContext};
+  }));
+  runImpl(runnable, asyncLock, kj::none, Runnable::Exceptional(true));
 }
 
 void IoContext::requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report) {
@@ -725,6 +772,9 @@ void IoContext::addTask(kj::Promise<void> promise) {
     return;
   }
 
+  // As in addWaitUntil(), wrap the promise before attaching anything to it.
+  promise = logTaskFailure(kj::mv(promise));
+
   if (incomingRequests.empty()) {
     // A task can be scheduled after the last IncomingRequest has been unlinked (see
     // ~IoContext_IncomingRequest) while the IoContext itself is still alive -- an RPC stream
@@ -750,6 +800,10 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
+  // Wrap the promise before attaching anything to it, so that the task, and whatever it is
+  // tracked by, lasts until its failure has been logged.
+  promise = logTaskFailure(kj::mv(promise));
+
   kj::Own<Worker::Actor::WaitUntilTaskHandle> handle;
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = a.addedWaitUntilTask(); })) {
@@ -1626,7 +1680,7 @@ TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }
 
-void IoContext::taskFailed(kj::Exception&& exception) {
+void IoContext::recordTaskFailure(const kj::Exception& exception) {
   if (waitUntilStatusValue == EventOutcome::OK) {
     KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {
       waitUntilStatusValue = status;
@@ -1634,16 +1688,25 @@ void IoContext::taskFailed(kj::Exception&& exception) {
       waitUntilStatusValue = RequestObserver::outcomeFromException(exception);
     }
   }
+}
 
-  // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
-  // happen.
-  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
-    // There may no longer be an incoming request at task fail time – provide kj::none to indicate
-    // that the tracer and metrics should be taken from the current request, if available
-    logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception), kj::none);
-  })) {
-    KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", e);
+kj::Promise<void> IoContext::logTaskFailure(kj::Promise<void> promise) {
+  KJ_TRY {
+    co_await promise;
   }
+  KJ_CATCH(exception) {
+    recordTaskFailure(exception);
+    // There may no longer be an incoming request at task fail time – provide kj::none to indicate
+    // that the tracer and metrics should be taken from the current request, if available.
+    co_await logUncaughtExceptionAsync(
+        UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception), kj::none);
+  }
+}
+
+void IoContext::taskFailed(kj::Exception&& exception) {
+  // Tasks log their own failures in logTaskFailure(), so this only sees a failure to log one.
+  recordTaskFailure(exception);
+  KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exception);
 }
 
 void IoContext::requireCurrent() {

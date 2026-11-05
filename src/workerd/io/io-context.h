@@ -483,7 +483,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // request as a fallback if none is given. Pass `incomingRequest` whenever the exception is known
   // to belong to a specific request, such as the failure of its event handler: in an actor, the
   // current incoming request may be a newer, unrelated one.
-  void logUncaughtExceptionAsync(UncaughtExceptionSource source,
+  //
+  // Reporting to a tracer or the inspector requires the isolate lock, so the returned promise
+  // waits for an async lock. Callers should await it before recording the request's return
+  // event, so that the exception precedes it in the trace. The promise holds a reference to the
+  // request's tracer, so the exception is still traced if the request completes in the meantime.
+  // If the promise is canceled before the lock is acquired, the exception is only logged to
+  // syslog. The IoContext must outlive the returned promise.
+  kj::Promise<void> logUncaughtExceptionAsync(UncaughtExceptionSource source,
       kj::Exception&& e,
       kj::Maybe<IncomingRequest&> incomingRequest);
 
@@ -1435,6 +1442,27 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   friend class IoOwn;
   template <typename T>
   friend class IoPtr;
+
+  // The trace an exception passed to logUncaughtExceptionAsync() is added to.
+  struct PendingExceptionTrace {
+    kj::Rc<BaseTracer> tracer;
+    tracing::InvocationSpanContext spanContext;
+  };
+
+  // Second half of logUncaughtExceptionAsync(): logs `exception` once `lockPromise` resolves.
+  kj::Promise<void> logUncaughtExceptionWithLock(kj::Promise<Worker::AsyncLock> lockPromise,
+      UncaughtExceptionSource source,
+      kj::Exception exception,
+      kj::Maybe<PendingExceptionTrace> trace,
+      kj::CoUnwindAware = {});
+
+  // Updates waitUntilStatus() for a failed task.
+  void recordTaskFailure(const kj::Exception& exception);
+
+  // Wraps a task added to `tasks` or `waitUntilTasks`. If the task fails, records and logs the
+  // failure before the task completes, so that the IncomingRequest draining the task is still
+  // around, and the trace still open, when the exception is logged.
+  kj::Promise<void> logTaskFailure(kj::Promise<void> promise);
 
   void taskFailed(kj::Exception&& exception) override;
   void requireCurrent();

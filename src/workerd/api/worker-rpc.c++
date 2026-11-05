@@ -3468,7 +3468,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     }
   });
 
-  try {
+  KJ_TRY {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     capFulfiller->fulfill(capnp::membrane(
@@ -3479,18 +3479,19 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
-  } catch (...) {
+  }
+  KJ_CATCH(e) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
-    auto e = kj::getCaughtExceptionAsKj();
     markJsRpcExceptionAsDelivered(ioctx, e);
     // These are exceptions for a top-level jsRpc call and will cause the jsRpc customEvent to have
     // an exception outcome – log the exception to avoid reporting an exception outcome without the
     // actual exception.
-    KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() {
-      ioctx.logUncaughtExceptionAsync(
+    KJ_TRY {
+      co_await ioctx.logUncaughtExceptionAsync(
           UncaughtExceptionSource::ASYNC_TASK, e.clone(), *incomingRequest);
-    })) {
+    }
+    KJ_CATCH(exc) {
       KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exc);
     }
     revocableTarget.revoke(e.clone());

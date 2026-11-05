@@ -750,7 +750,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     });
   }
   KJ_CATCH(e) {
-    context.logUncaughtExceptionAsync(
+    co_await context.logUncaughtExceptionAsync(
         UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e), *incomingRequest);
     outcome = EventOutcome::EXCEPTION;
   }

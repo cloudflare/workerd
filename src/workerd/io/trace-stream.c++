@@ -1140,17 +1140,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
-  auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
-    return ioContext.waitUntilStatus();
-  }, [&ioContext, &incomingRequest](kj::Exception&& e) {
+  EventOutcome eventOutcome;
+  KJ_TRY {
+    co_await donePromise.exclusiveJoin(ioContext.onAbort());
+    eventOutcome = ioContext.waitUntilStatus();
+  }
+  KJ_CATCH(e) {
     // If we get an exception, report it for metrics, add a log to the trace and return an exception
     // outcome. There is no need to re-throw it as for tail workers we're not interested in
     // propagating the exception via jsRpc.
     incomingRequest->getMetrics().reportFailure(e);
-    ioContext.logUncaughtExceptionAsync(
+    co_await ioContext.logUncaughtExceptionAsync(
         UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), *incomingRequest);
-    return EventOutcome::EXCEPTION;
-  });
+    eventOutcome = EventOutcome::EXCEPTION;
+  }
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setReturn(ioContext.now());
   }

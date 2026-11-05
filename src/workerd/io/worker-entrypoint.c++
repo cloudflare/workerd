@@ -556,13 +556,10 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         // than an uncaught exception, so it is not logged.
         loggedExceptionEarlier = true;
         bool dispatchRejected = isActorDispatchRejection(exception);
-        if (!dispatchRejected) {
-          context.logUncaughtExceptionAsync(
-              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), *incomingRequest);
-        }
 
-        // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
-        // wrapper reports it. An output-gate failure takes precedence over the handler failure.
+        // Record a failure if cancellation interrupts any of the waits below. Otherwise the
+        // WorkerInterface wrapper reports it. An output-gate failure takes precedence over the
+        // handler failure.
         kj::Maybe<kj::Exception> outputGateException;
         auto reportFailure = kj::defer([&]() {
           KJ_IF_SOME(e, outputGateException) {
@@ -571,6 +568,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
             metricsForCatch->reportFailure(exception);
           }
         });
+
+        if (!dispatchRejected) {
+          co_await context.logUncaughtExceptionAsync(
+              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), *incomingRequest);
+        }
 
         // Do not allow the exception to escape the isolate without waiting for the output gate to
         // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
@@ -823,13 +825,17 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     self.loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(
+    auto logged = context.logUncaughtExceptionAsync(
         UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), incomingRequestRef);
 
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
-    return context.waitForOutputLocks().then(
-        [exception = kj::mv(exception)]() mutable -> kj::Promise<void> {
+    return logged
+        .then([weakContext = kj::mv(weakContext)]() {
+      auto& context =
+          KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed during connect");
+      return context.waitForOutputLocks();
+    }).then([exception = kj::mv(exception)]() mutable -> kj::Promise<void> {
       return kj::mv(exception);
     });
   })

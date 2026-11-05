@@ -63,7 +63,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   ensureHibernationManagerForEvent(
       KJ_REQUIRE_NONNULL(context.getActor()), eventParameters.websocketId);
 
-  try {
+  KJ_TRY {
     co_await context.run(
         [entrypointName = entrypointName, eventParameters = kj::mv(eventParameters),
             versionInfo = kj::mv(versionInfo), props = kj::mv(props),
@@ -100,15 +100,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_UNREACHABLE;
       }
     });
-  } catch (kj::Exception& e) {
+  }
+  KJ_CATCH(e) {
     if (auto desc = e.getDescription();
         !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
       LOG_EXCEPTION("HibernatableWebSocketCustomEvent"_kj, e);
     }
     incomingRequest->getMetrics().reportFailure(e);
-    context.logUncaughtExceptionAsync(
-        UncaughtExceptionSource::ASYNC_TASK, e.clone(), *incomingRequest);
     outcome = EventOutcome::EXCEPTION;
+    co_await context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::ASYNC_TASK, kj::mv(e), *incomingRequest);
   }
 
   co_return Result{

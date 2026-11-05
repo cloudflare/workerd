@@ -770,7 +770,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         auto alarmException = inspectAlarmException(e, context);
 
         // This will include the error in inspector/tracers and log to syslog if internal.
-        context.logUncaughtExceptionAsync(
+        auto logged = context.logUncaughtExceptionAsync(
             UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e), incomingRequest);
 
         auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
@@ -812,10 +812,11 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               "output lock broke during alarm execution without an interesting error description",
               actorId, description, shouldRetryCountsAgainstLimits);
         }
-        return WorkerInterface::AlarmResult{.retry = alarmException.retry,
-          .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-          .outcome = outcome,
-          .errorDescription = kj::str(description)};
+        return logged.then(
+            [result = WorkerInterface::AlarmResult{.retry = alarmException.retry,
+               .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
+               .outcome = outcome,
+               .errorDescription = kj::str(description)}]() mutable { return kj::mv(result); });
       })
           .then([&context, &incomingRequest](WorkerInterface::AlarmResult result)
                     -> kj::Promise<WorkerInterface::AlarmResult> {

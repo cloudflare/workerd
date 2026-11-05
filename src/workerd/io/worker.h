@@ -71,7 +71,6 @@ class IoContext;
 class AsyncTraceIsolate;
 class AsyncTraceListener;
 class AsyncTracePromiseHook;
-class IoContext_IncomingRequest;
 class InputGate;
 class OutputGate;
 
@@ -743,6 +742,12 @@ class Worker::Lock {
     //   out how to work around it, so here we are with a raw pointer. :/
   };
 
+  // The trace an uncaught exception is added to, and the span it is reported under.
+  struct ExceptionTraceTarget {
+    BaseTracer& tracer;
+    const tracing::InvocationSpanContext& spanContext;
+  };
+
   KJ_DISALLOW_COPY_AND_MOVE(Lock);
   KJ_DISALLOW_AS_COROUTINE_PARAM;
   ~Lock() noexcept(false);
@@ -774,18 +779,18 @@ class Worker::Lock {
   // than querying the property from the exception itself. This is also useful in the case that
   // the exception itself is not the original and the stack is missing.
   //
-  // The exception is added to the trace of `incomingRequest`, or of the IoContext's current
-  // incoming request if none is given.
+  // The exception is added to the trace of the IoContext's current incoming request.
   void logUncaughtException(UncaughtExceptionSource source,
       const jsg::JsValue& exception,
-      const jsg::JsMessage& message = jsg::JsMessage(),
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
+      const jsg::JsMessage& message = jsg::JsMessage());
 
   // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
-  // error may be extracted and used.
+  // error may be extracted and used. Unlike the version above, the exception is added only to
+  // `traceTarget`, so that it can't land in the trace of an unrelated request that became current
+  // while the caller waited for the lock.
   void logUncaughtException(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
+      kj::Maybe<ExceptionTraceTarget> traceTarget);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
@@ -829,6 +834,11 @@ class Worker::Lock {
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
+
+  // The parts of logUncaughtException() other than tracing: reports the exception to the
+  // inspector and, with --verbose, to stderr.
+  void reportUncaughtException(
+      UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message);
 
   Worker& worker;
   kj::Own<Impl> impl;
