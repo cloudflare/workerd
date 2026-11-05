@@ -1,0 +1,241 @@
+"""Macros that build the per-version Pyodide bundles.
+
+Together with internal/pool/, everything that determines a bundle's contents lives in this
+directory, apart from the Pyodide release itself (PYODIDE_VERSIONS in build/python_metadata.bzl).
+
+The macros are called from //src/pyodide, so the generated targets live in that package.
+"""
+
+load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("//:build/js_file.bzl", "js_file")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
+
+def _out_path(name, version):
+    return version + "/generated/" + name
+
+def _ts_bundle_out(prefix, name, version):
+    return ":" + _out_path(prefix + name, version)
+
+def _copy_to_generated(src, version, out_name):
+    copy_file(name = out_name + "@copy@" + version, src = src, out = _out_path(out_name, version))
+
+def _bin_relative_path(path):
+    # js_run_binary runs its tool with the bin directory as the working directory. Returns the
+    # path, relative to that directory, of a file in the current package. Works whether this
+    # package is in the main repository or (as when workerd is a dependency) an external one.
+    package = native.package_name()
+    if package:
+        path = package + "/" + path
+    repo = native.repo_name()
+    if repo:
+        path = "external/" + repo + "/" + path
+    return path
+
+def _packages_tag_for_version(version):
+    # Maps a Pyodide version to the package lock tag whose stdlib wheels should be embedded into
+    # that version's bundle. Newer Pyodide versions bundle the stdlib directly and have no lock
+    # file / wheels to embed, in which case this returns None.
+    for name, info in BUNDLE_VERSION_INFO.items():
+        if name == "development":
+            continue
+        if info["pyodide_version"] == version and "packages" in info:
+            return info["packages"]
+    return None
+
+def python_bundles(overrides = {}):
+    srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
+    native.filegroup(
+        name = "python_bundles",
+        srcs = srcs + [":bundle_version_info"],
+    )
+
+def _python_bundle_helper(info, overrides):
+    version = info["version"]
+    override = overrides.get(version, {})
+    return _python_bundle(version, **override)
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, python_stdlib_zip = None):
+    pyodide_package = "@pyodide-%s//" % version
+    if not pyodide_asm_wasm:
+        pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
+
+    if not pyodide_asm_mjs:
+        if version in ("0.26.0a2", "0.28.2"):
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.js"
+        else:
+            # for 314 or later, pyodide.asm.mjs is es6 module
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.mjs"
+
+    if not python_stdlib_zip:
+        python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
+
+    _copy_to_generated(pyodide_asm_wasm, version, "pyodide.asm.wasm")
+    _copy_to_generated(python_stdlib_zip, version, "python_stdlib.zip")
+
+    # Apply workerd's patches to the Emscripten-generated module (see patch_pyodide_asm.ts).
+    # The upstream file is first copied into this package so that both the tool's input and
+    # output can be addressed relative to the bin directory it runs in.
+    upstream_asm_mjs = _out_path("pyodide.asm.upstream.mjs", version)
+    patched_asm_mjs = _out_path("pyodide.asm.mjs", version)
+    _copy_to_generated(pyodide_asm_mjs, version, "pyodide.asm.upstream.mjs")
+    js_run_binary(
+        name = "pyodide.asm.mjs@rule@" + version,
+        srcs = [upstream_asm_mjs],
+        outs = [patched_asm_mjs],
+        args = [
+            "--version",
+            version,
+            "--input",
+            _bin_relative_path(upstream_asm_mjs),
+            "--output",
+            _bin_relative_path(patched_asm_mjs),
+        ],
+        mnemonic = "PatchPyodideAsm",
+        tool = Label(":patch_pyodide_asm"),
+    )
+
+    js_file(
+        name = "pyodide.asm.mjs@rule_js@" + version,
+        srcs = [patched_asm_mjs],
+        deps = ["pyodide.asm.mjs@rule@" + version],
+    )
+
+    expand_template(
+        name = "esbuild.config.mjs@" + version,
+        out = _out_path("esbuild.config.mjs", version),
+        substitutions = {
+            "%PYODIDE_VERSION%": version,
+        },
+        template = "internal/pool/esbuild.config.mjs",
+    )
+
+    esbuild(
+        name = "emscriptenSetup@" + version,
+        # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+        # for it. The file is provided in entry_point instead.
+        srcs = native.glob([
+            "internal/pool/*.ts",
+        ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
+            patched_asm_mjs,
+            "internal/util.ts",
+            "internal/const.ts",
+        ],
+        config = _out_path("esbuild.config.mjs", version),
+        entry_point = "internal/pool/emscriptenSetup.ts",
+        external = [
+            "child_process",
+            "crypto",
+            "fs",
+            "path",
+            "url",
+            "vm",
+            "ws",
+            "node:child_process",
+            "node:crypto",
+            "node:fs",
+            "node:path",
+            "node:url",
+            "node:vm",
+            "node:stream",
+            "node:tls",
+            "node:net",
+            "node:module",
+            "internal:unsafe-eval",
+        ],
+        format = "esm",
+        output = _out_path("emscriptenSetup.js", version),
+        target = "esnext",
+        deps = ["pyodide.asm.mjs@rule_js@" + version],
+    )
+
+    # The CPython stdlib modules and the shared libraries they depend on are embedded directly into
+    # the bundle so that the runtime no longer has to download or unpack them at request time. The
+    # wheels listed in the (pre-filtered) lock file are extracted at build time into a single
+    # PythonPackages capnp message (one entry per file, keyed by install_dir + path; see
+    # python_packages.capnp / pack_python_packages.py) which is embedded as the `python_packages`
+    # data module. Newer Pyodide versions bundle the stdlib directly and have no wheels to embed.
+    packages_tag = _packages_tag_for_version(version)
+    internal_data_modules = [
+        _out_path("python_stdlib.zip", version),
+    ]
+    extra_deps = []
+    has_packages = bool(packages_tag)
+    if has_packages:
+        lockfile = str(Label(":python-lock/pyodide-lock_%s.json" % packages_tag))
+        schema = str(Label(":python_packages.capnp"))
+        wheels = "@all_pyodide_wheels_%s//:whls" % packages_tag
+        native.genrule(
+            name = "python_packages.bin@rule@" + version,
+            srcs = [wheels, lockfile, schema],
+            outs = [_out_path("python_packages.bin", version)],
+            cmd = " ".join([
+                "$(execpath %s)" % Label(":pack_python_packages"),
+                "--capnp $(execpath @capnp-cpp//src/capnp:capnp_tool)",
+                "--schema $(location %s)" % schema,
+                "--lock $(location %s)" % lockfile,
+                "--out $@",
+                "$(locations %s)" % wheels,
+            ]),
+            tools = [
+                Label(":pack_python_packages"),
+                "@capnp-cpp//src/capnp:capnp_tool",
+            ],
+        )
+        internal_data_modules.append(_out_path("python_packages.bin", version))
+        extra_deps.append("python_packages.bin@rule@" + version)
+
+    import_name = "pyodideRuntime"
+    wd_js_bundle(
+        name = "pyodide@" + version,
+        import_name = import_name,
+        builtin_modules = [],
+        schema_id = "0xbcc8f57c63814005",
+        internal_modules = [
+            _out_path("emscriptenSetup.js", version),
+        ],
+        internal_wasm_modules = [
+            _out_path("pyodide.asm.wasm", version),
+        ],
+        internal_data_modules = internal_data_modules,
+        deps = [
+            "emscriptenSetup@" + version,
+            "pyodide.asm.wasm@copy@" + version,
+            "python_stdlib.zip@copy@" + version,
+        ] + extra_deps,
+        out_dir = _out_path("", version),
+    )
+
+    pyodide_cappn_bin_rule = "pyodide.capnp.bin@rule@" + version
+    bin_srcs = [
+        ":pyodide@%s.capnp" % version,
+        "//src/workerd/jsg:modules.capnp",
+        _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
+        _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
+        _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
+    ]
+    if has_packages:
+        bin_srcs.append(_ts_bundle_out(import_name + "-internal_", "python_packages.bin", version))
+    native.genrule(
+        name = pyodide_cappn_bin_rule,
+        srcs = bin_srcs,
+        outs = [_out_path("pyodide.capnp.bin", version)],
+        cmd = " ".join([
+            # Annoying logic to deal with different paths in workerd vs downstream.
+            # Either need "-I src" in workerd or -I external/+local_repository+workerd/src downstream
+            "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/+local_repository+workerd/src);",
+            "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
+            "eval",
+            "$(location :pyodide@%s.capnp)" % version,
+            import_name + "Bundle",
+            "-I $$INCLUDE",
+            "-o binary",
+            "> $@",
+        ]),
+        tools = ["@capnp-cpp//src/capnp:capnp_tool"],
+        visibility = ["//visibility:public"],
+    )
+    return pyodide_cappn_bin_rule
