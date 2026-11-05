@@ -1711,7 +1711,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
-    using ArtifactBundler = api::pyodide::ArtifactBundler;
+    using api::pyodide::ArtifactBundler;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           workerSource.variant.tryGet<Worker::Script::ModulesSource>(), featureFlags,
