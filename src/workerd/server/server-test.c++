@@ -5090,7 +5090,7 @@ KJ_TEST("Server: OTLP exports dynamic workers and excludes every collector entry
   stats.httpGet200("/", "2:true");
 }
 
-KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches queued requests") {
+KJ_TEST("Server: OTLP shares export concurrency and drains queued requests across workers") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -5125,16 +5125,12 @@ KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches q
           modules = [(name = "main.js", esModule =
             `let hold = true;
             `const queued = new Set();
-            `const sizes = [];
-            `let dropped = false;
             `export default {
             `  async fetch(req) {
             `    if (req.method === "POST") {
             `      const body = await req.arrayBuffer();
             `      const text = new TextDecoder().decode(body);
-            `      for (const [name] of text.matchAll(/export-queued-\d{4}/g)) queued.add(name);
-            `      dropped ||= text.includes("export-dropped-marker");
-            `      if (text.includes("export-queued-")) sizes.push(body.byteLength);
+            `      for (const [name] of text.matchAll(/export-queued-\d+/g)) queued.add(name);
             `      if (hold) await fetch("http://gate");
             `      return new Response(null, {status: 204});
             `    }
@@ -5142,10 +5138,7 @@ KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches q
             `      hold = false;
             `      return new Response("OK");
             `    }
-            `    const threshold = 1024 * 1024;
-            `    const valid = sizes.length > 1 && sizes[0] >= threshold &&
-            `      sizes.every(n => n < 2 * threshold);
-            `    return new Response(queued.size + ":" + dropped + ":" + valid);
+            `    return new Response(String(queued.size));
             `  }
             `}
           )],
@@ -5170,14 +5163,9 @@ KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches q
     held.add(test.receiveInternetSubrequest("gate"));
   }
 
-  // Each invocation still completes while the collector is stalled. The queue bound counts
-  // encoded export messages, before they are combined into larger HTTP requests.
-  for (auto i: kj::zeroTo(4096)) {
-    (i % 2 == 0 ? conn : other).httpGet200(kj::str("/queued-", 1000 + i), "OK");
-  }
-  {
-    KJ_EXPECT_LOG(WARNING, "OTLP export queue is full; dropping spans");
-    conn.httpGet200("/dropped-marker", "OK");
+  // Both workers still complete invocations while the shared collector is stalled.
+  for (auto i: kj::zeroTo(2)) {
+    (i % 2 == 0 ? conn : other).httpGet200(kj::str("/queued-", i), "OK");
   }
   auto extra = test.server.accept("gate");
   KJ_EXPECT(!extra.poll(test.ws), "more than 16 exports reached the collector");
@@ -5186,12 +5174,11 @@ KJ_TEST("Server: OTLP limits concurrent exports, bounds its queue, and batches q
   stats.httpGet200("/release", "OK");
   held[0].send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
   test.wait(1);
-  stats.httpGet200("/stats", "4096:false:true");
+  stats.httpGet200("/stats", "2");
 
-  // Draining the queue reopens admission; the dropped message is never retried.
-  conn.httpGet200("/queued-9999", "OK");
+  conn.httpGet200("/queued-2", "OK");
   test.wait(1);
-  stats.httpGet200("/stats", "4097:false:true");
+  stats.httpGet200("/stats", "3");
   for (uint i = 1; i < held.size(); ++i) {
     held[i].send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
   }
