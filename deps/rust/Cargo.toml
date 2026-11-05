@@ -34,6 +34,11 @@ async-trait = { version = "0", default-features = false }
 # kj-hyper's WebSocket handshake: Sec-WebSocket-Key / -Accept (RFC 6455 section 4).
 base64 = { version = "0", default-features = false, features = ["std"] }
 sha1 = { version = "0", default-features = false }
+# node-internal:buffer_native (src/rust/api/buffer.rs): SIMD base64, substring search, and UTF-8
+# validation, with runtime CPU feature detection.
+base64-simd = "0.8"
+memchr = "2"
+simdutf8 = "0.1"
 bytes = { version = "1", default-features = false }
 capnp = "0.27"
 capnpc = "0.27"

@@ -3,12 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Type definitions for the `node-internal:buffer_native` module
-// (src/workerd/api/node/buffer-native.h), which makes the V8, libc, simdutf,
-// nbytes, kj, i18n, and string search calls of
+// (src/rust/api/buffer.rs), the primitives that stand in for the V8, libc,
+// simdutf, nbytes, kj, i18n, and string search calls of
 // src/workerd/api/node/buffer.c++. Functions that take `start` and `end`
 // operate on that range of the array.
 
-// jsg::JsString::WriteFlags
+// v8::String::WriteFlags
 export const WRITE_NONE: number;
 export const WRITE_REPLACE_INVALID_UTF8: number;
 
@@ -51,7 +51,7 @@ export function newFromTwoByte(
   end: number
 ): string;
 
-// String search (buffer-string-search.h)
+// String search
 export function searchOneByte(
   haystack: Uint8Array,
   needle: Uint8Array,
@@ -67,7 +67,7 @@ export function searchTwoByte(
   isForward: boolean
 ): number;
 
-// libc
+// Comparison
 export function memcmp(
   one: Uint8Array,
   oneStart: number,
@@ -76,7 +76,7 @@ export function memcmp(
   length: number
 ): number;
 
-// simdutf
+// Base64
 export function decodeBase64(string: string): Uint8Array;
 export function encodeBase64(
   bytes: Uint8Array,
@@ -88,28 +88,30 @@ export function encodeBase64Url(
   start: number,
   end: number
 ): string;
-export function simdutfValidateAscii(input: Uint8Array): boolean;
-export function simdutfValidateUtf8(input: Uint8Array): boolean;
-
-// nbytes
-export function nbytesBase64Decode(
+export function decodeBase64Into(
   output: Uint8Array,
   start: number,
   end: number,
   input: Uint8Array
 ): number;
-export function nbytesSwapBytes16(data: Uint8Array): boolean;
-export function nbytesSwapBytes32(data: Uint8Array): boolean;
-export function nbytesSwapBytes64(data: Uint8Array): boolean;
 
-// kj
+// Hex
 export function encodeHex(
   bytes: Uint8Array,
   start: number,
   end: number
 ): string;
 
-// workerd::api::node::i18n
+// Validation
+export function validateAscii(input: Uint8Array): boolean;
+export function validateUtf8(input: Uint8Array): boolean;
+
+// Byte order
+export function swapBytes16(data: Uint8Array): boolean;
+export function swapBytes32(data: Uint8Array): boolean;
+export function swapBytes64(data: Uint8Array): boolean;
+
+// Transcoding
 export function transcode(
   source: Uint8Array,
   fromEncoding: number,
