@@ -986,6 +986,27 @@ the prototype or is dropped; with Rust JSG, no JavaScript runs and `__proto__` i
 as with `Object.fromEntries()`. `Local<Object>::keys()` and
 `get_by_name()` list and read properties the same way.
 
+### Rest parameters
+
+`jsg::Arguments<T>`, C++ JSG's `jsg::Arguments<T>`, is a rest parameter: as the last parameter of
+a `#[jsg_method]` or a `#[jsg_constructor]`, it takes every argument from its position on, each
+converted to `T`.
+
+```rust
+#[jsg_method]
+pub fn exec(&self, query: String, bindings: jsg::Arguments<Binding>) -> Cursor { /* ... */ }
+// JS: sql.exec("SELECT ?, ?", 1, "a")  // bindings == [1, "a"]
+```
+
+- Without remaining arguments it is empty; omitting them is never an error.
+- Each argument converts as a parameter of type `T` would, and a mismatch is the same
+  `TypeError`, which names the rest parameter's position for every argument, as C++ JSG's does.
+- It is not counted in `.length`, and a parameter after it is a compile error.
+- It holds the values in a `Vec`: it dereferences to `[T]`, iterates, and `into_inner()` returns
+  the `Vec`. It converts only from the arguments of a call; a JavaScript array is a `Vec<T>`.
+- RTTI describes it as C++ RTTI does, without the element type, so TypeScript declares it as
+  `...name: any[]`; give a precise type with a TypeScript override.
+
 ### Arrays, typed arrays and `ArrayBuffer`s
 
 A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
@@ -1317,6 +1338,44 @@ A wildcard property behaves as in C++ JSG:
 - An object that inherits from the resource, as `Object.create(obj)` does, reads them too.
 - A wildcard property named `then` makes the object a thenable, which `await` would call.
   Return `None` for `then` unless that is intended.
+
+## Callable resources
+
+`#[jsg_callable]`, the equivalent of C++ JSG's `JSG_CALLABLE`, makes the instances of a resource
+type callable as functions:
+
+```rust
+#[jsg_resource]
+impl Statement {
+    // `statement(1, 2)` runs the method.
+    #[jsg_callable]
+    pub fn run(&self, lock: &mut jsg::Lock, a: f64, b: Option<f64>) -> String {
+        /* ... */
+    }
+}
+```
+
+A callable resource behaves as in C++ JSG:
+
+- The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape
+  of a `#[jsg_method]`: an optional `lock: &mut jsg::Lock`, then the JavaScript arguments, which
+  are converted as a method's are. An argument error names the method `(called as function)`.
+  A type is callable at most one way, though `custom_members` may choose between several by
+  compatibility flag. The method may also be a `#[jsg_method]`, to be callable both ways.
+- The method runs whether the instance is called with or without `new`.
+- `this` is always the instance, however the call names it: a callable read from another object
+  (`const f = obj.method; f()`), or called with `Reflect.apply()` and another receiver, still runs
+  on the instance. The resource cannot tell how it was called.
+- `typeof` is `"function"`, but the instance is an ordinary instance of the resource type: its
+  prototype is the type's prototype, not `Function.prototype`, so it has no `call`, `apply` or
+  `bind`, and `instanceof Function` is false.
+- Only the instance is callable: an object that inherits from it, as `Object.create(obj)` does,
+  is not.
+- With a [wildcard property](#wildcard-properties) as well, every property can be callable, which
+  is how C++ JSG's RPC stubs are built.
+- RTTI describes the method as the type's call signature (the `callable` of its structure), as
+  C++ RTTI describes a `JSG_CALLABLE`. The TypeScript generator does not read it, so C++ types
+  declare their call signatures with `JSG_TS_OVERRIDE`.
 
 ## Static Constants
 

@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod arguments;
 mod async_context;
 mod buffer;
 mod cell;
@@ -32,6 +33,7 @@ mod typed_promise;
 pub mod v8;
 mod wrappable;
 
+pub use arguments::Arguments;
 pub use async_context::AsyncContextFrame;
 pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
@@ -1169,6 +1171,12 @@ pub enum Member {
     WildcardProperty {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
+    },
+    /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
+    /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
+    /// call names it. A type has at most one.
+    Callable {
+        callback: RawFunctionCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
