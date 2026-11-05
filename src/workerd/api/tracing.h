@@ -183,7 +183,7 @@ class Span: public jsg::Object {
   // Ends the span and submits its content to the tracing system. Idempotent.
   void end();
 
-  JSG_RESOURCE_TYPE(Span, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Span) {
     JSG_READONLY_PROTOTYPE_PROPERTY(isTraced, getIsTraced);
 
     JSG_METHOD(spanContext);
@@ -194,34 +194,22 @@ class Span: public jsg::Object {
     JSG_METHOD(setStatus);
     JSG_METHOD(end);
 
-    if (flags.getSpanLinks()) {
-      JSG_METHOD(addLink);
-      JSG_METHOD(addLinks);
-      JSG_TS_DEFINE(
-        interface TracingSpanLinkContext extends TracingSpanContext {
-          isRemote?: boolean;
-          traceState?: string;
-        }
-        interface TracingSpanLink {
-          context: TracingSpanLinkContext;
-          attributes?: Record<string, boolean | number | string | undefined>;
-          droppedAttributesCount?: number;
-        }
-      );
-      JSG_TS_OVERRIDE({
-        addLink(link: TracingSpanLink): this;
-        addLinks(links: readonly TracingSpanLink[]): this;
-        setAttribute(key: string, value: boolean | number | string): this;
-        setAttributes(attributes: Record<string, boolean | number | string | undefined>): this;
-        recordException(exception: string
-          | { code: string | number; name?: string; message?: string; stack?: string }
-          | { code?: string | number; name: string; message?: string; stack?: string }
-          | { code?: string | number; name?: string; message: string; stack?: string }): void;
-        updateName(name: string): this;
-        setStatus(status: TracingSpanStatus): this;
-      });
-    } else {
-      JSG_TS_OVERRIDE({
+    JSG_METHOD(addLink);
+    JSG_METHOD(addLinks);
+    JSG_TS_DEFINE(
+      interface TracingSpanLinkContext extends TracingSpanContext {
+        isRemote?: boolean;
+        traceState?: string;
+      }
+      interface TracingSpanLink {
+        context: TracingSpanLinkContext;
+        attributes?: Record<string, boolean | number | string | undefined>;
+        droppedAttributesCount?: number;
+      }
+    );
+    JSG_TS_OVERRIDE({
+      addLink(link: TracingSpanLink): this;
+      addLinks(links: readonly TracingSpanLink[]): this;
       setAttribute(key: string, value: boolean | number | string): this;
       setAttributes(
         attributes: Record<string, boolean | number | string | undefined>
@@ -232,8 +220,7 @@ class Span: public jsg::Object {
         | { code?: string | number; name?: string; message: string; stack?: string }): void;
       updateName(name: string): this;
       setStatus(status: TracingSpanStatus): this;
-      });
-    }
+    });
   }
 
  private:

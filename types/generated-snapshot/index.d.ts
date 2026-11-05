@@ -4589,6 +4589,15 @@ interface Tracing {
   getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
+interface TracingSpanLinkContext extends TracingSpanContext {
+  isRemote?: boolean;
+  traceState?: string;
+}
+interface TracingSpanLink {
+  context: TracingSpanLinkContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4621,6 +4630,8 @@ declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 type TracingSpanStatusCode = "unset" | "ok" | "error";
 interface TracingSpanStatus {

@@ -4598,6 +4598,15 @@ export interface Tracing {
   getActiveSpan(): Span | undefined;
   Span: typeof Span;
 }
+export interface TracingSpanLinkContext extends TracingSpanContext {
+  isRemote?: boolean;
+  traceState?: string;
+}
+export interface TracingSpanLink {
+  context: TracingSpanLinkContext;
+  attributes?: Record<string, boolean | number | string | undefined>;
+  droppedAttributesCount?: number;
+}
 export declare abstract class Span {
   get isTraced(): boolean;
   spanContext(): TracingSpanContext;
@@ -4630,6 +4639,8 @@ export declare abstract class Span {
   updateName(name: string): this;
   setStatus(status: TracingSpanStatus): this;
   end(): void;
+  addLink(link: TracingSpanLink): this;
+  addLinks(links: readonly TracingSpanLink[]): this;
 }
 export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {

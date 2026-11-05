@@ -7,28 +7,20 @@ import { tracing } from 'cloudflare:workers';
 
 const startup = tracing.startSpan('startup');
 
-export const noopsAndFlag = {
+export const noops = {
   test(ctrl, env, ctx) {
     const span = ctx.tracing.startSpan('untraced');
     for (const receiver of [startup, span]) {
       assert.equal(receiver.isTraced, false);
-      assert.equal(
-        typeof receiver.addLink,
-        env.enabled ? 'function' : 'undefined'
-      );
-      assert.equal(
-        typeof receiver.addLinks,
-        env.enabled ? 'function' : 'undefined'
-      );
-      if (env.enabled) {
-        const poison = {
-          get context() {
-            throw new Error('no-op span read its input');
-          },
-        };
-        assert.equal(receiver.addLink(poison), receiver);
-        assert.equal(receiver.addLinks([poison]), receiver);
-      }
+      assert.equal(typeof receiver.addLink, 'function');
+      assert.equal(typeof receiver.addLinks, 'function');
+      const poison = {
+        get context() {
+          throw new Error('no-op span read its input');
+        },
+      };
+      assert.equal(receiver.addLink(poison), receiver);
+      assert.equal(receiver.addLinks([poison]), receiver);
       receiver.end();
     }
   },
