@@ -174,6 +174,7 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   const WorkerFactory& factory;
   kj::String name;
   WorkerTimerChannel timerChannel;
+  kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter;
   kj::TaskSet waitUntilTasks;
 
   // The compiled compatibility flags of a config worker; a dynamic worker's live in its source.
