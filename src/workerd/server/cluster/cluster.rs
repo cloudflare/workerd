@@ -123,9 +123,11 @@ impl Cluster {
         })
     }
 
-    /// The bucket below `<prefix>kv/`, where built-in KV keeps large values.
-    pub fn kv_blobs(&self) -> Bucket {
-        self.bucket.at(&format!("{}kv", self.bucket.prefix()))
+    /// The bucket below `<prefix>services/<path>/`, apart from the cluster's
+    /// own state (`ClusterBucket` in workerd.capnp).
+    pub fn services(&self, path: &str) -> Bucket {
+        self.bucket
+            .at(&format!("{}services/{path}", self.bucket.prefix()))
     }
 
     pub fn node(&self) -> &str {

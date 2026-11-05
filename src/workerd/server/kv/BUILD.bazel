@@ -1,6 +1,17 @@
-# Built-in KV's Worker (server/services/kv.rs).
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+# The KV Worker (kv.js), which cli/wrangler.rs embeds and tests load.
 
 exports_files(
     ["kv.js"],
-    visibility = ["//src/workerd/server/server:__pkg__"],
+    visibility = [
+        "//src/workerd/server:__pkg__",
+        "//src/workerd/server/tests:__subpackages__",
+    ],
+)
+
+js_library(
+    name = "kv_js",
+    srcs = ["kv.js"],
+    visibility = ["//src/workerd/server/tests:__subpackages__"],
 )

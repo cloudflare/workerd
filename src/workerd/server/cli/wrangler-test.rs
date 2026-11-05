@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use workerd_capnp::service;
+use workerd_capnp::service_designator;
 use workerd_capnp::worker;
 
 use super::*;
@@ -292,13 +293,13 @@ fn unsupported_field_is_an_error() {
         (
             "wrangler.jsonc",
             r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
-                 "kv_namespaces": [{ "binding": "KV", "id": "x", "preview_id": "y" }] }"#,
+                 "kv_namespaces": [{ "binding": "KV", "bogus": "y" }] }"#,
         ),
         ("index.js", ""),
     ])
     .err()
     .unwrap();
-    assert!(error.contains("preview_id"), "{error}");
+    assert!(error.contains("bogus"), "{error}");
 }
 
 #[test]
@@ -319,14 +320,14 @@ fn kv_namespaces_require_experimental() {
 }
 
 #[test]
-fn kv_namespaces_are_kv_namespace_ids_in_builtin_storage() {
+fn kv_namespaces_bind_the_kv_worker() {
     let dir = project(&[
         (
             "wrangler.jsonc",
             r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
                  "no_bundle": true,
-                 "kv_namespaces": [{ "binding": "A", "id": "a" },
-                                   { "binding": "B", "id": "b" }] }"#,
+                 "kv_namespaces": [{ "binding": "A", "id": "a", "preview_id": "p" },
+                                   { "binding": "B", "remote": true }] }"#,
         ),
         ("index.js", ""),
     ]);
@@ -338,37 +339,56 @@ fn kv_namespaces_are_kv_namespace_ids_in_builtin_storage() {
     .unwrap();
     let message = read(config);
     let conf = message.get_root::<config::Reader>().unwrap();
-    assert_eq!(conf.get_builtin_storage().unwrap(), "app-builtin-storage");
     let services = conf.get_services().unwrap();
-    assert_eq!(services.len(), 2);
-    let service::Which::Disk(disk) = services.get(1).which().unwrap() else {
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-kv", "app-kv-storage", "app-kv-blobs"]);
+    let service::Which::Disk(disk) = services.get(3).which().unwrap() else {
         panic!("not a disk");
     };
     let disk = disk.unwrap();
     assert!(disk.get_writable());
-    let builtin = dir.join(".wrangler/state/workerd/builtin");
-    assert!(builtin.is_dir());
+    let blobs = dir.join(".wrangler/state/workerd/kv/blobs");
+    assert!(blobs.is_dir());
     assert_eq!(
         fs::canonicalize(disk.get_path().unwrap().to_str().unwrap()).unwrap(),
-        fs::canonicalize(builtin).unwrap()
+        fs::canonicalize(blobs).unwrap()
     );
     let service::Which::Worker(w) = services.get(0).which().unwrap() else {
         panic!("not a worker");
     };
-    let ids: Vec<_> = w
+    let bound: Vec<_> = w
         .unwrap()
         .get_bindings()
         .unwrap()
         .iter()
         .map(|b| {
-            let worker::binding::Which::KvNamespaceId(id) = b.which().unwrap() else {
-                panic!("not a kvNamespaceId");
+            let worker::binding::Which::KvNamespace(d) = b.which().unwrap() else {
+                panic!("not a kvNamespace");
             };
-            let name = b.get_name().unwrap().to_str().unwrap().to_owned();
-            (name, id.unwrap().to_str().unwrap().to_owned())
+            let d = d.unwrap();
+            let service_designator::props::Which::Json(props) = d.get_props().which().unwrap()
+            else {
+                panic!("no JSON props");
+            };
+            let text = |t: capnp::text::Reader<'_>| t.to_str().unwrap().to_owned();
+            (
+                text(b.get_name().unwrap()),
+                text(d.get_name().unwrap()),
+                text(props.unwrap()),
+            )
         })
         .collect();
-    assert_eq!(ids, [("A".into(), "a".into()), ("B".into(), "b".into())]);
+    let kv = |b: &str, id: &str| {
+        (
+            b.into(),
+            "app-kv".into(),
+            format!(r#"{{"namespace":"{id}"}}"#),
+        )
+    };
+    assert_eq!(bound, [kv("A", "a"), kv("B", "B")]);
 }
 
 #[test]

@@ -20,6 +20,8 @@
 //      breaks, while a fresh stub reaches the re-instantiated DO.
 //   9. Facets and their deletions survive a takeover.
 //  10. Draining cancels a running onHibernate handler.
+//  11. KV: a namespace is seen from every node, its large values are in the
+//      bucket and cached on each node's disk, and it survives its owner.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -129,7 +131,6 @@ class ClusterNode {
         // Drop the runtime on exit, joining its threads, which TSan reports
         // as leaked otherwise.
         KJ_CLEAN_SHUTDOWN: '1',
-        WORKERD_KV_TEST_CLOCK: '1',
         NODE_ID: this.#nodeId,
         AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
       },
@@ -783,14 +784,14 @@ test('cluster: a KV namespace is an object, seen from every node', async () => {
     const gone = await fetchJson(b, `/kv/get?${q({ key: 'q' })}`);
     assert.strictEqual(gone.body.value, null);
     // Small values are inline in the object: none is in the bucket.
-    assert.deepStrictEqual(await bucket.list('kv/'), []);
+    assert.deepStrictEqual(await bucket.list('services/kv/'), []);
 
     // A large value is a blob, and a listing does not read it.
     for (const size of ['65536', '65537']) {
       const big = { key: `big/${size}`, size, metadata: '{"b":1}' };
       await fetchJson(a, `/kv/put?${q(big)}`);
     }
-    const blobs = await bucket.list('kv/');
+    const blobs = await bucket.list('services/kv/');
     assert.strictEqual(blobs.length, 1, blobs.join());
     const served = () => bucket.served(`v1/${blobs[0]}`);
     const before = await served();
@@ -808,7 +809,7 @@ test('cluster: a KV namespace is an object, seen from every node', async () => {
 });
 
 // A node keeps the KV blobs it writes and reads on its disk, so it
-// downloads a value once. Eviction is a unit test (services/kv-test.rs).
+// downloads a value once.
 test('cluster: a node caches KV blobs on its disk', async () => {
   await withCluster(2, async ({ nodes, bucket }) => {
     const [a, b] = nodes.map((n) => n.httpPort);
@@ -821,7 +822,7 @@ test('cluster: a node caches KV blobs on its disk', async () => {
     // Bytes the bucket served of every blob it has held.
     const seen = new Set();
     const served = async () => {
-      for (const key of await bucket.list('kv/')) seen.add(key);
+      for (const key of await bucket.list('services/kv/')) seen.add(key);
       let n = 0;
       for (const key of seen) n += await bucket.served(`v1/${key}`);
       return n;
@@ -878,6 +879,60 @@ test('cluster: KV reads are stale for at most cacheTtl', async () => {
     assert.deepStrictEqual([stale.value, stale.cacheStatus], ['old', 'HIT']);
     await fetchJson(a, `/kv/clock?${q({ advance: '31000' })}`);
     assert.strictEqual((await read(a)).value, 'new');
+  });
+});
+
+// KV fails over as any object does: once a namespace's owner dies, the
+// survivor reads its large values from the bucket, expires its keys, and
+// collects the blobs it replaces.
+test('cluster: a KV namespace survives its owner', async () => {
+  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
+    const kv = (node, op, params) =>
+      fetchJson(node.httpPort, `/kv/${op}?${new URLSearchParams(params)}`, {
+        timeoutMs: 10_000,
+      });
+    await kv(nodes[0], 'put', { key: 'big', size: '100000' });
+    await kv(nodes[0], 'put', { key: 'ttl', value: 'v', ttl: '60' });
+    const records = await bucket.list(objectPrefix('', 'kv'));
+    const own = records.find((key) => key.endsWith('/own.json'));
+    const ownerKey = JSON.parse(await bucket.get(own)).node;
+    const owner = nodes.find((n) => nodeKeys.get(n.nodeId) === ownerKey);
+    const survivor = nodes.find((n) => n !== owner);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+
+    // Requests fail until the dead owner's lease expires.
+    let got = null;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      got = await kv(survivor, 'get', { key: 'big' }).catch(() => null);
+      if (got?.status === 200) break;
+      await sleep(200);
+    }
+    assert.strictEqual(got?.status, 200, JSON.stringify(got?.body));
+    assert.strictEqual(got.body.value.length, 100000);
+
+    assert.strictEqual(
+      (await kv(survivor, 'get', { key: 'ttl' })).body.value,
+      'v'
+    );
+    await kv(survivor, 'clock', { advance: '61000' });
+    assert.strictEqual(
+      (await kv(survivor, 'get', { key: 'ttl' })).body.value,
+      null
+    );
+    const listed = await kv(survivor, 'list', { prefix: '' });
+    assert.deepStrictEqual(
+      listed.body.keys.map((k) => k.name),
+      ['big']
+    );
+
+    assert.strictEqual((await bucket.list('services/kv/')).length, 1);
+    await kv(survivor, 'put', { key: 'big', value: 'small' });
+    const collected = Date.now() + 10_000;
+    while ((await bucket.list('services/kv/')).length > 0) {
+      assert(Date.now() < collected, 'the replaced blob was never collected');
+      await sleep(100);
+    }
   });
 });
 

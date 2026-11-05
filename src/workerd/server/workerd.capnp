@@ -97,18 +97,6 @@ struct Config {
 
   cluster @7 :ClusterConfig;
   # Set when this instance should join a cluster. Requires `--experimental`.
-
-  builtinStorage @8 :Text;
-  # The writable disk service (`Service.disk`) where workerd's built-in products keep their
-  # state, each in directories of its own: built-in KV's Durable Objects, and its values over
-  # 64 KiB, or in a cluster its cache of those values. Required when a Worker binds a
-  # `kvNamespaceId`. Experimental: requires `--experimental`.
-  #
-  # When set, the config has the built-in service `workerd:kv`. A config may not define a
-  # service named `workerd:*`, but may name one: a `kvNamespace` (or `service`) designator
-  # `(name = "workerd:kv", props = (json = "{\"namespace\": \"<id>\"}"))` reaches the
-  # namespace `<id>`, as a `kvNamespaceId = "<id>"` binding does. That is the supported way to
-  # reach a namespace chosen at runtime.
 }
 
 struct ClusterConfig {
@@ -299,12 +287,26 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    bucket @6 :ClusterBucket;
+    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
   #   be a list of Worker names, where each Worker must have a binding called `next`. This
   #   implicitly creates an inherited worker that wraps this service, with the `next` binding
   #   pointing to the service itself (or to the next middleware in the stack).
+}
+
+struct ClusterBucket {
+  # GET, PUT and DELETE on `/<file>` read, write and remove the object
+  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
+  # that every instance sees the same files. The cluster keeps its own state outside
+  # `services/`, where this service cannot reach it. A binding to this service grants only its
+  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 }
 
 struct ServiceDesignator {
@@ -612,13 +614,6 @@ struct Worker {
       #        const fetcher = await client.getEntrypoint("service", "entrypoint");
       #
       # This is a workerd-only API intended for local development and testing.
-
-      kvNamespaceId @29 :Text;
-      # A KV namespace kept by workerd itself, named by its id (wrangler's `id`). Bindings with
-      # the same id share a namespace. It lives in `Config.builtinStorage`, which it requires;
-      # in a cluster it replicates as any Durable Object, and its values over 64 KiB live in the
-      # cluster's bucket. A namespace chosen at runtime is reached through `workerd:kv` instead;
-      # see `Config.builtinStorage`. Experimental: requires `--experimental`.
 
       # TODO(someday): dispatch, other new features
     }

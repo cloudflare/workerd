@@ -193,18 +193,6 @@ impl DiskDirectoryService {
     pub fn writable_path(&self) -> Option<&str> {
         self.0.writable.then(|| self.0.root.to_str()).flatten()
     }
-
-    /// The directory `name` below this one, made if missing, served alike.
-    pub fn subdirectory(&self, name: &str) -> Result<Rc<Self>> {
-        let root = self.0.root.join(name);
-        std::fs::create_dir_all(&root).map_err(|e| io_kj_error(&e))?;
-        Ok(Rc::new(Self(Rc::new(Disk {
-            factory: Rc::clone(&self.0.factory),
-            root,
-            writable: self.0.writable,
-            allow_dotfiles: self.0.allow_dotfiles,
-        }))))
-    }
 }
 
 impl Channel for DiskDirectoryService {
@@ -251,14 +239,14 @@ pub fn make_disk_directory_service(
 // =======================================================================================
 // Requests
 
-pub fn kj_headers<'t>(
+fn kj_headers<'t>(
     table: &'t HeaderTable,
     map: &http::HeaderMap,
 ) -> Result<kj_hyper::ffi::Borrowing<'t, kj::http::ffi::HttpHeaders>> {
     kj_hyper::HeaderBlock::new(map, &http::Extensions::new()).to_kj(table)
 }
 
-pub fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
+fn header_value(value: impl AsRef<str>) -> Result<http::HeaderValue> {
     http::HeaderValue::from_str(value.as_ref())
         .map_err(|_| kj::failed!("invalid header value: {}", value.as_ref()))
 }

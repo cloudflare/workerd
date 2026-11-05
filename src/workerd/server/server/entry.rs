@@ -128,7 +128,6 @@ fn run<Fut: Future<Output = Result<()>> + 'static>(
 ) -> Result<i32> {
     let command = move |config, structured| {
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let config = crate::services::kv::with_builtin(config)?;
         let factory = ffi::bootstrap(
             runtime.context(),
             config,

@@ -120,8 +120,8 @@ test('kv_namespaces in a wrangler.jsonc', async () => {
   assert.strictEqual(await get('/A/k'), null);
   assert.strictEqual(await get('/B/k'), 'in b');
   await server.stop();
-  const storage = join(dir, '.wrangler/state/workerd/builtin');
-  assert.ok((await stat(join(storage, 'workerd-KVNamespace'))).isDirectory());
+  const storage = join(dir, '.wrangler/state/workerd/kv');
+  assert.ok((await stat(join(storage, 'KVNamespace'))).isDirectory());
 
   // Two processes on the same storage, as `wrangler dev` and `wrangler kv
   // key put --local` are: each sees the other's writes at once, misses

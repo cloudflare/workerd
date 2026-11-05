@@ -12,11 +12,8 @@ async function blobs(env) {
     const r = await env.DISK.fetch(`http://d/${path}`);
     return r.ok ? (await r.json()).map((e) => e.name) : [];
   };
-  const root = 'workerd-KVNamespace-blobs';
   const out = [];
-  for (const dir of await ls(`${root}/`)) {
-    out.push(...(await ls(`${root}/${dir}/b/`)));
-  }
+  for (const dir of await ls('')) out.push(...(await ls(`${dir}/b/`)));
   return out.sort();
 }
 
@@ -164,7 +161,7 @@ export const threshold = {
 };
 
 // An overwritten or deleted blob is deleted once its grace period, shortened
-// by `WORKERD_KV_TEST_CLOCK`, is over.
+// by `TEST_CLOCK`, is over.
 export const blobGc = {
   async test(ctrl, env) {
     await sleep(500);
@@ -333,7 +330,7 @@ export const expiry = {
     await env.KV.put('x/at', 'v', { expiration: now() + 120 });
     await env.KV.put('x/forever', 'v');
     const advance = (s) =>
-      env.BUILTIN.fetch(`http://kv/clock?advance=${s * 1000}`, {
+      env.KV_WORKER.fetch(`http://kv/clock?advance=${s * 1000}`, {
         method: 'POST',
       });
     try {
@@ -355,17 +352,6 @@ export const expiry = {
     } finally {
       await advance(-121);
     }
-  },
-};
-
-// A kvNamespace designator may name workerd:kv with the namespace in its
-// props, for a namespace chosen at runtime.
-export const byDesignator = {
-  async test(ctrl, env) {
-    await env.KV.put('d', 'shared');
-    assert.strictEqual(await env.BY_DESIGNATOR.get('d'), 'shared');
-    await env.BY_DESIGNATOR.put('d2', 'back');
-    assert.strictEqual(await env.KV.get('d2'), 'back');
   },
 };
 

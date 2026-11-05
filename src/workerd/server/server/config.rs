@@ -56,7 +56,6 @@ use crate::cluster::ClusterNode;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
-use crate::services::kv::make_blob_service;
 use crate::worker::LinkedChannels;
 use crate::worker::WorkerService;
 
@@ -507,6 +506,8 @@ pub fn collect_actor_configs(
             }
 
             // Meant for parameterized workers; nothing implements it, so nothing may set it.
+            // TODO(someday): implement it, so that a Worker with Durable Objects can be
+            // `inherit`ed, as a built-in Worker's config constant would be.
             if worker_conf.has_durable_object_unique_key_modifier() {
                 return Err(capnp::Error::failed(
                     "durableObjectUniqueKeyModifier is not implemented yet".to_owned(),
@@ -1107,13 +1108,7 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
-        if services.0.contains_key(crate::services::kv::NAME) && !factory.experimental() {
-            report.error(
-                "Config.builtinStorage is experimental; it requires --experimental.".to_owned(),
-            );
-        }
-        let blobs = make_blob_service(config, &services.0, cluster.as_ref(), &factory)?;
-        services.0.extend(blobs);
+        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
 
         let server = Rc::new(Self {
             report,
@@ -1372,6 +1367,8 @@ async fn make_service(
                     .map(Service::Disk),
             ))
         }
+        // Made once the cluster is joined (`make_bucket_services`).
+        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
         Err(capnp::NotInSchema(_)) => {
             report.error(format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -1529,6 +1526,38 @@ impl Server {
 #[cfg(test)]
 #[path = "config-test.rs"]
 mod tests;
+
+/// Replaces each `bucket` service's stand-in with the directory of the
+/// cluster's bucket it names.
+fn make_bucket_services(
+    config: config::Reader<'_>,
+    services: &mut Services,
+    cluster: Option<&Rc<ClusterNode>>,
+    factory: &Rc<Factory>,
+    report: &Reporter,
+) -> Result<()> {
+    for conf in config.get_services().map_err(capnp_error)? {
+        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
+            continue;
+        };
+        let name = text(conf.get_name())?;
+        let Some(node) = cluster else {
+            report.service_error(&name, "A bucket service requires Config.cluster.");
+            continue;
+        };
+        let bucket = bucket.map_err(capnp_error)?;
+        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let channel: Rc<dyn Channel> = match made {
+            Ok(service) => Rc::new(service),
+            Err(error) => {
+                report.service_error(&name, error.description());
+                continue;
+            }
+        };
+        services.0.insert(name, Service::Leaf(channel));
+    }
+    Ok(())
+}
 
 /// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.
 fn make_cluster(

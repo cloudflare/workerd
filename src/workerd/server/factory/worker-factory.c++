@@ -1412,18 +1412,12 @@ MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
 }
 
 // Compiles a config worker's compatibility flags into `arena`, as the worker's errors.
-// A built-in service's Worker (`workerd:*`, services/kv.rs) keeps its own date under `--compat-date`,
-// and may use experimental features.
 CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
-    bool builtin,
     config::Worker::Reader conf,
     capnp::MallocMessageBuilder& arena,
     ErrorReporter& errorReporter) {
   auto flags = arena.initRoot<CompatibilityFlags>();
-  bool experimental = options.experimental || builtin;
-  kj::Maybe<kj::StringPtr> testDate;
-  if (!builtin) testDate = options.testCompatibilityDateOverride;
-  KJ_IF_SOME(overrideDate, testDate) {
+  KJ_IF_SOME(overrideDate, options.testCompatibilityDateOverride) {
     if (conf.hasCompatibilityDate()) {
       errorReporter.addError(
           kj::str("Worker specifies compatibilityDate but --compat-date was provided. "
@@ -1432,15 +1426,16 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
     }
     // FUTURE_FOR_TEST admits any valid date, such as 2999-12-31.
     compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), flags, errorReporter,
-        experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+        options.experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
         isPythonMainModule(conf));
   } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(), flags,
-        errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
+        errorReporter, options.experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
         isPythonMainModule(conf));
   } else KJ_IF_SOME(defaultDate, options.defaultCompatibilityDate) {
     compileCompatibilityFlags(defaultDate, conf.getCompatibilityFlags(), flags, errorReporter,
-        experimental, CompatibilityDateValidation::CODE_VERSION, nullptr, isPythonMainModule(conf));
+        options.experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
+        isPythonMainModule(conf));
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
@@ -1548,8 +1543,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     auto conf = factory.config.getServices()[index].getWorker();
     extensions = factory.config.getExtensions();
     impl->flagsArena = kj::heap<capnp::MallocMessageBuilder>();
-    featureFlags = compileFlags(
-        options, impl->name.startsWith("workerd:"_kj), conf, *impl->flagsArena, errorReporter);
+    featureFlags = compileFlags(options, conf, *impl->flagsArena, errorReporter);
     source = WorkerdApi::extractSource(impl->name, conf, featureFlags, errorReporter);
     if (conf.hasModuleFallback()) moduleFallback = conf.getModuleFallback();
     compileBindings = [globals = kj::heapArray(kj::from<Rust>(spec.globals))](

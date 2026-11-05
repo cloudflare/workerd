@@ -81,6 +81,8 @@ wd_rust_binary(
 wd_rust_crate(
     name = "workerd-cli",
     srcs = glob(["cli/**/*.rs"]),
+    # The KV Worker (cli/wrangler.rs).
+    compile_data = ["//src/workerd/server/kv:kv.js"],
     crate_root = "cli/lib.rs",
     cxx_bridge_deps = ["//src/workerd/server/factory:bootstrap-hdrs"],
     cxx_bridge_hdrs = ["config-compiler.h"],

@@ -2,32 +2,44 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Built-in KV, on the protocol workerd's KV binding speaks
-// (src/workerd/api/kv.c++): GET, PUT and DELETE on /<key>, GET /?prefix=
-// for a page of keys, POST /bulk/get. The binding's props name the
-// namespace.
+// KV, on the protocol workerd's KV binding speaks (src/workerd/api/kv.c++):
+// GET, PUT and DELETE on /<key>, GET /?prefix= for a page of keys, POST
+// /bulk/get. The binding's props name the namespace:
+//
+//   kvNamespace = (name = "<this service>",
+//                  props = (json = "{\"namespace\": \"<id>\"}"))
+//
+// Bindings, which the config gives this Worker (wrangler configs get them
+// from cli/wrangler.rs):
+//
+//   SHARD       the `KVNamespace` class, SQLite-backed, on a local disk
+//   BLOBS       values over `INLINE` bytes: a writable `disk`, or in a
+//               cluster a `bucket` service
+//   BLOB_CACHE  in a cluster, a writable `disk` on the node that caches
+//               blobs (optional)
+//   CLUSTERED   JSON `true` in a cluster (optional)
+//   TEST_CLOCK  JSON `true` for tests (optional)
 //
 // A namespace is a Durable Object (`KVNamespace`, by `idFromName`) whose
 // SQLite table `entries` is its index: each key's expiration, metadata,
-// and its value inline up to `INLINE` bytes or else the path of a blob.
-// Blobs live in the service `BLOBS` (GET, PUT and DELETE on
-// /<dir>/b/<id>), a directory on disk or the cluster's bucket. A blob is
-// immutable: it is reserved, written, then claimed by its row's write, and
-// deleted after the row stops naming it, through the object's `garbage`
-// table and its alarm.
+// and its value inline up to `INLINE` bytes or else the path of a blob,
+// `<dir>/b/<id>` in `BLOBS`. A blob is immutable: it is reserved, written,
+// then claimed by its row's write, and deleted after the row stops naming
+// it, through the object's `garbage` table and its alarm. One object holds
+// a namespace, so its throughput is one object's.
 //
 // This Worker reads and writes blobs itself, so large values do not pass
-// through the object. In a cluster (`CLUSTERED`) it keeps a per-process
-// cache of rows and misses for each read's `cacheTtl`, which this process's
-// writes update and nothing else invalidates. Locally it keeps none: the
-// object is in the process, and another process on the same storage, such
-// as `wrangler kv key put --local`, must be seen at once. Rows name blobs
-// rather than hold them, so entries are small; blobs never change, and in a
-// cluster `BLOBS` caches them on the node's disk.
+// through the object. In a cluster it keeps a per-process cache of rows and
+// misses for each read's `cacheTtl`, which this process's writes update and
+// nothing else invalidates. Locally it keeps none: the object is in the
+// process, and another process on the same storage, such as `wrangler kv
+// key put --local`, must be seen at once. Rows name blobs rather than hold
+// them, so entries are small; blobs never change, so `BLOB_CACHE` needs no
+// invalidation.
 //
-// With `TEST_CLOCK` (`WORKERD_KV_TEST_CLOCK` set), POST /clock?advance=<ms>
-// moves this process's clock for expiry and the entry cache, for tests; blob
-// collection keeps the real clock.
+// With `TEST_CLOCK`, POST /clock?advance=<ms> moves this process's clock for
+// expiry and the entry cache, for tests; blob collection keeps the real
+// clock.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -49,6 +61,7 @@ const RESERVE_MS = 600_000;
 const GRACE_MS = 2_000;
 const TEST_GRACE_MS = 100;
 const READS = 3;
+const BLOB_CACHE_BYTES = 1024 * 1024 * 1024;
 
 class Fail extends Error {
   constructor(status, text) {
@@ -66,7 +79,7 @@ const clock = () => Date.now() + skew;
 
 export default {
   async fetch(request, env, ctx) {
-    clustered ??= env.CLUSTERED;
+    clustered ??= env.CLUSTERED === true;
     const ns = ctx.props?.namespace;
     if (typeof ns !== 'string') {
       return fail(400, 'No namespace: props must be {"namespace": "<id>"}.');
@@ -186,6 +199,7 @@ async function put(request, env, space, key, params) {
       body: value,
     });
     if (!r.ok) throw new Error(`Writing the value failed: ${r.status}.`);
+    await cacheBlob(env, blob, value);
   }
   const inline = blob === null ? value : null;
   const version = await space.shard.write(
@@ -384,9 +398,8 @@ function recall(space, key, ttl) {
 }
 
 // Each key's entry (`{value, expiration, metadata}` or null) and whether
-// its row came from the cache.
-// Each key's entry and whether it was cached, refused with a 413 once
-// their values pass `cap` bytes, before any further blob is read.
+// its row came from the cache, refused with a 413 once their values pass
+// `cap` bytes, before any further blob is read.
 async function read(env, space, keys, ttl, cap = Infinity) {
   const rows = keys.map((key) => recall(space, key, ttl));
   const hits = rows.map((row) => row !== undefined);
@@ -425,17 +438,88 @@ async function load(env, space, key, row, ttl) {
     if (row.blob === null) {
       return { value: new Uint8Array(row.value), expiration, metadata };
     }
-    const r = await env.BLOBS.fetch(`http://blobs/${row.blob}`);
-    if (r.ok) {
-      const value = new Uint8Array(await r.arrayBuffer());
-      return { value, expiration, metadata };
-    }
-    if (r.status !== 404 || i === READS) {
-      throw new Error(`Reading the value failed: ${r.status}.`);
-    }
+    const value = await readBlob(env, row.blob);
+    if (value !== null) return { value, expiration, metadata };
+    if (i === READS) throw new Error('Reading the value failed: 404.');
     const { version, rows } = await space.shard.read([key]);
     remember(space, key, (row = rows[0]), ttl, version);
   }
+}
+
+// =======================================================================
+// Blobs, and their cache on a cluster node's disk
+
+// The blobs in `BLOB_CACHE` by path, least recently used first, with
+// their sizes. The Worker and its objects share the process's isolate, so
+// this is the node's one index. It is in memory, so each process caches in
+// a directory of its own, `c/<generation>/`, and deletes the others'.
+const cachedBlobs = new Map();
+let cachedBytes = 0;
+let generation = null;
+
+function cacheUrl(path) {
+  return `http://cache/c/${generation}/${path}`;
+}
+
+// The cache, null if there is none. The first call deletes the other
+// generations.
+async function blobCache(env) {
+  const cache = env.BLOB_CACHE;
+  if (cache === undefined || generation !== null) return cache ?? null;
+  generation = hex(crypto.getRandomValues(new Uint8Array(8)));
+  const r = await cache.fetch('http://cache/c');
+  for (const { name } of r.ok ? await r.json() : []) {
+    if (name === generation) continue;
+    await cache.fetch(`http://cache/c/${name}`, { method: 'DELETE' });
+  }
+  return cache;
+}
+
+// A blob's bytes, or null if it is not in `BLOBS`.
+async function readBlob(env, path) {
+  const cache = await blobCache(env);
+  if (cache !== null && cachedBlobs.has(path)) {
+    const r = await cache.fetch(cacheUrl(path));
+    if (r.ok) {
+      const size = cachedBlobs.get(path);
+      cachedBlobs.delete(path);
+      cachedBlobs.set(path, size);
+      return new Uint8Array(await r.arrayBuffer());
+    }
+    await uncacheBlob(cache, path);
+  }
+  const r = await env.BLOBS.fetch(`http://blobs/${path}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`Reading the value failed: ${r.status}.`);
+  const value = new Uint8Array(await r.arrayBuffer());
+  await cacheBlob(env, path, value);
+  return value;
+}
+
+// Writes a blob to the cache, evicting the least recently used past
+// `BLOB_CACHE_BYTES`.
+async function cacheBlob(env, path, value) {
+  const cache = await blobCache(env);
+  const size = value.byteLength;
+  if (cache === null || size > BLOB_CACHE_BYTES) return;
+  const r = await cache.fetch(cacheUrl(path), { method: 'PUT', body: value });
+  if (!r.ok || cachedBlobs.has(path)) return;
+  cachedBlobs.set(path, size);
+  cachedBytes += size;
+  const evicted = [];
+  for (const old of cachedBlobs.keys()) {
+    if (cachedBytes <= BLOB_CACHE_BYTES) break;
+    evicted.push(uncacheBlob(cache, old));
+  }
+  await Promise.all(evicted);
+}
+
+async function uncacheBlob(cache, path) {
+  const size = cachedBlobs.get(path);
+  if (size === undefined) return;
+  cachedBlobs.delete(path);
+  cachedBytes -= size;
+  await cache.fetch(cacheUrl(path), { method: 'DELETE' });
 }
 
 const hex = (bytes) =>
@@ -460,26 +544,43 @@ function above(prefix) {
 // =======================================================================
 // The namespace's object
 
+// The schema, as the steps from each version to the next: a database at
+// version `v` (its `schema` row; 0 when new) runs `MIGRATIONS.slice(v)`.
+const MIGRATIONS = [
+  (sql) => {
+    sql.exec(`CREATE TABLE entries (
+      key TEXT PRIMARY KEY, value BLOB, blob TEXT, expiration INTEGER,
+      metadata TEXT)`);
+    sql.exec('CREATE INDEX entries_expiration ON entries(expiration)');
+    // Blobs to delete when due: reserved ones, keyed by the key whose write
+    // may claim them, and unclaimable ones, keyed by null.
+    sql.exec(`CREATE TABLE garbage (
+      blob TEXT PRIMARY KEY, due INTEGER NOT NULL, key TEXT)`);
+    // The number of writes so far: each write's version, and a read's.
+    sql.exec('CREATE TABLE clock (v INTEGER NOT NULL)');
+    sql.exec('INSERT INTO clock VALUES (0)');
+  },
+];
+
 export class KVNamespace extends DurableObject {
   #alarm = null;
 
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS entries (
-      key TEXT PRIMARY KEY, value BLOB, blob TEXT, expiration INTEGER,
-      metadata TEXT)`);
-    this.sql.exec(`CREATE INDEX IF NOT EXISTS entries_expiration
-      ON entries(expiration)`);
-    // Blobs to delete when due: reserved ones, keyed by the key whose write
-    // may claim them, and unclaimable ones, keyed by null.
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS garbage (
-      blob TEXT PRIMARY KEY, due INTEGER NOT NULL, key TEXT)`);
-    // The number of writes so far: each write's version, and a read's.
-    this.sql.exec('CREATE TABLE IF NOT EXISTS clock (v INTEGER NOT NULL)');
-    this.sql.exec(
-      'INSERT INTO clock SELECT 0 WHERE NOT EXISTS (SELECT * FROM clock)'
-    );
+    this.sql.exec('CREATE TABLE IF NOT EXISTS schema (v INTEGER NOT NULL)');
+    const v = this.sql.exec('SELECT v FROM schema').toArray()[0]?.v ?? 0;
+    if (v > MIGRATIONS.length) {
+      throw new Error(
+        `This namespace's schema (${v}) is newer than this workerd's ` +
+          `(${MIGRATIONS.length}).`
+      );
+    }
+    ctx.storage.transactionSync(() => {
+      for (const migrate of MIGRATIONS.slice(v)) migrate(this.sql);
+      this.sql.exec('DELETE FROM schema');
+      this.sql.exec('INSERT INTO schema VALUES (?)', MIGRATIONS.length);
+    });
     ctx.blockConcurrencyWhile(async () => {
       this.#alarm = await ctx.storage.getAlarm();
     });
@@ -597,6 +698,10 @@ export class KVNamespace extends DurableObject {
         const r = await this.env.BLOBS.fetch(`http://blobs/${blob}`, {
           method: 'DELETE',
         });
+        const cache = this.env.BLOB_CACHE;
+        if (cache !== undefined && generation !== null) {
+          await uncacheBlob(cache, blob);
+        }
         if (r.ok || r.status === 404) {
           this.sql.exec(
             'DELETE FROM garbage WHERE blob = ? AND key IS NULL',

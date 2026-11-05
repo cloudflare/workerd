@@ -13,6 +13,7 @@ js_test(
         ":fake-s3.js",
         ":fake-s3.wd-test",
         "//src/workerd/server:workerd",
+        "//src/workerd/server/kv:kv_js",
     ],
     entry_point = "cluster-test.mjs",
     env = {
