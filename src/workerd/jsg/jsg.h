@@ -2343,6 +2343,10 @@ class GcVisitor {
   friend class TracedOwn;
 };
 
+// Returns true if we are currently executing C++ destructors as a result of garbage collection
+// occurring.
+bool isInGcDestructor();
+
 // An owning pointer, like `kj::Own<T>`, for a heap object whose handles its owner visits.
 //
 // Visiting a handle switches it to traced mode, where only the visit keeps its target alive. A
@@ -2411,6 +2415,7 @@ class TracedOwn {
       if (inner.get() != nullptr &&
           util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
         KJ_ASSERT(v8::Locker::IsLocked(visitedIn), "TracedOwn moved without the isolate lock");
+        KJ_DASSERT(!isInGcDestructor(), "TracedOwn moved during GC finalization");
         GcVisitor::makeStrong(visitedIn, *inner);
       }
       visitedIn = nullptr;
@@ -3611,10 +3616,6 @@ class V8StackScope final {
 auto runInV8Stack(auto callback) {
   return V8StackScope::runInV8StackImpl(__builtin_frame_address(0), kj::mv(callback));
 };
-
-// Returns true if we are currently executing C++ destructors as a result of garbage collection
-// occurring.
-bool isInGcDestructor();
 
 // =======================================================================================
 // inline implementation details

@@ -259,8 +259,9 @@ while the object still uses them. A `TracedOwn<T>` makes them strong again when 
 This is behind the `gc-complete-tracing` autogate; with it disabled, a `TracedOwn<T>` behaves
 like a `kj::Own<T>`.
 The `jsg-traced-own` clang-tidy check flags a `visitForGc()`, or a helper handed the
-visitor, that visits through a `kj::Own`, and moves of whole containers whose elements
-hold a `TracedOwn`.
+visitor, that visits through a `kj::Own`, and a `kj::mv` of a container field whose
+elements hold a `TracedOwn`. It doesn't catch moving a struct that holds such a container,
+a local, or a swap.
 
 **Not GC-visitable** (compile error if visited):
 `jsg::WeakRef<T>`.

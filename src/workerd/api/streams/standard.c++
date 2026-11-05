@@ -1211,6 +1211,9 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
 // and trigger the cancel algorithm.
 template <typename Self>
 void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason) {
+  // Dropping the queue leaves any reads it didn't settle unvisited, and the cancel algorithm can
+  // run a GC.
+  state.whenActive([](Queue& queue) { queue.makePendingReadsStrong(); });
   state.template transitionTo<StreamStates::Closed>();
 
   auto onSuccess =

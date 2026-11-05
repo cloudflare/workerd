@@ -149,8 +149,9 @@ These rules MUST be followed when writing or modifying JSG code:
     `kj::Own<T>`, and move its elements out of a container one at a time. Moving a
     `kj::Own` or a whole container leaves the handles traced with nothing visiting
     them, so the GC can free their targets while they are in use. The
-    `jsg-traced-own` clang-tidy check flags both; it does not check objects shared
-    through `kj::Rc`.
+    `jsg-traced-own` clang-tidy check flags both, but for moves only a `kj::mv` of a
+    container field, not of a struct holding one, a local, or a swap. It does not
+    check objects shared through `kj::Rc`.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

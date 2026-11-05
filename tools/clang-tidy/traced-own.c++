@@ -89,7 +89,8 @@ void TracedOwnCheck::registerMatchers(clang::ast_matchers::MatchFinder* Finder) 
           "::std::vector", "::std::deque", "::std::list"),
       hasAnyTemplateArgument(refersToType(holdsTracedOwnElement())));
 
-  // `kj::mv(field)` / `std::move(field)` of a container of TracedOwns.
+  // `kj::mv(field)` / `std::move(field)` of a container of TracedOwns. Moving a struct that holds
+  // such a container, a local, or a swap is not matched.
   Finder->addMatcher(
       callExpr(callee(functionDecl(hasAnyName("::kj::mv", "::std::move"))), argumentCountIs(1),
           hasArgument(0,

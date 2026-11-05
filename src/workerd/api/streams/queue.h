@@ -173,7 +173,7 @@ class QueueImpl final: public kj::PtrTarget {
     if (state.isActive()) {
       // The controller has stopped visiting this queue, and settling one consumer's reads can
       // run a GC before the next consumer's reads are taken out.
-      allConsumers.forEach([](auto& consumer) { consumer.makePendingReadsStrong(); });
+      makePendingReadsStrong();
       // Keep pending BYOB handles alive through fan-out, but publish the terminal state first.
       auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
       state.template transitionTo<Closed>();
@@ -200,7 +200,7 @@ class QueueImpl final: public kj::PtrTarget {
   void error(jsg::Lock& js, jsg::JsValue reason) {
     if (state.isActive()) {
       // See close().
-      allConsumers.forEach([](auto& consumer) { consumer.makePendingReadsStrong(); });
+      makePendingReadsStrong();
       auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
       state.template transitionTo<Errored>(reason.addRef(js));
 #ifdef KJ_DEBUG
@@ -266,11 +266,17 @@ class QueueImpl final: public kj::PtrTarget {
   // can settle it is reachable, as in the spec, where the controller holds its stream. Every
   // stream holds its controller, so this also covers a reachable stream. The queue is the reads'
   // only visitor, since a handle visited from two parents is strong or traced depending on which
-  // visited last; close() and error() make the reads strong before the queue stops being visited.
+  // visited last. close(), error(), and a controller about to drop the queue call
+  // makePendingReadsStrong() before the queue stops being visited.
   void visitForGc(jsg::GcVisitor& visitor) {
     if (util::Autogate::isEnabled(util::AutogateKey::GC_COMPLETE_TRACING)) {
       allConsumers.forEach([&](auto& consumer) { consumer.visitPendingReads(visitor); });
     }
+  }
+
+  // Makes the consumers' pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong() {
+    allConsumers.forEach([](auto& consumer) { consumer.makePendingReadsStrong(); });
   }
 
   // Specific queue implementations may provide additional state that is attached
@@ -878,6 +884,9 @@ class ValueQueue final {
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  // Makes pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong();
+
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -1158,6 +1167,9 @@ class ByteQueue final {
   kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  // Makes pending reads strong, for a queue about to stop being visited.
+  void makePendingReadsStrong();
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
