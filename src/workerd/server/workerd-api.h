@@ -94,6 +94,11 @@ class WorkerdApi final: public Worker::Api {
   void compileGlobals(
       jsg::Lock& lock, capnp::List<Global>::Reader globals, v8::Local<v8::Object> target) const;
 
+  // Whether a binding of this kind can be created in the startup-snapshot zygote and transferred
+  // to the Worker started from the snapshot. A Worker with a binding of any other kind starts
+  // without a snapshot. See the definition for the kinds and why.
+  static bool isBindingTransferableThroughSnapshot(Global::Reader global);
+
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
