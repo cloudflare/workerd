@@ -437,7 +437,9 @@ impl Scheduler {
 
 `std::cell::Cell` and `std::cell::RefCell` are `Traced` only for types that hold no GC
 references, which the marker trait `jsg::HoldsNoGcReferences` marks; a `jsg::Rc` or a
-`TracedGlobal` in one is a compile error. So a `jsg::Rc` or `TracedGlobal` that leaves a traced
+`TracedGlobal` in one is a compile error. Wrappers and collections have the marker when their
+contents do, and `#[jsg_struct]` and `#[jsg_oneof]` derive it when every field or variant has it,
+so for them it can't be claimed by hand. So a `jsg::Rc` or `TracedGlobal` that leaves a traced
 field of a live resource is strong, unless a hand-written `impl Traced` reaches it through a std
 cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 
@@ -482,7 +484,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **Cells for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) use a cell: `jsg::Cell<T>` or `jsg::RefCell<T>` for a field that holds a `jsg::Rc` or a `TracedGlobal`, and `std::cell::Cell<T>` or `RefCell<T>` for anything else; see [Cells](#cells).
-- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls; wrappers/collections delegate recursively.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
@@ -728,8 +730,8 @@ resource. The garbage collector traces `data` (`T: Traced`) through the function
 once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data` traces may
 lead back to the function. Two things break this:
 
-- A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
-  nothing by default). If it can reach the function, the cycle is invisible to the garbage
+- A reference that `T::trace` does not visit, such as a `v8::Global` (which has no `Traced`
+  impl, but can hide inside a type with a hand-written one). If it can reach the function, the cycle is invisible to the garbage
   collector, and the function and `data` are freed only when the isolate is torn down.
 - Another owner that the garbage collector also traces, such as a resource sharing part of
   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it traces:

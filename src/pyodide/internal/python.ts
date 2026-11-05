@@ -12,6 +12,7 @@ import {
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
+  LOADED_SNAPSHOT_TYPE,
   type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
 import {
@@ -267,9 +268,13 @@ export async function loadPyodide(
       const pyodide = Module.API.public_api;
 
       validatePyodideVersion(pyodide);
-      enterJaegerSpan('setup_python_search_path', () => {
-        setupPythonSearchPath(pyodide);
-      });
+      // A dedicated snapshot is collected after this has run, so sys.path is already set
+      // up.
+      if (LOADED_SNAPSHOT_TYPE !== 'dedicated') {
+        enterJaegerSpan('setup_python_search_path', () => {
+          setupPythonSearchPath(pyodide);
+        });
+      }
       setupRuntimeSignalHandling(Module);
       Module.API.on_fatal = (error: unknown): void => {
         try {

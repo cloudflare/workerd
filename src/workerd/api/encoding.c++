@@ -619,22 +619,24 @@ jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str) {
 
 namespace {
 
+constexpr bool isLeadSurrogate(uint16_t c) {
+  return (c & 0xfc00) == 0xd800;
+}
+
 constexpr bool isSurrogatePair(uint16_t lead, uint16_t trail) {
   // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
   // to work right on invalid UTF-16. Hence, we need this method to check for
   // surrogate pairs and correctly trim utf16 chunks.
-  return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
+  return isLeadSurrogate(lead) && (trail & 0xfc00) == 0xdc00;
 }
 
-// Ignores surrogates conservatively.
+// Counts a surrogate as three bytes, as for U+FFFD; findBestFit() corrects for a pair.
 constexpr size_t simpleUtfEncodingLength(uint16_t c) {
-  return 1 + (c >= 0x80) + (c >= 0x400);
+  return 1 + (c >= 0x80) + (c >= 0x800);
 }
 
-// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
-// May conservatively underestimate the largest number of code units we can fit
-// because of undetected surrogate pairs on boundaries.
-// Works even on malformed UTF-16.
+// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8, without splitting a
+// surrogate pair. Works even on malformed UTF-16.
 template <typename Char>
 size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
@@ -667,6 +669,13 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
     size_t chunkSize = kj::min(remainingInput, fitEstimate);
     if (chunkSize == 1) break;  // Not worth running this complicated stuff one char at a time.
+    if constexpr (UTF16) {
+      // Measured apart, the halves of a pair split between two chunks would each count as
+      // U+FFFD, six bytes instead of four, so don't end a chunk on a lead surrogate.
+      if (chunkSize < remainingInput && isLeadSurrogate(data[pos + chunkSize - 1])) {
+        chunkSize--;
+      }
+    }
     // No div-by-zero because remainingInput and fitEstimate are at least 1.
     KJ_DASSERT(chunkSize >= 1);
 

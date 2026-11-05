@@ -1206,7 +1206,14 @@ class ByteStreamCursor
     const byteOffset = v.byteOffset + this.byteOffset;
     const byteLength = v.byteLength - this.byteOffset;
     if (this.queue.hasOtherLiveCursorAtOrBefore(this, this.position)) {
-      return new Uint8Array(cloneArrayBuffer(v.buffer, byteOffset, byteLength));
+      // Copied into a new Uint8Array rather than a new ArrayBuffer: V8
+      // keeps a small one's bytes on its heap, a far cheaper allocation.
+      const copy = new Uint8Array(byteLength);
+      TypedArrayPrototypeSet(
+        copy,
+        new Uint8Array(v.buffer, byteOffset, byteLength)
+      );
+      return copy;
     }
     return new Uint8Array(v.buffer, byteOffset, byteLength);
   }

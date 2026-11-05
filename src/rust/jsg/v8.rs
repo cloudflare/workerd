@@ -836,7 +836,6 @@ pub mod ffi {
         pub unsafe fn wrappable_attach_opaque_wrapper(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
-            needs_gc_tracing: bool,
         ) -> Result<MaybeLocal>;
         // Infallible: returns kj::none for anything but the opaque wrapper of a Rust Wrappable.
         pub unsafe fn wrappable_try_unwrap_opaque(
@@ -1851,10 +1850,6 @@ impl Eq for Local<'_, String> {}
 struct FunctionData<T>(T);
 
 impl<T: Traced> Traced for FunctionData<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         self.0.trace(visitor);
     }
@@ -5082,7 +5077,7 @@ impl WrappableRc {
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
-        let data = self.attach_opaque_wrapper(lock, true)?;
+        let data = self.attach_opaque_wrapper(lock)?;
         let mut functions = Vec::with_capacity(N);
         for callback in callbacks {
             // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
@@ -5107,33 +5102,28 @@ impl WrappableRc {
     /// While an exception or a termination is pending, creates nothing and returns
     /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shim checks before
     /// creating the wrapper, which would clear the exception.
-    // The bool maps directly to the C++ parameter, as in `remove_strong_ref`.
     pub(crate) fn attach_opaque_wrapper<'s>(
         &self,
         lock: &Lock<'s>,
-        needs_gc_tracing: bool,
     ) -> crate::Result<Local<'s, Value>> {
         let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
         // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
         unsafe {
             Local::from_ffi_maybe(
-                ffi::wrappable_attach_opaque_wrapper(
-                    isolate,
-                    self.handle.clone(),
-                    needs_gc_tracing,
-                )
-                .map_err(|exception| {
-                    // `jsg::check` throws when creating the wrapper leaves an exception
-                    // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
-                    if ffi::isolate_has_pending_exception(isolate)
-                        || ffi::isolate_is_execution_terminating(isolate)
-                    {
-                        Error::pending()
-                    } else {
-                        Error::from(exception)
-                    }
-                })?,
+                ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
+                    |exception| {
+                        // `jsg::check` throws when creating the wrapper leaves an exception
+                        // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
+                        if ffi::isolate_has_pending_exception(isolate)
+                            || ffi::isolate_is_execution_terminating(isolate)
+                        {
+                            Error::pending()
+                        } else {
+                            Error::from(exception)
+                        }
+                    },
+                )?,
             )
         }
         .ok_or_else(Error::pending)

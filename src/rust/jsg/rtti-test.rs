@@ -158,7 +158,9 @@ impl crate::Type for Flagged {
     }
 }
 
-impl crate::Traced for Flagged {}
+impl crate::Traced for Flagged {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl crate::GarbageCollected for Flagged {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -273,7 +275,9 @@ impl crate::Type for Outer {
     }
 }
 
-impl crate::Traced for Outer {}
+impl crate::Traced for Outer {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl crate::GarbageCollected for Outer {
     fn memory_name(&self) -> &'static std::ffi::CStr {

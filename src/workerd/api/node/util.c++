@@ -76,8 +76,8 @@ bool UtilModule::isBoxedPrimitive(jsg::JsValue value) {
       value.isBigIntObject() || value.isSymbolObject();
 }
 
-jsg::Name UtilModule::getResourceTypeInspect(jsg::Lock& js) {
-  return js.newApiSymbol("kResourceTypeInspect"_kj);
+jsg::JsSymbol UtilModule::getResourceTypeInspect(jsg::Lock& js) {
+  return js.symbolInternal("kResourceTypeInspect"_kj);
 }
 
 kj::Array<UtilModule::CallSiteEntry> UtilModule::getCallSites(
