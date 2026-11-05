@@ -62,6 +62,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace api
 
 class BaseTracer;
+class EmbedderBootstrap;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -635,6 +636,13 @@ class Worker::Api {
   // on. Empty when the embedder does not declare listeners.
   virtual kj::ArrayPtr<const InboundListener> getInboundListeners() const {
     return nullptr;
+  }
+
+  // Bootstrap scripts the embedder contributes to the per-isolate bootstrap, run after workerd's
+  // own in every context the bootstrap runs in. The result must outlive every such context. See
+  // EmbedderBootstrap in api/per-isolate-bootstrap.h.
+  virtual kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const {
+    return kj::none;
   }
 
   struct NewContextOptions {
