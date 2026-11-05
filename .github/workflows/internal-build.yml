@@ -23,14 +23,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # `internal-build` is a required check, and GitHub counts a skipped required check as passing.
-  # GitHub still creates a check run for a job skipped by its `if`, so a skipped run for an edit
-  # must not be named `internal-build`: on the same commit as a build in progress, it would let
-  # the PR merge before that build finishes. Hence the job id is not `internal-build`, which
-  # GitHub could fall back to, and only runs that check the PR are given that name.
+  # `internal-build` is a required check, which GitHub matches by name in the newest run of this
+  # workflow on the PR's commit, and it counts a skipped required check as passing. So the job
+  # runs, under this name, for every event, edits included: an edit's run checks the same commit
+  # as the build it doesn't cancel (see the concurrency group above).
   build:
-    name: "${{ (github.event.action != 'edited' || github.event.changes.base) && 'internal-build' || 'internal-build (skipped: PR edit only)' }}"
-    if: github.event.action != 'edited' || github.event.changes.base
+    name: internal-build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted workflow tooling

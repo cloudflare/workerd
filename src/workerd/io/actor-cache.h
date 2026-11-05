@@ -1079,8 +1079,8 @@ struct ActorCacheSharedLruOptions {
   // If true, assume `noCache` for all operations.
   bool noCache = false;
 
-  // If true, don't actually flush anything. This is used in preview sessions, since they keep
-  // state strictly in memory.
+  // If true, don't actually flush anything. This is used for actors whose state is kept strictly
+  // in memory.
   bool neverFlush = false;
 };
 

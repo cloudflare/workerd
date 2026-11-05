@@ -35,7 +35,6 @@ const unitTests :Workerd.Config = (
                             "enhanced_error_serialization"],
     )),
   ],
-  autogates = ["workerd-autogate-jsrpc-readable-cancel-propagation"],
 );
 
 const testModules :List(Workerd.Worker.Module) = [

@@ -168,7 +168,16 @@ let getWritableStreamWriter: <W>(
 ) => WritableStreamDefaultWriter<W> | undefined;
 let writableStreamAbort: StreamOp<[reason?: unknown], Promise<void>>;
 let writableStreamCloseInternal: StreamOp<[], Promise<void>>;
-let writableStreamAddWriteRequest: StreamOp<[], Promise<void>>;
+// What a write settles: the promise writer.write() returns, or a pipe's
+// own request (see internalsForPipe.writerWriteWithRequest).
+interface WriteRequest {
+  resolve(): void;
+  reject(reason: unknown): void;
+}
+let writableStreamAddWriteRequest: StreamOp<
+  [request: WriteRequest | undefined],
+  Promise<void> | undefined
+>;
 let writableStreamDealWithRejection: StreamOp<[error: unknown], void>;
 let writableStreamStartErroring: StreamOp<[reason: unknown], void>;
 let writableStreamFinishErroringIfNeeded: StreamOp<[], void>;
@@ -274,10 +283,13 @@ let setWritableStreamInteropErrorHook: StreamOp<
 // Internal writer operations: the pipe implementation must never dispatch
 // through the public prototype methods (user-interceptable once the classes
 // are installed on the global).
+// With a `request`, the write settles it rather than a promise, and the
+// call returns undefined.
 let writerWriteInternal: <W>(
   writer: WritableStreamDefaultWriter<W>,
-  chunk: W
-) => Promise<void>;
+  chunk: W,
+  request?: WriteRequest
+) => Promise<void> | undefined;
 let writerCloseInternal: WriterOp<[], Promise<void>>;
 let writerAbortInternal: WriterOp<[reason: unknown], Promise<void>>;
 // `releaseError` defaults to releasedWriterError(); a pipe's writer
@@ -302,9 +314,8 @@ class WritableStream<W = unknown> {
   #writer?: WritableStreamDefaultWriter<W> | undefined;
   #state: WritableState = 'writable';
   #storedError: unknown = undefined;
-  readonly #writeRequests: RingBufferType<PromiseWithResolversType<void>> =
-    new RingBuffer();
-  #inFlightWriteRequest: PromiseWithResolversType<void> | undefined;
+  readonly #writeRequests: RingBufferType<WriteRequest> = new RingBuffer();
+  #inFlightWriteRequest: WriteRequest | undefined;
   #closeRequest: PromiseWithResolversType<void> | undefined;
   #inFlightCloseRequest: PromiseWithResolversType<void> | undefined;
   #pendingAbortRequest: PendingAbortRequest | undefined;
@@ -506,11 +517,15 @@ class WritableStream<W = unknown> {
       );
     };
 
-    writableStreamAddWriteRequest = (stream) => {
+    writableStreamAddWriteRequest = (stream, request) => {
       // Caller guarantees: locked and state 'writable'.
-      const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      stream.#writeRequests.push(request);
-      return request.promise;
+      if (request !== undefined) {
+        stream.#writeRequests.push(request);
+        return undefined;
+      }
+      const pending = PromiseWithResolvers() as PromiseWithResolversType<void>;
+      stream.#writeRequests.push(pending);
+      return pending.promise;
     };
 
     writableStreamAbort = <W>(stream: WritableStream<W>, reason?: unknown) => {
@@ -691,21 +706,19 @@ class WritableStream<W = unknown> {
     writableStreamMarkFirstWriteRequestInFlight = (stream) => {
       // assert: no in-flight write; writeRequests non-empty
       stream.#inFlightWriteRequest =
-        stream.#writeRequests.shift() as PromiseWithResolversType<void>;
+        stream.#writeRequests.shift() as WriteRequest;
     };
 
     writableStreamFinishInFlightWrite = (stream) => {
       // assert: in-flight write request is set (caller guarantee)
-      const request = stream
-        .#inFlightWriteRequest as PromiseWithResolversType<void>;
+      const request = stream.#inFlightWriteRequest as WriteRequest;
       stream.#inFlightWriteRequest = undefined;
       request.resolve();
     };
 
     writableStreamFinishInFlightWriteWithError = (stream, error) => {
       // assert: in-flight write request is set (caller guarantee)
-      const request = stream
-        .#inFlightWriteRequest as PromiseWithResolversType<void>;
+      const request = stream.#inFlightWriteRequest as WriteRequest;
       stream.#inFlightWriteRequest = undefined;
       request.reject(error);
       writableStreamDealWithRejection(stream, error);
@@ -716,8 +729,7 @@ class WritableStream<W = unknown> {
     // transition — the stream stays writable and the queue keeps going.
     writableStreamFinishInFlightWriteWithNonFatalError = (stream, error) => {
       // assert: in-flight write request is set (caller guarantee)
-      const request = stream
-        .#inFlightWriteRequest as PromiseWithResolversType<void>;
+      const request = stream.#inFlightWriteRequest as WriteRequest;
       stream.#inFlightWriteRequest = undefined;
       request.reject(error);
     };
@@ -896,6 +908,8 @@ class WritableStream<W = unknown> {
 // Started-flag peek used by the stream's erroring machinery; assigned in
 // the controller's static block.
 let controllerStartedOf: ControllerOp<[], boolean>;
+// Whether the controller's queue holds nothing, writes or markers.
+let controllerQueueIsEmpty: ControllerOp<[], boolean>;
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultController
@@ -948,6 +962,8 @@ class WritableStreamDefaultController<
         throw new TypeError('Illegal invocation');
     };
     controllerStartedOf = (controller) => controller.#started;
+
+    controllerQueueIsEmpty = (controller) => controller.#queue.length === 0;
 
     controllerGetDesiredSize = (controller) => {
       return controller.#strategyHWM - controller.#queueTotalSize;
@@ -1326,6 +1342,17 @@ class WritableStreamDefaultController<
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultWriter
 
+// A write that fails before it is queued: rejects its promise, or its
+// request.
+function writeFailed(
+  request: WriteRequest | undefined,
+  reason: unknown
+): Promise<void> | undefined {
+  if (request === undefined) return PromiseReject(reason);
+  request.reject(reason);
+  return undefined;
+}
+
 // What a released writer's operations reject or throw with, and what
 // releaseLock() rejects the writer's ready and closed promises with.
 function releasedWriterError(): TypeError {
@@ -1364,18 +1391,20 @@ class WritableStreamDefaultWriter<
     // because size() can re-entrantly call close()/releaseLock()/error().
     writerWriteInternal = <W>(
       writer: WritableStreamDefaultWriter<W>,
-      chunk: W
+      chunk: W,
+      request?: WriteRequest
     ) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(releasedWriterError());
+        return writeFailed(request, releasedWriterError());
       }
       // The pending-closure gate (see #pendingClosure): checked before the
       // size algorithm runs, so no user code executes for a write against a
       // closing socket. The text matches the legacy internal controller's
       // exactly.
       if (isWritableStreamPendingClosure(stream)) {
-        return PromiseReject(
+        return writeFailed(
+          request,
           new TypeError(
             'This WritableStream belongs to an object that is closing.'
           )
@@ -1393,25 +1422,26 @@ class WritableStreamDefaultWriter<
       // Step 5: Re-check writer.[[stream]] — size() may have called
       // releaseLock().
       if (writer.#stream !== stream) {
-        return PromiseReject(releasedWriterError());
+        return writeFailed(request, releasedWriterError());
       }
 
       // Steps 6–9: State checks (AFTER size ran).
       const state = getWritableStreamState(stream);
       if (state === 'errored') {
-        return PromiseReject(getWritableStreamStoredError(stream));
+        return writeFailed(request, getWritableStreamStoredError(stream));
       }
       if (writableStreamCloseQueuedOrInFlight(stream) || state === 'closed') {
-        return PromiseReject(
+        return writeFailed(
+          request,
           new TypeError('Cannot write to a stream that is closing or closed')
         );
       }
       if (state === 'erroring') {
-        return PromiseReject(getWritableStreamStoredError(stream));
+        return writeFailed(request, getWritableStreamStoredError(stream));
       }
 
       // Step 11: Add write request.
-      const promise = writableStreamAddWriteRequest(stream);
+      const promise = writableStreamAddWriteRequest(stream, request);
 
       // Step 12: ControllerWrite (with pre-computed chunkSize, no size()
       // call — that already happened in step 4).
@@ -1574,7 +1604,7 @@ class WritableStreamDefaultWriter<
   write(chunk: W = undefined as W): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      return writerWriteInternal(this, chunk);
+      return writerWriteInternal(this, chunk) as Promise<void>;
     } catch (e) {
       return PromiseReject(e);
     }
@@ -1787,7 +1817,7 @@ const cppExports = ObjectFreeze({
   writableStreamWriterWrite: <W>(
     writer: WritableStreamDefaultWriter<W>,
     chunk: W
-  ): Promise<void> => writerWriteInternal(writer, chunk),
+  ): Promise<void> => writerWriteInternal(writer, chunk) as Promise<void>,
   writableStreamWriterClose: <W>(
     writer: WritableStreamDefaultWriter<W>
   ): Promise<void> => writerCloseInternal(writer),
@@ -1814,8 +1844,15 @@ module.exports = {
     ): WritableStreamDefaultWriter<W> {
       return new WritableStreamDefaultWriter<W>(stream);
     },
-    writerWrite: <W>(writer: WritableStreamDefaultWriter<W>, chunk: W) =>
-      writerWriteInternal(writer, chunk),
+    // A pipe's write: settles `request`, synchronously from the writable's
+    // steps, rather than a promise. A request may serve every write.
+    writerWriteWithRequest: <W>(
+      writer: WritableStreamDefaultWriter<W>,
+      chunk: W,
+      request: WriteRequest
+    ): void => {
+      writerWriteInternal(writer, chunk, request);
+    },
     writerCloseWithErrorPropagation,
     writerRelease: <W>(
       writer: WritableStreamDefaultWriter<W>,
@@ -1872,6 +1909,19 @@ module.exports = {
     willAcceptWrite: <W>(stream: WritableStream<W>): boolean =>
       getWritableStreamState(stream) === 'writable' &&
       !writableStreamCloseQueuedOrInFlight(stream),
+    // Whether a writer.write() issued NOW, if accepted, reaches the sink's
+    // write() before it returns: the sink has started, and nothing is in
+    // flight or queued ahead of it. Like willAcceptWrite, for size()
+    // callbacks; the answer cannot change before the write is enqueued.
+    sinkTakesWriteNow: <W>(stream: WritableStream<W>): boolean => {
+      const controller = getWritableStreamController(stream);
+      return (
+        controller !== undefined &&
+        controllerStartedOf(controller) &&
+        controllerQueueIsEmpty(controller) &&
+        !writableStreamHasOperationMarkedInFlight(stream)
+      );
+    },
     // Wraps a sink write() rejection so it rejects only ITS write request,
     // leaving the stream writable (the identity streams' invalid-chunk
     // contract — see NonFatalWriteRejection). The sink throws (or rejects

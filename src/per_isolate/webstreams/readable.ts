@@ -430,6 +430,9 @@ let byteControllerSetConsumptionHook: (
   controller: ReadableByteStreamController,
   hook: (() => void) | undefined
 ) => void;
+let byteControllerPullSettled: (
+  controller: ReadableByteStreamController
+) => void;
 let defaultControllerCanCloseOrEnqueue: <R>(
   controller: ReadableStreamDefaultController<R>
 ) => boolean;
@@ -1345,8 +1348,15 @@ function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
   return info;
 }
 
+// What an internal source's pull returns instead of a promise (see
+// internalsForTransform): it completed synchronously, or it is parked until
+// the source calls pullSettled.
+const kPullDone: unique symbol = Symbol('pullDone');
+const kPullParked: unique symbol = Symbol('pullParked');
+type PullResult = Promise<void> | typeof kPullDone | typeof kPullParked;
+
 interface SourceAlgorithms {
-  pull: (() => Promise<void>) | undefined;
+  pull: (() => PullResult) | undefined;
   cancel: ((reason: unknown) => Promise<void>) | undefined;
 }
 
@@ -1379,11 +1389,15 @@ function makeSourceAlgorithms<C>(
   }
   let pull: SourceAlgorithms['pull'];
   if (pullFn !== undefined) {
-    pull = () => {
+    pull = (): PullResult => {
       try {
-        return PromiseResolve(
-          FunctionPrototypeCall(pullFn, underlyingSource, controller)
+        const result: unknown = FunctionPrototypeCall(
+          pullFn,
+          underlyingSource,
+          controller
         );
+        if (result === kPullDone || result === kPullParked) return result;
+        return PromiseResolve(result) as Promise<void>;
       } catch (e) {
         return PromiseReject(e);
       }
@@ -1405,7 +1419,7 @@ class QueuedControllerCore<T, R> {
   // cancel, per spec ClearAlgorithms. Only a default controller sizes its
   // chunks.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
-  #pullAlgorithm: (() => Promise<void>) | undefined;
+  #pullAlgorithm: (() => PullResult) | undefined;
   #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
   #started: boolean = false;
   #pulling: boolean = false;
@@ -1646,19 +1660,29 @@ class QueuedControllerCore<T, R> {
     const pullAlgorithm = this.#pullAlgorithm;
     const result =
       pullAlgorithm === undefined ? PromiseResolve() : pullAlgorithm();
+    if (result === kPullParked) return;
+    if (result === kPullDone) {
+      this.pullSettled();
+      return;
+    }
     PromisePrototypeThen(
       result,
       () => {
-        this.#pulling = false;
-        if (this.#pullAgain) {
-          this.#pullAgain = false;
-          this.callPullIfNeeded();
-        }
+        this.pullSettled();
       },
       (e: unknown) => {
         this.error(e);
       }
     );
+  }
+
+  // The pull in flight has completed.
+  pullSettled(): void {
+    this.#pulling = false;
+    if (this.#pullAgain) {
+      this.#pullAgain = false;
+      this.callPullIfNeeded();
+    }
   }
 
   // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
@@ -2095,6 +2119,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     byteControllerSetConsumptionHook = (controller, hook) => {
       controller.#core.queue.setConsumptionHook(hook);
+    };
+    byteControllerPullSettled = (controller) => {
+      controller.#core.pullSettled();
     };
 
     assertIsReadableByteStreamController = function (
@@ -2983,25 +3010,31 @@ function pipeToInternal<R>(
     }
   };
 
-  // Settles with the pipe's latest write, so that shutdownWithAction can
-  // wait for every write to be acknowledged.
-  let lastWriteSettled: Promise<void> = PromiseResolve(undefined);
+  // The pipe's writes not yet settled, so that shutdownWithAction can wait
+  // for every write to be acknowledged.
+  let unsettledWrites = 0;
 
   // Whether a shutdown is waiting for the pipe's writes before its action.
   let waitingForWrites = false;
+  // What the shutdown runs once the writes have settled.
+  let afterWrites: (() => void) | undefined;
 
-  // Calls `then` once the latest write has settled, waiting again if a
-  // write was made meanwhile.
+  // Runs afterWrites a microtask later, unless a write made meanwhile is
+  // still unsettled; its settlement checks again.
+  const checkWritesSettled = (): void => {
+    PromisePrototypeThen(PromiseResolve(), () => {
+      const then = afterWrites;
+      if (then === undefined || unsettledWrites > 0) return;
+      afterWrites = undefined;
+      then();
+    });
+  };
+
+  // Calls `then` once every write made so far, and every write made
+  // meanwhile, has settled.
   const waitForWrites = (then: () => void): void => {
-    const settled = lastWriteSettled;
-    const check = (): void => {
-      if (settled === lastWriteSettled) {
-        then();
-      } else {
-        waitForWrites(then);
-      }
-    };
-    PromisePrototypeThen(settled, check, check);
+    afterWrites = then;
+    if (unsettledWrites === 0) checkWritesSettled();
   };
 
   // Set when a write rejects NON-FATALLY (dest still writable — the
@@ -3208,29 +3241,45 @@ function pipeToInternal<R>(
   };
   checkConditions();
 
-  const writeChunk = (chunk: R): void => {
-    const writePromise = writableInternals.writerWrite(writer, chunk);
-    // One reaction per write. A rejection that leaves the destination
-    // WRITABLE is the internal transforms' non-fatal invalid-chunk
-    // rejection — fail the pipe with it (see onWriteRejectedNonFatally).
-    // Fatal rejections error the destination and are handled by the
-    // closed-promise observer instead. When a clean shutdown is already
-    // waiting for acknowledgment, record the failure for runAction's
-    // upgrade path. The reaction's promise settles once the write has,
-    // which is what shutdownWithAction waits for; the writable serializes
-    // writes, so every earlier write has settled by then too.
-    lastWriteSettled = PromisePrototypeThen(
-      writePromise,
-      undefined,
-      (e: unknown) => {
-        if (writableInternals.getState(destination) !== 'writable') return;
-        if (shuttingDown) {
-          pendingNonFatalWriteFailure ??= { reason: e };
-          return;
-        }
-        onWriteRejectedNonFatally(e);
+  // A rejection that leaves the destination WRITABLE is the internal
+  // transforms' non-fatal invalid-chunk rejection — fail the pipe with it
+  // (see onWriteRejectedNonFatally). Fatal rejections error the
+  // destination and are handled by the closed-promise observer instead.
+  // When a clean shutdown is already waiting for acknowledgment, record
+  // the failure for runAction's upgrade path.
+  const onWriteRejected = (e: unknown): void => {
+    if (writableInternals.getState(destination) !== 'writable') return;
+    if (shuttingDown) {
+      pendingNonFatalWriteFailure ??= { reason: e };
+      return;
+    }
+    onWriteRejectedNonFatally(e);
+  };
+
+  // Every write's request. The writable settles it from inside its own
+  // steps, where a fatal rejection has yet to error the destination, so
+  // the rejection is handled a microtask later, as a reaction to a write
+  // promise would be; and ahead of the shutdown's check for settled
+  // writes.
+  const writeRequest = {
+    resolve(): void {
+      if (--unsettledWrites === 0 && afterWrites !== undefined) {
+        checkWritesSettled();
       }
-    ) as Promise<void>;
+    },
+    reject(e: unknown): void {
+      PromisePrototypeThen(PromiseResolve(), () => {
+        onWriteRejected(e);
+      });
+      if (--unsettledWrites === 0 && afterWrites !== undefined) {
+        checkWritesSettled();
+      }
+    },
+  };
+
+  const writeChunk = (chunk: R): void => {
+    unsettledWrites++;
+    writableInternals.writerWriteWithRequest(writer, chunk, writeRequest);
   };
 
   // Spec: no reads while the writer's desiredSize is <= 0 or null.
@@ -5197,6 +5246,13 @@ module.exports = {
         controller as ReadableByteStreamController,
         hook
       ),
+    // An internal source's pull returns kPullDone when it has completed
+    // synchronously, or kPullParked, and later calls pullSettled once it
+    // completes, instead of returning a promise.
+    kPullDone,
+    kPullParked,
+    pullSettled: (controller: object) =>
+      byteControllerPullSettled(controller as ReadableByteStreamController),
     // A transform pair's notification, called synchronously with the
     // reason after the Node.js interop hook has errored this stream (the
     // only external error path that bypasses the source's cancel steps).

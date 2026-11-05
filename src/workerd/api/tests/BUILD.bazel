@@ -317,6 +317,9 @@ wd_test(
 )
 
 wd_test(
+    # It runs several other tests' workers to trace them, which takes up to 12.5s of the 15s
+    # "medium" timeout in debug builds.
+    size = "large",
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",
@@ -334,6 +337,8 @@ wd_test(
         "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
         "tail-worker-test-throw.js",
+        "tail-worker-test-on-hibernate.js",
+        "tail-worker-test-event-log.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
@@ -1288,6 +1293,21 @@ wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],
+)
+
+# The limit is off while its kill switch autogate is on, so this has no @all-autogates variant.
+# websocket-accept-limit-killswitch-test below covers the kill switch being on.
+wd_test(
+    # It accepts the 32768 WebSockets of the limit, which takes 13.5s in debug builds.
+    size = "large",
+    src = "websocket-accept-limit-test.wd-test",
+    data = ["websocket-accept-limit-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "websocket-accept-limit-killswitch-test.wd-test",
+    data = ["websocket-accept-limit-killswitch-test.js"],
 )
 
 wd_test(

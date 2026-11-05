@@ -384,6 +384,33 @@ export const encodeWptTest = {
   },
 };
 
+// encodeInto() writes every code point that fits, also when the input is long enough for the
+// implementation to measure it in pieces.
+export const encodeIntoFillsTheDestination = {
+  test() {
+    const enc = new TextEncoder();
+    const cases = [
+      // input, code units per character, UTF-8 bytes per character
+      ['\u{1F639}', 2, 4],
+      ['\u0436', 1, 2],
+      ['\u07ff', 1, 2],
+      ['\u6f22', 1, 3],
+    ];
+    for (const [char, units, bytes] of cases) {
+      const input = char.repeat(1000);
+      for (const size of [1, 2, 3, 4, 5, 7, 100, 1001, 1003, 2001, 2999]) {
+        const fit = Math.min(1000, Math.floor(size / bytes));
+        const { read, written } = enc.encodeInto(input, new Uint8Array(size));
+        deepStrictEqual(
+          { read, written },
+          { read: fit * units, written: fit * bytes },
+          `${JSON.stringify(char)} into ${size}`
+        );
+      }
+    }
+  },
+};
+
 export const big5 = {
   test() {
     // Input is the Big5 encoding for the word 中國人 (meaning Chinese Person)
