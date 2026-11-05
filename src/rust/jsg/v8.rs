@@ -670,6 +670,18 @@ pub mod ffi {
         // throws.
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
+        // JSON
+        // Leave what parsing and stringifying throw pending; see `call_into_js()`.
+        // Infallible: JSON::Parse reports what it throws in its result.
+        pub unsafe fn value_json_parse(isolate: *mut Isolate, text: &Local) -> MaybeLocal;
+        // Fallible: the result is a rust::String.
+        pub unsafe fn local_json_stringify(
+            isolate: *mut Isolate,
+            value: &Local,
+            gap: &Local,
+            result: &mut String,
+        ) -> Result<bool>;
+
         // Errors
         // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
         pub unsafe fn exception_create_from_bytes(
