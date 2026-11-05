@@ -4882,16 +4882,18 @@ bool Worker::Actor::hasOnHibernateHandler() {
 kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
-  return impl->abortCanceler.wrap(
-      runOnHibernateImpl(reason, kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer)));
+  return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
+      kj::mv(observer), kj::mv(workerTracer), kj::mv(selfTokenFactory)));
 }
 
 kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
   // without the request tracking that addRef() adds.
   auto self = kj::addRef(*this);
@@ -4908,7 +4910,8 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   RequestObserver& observerRef = *observer;
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
-          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */,
+          kj::none /* accessInfo */, kj::mv(selfTokenFactory));
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
   }

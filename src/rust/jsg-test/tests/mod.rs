@@ -30,6 +30,7 @@ mod js_string;
 mod jsg_oneof;
 mod jsg_oneof_variants;
 mod jsg_struct;
+mod json;
 mod local_cast;
 mod local_handle;
 mod local_value;
