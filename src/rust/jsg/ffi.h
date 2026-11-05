@@ -403,6 +403,10 @@ size_t local_typed_array_length(const Local& array);
 uintptr_t local_typed_array_buffer_data(const Local& array);
 // Returns the byte offset of this TypedArray view within its backing ArrayBuffer.
 size_t local_typed_array_byte_offset(const Local& array);
+// Returns the address of the TypedArray's first byte (zero if it has none), and its byte length
+// in `byteLength`: what local_typed_array_buffer_data, _byte_offset and _byte_length return,
+// in one call.
+uintptr_t local_typed_array_contents(const Local& array, size_t& byteLength);
 // Returns the byte length of the TypedArray.
 size_t local_typed_array_byte_length(const Local& array);
 uint8_t local_uint8_array_get(const Local& array, size_t index);

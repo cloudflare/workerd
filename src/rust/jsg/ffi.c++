@@ -1065,6 +1065,22 @@ size_t local_typed_array_byte_offset(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
 }
 
+uintptr_t local_typed_array_contents(const Local& array, size_t& byteLength) {
+  auto view = local_as_ref_from_ffi<v8::TypedArray>(array);
+  byteLength = view->ByteLength();
+  if (byteLength == 0) return 0;
+  auto buffer = view->Buffer();
+  auto byteOffset = view->ByteOffset();
+  // As jsg::JsBufferSource::asArrayPtr(): the view's range is checked against the backing store,
+  // which the sandbox can't corrupt.
+  auto bufferLength = buffer->ByteLength();
+  if (byteOffset > bufferLength || byteLength > bufferLength - byteOffset) [[unlikely]] {
+    byteLength = 0;
+    return 0;
+  }
+  return reinterpret_cast<uintptr_t>(buffer->Data()) + byteOffset;
+}
+
 size_t local_typed_array_byte_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
 }
