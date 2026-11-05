@@ -116,6 +116,11 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
+    /// A JavaScript error class or a `DOMException` name. A new variant must also be added to
+    /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
+    /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
+    /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is
+    /// not a compile error.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum ExceptionType {
         OperationError,
@@ -922,7 +927,15 @@ pub mod ffi {
 
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ffi::ExceptionType {
+    /// The name of the error class or `DOMException` this type stands for.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
             Self::OperationError => "OperationError",
             Self::DataError => "DataError",
             Self::DataCloneError => "DataCloneError",
@@ -939,12 +952,9 @@ impl std::fmt::Display for ffi::ExceptionType {
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
             _ => "Error",
-        };
-        write!(f, "{name}")
+        }
     }
-}
 
-impl ffi::ExceptionType {
     /// Whether an error of this type is thrown as a `DOMException` with this name, rather than
     /// as a JavaScript error class.
     ///

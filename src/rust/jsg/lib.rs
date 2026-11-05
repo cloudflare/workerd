@@ -375,7 +375,7 @@ impl Error {
     pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
         if self.name.is_dom_exception() {
             return lock
-                .create_dom_exception_from_bytes(&self.name.to_string(), self.message.as_bytes())
+                .create_dom_exception_from_bytes(self.name.as_str(), self.message.as_bytes())
                 .map(Into::into);
         }
         Ok(lock
