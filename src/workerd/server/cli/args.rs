@@ -10,6 +10,7 @@ use clap::Parser;
 use clap::Subcommand;
 use clap::ValueEnum;
 use workerd_server::bench;
+use workerd_server::bench::sparkline;
 use workerd_server::bridge::ffi as server;
 
 use crate::bridge::ffi;
@@ -274,7 +275,8 @@ is timed after `bench` returns:
         b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
       }
     }
-Results are written to stdout as a table, or as JSON with --format=json.
+Results are written to stdout as a table, or as JSON with --format=json. --sparkline adds a column \
+to the table showing how each case's samples are distributed.
 ";
 
 #[derive(Args, Debug)]
@@ -565,6 +567,27 @@ pub struct BenchArgs {
     #[arg(long, value_enum, default_value_t = BenchFormat::Text)]
     pub format: BenchFormat,
 
+    /// Add a column to the table with a sparkline of each case's samples: of wall time (the
+    /// default), CPU time, or both. Each spans the case's fastest sample to its slowest.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "metric",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "wall"
+    )]
+    pub sparkline: Option<BenchSparkline>,
+
+    /// Draw sparklines with ASCII characters. Without this, they use Unicode block characters
+    /// unless the locale's encoding is not UTF-8.
+    #[arg(long)]
+    pub ascii: bool,
+
+    /// How sparklines divide samples among their columns. Experimental, so not documented.
+    #[arg(long, value_enum, hide = true, default_value_t = BenchBinning::Linear)]
+    pub sparkline_binning: BenchBinning,
+
     /// Write the results to <path> instead of stdout.
     #[arg(long, value_name = "path")]
     pub output: Option<String>,
@@ -583,6 +606,24 @@ pub enum BenchFormat {
     Text,
     /// The full report, including raw samples.
     Json,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BenchSparkline {
+    /// Wall time per call.
+    Wall,
+    /// Thread CPU time per call.
+    Cpu,
+    /// A column for each.
+    Both,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BenchBinning {
+    /// Samples counted in equal-width columns.
+    Linear,
+    /// A quantile-respectful density estimate of the samples.
+    Qrde,
 }
 
 /// `workerd bench`'s `<filter>`: `test`'s `<filter>` and `/<case-pattern>`, each optional.
@@ -739,8 +780,29 @@ impl BenchArgs {
             quick: self.quick,
             case_pattern,
             json: self.format == BenchFormat::Json,
+            sparklines: self.sparkline.map(|metrics| self.sparklines(metrics)),
             output: self.output.clone(),
             trace: self.trace,
+        }
+    }
+
+    /// The sparklines of `metrics`, drawn as `--ascii` and `--sparkline-binning` ask.
+    fn sparklines(&self, metrics: BenchSparkline) -> sparkline::Options {
+        sparkline::Options {
+            metrics: match metrics {
+                BenchSparkline::Wall => sparkline::Metrics::Wall,
+                BenchSparkline::Cpu => sparkline::Metrics::Cpu,
+                BenchSparkline::Both => sparkline::Metrics::Both,
+            },
+            binning: match self.sparkline_binning {
+                BenchBinning::Linear => sparkline::Binning::Linear,
+                BenchBinning::Qrde => sparkline::Binning::Qrde,
+            },
+            charset: if self.ascii {
+                sparkline::Charset::Ascii
+            } else {
+                sparkline::Charset::from_env()
+            },
         }
     }
 }

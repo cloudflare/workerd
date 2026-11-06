@@ -99,7 +99,8 @@ Arguments after the target go to `workerd bench`, which can also be run directly
 
 ```
 workerd bench config.wd-bench [filter] [--format=text|json] [--output=path] [--quick]
-    [--compat-date=date|latest] [--all-autogates] [--trace]
+    [--compat-date=date|latest] [--all-autogates] [--trace] [--sparkline[=wall|cpu|both]]
+    [--ascii]
 ```
 
 `--compat-date` requires the workers in the config to omit `compatibilityDate`.
@@ -118,6 +119,22 @@ confidence interval of the median, the mean, and the median thread CPU time (mos
 Windows, whose thread CPU clock advances only on scheduler ticks). `--format=json`
 writes the full report, including every sample, as defined by
 [bench.capnp](../src/workerd/io/bench.capnp). The JSON format isn't stable yet.
+
+`--sparkline` adds a column with a sparkline of each case's samples of wall time per call;
+`--sparkline=cpu` draws thread CPU time instead, and `--sparkline=both` adds a column for each. A
+sparkline divides the range from the case's fastest sample to its slowest into 16 equal columns,
+each as tall as its share of the samples relative to the fullest one, so it shows whether the
+samples cluster around one value, form several clusters, or have a slow tail. These samples form
+two clusters, which explains the wide confidence interval:
+
+```
+  case                 median  95% CI           mean    cpu median  samples     wall histogram
+  encode one-byte 256  291 ns  289 ns - 351 ns  315 ns  291 ns      50 x 65536  █▆▁           █▃
+```
+
+Sparklines have no axis, and each case's has its own range; read the range off the case's
+statistics. They use Unicode block characters, or ASCII characters with `--ascii` or when the
+locale's encoding (`LC_ALL`, `LC_CTYPE` or `LANG`) isn't UTF-8.
 
 - The runner's own cost per call (an empty function, and an empty async function for cases that
   return promises) is measured once per run and subtracted from the results. It is shown under
