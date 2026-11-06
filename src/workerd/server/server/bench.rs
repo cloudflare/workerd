@@ -8,6 +8,8 @@
 //! The worker factory runs a handler (`worker_bench`) and hands back the group the handler filled
 //! in as an encoded message, which the report copies in under the group's name.
 
+pub mod sparkline;
+
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::time::Duration;
