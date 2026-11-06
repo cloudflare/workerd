@@ -93,8 +93,12 @@ jobs:
 
           echo "Found open PR for branch $BRANCH_NAME"
 
+          # python_metadata.bzl is an input of the pyodide module extension, so the lockfile has
+          # to change with it. The same as `just update-lockfile`.
+          bazel build --lockfile_mode=update --nobuild //... //build/deps/formatters:rustfmt@rule
+
           # Commit and push the changes
-          git add build/python_metadata.bzl
+          git add build/python_metadata.bzl MODULE.bazel.lock
           git commit --fixup HEAD -m "Update python_metadata.bzl with new snapshot info
 
           This commit updates the snapshot values in python_metadata.bzl based on the latest
