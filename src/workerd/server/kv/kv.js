@@ -596,15 +596,17 @@ export class KVNamespace extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec('CREATE TABLE IF NOT EXISTS schema (v INTEGER NOT NULL)');
-    const v = this.sql.exec('SELECT v FROM schema').toArray()[0]?.v ?? 0;
-    if (v > MIGRATIONS.length) {
-      throw new Error(
-        `This namespace's schema (${v}) is newer than this workerd's ` +
-          `(${MIGRATIONS.length}).`
-      );
-    }
+    // The version is read in the transaction that migrates, so two processes
+    // opening a new namespace at once don't both migrate it.
     ctx.storage.transactionSync(() => {
+      this.sql.exec('CREATE TABLE IF NOT EXISTS schema (v INTEGER NOT NULL)');
+      const v = this.sql.exec('SELECT v FROM schema').toArray()[0]?.v ?? 0;
+      if (v > MIGRATIONS.length) {
+        throw new Error(
+          `This namespace's schema (${v}) is newer than this workerd's ` +
+            `(${MIGRATIONS.length}).`
+        );
+      }
       for (const migrate of MIGRATIONS.slice(v)) migrate(this.sql);
       this.sql.exec('DELETE FROM schema');
       this.sql.exec('INSERT INTO schema VALUES (?)', MIGRATIONS.length);
