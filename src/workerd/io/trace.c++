@@ -325,6 +325,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(spanUpdate, SpanUpdate) {
       return spanUpdate.toString();
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      return links.toString();
+    }
     KJ_CASE_ONEOF(diagnosticChannelEvent, DiagnosticChannelEvent) {
       return kj::str("diagnosticChannelEvent");
     }
@@ -1439,6 +1442,156 @@ kj::String SpanClose::toString() const {
   return kj::str("SpanClose: ", outcome);
 }
 
+SpanLink::SpanLink(SpanContext context,
+    CustomInfo attributes,
+    Origin origin,
+    kj::Maybe<kj::ConstString> traceState,
+    uint32_t droppedAttributesCount)
+    : context(kj::mv(context)),
+      attributes(kj::mv(attributes)),
+      origin(origin),
+      traceState(kj::mv(traceState)),
+      droppedAttributesCount(droppedAttributesCount) {}
+
+SpanLink::SpanLink(rpc::Trace::SpanLink::Reader reader)
+    : context(SpanContext::fromCapnp(reader.getContext())),
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return Attribute(attr); }),
+      origin(reader.getOrigin()),
+      droppedAttributesCount(reader.getDroppedAttributesCount()) {
+  if (reader.hasTraceState()) {
+    traceState = kj::ConstString(kj::str(reader.getTraceState()));
+  }
+}
+
+kj::Maybe<SpanContext> SpanLink::parseContext(
+    kj::StringPtr traceId, kj::StringPtr spanId, TraceFlags traceFlags) {
+  if (traceId.size() != 32 || spanId.size() != 16) return kj::none;
+  for (const auto& value: {traceId, spanId}) {
+    for (auto c: value) {
+      if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return kj::none;
+    }
+  }
+  auto high = KJ_UNWRAP_OR_RETURN(hexToUint64(traceId.slice(0, 16)), kj::none);
+  auto low = KJ_UNWRAP_OR_RETURN(hexToUint64(traceId.slice(16)), kj::none);
+  auto id = KJ_UNWRAP_OR_RETURN(hexToUint64(spanId), kj::none);
+  return SpanContext(TraceId(low, high), SpanId(id), traceFlags);
+}
+
+kj::Maybe<kj::String> SpanLink::parseTracestate(kj::StringPtr value) {
+  if (value.size() == 0 || value.size() > 512) return kj::none;
+  kj::Vector<kj::ArrayPtr<const char>> keys;
+  kj::Vector<kj::ArrayPtr<const char>> entries;
+  auto lower = [](char c) { return c >= 'a' && c <= 'z'; };
+  auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  size_t start = 0;
+  while (start < value.size()) {
+    size_t end = start;
+    while (end < value.size() && value[end] != ',') ++end;
+    auto entry = value.slice(start, end);
+    while (entry.size() && (entry[0] == ' ' || entry[0] == '\t')) entry = entry.slice(1);
+    while (entry.size() && (entry.back() == ' ' || entry.back() == '\t')) {
+      entry = entry.first(entry.size() - 1);
+    }
+    // Empty list members are permitted by W3C Trace Context.
+    if (entry.size() == 0) {
+      start = end + 1;
+      continue;
+    }
+    auto equals = KJ_UNWRAP_OR_RETURN(entry.findFirst('='), kj::none);
+    auto key = entry.first(equals);
+    auto data = entry.slice(equals + 1);
+    if (key.size() == 0 || key.size() > 256 || data.size() == 0 || data.size() > 256 ||
+        keys.size() == 32)
+      return kj::none;
+    for (const auto& previous: keys) {
+      if (previous == key) return kj::none;
+    }
+    auto at = key.findFirst('@');
+    if (at == kj::none) {
+      if (!lower(key[0])) return kj::none;
+    } else {
+      auto pos = KJ_ASSERT_NONNULL(at);
+      if (pos == 0 || pos > 241 || pos + 1 == key.size() || key.size() - pos - 1 > 14 ||
+          (!lower(key[0]) && !digit(key[0])) || !lower(key[pos + 1]))
+        return kj::none;
+    }
+    for (size_t i = 0; i < key.size(); ++i) {
+      auto c = key[i];
+      if (lower(c) || digit(c) || c == '_' || c == '-' || c == '*' || c == '/') continue;
+      if (c == '@' && at == i) continue;
+      return kj::none;
+    }
+    for (auto c: data) {
+      if (c < 0x20 || c > 0x7e || c == '=') return kj::none;
+    }
+    keys.add(key);
+    entries.add(entry);
+    start = end + 1;
+  }
+  if (entries.empty()) return kj::none;
+  return kj::strArray(entries.asPtr(), ",");
+}
+
+void SpanLink::copyTo(rpc::Trace::SpanLink::Builder builder) const {
+  context.toCapnp(builder.initContext());
+  auto attrs = builder.initAttributes(attributes.size());
+  for (size_t i = 0; i < attributes.size(); ++i) attributes[i].copyTo(attrs[i]);
+  builder.setOrigin(origin);
+  KJ_IF_SOME(value, traceState) {
+    builder.setTraceState(value.asPtr());
+  }
+  builder.setDroppedAttributesCount(droppedAttributesCount);
+}
+
+SpanLink SpanLink::clone() const {
+  return SpanLink(SpanContext::clone(context), KJ_MAP(attr, attributes) { return attr.clone(); },
+      origin, traceState.map([](const auto& value) { return value.clone(); }),
+      droppedAttributesCount);
+}
+
+size_t SpanLink::size() const {
+  size_t result = sizeof(SpanLink);
+  KJ_IF_SOME(value, traceState) {
+    result += value.size();
+  }
+  for (auto& attr: attributes) {
+    result += sizeof(Attribute) + attr.name.size();
+    for (auto& value: attr.value) {
+      KJ_SWITCH_ONEOF(value) {
+        KJ_CASE_ONEOF(text, kj::ConstString) {
+          result += text.size();
+        }
+        KJ_CASE_ONEOF_DEFAULT {
+          result += sizeof(double);
+        }
+      }
+    }
+  }
+  return result;
+}
+
+SpanLinks::SpanLinks(rpc::Trace::SpanLinks::Reader reader)
+    : links(KJ_MAP(link, reader.getLinks()) { return SpanLink(link); }) {}
+
+void SpanLinks::copyTo(rpc::Trace::SpanLinks::Builder builder) const {
+  auto output = builder.initLinks(links.size());
+  for (size_t i = 0; i < links.size(); ++i) links[i].copyTo(output[i]);
+}
+
+SpanLinks SpanLinks::clone() const {
+  return SpanLinks(KJ_MAP(link, links) { return link.clone(); });
+}
+
+size_t SpanLinks::size() const {
+  size_t result = 0;
+  for (auto& link: links) result += link.size();
+  return result;
+}
+
+kj::String SpanLinks::toString() const {
+  return kj::str("SpanLinks: ", links.size());
+}
+
 SpanUpdate::SpanUpdate(kj::ConstString operationName): info(kj::mv(operationName)) {}
 
 SpanUpdate::SpanUpdate(SpanStatus status): info(kj::mv(status)) {}
@@ -1824,6 +1977,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::SPAN_UPDATE: {
       return SpanUpdate(event.getSpanUpdate());
     }
+    case rpc::Trace::TailEvent::Event::SPAN_LINKS: {
+      return SpanLinks(event.getSpanLinks());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
@@ -1881,6 +2037,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(update, SpanUpdate) {
       update.copyTo(eventBuilder.initSpanUpdate());
     }
+    KJ_CASE_ONEOF(links, SpanLinks) {
+      links.copyTo(eventBuilder.initSpanLinks());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1923,6 +2082,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(update, SpanUpdate) {
         return update.clone();
+      }
+      KJ_CASE_ONEOF(links, SpanLinks) {
+        return links.clone();
       }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
@@ -2039,6 +2201,12 @@ void SpanBuilder::setStatus(tracing::SpanStatus status) {
     if (observer != nullptr) {
       observer->onUpdateStatus(kj::mv(status));
     }
+  }
+}
+
+void SpanBuilder::addLinks(tracing::SpanLinks links) {
+  KJ_IF_SOME(_, span) {
+    if (observer != nullptr) observer->onLinks(kj::mv(links));
   }
 }
 

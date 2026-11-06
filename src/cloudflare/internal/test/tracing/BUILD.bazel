@@ -16,6 +16,11 @@ wd_test(
 )
 
 wd_test(
+    src = "span-links-test.wd-test",
+    data = glob(["*.js"]),
+)
+
+wd_test(
     src = "tracing-active-span-test.wd-test",
     data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )

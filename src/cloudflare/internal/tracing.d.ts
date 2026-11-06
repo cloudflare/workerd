@@ -49,6 +49,18 @@ interface TracingSpanContext {
   traceFlags: number;
 }
 
+interface TracingSpanLinkContext extends TracingSpanContext {
+  isRemote?: boolean;
+  traceState?: string;
+}
+
+interface TracingSpanLink {
+  context: TracingSpanLinkContext;
+  attributes?: SpanAttributes;
+  // Accepted for OTel Link compatibility; recording computes this from sanitized attributes.
+  droppedAttributesCount?: number;
+}
+
 declare class Span {
   // Returns true if this span will be recorded to the tracing system. False when the
   // current async context is not being traced, or when the span has already been submitted.
@@ -74,6 +86,11 @@ declare class Span {
   // Sets the span status. Calls after the span has ended are ignored. Messages are retained only
   // for errors.
   setStatus(status: TracingSpanStatus): this;
+
+  // Links are snapshots and do not change the span's parent, active context, or sampling decision.
+  addLink(link: TracingSpanLink): this;
+  // Arrays longer than 512 elements are ignored with a warning before reading any entries.
+  addLinks(links: readonly TracingSpanLink[]): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
   end(): void;
@@ -136,4 +153,10 @@ export default tracing;
 // Re-export `Span` as a named type export for callers that prefer `import type { Span }`
 // over `InstanceType<typeof tracing.Span>`. The runtime module does not have a named
 // `Span` export - this is purely a type-level convenience.
-export type { Exception, Span, TracingSpanContext };
+export type {
+  Exception,
+  Span,
+  TracingSpanContext,
+  TracingSpanLinkContext,
+  TracingSpanLink,
+};
