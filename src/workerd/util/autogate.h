@@ -123,6 +123,9 @@ namespace workerd::util {
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
   V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* When enabled, the per-isolate bootstrap replaces the JSG performance.now() and                \
+     performance.timeOrigin with the TypeScript ones in src/per_isolate/performance/. */           \
+  V(TYPESCRIPT_PERFORMANCE_NOW)                                                                    \
   /* Cross-context actions queued on an actor between events wait for its next request instead     \
      of aborting it, and IoContext::run() without a current request fails with a typed error.      \
      An alarm's request also drains when its alarm is canceled or fails to schedule, and an        \
