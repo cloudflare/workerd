@@ -2507,7 +2507,6 @@ export class SocketAddress implements _SocketAddress {
 // Here we do the entire implementation as TypeScript simply because
 // we don't need the C++ parts at all.
 
-const kIpv6Regex = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
 const kIpv6RangeRegex =
   /Range: IPv6 ([0-9a-fA-F:]{1,39})-([0-9a-fA-F:]{1,39})/i;
 const kIpv6AddressRegex = /Address: IPv6 ([0-9a-fA-F:]{1,39})/i;
@@ -2537,24 +2536,14 @@ function parseIPv4(ip: string): FixedLengthArray<number, 4> | undefined {
 }
 
 function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
-  // Handle IPv4-mapped IPv6 addresses
-  if (ip.includes('.')) {
-    const match = ip.match(kIpv6Regex);
-    if (match != null && match[1]) {
-      const ipv4Parts = parseIPv4(match[1]);
-      if (ipv4Parts !== undefined) {
-        return [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0xffff,
-          (ipv4Parts[0] << 8) | ipv4Parts[1],
-          (ipv4Parts[2] << 8) | ipv4Parts[3],
-        ];
-      }
-    }
+  // A trailing dotted-quad IPv4 address, as in ::ffff:1.2.3.4, stands for the last two groups.
+  const lastColon = ip.lastIndexOf(':');
+  if (ip.includes('.', lastColon)) {
+    const ipv4 = parseIPv4(ip.slice(lastColon + 1));
+    if (ipv4 === undefined) return undefined;
+    const high = ((ipv4[0] << 8) | ipv4[1]).toString(16);
+    const low = ((ipv4[2] << 8) | ipv4[3]).toString(16);
+    ip = `${ip.slice(0, lastColon + 1)}${high}:${low}`;
   }
 
   // Expand :: notation
@@ -2581,11 +2570,16 @@ function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
   return nums.includes(-1) ? undefined : nums;
 }
 
-function ipv4ToNumber(ip: string): number {
+// Rules hold their addresses as integers (an IPv4 address as a 32-bit value, an IPv6 address as
+// a 128-bit value) and are parsed once, when added. check() then parses only the address it is
+// given and compares integers.
+function ipv4ToBigInt(ip: string): bigint {
   const parts = parseIPv4(ip);
   if (parts === undefined)
     throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
-  return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+  return BigInt(
+    ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
+  );
 }
 
 function ipv6ToBigInt(ip: string): bigint {
@@ -2601,48 +2595,32 @@ function ipv6ToBigInt(ip: string): bigint {
   return result;
 }
 
-function isInIPv4Subnet(ip: string, network: string, prefix: number): boolean {
-  if (prefix < 0 || prefix > 32) return false;
-  if (prefix === 0) return true;
-
-  const ipNum = ipv4ToNumber(ip);
-  const netNum = ipv4ToNumber(network);
-  // Create a subnet mask by shifting all 1s left by (32 - prefix) bits
-  // This creates a mask with 'prefix' number of leading 1s followed by 0s
-  // For example, prefix=24 creates mask 0xffffff00 (255.255.255.0)
-  const mask = (0xffffffff << (32 - prefix)) >>> 0;
-
-  return (ipNum & mask) === (netNum & mask);
+function ipToBigInt(ip: string, family: 'ipv4' | 'ipv6'): bigint {
+  return family === 'ipv4' ? ipv4ToBigInt(ip) : ipv6ToBigInt(ip);
 }
 
-function isInIPv6Subnet(ip: string, network: string, prefix: number): boolean {
-  if (prefix < 0 || prefix > 128) return false;
-  if (prefix === 0) return true;
-
-  const ipBig = ipv6ToBigInt(ip);
-  const netBig = ipv6ToBigInt(network);
-
-  // Create a 128-bit subnet mask for IPv6 by shifting all 1s left by (128 - prefix) bits
-  // This creates a mask with 'prefix' number of leading 1s followed by 0s
-  // The AND with 0xfff...f ensures we stay within 128 bits
-  // For example, prefix=64 creates a mask with 64 leading 1s and 64 trailing 0s
-  const mask =
-    (0xffffffffffffffffffffffffffffffffn << BigInt(128 - prefix)) &
-    0xffffffffffffffffffffffffffffffffn;
-
-  return (ipBig & mask) === (netBig & mask);
+// A mask of `prefix` leading one bits in a `bits`-bit address.
+function subnetMask(prefix: number, bits: number): bigint {
+  return ((1n << BigInt(bits)) - 1n) ^ ((1n << BigInt(bits - prefix)) - 1n);
 }
 
-function compareIPv4(a: string, b: string): number {
-  const aNum = ipv4ToNumber(a);
-  const bNum = ipv4ToNumber(b);
-  return aNum - bNum;
+const kIPv4MappedPrefix = 0xffffn;
+const kIPv4Mask = 0xffffffffn;
+
+// A checked address, in the form each family of rule compares against. An IPv4-mapped IPv6
+// address (::ffff:a.b.c.d) also has an ipv4 value so that IPv4 rules match it, as in Node.js.
+interface ParsedAddress {
+  ipv4: bigint | undefined;
+  ipv6: bigint | undefined;
 }
 
-function compareIPv6(a: string, b: string): number {
-  const aBig = ipv6ToBigInt(a);
-  const bBig = ipv6ToBigInt(b);
-  return aBig < bBig ? -1 : aBig > bBig ? 1 : 0;
+function parseAddress(address: string, family: 'ipv4' | 'ipv6'): ParsedAddress {
+  if (family === 'ipv4') {
+    return { ipv4: ipv4ToBigInt(address), ipv6: undefined };
+  }
+  const ipv6 = ipv6ToBigInt(address);
+  const ipv4 = ipv6 >> 32n === kIPv4MappedPrefix ? ipv6 & kIPv4Mask : undefined;
+  return { ipv4, ipv6 };
 }
 
 function formatIPFamily(family: 'ipv4' | 'ipv6'): 'IPv4' | 'IPv6' {
@@ -2650,122 +2628,80 @@ function formatIPFamily(family: 'ipv4' | 'ipv6'): 'IPv4' | 'IPv6' {
 }
 
 interface BlockListRule {
-  type: 'address' | 'range' | 'subnet';
   family: 'ipv4' | 'ipv6';
   toString(): string;
-  check(address: string, family: 'ipv4' | 'ipv6'): boolean;
+  // Whether the rule covers ip, an address in the rule's family.
+  covers(ip: bigint): boolean;
 }
 
 class AddressRule implements BlockListRule {
-  type = 'address' as const;
   address: string;
   family: 'ipv4' | 'ipv6';
+  #address: bigint;
 
   constructor(address: string, family: 'ipv4' | 'ipv6') {
     this.address = address;
     this.family = family;
+    this.#address = ipToBigInt(address, family);
   }
 
   toString(): string {
     return `Address: ${formatIPFamily(this.family)} ${this.address}`;
   }
 
-  check(address: string, family: 'ipv4' | 'ipv6'): boolean {
-    if (this.family !== family) {
-      // Handle IPv4-mapped IPv6 addresses
-      if (
-        this.family === 'ipv4' &&
-        family === 'ipv6' &&
-        address.startsWith('::ffff:')
-      ) {
-        const ipv4Part = address.substring(7);
-        return this.address === ipv4Part;
-      }
-      return false;
-    }
-    return this.address === address;
+  covers(ip: bigint): boolean {
+    return ip === this.#address;
   }
 }
 
 class RangeRule implements BlockListRule {
-  type = 'range' as const;
   start: string;
   end: string;
   family: 'ipv4' | 'ipv6';
+  #start: bigint;
+  #end: bigint;
 
   constructor(start: string, end: string, family: 'ipv4' | 'ipv6') {
     this.start = start;
     this.end = end;
     this.family = family;
+    this.#start = ipToBigInt(start, family);
+    this.#end = ipToBigInt(end, family);
+    if (this.#start > this.#end) {
+      throw new ERR_INVALID_ARG_VALUE('start', start, 'must come before end');
+    }
   }
 
   toString(): string {
     return `Range: ${formatIPFamily(this.family)} ${this.start}-${this.end}`;
   }
 
-  check(address: string, family: 'ipv4' | 'ipv6'): boolean {
-    if (this.family !== family) {
-      // Handle IPv4-mapped IPv6 for IPv4 ranges
-      if (
-        this.family === 'ipv4' &&
-        family === 'ipv6' &&
-        address.startsWith('::ffff:')
-      ) {
-        const ipv4Part = address.substring(7);
-        const cmpStart = compareIPv4(ipv4Part, this.start);
-        const cmpEnd = compareIPv4(ipv4Part, this.end);
-        return cmpStart >= 0 && cmpEnd <= 0;
-      }
-      return false;
-    }
-
-    if (family === 'ipv4') {
-      const cmpStart = compareIPv4(address, this.start);
-      const cmpEnd = compareIPv4(address, this.end);
-      return cmpStart >= 0 && cmpEnd <= 0;
-    } else {
-      const cmpStart = compareIPv6(address, this.start);
-      const cmpEnd = compareIPv6(address, this.end);
-      return cmpStart >= 0 && cmpEnd <= 0;
-    }
+  covers(ip: bigint): boolean {
+    return this.#start <= ip && ip <= this.#end;
   }
 }
 
 class SubnetRule implements BlockListRule {
-  type = 'subnet' as const;
   network: string;
   prefix: number;
   family: 'ipv4' | 'ipv6';
+  #network: bigint;
+  #mask: bigint;
 
   constructor(network: string, prefix: number, family: 'ipv4' | 'ipv6') {
     this.network = network;
     this.prefix = prefix;
     this.family = family;
+    this.#mask = subnetMask(prefix, family === 'ipv4' ? 32 : 128);
+    this.#network = ipToBigInt(network, family) & this.#mask;
   }
 
   toString(): string {
     return `Subnet: ${formatIPFamily(this.family)} ${this.network}/${this.prefix}`;
   }
 
-  check(address: string, family: 'ipv4' | 'ipv6'): boolean {
-    if (this.family !== family) {
-      // Handle IPv4-mapped IPv6 for IPv4 subnets
-      if (
-        this.family === 'ipv4' &&
-        family === 'ipv6' &&
-        address.startsWith('::ffff:')
-      ) {
-        const ipv4Part = address.substring(7);
-        return isInIPv4Subnet(ipv4Part, this.network, this.prefix);
-      }
-      return false;
-    }
-
-    if (family === 'ipv4') {
-      return isInIPv4Subnet(address, this.network, this.prefix);
-    } else {
-      return isInIPv6Subnet(address, this.network, this.prefix);
-    }
+  covers(ip: bigint): boolean {
+    return (ip & this.#mask) === this.#network;
   }
 }
 
@@ -2836,23 +2772,9 @@ export class BlockList {
       if (!isIPv4(startAddr) || !isIPv4(endAddr)) {
         throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
       }
-      if (compareIPv4(startAddr, endAddr) > 0) {
-        throw new ERR_INVALID_ARG_VALUE(
-          'start',
-          startAddr,
-          'must come before end'
-        );
-      }
     } else {
       if (!isIPv6(startAddr) || !isIPv6(endAddr)) {
         throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address');
-      }
-      if (compareIPv6(startAddr, endAddr) > 0) {
-        throw new ERR_INVALID_ARG_VALUE(
-          'start',
-          startAddr,
-          'must come before end'
-        );
       }
     }
 
@@ -2916,7 +2838,8 @@ export class BlockList {
       checkFamily = family.toLowerCase() as 'ipv4' | 'ipv6';
     }
 
-    // Validate address format
+    // An address that isn't valid for its family matches nothing.
+    let parsed: ParsedAddress;
     try {
       if (checkFamily === 'ipv4' && !isIPv4(checkAddr)) {
         return false;
@@ -2924,13 +2847,14 @@ export class BlockList {
       if (checkFamily === 'ipv6' && !isIPv6(checkAddr)) {
         return false;
       }
+      parsed = parseAddress(checkAddr, checkFamily);
     } catch {
       return false;
     }
 
-    // Check against all rules
     for (const rule of this.#rules) {
-      if (rule.check(checkAddr, checkFamily)) {
+      const ip = parsed[rule.family];
+      if (ip !== undefined && rule.covers(ip)) {
         return true;
       }
     }
