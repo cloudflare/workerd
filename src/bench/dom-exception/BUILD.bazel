@@ -1,0 +1,8 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The DOMException benchmarks, against the C++ implementation.
+
+wd_bench(
+    src = "dom-exception-cpp.wd-bench",
+    data = ["dom-exception.js"],
+)
