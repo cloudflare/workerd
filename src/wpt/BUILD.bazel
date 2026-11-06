@@ -29,6 +29,14 @@ wpt_test(
     wpt_directory = "@wpt//:url@module",
 )
 
+# The TypeScript URL and URLSearchParams, against the same expectations.
+wpt_test(
+    name = "url-ts",
+    autogates = ["workerd-autogate-ts-url"],
+    config = "url-test.ts",
+    wpt_directory = "@wpt//:url@module",
+)
+
 wpt_test(
     name = "urlpattern",
     # We use a fixed compat date because new URLPattern implementation

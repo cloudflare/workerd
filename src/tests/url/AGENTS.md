@@ -3,7 +3,8 @@
 An informal specification of URL and URLSearchParams as implemented in
 workerd, kept in lockstep with the test suite in this directory. **The tests
 are the normative artifact.** The cells run the same modules
-(`url-modules.capnp`) against the C++ implementations:
+(`url-modules.capnp`) against the C++ implementations and the TypeScript
+one:
 
 | Cell | Implementation | Flags the suite branches on |
 | --- | --- | --- |
@@ -12,17 +13,17 @@ are the normative artifact.** The cells run the same modules
 | `url-legacy-cpp` | `api/url.{h,c++}` (`kj::Url`) | `url_original`, `workers_api_getters_setters_on_prototype`, `set_tostring_tag`, `urlsearchparams_delete_has_value_arg` |
 | `url-legacy-instance-cpp` | the same, attributes on each instance | `url_original`, `workers_api_getters_setters_on_instance`, `do_not_set_tostring_tag`, `no_urlsearchparams_delete_has_value_arg` |
 | `url-opt-in-cpp` | standard, with the dateless WebIDL opt-ins | standard + `spec_compliant_property_attributes`, `immutable_api_prototypes` (`--experimental`) |
+| `url-standard-ts`, `url-standard-legacy-flags-ts`, `url-legacy-ts`, `url-legacy-instance-ts` | `src/per_isolate/url/`, under the `TS_URL` autogate | as the C++ cell of the same name |
 
 `which-impl.js` reads the flags; a cell's `USING_TS_IMPL` binding says which
 implementation it means to run. `enable_fast_jsg_struct` is not pinned: the
 `@` and `@all-compat-flags` variants run each cell with it off and on.
 
-A TypeScript implementation (`src/per_isolate/url/`, behind the `TS_URL`
-autogate) is planned. It honors the dated flags above and is otherwise
-WebIDL-conformant, so it may differ from the C++ only toward the spec, in the
+The TypeScript implementation honors the dated flags above and is otherwise
+WebIDL-conformant, so it differs from the C++ only toward the spec, in the
 rows of the ledger below. Each row is pinned on both sides with a
-`usingTsImpl` branch; the TS branches describe the target, and are exercised
-once the TS cells exist.
+`usingTsImpl` branch. The C++ cells disable the `@all-autogates` variant,
+which would run the TypeScript implementation under them.
 
 ## Core semantics
 
@@ -70,6 +71,8 @@ once the TS cells exist.
 | 22 | Legacy-instance `URL.prototype` | `toString`, `toJSON` only | the accessors too | `api-surface.js` |
 | 23 | Legacy `delete`/`has` value under `urlsearchparams_delete_has_value_arg` | ignored | honored | `search-params.js` |
 | 24 | Iterator result shape | `{ done, value }`; without `enable_fast_jsg_struct` the last lacks `value` | `{ value, done }` | `iteration.js` |
+| 25 | Record initializer read order | every key's descriptor, then every value | each key's descriptor, then its value | `search-params.js` |
+| 26 | Record initializer with an enumerable Symbol key | skipped | TypeError, as WPT's `headers-record.any.js` requires of records | `search-params.js` |
 
 Rows the plan keeps but no test here covers: #7 and #11 (now matches), #8
 and #19 (WPT), #10 (RPC; with the TS cells) and #12 (heap snapshots).

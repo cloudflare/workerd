@@ -6,8 +6,9 @@ load("//:build/wd_test.bzl", "wd_test")
 # with the dateless opt-ins (C++ only). See AGENTS.md.
 #
 # The C++ cells disable the @all-autogates variant: enabling every autogate
-# will enable TS_URL, which swaps in the TypeScript implementation under a
-# cell whose USING_TS_IMPL binding says C++.
+# enables TS_URL, which swaps in the TypeScript implementation under a cell
+# whose USING_TS_IMPL binding says C++. The TypeScript cells enable TS_URL
+# themselves.
 
 url_suite_srcs = glob(["*.js"]) + ["url-modules.capnp"]
 
@@ -40,4 +41,24 @@ wd_test(
     args = ["--experimental"],
     data = url_suite_srcs,
     generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "url-standard-ts.wd-test",
+    data = url_suite_srcs,
+)
+
+wd_test(
+    src = "url-standard-legacy-flags-ts.wd-test",
+    data = url_suite_srcs,
+)
+
+wd_test(
+    src = "url-legacy-ts.wd-test",
+    data = url_suite_srcs,
+)
+
+wd_test(
+    src = "url-legacy-instance-ts.wd-test",
+    data = url_suite_srcs,
 )

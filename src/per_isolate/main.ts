@@ -363,6 +363,31 @@ if (autogates['ts-event-source']) {
   }
 }
 
+// The TypeScript URL and URLSearchParams replace the C++ ones, which
+// global-scope.h then leaves out. Installed as WebIDL installs an interface:
+// own, non-enumerable properties of the global, and not on its prototype.
+if (autogates['ts-url']) {
+  const { URL, URLSearchParams } = require('url/url');
+  // The C++ bridge's functions, which it finds already loaded.
+  require('url/cpp_exports');
+  ObjectDefineProperties(globalThis, {
+    URL: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URL,
+    },
+    URLSearchParams: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: URLSearchParams,
+    },
+  });
+}
+
 // Internal-only: a cloneable class for testing the serialization protocol
 // (serialization.ts), such as over RPC. Gated by an experimental flag that
 // may never lose its experimental annotation.

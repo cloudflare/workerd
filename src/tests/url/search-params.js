@@ -83,8 +83,28 @@ export const badSequences = {
 export const recordInitializers = {
   test() {
     strictEqual(str({ a: 1, b: 'x' }), 'a=1&b=x');
-    strictEqual(str({ [Symbol('s')]: '1', a: '2' }), 'a=2');
-    strictEqual(str({ [Symbol.iterator]: undefined, a: '1' }), 'a=1');
+    // Ledger #26: WebIDL converts every own enumerable key, and a Symbol
+    // does not convert to a string; JSG skips them. An undefined
+    // Symbol.iterator makes the object a record with such a key.
+    for (const init of [
+      { [Symbol('s')]: '1', a: '2' },
+      { [Symbol.iterator]: undefined, a: '2' },
+    ]) {
+      if (usingTsImpl) {
+        throws(() => str(init), TypeError);
+      } else {
+        strictEqual(str(init), 'a=2');
+      }
+    }
+    strictEqual(
+      str(
+        Object.defineProperty({ a: '2' }, Symbol('hidden'), {
+          value: '1',
+          enumerable: false,
+        })
+      ),
+      'a=2'
+    );
     strictEqual(
       str(
         Object.defineProperty({ b: '2' }, 'a', {
@@ -123,7 +143,11 @@ export const recordReadOrder = {
       }
     );
     strictEqual(str(init), 'a=1&b=2');
-    const record = ['ownKeys', 'gopd a', 'gopd b', 'get a', 'get b'];
+    // Ledger #25: WebIDL reads each key's descriptor and then its value; JSG
+    // reads every descriptor first.
+    const record = usingTsImpl
+      ? ['ownKeys', 'gopd a', 'get a', 'gopd b', 'get b']
+      : ['ownKeys', 'gopd a', 'gopd b', 'get a', 'get b'];
     deepStrictEqual(
       log,
       legacyCpp ? record : ['get Symbol(Symbol.iterator)', ...record]
