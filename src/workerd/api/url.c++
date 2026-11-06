@@ -166,21 +166,35 @@ kj::String kjUrlToString(const kj::Url& url) {
 }  // namespace
 
 // =======================================================================================
-// URL
+// LegacyUrl
 
-jsg::Ref<URL> URL::constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base) {
+LegacyUrl::LegacyUrl(kj::Url&& u): url(kj::mv(u)) {
+  normalizePort(url);
+}
+
+kj::Rc<LegacyUrl> LegacyUrl::parse(kj::String url, kj::Maybe<kj::String> base) {
   KJ_IF_SOME(b, base) {
     auto baseUrl =
         JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(b)), TypeError, "Invalid base URL string.");
-    return js.alloc<URL>(JSG_REQUIRE_NONNULL(
+    return kj::rc<LegacyUrl>(JSG_REQUIRE_NONNULL(
         baseUrl.tryParseRelative(kj::mv(url)), TypeError, "Invalid relative URL string."));
   }
-  return js.alloc<URL>(
+  return kj::rc<LegacyUrl>(
       JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(url)), TypeError, "Invalid URL string."));
 }
 
-URL::URL(kj::Url&& u): url(kj::refcounted<RefcountedUrl>(kj::mv(u))) {
-  normalizePort(*url);
+kj::Maybe<kj::Rc<LegacyUrl>> LegacyUrl::tryParse(kj::String url, kj::Maybe<kj::String> base) {
+  KJ_IF_SOME(b, base) {
+    KJ_IF_SOME(baseUrl, kj::Url::tryParse(kj::mv(b))) {
+      return baseUrl.tryParseRelative(kj::mv(url)).map([](kj::Url&& u) {
+        return kj::rc<LegacyUrl>(kj::mv(u));
+      });
+    }
+    return kj::none;
+  }
+  return kj::Url::tryParse(kj::mv(url)).map([](kj::Url&& u) {
+    return kj::rc<LegacyUrl>(kj::mv(u));
+  });
 }
 
 // Setters and Getters
@@ -209,60 +223,58 @@ URL::URL(kj::Url&& u): url(kj::refcounted<RefcountedUrl>(kj::mv(u))) {
 //   specific components of a URL. This is more or less a generalization of kj::Url's parser
 //   context, and offers an obvious path forward to both conformance and performance.
 
-kj::String URL::getHref() {
-  return toString();
+kj::String LegacyUrl::getHref() const {
+  return kjUrlToString(url);
 }
-void URL::setHref(jsg::Lock& js, kj::String value) {
+bool LegacyUrl::setHref(kj::String value) {
   KJ_IF_SOME(u, kj::Url::tryParse(kj::mv(value))) {
-    url->kj::Url::operator=(kj::mv(u));
-  } else {
-    auto context = jsg::TypeErrorContext::setterArgument(typeid(URL), "href");
-    jsg::throwTypeError(js.v8Isolate, context, "valid URL string");
-    // href's is the only setter which is allowed to throw on invalid input, according to the spec.
+    url = kj::mv(u);
+    return true;
   }
+  return false;
 }
 
-kj::String URL::getOrigin() {
+kj::String LegacyUrl::getOrigin() const {
   // TODO(cleanup): Move this logic into kj::Url.
 
-  if (isSpecialScheme(url->scheme) && url->scheme != "file") {
-    return kj::str(url->scheme, "://", url->host);
-  } else if (url->scheme == "file") {
+  if (isSpecialScheme(url.scheme) && url.scheme != "file") {
+    return kj::str(url.scheme, "://", url.host);
+  } else if (url.scheme == "file") {
     return kj::str("null");
-  } else if (url->scheme == "blob") {
-    // TODO(soon): Parse url->path[0] and return that if it has an origin.
+  } else if (url.scheme == "blob") {
+    // TODO(soon): Parse url.path[0] and return that if it has an origin.
     return kj::str("null");
   }
   return kj::str("null");
 }
 
-kj::String URL::getProtocol() {
-  return kj::str(url->scheme, ':');
+kj::String LegacyUrl::getProtocol() const {
+  return kj::str(url.scheme, ':');
 }
-void URL::setProtocol(kj::String value) {
+void LegacyUrl::setProtocol(kj::String value) {
   KJ_IF_SOME(colon, value.findFirst(':')) {
     auto scheme = kj::str(value.first(colon));
     value = kj::mv(scheme);
   }
 
-  auto copy = url->clone();
+  auto copy = url.clone();
   copy.scheme = kj::mv(value);
 
   KJ_IF_SOME(u, kj::Url::tryParse(kjUrlToString(copy))) {
-    url->kj::Url::operator=(kj::mv(u));
+    url = kj::mv(u);
   }
 
-  normalizePort(*url);
+  normalizePort(url);
 }
 
-kj::String URL::getUsername() {
-  KJ_IF_SOME(userInfo, url->userInfo) {
+kj::String LegacyUrl::getUsername() const {
+  KJ_IF_SOME(userInfo, url.userInfo) {
     return kj::encodeUriUserInfo(userInfo.username);
   }
   return {};
 }
-void URL::setUsername(kj::String value) {
-  auto copy = url->clone();
+void LegacyUrl::setUsername(kj::String value) {
+  auto copy = url.clone();
   KJ_IF_SOME(ui, copy.userInfo) {
     ui.username = kj::mv(value);
   } else {
@@ -270,20 +282,20 @@ void URL::setUsername(kj::String value) {
   }
 
   KJ_IF_SOME(u, kj::Url::tryParse(kjUrlToString(copy))) {
-    url->kj::Url::operator=(kj::mv(u));
+    url = kj::mv(u);
   }
 }
 
-kj::String URL::getPassword() {
-  KJ_IF_SOME(userInfo, url->userInfo) {
+kj::String LegacyUrl::getPassword() const {
+  KJ_IF_SOME(userInfo, url.userInfo) {
     KJ_IF_SOME(password, userInfo.password) {
       return kj::encodeUriUserInfo(password);
     }
   }
   return {};
 }
-void URL::setPassword(kj::String value) {
-  auto copy = url->clone();
+void LegacyUrl::setPassword(kj::String value) {
+  auto copy = url.clone();
   KJ_IF_SOME(ui, copy.userInfo) {
     // We already have userInfo. Set the password if we were given a non-empty string, otherwise
     // reset the password Maybe.
@@ -297,14 +309,14 @@ void URL::setPassword(kj::String value) {
   }
 
   KJ_IF_SOME(u, kj::Url::tryParse(kjUrlToString(copy))) {
-    url->kj::Url::operator=(kj::mv(u));
+    url = kj::mv(u);
   }
 }
 
-kj::String URL::getHost() {
-  return kj::str(url->host);
+kj::String LegacyUrl::getHost() const {
+  return kj::str(url.host);
 }
-void URL::setHost(kj::String value) {
+void LegacyUrl::setHost(kj::String value) {
   // The spec provides the following helpful note:
   //
   //   If the given value for the host attribute’s setter lacks a port, context object’s url’s port
@@ -314,73 +326,73 @@ void URL::setHost(kj::String value) {
   // If the new host value lacks a port, copy the current one over to the new value, if any. We can
   // assume that if the current one has a port, it must not be the default port for this URL's
   // scheme.
-  KJ_IF_SOME(colon, url->host.findFirst(':')) {
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
     KJ_IF_SOME(newHostColon, value.findFirst(':')) {
       if (value.size() == newHostColon + 1) {
         // The new host has a colon but nothing after it. Adopt the current port.
-        value = kj::str(kj::mv(value), url->host.slice(colon + 1));
+        value = kj::str(kj::mv(value), url.host.slice(colon + 1));
       } else {
         // The new host has a port, so we don't copy the current one over.
       }
     } else {
       // The new host has no port. Adopt the current port.
-      value = kj::str(kj::mv(value), url->host.slice(colon));
+      value = kj::str(kj::mv(value), url.host.slice(colon));
     }
   }
 
   // TODO(soon): Validate the new host string. kj::Url::isValidHost(value)?
-  url->host = kj::mv(value);
+  url.host = kj::mv(value);
 
-  normalizePort(*url);
+  normalizePort(url);
 }
 
-kj::String URL::getHostname() {
-  KJ_IF_SOME(colon, url->host.findFirst(':')) {
-    return kj::str(url->host.first(colon));
+kj::String LegacyUrl::getHostname() const {
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
+    return kj::str(url.host.first(colon));
   }
-  return kj::str(url->host);
+  return kj::str(url.host);
 }
-void URL::setHostname(kj::String value) {
+void LegacyUrl::setHostname(kj::String value) {
   // In contrast to the host setter, the hostname setter explicitly ignores any new port. We take
   // the hostname from the new value and the port from the old value.
   auto hostnameString = value.first(value.findFirst(':').orDefault(value.size()));
-  auto portString = url->host.slice(url->host.findFirst(':').orDefault(url->host.size()));
+  auto portString = url.host.slice(url.host.findFirst(':').orDefault(url.host.size()));
 
-  url->host = kj::str(hostnameString, portString);
+  url.host = kj::str(hostnameString, portString);
 }
 
-kj::String URL::getPort() {
-  KJ_IF_SOME(colon, url->host.findFirst(':')) {
-    return kj::str(url->host.slice(colon + 1));
+kj::String LegacyUrl::getPort() const {
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
+    return kj::str(url.host.slice(colon + 1));
   }
   return {};
 }
-void URL::setPort(kj::String value) {
-  KJ_IF_SOME(colon, url->host.findFirst(':')) {
+void LegacyUrl::setPort(kj::String value) {
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
     // Our url's host already has a port. Replace it.
-    value = kj::str(url->host.first(colon + 1), kj::mv(value));
+    value = kj::str(url.host.first(colon + 1), kj::mv(value));
   } else {
-    value = kj::str(url->host, ':', kj::mv(value));
+    value = kj::str(url.host, ':', kj::mv(value));
   }
 
-  url->host = kj::mv(value);
+  url.host = kj::mv(value);
 
-  normalizePort(*url);
+  normalizePort(url);
 }
 
-kj::String URL::getPathname() {
-  if (!url->path.empty()) {
+kj::String LegacyUrl::getPathname() const {
+  if (!url.path.empty()) {
     auto components =
-        KJ_MAP(component, url->path) { return kj::str('/', kj::encodeUriPath(component)); };
-    return kj::str(kj::strArray(components, ""), url->hasTrailingSlash ? "/" : "");
-  } else if (url->hasTrailingSlash || isSpecialScheme(url->scheme)) {
+        KJ_MAP(component, url.path) { return kj::str('/', kj::encodeUriPath(component)); };
+    return kj::str(kj::strArray(components, ""), url.hasTrailingSlash ? "/" : "");
+  } else if (url.hasTrailingSlash || isSpecialScheme(url.scheme)) {
     // Special URLs have non-empty paths by definition, regardless of the value of hasTrailingSlash.
     return kj::str('/');
   }
   return {};
 }
-void URL::setPathname(kj::String value) {
-  decltype(url->path) newPath;
+void LegacyUrl::setPathname(kj::String value) {
+  decltype(url.path) newPath;
   bool newHasTrailingSlash;
 
   auto text = value.slice(0);
@@ -418,13 +430,13 @@ void URL::setPathname(kj::String value) {
   }
 
   if (!err) {
-    url->hasTrailingSlash = newHasTrailingSlash;
-    url->path = newPath.releaseAsArray();
+    url.hasTrailingSlash = newHasTrailingSlash;
+    url.path = newPath.releaseAsArray();
   }
 }
 
-kj::String URL::getSearch() {
-  auto query = KJ_MAP(q, url->query) {
+kj::String LegacyUrl::getSearch() const {
+  auto query = KJ_MAP(q, url.query) {
     // TODO(soon): We shouldn't be performing any encoding here, because our setSearch() (and URL
     //   constructor) shouldn't be performing application/x-www-form-urlencoded decoding on the
     //   query string themselves -- that's for URLSearchParams to do.
@@ -439,8 +451,8 @@ kj::String URL::getSearch() {
   }
   return {};
 }
-void URL::setSearch(kj::String value) {
-  decltype(url->query) newQuery;
+void LegacyUrl::setSearch(kj::String value) {
+  decltype(url.query) newQuery;
 
   auto text = value.slice(value.startsWith("?") ? 1 : 0);
   bool err = false;
@@ -471,89 +483,40 @@ void URL::setSearch(kj::String value) {
   }
 
   if (!err) {
-    url->query = newQuery.releaseAsArray();
+    url.query = newQuery.releaseAsArray();
   }
 }
 
-jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
-  KJ_IF_SOME(usp, searchParams) {
-    return usp.addRef();
-  } else {
-    searchParams.emplace(js.alloc<URLSearchParams>(kj::addRef(*url)));
-    return KJ_ASSERT_NONNULL(searchParams).addRef();
-  }
-}
-
-kj::String URL::getHash() {
-  KJ_IF_SOME(fragment, url->fragment) {
+kj::String LegacyUrl::getHash() const {
+  KJ_IF_SOME(fragment, url.fragment) {
     if (fragment.size() > 0) {
       return kj::str('#', kj::encodeUriFragment(fragment));
     }
   }
   return {};
 }
-void URL::setHash(kj::String value) {
+void LegacyUrl::setHash(kj::String value) {
   // Omit any starting '#'.
-  url->fragment = kj::decodeUriComponent(value.slice(value.startsWith("#") ? 1 : 0));
+  url.fragment = kj::decodeUriComponent(value.slice(value.startsWith("#") ? 1 : 0));
 }
 
-kj::String URL::toString() {
-  return kjUrlToString(*url);
-}
-kj::String URL::toJSON() {
-  return toString();
+void LegacyUrl::append(kj::String name, kj::String value) {
+  url.query.add(kj::Url::QueryParam{kj::mv(name), kj::mv(value)});
 }
 
-// =======================================================================================
-// URLSearchParams
-
-URLSearchParams::URLSearchParams(kj::Own<URL::RefcountedUrl> url): url(kj::mv(url)) {}
-
-jsg::Ref<URLSearchParams> URLSearchParams::constructor(
-    jsg::Lock& js, jsg::Optional<URLSearchParams::Initializer> init) {
-  auto searchParams = js.alloc<URLSearchParams>(kj::refcounted<URL::RefcountedUrl>());
-
-  KJ_IF_SOME(i, init) {
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(usp, jsg::Ref<URLSearchParams>) {
-        searchParams->url->kj::Url::operator=(usp->url->clone());
-      }
-      KJ_CASE_ONEOF(queryString, kj::String) {
-        auto& adjustment =
-            searchParams->externalMemoryAdjustment.emplace(js.getExternalMemoryAdjustment());
-        parseQueryString(searchParams->url->query, kj::mv(queryString), adjustment, true);
-      }
-      KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
-        searchParams->url->query = KJ_MAP(entry, dict.fields) {
-          return kj::Url::QueryParam{kj::mv(entry.name), kj::mv(entry.value)};
-        };
-      }
-      KJ_CASE_ONEOF(arrayOfArrays, kj::Array<kj::Array<kj::String>>) {
-        searchParams->url->query = KJ_MAP(entry, arrayOfArrays) {
-          JSG_REQUIRE(entry.size() == 2, TypeError,
-              "To initialize a URLSearchParams object "
-              "from an array-of-arrays, each inner array must have exactly two elements.");
-          return kj::Url::QueryParam{kj::mv(entry[0]), kj::mv(entry[1])};
-        };
-      }
+void LegacyUrl::delete_(kj::StringPtr name, kj::Maybe<kj::StringPtr> value) {
+  auto pivot = std::remove_if(url.query.begin(), url.query.end(), [&](const auto& kv) {
+    if (kv.name != name) return false;
+    KJ_IF_SOME(v, value) {
+      return kv.value == v;
     }
-  }
-
-  return searchParams;
+    return true;
+  });
+  url.query.truncate(pivot - url.query.begin());
 }
 
-void URLSearchParams::append(kj::String name, kj::String value) {
-  url->query.add(kj::Url::QueryParam{kj::mv(name), kj::mv(value)});
-}
-
-void URLSearchParams::delete_(kj::String name) {
-  auto pivot = std::remove_if(
-      url->query.begin(), url->query.end(), [&name](const auto& kv) { return kv.name == name; });
-  url->query.truncate(pivot - url->query.begin());
-}
-
-kj::Maybe<kj::String> URLSearchParams::get(kj::String name) {
-  for (auto& [k, v]: url->query) {
+kj::Maybe<kj::String> LegacyUrl::get(kj::StringPtr name) const {
+  for (auto& [k, v]: url.query) {
     if (k == name) {
       return kj::str(v);
     }
@@ -561,9 +524,9 @@ kj::Maybe<kj::String> URLSearchParams::get(kj::String name) {
   return kj::none;
 }
 
-kj::Array<kj::String> URLSearchParams::getAll(kj::String name) {
+kj::Array<kj::String> LegacyUrl::getAll(kj::StringPtr name) const {
   kj::Vector<kj::String> result;
-  for (auto& [k, v]: url->query) {
+  for (auto& [k, v]: url.query) {
     if (k == name) {
       result.add(kj::str(v));
     }
@@ -571,30 +534,31 @@ kj::Array<kj::String> URLSearchParams::getAll(kj::String name) {
   return result.releaseAsArray();
 }
 
-bool URLSearchParams::has(kj::String name) {
-  for (auto& [k, v]: url->query) {
+bool LegacyUrl::has(kj::StringPtr name, kj::Maybe<kj::StringPtr> value) const {
+  for (auto& [k, v]: url.query) {
     if (k == name) {
+      KJ_IF_SOME(expected, value) {
+        if (v != expected) continue;
+      }
       return true;
     }
   }
   return false;
 }
 
-// Set the first element named `name` to `value`, then remove all the rest matching that name.
-void URLSearchParams::set(kj::String name, kj::String value) {
+void LegacyUrl::set(kj::String name, kj::String value) {
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
-  auto firstFound = std::find_if(url->query.begin(), url->query.end(), predicate);
-  if (firstFound != url->query.end()) {
+  auto firstFound = std::find_if(url.query.begin(), url.query.end(), predicate);
+  if (firstFound != url.query.end()) {
     firstFound->value = kj::mv(value);
-    auto pivot = std::remove_if(++firstFound, url->query.end(), predicate);
-    url->query.truncate(pivot - url->query.begin());
+    auto pivot = std::remove_if(++firstFound, url.query.end(), predicate);
+    url.query.truncate(pivot - url.query.begin());
   } else {
     append(kj::mv(name), kj::mv(value));
   }
 }
 
-// Sort by UTF-16 code unit, preserving order of equal elements.
-void URLSearchParams::sort() {
+void LegacyUrl::sort() {
   // TODO(perf): This UTF-16 business is sad. The WPT points out the specific example 🌈 < ﬃ,
   //   because the rainbow is lexicographically less than the ligature in UTF-16 code units. In
   //   UTF-8 code units, their order is the opposite.
@@ -603,12 +567,253 @@ void URLSearchParams::sort() {
   //   ﬃ   ef ac 83    |  fb03
   //   🌈  f0 9f 8c 88 |  d83c df08
 
-  std::stable_sort(url->query.begin(), url->query.end(), [](const auto& left, const auto& right) {
+  std::stable_sort(url.query.begin(), url.query.end(), [](const auto& left, const auto& right) {
     auto leftUtf16 = fastEncodeUtf16(left.name.asArray());
     auto rightUtf16 = fastEncodeUtf16(right.name.asArray());
     return std::lexicographical_compare(
         leftUtf16.begin(), leftUtf16.end(), rightUtf16.begin(), rightUtf16.end());
   });
+}
+
+kj::StringPtr LegacyUrl::nameAt(size_t index) const {
+  KJ_REQUIRE(index < url.query.size());
+  return url.query[index].name;
+}
+
+kj::StringPtr LegacyUrl::valueAt(size_t index) const {
+  KJ_REQUIRE(index < url.query.size());
+  return url.query[index].value;
+}
+
+kj::String LegacyUrl::serialize() const {
+  kj::Vector<char> chars(128);
+
+  bool first = true;
+  for (auto& param: url.query) {
+    if (!first) chars.add('&');
+    first = false;
+    chars.addAll(kj::encodeWwwForm(param.name));
+    // This *intentionally* differs from the behavior in getSearch() and kj::Url::toString()!
+    // URLSearchParams has no concept of "null-valued" query parameters -- they get coerced to
+    // empty-valued query parameters, so we unconditionally add the '=' sign.
+    chars.add('=');
+    chars.addAll(kj::encodeWwwForm(param.value));
+  }
+
+  chars.add('\0');
+  return kj::String(chars.releaseAsArray());
+}
+
+kj::Rc<LegacyUrl> LegacyUrl::clone() const {
+  auto copy = kj::rc<LegacyUrl>();
+  copy->assign(*this);
+  return copy;
+}
+
+void LegacyUrl::assign(const LegacyUrl& other) {
+  url = other.url.clone();
+}
+
+void LegacyUrl::assignQueryString(
+    kj::ArrayPtr<const char> query, jsg::ExternalMemoryAdjustment& adjustment) {
+  kj::Vector<kj::Url::QueryParam> parsed;
+  parseQueryString(parsed, query, adjustment, true);
+  url.query = kj::mv(parsed);
+}
+
+void LegacyUrl::assignQueryPairs(kj::Array<kj::Url::QueryParam> pairs) {
+  url.query = kj::mv(pairs);
+}
+
+size_t LegacyUrl::memorySize() const {
+  size_t size = url.scheme.size();
+  KJ_IF_SOME(ui, url.userInfo) {
+    size += ui.username.size();
+    KJ_IF_SOME(pwd, ui.password) {
+      size += pwd.size();
+    }
+  }
+  size += url.host.size();
+  for (const auto& p: url.path) {
+    size += p.size();
+  }
+  for (const auto& param: url.query) {
+    size += param.name.size();
+    size += param.value.size();
+  }
+  KJ_IF_SOME(frag, url.fragment) {
+    size += frag.size();
+  }
+  return size;
+}
+
+// =======================================================================================
+// URL
+
+jsg::Ref<URL> URL::constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base) {
+  return js.alloc<URL>(LegacyUrl::parse(kj::mv(url), kj::mv(base)));
+}
+
+URL::URL(kj::Rc<LegacyUrl> url): url(kj::mv(url)) {}
+
+kj::String URL::getHref() {
+  return url->getHref();
+}
+void URL::setHref(jsg::Lock& js, kj::String value) {
+  if (!url->setHref(kj::mv(value))) {
+    auto context = jsg::TypeErrorContext::setterArgument(typeid(URL), "href");
+    jsg::throwTypeError(js.v8Isolate, context, "valid URL string");
+    // href's is the only setter which is allowed to throw on invalid input, according to the spec.
+  }
+}
+
+kj::String URL::getOrigin() {
+  return url->getOrigin();
+}
+
+kj::String URL::getProtocol() {
+  return url->getProtocol();
+}
+void URL::setProtocol(kj::String value) {
+  url->setProtocol(kj::mv(value));
+}
+
+kj::String URL::getUsername() {
+  return url->getUsername();
+}
+void URL::setUsername(kj::String value) {
+  url->setUsername(kj::mv(value));
+}
+
+kj::String URL::getPassword() {
+  return url->getPassword();
+}
+void URL::setPassword(kj::String value) {
+  url->setPassword(kj::mv(value));
+}
+
+kj::String URL::getHost() {
+  return url->getHost();
+}
+void URL::setHost(kj::String value) {
+  url->setHost(kj::mv(value));
+}
+
+kj::String URL::getHostname() {
+  return url->getHostname();
+}
+void URL::setHostname(kj::String value) {
+  url->setHostname(kj::mv(value));
+}
+
+kj::String URL::getPort() {
+  return url->getPort();
+}
+void URL::setPort(kj::String value) {
+  url->setPort(kj::mv(value));
+}
+
+kj::String URL::getPathname() {
+  return url->getPathname();
+}
+void URL::setPathname(kj::String value) {
+  url->setPathname(kj::mv(value));
+}
+
+kj::String URL::getSearch() {
+  return url->getSearch();
+}
+void URL::setSearch(kj::String value) {
+  url->setSearch(kj::mv(value));
+}
+
+jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
+  KJ_IF_SOME(usp, searchParams) {
+    return usp.addRef();
+  } else {
+    searchParams.emplace(js.alloc<URLSearchParams>(url.addRef()));
+    return KJ_ASSERT_NONNULL(searchParams).addRef();
+  }
+}
+
+kj::String URL::getHash() {
+  return url->getHash();
+}
+void URL::setHash(kj::String value) {
+  url->setHash(kj::mv(value));
+}
+
+kj::String URL::toString() {
+  return url->getHref();
+}
+kj::String URL::toJSON() {
+  return url->getHref();
+}
+
+// =======================================================================================
+// URLSearchParams
+
+URLSearchParams::URLSearchParams(kj::Rc<LegacyUrl> url): url(kj::mv(url)) {}
+
+jsg::Ref<URLSearchParams> URLSearchParams::constructor(
+    jsg::Lock& js, jsg::Optional<URLSearchParams::Initializer> init) {
+  auto searchParams = js.alloc<URLSearchParams>(kj::rc<LegacyUrl>());
+
+  KJ_IF_SOME(i, init) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(usp, jsg::Ref<URLSearchParams>) {
+        searchParams->url->assign(*usp->url);
+      }
+      KJ_CASE_ONEOF(queryString, kj::String) {
+        auto& adjustment =
+            searchParams->externalMemoryAdjustment.emplace(js.getExternalMemoryAdjustment());
+        searchParams->url->assignQueryString(queryString, adjustment);
+      }
+      KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
+        searchParams->url->assignQueryPairs(KJ_MAP(entry, dict.fields) {
+          return kj::Url::QueryParam{kj::mv(entry.name), kj::mv(entry.value)};
+        });
+      }
+      KJ_CASE_ONEOF(arrayOfArrays, kj::Array<kj::Array<kj::String>>) {
+        searchParams->url->assignQueryPairs(KJ_MAP(entry, arrayOfArrays) {
+          JSG_REQUIRE(entry.size() == 2, TypeError,
+              "To initialize a URLSearchParams object "
+              "from an array-of-arrays, each inner array must have exactly two elements.");
+          return kj::Url::QueryParam{kj::mv(entry[0]), kj::mv(entry[1])};
+        });
+      }
+    }
+  }
+
+  return searchParams;
+}
+
+void URLSearchParams::append(kj::String name, kj::String value) {
+  url->append(kj::mv(name), kj::mv(value));
+}
+
+void URLSearchParams::delete_(kj::String name) {
+  url->delete_(name, kj::none);
+}
+
+kj::Maybe<kj::String> URLSearchParams::get(kj::String name) {
+  return url->get(name);
+}
+
+kj::Array<kj::String> URLSearchParams::getAll(kj::String name) {
+  return url->getAll(name);
+}
+
+bool URLSearchParams::has(kj::String name) {
+  return url->has(name, kj::none);
+}
+
+void URLSearchParams::set(kj::String name, kj::String value) {
+  url->set(kj::mv(name), kj::mv(value));
+}
+
+void URLSearchParams::sort() {
+  url->sort();
 }
 
 void URLSearchParams::forEach(jsg::Lock& js,
@@ -624,16 +829,12 @@ void URLSearchParams::forEach(jsg::Lock& js,
   callback.setReceiver(js.v8Ref(receiver));
 
   // On each iteration of the for loop, a JavaScript callback is invoked. If a new
-  // item is appended to the this->url->query within that function, the loop must pick
+  // item is appended to the query within that function, the loop must pick
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
-  // Silence clang-tidy warning, using an iterator would not work correctly if callback
-  // increases the size of data.
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < this->url->query.size(); i++) {
-    auto& [key, value] = this->url->query[i];
-    callback(js, value, key, JSG_THIS);
+  for (size_t i = 0; i < url->size(); i++) {
+    callback(js, url->valueAt(i), url->nameAt(i), JSG_THIS);
   }
 }
 
@@ -650,22 +851,7 @@ jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) 
 }
 
 kj::String URLSearchParams::toString() {
-  kj::Vector<char> chars(128);
-
-  bool first = true;
-  for (auto& param: url->query) {
-    if (!first) chars.add('&');
-    first = false;
-    chars.addAll(kj::encodeWwwForm(param.name));
-    // This *intentionally* differs from the behavior in URL::getSearch() and kj::Url::toString()!
-    // URLSearchParams has no concept of "null-valued" query parameters -- they get coerced to
-    // empty-valued query parameters, so we unconditionally add the '=' sign.
-    chars.add('=');
-    chars.addAll(kj::encodeWwwForm(param.value));
-  }
-
-  chars.add('\0');
-  return kj::String(chars.releaseAsArray());
+  return url->serialize();
 }
 
 }  // namespace workerd::api
