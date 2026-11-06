@@ -9,8 +9,6 @@
 import type { UrlAttributes, UrlBackend } from './backend';
 import type { InternalArrayHelpers } from './internal-array';
 
-const { ArrayPrototypePush } = primordials;
-
 const { createLegacySearchParams, createLegacyUrl, tryCreateLegacyUrl } = utils;
 
 const {
@@ -117,7 +115,8 @@ const backend: UrlBackend<LegacyUrlHandle> = {
     const pairs = internalArray<string>();
     for (let i = 0; i < init.length; i++) {
       const entry = init[i] as [string, string];
-      ArrayPrototypePush(pairs, entry[0], entry[1]);
+      pairs[pairs.length] = entry[0];
+      pairs[pairs.length] = entry[1];
     }
     store.assignQueryPairs(pairs);
     return store;

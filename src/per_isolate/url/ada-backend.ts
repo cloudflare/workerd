@@ -24,7 +24,6 @@ import type { InternalArrayHelpers } from './internal-array';
 import type { UrlencodedHelpers } from './urlencoded';
 
 const {
-  ArrayPrototypePush,
   ArrayPrototypeSort,
   ObjectFreeze,
   ObjectSetPrototypeOf,
@@ -229,7 +228,7 @@ class ListStore implements SearchParamsStore {
   }
 
   append(name: string, value: string): void {
-    ArrayPrototypePush(this.#list, [name, value]);
+    this.#list[this.#list.length] = [name, value];
     this.#update();
   }
 
@@ -239,7 +238,7 @@ class ListStore implements SearchParamsStore {
     for (let i = 0; i < list.length; i++) {
       const entry = list[i] as SearchParamsEntry;
       if (entry[0] !== name || (value !== undefined && entry[1] !== value)) {
-        ArrayPrototypePush(kept, entry);
+        kept[kept.length] = entry;
       }
     }
     this.#list = kept;
@@ -260,7 +259,7 @@ class ListStore implements SearchParamsStore {
     const values = internalArray<string>();
     for (let i = 0; i < list.length; i++) {
       const entry = list[i] as SearchParamsEntry;
-      if (entry[0] === name) ArrayPrototypePush(values, entry[1]);
+      if (entry[0] === name) values[values.length] = entry[1];
     }
     return toUserArray(values);
   }
@@ -283,14 +282,14 @@ class ListStore implements SearchParamsStore {
     for (let i = 0; i < list.length; i++) {
       const entry = list[i] as SearchParamsEntry;
       if (entry[0] !== name) {
-        ArrayPrototypePush(kept, entry);
+        kept[kept.length] = entry;
       } else if (!found) {
         found = true;
         entry[1] = value;
-        ArrayPrototypePush(kept, entry);
+        kept[kept.length] = entry;
       }
     }
-    if (!found) ArrayPrototypePush(kept, [name, value]);
+    if (!found) kept[kept.length] = [name, value];
     this.#list = kept;
     this.#update();
   }

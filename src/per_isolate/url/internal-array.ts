@@ -5,6 +5,10 @@
 // inherited setter rather than defining the element. So the URL modules
 // build their lists in arrays with a null prototype, and hand user code an
 // ordinary copy: Array.prototype.slice() defines its result's elements.
+//
+// Append to one with an index store, `list[list.length] = value`: V8's
+// fast Array.prototype.push() needs the initial Array.prototype, so on
+// these it is several times slower.
 
 const { ArrayPrototypeSlice, ObjectSetPrototypeOf } = primordials;
 
