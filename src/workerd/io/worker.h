@@ -62,6 +62,7 @@ KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace api
 
 class BaseTracer;
+class EmbedderBootstrap;
 class IsolateLimitEnforcer;
 enum class UncaughtExceptionSource;
 class VirtualFileSystem;
@@ -637,6 +638,13 @@ class Worker::Api {
     return nullptr;
   }
 
+  // Bootstrap scripts the embedder contributes to the per-isolate bootstrap, run after workerd's
+  // own in every context the bootstrap runs in. The result must outlive every such context. See
+  // EmbedderBootstrap in api/per-isolate-bootstrap.h.
+  virtual kj::Maybe<const EmbedderBootstrap&> getEmbedderBootstrap() const {
+    return kj::none;
+  }
+
   struct NewContextOptions {
     // If the worker is using the new module registry system, this is the registry to
     // install on the newly created context. If null, the old system is assumed.
@@ -1082,10 +1090,13 @@ class Worker::Actor final: public kj::Refcounted {
   // unless this call is canceled before the handler finishes. Failures of the handler itself don't
   // reject the promise. It rejects if and only if the actor is broken afterwards: it was already
   // shut down, its IoContext was aborted, its output gate is broken, or the final flush failed.
+  //
+  // `selfTokenFactory` lets the handler call ctx.restore(), as for the actor's requests.
   kj::Promise<void> runOnHibernate(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
-      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
@@ -1236,7 +1247,8 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Promise<void> runOnHibernateImpl(HibernationReason reason,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> observer,
-      kj::Maybe<kj::Rc<BaseTracer>> workerTracer);
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 };
 
 WD_STRONG_BOOL(PopulateVersionInfoMetadata);

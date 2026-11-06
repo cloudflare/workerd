@@ -29,7 +29,6 @@
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 
 using namespace kj_rs;
@@ -41,7 +40,6 @@ using api::pyodide::PythonConfig;
 namespace {
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
@@ -181,7 +179,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Array<Worker::Api::InboundListener> inboundListeners,
-    kj::Maybe<jsg::SnapshotConfig> snapshotConfig)
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig,
+    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -191,7 +190,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           memoryCacheProvider,
           pythonConfig,
           kj::mv(snapshotConfig))),
-      inboundListeners(kj::mv(inboundListeners)) {}
+      inboundListeners(kj::mv(inboundListeners)),
+      embedderBootstrap(embedderBootstrap) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -202,6 +202,9 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 }
 kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners() const {
   return inboundListeners;
+}
+kj::Maybe<const EmbedderBootstrap&> WorkerdApi::getEmbedderBootstrap() const {
+  return embedderBootstrap;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {

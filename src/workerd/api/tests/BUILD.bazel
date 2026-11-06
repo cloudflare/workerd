@@ -349,7 +349,12 @@ wd_test(
 
 wd_test(
     src = "rpc-stub-gc-warning-test.wd-test",
-    args = ["--experimental"],
+    # An inspector makes the warning capture a JS stack trace; see the test for why that matters.
+    # Port 0 binds an ephemeral port, so parallel runs do not collide.
+    args = [
+        "--experimental",
+        "--inspector-addr=127.0.0.1:0",
+    ],
     data = [
         "rpc-stub-gc-warning-test.js",
         "tail-worker-test-no-op.js",

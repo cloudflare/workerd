@@ -72,10 +72,13 @@ impl Rest {
 fn eval(harness: &Harness, code: &str) -> String {
     let mut result = String::new();
     harness.run_in_context(|lock, ctx| {
-        let rest = jsg::Rc::new(Rest {
-            prefix: String::new(),
-            parts: Vec::new(),
-        });
+        let rest = jsg::Rc::new(
+            lock,
+            Rest {
+                prefix: String::new(),
+                parts: Vec::new(),
+            },
+        );
         ctx.set_global(lock, "rest", rest);
         let constructor = jsg::resource::function_template_of::<Rest>(lock).unwrap();
         ctx.set_global(lock, "Rest", constructor);

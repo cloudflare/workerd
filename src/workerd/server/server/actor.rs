@@ -64,6 +64,7 @@ use crate::cluster::Owner;
 use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
 use crate::config::Factory;
+use crate::config::invalid_config_error;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -108,6 +109,8 @@ pub struct ActorNamespace {
     directory: OnceCell<String>,
     /// Actors being resolved in the cluster, each woken when its first resolution ends.
     resolving: RefCell<HashMap<String, Rc<Notify>>>,
+    /// Set for the namespace of a worker that cannot handle requests (`set_broken`).
+    broken: Cell<bool>,
 }
 
 /// The first resolution of an actor: its end, however it ends, wakes the requests that waited.
@@ -152,7 +155,14 @@ impl ActorNamespace {
             cluster: OnceCell::new(),
             directory: OnceCell::new(),
             resolving: RefCell::new(HashMap::new()),
+            broken: Cell::new(false),
         })
+    }
+
+    /// Fails every request for one of the namespace's actors before it is routed, so that the
+    /// instance never claims an actor it cannot run, and declines dead peers' alarms.
+    pub fn set_broken(&self) {
+        self.broken.set(true);
     }
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
@@ -165,6 +175,11 @@ impl ActorNamespace {
 
     /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
     pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        if self.broken.get() {
+            return Err(kj::failed!(
+                "the namespace cannot adopt alarms because its worker cannot handle requests"
+            ));
+        }
         ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
         Ok(())
     }
@@ -203,6 +218,9 @@ impl ActorNamespace {
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
     /// with the instance that owns it.
     async fn resolve(&self, id: KjOwn<ActorIdHandle>) -> Result<Resolved> {
+        if self.broken.get() {
+            return Err(invalid_config_error());
+        }
         let key = ffi::actor_id_key(&id);
         if let Some(container) = self.owned_container(&key) {
             return Ok(Resolved::Here(Client(container)));
@@ -442,6 +460,14 @@ impl ActorNamespace {
         if !path.is_empty() {
             let directory = format!("{path}/{unique_key}");
             if self.cluster.get().is_some() {
+                // Composition rejects this in a deployment; this check also prevents any other
+                // config from claiming a directory outside `path`.
+                if !::cluster::compose::is_path_component(unique_key) {
+                    return Err(kj::failed!(
+                        "Durable Object namespace uniqueKey {unique_key:?} is not one path \
+                         component"
+                    ));
+                }
                 claim_directory(&directory)?;
             }
             let _ = self.directory.set(directory);
@@ -467,6 +493,20 @@ impl ActorNamespace {
         match &self.config {
             ActorConfig::Durable { unique_key, .. } => Some(unique_key),
             ActorConfig::Ephemeral { .. } => None,
+        }
+    }
+
+    /// Gives `metadata` a self token naming the root actor `id`, for `ctx.restore()`. An
+    /// ephemeral namespace's actors have none.
+    fn set_self_token(&self, metadata: &mut KjOwn<RequestMetadata>, id: &ActorIdHandle) {
+        if let Some(unique_key) = self.unique_key() {
+            ffi::request_metadata_set_actor_self_token(
+                self.factory.raw(),
+                metadata.as_mut(),
+                unique_key,
+                id,
+                self.persistent_self_tokens,
+            );
         }
     }
 
@@ -1082,15 +1122,7 @@ impl Client {
                 // container that would block eviction. A facet is only ever called by its
                 // parent, or through a restored channel the parent set up, which brings its own
                 // trusted factory.
-                if let Some(unique_key) = ns.unique_key() {
-                    ffi::request_metadata_set_actor_self_token(
-                        ns.factory.raw(),
-                        metadata.as_mut(),
-                        unique_key,
-                        id,
-                        ns.persistent_self_tokens,
-                    );
-                }
+                ns.set_self_token(&mut metadata, id);
             }
             class.start_request(metadata, actor)?
         };
@@ -1344,13 +1376,15 @@ impl ActorContainer {
             let ns = self.namespace()?;
             ns.require_lease()?;
             let class = self.class()?;
+            let mut metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+            ns.set_self_token(&mut metadata, &*self.id()?);
             let container = Weak::clone(&self.this);
             let reason = reason.to_owned();
             let retirement = ns
                 .factory
-                .spawn(
-                    async move { retire_actor(container, actor, class, reason, hibernate).await },
-                )
+                .spawn(async move {
+                    retire_actor(container, actor, class, metadata, reason, hibernate).await
+                })
                 .shared();
             *self.retirement.borrow_mut() = Some(retirement.clone());
             self.cancel_shutdown();
@@ -1402,10 +1436,11 @@ async fn retire_actor(
     container: Weak<ActorContainer>,
     actor: Rc<KjOwn<ffi::ActorHandle>>,
     class: Rc<dyn ActorClass>,
+    metadata: KjOwn<RequestMetadata>,
     reason: String,
     hibernate: bool,
 ) -> Result<()> {
-    let hook = class.run_on_hibernate(&actor).await;
+    let hook = class.run_on_hibernate(metadata, &actor).await;
     let container = container
         .upgrade()
         .ok_or_else(|| kj::disconnected!("the retiring actor's container is gone"))?;

@@ -424,7 +424,7 @@ impl Integers {
 }
 
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let resource = jsg::Rc::new(Integers).to_js(lock).unwrap();
+    let resource = jsg::Rc::new(lock, Integers).to_js(lock).unwrap();
     ctx.set_global(lock, "r", resource);
 }
 

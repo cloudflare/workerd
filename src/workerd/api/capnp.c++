@@ -636,7 +636,8 @@ CapnpCapability::~CapnpCapability() noexcept(false) {
     // To solve #2, we defer destruction of the object until the end of the IoContext.
     kj::mv(c).deferGcToContext();
 
-    // In preview, let's try to warn the developer about the problem.
+    // In preview, let's try to warn the developer about the problem. Logged later: this destructor
+    // runs inside a GC callback, where logging is not allowed to touch V8.
     //
     // TODO(cleanup): Instead of logging this warning at GC time, it would be better if we logged
     //   it at the time that the client is destroyed, i.e. when the IoContext is torn down,
@@ -644,7 +645,7 @@ CapnpCapability::~CapnpCapability() noexcept(false) {
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
     KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-      ioContext.logWarningOnce(
+      ioContext.logWarningOnceLater(
           kj::str("A Cap'n Proto capability of type ", schema.getShortDisplayName(),
               " was not closed properly. You must call close() on all capabilities in order to "
               "let the other side know that you are no longer using them. You cannot rely on "

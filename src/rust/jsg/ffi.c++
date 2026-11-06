@@ -69,6 +69,16 @@ static v8::MaybeLocal<v8::String> newUtf8String(
   return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
+// Copies a V8 string into a Rust one. Lone surrogates become U+FFFD (rust::String::lossy), since
+// a rust::String must be valid UTF-8. Throws a KJ exception if the allocation fails.
+static ::rust::String toRustString(v8::Isolate* isolate, v8::Local<v8::String> str) {
+  v8::String::ValueView view(isolate, str);
+  if (view.is_one_byte()) {
+    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+  }
+  return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+}
+
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
 // overlong name throws. The property shims, which take a key from arbitrary Rust text, are
 // declared fallible in v8.rs for that reason. The names a resource template interns come from
@@ -926,13 +936,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
     return false;
   }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  } else {
-    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-  }
+  result = toRustString(isolate, v8Str);
   return true;
 }
 
@@ -1118,20 +1122,8 @@ void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
 }
 
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong) {
-  // maybeDeferDestruction() requires a kj::Own<Wrappable> to take ownership of.
-  // We must temporarily increment the refcount via addRef() to create that handle.
-  //
-  // Refcount accounting:
-  //   addRef(wrappable)      → +1 (creates `own`)
-  //   maybeDeferDestruction  → internally stores `own` in RefToDelete
-  //   ~RefToDelete           → if is_strong: calls removeStrongRef(), then drops `own` → -1
-  // Net effect: 0 (the actual kj::Rc decrement happens later when Rust drops the KjRc).
-  //
-  // is_strong must match the Ref's current strong flag. If GC tracing already transitioned
-  // the ref to weak (strong=false), passing true here would double-decrement strongRefcount.
-  auto own = kj::addRef(wrappable);
-  wrappable.maybeDeferDestruction(is_strong, kj::mv(own), &wrappable);
+void wrappable_remove_strong_ref(Wrappable& wrappable) {
+  wrappable.removeStrongRef();
 }
 
 void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced) {
@@ -1449,6 +1441,22 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, functionTemplate);
   }
 
+  // Mirrors ResourceTypeBuilder::registerDispose and registerAsyncDispose in resource.h.
+  auto setDisposer = [&](v8::Local<v8::Symbol> symbol, size_t callback) {
+    registerExternalRef(callback);
+    prototype->Set(symbol,
+        v8::FunctionTemplate::New(isolate,
+            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::PropertyAttribute::DontEnum);
+  };
+  KJ_IF_SOME(callback, descriptor.dispose) {
+    setDisposer(v8::Symbol::GetDispose(isolate), callback);
+  }
+  KJ_IF_SOME(callback, descriptor.async_dispose) {
+    setDisposer(v8::Symbol::GetAsyncDispose(isolate), callback);
+  }
+
   // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
   // the inspectProperties ObjectTemplate under the kResourceTypeInspect API symbol.  node:util's
   // inspect() checks for this symbol on the prototype to identify JSG resource types and uses
@@ -1617,8 +1625,8 @@ Realm* realm_from_isolate(Isolate* isolate) {
 
 namespace {
 // The IsolateBase deferred action hook of an isolate with a Rust Realm.
-void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
-  realm_reset_globals_awaiting_lock(isolate);
+void drainAwaitingLock(v8::Isolate* isolate) {
+  realm_drain_awaiting_lock(isolate);
 }
 
 // The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
@@ -1635,7 +1643,7 @@ bool realm_can_attach(Isolate* isolate) {
 
 void realm_attach(Isolate* isolate, Realm& realm) {
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
-  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&drainAwaitingLock);
 }
 
 void realm_detach(Isolate* isolate, const IsolateState* state) {
@@ -1649,6 +1657,26 @@ void realm_detach(Isolate* isolate, const IsolateState* state) {
 bool integer_enforce_range_autogate_enabled() {
   return ::workerd::util::Autogate::isEnabled(
       ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
+}
+
+// JSON
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text) {
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(
+      v8::JSON::Parse(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::String>(text)));
+}
+
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result) {
+  if (exceptionPending(isolate)) return false;
+  v8::Local<v8::String> json;
+  if (!v8::JSON::Stringify(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value),
+          local_as_ref_from_ffi<v8::String>(gap))
+           .ToLocal(&json)) {
+    return false;
+  }
+  result = toRustString(isolate, json);
+  return true;
 }
 
 // Errors

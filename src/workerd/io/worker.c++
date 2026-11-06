@@ -159,10 +159,11 @@ const capnp::JsonCodec& getCdpJsonCodec() {
 }
 
 void maybePerIsolateBootstrap(
-    CompatibilityFlags::Reader& featureFlags, jsg::Lock& lock, v8::Local<v8::Context> context) {
+    const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
-  JSG_WITHIN_CONTEXT_SCOPE(
-      lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
+  JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+    runPerIsolateBootstrap(js, api.getFeatureFlags(), api.getEmbedderBootstrap());
+  });
 }
 
 }  // namespace
@@ -1580,8 +1581,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
 
-        auto featureFlags = isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context);
+        maybePerIsolateBootstrap(isolate->getApi(), lock, context);
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -2327,8 +2327,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
       if (freshContext) {
-        auto featureFlags = script->isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context);
+        maybePerIsolateBootstrap(script->isolate->getApi(), lock, context);
       }
 
       // Install the virtual file system on the context. Keep in mind that for service
@@ -4882,16 +4881,18 @@ bool Worker::Actor::hasOnHibernateHandler() {
 kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
-  return impl->abortCanceler.wrap(
-      runOnHibernateImpl(reason, kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer)));
+  return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
+      kj::mv(observer), kj::mv(workerTracer), kj::mv(selfTokenFactory)));
 }
 
 kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
   // without the request tracking that addRef() adds.
   auto self = kj::addRef(*this);
@@ -4908,7 +4909,8 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   RequestObserver& observerRef = *observer;
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
-          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */,
+          kj::none /* accessInfo */, kj::mv(selfTokenFactory));
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
   }
