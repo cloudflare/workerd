@@ -2,7 +2,7 @@
   "binary_crates": [
     "capnpc 0.27.0"
   ],
-  "checksum": "963feda7dd144f6fde41e1dfc484639a8eb4d6d62d3f802b01152f22559cef7e",
+  "checksum": "85151030f619d166f7c4b7d93fa687fef60f2148fe1084f40a68fedc779aec0d",
   "conditions": {
     "aarch64-apple-darwin": [
       "aarch64-apple-darwin"
@@ -2990,6 +2990,10 @@
           {
             "id": "libz-rs-sys 0.6.8",
             "target": "libz_rs_sys"
+          },
+          {
+            "id": "lol_html 3.0.4",
+            "target": "lol_html"
           },
           {
             "id": "lol_html_c_api 1.4.0",
@@ -15982,6 +15986,7 @@
     "libc 0.2.191",
     "libm 0.2.16",
     "libz-rs-sys 0.6.8",
+    "lol_html 3.0.4",
     "lol_html_c_api 1.4.0",
     "nix 0.31.3",
     "notify 8.2.2",
