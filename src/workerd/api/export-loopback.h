@@ -140,6 +140,14 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
     return kj::none;
   }
 
+  // A copy for the snapshotClone() of a loopback namespace that holds this class. An embedder may
+  // bind a namespace of the Worker's own class into `env` as a loopback namespace, which unlike a
+  // `ctx.exports` entry exists when the zygote runs. The copy is never wrapped in the zygote, so
+  // it belongs to no isolate.
+  jsg::Ref<LoopbackDurableObjectClass> cloneForSnapshot() const {
+    return jsg::alloc<LoopbackDurableObjectClass>(channel);
+  }
+
   JSG_RESOURCE_TYPE(LoopbackDurableObjectClass) {
     JSG_INHERIT(DurableObjectClass);
     JSG_CALLABLE(call);
@@ -183,6 +191,15 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
             Persistent(featureFlags.getAllowIrrevocableStubStorage())),
         loopbackClass(kj::mv(loopbackClass)) {}
 
+  // The copy snapshotClone() makes, which keeps the original's `persistent` bit.
+  LoopbackDurableObjectNamespace(uint nsChannel,
+      kj::Own<ActorIdFactory> idFactory,
+      ActorCallRetriesAllowed actorCallRetriesAllowed,
+      jsg::Ref<LoopbackDurableObjectClass> loopbackClass,
+      Persistent persistent)
+      : DurableObjectNamespace(nsChannel, kj::mv(idFactory), actorCallRetriesAllowed, persistent),
+        loopbackClass(kj::mv(loopbackClass)) {}
+
   // getClass() accessor for use from C++ only.
   LoopbackDurableObjectClass& getClass() {
     return *loopbackClass.get();
@@ -198,9 +215,15 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
   // serializing the loopback namespace would mean serializing the namespace stub, *not* the
   // class stub. They are different things, and you might want to serialize either one.
 
-  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
-  // so never transferred through a startup snapshot.
+  // A `ctx.exports` entry is built for the real Worker after the zygote has run, but an embedder
+  // may bind the Worker's own class into `env` as a loopback namespace. That transfers through a
+  // startup snapshot as its channel numbers and a copy of its ID factory.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    KJ_IF_SOME(copy, copyForSnapshot()) {
+      return ownAsWrappable(
+          kj::refcounted<LoopbackDurableObjectNamespace>(copy.channel, kj::mv(copy.idFactory),
+              actorCallRetriesAllowed, loopbackClass->cloneForSnapshot(), persistent));
+    }
     return kj::none;
   }
 
@@ -235,10 +258,11 @@ class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
     return loopbackClass->call(js, kj::mv(options));
   }
 
-  // Only ever a `ctx.exports` entry, which is built for the real Worker after the zygote has run,
-  // so never transferred through a startup snapshot.
+  // Like LoopbackDurableObjectNamespace, an embedder may bind it into `env`. It transfers through a
+  // startup snapshot as its channel numbers.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    return kj::none;
+    return ownAsWrappable(kj::refcounted<LoopbackColoLocalActorNamespace>(
+        getChannel(), loopbackClass->cloneForSnapshot()));
   }
 
   JSG_RESOURCE_TYPE(LoopbackColoLocalActorNamespace) {

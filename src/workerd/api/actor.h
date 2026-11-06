@@ -37,6 +37,11 @@ class ColoLocalActorNamespace: public jsg::Object {
     JSG_METHOD(get);
   }
 
+ protected:
+  uint getChannel() const {
+    return channel;
+  }
+
  private:
   uint channel;
 };
@@ -328,11 +333,9 @@ class DurableObjectNamespace: public jsg::Object {
   // A binding transfers through a startup snapshot as its channel number and a copy of its ID
   // factory. A namespace built around a live factory belongs to one IoContext.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
-    KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
-      KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
-        return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
-            channelNumber, kj::mv(factory), actorCallRetriesAllowed, persistent));
-      }
+    KJ_IF_SOME(copy, copyForSnapshot()) {
+      return ownAsWrappable(kj::refcounted<DurableObjectNamespace>(
+          copy.channel, kj::mv(copy.idFactory), actorCallRetriesAllowed, persistent));
     }
     return kj::none;
   }
@@ -365,7 +368,22 @@ class DurableObjectNamespace: public jsg::Object {
     }
   }
 
- private:
+ protected:
+  // What snapshotClone() copies of a namespace bound to a channel number, for subclasses to build
+  // their own copies from. None for a namespace built around a live factory.
+  struct SnapshotCopy {
+    uint channel;
+    kj::Own<ActorIdFactory> idFactory;
+  };
+  kj::Maybe<SnapshotCopy> copyForSnapshot() const {
+    KJ_IF_SOME(channelNumber, channel.tryGet<uint>()) {
+      KJ_IF_SOME(factory, idFactory->cloneForSnapshot()) {
+        return SnapshotCopy{.channel = channelNumber, .idFactory = kj::mv(factory)};
+      }
+    }
+    return kj::none;
+  }
+
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
   ActorCallRetriesAllowed actorCallRetriesAllowed;
@@ -373,6 +391,7 @@ class DurableObjectNamespace: public jsg::Object {
   // See doc comment on the constructor.
   Persistent persistent;
 
+ private:
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
