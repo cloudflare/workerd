@@ -544,6 +544,8 @@ impl jsg::MemoryRetainer for Link {
 
 jsg::jsg_memory_retainer!(Outer, Inner, Empty, Link);
 
+jsg::jsg_traced!(Inner);
+
 /// Two links, each the other's `next`.
 fn new_ring() -> std::rc::Rc<Link> {
     let first = std::rc::Rc::new(Link {
@@ -571,8 +573,8 @@ struct Fields {
     pub outer: Outer,
     pub empty_a: Empty,
     pub empty_b: Empty,
-    pub cell_a: Cell<Inner>,
-    pub cell_b: Cell<Inner>,
+    pub cell_a: jsg::Cell<Inner>,
+    pub cell_b: jsg::Cell<Inner>,
     pub inners: Vec<Inner>,
     pub optional_inners: Vec<Option<Inner>>,
     pub boxed_inner: Box<Inner>,
@@ -675,8 +677,8 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             },
             empty_a: Empty,
             empty_b: Empty,
-            cell_a: Cell::new(new_inner("a")),
-            cell_b: Cell::new(new_inner("b")),
+            cell_a: jsg::Cell::new(new_inner("a")),
+            cell_b: jsg::Cell::new(new_inner("b")),
             inners: {
                 let mut inners = Vec::with_capacity(5);
                 inners.extend([new_inner("x"), new_inner("y")]);
@@ -963,7 +965,7 @@ fn handle_of_another_isolate_is_not_reported() {
     // A `Global` has no `Traced` impl, and is never visited.
     #[jsg_resource(memory_info, custom_trace)]
     struct Holder {
-        handle: Cell<Option<v8::Global<v8::Value>>>,
+        handle: RefCell<Option<v8::Global<v8::Value>>>,
     }
 
     impl jsg::Traced for Holder {
@@ -992,7 +994,7 @@ fn handle_of_another_isolate_is_not_reported() {
         let held = jsg::Rc::new(
             lock,
             Holder {
-                handle: Cell::new(global.take()),
+                handle: RefCell::new(global.take()),
             },
         );
         expose(lock, ctx, "holder", &held)?;
@@ -1009,11 +1011,281 @@ fn handle_of_another_isolate_is_not_reported() {
     let holder = holder.expect("set above");
     // Each handle is released under the lock of its own isolate.
     a.run_in_context(|_lock, _ctx| {
-        drop(holder.handle.take().expect("set above"));
+        drop(holder.handle.borrow_mut().take().expect("set above"));
         Ok(())
     });
     b.run_in_context(move |_lock, _ctx| {
         drop(holder);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Promises, async context frames and rest arguments
+// =============================================================================
+
+#[jsg_resource(memory_info)]
+struct Pending {
+    pub promise: jsg::TracedPromise<u32>,
+    pub resolver: jsg::TracedPromiseResolver<u32>,
+    pub frame: jsg::TracedAsyncContextFrame,
+    pub root_frame: jsg::TracedAsyncContextFrame,
+    pub arguments: jsg::Arguments<String>,
+}
+
+#[jsg_resource]
+impl Pending {}
+
+impl jsg::VisitForMemoryInfo for Pending {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"promise", &self.promise);
+        tracker.track_field(c"resolver", &self.resolver);
+        tracker.track_field(c"frame", &self.frame);
+        tracker.track_field(c"root_frame", &self.root_frame);
+        tracker.track_field(c"arguments", &self.arguments);
+    }
+}
+
+#[test]
+fn promises_and_frames_are_edges_into_the_v8_heap() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let (promise, resolver) = jsg::Promise::<u32>::new_with_resolver(lock)?;
+        let promise = promise.into_traced(lock);
+        let resolver = resolver.into_traced(lock);
+        let stored = "stored".to_owned().to_js(lock)?;
+        let frame = crate::Harness::run_in_async_context(
+            lock,
+            stored,
+            jsg::TracedAsyncContextFrame::current,
+        );
+        assert!(!frame.is_root());
+        let pending = Pending {
+            promise,
+            resolver,
+            frame,
+            root_frame: jsg::TracedAsyncContextFrame::root(),
+            arguments: vec!["a".to_owned(), "b".to_owned()].into(),
+        };
+        let pending = jsg::Rc::new(lock, pending);
+        expose(lock, ctx, "pending", &pending)?;
+
+        let snapshot = Snapshot::take(lock);
+        let node = snapshot.find("Pending");
+        for edge in ["promise", "resolver"] {
+            let target = snapshot.target(node, edge);
+            assert_eq!(snapshot.nodes[target].kind, "object", "{edge}");
+        }
+        snapshot.target(node, "frame");
+        // The root frame has no wrapper.
+        assert!(snapshot.targets(node, "root_frame").is_empty());
+
+        let arguments = snapshot.target(node, "arguments");
+        assert_eq!(snapshot.name(arguments), "workerd / Vec");
+        assert_eq!(
+            snapshot.target_names(arguments),
+            ["workerd / String", "workerd / String"]
+        );
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Shared pointers and std cells
+// =============================================================================
+
+#[jsg_resource(memory_info, custom_trace)]
+struct Shared {
+    pub number: std::rc::Rc<u64>,
+    pub string: std::sync::Arc<String>,
+    pub copied: Cell<u32>,
+}
+
+impl jsg::Traced for Shared {
+    fn trace(&self, _: &mut jsg::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl Shared {}
+
+impl jsg::VisitForMemoryInfo for Shared {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"number", &self.number);
+        tracker.track_field(c"string", &self.string);
+        tracker.track_field(c"copied", &self.copied);
+    }
+}
+
+#[test]
+fn shared_pointers_count_their_allocations() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let shared = Shared {
+            number: std::rc::Rc::new(7),
+            string: std::sync::Arc::new("a string".to_owned()),
+            copied: Cell::new(1),
+        };
+        let shared = jsg::Rc::new(lock, shared);
+        expose(lock, ctx, "shared", &shared)?;
+
+        let snapshot = Snapshot::take(lock);
+        let node = snapshot.find("Shared");
+
+        // Plain data is a node of its size.
+        let number = snapshot.target(node, "number");
+        assert_eq!(snapshot.name(number), "workerd / Rc");
+        assert_eq!(snapshot.size(number), size_of::<u64>());
+        assert!(snapshot.nodes[number].edges.is_empty());
+
+        // Anything else is a node of the bytes it leaves uncounted, which it reports to.
+        let string = snapshot.target(node, "string");
+        assert_eq!(snapshot.name(string), "workerd / Arc");
+        assert_eq!(snapshot.size(string), size_of::<String>());
+        assert_eq!(snapshot.target_names(string), ["workerd / String"]);
+
+        // A std cell of plain data reports nothing, as the data does.
+        assert!(snapshot.targets(node, "copied").is_empty());
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Depth
+// =============================================================================
+
+/// A retainer in a linked list, which reporting follows link by link.
+struct ListNode {
+    next: Option<Box<ListNode>>,
+}
+
+impl jsg::MemoryRetainer for ListNode {
+    fn memory_name(&self) -> &'static CStr {
+        c"ListNode"
+    }
+
+    fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"next", &self.next);
+    }
+}
+
+jsg::jsg_memory_retainer!(ListNode);
+
+impl Drop for ListNode {
+    // Drops the list link by link, since a recursive drop of a long list overflows the stack.
+    fn drop(&mut self) {
+        let mut next = self.next.take();
+        while let Some(mut node) = next {
+            next = node.next.take();
+        }
+    }
+}
+
+fn new_list(len: usize) -> ListNode {
+    let mut head = ListNode { next: None };
+    for _ in 1..len {
+        head = ListNode {
+            next: Some(Box::new(head)),
+        };
+    }
+    head
+}
+
+/// A value that is not a retainer, in a cycle through `std::rc::Rc`.
+struct Loop {
+    next: RefCell<Option<std::rc::Rc<Loop>>>,
+}
+
+impl jsg::MemoryInfo for Loop {
+    fn track_as_field(
+        &self,
+        tracker: &mut jsg::MemoryTracker<'_>,
+        edge_name: Option<&'static CStr>,
+    ) {
+        self.next.track_as_field(tracker, edge_name);
+    }
+}
+
+#[jsg_resource(memory_info, custom_trace)]
+struct Deep {
+    pub list: ListNode,
+    pub ring: std::rc::Rc<Loop>,
+}
+
+impl jsg::Traced for Deep {
+    fn trace(&self, _: &mut jsg::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl Deep {}
+
+impl jsg::VisitForMemoryInfo for Deep {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"list", &self.list);
+        tracker.track_field(c"ring", &self.ring);
+    }
+}
+
+/// Whether `count` nodes nested in a resource's node reach `MAX_DEPTH` and stop there: the
+/// resource is a node or two deep, depending on how the snapshot reached it.
+fn stops_at_max_depth(count: usize) -> bool {
+    let max = jsg::MemoryTracker::MAX_DEPTH;
+    (max - 4..=max).contains(&count)
+}
+
+#[test]
+fn reporting_stops_at_max_depth() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let ring = std::rc::Rc::new(Loop {
+            next: RefCell::new(None),
+        });
+        *ring.next.borrow_mut() = Some(ring.clone());
+        let deep = Deep {
+            list: new_list(10_000),
+            ring,
+        };
+        let deep = jsg::Rc::new(lock, deep);
+        expose(lock, ctx, "deep", &deep)?;
+
+        let snapshot = Snapshot::take(lock);
+        let lists = snapshot.find_all("ListNode").len();
+        assert!(stops_at_max_depth(lists), "{lists} list nodes");
+        let rings = snapshot.find_all("Rc").len();
+        assert!(stops_at_max_depth(rings), "{rings} Rc nodes");
+
+        // Break the cycle, which would leak.
+        deep.ring.next.borrow_mut().take();
+        Ok(())
+    });
+}
+
+#[jsg_resource(memory_info)]
+struct Chain {
+    pub next: Option<jsg::Rc<Chain>>,
+}
+
+#[jsg_resource]
+impl Chain {}
+
+impl jsg::VisitForMemoryInfo for Chain {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"next", &self.next);
+    }
+}
+
+#[test]
+fn reporting_a_chain_of_resources_stops_at_max_depth() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let mut head = None;
+        for _ in 0..3 * jsg::MemoryTracker::MAX_DEPTH {
+            head = Some(jsg::Rc::new(lock, Chain { next: head }));
+        }
+        expose(lock, ctx, "head", head.as_ref().expect("built above"))?;
+
+        let snapshot = Snapshot::take(lock);
+        let links = snapshot.find_all("Chain").len();
+        assert!(stops_at_max_depth(links), "{links} resource nodes");
         Ok(())
     });
 }

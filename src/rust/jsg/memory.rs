@@ -35,10 +35,10 @@
 //! (`size_of_val`), which include its fields' inline bytes, and a string or collection counts the
 //! memory it allocates. A retainer held inline in another, as a field, is therefore counted in
 //! both nodes, as a C++ member with `JSG_MEMORY_INFO` is. A collection leaves the bytes of the
-//! retainers it holds inline, directly or in an `Option`, `Cell` or other inline wrapper, to their
+//! retainers it holds inline, directly or in an `Option`, `jsg::Cell` or other inline wrapper, to their
 //! own nodes (see [`MemoryInfo::self_bytes_reported`]). A value shared through an `std::rc::Rc`
-//! or `std::sync::Arc` is reported once for each holder, unless it is a retainer, which is one
-//! node.
+//! or `std::sync::Arc` is reported, with its allocation, once for each holder, unless it is a
+//! retainer, which is one node. Nodes nest at most [`MemoryTracker::MAX_DEPTH`] deep.
 //!
 //! The size of a collection is that of its elements' slots: `capacity` slots for `Vec`,
 //! `VecDeque`, `HashMap`, `HashSet` and `Dict`, `len` for `BTreeMap`, `BTreeSet` and boxed
@@ -117,6 +117,12 @@ impl Drop for PushedNode<'_, '_> {
 }
 
 impl<'a> MemoryTracker<'a> {
+    /// How deep reporting nests nodes: a node this deep, a retainer's, a container's or a
+    /// resource's, is reported without what it holds. It bounds the stack that reporting a long
+    /// chain uses, such as a linked list of retainers or of resources, or a cycle through
+    /// `std::rc::Rc` of values that are not retainers, which would otherwise never end.
+    pub const MAX_DEPTH: usize = 128;
+
     pub(crate) fn from_ffi(mut inner: Pin<&'a mut ffi::MemoryTracker>) -> Self {
         // SAFETY: the tracker is valid for the duration of the snapshot.
         let isolate = unsafe { ffi::memory_tracker_isolate(inner.as_mut()) };
@@ -127,6 +133,13 @@ impl<'a> MemoryTracker<'a> {
     /// value Rust JSG doesn't know, such as a C++ JSG `jsg::Ref`, through its own FFI.
     pub fn as_ffi(&mut self) -> Pin<&mut ffi::MemoryTracker> {
         self.inner.as_mut()
+    }
+
+    /// Whether the node being tracked is [`Self::MAX_DEPTH`] deep, so that what it holds is not
+    /// reported.
+    pub(crate) fn is_too_deep(&mut self) -> bool {
+        // SAFETY: the tracker is valid for the duration of the snapshot.
+        unsafe { ffi::memory_tracker_depth(self.inner.as_mut()) >= Self::MAX_DEPTH }
     }
 
     /// Reports `value`, a field of the object being tracked, under the edge `edge_name`: C++
@@ -162,6 +175,8 @@ impl<'a> MemoryTracker<'a> {
     ///
     /// Report the fields of the object being tracked, not values computed from them: two
     /// temporaries of the same type in the same stack slot would be taken for one retainer.
+    ///
+    /// A retainer [`Self::MAX_DEPTH`] nodes deep is a node without its fields.
     pub fn track_retainer<R: MemoryRetainer + ?Sized + 'static>(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -186,13 +201,16 @@ impl<'a> MemoryTracker<'a> {
         };
         if pushed {
             let mut node = PushedNode { tracker: self };
-            retainer.memory_info(&mut node);
+            if !node.is_too_deep() {
+                retainer.memory_info(&mut node);
+            }
         }
     }
 
     /// Adds a node of `size` bytes named `name` for a container, with an edge to it from the
     /// object being tracked, and has `elements` report the container's elements to it, with
-    /// `None` as their edge names.
+    /// `None` as their edge names. A container [`Self::MAX_DEPTH`] nodes deep is a node without
+    /// its elements.
     pub fn track_container(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -210,7 +228,9 @@ impl<'a> MemoryTracker<'a> {
             );
         }
         let mut node = PushedNode { tracker: self };
-        elements(&mut node);
+        if !node.is_too_deep() {
+            elements(&mut node);
+        }
     }
 
     /// Reports a Rust resource's Wrappable, as C++ reports a `jsg::Ref` field.
@@ -273,14 +293,15 @@ impl<'a> MemoryTracker<'a> {
 ///
 /// - must not panic: the tracker is called from C++, and a panic there aborts the process, as an
 ///   exception thrown while C++ builds the graph does;
-/// - must not write into anything it can reach, a `Cell` above all: the impl for `Cell<T>`
-///   reports the `T` in place, through `Cell::as_ptr`, as `Traced` traces it, and a `Cell::set`
-///   or `Cell::replace` while it does would drop the `T` under it. Nothing checks this rule;
+/// - must not write into anything it can reach: a snapshot reports what it finds as it is. A
+///   [`crate::Cell`] reports its value in place and panics on a write meanwhile, and a `RefCell`
+///   is borrowed while it reports its value, so a `borrow_mut` panics; either aborts the process;
 /// - must not call into JavaScript, and should allocate nothing.
 ///
-/// A type that is part of a cycle through `std::rc::Rc` or `std::sync::Arc` must be a
+/// A type that is part of a cycle through `std::rc::Rc` or `std::sync::Arc` should be a
 /// [`MemoryRetainer`]: a retainer reached again is only an edge to its node, which ends the
-/// cycle, while any other value is reported again each time it is reached, without end.
+/// cycle, while any other value is reported again each time it is reached, until the nodes are
+/// [`MemoryTracker::MAX_DEPTH`] deep.
 ///
 /// # Built-in implementations
 ///
@@ -289,13 +310,16 @@ impl<'a> MemoryTracker<'a> {
 /// - **`String`** and **`Box<str>`** are a node of the memory they allocate, and
 ///   **`v8::BackingStore`** one of its byte length.
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`**, **`Lenient<T>`**,
-///   **`NonCoercible<T>`**, **`Cell<T>`**, **`RefCell<T>`**, **`std::rc::Rc<T>`**,
-///   **`std::sync::Arc<T>`** and **`[T; N]`** report what they hold, if anything. A mutably
-///   borrowed `RefCell` reports nothing. `Cell<T>` reports the `T` in place; see the rules for
-///   reporting code above.
-/// - **`Box<T>`** reports a retainer as its node, plain data as a node of its size, and anything
-///   else as a node of the bytes that what it holds leaves uncounted, which what it holds
-///   reports to.
+///   **`NonCoercible<T>`**, **`jsg::Cell<T>`**, **`RefCell<T>`**, **`jsg::RefCell<T>`**,
+///   **`jsg::Arguments<T>`** and **`[T; N]`** report what they hold, if anything. A mutably
+///   borrowed `RefCell` reports nothing. A `jsg::Cell<T>` reports the `T` in place; see the rules
+///   for reporting code above. A **`std::cell::Cell<T>`** reports only a `T: Copy`, which it
+///   reports a copy of, so a retainer in one is not identified by its address; hold one in a
+///   `jsg::Cell`.
+/// - **`Box<T>`**, **`std::rc::Rc<T>`** and **`std::sync::Arc<T>`** report a retainer as its node,
+///   plain data as a node of its size, and anything else as a node of the bytes that what they
+///   hold leaves uncounted, which what they hold reports to. A value shared through an `Rc` or
+///   `Arc` that is not a retainer is reported, with its allocation, once for each holder.
 /// - **Collections** (`Vec<T>`, `Box<[T]>`, `VecDeque<T>`, `Dict<V>`, `HashMap<K, V>`,
 ///   `BTreeMap<K, V>`, `HashSet<T>`, `BTreeSet<T>`) are a node of the memory they allocate, less
 ///   the bytes their elements' nodes count, which their elements report to; maps report their
@@ -306,7 +330,9 @@ impl<'a> MemoryTracker<'a> {
 /// - **`jsg::Rc<R>`** reports the resource's node, as C++ reports a `jsg::Ref`.
 /// - **`jsg::Weak<R>`** reports nothing.
 /// - **`v8::Global<T>`** and **`v8::TracedGlobal<T>`** are an edge to the value in the V8 heap,
-///   as C++ reports a `jsg::V8Ref`.
+///   as C++ reports a `jsg::V8Ref`, and so are **`jsg::TracedPromise<T>`**,
+///   **`jsg::TracedPromiseResolver<T>`**, **`jsg::AsyncContextFrame`** and
+///   **`jsg::TracedAsyncContextFrame`**, of which the root frame reports nothing.
 pub trait MemoryInfo {
     /// Whether a value of this type retains no memory beyond its own bytes, so that a
     /// collection of such values is reported as one node of the collection's size.
@@ -560,21 +586,17 @@ impl<T: MemoryInfo> MemoryInfo for NonCoercible<T> {
     }
 }
 
-impl<T: MemoryInfo> MemoryInfo for std::cell::Cell<T> {
+/// Only for `T: Copy`, which it reports a copy of: reporting code that wrote into the cell while
+/// it reported the `T` in place would drop the `T` under it. A [`crate::Cell`] reports any `T`.
+impl<T: MemoryInfo + Copy> MemoryInfo for std::cell::Cell<T> {
     const PLAIN_DATA: bool = T::PLAIN_DATA;
 
     fn self_bytes_reported(&self) -> usize {
-        // SAFETY: as in `track_as_field`.
-        unsafe { (*self.as_ptr()).self_bytes_reported() }
+        self.get().self_bytes_reported()
     }
 
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        // SAFETY: a heap snapshot runs on the thread holding the isolate lock, and reporting code
-        // writes into nothing it can reach and runs no JavaScript (see the rules for reporting
-        // code on `MemoryInfo`), so nothing writes into the cell while the reference lives.
-        // Nothing enforces that rule, as nothing does for `Traced` on `Cell`, which reads in
-        // place in the same way. Reading in place gives a retainer the cell's own address.
-        unsafe { (*self.as_ptr()).track_as_field(tracker, edge_name) };
+        self.get().track_as_field(tracker, edge_name);
     }
 }
 
@@ -595,34 +617,45 @@ impl<T: MemoryInfo> MemoryInfo for std::cell::RefCell<T> {
     }
 }
 
+/// Reports `inner`, which a `Box`, `std::rc::Rc` or `std::sync::Arc` named `name` holds in an
+/// allocation of its own: plain data as a node of its size, a retainer as its node, which counts
+/// the whole value, and anything else as a node of the bytes that `inner` leaves uncounted, to
+/// which `inner` reports. A reference count is bookkeeping, which sizes leave out.
+fn track_pointee<T: MemoryInfo>(
+    tracker: &mut MemoryTracker<'_>,
+    edge_name: Option<&'static CStr>,
+    name: &'static CStr,
+    inner: &T,
+) {
+    if T::PLAIN_DATA {
+        tracker.track_field_with_size(edge_name, size_of::<T>(), Some(name));
+        return;
+    }
+    let uncounted = size_of::<T>().saturating_sub(inner.self_bytes_reported());
+    if uncounted == 0 {
+        inner.track_as_field(tracker, edge_name);
+    } else {
+        tracker.track_container(edge_name, name, uncounted, |tracker| {
+            inner.track_as_field(tracker, None);
+        });
+    }
+}
+
 impl<T: MemoryInfo> MemoryInfo for std::rc::Rc<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        (**self).track_as_field(tracker, edge_name);
+        track_pointee(tracker, edge_name, c"Rc", &**self);
     }
 }
 
 impl<T: MemoryInfo> MemoryInfo for std::sync::Arc<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        (**self).track_as_field(tracker, edge_name);
+        track_pointee(tracker, edge_name, c"Arc", &**self);
     }
 }
 
 impl<T: MemoryInfo> MemoryInfo for Box<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        let inner: &T = self;
-        if T::PLAIN_DATA {
-            tracker.track_field_with_size(edge_name, size_of::<T>(), Some(c"Box"));
-            return;
-        }
-        let uncounted = size_of::<T>().saturating_sub(inner.self_bytes_reported());
-        if uncounted == 0 {
-            // A retainer's node counts the whole allocation.
-            inner.track_as_field(tracker, edge_name);
-        } else {
-            tracker.track_container(edge_name, c"Box", uncounted, |tracker| {
-                inner.track_as_field(tracker, None);
-            });
-        }
+        track_pointee(tracker, edge_name, c"Box", &**self);
     }
 }
 

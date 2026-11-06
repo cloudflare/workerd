@@ -145,6 +145,7 @@ bool memory_tracker_push_retainer(MemoryTracker& tracker,
 void memory_tracker_push_container(
     MemoryTracker& tracker, const char* name, size_t size, const char* edge_name);
 void memory_tracker_pop_node(MemoryTracker& tracker);
+size_t memory_tracker_depth(MemoryTracker& tracker);
 
 // Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
 // - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,

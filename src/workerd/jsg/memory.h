@@ -341,6 +341,12 @@ class MemoryTracker final {
   // builds ignore a pop without such a push; debug builds assert.
   void popNode();
 
+  // How many nodes are being tracked, each inside the one before: the depth of the node that
+  // fields are reported to, or 0 for none.
+  size_t depth() const {
+    return nodeStack_.size();
+  }
+
   KJ_DISALLOW_COPY_AND_MOVE(MemoryTracker);
 
  private:

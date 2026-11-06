@@ -646,6 +646,8 @@ pub mod ffi {
             edge_name: *const c_char,
         );
         pub unsafe fn memory_tracker_pop_node(tracker: Pin<&mut MemoryTracker>);
+        /// How many nodes are being tracked, each inside the one before.
+        pub unsafe fn memory_tracker_depth(tracker: Pin<&mut MemoryTracker>) -> usize;
 
         // Unwrappers
         //
@@ -4684,6 +4686,10 @@ unsafe fn wrappable_invoke_get_memory_info(
             return;
         };
         let mut tracker = crate::MemoryTracker::from_ffi(tracker);
+        // The resource's node is the one being tracked: one `MAX_DEPTH` deep reports no fields.
+        if tracker.is_too_deep() {
+            return;
+        }
         trait_ptr.as_gc_ref().memory_info(&mut tracker);
     }
 }

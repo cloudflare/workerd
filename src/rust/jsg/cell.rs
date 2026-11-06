@@ -44,8 +44,15 @@ use crate::v8::GcVisitor;
 /// reference strong touches V8 handles.
 ///
 /// Use a [`RefCell`] to read or change the value in place.
+///
+/// A heap snapshot reports the value in place. Writing into the cell while it does, from the code
+/// that reports it, would drop the value under it, so [`set`](Self::set) and
+/// [`replace`](Self::replace) panic then, which aborts the process (see the
+/// [rules for reporting code](crate::MemoryInfo#rules-for-reporting-code)).
 pub struct Cell<T> {
     inner: std::cell::Cell<T>,
+    /// Whether a heap snapshot is reporting the value, in place.
+    reporting: std::cell::Cell<bool>,
 }
 
 impl<T: Traced> Cell<T> {
@@ -53,21 +60,28 @@ impl<T: Traced> Cell<T> {
     pub const fn new(value: T) -> Self {
         Self {
             inner: std::cell::Cell::new(value),
+            reporting: std::cell::Cell::new(false),
         }
     }
 
     /// Replaces the value with `value` and drops the old one.
     ///
     /// Dropping a weak reference needs no fix-up, so this takes no lock.
+    ///
+    /// # Panics
+    /// Panics if a heap snapshot is reporting the value.
     pub fn set(&self, value: T) {
+        self.check_not_reporting();
         self.inner.set(value);
     }
 
     /// Replaces the value with `value` and returns the old one, made strong.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's.
+    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
+    /// heap snapshot is reporting the value.
     pub fn replace(&self, lock: &mut Lock<'_>, value: T) -> T {
+        self.check_not_reporting();
         // Detached once out of the cell: making a `jsg::Rc` to a resource with no wrapper strong
         // visits that resource, which can lead back to this cell, and that visit must not find
         // the old value here still weak.
@@ -79,12 +93,20 @@ impl<T: Traced> Cell<T> {
     /// Takes the value, made strong, and leaves `T::default()` behind.
     ///
     /// # Panics
-    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's.
+    /// Panics if the value holds a `TracedGlobal` of an isolate other than the lock's, or if a
+    /// heap snapshot is reporting the value.
     pub fn take(&self, lock: &mut Lock<'_>) -> T
     where
         T: Default,
     {
         self.replace(lock, T::default())
+    }
+
+    fn check_not_reporting(&self) {
+        assert!(
+            !self.reporting.get(),
+            "a jsg::Cell was written while a heap snapshot reported its value"
+        );
     }
 }
 
@@ -101,17 +123,42 @@ impl<T: Traced> Traced for Cell<T> {
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Cell<T> {}
 
-/// Reads the value in place, as [`std::cell::Cell`]'s impl does, under the same rule: reporting
-/// code writes into no cell.
+/// Reports the value in place, so that a retainer in the cell is identified by its address. The
+/// cell refuses writes meanwhile.
 impl<T: MemoryInfo> MemoryInfo for Cell<T> {
     const PLAIN_DATA: bool = T::PLAIN_DATA;
 
     fn self_bytes_reported(&self) -> usize {
-        self.inner.self_bytes_reported()
+        self.read_for_report(T::self_bytes_reported)
     }
 
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
-        self.inner.track_as_field(tracker, edge_name);
+        self.read_for_report(|value| value.track_as_field(tracker, edge_name));
+    }
+}
+
+impl<T> Cell<T> {
+    /// Runs `report` on the value in place, with writes into the cell refused.
+    fn read_for_report<U>(&self, report: impl FnOnce(&T) -> U) -> U {
+        /// Restores the flag however `report` ends, including by a panic.
+        struct Restore<'a> {
+            reporting: &'a std::cell::Cell<bool>,
+            previous: bool,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.reporting.set(self.previous);
+            }
+        }
+
+        let _restore = Restore {
+            reporting: &self.reporting,
+            previous: self.reporting.replace(true),
+        };
+        // SAFETY: the cell hands out no reference to its value, and refuses `set` and `replace`
+        // until `_restore` is dropped, after `report` returns, so nothing writes into the cell
+        // while the reference lives. Reporting runs on the thread holding the isolate lock.
+        report(unsafe { &*self.inner.as_ptr() })
     }
 }
 
@@ -215,3 +262,7 @@ impl<T: Traced + Default> Default for RefCell<T> {
         Self::new(T::default())
     }
 }
+
+#[cfg(test)]
+#[path = "cell-test.rs"]
+mod tests;

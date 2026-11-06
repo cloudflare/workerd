@@ -1198,6 +1198,10 @@ void memory_tracker_pop_node(MemoryTracker& tracker) {
   tracker.popNode();
 }
 
+size_t memory_tracker_depth(MemoryTracker& tracker) {
+  return tracker.depth();
+}
+
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor) {
   auto* gcVisitor = gc_visitor_from_ffi(visitor);
