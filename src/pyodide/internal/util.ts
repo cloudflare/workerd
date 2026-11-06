@@ -157,3 +157,52 @@ export function loadPythonMod(
   });
   return mod;
 }
+
+type PyModuleDict = {
+  get(name: string): { __cf_source__?: string } | undefined;
+  set(name: string, mod: object): void;
+  destroy(): void;
+};
+
+/**
+ * Like `loadPythonMod`, but also registers the module in `sys.modules` as
+ * `_cf_internal_<moduleName>`, and returns the registered module instead of loading it again when
+ * one is there already.
+ */
+export function loadOrReusePythonMod(
+  pyodide: Pyodide,
+  moduleName: string,
+  source: Uint8Array
+): { __dict__: PyDict } {
+  const registeredName = `_cf_internal_${moduleName}`;
+  const sourceText = new TextDecoder().decode(source);
+  const sys = pyodide.pyimport('sys') as unknown as {
+    modules: PyModuleDict;
+    destroy(): void;
+  };
+  const sysModules = sys.modules;
+  try {
+    const registered = sysModules.get(registeredName);
+    // Make sure the module was loaded from the same source as `source`.
+    // Dedicated snapshot created from a different version might have
+    // a different source.
+    if (registered?.__cf_source__ === sourceText) {
+      return registered as { __dict__: PyDict };
+    }
+
+    // Load the module from source and register it.
+    // When creating a new snapshot, this is called and
+    // the module is registered in `sys.modules`,
+    // so the next time it is called, it will be reused without loading.
+    const mod = loadPythonMod(pyodide, moduleName, source) as {
+      __dict__: PyDict;
+      __cf_source__?: string;
+    };
+    mod.__cf_source__ = sourceText;
+    sysModules.set(registeredName, mod);
+    return mod;
+  } finally {
+    sysModules.destroy();
+    sys.destroy();
+  }
+}

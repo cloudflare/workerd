@@ -3,8 +3,24 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 import os
+import signal
+import sys
 
 from workers import WorkerEntrypoint
+
+# The runtime compiles its introspection module once, after this top level has run. A dedicated
+# snapshot is collected after that, so it holds this hook and its count, and an isolate restored
+# from it reuses the module instead of compiling it again.
+introspection_compiles = 0
+
+
+def count_introspection_compiles(event, args):
+    global introspection_compiles
+    if event == "compile" and args[1] == "introspection.py":
+        introspection_compiles += 1
+
+
+sys.addaudithook(count_introspection_compiles)
 
 
 class WorkerEntrypointExample(WorkerEntrypoint):
@@ -26,3 +42,9 @@ async def test(ctrl, env, ctx):
     second_resp = await env.entrypoint.rpc_trigger_func()
     # We expect the counter to stay the same since this isn't a durable object.
     assert second_resp == "hello from python 1"
+
+    assert introspection_compiles == 1, introspection_compiles
+
+    introspection = sys.modules["_cf_internal_introspection"]
+    assert "def wrapper_func" in introspection.__cf_source__
+    assert signal.getsignal(signal.SIGXCPU) is introspection.raise_cpu_limit_exceeded
