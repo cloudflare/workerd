@@ -451,6 +451,12 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value);
 const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value);
 
+// simdutf, for `string_from_latin1` in v8.rs. Defined in ffi.c++ so that this header, which every
+// includer of the bridge headers reads, needs no simdutf.
+bool simdutf_validate_ascii(const uint8_t* input, size_t length);
+size_t simdutf_utf8_length_from_latin1(const uint8_t* input, size_t length);
+size_t simdutf_convert_latin1_to_utf8(const uint8_t* input, size_t length, uint8_t* utf8_output);
+
 // ArrayBuffer detach/detachable/was-detached
 // Returns false, and detaches nothing, if an exception or a termination is pending.
 bool local_array_buffer_detach(Isolate* isolate, const Local& buffer);

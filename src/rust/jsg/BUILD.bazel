@@ -93,6 +93,7 @@ wd_cc_library(
         "//src/rust/cxx/kj-rs",
         "//src/workerd/jsg:jsg-core",
         "//src/workerd/util:autogate",
+        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )

@@ -4,6 +4,8 @@
 
 #include "ffi.h"
 
+#include "simdutf.h"
+
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -74,7 +76,7 @@ static v8::MaybeLocal<v8::String> newUtf8String(
 static ::rust::String toRustString(v8::Isolate* isolate, v8::Local<v8::String> str) {
   v8::String::ValueView view(isolate, str);
   if (view.is_one_byte()) {
-    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+    return string_from_latin1(::rust::Slice<const uint8_t>(view.data8(), view.length()));
   }
   return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
 }
@@ -938,6 +940,19 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   }
   result = toRustString(isolate, v8Str);
   return true;
+}
+
+bool simdutf_validate_ascii(const uint8_t* input, size_t length) {
+  return simdutf::validate_ascii(reinterpret_cast<const char*>(input), length);
+}
+
+size_t simdutf_utf8_length_from_latin1(const uint8_t* input, size_t length) {
+  return simdutf::utf8_length_from_latin1(reinterpret_cast<const char*>(input), length);
+}
+
+size_t simdutf_convert_latin1_to_utf8(const uint8_t* input, size_t length, uint8_t* utf8_output) {
+  return simdutf::convert_latin1_to_utf8(
+      reinterpret_cast<const char*>(input), length, reinterpret_cast<char*>(utf8_output));
 }
 
 bool unwrap_boolean(Isolate* isolate, Local value) {
