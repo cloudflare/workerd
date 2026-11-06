@@ -45,12 +45,11 @@ pub enum PropertyKind {
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
-    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+    if let Some(err) = validate_struct_args(attr.clone().into()) {
         return err.to_compile_error().into();
     }
 
-    // Check for `#[jsg_resource(custom_trace)]` and `#[jsg_resource(memory_info)]` before
-    // consuming `attr`.
+    // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
     let memory_info = has_memory_info_flag(&attr);
     let ts_root = has_flag(&attr, "ts_root");
@@ -88,17 +87,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         }
     };
 
-    // `memory_info` reports the fields through the user's `VisitForMemoryInfo` impl, as C++
-    // `JSG_RESOURCE_TYPE` calls a resource's `visitForMemoryInfo`.
-    let memory_info_fn = if memory_info {
-        quote! {
-            fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-                <Self as jsg::VisitForMemoryInfo>::visit_for_memory_info(self, tracker);
-            }
-        }
-    } else {
-        quote! {}
-    };
+    let memory_info_fn = generate_memory_info_fn(memory_info);
 
     let gc_impl = quote! {
         #[automatically_derived]
@@ -582,22 +571,68 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
-/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
-/// `nested_types(...)`, which belongs on the impl block.
-fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+/// The `GarbageCollected::memory_info` of a resource with `memory_info`, which reports the fields
+/// through the user's `VisitForMemoryInfo` impl, as C++ `JSG_RESOURCE_TYPE` calls a resource's
+/// `visitForMemoryInfo`; none, which reports no fields, without it.
+fn generate_memory_info_fn(memory_info: bool) -> proc_macro2::TokenStream {
+    if memory_info {
+        quote! {
+            fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+                <Self as jsg::VisitForMemoryInfo>::visit_for_memory_info(self, tracker);
+            }
+        }
+    } else {
+        quote! {}
+    }
+}
+
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
+/// `custom_trace`, `memory_info` and `ts_root`, so that a misspelled flag does not compile instead
+/// of being ignored. `nested_types(...)` and `custom_members` belong on the impl block.
+fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
+    const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info` or \
+                            `ts_root` on a #[jsg_resource] struct";
+
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
-        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
-    metas
-        .iter()
-        .find(|meta| meta.path().is_ident("nested_types"))
-        .map(|meta| {
-            syn::Error::new_spanned(
-                meta.path(),
-                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
-            )
-        })
+        match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
+            Ok(metas) => metas,
+            Err(err) => return Some(err),
+        };
+    metas.iter().find_map(|meta| {
+        let path = meta.path();
+        if path.is_ident("nested_types") || path.is_ident("custom_members") {
+            let flag = if path.is_ident("nested_types") {
+                "nested_types(...)"
+            } else {
+                "custom_members"
+            };
+            return Some(syn::Error::new_spanned(
+                path,
+                format!("`{flag}` belongs on the #[jsg_resource] impl block, not the struct"),
+            ));
+        }
+        match meta {
+            syn::Meta::Path(path)
+                if ["custom_trace", "memory_info", "ts_root"]
+                    .iter()
+                    .any(|flag| path.is_ident(flag)) =>
+            {
+                None
+            }
+            syn::Meta::NameValue(syn::MetaNameValue {
+                path,
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(_),
+                        ..
+                    }),
+                ..
+            }) if path.is_ident("name") => None,
+            _ => Some(syn::Error::new_spanned(meta, EXPECTED)),
+        }
+    })
 }
 
 /// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
