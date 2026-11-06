@@ -238,12 +238,17 @@ wd_test(
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
-# them from running concurrently with each other while still allowing other tests to run alongside,
-# and gives each its own executor under remote execution (see build/bazelflare/exec_properties.bzl).
+# The socket resource serializes fixed-port listeners locally. Only bazelflare gives each of
+# these tests its own remote network; other executors must run them locally for the resource to
+# apply. Bazel ignores --strategy_regexp for TestRunner actions.
 SOCKET_TEST_TAGS = [
     "resources:socket:1",
 ]
+
+SOCKET_TEST_EXECUTION_REQUIREMENTS = select({
+    "//build/bazelflare:on_bazelflare": {},
+    "//conditions:default": {"no-remote-exec": ""},
+})
 
 wd_test(
     src = "connect-handler-test.wd-test",
@@ -255,6 +260,7 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
@@ -344,6 +350,7 @@ wd_test(
         "connect-handler-test-proxy.js",
         "stw-large-log-subject.js",
     ],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
@@ -950,6 +957,7 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
@@ -962,6 +970,7 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
@@ -1390,6 +1399,7 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
@@ -1401,6 +1411,7 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
+    execution_requirements = SOCKET_TEST_EXECUTION_REQUIREMENTS,
     tags = SOCKET_TEST_TAGS,
 )
 
