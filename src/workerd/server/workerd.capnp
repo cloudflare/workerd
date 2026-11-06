@@ -527,7 +527,8 @@ struct Worker {
 
       builtin @11 :Text;
       # An ES module whose source is compiled into workerd, by name: `/workerd/kv.js`, the KV
-      # Worker (see its header for the bindings it takes). Experimental.
+      # Worker, or `/workerd/cron.js`, cron triggers (see each one's header for the config it
+      # takes). Experimental.
     }
 
     namedExports @10 :List(Text);

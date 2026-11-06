@@ -172,7 +172,7 @@ async fn start(
         factory: Rc::clone(&factory),
         draining,
     });
-    let listeners = FuturesUnordered::new();
+    let mut listeners = FuturesUnordered::new();
     let mut ports = Vec::new();
     let sockets = config.get_sockets().map_err(capnp_error)?;
     for (sock, bound) in sockets.iter().zip(bound.sockets) {
@@ -209,6 +209,7 @@ async fn start(
     if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
         start_cluster(&factory, node, listener);
     }
+    listeners.extend(crate::cron::start(&context, &server, config, for_test)?);
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;

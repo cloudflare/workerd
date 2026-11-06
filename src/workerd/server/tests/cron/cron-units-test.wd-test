@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cron-units-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "cron-units-test.js" ),
+          ( name = "cron.js", builtin = "/workerd/cron.js" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      )
+    ),
+  ],
+);
