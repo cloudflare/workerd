@@ -499,18 +499,15 @@ impl ActorNamespace {
     async fn stop_all(&self, until: Option<Instant>, stop: impl Fn(&str, &ActorContainer)) {
         let actors = std::mem::take(&mut *self.actors.borrow_mut());
         let mut actors = actors.into_iter().collect::<Vec<_>>().into_iter();
-        loop {
-            for (key, container) in actors.by_ref().take(STOPS_AT_ONCE) {
-                stop(&key, &container);
-            }
-            if actors.len() == 0 {
-                return;
-            }
-            tokio::task::yield_now().await;
+        while actors.len() > 0 {
             if until.is_some_and(|until| Instant::now() >= until) {
                 let left = actors.map(|(_, container)| container);
                 return self.left_behind.borrow_mut().extend(left);
             }
+            for (key, container) in actors.by_ref().take(STOPS_AT_ONCE) {
+                stop(&key, &container);
+            }
+            tokio::task::yield_now().await;
         }
     }
 
@@ -2325,13 +2322,16 @@ impl Channel for ActorChannel {
     }
 }
 
-/// Hands off the objects of `namespaces` as this instance drains.
+/// Hands off the objects of `namespaces` as this instance drains, and answers whether it
+/// stopped them all.
 ///
 /// Every object stops once its requests in flight finished, or at the in-flight deadline,
 /// cancelling them. Then a few at a time, the busiest first, are released, until the handoff's
 /// deadline. What is left then is stopped where it is (`ActorNamespace::release_all`), for peers
-/// to take over once this instance left the cluster.
-pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadlines) {
+/// to take over once this instance left the cluster, until the release deadline. Objects still
+/// running then must keep this instance a member: a peer that took one over would run it
+/// alongside them.
+pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadlines) -> bool {
     let slots = Rc::new(tokio::sync::Semaphore::new(HANDOFFS_AT_ONCE));
     let mut handoffs: Vec<_> = namespaces
         .iter()
@@ -2349,6 +2349,9 @@ pub async fn hand_off_all(namespaces: &[Rc<ActorNamespace>], deadlines: Deadline
     let all = futures::future::join_all(ordered);
     let _ = tokio::time::timeout_at(deadlines.handoff, all).await;
     for ns in namespaces {
-        ns.release_all(deadlines.connections).await;
+        ns.release_all(deadlines.release).await;
     }
+    namespaces
+        .iter()
+        .all(|ns| ns.left_behind.borrow().is_empty())
 }

@@ -83,7 +83,7 @@ const bucketOptions :List(Text) = [
   "aws_secret_access_key=wdtest-secret",
 ];
 
-# The drain tests hold requests in flight for up to 8 s: half of this stop timeout.
+# The drain tests hold requests in flight for up to 8 s, within half of this stop timeout.
 const cluster :Workerd.ClusterConfig = (
   bucket = "s3://wdtest/cluster",
   bucketOptions = .bucketOptions,

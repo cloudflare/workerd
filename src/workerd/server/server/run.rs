@@ -456,20 +456,32 @@ pub async fn run(
                     .filter(|ns| ns.cluster().is_some())
                     .collect();
                 let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
-                if let Either::Left((result, handoff)) =
-                    futures::future::select(serving.as_mut(), handoff).await
-                {
-                    result?;
-                    handoff.await;
-                }
+                let stopped = match futures::future::select(serving.as_mut(), handoff).await {
+                    Either::Left((result, handoff)) => {
+                        result?;
+                        handoff.await
+                    }
+                    Either::Right((stopped, _)) => stopped,
+                };
                 // Released before the lease goes, so nothing is served after it. Until the
                 // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
-                // that reads this node's record still finds it live and routes here again.
-                let deregister = node.cluster.deregister();
-                match tokio::time::timeout_at(deadlines.connections, deregister).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
-                    Err(_) => tracing::warn!("leaving the cluster timed out"),
+                // that reads this node's record still finds it live and routes here again. With
+                // objects still running, which stopping very many can leave, it stays a member:
+                // peers take over every object it did not hand off once its lease expires, after
+                // this process exited.
+                if stopped {
+                    let deregister = node.cluster.deregister();
+                    match tokio::time::timeout_at(deadlines.connections, deregister).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
+                        Err(_) => tracing::warn!("leaving the cluster timed out"),
+                    }
+                } else {
+                    tracing::warn!(
+                        "Durable Objects still run at the release deadline: staying a cluster \
+                         member, so that peers take over its objects once this node's lease \
+                         expires"
+                    );
                 }
                 let grace = std::pin::pin!(tokio::time::sleep_until(deadlines.grace));
                 if let Either::Left((result, _)) =

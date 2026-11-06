@@ -88,6 +88,7 @@ pub struct ClusterNode {
 pub struct Deadlines {
     pub in_flight: Instant,
     pub handoff: Instant,
+    pub release: Instant,
     pub grace: Instant,
     pub connections: Instant,
     pub stop: Instant,
@@ -349,6 +350,7 @@ impl ClusterNode {
         let deadlines = Deadlines {
             in_flight: at(self.budget.in_flight_ms()),
             handoff: at(self.budget.handoff_ms()),
+            release: at(self.budget.release_ms()),
             grace: at(self.budget.grace_ms()),
             connections: at(self.budget.connections_ms()),
             stop: at(self.budget.stop_ms),

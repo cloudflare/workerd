@@ -246,27 +246,29 @@ struct ClusterConfig {
   #
   # The time is spent in order: until half of it, requests in flight on an object being handed off
   # may finish, and are then cancelled, failing as requests that may have run, which are not sent
-  # again; at three quarters, the handoff ends, and an object not yet released is taken over by a
-  # peer once the instance has left; at nine tenths, the instance stops waiting for its connections,
-  # whose requests end as it exits; the rest is for the containers. A call that reaches an object
-  # being handed off through a stateless worker, rather than from a Durable Object, waits like any
-  # other request, so a call from the object back to itself that way ends only with the requests
-  # in flight. Stopping an object's Docker container takes one of the few handoffs that run at once.
+  # again; at three quarters, the handoff ends, and an object not yet released is stopped if it
+  # still runs, and taken over by a peer once the instance has left; at nine tenths, the instance
+  # stops waiting for its connections, whose requests end as it exits; the rest is for the
+  # containers. A call that reaches an object being handed off through a stateless worker, rather
+  # than from a Durable Object, waits like any other request, so a call from the object back to
+  # itself that way ends only with the requests in flight. Stopping an object's Docker container
+  # takes one of the few handoffs that run at once.
   #
   # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
   # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
   # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
   # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut
-  # short. The timeout is not a hard limit: an instance with very many objects can take longer to
-  # stop them, and if the supervisor kills it first, its peers take its objects over once its lease
-  # expires.
+  # short. An instance with very many objects may not stop them all by 33/40 of the timeout: it
+  # then stays a member, and its peers take over every object it did not hand off once its lease
+  # expires, after it exited, as they do when the supervisor kills it first.
   #
   # A `fetch()` to an object that moves is sent on transparently. A JS RPC call that a peer sent
   # through a stub to the stopping instance may fail once, as retryable; the stub's next call finds
   # the object. WebSockets an object here accepted close as it is handed off. An alarm that comes
   # due on a stopping instance runs where its object goes: when a request claims the object there,
   # or else once a peer adopts the alarms of the instance that left, within five seconds of its
-  # leaving, so up to one stop and five seconds late.
+  # leaving, so up to one stop and five seconds late; for an instance that stays a member with
+  # objects still running, once its lease expires, up to 20 seconds later still.
   #
   # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
   # not stopping, and 503 otherwise: a readiness probe for a rolling restart.

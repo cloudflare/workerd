@@ -13,8 +13,13 @@
 //!
 //! - until `in_flight_ms`, work in flight on an object being handed off
 //!   may finish; past it, that work is cancelled;
-//! - at `handoff_ms` the handoff ends: an object not released by then
-//!   recovers on a peer once the instance has left, as after a crash;
+//! - at `handoff_ms` the handoff ends, and the instance stops the objects
+//!   it did not release;
+//! - by `release_ms` it has stopped them all, and leaves the cluster: an
+//!   object it did not release recovers on a peer then, as after a crash.
+//!   While objects it could not stop in time still run, it stays a member:
+//!   peers take over every object it did not release once its lease
+//!   expires, after it exited;
 //! - until `grace_ms` at least, the instance accepts requests, as load
 //!   balancers take a while to stop sending them;
 //! - at `connections_ms` the instance stops waiting for its connections,
@@ -42,10 +47,17 @@ impl Budget {
         self.stop_ms / 2
     }
 
-    /// The handoff ends.
+    /// The handoff ends; the instance stops the objects it did not release.
     #[must_use]
     pub const fn handoff_ms(&self) -> u64 {
-        self.stop_ms / 4 * 3
+        self.stop_ms * 3 / 4
+    }
+
+    /// The instance stops no more objects, and leaves the cluster, which
+    /// may take until `connections_ms`.
+    #[must_use]
+    pub const fn release_ms(&self) -> u64 {
+        self.stop_ms * 33 / 40
     }
 
     /// Accepting requests may stop, if the handoff ended.
@@ -63,7 +75,7 @@ impl Budget {
     /// cleanup takes the rest.
     #[must_use]
     pub const fn connections_ms(&self) -> u64 {
-        self.stop_ms / 10 * 9
+        self.stop_ms * 9 / 10
     }
 }
 
