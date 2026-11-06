@@ -1,12 +1,17 @@
 load("//:build/wd_bench.bzl", "wd_bench")
 
 # The URLPattern benchmarks, on the standard (ada) path, against the C++
-# implementation. The TypeScript one (TS_URL_PATTERN) gets a config of its
-# own when it exists; enabling every autogate will enable it, so the C++
-# config has no @all-autogates variant.
+# implementation and the TypeScript one (TS_URL_PATTERN). Enabling every
+# autogate enables TS_URL_PATTERN, so the C++ config has no @all-autogates
+# variant; the TypeScript config enables it itself.
 
 wd_bench(
     src = "urlpattern-cpp.wd-bench",
     data = ["urlpattern.js"],
     generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "urlpattern-ts.wd-bench",
+    data = ["urlpattern.js"],
 )
