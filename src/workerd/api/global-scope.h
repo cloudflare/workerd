@@ -705,7 +705,6 @@ constexpr bool alarmRetryCountsAgainstLimit(AlarmRetryFailureInfo info) {
   return !info.outputGateBroken || info.isUserError || info.resourceLimitExceeded;
 }
 
-// Global object API exposed to JavaScript.
 // What a connect() handler's Socket gets for startTls(), taken from the slot the peer offered.
 struct ConnectTlsUpgrade {
   kj::Own<kj::TlsStarterCallback> starter = kj::heap<kj::TlsStarterCallback>();
@@ -725,6 +724,7 @@ struct ConnectTlsUpgrade {
 // anything suspends; the result owns everything the handler needs.
 ConnectTlsUpgrade takeConnectTlsUpgrade(kj::HttpConnectSettings& settings, bool enabled);
 
+// Global object API exposed to JavaScript.
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
  public:
   ServiceWorkerGlobalScope();

@@ -19,24 +19,7 @@ class RelayDirection {
   RelayDirection(kj::AsyncInputStream& from, kj::AsyncIoStream& to): from(from), to(to) {}
   KJ_DISALLOW_COPY_AND_MOVE(RelayDirection);
 
-  kj::Promise<void> run() {
-    auto buffer = kj::heapArray<kj::byte>(RELAY_BUFFER_SIZE);
-    for (;;) {
-      size_t amount = co_await from.tryRead(buffer.begin(), 1, buffer.size());
-      if (amount == 0) break;
-
-      KJ_IF_SOME(change, transportChange) {
-        co_await change.addBranch();
-      }
-
-      auto write = to.write(buffer.first(amount)).fork();
-      auto written = write.addBranch();
-      inFlightWrite = kj::mv(write);
-      co_await written;
-      inFlightWrite = kj::none;
-    }
-    to.shutdownWrite();
-  }
+  kj::Promise<void> run();
 
   // Runs `change` once the write in flight, if any, has finished, and holds back every write after
   // it until `change` has resolved. The result is `change`'s.
@@ -56,11 +39,58 @@ class RelayDirection {
   }
 
  private:
+  // How many iterations in a row may complete without waiting before run() yields to the event
+  // loop, so that a direction whose streams can always keep up synchronously does not starve
+  // everything else.
+  static constexpr size_t MAX_SYNC_ITERATIONS = 64;
+
   kj::AsyncInputStream& from;
   kj::AsyncIoStream& to;
+  // `inFlightWrite` borrows this, and outlives run() when the relay is cancelled, so it belongs to
+  // the direction rather than to run(). Declared before `inFlightWrite` so that it is destroyed
+  // after it.
+  kj::Array<kj::byte> buffer = kj::heapArray<kj::byte>(RELAY_BUFFER_SIZE);
   kj::Maybe<kj::ForkedPromise<void>> inFlightWrite;
   kj::Maybe<kj::ForkedPromise<void>> transportChange;
 };
+
+kj::Promise<void> RelayDirection::run() {
+  size_t syncIterations = 0;
+  for (;;) {
+    bool waited = false;
+    size_t amount;
+    KJ_IF_SOME(n, from.tryReadSync(buffer, 1)) {
+      amount = n;
+    } else {
+      amount = co_await from.tryRead(buffer.begin(), 1, buffer.size());
+      waited = true;
+    }
+    if (amount == 0) break;
+    auto data = buffer.first(amount);
+
+    KJ_IF_SOME(change, transportChange) {
+      co_await change.addBranch();
+      waited = true;
+    }
+
+    if (!to.tryWriteSync(data)) {
+      auto write = to.write(data).fork();
+      auto written = write.addBranch();
+      inFlightWrite = kj::mv(write);
+      co_await written;
+      inFlightWrite = kj::none;
+      waited = true;
+    }
+
+    if (waited) {
+      syncIterations = 0;
+    } else if (++syncIterations == MAX_SYNC_ITERATIONS) {
+      syncIterations = 0;
+      co_await kj::yield();
+    }
+  }
+  to.shutdownWrite();
+}
 
 // Forwards upgrade requests arriving from the far side of one end to the other end.
 class UpgradeForward {

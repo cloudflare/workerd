@@ -102,5 +102,6 @@ export const proxyToRejectsWhenTheRelayFails = {
 
     await rejects(relay, { message: 'relay aborted' });
     await rejects(echo.closed, { message: 'relay aborted' });
+    await rejects(silent.closed, { message: 'relay aborted' });
   },
 };

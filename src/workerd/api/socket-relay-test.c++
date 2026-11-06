@@ -26,9 +26,9 @@ kj::Promise<void> writeString(kj::AsyncOutputStream& out, kj::StringPtr text) {
 }
 
 kj::String readString(kj::AsyncInputStream& in, size_t size, kj::WaitScope& waitScope) {
-  auto buffer = kj::heapArray<kj::byte>(size);
-  in.read(buffer).wait(waitScope);
-  return kj::str(buffer.asChars());
+  auto result = kj::heapString(size);
+  in.read(result.asBytes()).wait(waitScope);
+  return result;
 }
 
 void expectEof(kj::AsyncInputStream& in, kj::WaitScope& waitScope) {
@@ -46,6 +46,12 @@ class WriteThrough: public kj::AsyncIoStream {
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     return inner->write(pieces);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->tryWriteSync(buffer);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->tryWriteSync(pieces);
   }
   kj::Promise<void> whenWriteDisconnected() override {
     return inner->whenWriteDisconnected();
@@ -172,6 +178,25 @@ KJ_TEST("relayStreams() fails when either direction fails") {
   auto written = writeString(*a.far, "data");
   KJ_EXPECT_THROW(DISCONNECTED, relay.wait(waitScope));
   written.wait(waitScope);
+}
+
+KJ_TEST("relayStreams() can be cancelled while a write is in flight") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+  auto a = newLink();
+  auto b = newLink();
+
+  auto relay =
+      relayStreams(RelayEnd{.stream = kj::mv(a.relayed)}, RelayEnd{.stream = kj::mv(b.relayed)})
+          .eagerlyEvaluate(nullptr);
+
+  // Nobody reads from the far side of `b`, so the relay's write to it stays in flight.
+  auto written = writeString(*a.far, "data");
+  written.wait(waitScope);
+  KJ_EXPECT(!relay.poll(waitScope));
+
+  // Cancelling the relay must not leave that write referring to memory the relay has freed.
+  relay = nullptr;
 }
 
 KJ_TEST("relayStreams() upgrades the other end between the bytes sent before and after asking") {
