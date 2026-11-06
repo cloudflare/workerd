@@ -3,24 +3,25 @@
 An informal specification of URLPattern as implemented in workerd, kept in
 lockstep with the test suite in this directory. **The tests are the
 normative artifact.** The cells run the same modules
-(`urlpattern-modules.capnp`) against the C++ implementations:
+(`urlpattern-modules.capnp`) against the C++ implementations and the
+TypeScript one:
 
 | Cell | Implementation | Flags the suite branches on |
 | --- | --- | --- |
 | `urlpattern-standard-cpp` | `api/urlpattern-standard.{h,c++}` (ada) | `urlpattern_standard`, `set_tostring_tag` |
 | `urlpattern-legacy-cpp` | `api/urlpattern.{h,c++}` (`jsg::UrlPattern`) | `urlpattern_original`, `do_not_set_tostring_tag` |
 | `urlpattern-opt-in-cpp` | standard, with the dateless WebIDL opt-ins | standard + `spec_compliant_property_attributes`, `immutable_api_prototypes` (`--experimental`) |
+| `urlpattern-standard-ts`, `urlpattern-legacy-ts` | `src/per_isolate/urlpattern/`, under the `TS_URL_PATTERN` autogate | as the C++ cell of the same name |
 
 `which-impl.js` reads the flags; a cell's `USING_TS_IMPL` binding says which
 implementation it means to run. `enable_fast_jsg_struct` is not pinned: the
 `@` and `@all-compat-flags` variants run each cell with it off and on.
 
-The suite also holds the TypeScript implementation's expectations, in its
-`usingTsImpl` branches: it honors the dated flags above and is otherwise
+The TypeScript implementation honors the dated flags above and is otherwise
 WebIDL-conformant, so it differs from the C++ only toward the spec, in the
-rows of the ledger below. The C++ cells disable the `@all-autogates`
-variant, which will run the TypeScript implementation under them once
-`TS_URL_PATTERN` exists.
+rows of the ledger below. Each row is pinned on both sides with a
+`usingTsImpl` branch. The C++ cells disable the `@all-autogates` variant,
+which would run the TypeScript implementation under them.
 
 ## Core semantics
 
