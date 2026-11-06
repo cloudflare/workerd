@@ -38,6 +38,9 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 // serialization.ts).
 require('serialization');
 
+// Loaded before any module that may create or recognize a DOMException.
+require('dom-exception');
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,

@@ -48,6 +48,7 @@
 // with a reader of whichever streams implementation is installed, captured
 // below, and decoded with a streaming TextDecoder before it is parsed.
 
+import type { DomExceptionModule } from '../dom-exception';
 import type { EventTargetInternals } from '../events/event-target-internals';
 import type { RuntimeClassHelpers } from '../runtime-class';
 
@@ -56,7 +57,6 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   ArrayPrototypePush,
-  DOMException,
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
@@ -111,6 +111,8 @@ const {
 } = require('events/event-target-internals') as EventTargetInternals;
 const { markAsRuntimeClass, setNameAndLength } =
   require('runtime-class') as RuntimeClassHelpers;
+
+const { DOMException } = require('dom-exception') as DomExceptionModule;
 
 // Whichever streams implementation main.ts installed before loading this
 // module; a Response body and anything EventSource.from() accepts are its
