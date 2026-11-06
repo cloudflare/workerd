@@ -10,7 +10,6 @@ import type { SearchParamsEntry } from './backend';
 import type { InternalArrayHelpers } from './internal-array';
 
 const {
-  ArrayPrototypePush,
   StringPrototypeCharCodeAt,
   StringPrototypeIndexOf,
   StringPrototypeSlice,
@@ -96,6 +95,10 @@ function decodeComponent(input: string): string {
 function parseUrlencoded(input: string): SearchParamsEntry[] {
   const list = internalArray<SearchParamsEntry>();
   const length = input.length;
+  // Without a '%' or a '+' anywhere, no name or value needs decoding.
+  const decode =
+    StringPrototypeIndexOf(input, '%') !== -1 ||
+    StringPrototypeIndexOf(input, '+') !== -1;
   let start = 0;
   while (start < length) {
     let end = StringPrototypeIndexOf(input, '&', start);
@@ -111,7 +114,9 @@ function parseUrlencoded(input: string): SearchParamsEntry[] {
         name = StringPrototypeSlice(input, start, end);
         value = '';
       }
-      ArrayPrototypePush(list, [decodeComponent(name), decodeComponent(value)]);
+      list[list.length] = decode
+        ? [decodeComponent(name), decodeComponent(value)]
+        : [name, value];
     }
     start = end + 1;
   }
@@ -155,6 +160,15 @@ function serializeComponent(input: string): string {
   }
   if (i === length) return input;
   let result = StringPrototypeSlice(input, 0, i);
+  // ASCII is its own UTF-8, so only the rest from the first non-ASCII code
+  // unit needs encoding.
+  while (i < length) {
+    const unit = StringPrototypeCharCodeAt(input, i);
+    if (unit >= 128) break;
+    result += kByteEncodings[unit] as string;
+    i++;
+  }
+  if (i === length) return result;
   const bytes = TextEncoderEncode(kEncoder, StringPrototypeSlice(input, i));
   const byteLength = TypedArrayPrototypeGetLength(bytes);
   for (let b = 0; b < byteLength; b++) {

@@ -25,7 +25,6 @@ import type { RuntimeClassHelpers } from '../runtime-class';
 import type { SerializationHelpers } from '../serialization';
 
 const {
-  ArrayPrototypePush,
   BlobPrototypeSlice,
   Error,
   FunctionPrototypeCall,
@@ -170,9 +169,9 @@ function sequenceInit(init: object, method: unknown): SearchParamsEntry[] {
     if (inner === undefined) throw new TypeError(notASequence);
     const strings = internalArray<string>();
     forEachOfIterable(element, inner, (item) => {
-      ArrayPrototypePush(strings, toUSVString(item));
+      strings[strings.length] = toUSVString(item);
     });
-    ArrayPrototypePush(sequences, strings);
+    sequences[sequences.length] = strings;
   });
   const entries = internalArray<SearchParamsEntry>();
   for (let i = 0; i < sequences.length; i++) {
@@ -182,7 +181,7 @@ function sequenceInit(init: object, method: unknown): SearchParamsEntry[] {
         `${kConstructSearchParams}: each sequence must be a name-value pair.`
       );
     }
-    ArrayPrototypePush(entries, [pair[0] as string, pair[1] as string]);
+    entries[entries.length] = [pair[0] as string, pair[1] as string];
   }
   return entries;
 }
@@ -203,7 +202,7 @@ function recordInit(init: object): SearchParamsEntry[] {
     const position = positions.get(name);
     if (position === undefined) {
       positions.set(name, entries.length);
-      ArrayPrototypePush(entries, [name, value]);
+      entries[entries.length] = [name, value];
     } else {
       (entries[position] as SearchParamsEntry)[1] = value;
     }
