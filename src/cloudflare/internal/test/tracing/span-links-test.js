@@ -125,6 +125,24 @@ export const links = {
       ]);
     });
 
+    tracing.enterSpan('batch-limit', (span) => {
+      for (const length of [513, 0xffffffff]) {
+        const oversized = new Array(length);
+        Object.defineProperty(oversized, 0, {
+          get() {
+            throw new Error('oversized link arrays must not read any entries');
+          },
+        });
+        assert.equal(span.addLinks(oversized), span);
+      }
+
+      assert.equal(
+        span.addLinks(Array.from({ length: 512 }, () => ({ context: remote }))),
+        span
+      );
+      assert.equal(span.addLinks([{ context: remote }]), span);
+    });
+
     tracing.enterSpan('sanitization', (span) => {
       const attributes = Object.assign(
         Object.create({ inherited: 'ignored' }),

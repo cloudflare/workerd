@@ -104,6 +104,8 @@ export const validate = {
     assert.equal('traceState' in validated[2].context, false);
     assert.equal(validated[3].droppedAttributesCount, 0);
 
+    assert.equal(named('batch-limit').links.length, 513);
+
     const sanitized = named('sanitization').links;
     assert.equal(sanitized.length, 11);
     assert.deepEqual(attrs(sanitized[0]), {
