@@ -939,6 +939,16 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-disposal-gc-test.wd-test",
+    args = [
+        "--experimental",
+        "js-rpc-disposal-gc-test",
+    ],
+    data = ["js-rpc-disposal-gc-test.js"],
+    tags = SOCKET_TEST_TAGS,
+)
+
+wd_test(
     src = "js-rpc-test.wd-test",
     args = [
         "--experimental",
