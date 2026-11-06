@@ -2388,7 +2388,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     jsg::WrappablesSerializeMetadata wrappablesMetadata;
 
     // Zygote only: the context global's JS event listeners, recorded inside the handle scope
-    // below and stored in the SnapshotArtifact by createSnapshotBlob().
+    // below once the top level has run and stored in the SnapshotArtifact by
+    // createSnapshotBlob().
     kj::Vector<jsg::SnapshotArtifact::ListenerRecord> listenerRecords;
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
@@ -2416,12 +2417,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         isolateBase.setSnapshotDefaultContext(
             context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
       }
-
-      KJ_DEFER({
-        if (lock.isPreparingSnapshot()) {
-          stashPerIsolateBootstrapForSnapshot(lock, context);
-        }
-      });
 
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
@@ -2657,8 +2652,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       }
 
       if (lock.isPreparingSnapshot() && impl->permanentException == kj::none) {
-        // The zygote's top level has run: record what it left of the properties V8 adds when the
-        // snapshot is restored, and remove them so that V8 can add them.
+        // The zygote's top level has run to completion: record what it left for the snapshot.
+        // A top level that failed is recorded nowhere; the check after this handle scope ends
+        // the zygote instead.
+
+        // Record what the top level left of the properties V8 adds when the snapshot is
+        // restored, and remove them so that V8 can add them.
         auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.removeRestoreTimeGlobalsBeforeSnapshot(lock, context);
 
@@ -2676,11 +2675,27 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             .once = once,
           });
         });
+
+        // Bundle the per-isolate bootstrap's JS-held state and pin it, the last of the record
+        // steps. This also releases the bootstrap's C++ state, which createSnapshotBlob() would
+        // otherwise reject as a live handle; a context the zygote abandons releases it when the
+        // context is disposed.
+        stashPerIsolateBootstrapForSnapshot(lock, context);
       }
     });
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.isPreparingSnapshot()) {
+      KJ_IF_SOME(e, impl->permanentException) {
+        // A top level that failed leaves nothing worth a snapshot, and CreateBlob() on its
+        // half-built context would only risk a V8 fatal (an unregistered external reference, a
+        // handle left behind). The Worker starts without a snapshot: factory_new_worker() catches
+        // this and logs the reason. The context is disposed with the script (or with `impl`),
+        // which releases the per-isolate bootstrap's state.
+        KJ_FAIL_REQUIRE(
+            "the zygote's top level failed; no startup snapshot was created", e.getDescription());
+      }
+
       // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
       // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
       // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
