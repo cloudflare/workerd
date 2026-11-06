@@ -80,8 +80,7 @@ void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   }
 }
 
-jsg::Ref<DOMException> DOMException::deserialize(
-    jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+JsObject DOMException::deserialize(jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
   switch (tag) {
     case SERIALIZATION_TAG_V2: {
       kj::String name = deserializer.readLengthDelimitedString();
@@ -127,8 +126,8 @@ v8::MaybeLocal<v8::Object> newDOMException(
   try {
     KJ_REQUIRE(isolate->InContext(), "creating a DOMException requires an entered context");
     auto& js = Lock::from(isolate);
-    auto exception = js.domException(kj::str(name), kj::str(message));
-    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+    v8::Local<v8::Object> exception = js.domException(kj::str(name), kj::str(message));
+    return exception;
   } catch (JsExceptionThrown&) {
     // Creating the DOMException threw, for instance because the stack is exhausted; that
     // exception stays pending.

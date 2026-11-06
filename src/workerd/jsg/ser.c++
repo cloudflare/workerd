@@ -256,8 +256,7 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   auto message = kj::str("Could not serialize object of type \"", obj->GetConstructorName(),
       "\". This type does "
       "not support serialization.");
-  auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
-  js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
+  js.throwException(js.domException(kj::str("DataCloneError"), kj::mv(message)));
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {

@@ -390,8 +390,7 @@ DecodedException decodeTunneledException(
     KJ_IF_SOME(errorName, tryConsumeDomExceptionName(errorType)) {
       auto& js = Lock::from(isolate);
       auto message = appMessage(errorType);
-      auto exception = js.domException(kj::mv(errorName), kj::mv(message));
-      result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+      result.handle = js.domException(kj::mv(errorName), kj::mv(message));
       addAdditionalInfo();
       return result;
     }

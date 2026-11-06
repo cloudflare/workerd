@@ -3193,7 +3193,9 @@ class Lock {
     }
   }
 
-  virtual Ref<DOMException> domException(
+  // Creates a DOMException without running JavaScript. Its stack is `stackValue` if given, or
+  // else captured from the current one.
+  virtual JsObject domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
   // The DOMException that `value` unwraps as, as a `DOMException&` parameter unwraps it: `value`
