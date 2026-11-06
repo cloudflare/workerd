@@ -104,22 +104,37 @@ use crate::v8;
 /// `Traced::trace` on every field — types with no GC-visible references
 /// use a no-op implementation, such as the one `jsg_traced!` generates.
 ///
+/// `Traced` requires `Send`, which keeps resources free of data races. Resources, function data
+/// and reaction data, including the values of typed promises, hold only `Traced` types, and the
+/// isolate lock is their mutex: one thread uses them at a time, but the lock passes between
+/// threads, and a thread that holds it can move a value out and keep it after releasing the lock.
+/// So they must be `Send`, for the reason `Mutex<T>: Sync` needs `T: Send`, but need not be
+/// `Sync`. [`jsg::Rc`](crate::Rc) and [`jsg::Weak`](crate::Weak) are `Send` because they touch
+/// their counts and their resource only under the lock of its isolate. `std::rc::Rc` is not
+/// `Send`, so it has no `Traced` impl. See `src/rust/jsg/README.md`, safety rule 5.
+///
+/// A hand-written impl must also visit every GC reference the value holds, keep traced state with
+/// its one GC owner, hold no [`v8::Global`] (safety rule 2), and change nothing but through the
+/// visitor. Breaking those leaks, panics or aborts, but can't cause undefined behaviour, so the
+/// trait is safe.
+///
 /// # Built-in implementations
 ///
-/// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
+/// - **Primitives** (`bool`, `String`, integers, floats, atomics, `()`) — no-op.
 /// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
-///   `BTreeSet<T>`) — iterates elements/values and traces each.
-/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`** — only for
-///   `T: HoldsNoGcReferences`, so there is nothing in them to visit; see
-///   [`HoldsNoGcReferences`].
+///   `BTreeSet<T>`) — iterates elements/values and traces each. Map keys are not visited, so
+///   they must be [`HoldsNoGcReferences`].
+/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`**, **`std::sync::Mutex<T>`**,
+///   **`std::sync::Arc<T>`** — only for `T: HoldsNoGcReferences` (and `Sync`, for `Arc`), so
+///   there is nothing in them to visit; see [`HoldsNoGcReferences`].
 /// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — delegate to the
 ///   value, and detach it from the cell's owner as it leaves the cell; see
 ///   [`GcVisitor::is_detaching`](crate::v8::GcVisitor::is_detaching).
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
-pub trait Traced {
+pub trait Traced: Send {
     /// Visit GC-visible references held by this value.
     ///
     /// It has no default, so that an impl can't skip a field by leaving it out. A type with no
@@ -129,10 +144,9 @@ pub trait Traced {
     /// A hand-written implementation must visit every field that can hold a GC reference
     /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
     /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
-    /// it is never collected. Don't keep a type that holds GC references behind an
-    /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
-    /// `README.md` §Safety rules, rule 2. Other than through `visitor`, it must not change the
-    /// value or anything that holds it: a [`crate::Cell`] visits its value in place.
+    /// it is never collected. Other than through `visitor`, it must not change the value or
+    /// anything that holds it: a [`crate::Cell`] visits its value in place, so writing into any
+    /// `jsg::Cell` during a visit panics.
     fn trace(&self, visitor: &mut crate::v8::GcVisitor);
 }
 
@@ -185,6 +199,17 @@ impl_traced_noop!(
     isize,
     f32,
     f64,
+    std::sync::atomic::AtomicBool,
+    std::sync::atomic::AtomicU8,
+    std::sync::atomic::AtomicU16,
+    std::sync::atomic::AtomicU32,
+    std::sync::atomic::AtomicU64,
+    std::sync::atomic::AtomicUsize,
+    std::sync::atomic::AtomicI8,
+    std::sync::atomic::AtomicI16,
+    std::sync::atomic::AtomicI32,
+    std::sync::atomic::AtomicI64,
+    std::sync::atomic::AtomicIsize,
     std::time::SystemTime,
     crate::v8::BackingStore,
     &str,
@@ -259,7 +284,9 @@ impl<V: Traced> Traced for Dict<V> {
 
 impl<V: HoldsNoGcReferences> HoldsNoGcReferences for Dict<V> {}
 
-impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+impl<K: HoldsNoGcReferences, V: Traced, S: std::hash::BuildHasher + Send> Traced
+    for std::collections::HashMap<K, V, S>
+{
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -267,12 +294,12 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
     }
 }
 
-impl<K, V: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
-    for std::collections::HashMap<K, V, S>
+impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences, S: std::hash::BuildHasher + Send>
+    HoldsNoGcReferences for std::collections::HashMap<K, V, S>
 {
 }
 
-impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+impl<K: HoldsNoGcReferences, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -280,9 +307,12 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     }
 }
 
-impl<K, V: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeMap<K, V> {}
+impl<K: HoldsNoGcReferences, V: HoldsNoGcReferences> HoldsNoGcReferences
+    for std::collections::BTreeMap<K, V>
+{
+}
 
-impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+impl<T: Traced, S: std::hash::BuildHasher + Send> Traced for std::collections::HashSet<T, S> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -290,7 +320,7 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
     }
 }
 
-impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher + Send> HoldsNoGcReferences
     for std::collections::HashSet<T, S>
 {
 }
@@ -306,47 +336,38 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeSet<T> {}
 
 /// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` taken out of a std `Cell`
-/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`].
+/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`]. So there is
+/// nothing in it to visit.
 impl<T: HoldsNoGcReferences> Traced for std::cell::Cell<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // SAFETY: V8 GC tracing is single-threaded within an isolate and never
-        // re-entrant on the same object during a single GC cycle. We only read
-        // through the pointer.
-        unsafe {
-            (*self.as_ptr()).trace(visitor);
-        }
-    }
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::Cell<T> {}
 
 /// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` moved out through a std
 /// `RefCell`'s mutable borrow would be neither strong nor traced. A cell that holds one is a
-/// [`crate::RefCell`].
+/// [`crate::RefCell`]. So there is nothing in it to visit.
 impl<T: HoldsNoGcReferences> Traced for std::cell::RefCell<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // `T` holds no GC references, so a mutably borrowed cell can be skipped: a visit would
-        // find nothing in it. (`crate::RefCell` holds references, and makes them strong when it
-        // is mutably borrowed, so a visit can skip it too.)
-        if let Ok(inner) = self.try_borrow() {
-            inner.trace(visitor);
-        }
-    }
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::RefCell<T> {}
 
-/// Only for `T: HoldsNoGcReferences`: every owner of a shared `Rc` would trace what it holds, and
-/// a GC reference has a single parent. A `jsg::Rc` visited by two parents asserts, as a C++
-/// `jsg::Ref` does, and a `TracedGlobal` would stay alive only while the last one to visit it
-/// does. Share a resource through a `jsg::Rc` or `jsg::Weak` to it instead.
-impl<T: HoldsNoGcReferences> Traced for std::rc::Rc<T> {
-    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        (**self).trace(visitor);
-    }
+/// Only for `T: HoldsNoGcReferences`: every owner of a shared `Arc` would trace what it holds,
+/// though a GC reference has a single parent. Share a resource through a `jsg::Rc` or
+/// `jsg::Weak` to it instead.
+impl<T: HoldsNoGcReferences + Sync> Traced for std::sync::Arc<T> {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
-impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::rc::Rc<T> {}
+impl<T: HoldsNoGcReferences + Sync> HoldsNoGcReferences for std::sync::Arc<T> {}
+
+/// Only for `T: HoldsNoGcReferences`, as for `std::cell::RefCell`.
+impl<T: HoldsNoGcReferences> Traced for std::sync::Mutex<T> {
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+}
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::sync::Mutex<T> {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)

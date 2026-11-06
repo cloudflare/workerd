@@ -323,3 +323,29 @@ fn gc_during_a_mutable_borrow_loses_nothing() {
         Ok(())
     });
 }
+
+thread_local! {
+    static WRITTEN_DURING_A_VISIT: jsg::Cell<u32> = const { jsg::Cell::new(0) };
+}
+
+/// Writes into a `jsg::Cell` from its `trace`, which the trait's contract forbids.
+struct WritesDuringItsVisit;
+
+impl jsg::Traced for WritesDuringItsVisit {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {
+        WRITTEN_DURING_A_VISIT.with(|cell| cell.set(1));
+    }
+}
+
+/// A visit reads a `jsg::Cell`'s value in place, so a write into any `jsg::Cell` meanwhile, which
+/// could drop the value under the visit, panics rather than corrupting memory. `replace` detaches
+/// the old value, which visits the inner cell in place.
+#[test]
+#[should_panic(expected = "a jsg::Cell was written while a GC visit or a heap snapshot read")]
+fn writing_into_a_jsg_cell_during_a_visit_panics() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        let outer = jsg::Cell::new(jsg::Cell::new(WritesDuringItsVisit));
+        outer.replace(lock, jsg::Cell::new(WritesDuringItsVisit));
+        Ok(())
+    });
+}

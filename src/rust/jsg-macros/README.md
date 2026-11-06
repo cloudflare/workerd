@@ -45,12 +45,12 @@ in `src/rust/jsg/README.md`.
 resource struct (see `#[jsg_resource]`), and can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
-The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
-`RefCell` or `std::rc::Rc`, when every field's type does. A recursive struct, or two that
-contain each other, can't derive it, since the trait solver reports the cycle as an overflow, so
-`custom_holds_no_gc_references` on one struct in the cycle keeps the generated `Traced` impl and
-leaves the marker to its author, who implements it only if no struct in the cycle holds a GC
-reference.
+The struct implements `jsg::HoldsNoGcReferences` when every field's type does, which lets it into a
+`std::cell::Cell`, `RefCell` or `std::sync::Mutex`, and into an `Arc` if it is also `Sync`. A
+recursive struct, or two that contain each other, can't derive it, since the trait solver reports
+the cycle as an overflow, so `custom_holds_no_gc_references` on one struct in the cycle keeps the
+generated `Traced` impl and leaves the marker to its author, who implements it only if no struct in
+the cycle holds a GC reference.
 
 ```rust
 #[jsg_struct]
@@ -615,7 +615,8 @@ use no-op `Traced` impls (`jsg::jsg_traced!`); containers/wrappers recurse to in
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` / `jsg::NullOrUndefined<T>` | Delegates to `T` when `Some` |
 | `jsg::Lenient<T>` | Traces `T` when `Some`, or the original JS value when `Unconvertable` |
-| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values; map keys are not visited, so they must be `jsg::HoldsNoGcReferences`, which the bounds require |
+| `std::rc::Rc<T>` | **Not allowed** — no `Traced` impl, since a clone could reach the resource's state without the isolate lock; share a resource through `jsg::Rc` or `jsg::Weak`, and plain data with a future through `Arc<T: Send + Sync>` |
 | `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
 | `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe because visits change nothing other than through the visitor and `replace` moves the value out before detaching it; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make strong what leaves the cell (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives | No-op `Traced` |
@@ -630,7 +631,8 @@ because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
 
 For cases where default field-by-field `Traced` behavior is not enough, use
 `#[jsg_resource(custom_trace)]` to suppress the generated `Traced` impl and
-write your own.
+write your own. The impl must visit every GC reference, and the type must be `Send`, which
+`Traced` requires (see `jsg/README.md` §Safety rules, rules 2 and 5).
 
 The macro still generates:
 
@@ -789,7 +791,7 @@ A retainer held as a field of a resource without `custom_trace` is traced too, s
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
 capacity. A retainer reached twice is one node, and so is an allocation that several
-`std::rc::Rc`s or `std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
+`std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
 `jsg::MemoryTracker::MAX_DEPTH` deep: a node that would be that deep is a leaf with nothing inside
 it, or an edge to a resource's JavaScript wrapper, which bounds any long chain, and which is not
 deduplicated, so that a shorter path to the same value still reports it in full. A retainer type

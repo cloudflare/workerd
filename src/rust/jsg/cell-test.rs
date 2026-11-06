@@ -12,12 +12,12 @@ use super::*;
 fn set_panics_while_the_value_is_reported() {
     let cell = Cell::new(1u32);
     let written = catch_unwind(AssertUnwindSafe(|| {
-        cell.read_for_report(|_| cell.set(2));
+        cell.read_in_place(|_| cell.set(2));
     }));
     assert!(written.is_err());
     // The panic ended the report, which let the cell go.
     cell.set(3);
-    assert_eq!(cell.read_for_report(|value| *value), 3);
+    assert_eq!(cell.read_in_place(|value| *value), 3);
 }
 
 /// One flag for the thread: reporting one cell refuses writes into any other.
@@ -26,7 +26,7 @@ fn set_of_another_cell_panics_while_a_value_is_reported() {
     let cell = Cell::new(1u32);
     let other = Cell::new(1u32);
     let written = catch_unwind(AssertUnwindSafe(|| {
-        cell.read_for_report(|_| other.set(2));
+        cell.read_in_place(|_| other.set(2));
     }));
     assert!(written.is_err());
     other.set(3);
@@ -40,7 +40,7 @@ fn a_report_on_another_thread_allows_writes() {
     let (done, finish) = std::sync::mpsc::channel::<()>();
     let reporter = std::thread::spawn(move || {
         let other = Cell::new(1u32);
-        other.read_for_report(|_| {
+        other.read_in_place(|_| {
             reading.send(()).unwrap();
             finish.recv().unwrap();
         });
@@ -55,12 +55,12 @@ fn a_report_on_another_thread_allows_writes() {
 fn a_nested_report_leaves_the_outer_one_in_force() {
     let cell = Cell::new(1u32);
     let written = catch_unwind(AssertUnwindSafe(|| {
-        cell.read_for_report(|_| {
-            cell.read_for_report(|_| {});
+        cell.read_in_place(|_| {
+            cell.read_in_place(|_| {});
             cell.set(2);
         });
     }));
     assert!(written.is_err());
     cell.set(3);
-    assert_eq!(cell.read_for_report(|value| *value), 3);
+    assert_eq!(cell.read_in_place(|value| *value), 3);
 }

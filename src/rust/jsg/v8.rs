@@ -1992,14 +1992,14 @@ impl Function {
     /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
     /// traces may lead back to the function. Two things break this:
     ///
-    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
-    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
-    ///   collector, and the function and `data` are freed only when the isolate is torn down.
-    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
-    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
-    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
-    ///   traced from two owners can be freed while one of them still uses it. To share state,
-    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (which has no
+    ///   `Traced` impl, but can hide inside a type with a hand-written one). If it can reach the
+    ///   function, the cycle is invisible to the garbage collector, and the function and `data`
+    ///   are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces. `data` must be the only owner that
+    ///   traces what it traces: tracing one `jsg::Rc` from two owners fails an assertion, and a
+    ///   `TracedGlobal` traced from two owners can be freed while one of them still uses it. To
+    ///   share state, hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
     ///
     /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
     /// from `data`.
@@ -4919,8 +4919,7 @@ impl GcVisitor {
     /// The visit makes the handle strong if the parent has strong Rust references, and weak if
     /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
     /// last visit wins, and the value can be collected while the other owner still uses it. So
-    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
-    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    /// a `TracedGlobal` must have exactly one GC owner; see `README.md` §Safety rules, rule 2.
     ///
     /// # Panics
     /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an

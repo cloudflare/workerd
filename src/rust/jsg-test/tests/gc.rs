@@ -991,7 +991,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
 }
 
 // ---------------------------------------------------------------------------
-// Rc<NativeState> shared ownership — native object outlives Rc but is
+// Arc<NativeState> shared ownership — native object outlives the test's Arc but is
 // dropped when V8 GC collects the JS wrapper.
 // ---------------------------------------------------------------------------
 
@@ -1001,24 +1001,26 @@ struct NativeState {
     value: u32,
 }
 
-jsg::jsg_traced!(NativeState);
-
 impl Drop for NativeState {
     fn drop(&mut self) {
         NATIVE_STATE_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
 
+struct SharedNativeState(std::sync::Arc<NativeState>);
+
+jsg::jsg_traced!(SharedNativeState);
+
 #[jsg_resource]
 struct NativeOwnerResource {
-    state: std::rc::Rc<NativeState>,
+    state: SharedNativeState,
 }
 
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
     fn get_value(&self) -> u32 {
-        self.state.value
+        self.state.0.value
     }
 }
 
@@ -1104,7 +1106,7 @@ fn traced_ref_drop_respects_strong_flag() {
     });
 }
 
-/// A Rust resource holds an `Rc<NativeState>`. After wrapping for JS and
+/// A Rust resource holds an `Arc<NativeState>`. After wrapping for JS and
 /// dropping the Rust `Ref`, the native state is kept alive by the `CppgcShim`.
 /// Minor (young-generation) GC must collect the wrapper and drop the native
 /// state — proving the `ResetRoot` / `detachLater` path works for Rust resources.
@@ -1113,8 +1115,8 @@ fn rc_native_object_dropped_on_minor_gc() {
     NATIVE_STATE_DROPS.store(0, Ordering::SeqCst);
 
     let harness = crate::Harness::new();
-    let state = std::rc::Rc::new(NativeState { value: 99 });
-    let state_clone = state.clone();
+    let state = std::sync::Arc::new(NativeState { value: 99 });
+    let state_clone = SharedNativeState(std::sync::Arc::clone(&state));
 
     harness.run_in_context(|lock, _ctx| {
         let resource = jsg::Rc::new(lock, NativeOwnerResource { state: state_clone });
@@ -1128,14 +1130,14 @@ fn rc_native_object_dropped_on_minor_gc() {
         Ok(())
     });
 
-    // Drop the external Rc clone. The resource's Rc inside the Wrappable
+    // Drop the external Arc clone. The resource's Arc inside the Wrappable
     // is the last one, but the Wrappable is alive (held by CppgcShim).
     std::mem::drop(state);
     assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 0);
 
     // Minor GC collects the young-generation wrapper via the ResetRoot path,
     // which detaches the CppgcShim → drops kj::Own<Wrappable> → drops the
-    // resource → drops Rc<NativeState> → NativeState is dropped.
+    // resource → drops Arc<NativeState> → NativeState is dropped.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_minor_gc(lock);
         assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 1);
