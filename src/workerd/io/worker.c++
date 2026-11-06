@@ -2221,10 +2221,15 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
   // the modules are already resolved so we don't pump the microtask queue while
   // synchronously accessing those globals. Resolving them here ensures that they are
   // ready to go before we begin evaluating the main module.
+  //
+  // The process global reads the process object's own module, not node:process, whose
+  // named exports include the stdio streams and so force them to be built.
   auto featureFlags = FeatureFlags::get(js);
   if (featureFlags.getNodeJsCompatV2() && isNewModuleRegistryEnabled(featureFlags)) {
-    JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
-        "Failed to initialize node:process module");
+    auto processSpec = featureFlags.getEnableNodeJsProcessV2() ? "node-internal:public_process"_kj
+                                                               : "node-internal:legacy_process"_kj;
+    JSG_REQUIRE_NONNULL(js.resolveInternalModule(processSpec), Error, "Failed to initialize ",
+        processSpec, " module");
     JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
         "Failed to initialize node:buffer module");
   }

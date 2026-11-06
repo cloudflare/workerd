@@ -1355,7 +1355,9 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_IF_SOME(p, processValue) {
     return p.getHandle(js);
   }
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  // Handle process module redirection based on enable_nodejs_process_v2 flag. This reads
+  // the process object's own module rather than node:process, whose named exports include
+  // the stdio streams and so force them to be built.
   auto specifier = ([&]() -> kj::StringPtr {
     if (FeatureFlags::get(js).getEnableNodeJsProcessV2()) {
       return "node-internal:public_process"_kj;

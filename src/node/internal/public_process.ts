@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-// Process is implemented under node-internal: so that we can have node:process
-// resolve to node-internal:public_process OR node-internal:legacy_process depending
-// on whether the enable_nodejs_process_v2 compat flag is set.
+// The `process` object for the enable_nodejs_process_v2 flag: what the `process` global
+// returns, and the default export of node:process. node:process itself resolves to
+// node-internal:process_exports, which re-exports this module and adds the stdio streams
+// as named exports; node-internal:legacy_process serves the flag's off state.
 
 import { default as EventEmitter } from 'node-internal:events';
 import {
@@ -33,7 +34,6 @@ import type * as NodeFS from 'node:fs';
 
 export { platform, nextTick, emitWarning, env, features, config };
 import { stdin, stdout, stderr } from 'node-internal:internal_process_stdio';
-export { stdin, stdout, stderr };
 
 export function chdir(path: string | Buffer | URL): void {
   validateString(path, 'directory');
