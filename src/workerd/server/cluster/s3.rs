@@ -98,7 +98,12 @@ impl S3 {
                 .map(|(_, value)| value.clone())
                 .or_else(|| std::env::var(var).ok())
         };
-        let required = |name: &str| option(name).ok_or_else(|| Error::Config(name.to_owned()));
+        let required = |name: &str| {
+            option(name).ok_or_else(|| {
+                let var = name.to_uppercase();
+                Error::Config(format!("set {name} or {var}"))
+            })
+        };
         let region = option("aws_region").unwrap_or_else(|| "us-east-1".into());
         let endpoint = option("aws_endpoint")
             .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com"))
@@ -179,10 +184,31 @@ impl Store for S3 {
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
-        let mut entries = Vec::new();
+        Ok(self.listing(prefix, false).await?.0)
+    }
+
+    async fn prefixes(&self, prefix: &str) -> Result<Vec<String>> {
+        Ok(self.listing(prefix, true).await?.1)
+    }
+
+    /// How far this node's wall clock is outside the bucket's, from the last
+    /// response's `Date` header: 0 when the header fits the request's window.
+    fn clock_skew_ms(&self) -> Option<i64> {
+        self.skew_ms.get()
+    }
+}
+
+impl S3 {
+    /// The keys under `prefix`, and with `delimit` the common prefixes
+    /// up to the next `/`.
+    async fn listing(&self, prefix: &str, delimit: bool) -> Result<(Vec<Entry>, Vec<String>)> {
+        let (mut entries, mut prefixes) = (Vec::new(), Vec::new());
         let mut token: Option<String> = None;
         loop {
             let mut query = vec![("list-type", "2".to_owned()), ("prefix", prefix.to_owned())];
+            if delimit {
+                query.push(("delimiter", "/".to_owned()));
+            }
             if let Some(token) = token.take() {
                 query.push(("continuation-token", token));
             }
@@ -197,23 +223,18 @@ impl Store for S3 {
                 let key = elements(contents, "Key").next().map(unescape);
                 entries.extend(key.map(|key| Entry { key }));
             }
+            for common in elements(&xml, "CommonPrefixes") {
+                prefixes.extend(elements(common, "Prefix").next().map(unescape));
+            }
             match elements(&xml, "NextContinuationToken").next() {
                 Some(next) if elements(&xml, "IsTruncated").next() == Some("true") => {
                     token = Some(unescape(next));
                 }
-                _ => return Ok(entries),
+                _ => return Ok((entries, prefixes)),
             }
         }
     }
 
-    /// How far this node's wall clock is outside the bucket's, from the last
-    /// response's `Date` header: 0 when the header fits the request's window.
-    fn clock_skew_ms(&self) -> Option<i64> {
-        self.skew_ms.get()
-    }
-}
-
-impl S3 {
     /// Sign and send one request. `key` is the object key, or empty for a
     /// bucket-level call.
     /// R2 answers 429 to more than about one write a second to one key, and
@@ -339,7 +360,7 @@ impl S3 {
                 (head, REQUEST_TIMEOUT),
             )
             .await
-            .map_err(|error| Error::Http(format!("{method} {key}: {error}")))?;
+            .map_err(|error| request_error(method, key, &error))?;
         if let Some(date) = http_date_ms(&response.date) {
             // The bucket stamped the header, in whole seconds, between the
             // send and the answer: this clock is off only by what lies
@@ -483,6 +504,15 @@ pub fn format_rfc3339_nano(unix_millis: i64) -> String {
     out + "Z"
 }
 
+/// Converts `error` from a request for `key` to a bucket error.
+fn request_error(method: &str, key: &str, error: &str) -> Error {
+    if error == crate::http::TOO_LARGE {
+        Error::TooLarge(format!("{method} {key}"))
+    } else {
+        Error::Http(format!("{method} {key}: {error}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -533,14 +563,38 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_credential_names_its_variable() {
+        // Unless the environment supplies it.
+        if ["AWS_SECRET_ACCESS_KEY", "AWS_CREDENTIALS_FILE"]
+            .iter()
+            .any(|var| std::env::var_os(var).is_some())
+        {
+            return;
+        }
+        let options = [("aws_access_key_id".to_owned(), "k".to_owned())];
+        let Err(Error::Config(message)) = S3::new("s3://bucket/prefix", &options) else {
+            panic!("expected a config error");
+        };
+        assert_eq!(
+            message,
+            "set aws_secret_access_key or AWS_SECRET_ACCESS_KEY"
+        );
+    }
+
+    #[test]
     fn listing_xml() {
         let xml = "<ListBucketResult><IsTruncated>true</IsTruncated>\
             <Contents><Key>a&amp;b</Key><Size>3</Size></Contents>\
+            <CommonPrefixes><Prefix>p/</Prefix></CommonPrefixes>\
             <NextContinuationToken>t</NextContinuationToken></ListBucketResult>";
         let keys: Vec<_> = elements(xml, "Contents")
             .map(|c| unescape(elements(c, "Key").next().unwrap()))
             .collect();
         assert_eq!(keys, ["a&b"]);
+        let prefixes: Vec<_> = elements(xml, "CommonPrefixes")
+            .map(|c| elements(c, "Prefix").next().unwrap())
+            .collect();
+        assert_eq!(prefixes, ["p/"]);
         assert_eq!(elements(xml, "NextContinuationToken").next(), Some("t"));
     }
 

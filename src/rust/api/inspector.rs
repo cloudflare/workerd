@@ -178,7 +178,7 @@ pub struct InspectorModule;
 
 #[jsg_resource(nested_types(Connection = InspectorConnection))]
 impl InspectorModule {
-    pub fn new() -> jsg::Rc<Self> {
-        jsg::Rc::new(Self {})
+    pub fn new(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Self> {
+        jsg::Rc::new(lock, Self {})
     }
 }

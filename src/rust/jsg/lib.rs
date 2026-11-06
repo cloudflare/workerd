@@ -2,32 +2,44 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod arguments;
+mod async_context;
 mod buffer;
+mod cell;
 mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
+pub mod json;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
 mod oneof;
+mod opaque;
 mod promise;
 pub mod resource;
+pub mod rtti;
 mod scope;
 pub mod ser;
+mod string;
+mod typed_promise;
 pub mod v8;
 mod wrappable;
 
+pub use arguments::Arguments;
+pub use async_context::AsyncContextFrame;
+pub use async_context::TracedAsyncContextFrame;
 pub use buffer::ToJsArrayBuffer;
 pub use buffer::ToJsTypedArray;
+pub use cell::Cell;
+pub use cell::RefCell;
 pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
@@ -46,10 +58,19 @@ pub use oneof::concat_union_names;
 pub use oneof::try_union_from_js;
 #[doc(hidden)]
 pub use oneof::validate_union_names;
+pub use resource::DescribedMember;
+pub use resource::MemberDefinition;
+pub use resource::MemberRegistry;
 pub use resource::NestedType;
+pub use resource::NestedTypeMember;
 pub use resource::Rc;
 pub use resource::Resource;
+pub use resource::Undescribed;
 pub use resource::Weak;
+pub use resource::described_member;
+pub use resource::nested_type;
+pub use resource::undescribed;
+pub use rtti::TypeInfo;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
 pub use scope::Intercepted;
@@ -67,10 +88,18 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
+pub use string::JsString;
+pub use typed_promise::Promise;
+pub use typed_promise::PromiseArgument;
+pub use typed_promise::PromiseResolver;
+pub use typed_promise::PromiseValue;
+pub use typed_promise::TracedPromise;
+pub use typed_promise::TracedPromiseResolver;
 pub use v8::GcVisitor;
 pub use v8::IsolatePtr;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
+pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
 
@@ -97,17 +126,18 @@ mod ffi {
         /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
         fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
 
-        /// Resets the V8 handles that `Global`s and `TracedGlobal`s dropped without the
-        /// isolate lock left for the next lock. `IsolateBase::applyDeferredActions` calls it
-        /// through the deferred action hook, which `IsolateBase::Lock` does whenever it locks
-        /// the isolate.
+        /// Releases the references that `Rc`s and `Weak`s dropped without the isolate lock left
+        /// for the next lock, and resets the V8 handles that `Global`s and `TracedGlobal`s
+        /// left. `IsolateBase::applyDeferredActions` calls it through the deferred action hook,
+        /// which `IsolateBase::Lock` does whenever it locks the isolate.
         /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
-        unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut Isolate);
+        unsafe fn realm_drain_awaiting_lock(isolate: *mut Isolate);
 
-        /// Frees the slots of `TracedGlobal`s dropped after the Realm; see
-        /// `IsolateState::isolate_disposed`. `~IsolateBase` calls it after
-        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
-        /// reference to the state that `realm_detach` was given.
+        /// Frees the slots of `TracedGlobal`s, and releases the references of `Rc`s and
+        /// `Weak`s, dropped after the Realm; see `IsolateState::isolate_disposed`.
+        /// `~IsolateBase` calls it after `v8::Isolate::Dispose`, through the hook that
+        /// `realm_detach` installs, with the reference to the state that `realm_detach` was
+        /// given.
         unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
@@ -124,7 +154,7 @@ mod ffi {
         /// none has been detached, which sets the dispose hook.
         unsafe fn realm_can_attach(isolate: *mut Isolate) -> bool;
         /// Stores `realm` in the isolate's data slot and installs the deferred action hook
-        /// that calls `realm_reset_globals_awaiting_lock`.
+        /// that calls `realm_drain_awaiting_lock`.
         pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
         /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
         /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
@@ -236,8 +266,8 @@ impl<'s> FromJS<'s> for Error {
     /// Otherwise, converts the value to a string for the message.
     ///
     /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or execution is terminating, this fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// If it throws, or an exception or a termination is already pending, this fails with an
+    /// error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
@@ -300,7 +330,11 @@ impl Error {
 
     /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
     /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
-    pub(crate) fn pending() -> Self {
+    ///
+    /// Outside this crate, it is for FFI shims that leave an exception pending and return an
+    /// empty result, as C++ code that calls into JavaScript does.
+    #[must_use]
+    pub fn pending() -> Self {
         Self {
             pending: true,
             ..Self::new_internal_error("a JavaScript exception is pending")
@@ -456,15 +490,14 @@ impl Error {
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// `name` is `Error`, the type JavaScript gets (`Lock::throw_internal_error()` -> C++
+    /// `makeInternalError()`).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::TypeError,
+            name: ExceptionType::Error,
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -562,7 +595,7 @@ impl<T> Deref for NonCoercible<T> {
 /// a coarse test. The trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type. For a non-coercing JavaScript string handle, use `v8::Local<'_, v8::String>`."
 )]
 pub trait Coercible: Type + coercible::Sealed {}
 
@@ -693,20 +726,6 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), error.into_ffi()) }
     }
 
-    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
-    /// after the current callback has returned, so they must be `'static`.
-    #[expect(
-        clippy::unimplemented,
-        reason = "`await_io` is not implemented for Rust resources yet"
-    )]
-    pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
-    where
-        F: Future<Output = I> + 'static,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
-    {
-        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
-    }
-
     pub(crate) fn realm(&mut self) -> &mut Realm {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
@@ -729,6 +748,14 @@ impl<'s> Lock<'s> {
     #[must_use]
     pub fn globals_awaiting_lock(&mut self) -> usize {
         self.realm().state.awaiting_lock_count()
+    }
+
+    /// The number of [`Rc`]s and [`Weak`]s that were dropped without the isolate lock and whose
+    /// references wait for the next lock to be released; see [`IsolateState`]. For tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn refs_awaiting_lock(&mut self) -> usize {
+        self.realm().state.released_awaiting_lock_count()
     }
 
     /// Throws an error as a V8 exception.
@@ -764,8 +791,8 @@ impl<'s> Lock<'s> {
             return;
         }
         if self.is_execution_terminating() {
-            // `isolate_throw_exception` would throw nothing, and creating the exception while
-            // execution is terminating fails a V8 debug check.
+            // `isolate_throw_exception` would throw nothing, so there is no point in creating
+            // the exception.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
@@ -887,8 +914,8 @@ impl<'s> Lock<'s> {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Creating the exception while execution is terminating fails a V8 debug check, and
-            // nothing could be rejected with it.
+            // Nothing could be rejected with the exception, so it is not created. (Creating it
+            // would be safe: creating an error object takes no context.)
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);
@@ -936,6 +963,48 @@ impl<'s> Lock<'s> {
         unsafe {
             v8::ffi::isolate_terminate_execution(self.isolate().as_ffi());
         }
+    }
+
+    /// Terminates JavaScript execution on this isolate now, as C++
+    /// `jsg::Lock::terminateExecutionNow()` does, and returns the error that carries the
+    /// termination to the code that started the JavaScript.
+    ///
+    /// Unlike [`Lock::terminate_execution`], which only requests a termination that V8 delivers
+    /// at its next interrupt check, this has V8 deliver it before returning, so that no more
+    /// JavaScript runs: not the rest of the calling function, nor a `catch` or `finally` block.
+    /// Where C++ then unwinds with `JsExceptionThrown`, the caller returns the error, for which
+    /// [`Error::is_pending`] is true:
+    ///
+    /// ```ignore
+    /// #[jsg_method]
+    /// fn stop(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+    ///     Err(lock.terminate_execution_now())
+    /// }
+    /// ```
+    ///
+    /// A `#[jsg_method]` that returns it sets no return value and throws nothing. Code that
+    /// goes on instead cannot run JavaScript or throw anyway: calls into JavaScript fail with a
+    /// pending error while execution is terminating, and the `throw_*` methods throw nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if V8 does not deliver the termination, which C++ asserts too. V8 delivers it
+    /// while it runs code in the entered context, so there must be one.
+    ///
+    /// This panics rather than returning an ordinary error, because an ordinary error would
+    /// throw a JavaScript exception that a `catch` or `finally` block could run after, which
+    /// this function exists to prevent. In a callback from V8, such as a `#[jsg_method]`,
+    /// [`catch_panic`] turns the panic into an internal error and terminates execution, as
+    /// intended. Code that C++ calls through `callback_scope!` has no such handler, and a panic
+    /// that reaches C++ aborts the process.
+    #[must_use = "return the error, so that the termination reaches the code that started the \
+                  JavaScript"]
+    pub fn terminate_execution_now(&mut self) -> Error {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        let terminating =
+            unsafe { v8::ffi::isolate_terminate_execution_now(self.isolate().as_ffi()) };
+        assert!(terminating, "V8 did not terminate execution when asked");
+        Error::pending()
     }
 }
 
@@ -1112,6 +1181,25 @@ pub enum Member {
         getter_callback: RawWildcardGetterCallback,
         query_callback: RawWildcardQueryCallback,
     },
+    /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
+    /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
+    /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
+    Dispose {
+        callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
+    /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
+    /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
+    /// one, and may also have a [`Member::Dispose`].
+    AsyncDispose {
+        callback: RawFunctionCallback,
+    },
+    /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
+    /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
+    /// call names it. A type has at most one.
+    Callable {
+        callback: RawFunctionCallback,
+    },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.
@@ -1152,15 +1240,16 @@ pub trait Struct: Type {}
 /// `CppgcShim` destruction triggers cleanup of the underlying `Wrappable`.
 ///
 /// A Realm attaches itself to its isolate: it is stored in the isolate's data slot, and it
-/// installs the hook through which each `IsolateBase::Lock` resets the persistent handles
-/// dropped without the lock. It must be dropped under the isolate lock, before the isolate is
-/// disposed: dropping it detaches it and closes the isolate's [`IsolateState`], after which the
-/// `Global`s and `TracedGlobal`s of the isolate leave their handles to `v8::Isolate::Dispose`.
-/// The isolate keeps the state alive until it is disposed.
+/// installs the hook through which each `IsolateBase::Lock` releases the resource references and
+/// resets the persistent handles dropped without the lock. It must be dropped under the isolate
+/// lock, before the isolate is disposed: dropping it detaches it and closes the isolate's
+/// [`IsolateState`], after which the `Global`s and `TracedGlobal`s of the isolate leave their
+/// handles to `v8::Isolate::Dispose`, and its `Rc`s and `Weak`s keep their references until the
+/// isolate is disposed. The isolate keeps the state alive until then.
 pub struct Realm {
     isolate: v8::IsolatePtr,
-    /// Shared with every `Global` and `TracedGlobal` of the isolate, which identifies its isolate
-    /// by it.
+    /// Shared with every `Global`, `TracedGlobal`, `Rc` and `Weak` of the isolate, which
+    /// identifies its isolate by it.
     state: Arc<IsolateState>,
     resources: resource::Resources,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
@@ -1190,7 +1279,7 @@ impl Realm {
     /// this realm's compatibility flags.
     pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
         self.resources
-            .get_constructor::<R>(self.isolate, &self.state, self.feature_flags.reader())
+            .get_constructor::<R>(self.isolate, &self.state, &self.feature_flags)
     }
 }
 
@@ -1253,7 +1342,7 @@ unsafe fn isolate_disposed(state: *const IsolateState) {
 
 /// See the bridge declaration.
 #[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
-unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
+unsafe fn realm_drain_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     // A Rust scope of the isolate open on this thread means that C++ locked the isolate again
     // under a `Lock`, which may hold a reference to the Realm. The queue then waits for the
     // next lock.
@@ -1270,7 +1359,7 @@ unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
     let isolate = unsafe { Isolate::from_raw(isolate) };
     // SAFETY: the Realm is attached while the hook that calls this is installed.
     let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
-    realm.state.reset_awaiting_lock(isolate);
+    realm.state.drain_awaiting_lock(isolate);
 }
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for

@@ -34,32 +34,15 @@ bool getReadableStreamIsDisturbed(jsg::Lock& js, jsg::JsObject obj) {
   return webstreams::dispatchCall(js, "getReadableStreamIsDisturbed", obj).isTrue();
 }
 
-// Recognizes the TypeScript implementation's ReadableStream (including subclasses) by the own
-// api-symbol brand its constructor stamps on every instance. Runs no JavaScript -- recognition
-// must work during RPC deserialization, inside V8's no-JS-execution scope -- so it probes for
-// the brand rather than asking the TS implementation. Proxies answer false: an own-property
-// probe on a proxy would invoke its traps, and the TS-side #-brand does not tunnel through
-// proxies either.
-//
-// This is recognition, not authentication. An api symbol stays visible to reflection
-// (Object.getOwnPropertySymbols) on every instance, so user code can read it off a real stream
-// and stamp it on an object of its own: a true answer means "route this as a TypeScript
-// stream", not "this is one". Genuine instances cannot lose the brand, which is stamped
-// non-writable and non-configurable. What protects the consumers is that recognition grants
-// nothing on its own -- every operation reached afterwards goes through the TS internal
-// algorithms, whose real #-brand checks throw a TypeError on an impostor, and on both RPC
-// serialize arms that rejection lands before anything is written to the wire.
-//
-// An impostor also cannot arrive over the wire, because V8's value serializer emits only own
-// enumerable string keys (dropping any symbol-keyed brand) and will not serialize an
-// unrecognized class instance at all. Every branded object reachable inside the no-JS
-// deserialization scope is therefore one this runtime just built -- the premise the state
-// probes in isDisturbed() and isLocked() rest on.
+// The constructor stamps a V8-private brand on every TypeScript ReadableStream, including
+// subclasses. Reading it executes no JS, so recognition also works during RPC deserialization.
+// Private properties are not reflected, inherited, or serialized. Proxies do not convey the
+// brand, matching the TypeScript private-field check.
 bool isTypeScriptReadableStream(jsg::Lock& js, jsg::JsObject obj) {
   if (v8::Local<v8::Value>(obj)->IsProxy()) {
     return false;
   }
-  return obj.has(js, js.symbolInternal("kReadableStreamBrand"), jsg::JsObject::HasOption::OWN);
+  return obj.getPrivate(js, "kReadableStreamBrand"_kj).isTrue();
 }
 
 bool getReadableStreamIsLocked(jsg::Lock& js, jsg::JsObject obj) {
@@ -97,8 +80,8 @@ kj::Maybe<uint64_t> getReadableStreamExpectedLength(jsg::Lock& js, jsg::JsObject
   return kj::none;
 }
 
-// Starts collecting the stream's bytes. Every body consumption of a TypeScript stream builds its
-// result from them in C++, as the legacy implementation does from readAllBytes() and
+// Starts collecting the stream's bytes in JavaScript. Every body consumption of a TypeScript stream
+// builds its result from them in C++, as the legacy implementation does from readAllBytes() and
 // readAllText(). The promise resolves with a null-prototype record holding an ArrayBuffer, not
 // with the ArrayBuffer itself: resolving a promise with an object looks up its then, which a
 // patched Object.prototype.then would supply. Unwrap the record with consumedBuffer().
@@ -116,30 +99,175 @@ jsg::JsArrayBuffer consumedBuffer(jsg::Lock& js, jsg::Value& record) {
   return KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(obj.get(js, "buffer"_kj)));
 }
 
+// The bytes collectNativeSource() read, in the buffers it read them into.
+struct CollectedNativeBytes {
+  struct Part {
+    kj::Array<kj::byte> buffer;
+    size_t filled;
+  };
+  kj::Vector<Part> parts;
+  size_t length = 0;
+
+  void copyTo(kj::ArrayPtr<kj::byte> out) {
+    size_t offset = 0;
+    for (auto& part: parts) {
+      out.slice(offset, offset + part.filled).copyFrom(part.buffer.first(part.filled));
+      offset += part.filled;
+    }
+  }
+};
+
+// Large reads, as the legacy AllReader makes: a body declaring a length of up to
+// kNativeCollectDeclaredReadSize takes one.
+constexpr size_t kNativeCollectReadSize = 128 * 1024;
+constexpr size_t kNativeCollectDeclaredReadSize = 512 * 1024;
+
+// Collects every byte of a native source that a body consumption extracted
+// (extractNativeSourceForCollection in webstreams/readable.ts), failing as the JavaScript
+// collector would for the same stream. `bound` is the stream's declared expectedLength if
+// `declared`, an exact total that the native conduit enforces (see #accountDelivery and
+// closeFromSource in webstreams/native.ts); a breach fails with the conduit's error and, as
+// there, leaves the source uncanceled. Otherwise it is the memory limit, whose breach
+// collectChunks() reports and cancels the source with.
+kj::Promise<CollectedNativeBytes> collectNativeSource(
+    kj::Own<ReadableStreamSource> source, uint64_t bound, bool declared) {
+  CollectedNativeBytes collected;
+  size_t readSize = declared ? kNativeCollectDeclaredReadSize : kNativeCollectReadSize;
+  while (true) {
+    // Room for one byte more than the bound allows, so a breach shows without reading on.
+    size_t size = kj::min(bound - collected.length + 1, readSize);
+    auto buffer = kj::heapArray<kj::byte>(size);
+    size_t amount = co_await source->tryRead(buffer.begin(), size, size);
+    if (amount == 0) break;
+    if (collected.length + amount > bound) {
+      JSG_REQUIRE(!declared, RangeError,
+          "native source delivered more bytes than its declared expectedLength");
+      auto error = JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
+      source->cancel(error.clone());
+      kj::throwFatalException(kj::mv(error));
+    }
+    collected.length += amount;
+    collected.parts.add(CollectedNativeBytes::Part{kj::mv(buffer), amount});
+    // A read returns fewer than its minimum only at EOF.
+    if (amount < size) break;
+  }
+  JSG_REQUIRE(!declared || collected.length == bound, RangeError,
+      "native source closed before producing its declared expectedLength");
+  co_return kj::mv(collected);
+}
+
+// The native source of a native-backed stream that a body consumption can collect in C++,
+// extracted from the stream, with the bound to collect it under; kj::none, leaving the stream
+// untouched, when the JavaScript collector must consume it. See
+// extractNativeSourceForCollection in webstreams/readable.ts.
+struct NativeCollection {
+  kj::Own<ReadableStreamSource> source;
+  uint64_t bound;
+  bool declared;
+  // The stream's onEof subscription, resolved once the source reaches EOF, before the
+  // consumption resolves, as the conduit resolves it.
+  kj::Maybe<jsg::JsRef<jsg::JsFunction>> onEof;
+
+  kj::Promise<CollectedNativeBytes> collect() {
+    return collectNativeSource(kj::mv(source), bound, declared);
+  }
+
+  static void signalEof(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsFunction>>& onEof) {
+    KJ_IF_SOME(resolve, onEof) {
+      resolve.getHandle(js).call(js, js.undefined());
+    }
+  }
+};
+
+kj::Maybe<NativeCollection> tryExtractNativeSourceForCollection(
+    jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
+  // Only native-backed streams carry the private extraction slot; collecting needs the
+  // IoContext that the native source's reads belong to.
+  if (!IoContext::hasCurrent() || !obj.hasPrivate(js, "kExtractNativeSource"_kj)) {
+    return kj::none;
+  }
+  auto result =
+      webstreams::dispatchCall(js, "extractNativeSourceForCollection", obj, js.bigInt(limit));
+  KJ_IF_SOME(record, JSG_TRY_CAST_OBJECT(result)) {
+    auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
+    auto source = KJ_ASSERT_NONNULL(handler.tryUnwrap(js, record.get(js, "source"_kj)),
+        "extractNativeSourceForCollection() did not return a ReadableStreamNativeSource");
+    auto bound = KJ_ASSERT_NONNULL(
+        KJ_ASSERT_NONNULL(record.get(js, "bound"_kj).tryCast<jsg::JsNumber>()).value(js));
+    return NativeCollection{
+      .source = source->releaseForPump(js),
+      .bound = static_cast<uint64_t>(bound),
+      .declared = record.get(js, "declared"_kj).isTrue(),
+      .onEof =
+          record.get(js, "onEof"_kj).tryCast<jsg::JsFunction>().map([&](jsg::JsFunction resolve) {
+      return resolve.addRef(js);
+    }),
+    };
+  }
+  return kj::none;
+}
+
+// Calls `func` with the stream's bytes in an ArrayBuffer once they are all collected: in C++
+// from a native source the stream hands over, and otherwise by the JavaScript collector.
+template <typename Func>
+auto consumeReadableStreamArrayBuffer(jsg::Lock& js, jsg::JsObject obj, uint64_t limit, Func func) {
+  KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
+    return IoContext::current().awaitIo(js, collection.collect(),
+        [func = kj::mv(func), onEof = kj::mv(collection.onEof)](
+            jsg::Lock& js, CollectedNativeBytes collected) mutable {
+      NativeCollection::signalEof(js, onEof);
+      auto buffer = jsg::JsArrayBuffer::create(js, collected.length);
+      collected.copyTo(buffer.asArrayPtr());
+      return func(js, buffer);
+    });
+  }
+  return consumeReadableStreamBuffer(js, obj, limit)
+      .then(js, [func = kj::mv(func)](jsg::Lock& js, jsg::Value record) mutable {
+    return func(js, consumedBuffer(js, record));
+  });
+}
+
+// The text of a body's bytes, with a UTF-8 byte order mark removed, as the legacy readAllText()
+// builds it: see JsReadableStream::text().
+kj::String consumedText(kj::ArrayPtr<const kj::byte> bytes) {
+  if (hasUtf8Bom(bytes)) {
+    bytes = bytes.slice(UTF8_BOM_SIZE);
+  }
+  return kj::heapString(bytes.asChars());
+}
+
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> getReadableStreamArrayBuffer(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    return consumedBuffer(js, record).addRef(js);
-  });
+  return consumeReadableStreamArrayBuffer(
+      js, obj, limit, [](jsg::Lock& js, jsg::JsArrayBuffer buffer) { return buffer.addRef(js); });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    auto buffer = consumedBuffer(js, record);
+  return consumeReadableStreamArrayBuffer(
+      js, obj, limit, [](jsg::Lock& js, jsg::JsArrayBuffer buffer) {
     return jsg::JsUint8Array::create(js, buffer).addRef(js);
   });
 }
 
 jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
   // Collects bytes rather than decoded text, matching the legacy readAllText(): see
-  // JsReadableStream::text().
+  // JsReadableStream::text(). Bytes collected in C++ never become an ArrayBuffer.
+  KJ_IF_SOME(collection, tryExtractNativeSourceForCollection(js, obj, limit)) {
+    return IoContext::current().awaitIo(js, collection.collect(),
+        [onEof = kj::mv(collection.onEof)](jsg::Lock& js, CollectedNativeBytes collected) mutable {
+      NativeCollection::signalEof(js, onEof);
+      if (collected.parts.size() == 1) {
+        auto& part = collected.parts[0];
+        return consumedText(part.buffer.first(part.filled));
+      }
+      auto bytes = kj::heapArray<kj::byte>(collected.length);
+      collected.copyTo(bytes);
+      return consumedText(bytes);
+    });
+  }
   return consumeReadableStreamBuffer(js, obj, limit).then(js, [](jsg::Lock& js, jsg::Value record) {
-    kj::ArrayPtr<const kj::byte> bytes = consumedBuffer(js, record).asArrayPtr();
-    if (hasUtf8Bom(bytes)) {
-      bytes = bytes.slice(UTF8_BOM_SIZE);
-    }
-    return kj::heapString(bytes.asChars());
+    return consumedText(consumedBuffer(js, record).asArrayPtr());
   });
 }
 
@@ -154,9 +282,9 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> getReadableStreamJson(
 
 jsg::Promise<jsg::Ref<Blob>> getReadableStreamBlob(
     jsg::Lock& js, jsg::JsObject obj, uint64_t limit, kj::String contentType) {
-  return consumeReadableStreamBuffer(js, obj, limit)
-      .then(js, [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::Value record) mutable {
-    return js.alloc<Blob>(js, jsg::JsBufferSource(consumedBuffer(js, record)), kj::mv(contentType));
+  return consumeReadableStreamArrayBuffer(js, obj, limit,
+      [contentType = kj::mv(contentType)](jsg::Lock& js, jsg::JsArrayBuffer buffer) mutable {
+    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer), kj::mv(contentType));
   });
 }
 
@@ -1209,16 +1337,14 @@ kj::Promise<DeferredProxy<void>> JsReadableStream::pumpTo(
           "The ReadableStream has been locked to a reader.");
       auto& context = IoContext::current();
 
-      // Classify the backend by probing for the extraction marker: an own property keyed
-      // by the kExtractNativeSource API-registry symbol, present only on native-backed
-      // streams (see the contract in src/per_isolate/webstreams/native.ts).
-      auto extractSymbol = js.symbolInternal("kExtractNativeSource");
-      if (handle.has(js, extractSymbol, jsg::JsObject::HasOption::OWN)) {
+      // Only native-backed streams carry the private extraction slot.
+      if (handle.hasPrivate(js, "kExtractNativeSource"_kj)) {
         // Native-backed: extract the underlying source and pump entirely at the C++
         // layer, preserving each source's own deferred-proxy behavior. The extractor is
         // atomic (validate, detach, lock + disturb) and returns the source wrapper.
-        auto extractor = JSG_REQUIRE_NONNULL(JSG_TRY_CAST_FUNCTION(handle.get(js, extractSymbol)),
-            TypeError, "ReadableStream kExtractNativeSource property is not a function");
+        auto extractor = JSG_REQUIRE_NONNULL(
+            JSG_TRY_CAST_FUNCTION(handle.getPrivate(js, "kExtractNativeSource"_kj)), TypeError,
+            "ReadableStream kExtractNativeSource slot is not a function");
         auto sourceObj = extractor.call(js, handle);
         auto& handler =
             KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<ReadableStreamNativeSource>>());
@@ -1486,18 +1612,20 @@ ReadableStreamNativeSource::ReadableStreamNativeSource(
 
 jsg::Promise<void> ReadableStreamNativeSource::pull(
     jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal) {
-  // Defensive: the TypeScript conduit guarantees at most one pull in flight (standard
-  // pulling/pullAgain serialization); a concurrent pull is a contract violation and must
-  // fail loudly.
-  JSG_REQUIRE(!pullInFlight, TypeError, "pull() is already in flight.");
+  JSG_REQUIRE(!pulling && !pullInFlight, TypeError, "pull() is already in flight.");
+  pulling = true;
+  KJ_DEFER({
+    // Asynchronous pulls retain the guard through delivery and failure cleanup.
+    if (!pullInFlight) pulling = false;
+  });
 
-  KJ_IF_SOME(active, state) {
+  if (state != kj::none) {
     // The read mode follows the consumer: a non-null byobRequest means a BYOB read is at
     // the head of the conduit's request queue; null means a default read is.
     KJ_IF_SOME(byobRequest, JSG_TRY_CAST_OBJECT(controller.get(js, "byobRequest"_kj))) {
-      return pullByob(js, controller, byobRequest, kj::mv(signal), active);
+      return pullByob(js, controller, byobRequest, kj::mv(signal));
     }
-    return pullDefault(js, controller, kj::mv(signal), active);
+    return pullDefault(js, controller, kj::mv(signal));
   }
 
   // The source already reached EOF, was canceled, or failed. The conduit stops pulling once
@@ -1506,7 +1634,11 @@ jsg::Promise<void> ReadableStreamNativeSource::pull(
 }
 
 jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
-    jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active) {
+    jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal) {
+  // The controller's byobRequest getter may have canceled or teed the source.
+  if (state == kj::none) return js.resolvedPromise();
+  auto& active = KJ_ASSERT_NONNULL(state);
+
   // Bytes retained from an abandoned pull are redelivered first, before any new data.
   if (!stash.empty()) {
     // Contract: check the signal synchronously immediately before delivering. If the
@@ -1558,13 +1690,17 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   // before marking it in flight, so a pull that never started leaves no flag behind.
   auto& source = *active.source;
   auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
-  auto read = source.tryRead(scratch.begin(), 1, scratch.size());
+  auto buffer = kj::mv(scratch);
+  auto read = source.tryRead(buffer.begin(), 1, buffer.size());
   pullInFlight = true;
   inFlightReadStartLength = kj::mv(startLength);
   return ioContext
       .awaitIo(js, kj::mv(read),
-          [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
-              jsg::Lock& js, size_t amount) mutable {
+          [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal),
+              buffer = kj::mv(buffer)](jsg::Lock& js, size_t amount) mutable {
+    // If delivery throws, the catch below retains the guard until teardown finishes.
+    KJ_ON_SCOPE_SUCCESS(self->pulling = false);
+    KJ_DEFER(self->scratch = kj::mv(buffer));
     self->pullInFlight = false;
     if (self->pendingCancel) {
       // cancel() arrived while the read was in flight: complete the deferred teardown and
@@ -1573,7 +1709,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
       self->state = kj::none;
       return;
     }
-    auto data = self->scratch.first(amount);
+    auto data = buffer.first(amount);
     if (self->handOffToTee(data, amount == 0)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read while it was in flight (e.g. releaseLock()).
@@ -1591,6 +1727,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
     webstreams::invokeMethod(
         js, controller.getHandle(js), "enqueue"_kj, jsg::JsUint8Array::create(js, data));
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    KJ_DEFER(self->pulling = false);
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
     // -- the conduit errors the stream with the failure, even if this pull was abandoned. A
     // waiting tee's branches fail with the same error.
@@ -1605,8 +1742,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     jsg::JsObject controller,
     jsg::JsObject byobRequest,
-    jsg::Ref<AbortSignal> signal,
-    Active& active) {
+    jsg::Ref<AbortSignal> signal) {
   // Extract the request's view and minimum. The view is a Uint8Array over the remaining
   // unfilled region of the consumer's (transferred, conduit-owned) buffer; atLeast is the
   // minimum number of bytes that must be delivered to satisfy the read (>= 1). These come
@@ -1634,6 +1770,10 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       atLeast <= dest.size(), TypeError, "The BYOB request's minimum exceeds its view size.");
   JSG_REQUIRE(atLeast % elementSize == 0 && dest.size() % elementSize == 0, TypeError,
       "The BYOB request is not element-aligned.");
+
+  // Every metadata getter above can run JavaScript and consume the source.
+  if (state == kj::none) return js.resolvedPromise();
+  auto& active = KJ_ASSERT_NONNULL(state);
 
   // Bytes retained from an abandoned pull, or a partial element left by the previous one,
   // are redelivered first. If they alone satisfy the read's minimum, no I/O is needed.
@@ -1691,14 +1831,18 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   // As in pullDefault: start the read before marking it in flight.
   auto& source = *active.source;
   auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
-  auto read = source.tryRead(scratch.begin(), minBytes, maxBytes);
+  auto buffer = kj::mv(scratch);
+  auto read = source.tryRead(buffer.begin(), minBytes, maxBytes);
   pullInFlight = true;
   inFlightReadStartLength = kj::mv(startLength);
   return ioContext
       .awaitIo(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
-              minBytes, elementSize](jsg::Lock& js, size_t amount) mutable {
+              buffer = kj::mv(buffer), minBytes,
+              elementSize](jsg::Lock& js, size_t amount) mutable {
+    KJ_ON_SCOPE_SUCCESS(self->pulling = false);
+    KJ_DEFER(self->scratch = kj::mv(buffer));
     self->pullInFlight = false;
     if (self->pendingCancel) {
       // cancel() arrived while the read was in flight: complete the deferred teardown and
@@ -1707,7 +1851,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
       self->state = kj::none;
       return;
     }
-    auto data = self->scratch.first(amount);
+    auto data = buffer.first(amount);
     if (self->handOffToTee(data, amount < minBytes)) return;
     if (signal->getAborted(js)) {
       // The consumer abandoned the read; retain the bytes (after any previously retained
@@ -1727,6 +1871,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     self->respondByob(js, controller.getHandle(js), byobRequest.getHandle(js), dest, data,
         Eof(amount < minBytes), elementSize);
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
+    KJ_DEFER(self->pulling = false);
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
@@ -1781,13 +1926,18 @@ void ReadableStreamNativeSource::respondByob(jsg::Lock& js,
 }
 
 void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
+  if (state == kj::none || pendingCancel) return;
+
+  // Exception conversion reads user properties and may reenter cancel() or tee().
+  kj::Exception exception = [&]() {
+    KJ_IF_SOME(r, reason) {
+      return js.exceptionToKj(r);
+    }
+    return JSG_KJ_EXCEPTION(DISCONNECTED, Error, "This ReadableStream was cancelled.");
+  }();
+  if (pendingCancel) return;
+
   KJ_IF_SOME(active, state) {
-    kj::Exception exception = [&]() {
-      KJ_IF_SOME(r, reason) {
-        return js.exceptionToKj(r);
-      }
-      return JSG_KJ_EXCEPTION(DISCONNECTED, Error, "This ReadableStream was cancelled.");
-    }();
     active.source->cancel(kj::mv(exception));
     if (pullInFlight) {
       // A read is in flight; releasing the source now would destroy it out from under its

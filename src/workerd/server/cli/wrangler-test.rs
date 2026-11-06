@@ -149,6 +149,67 @@ fn durable_objects() {
 }
 
 #[test]
+fn a_deployment_holds_only_the_worker() {
+    const COUNTER: &str = r#"{
+      "name": "counter",
+      "main": "index.js",
+      "compatibility_date": "2026-01-01",
+      "no_bundle": true,
+      "durable_objects": { "bindings": [{ "name": "COUNTER", "class_name": "Counter" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }],
+    }"#;
+    let dir = project(&[
+        ("wrangler.jsonc", COUNTER),
+        ("index.js", "export class Counter {}"),
+    ]);
+    let path = dir.join("wrangler.jsonc");
+    let process = Process::new(None, None, Vec::new());
+    for (given, name) in [(None, "counter"), (Some("staging"), "staging")] {
+        let (loaded, config) = load_deployment(path.to_str().unwrap(), given, &process).unwrap();
+        assert_eq!(loaded, name);
+        let message = read(config);
+        let config = message.get_root::<config::Reader>().unwrap();
+        assert!(!config.has_sockets());
+        let services = config.get_services().unwrap();
+        assert_eq!(services.len(), 1);
+        // Named after the deployment, as its classes' storage keys are, so that the same project
+        // deployed under two names composes.
+        assert_eq!(services.get(0).get_name().unwrap(), name);
+        let service::Which::Worker(worker) = services.get(0).which().unwrap() else {
+            panic!("expected a worker service")
+        };
+        let worker = worker.unwrap();
+        let ns = worker.get_durable_object_namespaces().unwrap().get(0);
+        let worker::durable_object_namespace::Which::UniqueKey(key) = ns.which().unwrap() else {
+            panic!("expected a unique key")
+        };
+        assert_eq!(key.unwrap(), format!("{name}-Counter"));
+        let worker::durable_object_storage::Which::LocalDisk(disk) =
+            worker.get_durable_object_storage().which().unwrap()
+        else {
+            panic!("expected local disk storage")
+        };
+        assert_eq!(disk.unwrap(), DEPLOYMENT_STORAGE);
+    }
+    assert!(!dir.join(".wrangler/state").exists());
+
+    let unnamed = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01", "no_bundle": true }"#,
+        ),
+        ("index.js", "export default {}"),
+    ]);
+    let path = unnamed.join("wrangler.jsonc");
+    let Err(error) = load_deployment(path.to_str().unwrap(), None, &process) else {
+        panic!("expected an error")
+    };
+    assert!(error.contains("--name"), "{error}");
+    let (name, _) = load_deployment(path.to_str().unwrap(), Some("app"), &process).unwrap();
+    assert_eq!(name, "app");
+}
+
+#[test]
 fn migrations_rename_and_delete() {
     let w: Wrangler = serde_json::from_str(
         r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
@@ -219,6 +280,60 @@ fn migrations_follow_wranglers_order_and_checks() {
         error.contains("renamed-to class B already exists"),
         "{error}"
     );
+}
+
+#[test]
+fn exports() {
+    let classes = |exports: &str| {
+        let w: Wrangler = serde_json::from_str(&format!(
+            r#"{{ "main": "index.js", "compatibility_date": "2026-01-01",
+                  "durable_objects": {{ "bindings": [{{ "name": "B", "class_name": "Bound" }}] }},
+                  "exports": {exports} }}"#
+        ))
+        .unwrap();
+        do_classes(&w)
+    };
+    let ok = r#"{ "Counter": { "type": "durable-object", "storage": "sqlite" },
+                  "Kv": { "type": "durable-object", "storage": "legacy-kv" },
+                  "Gone": { "type": "durable-object", "state": "deleted" },
+                  "Old": { "type": "durable-object", "state": "renamed",
+                           "renamed_to": "Counter" } }"#;
+    assert_eq!(
+        classes(ok).unwrap(),
+        [
+            ("Counter".to_owned(), "Old".to_owned(), true),
+            ("Kv".to_owned(), "Kv".to_owned(), false),
+            ("Bound".to_owned(), "Bound".to_owned(), false)
+        ]
+    );
+    let error = classes(r#"{ "A": { "type": "durable-object" } }"#).unwrap_err();
+    assert!(error.contains("A has the wrong fields"), "{error}");
+    let error = classes(
+        r#"{ "A": { "type": "durable-object", "state": "deleted", "storage": "sqlite" } }"#,
+    )
+    .unwrap_err();
+    assert!(error.contains("A has the wrong fields"), "{error}");
+    let error =
+        classes(r#"{ "A": { "type": "durable-object", "state": "renamed", "renamed_to": "B" } }"#)
+            .unwrap_err();
+    assert!(error.contains("which is not live"), "{error}");
+    let error = classes(
+        r#"{ "A": { "type": "durable-object", "state": "renamed", "renamed_to": "C" },
+             "B": { "type": "durable-object", "state": "renamed", "renamed_to": "C" },
+             "C": { "type": "durable-object", "storage": "sqlite" } }"#,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("more than one class is renamed to C"),
+        "{error}"
+    );
+    let both: Result<Wrangler, _> = serde_json::from_str(
+        r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
+             "exports": { "A": { "type": "durable-object", "storage": "sqlite" } },
+             "migrations": [{ "tag": "v1", "new_sqlite_classes": ["A"] }] }"#,
+    );
+    let error = do_classes(&both.unwrap()).unwrap_err();
+    assert!(error.contains("cannot both"), "{error}");
 }
 
 #[test]

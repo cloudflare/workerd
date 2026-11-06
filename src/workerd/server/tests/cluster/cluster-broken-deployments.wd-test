@@ -1,0 +1,97 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# Deployments that exercise failures beside the node in cluster-broken-node.wd-test. Some compose
+# but have a broken service. The others are skipped as a whole because they do not compose.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+# This deployment composes, but its worker throws while loading.
+const throws :Workerd.Config = (
+  services = [
+    ( name = "throws",
+      worker = (
+        modules = [
+          ( name = "throws.js", esModule = "throw new Error('this deployment fails to load');" ),
+        ],
+        compatibilityDate = "2026-01-01",
+      )
+    ),
+  ],
+);
+
+# This deployment is skipped because it defines "router", which the node's config also defines.
+const clash :Workerd.Config = (
+  services = [
+    ( name = "clashing", worker = .worker ),
+    ( name = "router", worker = .worker ),
+  ],
+);
+
+# This deployment composes, but its worker binds a service that nothing defines. Its Durable
+# Object namespace is stored on the node's disk.
+const brokenDo :Workerd.Config = (
+  services = [
+    ( name = "broken-do",
+      worker = (
+        modules = [
+          ( name = "broken-do.js",
+            esModule = "export class Counter { fetch() { return new Response('counted'); } }" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        bindings = [ ( name = "MISSING", service = "nope" ) ],
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "broken-do-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "do-storage" ),
+      )
+    ),
+  ],
+);
+
+# This deployment is skipped because the test replaces the first byte of "PLACEHOLDER" with one
+# that is not valid UTF-8.
+const notUtf8 :Workerd.Config = (
+  services = [
+    ( name = "not-utf8",
+      worker = (
+        modules = [ ( name = "not-utf8.js", esModule = "PLACEHOLDER" ) ],
+        compatibilityDate = "2026-01-01",
+      )
+    ),
+  ],
+);
+
+# This deployment is skipped because its Durable Object namespace's directory would be outside
+# the disk.
+const escape :Workerd.Config = (
+  services = [
+    ( name = "escapes",
+      worker = (
+        modules = [
+          ( name = "escapes.js", esModule = "export class Counter {}" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "../../cluster-test-escape" ),
+        ],
+        durableObjectStorage = ( localDisk = "do-storage" ),
+      )
+    ),
+  ],
+);
+
+# This deployment defines an external service, which no command-line override reaches.
+const external :Workerd.Config = (
+  services = [
+    ( name = "ext", external = ( address = "127.0.0.1:9", http = () ) ),
+  ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [
+    ( name = "worker.js", esModule = "export default { fetch() { return new Response('ok'); } };" ),
+  ],
+  compatibilityDate = "2026-01-01",
+);

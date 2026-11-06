@@ -4,8 +4,6 @@
 
 //! Tests that keep handles of one isolate out of another.
 
-#[cfg(not(debug_assertions))]
-use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 
 use jsg::FromJS;
@@ -160,11 +158,36 @@ fn global_of_another_isolate_panics() {
 }
 
 #[test]
+fn taking_a_global_of_another_isolate_out_of_a_cell_panics() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
+    a.run_in_context(|lock, _ctx| {
+        let value = "from a".to_js(lock)?;
+        global = Some(v8::TracedGlobal::new(lock, value));
+        Ok(())
+    });
+    let cell = jsg::Cell::new(global);
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        b.run_in_context(|lock, _ctx| {
+            let _taken = cell.take(lock);
+            Ok(())
+        });
+    }));
+    let payload = result.expect_err("taking A's TracedGlobal out of a cell in B must panic");
+    assert_eq!(
+        panic_message(&*payload),
+        "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+    );
+}
+
+#[test]
 fn callback_entered_while_another_isolate_has_scopes_throws() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     b.run_in_context(|lock_b, ctx_b| {
-        let thing = jsg::Rc::new(Thing).to_js(lock_b)?;
+        let thing = jsg::Rc::new(lock_b, Thing).to_js(lock_b)?;
         ctx_b.set_global(lock_b, "thing", thing);
         let mut result = None;
         // SAFETY: B's code runs while A's scope is open, but no handle crosses between them.
@@ -204,14 +227,17 @@ impl Thing {
 fn resource_wrapped_in_another_isolate_panics() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
-    let thing = jsg::Rc::new(Thing);
+    let mut thing = None;
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
-        let value = thing.clone().to_js(lock)?;
+        let created = jsg::Rc::new(lock, Thing);
+        let value = created.clone().to_js(lock)?;
         // Keep the wrapper alive so it is not collected before B tries to reuse it.
         wrapper = Some(v8::TracedGlobal::new(lock, value));
+        thing = Some(created);
         Ok(())
     });
+    let thing = thing.expect("created in A");
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         b.run_in_context(|lock, _ctx| {
@@ -222,7 +248,7 @@ fn resource_wrapped_in_another_isolate_panics() {
     let payload = result.expect_err("wrapping a resource of A in B must panic");
     assert_eq!(
         panic_message(&*payload),
-        "attempt to wrap a resource in an isolate other than the one it was wrapped in"
+        "attempt to wrap a resource in an isolate other than the one it was created in"
     );
 
     a.run_in_context(move |lock, _ctx| {
@@ -234,10 +260,91 @@ fn resource_wrapped_in_another_isolate_panics() {
     });
 }
 
+/// The other isolate is found also while an exception is pending, so that the resource is
+/// leaked rather than released without that isolate's lock. The exception is pending inside
+/// `try_catch`, which holds it until the closure returns; the panic is caught inside the
+/// closure, so that it doesn't unwind through V8.
+#[test]
+fn resource_wrapped_in_another_isolate_panics_while_exception_pending() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut thing = None;
+    let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
+    a.run_in_context(|lock, _ctx| {
+        let created = jsg::Rc::new(lock, Thing);
+        let value = created.clone().to_js(lock)?;
+        thing = Some(created);
+        wrapper = Some(v8::TracedGlobal::new(lock, value));
+        Ok(())
+    });
+    let thing = thing.expect("created in A");
+
+    b.run_in_context(|lock, ctx| {
+        let thrower = ctx
+            .eval_raw(lock, "() => { throw new Error('pending'); }")
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
+        let thrower = v8::Local::<v8::Function>::try_from(thrower).unwrap();
+        let caught = lock.try_catch(|lock| {
+            let thrown = thrower.call(lock, None, &[]);
+            assert!(thrown.as_ref().is_err_and(jsg::Error::is_pending));
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                drop(thing.clone().to_js(lock));
+            }));
+            let payload = result.expect_err("wrapping a resource of A in B must panic");
+            assert_eq!(
+                panic_message(&*payload),
+                "attempt to wrap a resource in an isolate other than the one it was created in"
+            );
+            thrown.map(drop)
+        })?;
+        assert!(caught.is_err(), "the exception thrown in B is caught");
+        Ok(())
+    });
+
+    a.run_in_context(move |lock, _ctx| {
+        let value = thing.to_js(lock)?;
+        let existing = wrapper.take().expect("set above");
+        assert_eq!(value, existing.as_local(lock));
+        Ok(())
+    });
+}
+
+/// A resource belongs to the isolate it was created in before it has a wrapper too, since its
+/// references are released under that isolate's lock.
+#[test]
+fn resource_created_in_another_isolate_panics_when_wrapped() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut thing = None;
+    a.run_in_context(|lock, _ctx| {
+        thing = Some(jsg::Rc::new(lock, Thing));
+        Ok(())
+    });
+    let thing = thing.expect("created in A");
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        b.run_in_context(|lock, _ctx| {
+            let _value = thing.clone().to_js(lock)?;
+            Ok(())
+        });
+    }));
+    let payload = result.expect_err("wrapping a resource of A in B must panic");
+    assert_eq!(
+        panic_message(&*payload),
+        "attempt to wrap a resource in an isolate other than the one it was created in"
+    );
+
+    a.run_in_context(move |lock, _ctx| {
+        let value = thing.to_js(lock)?;
+        assert!(value.is_object());
+        Ok(())
+    });
+}
+
 #[cfg(not(debug_assertions))]
 #[jsg_resource]
 struct TracedGlobalHolder {
-    handle: Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    handle: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 #[cfg(not(debug_assertions))]
@@ -259,20 +366,25 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
         global = Some(object.to_traced_global(lock));
         Ok(())
     });
-    let holder = jsg::Rc::new(TracedGlobalHolder {
-        handle: Cell::new(global),
-    });
-
+    let mut holder = None;
     b.run_in_context(|lock, ctx| {
+        let created = jsg::Rc::new(
+            lock,
+            TracedGlobalHolder {
+                handle: jsg::Cell::new(global.take()),
+            },
+        );
         // Wrapping the holder in B visits the `TracedGlobal`, and so does every GC of B.
-        ctx.set_global(lock, "holder", holder.clone());
+        ctx.set_global(lock, "holder", created.clone());
+        holder = Some(created);
         crate::Harness::request_gc(lock);
         Ok(())
     });
+    let holder = holder.expect("created in B");
 
     a.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
-        let global = holder.handle.take().expect("set above");
+        let global = holder.handle.take(lock).expect("set above");
         assert!(global.as_local(lock).is_object());
         drop(global);
         Ok(())

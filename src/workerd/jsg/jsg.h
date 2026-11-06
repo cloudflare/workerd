@@ -494,11 +494,9 @@ namespace workerd::jsg {
     registry.template registerStaticConstant<NAME, decltype(constant)>(constant);                  \
   } while (false)
 
-// Use inside a JSG_RESOURCE_TYPE block to attach a marker property to every instance of
-// the resource type. The property is keyed by a symbol acquired from V8's API symbol
-// registry (v8::Symbol::ForApi) using the stringified `name`, and its value is the symbol
-// itself. The property is created directly on each instance (not the prototype) as
-// read-only, non-enumerable, and non-configurable:
+// Use inside a JSG_RESOURCE_TYPE block to attach a V8-private marker to every instance.
+// The key is v8::Private::ForApi with the stringified `name`, and its value is true.
+// The marker is not inherited or visible to JavaScript property reflection:
 //
 //     class Foo: public jsg::Object {
 //      public:
@@ -507,18 +505,9 @@ namespace workerd::jsg {
 //       }
 //     };
 //
-// Because the symbol lives in the per-isolate API symbol registry, C++ code can re-acquire
-// the exact same symbol at any time via v8::Symbol::ForApi(isolate, "kUniqueSymbol") --
-// there is nothing to store or plumb around. Runtime-provided JavaScript can likewise be
-// handed the symbol (e.g. the per-isolate bootstrap exposes utils.getApiSymbol()), while
-// user code cannot mint it: the API registry is distinct from the Symbol.for() registry.
-// This makes the property a tamper-resistant brand/marker that both C++ and
-// runtime-provided JavaScript can recognize on instances via an own-property check.
-//
-// Note that the symbol registry is keyed process-wide by name (per isolate), so two
-// resource types declaring JSG_PRIVATE_SYMBOL with the same identifier share the same
-// symbol. The property itself remains visible to reflection (Object.getOwnPropertySymbols)
-// on instances, so it is a brand, not a secret.
+// C++ reads it with JsObject::getPrivate(js, "kUniqueSymbol"); bootstrap code uses
+// utils.getPrivate(object, "kUniqueSymbol"). Both resolve the same isolate-local key.
+// Ordinary JavaScript symbols, including API-registry symbols, do not address this slot.
 #define JSG_PRIVATE_SYMBOL(name)                                                                   \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
@@ -1882,51 +1871,6 @@ struct Identified {
   }
 };
 
-// jsg::Name represents a value that is either a string or a v8::Symbol. It is most useful for
-// use in APIs that can accept both interchangeably.
-//
-// Name implements hashCode() so it is suitable for use as a key in kj::HashMap, etc.
-class Name final {
- public:
-  explicit Name(kj::String string);
-  explicit Name(kj::StringPtr string);
-  explicit Name(Lock& js, v8::Local<v8::Symbol> symbol);
-  KJ_DISALLOW_COPY(Name);
-  Name(Name&&) = default;
-  Name& operator=(Name&&) = default;
-
-  inline int hashCode() const {
-    return hash;
-  }
-
-  Name clone(jsg::Lock& js);
-
-  kj::String toString(jsg::Lock& js);
-
-  JSG_MEMORY_INFO(Name) {
-    KJ_SWITCH_ONEOF(inner) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        tracker.trackField("inner", str);
-      }
-      KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
-        tracker.trackField("inner", sym);
-      }
-    }
-  }
-
- private:
-  int hash;
-  kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
-
-  kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
-
-  friend class NameWrapper;
-
-  void visitForGc(GcVisitor& visitor);
-
-  friend class MemoryTracker;
-};
-
 // jsg::Function<T> behaves much like kj::Function<T>, but can be passed to/from JS. It works in
 // both directions: you can receive a jsg::Function from JavaScript and call it from C++, and you
 // can also initialize a jsg::Function from a C++ lambda and pass it back to JavaScript.
@@ -2900,6 +2844,7 @@ class Lock {
     Value error = nullptr;
 
     {
+      // NOLINTNEXTLINE(custom-raw-v8-trycatch): the handler runs after its scope ends.
       v8::TryCatch tryCatch(v8Isolate);
       try {
         return func();
@@ -2981,20 +2926,6 @@ class Lock {
   // allowed since `func` is invoked synchronously.
   template <class Func>
   PromiseForResult<Func, void, false> evalNow(Func&& func);
-
-  // ---------------------------------------------------------------------------
-  // Name/Symbol stuff
-
-  // Creates a Name encapsulating a new unique v8::Symbol.
-  Name newSymbol(kj::StringPtr symbol);
-
-  // Creates a Name encapsulating a name from the global symbol registry.
-  // Equivalent to Symbol.for(symbol) in JavaScript.
-  Name newSharedSymbol(kj::StringPtr symbol);
-
-  // Similar to newSharedSymbol except that it uses a separate isolate registry
-  // that is not accessible by JavaScript.
-  Name newApiSymbol(kj::StringPtr symbol);
 
   // ---------------------------------------------------------------------------
   // Logging stuff
@@ -3615,6 +3546,7 @@ class JsgCatchScope {
 
   // Simple wrapper to work around v8::TryCatch's deleted operator new.
   struct Holder {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): catchException() destroys it before the handler.
     v8::TryCatch tryCatch;
     explicit Holder(v8::Isolate* isolate): tryCatch(isolate) {}
   };

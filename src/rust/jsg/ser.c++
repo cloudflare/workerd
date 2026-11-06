@@ -209,6 +209,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // throws a KJ exception, which reaches JavaScript as an internal error; if execution is
   // terminating, returns false.
   bool readHeader(::rust::Slice<const uint8_t> data) {
+    // NOLINTNEXTLINE(custom-raw-v8-trycatch): only turns what it caught into a KJ exception.
     v8::TryCatch tryCatch(isolate);
     if (deser.ReadHeader(isolate->GetCurrentContext()).IsJust()) return true;
     MaybeLocal exception;
@@ -302,6 +303,7 @@ bool local_serialize(Isolate* isolate,
     const Local& value,
     bool errors_are_host_objects,
     ::rust::Vec<uint8_t>& result) {
+  if (exceptionPending(isolate)) return false;
   Serializer serializer(isolate, errors_are_host_objects);
   if (!serializer.write(local_as_ref_from_ffi<v8::Value>(value))) return false;
   result = serializer.release();
@@ -309,6 +311,7 @@ bool local_serialize(Isolate* isolate,
 }
 
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+  if (exceptionPending(isolate)) return {};
   Deserializer deserializer(isolate, data);
   if (!deserializer.readHeader(data)) return {};
   return maybe_local_to_ffi(deserializer.read());

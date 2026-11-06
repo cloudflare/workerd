@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 
-use jsg::Member;
+use jsg::MemberRegistry;
 use jsg::PropertyPlacement;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
@@ -22,6 +22,12 @@ use crate::Harness;
 type OptionalNumber = Option<u32>;
 
 struct OptionalValue;
+
+impl jsg::TypeInfo for OptionalValue {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
 
 impl<'s> jsg::FromJS<'s> for OptionalValue {
     type ResultType = Self;
@@ -124,39 +130,34 @@ impl Sample {
 }
 
 impl Resource for Sample {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         let placement = if flags.get_jsg_property_on_prototype_template() {
             PropertyPlacement::Prototype
         } else {
             PropertyPlacement::Instance
         };
-        let mut members = vec![
-            Self::constructor_member(),
-            Self::two_member(),
-            Self::with_lock_member(),
-            Self::add_member(),
-            Self::custom_optional_member(),
-            Self::value_member(),
-            Self::get_kind_member(placement),
-            Self::get_label_member(placement),
-        ];
+        registry.add(Self::constructor_member());
+        registry.add(Self::two_member());
+        registry.add(Self::with_lock_member());
+        registry.add(Self::add_member());
+        registry.add(Self::custom_optional_member());
+        registry.add(Self::value_member());
+        registry.add(Self::get_kind_member(placement));
+        registry.add(Self::get_label_member(placement));
         if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
-            members.extend([
-                Self::get_cache_member(placement),
-                Self::format_label_member(),
-                Self::describe_member(),
-                Self::debug_label_member(),
-                Self::extra_value_member(),
-            ]);
+            registry.add(Self::get_cache_member(placement));
+            registry.add(Self::format_label_member());
+            registry.add(Self::describe_member());
+            registry.add(Self::debug_label_member());
+            registry.add(Self::extra_value_member());
         }
-        members
     }
 }
 
 fn eval_string(harness: &Harness, code: &str) -> String {
     let mut out = String::new();
     harness.run_in_context(|lock, ctx| {
-        let constructor = jsg::resource::function_template_of::<Sample>(lock);
+        let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
         ctx.set_global(lock, "Sample", constructor);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
@@ -223,7 +224,7 @@ fn constant_descriptor_follows_spec_compliant_property_attributes() {
 fn constructor_called_without_new_throws_type_error() {
     let harness = Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let constructor = jsg::resource::function_template_of::<Sample>(lock);
+        let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
         ctx.set_global(lock, "Sample", constructor);
 
         for code in ["Sample('x')", "Sample.call({}, 'x')"] {
@@ -359,12 +360,9 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
     for harness in [&old, &new, &old, &new] {
         harness.run_in_context(|lock, ctx| {
             // Wrap a Rust-created resource before exposing its constructor.
-            ctx.set_global(
-                lock,
-                "wrapped",
-                jsg::Rc::new(Sample::constructor("x".to_owned(), None)),
-            );
-            let constructor = jsg::resource::function_template_of::<Sample>(lock);
+            let wrapped = jsg::Rc::new(lock, Sample::constructor("x".to_owned(), None));
+            ctx.set_global(lock, "wrapped", wrapped);
+            let constructor = jsg::resource::function_template_of::<Sample>(lock).unwrap();
             ctx.set_global(lock, "Sample", constructor);
             let prototype = lock
                 .feature_flags()

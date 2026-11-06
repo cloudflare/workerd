@@ -11,8 +11,15 @@
 #include <workerd/util/exception.h>
 
 #include <kj/async-io.h>
+#include <kj/compat/http.h>
 #include <kj/sticky-flag.h>
 #include <kj/test.h>
+#include <kj/thread.h>
+#include <kj/timer.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace workerd {
 namespace {
@@ -184,6 +191,147 @@ class ThrowingResponse final: public kj::HttpService::Response {
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
     KJ_FAIL_ASSERT("request unexpectedly returned a WebSocket");
+  }
+};
+
+// Wraps an accepted WebSocket and records its destruction.
+class DestructionTrackingWebSocket final: public kj::WebSocket {
+ public:
+  DestructionTrackingWebSocket(kj::Own<kj::WebSocket> inner, bool& destroyed)
+      : inner(kj::mv(inner)),
+        destroyed(destroyed) {}
+
+  ~DestructionTrackingWebSocket() noexcept(false) {
+    destroyed = true;
+  }
+
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> message) override {
+    return inner->send(message);
+  }
+  kj::Promise<void> send(kj::ArrayPtr<const char> message) override {
+    return inner->send(message);
+  }
+  kj::Promise<void> close(uint16_t code, kj::StringPtr reason) override {
+    return inner->close(code, reason);
+  }
+  void disconnect() override {
+    inner->disconnect();
+  }
+  void abort() override {
+    inner->abort();
+  }
+  kj::Promise<void> whenAborted() override {
+    return inner->whenAborted();
+  }
+  kj::Promise<Message> receive(size_t maxSize) override {
+    return inner->receive(maxSize);
+  }
+  kj::Maybe<kj::Promise<void>> tryPumpFrom(kj::WebSocket& other) override {
+    return inner->tryPumpFrom(other);
+  }
+  uint64_t sentByteCount() override {
+    return inner->sentByteCount();
+  }
+  uint64_t receivedByteCount() override {
+    return inner->receivedByteCount();
+  }
+  kj::Maybe<kj::String> getPreferredExtensions(ExtensionsContext context) override {
+    return inner->getPreferredExtensions(context);
+  }
+
+ private:
+  kj::Own<kj::WebSocket> inner;
+  bool& destroyed;
+};
+
+// Fronts a WorkerEntrypoint with a real kj::HttpServer, so that the server's own check that an
+// accepted WebSocket is destroyed before the request handler completes is exercised. Records the
+// accepted WebSocket's destruction and the IoContext that accepted it.
+class EntrypointHttpService final: public kj::HttpService {
+ public:
+  explicit EntrypointHttpService(TestFixture& fixture): fixture(fixture) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    auto entrypoint = fixture.makeWorkerEntrypoint();
+    auto wrapped = kj::heap<TrackingResponse>(*this, response);
+    return entrypoint->request(method, url, headers, requestBody, *wrapped)
+        .attach(kj::mv(entrypoint), kj::mv(wrapped));
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    KJ_UNIMPLEMENTED();
+  }
+
+  // Set once acceptWebSocket() has been called; may be read from another thread.
+  std::atomic<bool> accepted{false};
+  bool webSocketDestroyed = false;
+  kj::Maybe<kj::Own<IoContext::WeakRef>> acceptingContext;
+
+ private:
+  class TrackingResponse final: public kj::HttpService::Response {
+   public:
+    TrackingResponse(EntrypointHttpService& service, kj::HttpService::Response& inner)
+        : service(service),
+          inner(inner) {}
+
+    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize) override {
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
+
+    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      auto ws = kj::heap<DestructionTrackingWebSocket>(
+          inner.acceptWebSocket(headers), service.webSocketDestroyed);
+      service.acceptingContext = IoContext::current().getWeakRef();
+      service.accepted.store(true, std::memory_order_release);
+      // Lets the script observe the acceptance; see CpuLimitKillAfterWebSocketAccept.
+      auto& js = jsg::Lock::current();
+      js.global().set(js, "accepted"_kj, js.boolean(true));
+      return ws;
+    }
+
+   private:
+    EntrypointHttpService& service;
+    kj::HttpService::Response& inner;
+  };
+
+  TestFixture& fixture;
+};
+
+// A kj::HttpServer serving EntrypointHttpService over an in-memory connection.
+struct HttpServerHarness {
+  kj::TimerImpl timer{kj::origin<kj::TimePoint>()};
+  kj::HttpHeaderTable headerTable;
+  EntrypointHttpService service;
+  kj::HttpServer server;
+  kj::TwoWayPipe pipe = kj::newTwoWayPipe();
+  kj::Promise<void> listenTask;
+
+  explicit HttpServerHarness(TestFixture& fixture)
+      : service(fixture),
+        server(timer, headerTable, service),
+        listenTask(server.listenHttp(kj::mv(pipe.ends[0])).eagerlyEvaluate(nullptr)) {}
+
+  void sendUpgrade(kj::WaitScope& ws) {
+    static constexpr kj::StringPtr upgradeRequest =
+        "GET / HTTP/1.1\r\n"
+        "Host: example.com\r\n"
+        "Connection: Upgrade\r\n"
+        "Upgrade: websocket\r\n"
+        "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"_kj;
+    pipe.ends[1]->write(upgradeRequest.asBytes()).wait(ws);
   }
 };
 
@@ -796,6 +944,68 @@ KJ_TEST("alarm scheduling tags failures after delivery") {
   KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
 }
 
+KJ_TEST("an alarm that fails to schedule drains its request") {
+  RejectingTimerChannel timer;
+  TestFixture fixture(TestFixture::SetupParams{
+    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .actorId = Worker::Actor::Id(kj::str("alarm-drain-test")),
+    .useRealTimers = false,
+    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
+        [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
+    return kj::rc<TestFixture::DummyIoChannelFactory>(timer);
+  }),
+  });
+  auto& waitScope = fixture.getWaitScope();
+  auto& actor = fixture.getActor();
+  auto context = fixture.newIoContext();
+  actor.setIoContext(kj::addRef(*context));
+
+  // Queued on the idle actor, so delivering the alarm starts a run of it as a waitUntil task of the
+  // alarm's request. Holding the input lock holds the run up until the alarm has failed.
+  uint ran = 0;
+  KJ_ASSERT(context->getCrossContextExecutor().tryExecute([&ran](jsg::Lock&) { ++ran; }));
+  fixture.pollEventLoop();
+  auto inputLock = actor.getInputGate().wait(nullptr).wait(waitScope);
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  KJ_EXPECT_THROW_MESSAGE("alarm scheduling failed",
+      entrypoint->runAlarm(kj::UNIX_EPOCH + kj::SECONDS, 0).wait(waitScope));
+  KJ_EXPECT(ran == 0, ran);
+
+  // The request is still draining, so it is current when the run gets the lock.
+  { auto released = kj::mv(inputLock); }
+  fixture.pollEventLoop();
+  KJ_EXPECT(ran == 1, ran);
+  KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
+}
+
+KJ_TEST("an alarm canceled while it waits for its scheduled time drains its request") {
+  TestFixture fixture({.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .actorId = Worker::Actor::Id(kj::str("alarm-cancel-drain-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto& actor = fixture.getActor();
+  auto context = fixture.newIoContext();
+  actor.setIoContext(kj::addRef(*context));
+
+  // Queued on the idle actor, so delivering the alarm starts a run of it as a waitUntil task of the
+  // alarm's request. Holding the input lock holds the run up until the alarm is canceled.
+  uint ran = 0;
+  KJ_ASSERT(context->getCrossContextExecutor().tryExecute([&ran](jsg::Lock&) { ++ran; }));
+  fixture.pollEventLoop();
+  auto inputLock = actor.getInputGate().wait(nullptr).wait(waitScope);
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  // The fixture's timers never fire, so the alarm waits for its scheduled time until canceled.
+  auto alarm = entrypoint->runAlarm(kj::UNIX_EPOCH + kj::SECONDS, 0);
+  KJ_EXPECT(!alarm.poll(waitScope));
+  alarm = nullptr;
+  KJ_EXPECT(ran == 0, ran);
+
+  // The request is still draining, so it is current when the run gets the lock.
+  { auto released = kj::mv(inputLock); }
+  fixture.pollEventLoop();
+  KJ_EXPECT(ran == 1, ran);
+  KJ_EXPECT(context->getAbortReason() == kj::none, context->getAbortReason());
+}
+
 KJ_TEST("custom events tag failures after delivery") {
   TestFixture fixture;
   auto entrypoint = fixture.makeWorkerEntrypoint();
@@ -904,6 +1114,103 @@ KJ_TEST("hibernatable WebSocket clean close is reported as a stream disconnect")
   KJ_EXPECT(getJsEvents(fixture) == "close:1000:true;");
   KJ_EXPECT(
       observer->outcome.orDefault(EventOutcome::OK) == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+}
+
+// Like HIBERNATABLE_WEB_SOCKET_SOURCE, but fetch() also creates a promise for another context to
+// settle with settle(). Its reaction uses the actor's storage, which needs a current request.
+// webSocketMessage() records the message and replies "ack".
+constexpr kj::StringPtr PROMISE_WEB_SOCKET_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    fetch() {
+      const [client, server] = Object.values(new WebSocketPair());
+      this.ctx.acceptWebSocket(server);
+      const { promise, resolve } = Promise.withResolvers();
+      globalThis.settle = resolve;
+      promise.then(async (value) => {
+        globalThis.events += "reaction;";
+        await this.ctx.storage.put("key", value);
+        globalThis.events += `stored:${await this.ctx.storage.get("key")};`;
+      });
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    webSocketMessage(ws, message) {
+      globalThis.events += `message:${message};`;
+      ws.send("ack");
+    }
+    webSocketClose(ws, code, reason) {
+      ws.close(code, reason);
+    }
+  }
+)SCRIPT"_kj;
+
+KJ_TEST("a promise settled from another context while an actor idles with a hibernatable "
+        "WebSocket settles in its next WebSocket event") {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setHandleCrossRequestPromiseResolution(true);
+  auto loopback = kj::refcounted<FixtureLoopback>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .featureFlags = flags.asReader(),
+    .autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS),
+    .mainModuleSource = PROMISE_WEB_SOCKET_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("idle-web-socket-promise-test")),
+    .actorClassName = "default"_kj,
+    .useRealTimers = false,
+    .actorLoopback = kj::addRef(*loopback),
+  });
+  loopback->fixture = fixture;
+  auto& waitScope = fixture.getWaitScope();
+  auto& actor = fixture.getActor();
+  actor.setHibernationManager(
+      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  kj::NullStream requestBody;
+  auto pipe = kj::newTwoWayPipe();
+  TestResponse response(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto request =
+      entrypoint->request(
+                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+          .eagerlyEvaluate(nullptr);
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  fixture.pollEventLoop();
+  KJ_ASSERT(response.statusCode == 101);
+  auto& context = KJ_ASSERT_NONNULL(actor.getIoContext());
+  KJ_ASSERT(!context.hasCurrentIncomingRequest());
+
+  // A stateless request settles the promise, queueing its reaction on the idle actor.
+  auto statelessContext = fixture.newStatelessIoContext();
+  auto settler = fixture.newIncomingRequest(*statelessContext);
+  fixture.enterContext(*settler, [](TestFixture::Environment& env) {
+    auto settle =
+        KJ_ASSERT_NONNULL(env.js.global().get(env.js, "settle"_kj).tryCast<jsg::JsFunction>());
+    settle.call(env.js, env.js.undefined(), env.js.str("value"_kj));
+  });
+  fixture.drainAndDestroy(kj::mv(settler));
+  fixture.pollEventLoop();
+  KJ_EXPECT(getJsEvents(fixture) == "", getJsEvents(fixture));
+  KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+
+  // The next WebSocket event runs the reaction before its handler.
+  peer->send("hi"_kj).wait(waitScope);
+  auto reply = peer->receive().wait(waitScope);
+  KJ_EXPECT(reply.is<kj::String>() && reply.get<kj::String>() == "ack");
+  fixture.pollEventLoop();
+  KJ_EXPECT(getJsEvents(fixture) == "reaction;stored:value;message:hi;", getJsEvents(fixture));
+  KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+
+  // Closing the WebSocket ends the upgrade request. Its outcome is tested above.
+  peer->close(1000, "done").wait(waitScope);
+  auto close = peer->receive().wait(waitScope);
+  KJ_ASSERT(close.is<kj::WebSocket::Close>());
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { request.wait(waitScope); })) {
+    KJ_EXPECT(e.getType() == kj::Exception::Type::DISCONNECTED, e);
+  }
 }
 
 KJ_TEST("local WebSocket disconnect is not a script exception") {
@@ -1129,6 +1436,114 @@ KJ_TEST("an abort while a coupled local WebSocket waits for output locks reports
     KJ_EXPECT(abortWhileAwaitingOutputLock(cpuLimitException(), lockRelease) ==
         EventOutcome::EXCEEDED_CPU);
   }
+}
+
+// Accepts a WebSocket from a regular Worker behind a real kj::HttpServer, then kills the isolate
+// as a CPU-limit kill lands right after the response was sent. The handler returns a WebSocket
+// response while a user microtask that spins is queued behind the continuation that sends the
+// response. Once that microtask starts spinning, another thread terminates execution, as the CPU
+// limiter does, and V8 discards the rest of the microtask queue.
+//
+// The script checks whether the WebSocket was accepted in a chain of microtasks, one at a time,
+// and spins on the first check after acceptance. A check is always queued ahead of whatever the
+// send queues, so the kill lands before any later microtask, such as one that would hand the
+// response to KJ, regardless of how many microtasks the runtime takes to send it.
+struct CpuLimitKillAfterWebSocketAccept {
+  // Spins even if the WebSocket is never accepted, so that the test fails instead of hanging.
+  static constexpr auto source = R"(
+    globalThis.accepted = false;
+    export default {
+      async fetch(request, env, ctx) {
+        const [client, server] = Object.values(new WebSocketPair());
+        server.accept();
+        let checks = 0;
+        const spinOnceAccepted = () => {
+          if (globalThis.accepted || ++checks > 100) {
+            signalSpinning();
+            for (;;) {}
+          } else {
+            queueMicrotask(spinOnceAccepted);
+          }
+        };
+        queueMicrotask(spinOnceAccepted);
+        return new Response(null, {status: 101, webSocket: client});
+      }
+    };
+  )"_kj;
+
+  // Declared before `fixture`, whose isolate holds a callback that refers to it.
+  std::atomic<bool> spinning{false};
+  TestFixture fixture{TestFixture::SetupParams{.mainModuleSource = source}};
+  HttpServerHarness harness{fixture};
+  EntrypointHttpService& service = harness.service;
+
+  // Sends the upgrade request and returns once execution has been terminated. Returns the
+  // IoContext that accepted the WebSocket; the IoContext has not been aborted yet.
+  IoContext& acceptThenKill() {
+    v8::Isolate* isolate;
+    fixture.runInIoContext([&](const TestFixture::Environment& environment) {
+      isolate = environment.isolate;
+      auto& js = environment.js;
+      // Once the microtask signals, it is about to spin.
+      jsg::JsObject(js.v8Context()->Global())
+          .set(js, "signalSpinning"_kj,
+              jsg::JsValue(js.wrapSimpleFunction(
+                  js.v8Context(), [this](jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) {
+        spinning.store(true, std::memory_order_release);
+      })));
+    });
+
+    {
+      kj::Thread killer([isolate, this]() {
+        // The deadline only keeps the test from hanging if the microtask never runs.
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!spinning.load(std::memory_order_acquire) &&
+            std::chrono::steady_clock::now() < deadline) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        isolate->TerminateExecution();
+      });
+      harness.sendUpgrade(fixture.getWaitScope());
+      fixture.pollEventLoop();
+    }
+
+    KJ_ASSERT(service.accepted.load());
+    KJ_EXPECT(!service.webSocketDestroyed);
+    return KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(service.acceptingContext)->tryGet());
+  }
+};
+
+KJ_TEST("WebSocket accepted before a CPU-limit kill is destroyed before the request completes") {
+  // The IoContext is aborted after the kill, as it is when a limit is exceeded. kj::HttpServer
+  // aborts the process if the accepted WebSocket is still alive when the request handler
+  // completes, so the WebSocket must be owned by the request's promise chain rather than by the
+  // IoContext, whose teardown runs later.
+  CpuLimitKillAfterWebSocketAccept test;
+  auto& context = test.acceptThenKill();
+
+  KJ_EXPECT_LOG(ERROR, "execution limit exceeded");
+  KJ_EXPECT_LOG(ERROR, "execution limit exceeded");
+  KJ_EXPECT_LOG(ERROR, "execution limit exceeded");
+  context.abort(KJ_EXCEPTION(OVERLOADED, "execution limit exceeded"));
+  test.harness.listenTask.wait(test.fixture.getWaitScope());
+  KJ_EXPECT(test.service.webSocketDestroyed);
+}
+
+KJ_TEST("WebSocket accepted before a CPU-limit kill is destroyed when the client disconnects") {
+  // The client disconnects before the IoContext is aborted. kj::HttpServer then cancels the
+  // request handler and destroys the connection without checking that the WebSocket is gone.
+  // The accepted WebSocket refers to that connection, so it must be destroyed by the
+  // cancellation, not later when the IoContext, kept alive while it drains, is torn down.
+  CpuLimitKillAfterWebSocketAccept test;
+  auto& context = test.acceptThenKill();
+
+  test.harness.pipe.ends[1] = nullptr;
+  test.harness.listenTask.wait(test.fixture.getWaitScope());
+  KJ_EXPECT(test.service.webSocketDestroyed);
+
+  KJ_EXPECT_LOG(ERROR, "execution limit exceeded");
+  context.abort(KJ_EXCEPTION(OVERLOADED, "execution limit exceeded"));
+  test.fixture.pollEventLoop();
 }
 
 KJ_TEST("output gate failure replaces an earlier handler failure") {

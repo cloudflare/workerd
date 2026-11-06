@@ -33,6 +33,14 @@
 //   /hold            Waits one second before responding, so that the test can
 //                    break the DO while this request is still in flight.
 //   /break           Aborts the DO via ctx.abort(). The request fails.
+//   /set-alarm       Sets the DO's alarm `ms` (default 60000) from now.
+//   /alarms          Returns `fired`, the NODE_ID of each instance that ran the
+//                    DO's alarm, in order.
+//   /facet-add?path=P
+//                    Increments the counter of the Tally facet at P, names
+//                    separated by commas, creating the facets on the way.
+//   /facet-delete?path=P
+//                    Deletes the facet at P with its descendants.
 //   /arm-constructor-failure
 //                    Sets a storage flag that makes the *next* instantiation of
 //                    this DO throw from its constructor (the flag is cleared and
@@ -63,6 +71,8 @@
 // waits that long *before* calling the DO. This lets a test put a request in
 // flight on a node and SIGTERM that node while the request has not yet routed
 // to the DO's owner.
+//
+// Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
 
 import {
   DurableObject,
@@ -74,6 +84,9 @@ import {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/on-hibernate/')) {
+      return env.ON_HIBERNATE.fetch(request);
+    }
 
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
@@ -148,6 +161,33 @@ export class Consumer extends WorkerEntrypoint {
 }
 
 const BREAK_ON_CONSTRUCT = 'break-on-construct';
+
+// The Tally facet `name` of the actor whose state is `ctx`.
+function tally(ctx, name) {
+  return ctx.facets.get(name, () => ({ class: ctx.exports.Tally }));
+}
+
+// A facet: a counter of its own, and facets beneath it.
+export class Tally extends DurableObject {
+  async add(path) {
+    if (path.length > 0) {
+      const [name, ...rest] = path;
+      return tally(this.ctx, name).add(rest);
+    }
+    const count = ((await this.ctx.storage.get('count')) ?? 0) + 1;
+    await this.ctx.storage.put('count', count);
+    return { count, nodeId: this.env.NODE_ID };
+  }
+
+  async remove(path) {
+    const [name, ...rest] = path;
+    if (rest.length === 0) {
+      this.ctx.facets.delete(name);
+    } else {
+      await tally(this.ctx, name).remove(rest);
+    }
+  }
+}
 
 export class Counter extends DurableObject {
   constructor(state, env) {
@@ -279,12 +319,23 @@ export class Counter extends DurableObject {
       await scheduler.wait(1000);
       return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/set-alarm') {
-      try {
-        await this.state.storage.setAlarm(Date.now() + 60_000);
-        return Response.json({ set: true });
-      } catch (e) {
-        return Response.json({ error: String(e) });
+      const ms = Number(url.searchParams.get('ms') ?? '60000');
+      await this.state.storage.setAlarm(Date.now() + ms);
+      return Response.json({ nodeId, id: idHex });
+    } else if (url.pathname === '/alarms') {
+      const fired = (await this.state.storage.get('fired')) ?? [];
+      return Response.json({ nodeId, id: idHex, fired });
+    } else if (url.pathname === '/facet-add') {
+      const [name, ...rest] = url.searchParams.get('path').split(',');
+      return Response.json(await tally(this.ctx, name).add(rest));
+    } else if (url.pathname === '/facet-delete') {
+      const [name, ...rest] = url.searchParams.get('path').split(',');
+      if (rest.length === 0) {
+        this.ctx.facets.delete(name);
+      } else {
+        await tally(this.ctx, name).remove(rest);
       }
+      return Response.json({ nodeId, id: idHex });
     } else if (url.pathname === '/break') {
       this.state.abort('broken on purpose');
     } else if (url.pathname === '/arm-constructor-failure') {
@@ -296,8 +347,12 @@ export class Counter extends DurableObject {
     return new Response('Not found', { status: 404 });
   }
 
-  // Present so `setAlarm` reaches the cluster's refusal.
-  async alarm() {}
+  // Records which node ran each alarm.
+  async alarm() {
+    const fired = (await this.state.storage.get('fired')) ?? [];
+    fired.push(this.env.NODE_ID);
+    await this.state.storage.put('fired', fired);
+  }
 
   // RPC method used by /vend-stub on the *target* DO.
   vend(kind) {

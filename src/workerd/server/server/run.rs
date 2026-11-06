@@ -31,6 +31,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
 use crate::config::Reporter;
@@ -66,6 +67,9 @@ pub struct RunOptions {
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
+    /// The source deployment of each appended service and of each service left absent because its
+    /// deployment was skipped.
+    pub deployments: Deployments,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -236,6 +240,8 @@ fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio:
     });
     let cluster = Rc::clone(&node.cluster);
     factory.spawn_detached(async move { cluster.tier_loop().await });
+    let node = Rc::clone(node);
+    factory.spawn_detached(async move { node.alarms_loop().await });
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -344,6 +350,11 @@ fn report_unmatched_overrides(
     let mut directories: Vec<&str> = overrides.directories.keys().map(String::as_str).collect();
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
+        // The overrides are for the node's own services, so whether one matches does not depend
+        // on the bucket's deployments.
+        if server.report().from_deployment(&name) {
+            continue;
+        }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
             Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),

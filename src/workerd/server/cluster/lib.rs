@@ -17,6 +17,14 @@
 //!   (`log.rs`), a session per epoch. A takeover restores the last opened
 //!   epoch's session and starts the next from a snapshot of it, so a late
 //!   write from the old owner lands where nothing reads it.
+//! - `alarms/<node>/<time>/<namespace>/<actor>/<seq>`: an alarm `node`
+//!   wakes `actor` for no later than `time` (`alarms.rs`).
+//! - `deploy/catalog.json`: the current version of every named deployment,
+//!   which each node serves beside its own config; replaced only by a
+//!   conditional write, so a deploy publishes atomically (`deploy.rs`).
+//! - `deploy/<name>/<version>/{config.bin,manifest.json}`: one immutable
+//!   version of a deployment, its services as an encoded `Config`; `version`
+//!   is the SHA-256 of `config.bin` (`deploy.rs`, `compose.rs`).
 //!
 //! `<namespace>` is a hash of the namespace's `uniqueKey`, and `<actor>` the
 //! actor ID's hex, so no key's length depends on a name.
@@ -30,9 +38,14 @@
     clippy::unwrap_used
 )]
 
+mod alarms;
 mod bucket;
 mod capture;
 pub mod cluster;
+pub mod compose;
+pub mod deploy;
+#[cfg(test)]
+mod dst;
 mod http;
 mod log;
 #[cfg(test)]
@@ -42,6 +55,7 @@ mod ownership;
 mod registry;
 pub mod s3;
 
+pub use alarms::Adopted;
 pub use bucket::Bucket;
 pub use bucket::Guard;
 pub use bucket::Store;
@@ -50,6 +64,11 @@ pub use cluster::Cluster;
 pub use cluster::Route;
 pub use cluster::Setup;
 pub use cluster::now_ms;
+pub use cluster::open_bucket;
+pub use log::DB;
+pub use log::facet_path;
+pub use log::facet_prefix;
+pub use owner::Layout;
 pub use owner::Owners;
 pub use ownership::Claim;
 pub use ownership::Ownership;
@@ -83,6 +102,13 @@ pub enum Error {
     Log(#[from] capnp::Error),
     #[error("log: {0}")]
     Schema(#[from] capnp::NotInSchema),
+    /// A deployment, or the catalog naming it, is refused: one line per
+    /// reason.
+    #[error("{0}")]
+    Deploy(String),
+    /// The bucket returned an object larger than [`http::MAX_BODY`]. The value names the request.
+    #[error("bucket: {0}: {too_large}", too_large = http::TOO_LARGE)]
+    TooLarge(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -97,14 +123,18 @@ pub type Sequence = u32;
 /// as the first 16 bytes of a labelled SHA-256 of its tenant, empty for
 /// now, and `uniqueKey`, in base64url.
 pub(crate) fn object_prefix(ns: &str, actor: &str) -> String {
+    format!("do/{}/{actor}", namespace_hash(ns))
+}
+
+/// A namespace's part of its objects' keys.
+pub fn namespace_hash(ns: &str) -> String {
     use base64::Engine;
     let mut data = Vec::new();
     for part in ["workerd cluster namespace v1", "", ns] {
         data.extend((part.len() as u64).to_be_bytes());
         data.extend(part.as_bytes());
     }
-    let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&sha256(&data)[..16]);
-    format!("do/{hash}/{actor}")
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&sha256(&data)[..16])
 }
 
 pub(crate) fn sha256(data: &[u8]) -> Vec<u8> {

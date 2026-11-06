@@ -916,11 +916,10 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
-// A stub's own policy applies only when it was given one and the retry request gates and the
-// userland gate are all on. Otherwise the runtime's default applies.
-ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent, bool enforcementRequested) {
-  if (enforcementRequested &&
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+// A stub's own policy applies only when it was given one and the userland gate is on. Otherwise
+// the runtime's default applies.
+ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent) {
+  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
     KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
       return ActorRetryPolicy::userDefined(userPolicy);
     }
@@ -934,15 +933,12 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     JsRpcCallPlan& callPlan,
     kj::Maybe<const kj::String&> name) {
   JsRpcRetrySetup result;
-  if (!destinationSupportsRetries || !callPlan.getReplayable() ||
-      !util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC)) {
+  if (!destinationSupportsRetries || !callPlan.getReplayable()) {
     return result;
   }
 
-  auto enforcementRequested =
-      util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS);
-  auto policy = getJsRpcRetryPolicy(parent, enforcementRequested);
-  auto enforcementEnabled = ActorRetryGateEnabled(enforcementRequested);
+  auto policy = getJsRpcRetryPolicy(parent);
+  auto enforcementEnabled = ActorRetryGateEnabled::YES;
   // A policy without retries never retains the call, so it neither reserves nor tracks memory.
   if (policy.allowsRetries()) {
     auto replayMemoryBytes = callPlan.getReplayReservationBytes() + sizeof(JsRpcCallRetryState) +
@@ -950,12 +946,10 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
     KJ_IF_SOME(value, name) {
       replayMemoryBytes += value.size();
     }
-    kj::Maybe<kj::Own<void>> reservation;
-    if (enforcementRequested) {
-      reservation = ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
-      if (reservation == kj::none) {
-        ioContext.getMetrics().recordActorCallReplayMemoryRejected();
-      }
+    auto reservation =
+        ioContext.getLimitEnforcer().tryReserveActorCallReplayMemory(replayMemoryBytes);
+    if (reservation == kj::none) {
+      ioContext.getMetrics().recordActorCallReplayMemoryRejected();
     }
     enforcementEnabled = ActorRetryGateEnabled(reservation != kj::none);
     // Tracked whether or not the reservation was granted, so demand does not depend on the budget.
@@ -1269,7 +1263,6 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       JsRpcCallPlan callPlan(kj::mv(planMessage), kj::mv(serializedData), serializedDataCapacity,
           serializerReplayability);
 
-      // The JSRPC gate controls this event type's retry rollout separately from fetch.
       retrySetup =
           setupJsRpcRetries(ioContext, *parent, destinationSupportsRetries, callPlan, name);
 
@@ -1587,7 +1580,8 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
     // itself shuts down.
     kj::mv(c).deferGcToContext();
 
-    // In preview, let's try to warn the developer about the problem.
+    // In preview, let's try to warn the developer about the problem. Logged later: this destructor
+    // runs inside a GC callback, where logging is not allowed to touch V8.
     //
     // TODO(cleanup): Instead of logging this warning at GC time, it would be better if we logged
     //   it at the time that the client is destroyed, i.e. when the IoContext is torn down,
@@ -1595,12 +1589,12 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
     KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-      ioContext.logWarningOnce(
+      ioContext.logWarningOnceLater(kj::str(
           "An RPC stub was not disposed properly. You must call dispose() on all stubs in order to "
           "let the other side know that you are no longer using them. You cannot rely on "
           "the garbage collector for this because it may take arbitrarily long before actually "
           "collecting unreachable objects. As a shortcut, calling dispose() on the result of "
-          "an RPC call disposes all stubs within it."_kj);
+          "an RPC call disposes all stubs within it."));
     }
   }
 
@@ -1632,11 +1626,11 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
       //
       // TODO(cleanup): Same comment as in ~JsRpcStub().
       KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-        ioContext.logWarningOnce(
+        ioContext.logWarningOnceLater(kj::str(
             "An RPC result was not disposed properly. One of the RPC calls you made expects you "
             "to call dispose() on the return value, but you didn't do so. You cannot rely on "
             "the garbage collector for this because it may take arbitrarily long before actually "
-            "collecting unreachable objects."_kj);
+            "collecting unreachable objects."));
       }
     }
   } else {
@@ -2326,6 +2320,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
           auto invocationResult = [&]() -> InvocationResult {
             jsg::Value error = nullptr;
             {
+              // NOLINTNEXTLINE(custom-raw-v8-trycatch): its scope ends before the error is used.
               v8::TryCatch tryCatch(js.v8Isolate);
               try {
                 KJ_IF_SOME(envCtx, targetInfo.envCtx) {

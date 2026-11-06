@@ -27,9 +27,9 @@ use crate::v8;
 /// # Errors
 ///
 /// Serialization runs JavaScript (getters and Proxy traps). If it throws, or `value` can't be
-/// serialized (a `DataCloneError`), or execution is terminating, the exception stays pending
-/// and the error is one for which [`Error::is_pending`] is true. Return it, as for
-/// [`v8::Local::<v8::Function>::call`].
+/// serialized (a `DataCloneError`), or an exception or a termination is already pending, the
+/// exception stays pending and the error is one for which [`Error::is_pending`] is true. Return
+/// it, as for [`v8::Local::<v8::Function>::call`].
 pub fn serialize<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
@@ -57,10 +57,10 @@ pub fn serialize<'s>(
 ///
 /// # Errors
 ///
-/// If `data` is malformed or names an unknown API type, or a type's deserializer throws, or
-/// execution is terminating, the exception stays pending and the error is one for which
-/// [`Error::is_pending`] is true. If the header is missing or of an unsupported version, the
-/// error is an internal one.
+/// If `data` is malformed or names an unknown API type, or a type's deserializer throws, or an
+/// exception or a termination is already pending, the exception stays pending and the error is
+/// one for which [`Error::is_pending`] is true. If the header is missing or of an unsupported
+/// version, the error is an internal one.
 pub fn deserialize<'s>(
     lock: &mut Lock<'s>,
     data: &[u8],

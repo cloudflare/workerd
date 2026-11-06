@@ -15,8 +15,10 @@ filegroup(
         "basics.c++",
         "bench.c++",
         "blob.c++",
+        "bootstrap-utils.c++",
         "cache.c++",
         "container.c++",
+        "event-target-bootstrap.c++",
         "events.c++",
         "eventsource.c++",
         "export-loopback.c++",
@@ -35,6 +37,7 @@ filegroup(
         "per-isolate-bootstrap.c++",
         "performance.c++",
         "queue.c++",
+        "request-io.c++",
         "restore.c++",
         "scheduled.c++",
         "snapshot.c++",
@@ -74,8 +77,10 @@ filegroup(
         "basics.h",
         "bench.h",
         "blob.h",
+        "bootstrap-utils.h",
         "cache.h",
         "container.h",
+        "event-target-bootstrap.h",
         "events.h",
         "eventsource.h",
         "export-loopback.h",
@@ -95,6 +100,7 @@ filegroup(
         "performance.h",
         "performance-bootstrap.h",
         "queue.h",
+        "request-io.h",
         "restore.h",
         "scheduled.h",
         "snapshot.h",
@@ -461,7 +467,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@ssl",
     ],
 )
 
@@ -670,6 +675,7 @@ kj_test(
         ":memory-cache",
         "//src/workerd/io:trace",
         "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:thread-scopes",
     ],
 )
 
@@ -678,6 +684,15 @@ kj_test(
     # Downstream users may set their own flags, which breaks this test.
     tags = ["no-downstream"],
     deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "per-isolate-embedder-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/api/tests/embedder-bootstrap:embedder_bootstrap_test",
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],
@@ -700,6 +715,30 @@ kj_test(
 )
 
 kj_test(
+    src = "event-target-bootstrap-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "bootstrap-utils-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "request-io-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "blob-test.c++",
     deps = [
         "//src/workerd/io",
@@ -708,6 +747,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "js-readable-stream-test.c++",
     deps = [
         "//src/workerd/io",
@@ -716,6 +756,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "js-writable-stream-test.c++",
     deps = [
         "//src/workerd/io",
@@ -812,19 +853,12 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        ":rtti",
         ":streams",
         ":urlpattern",
         ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
-    ],
-)
-
-kj_test(
-    src = "encoding-test.c++",
-    deps = [
-        ":encoding",
-        "//src/workerd/io",
     ],
 )
 
@@ -844,6 +878,15 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "abort-signal-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(

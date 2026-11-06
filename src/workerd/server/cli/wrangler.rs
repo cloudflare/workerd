@@ -9,12 +9,17 @@
 //! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`,
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
-//! `compatibility_flags`, `vars`, `durable_objects`, `migrations`, `no_bundle` and `$schema`. Any
-//! other field is an error rather than silently ignored.
+//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `no_bundle` and
+//! `$schema`. Any other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
 //! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//!
+//! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
+//! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
+//! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
+//! each node's own config defines.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,6 +36,11 @@ use crate::process::Process;
 
 const DEFAULT_ADDRESS: &str = "localhost:8787";
 
+/// The disk service a deployment's Durable Objects are stored on: a node's, since a deployment
+/// may define no disk. Each class's objects are in a directory of their own on it, named by the
+/// class's storage key, which names the deployment.
+pub const DEPLOYMENT_STORAGE: &str = "do-storage";
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Wrangler {
@@ -44,6 +54,8 @@ struct Wrangler {
     #[serde(default)]
     vars: BTreeMap<String, Value>,
     durable_objects: Option<DurableObjects>,
+    #[serde(default)]
+    exports: BTreeMap<String, Export>,
     #[serde(default)]
     migrations: Vec<Migration>,
     #[serde(default)]
@@ -61,6 +73,40 @@ struct DurableObjects {
 struct DurableObjectBinding {
     name: String,
     class_name: String,
+}
+
+/// An `exports` entry: a Durable Object class and its lifecycle state.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(rename = "type")]
+    _type: ExportType,
+    #[serde(default)]
+    state: State,
+    storage: Option<Storage>,
+    renamed_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ExportType {
+    DurableObject,
+}
+
+#[derive(Deserialize, Default, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum State {
+    #[default]
+    Created,
+    Deleted,
+    Renamed,
+}
+
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum Storage {
+    Sqlite,
+    LegacyKv,
 }
 
 #[derive(Deserialize)]
@@ -110,7 +156,53 @@ pub fn is_wrangler_config(path: &str) -> bool {
     ext.eq_ignore_ascii_case("json") || ext.eq_ignore_ascii_case("jsonc")
 }
 
+/// The wrangler config of the project in `dir`, in the order wrangler looks for one: its
+/// `wrangler.json`, else its `wrangler.jsonc`; a `wrangler.toml` is not supported.
+pub fn project_config(dir: &Path) -> Result<PathBuf, String> {
+    for candidate in ["wrangler.json", "wrangler.jsonc"] {
+        let path = dir.join(candidate);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    if dir.join("wrangler.toml").exists() {
+        return Err(format!(
+            "{}: wrangler.toml is not supported. Convert it to wrangler.jsonc.",
+            dir.display()
+        ));
+    }
+    Err(format!(
+        "{} does not contain wrangler.json or wrangler.jsonc.",
+        dir.display()
+    ))
+}
+
+/// What a wrangler config is translated into.
+enum Target<'a> {
+    /// A config to serve: the worker named after the config's `name`, else `main`, a socket, and
+    /// a disk service for its Durable Objects under `.wrangler/state/workerd`.
+    Serve,
+    /// A cluster deployment, services only: the worker named `name`, else after the config's
+    /// `name`, and its Durable Objects stored on the node's [`DEPLOYMENT_STORAGE`].
+    Deployment { name: Option<&'a str> },
+}
+
+/// The config `workerd serve` runs for the wrangler config at `path`.
 pub fn load(path: &str, process: &Process) -> Result<Config, String> {
+    translate(path, process, &Target::Serve).map(|(_, config)| config)
+}
+
+/// The deployment `workerd deploy` publishes for the wrangler config at `path`, and its name:
+/// `name`, else the config's `name`.
+pub fn load_deployment(
+    path: &str,
+    name: Option<&str>,
+    process: &Process,
+) -> Result<(String, Config), String> {
+    translate(path, process, &Target::Deployment { name })
+}
+
+fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, Config), String> {
     let watch = |p: &Path| {
         process
             .watch_file(p.as_os_str().as_encoded_bytes())
@@ -123,16 +215,26 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
     let root = file.parent().unwrap_or(&file);
 
+    let name = match target {
+        Target::Serve => wrangler.name.clone().unwrap_or_else(|| "main".to_owned()),
+        Target::Deployment { name } => name
+            .map(str::to_owned)
+            .or_else(|| wrangler.name.clone())
+            .ok_or(
+                "This deployment needs a name. Set \"name\" in the wrangler config or pass --name.",
+            )?,
+    };
+    let classes = do_classes(&wrangler)?;
+
     let sources = if wrangler.no_bundle {
         unbundled(root, &wrangler.main, &watch)?
     } else {
         bundle(&esbuild(root), root, &wrangler.main, &watch)?
     };
 
-    let classes = do_classes(&wrangler)?;
-    let name = wrangler.name.clone().unwrap_or_else(|| "main".to_owned());
+    let serving = matches!(target, Target::Serve);
     let storage = root.join(".wrangler/state/workerd");
-    if !classes.is_empty() {
+    if serving && !classes.is_empty() {
         fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
     }
 
@@ -140,7 +242,7 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
     let mut conf = message.init_root::<config::Builder>();
     let mut services = conf
         .reborrow()
-        .init_services(if classes.is_empty() { 1 } else { 2 });
+        .init_services(if serving && !classes.is_empty() { 2 } else { 1 });
 
     let mut service = services.reborrow().get(0);
     service.set_name(&name);
@@ -150,7 +252,58 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         .set_compatibility_flags(&wrangler.compatibility_flags[..])
         .map_err(|e| e.to_string())?;
 
-    let mut ms = worker.reborrow().init_modules(sources.len() as u32);
+    set_modules(worker.reborrow(), &sources)?;
+    set_bindings(worker.reborrow(), &wrangler);
+
+    if !classes.is_empty() {
+        let mut ns = worker
+            .reborrow()
+            .init_durable_object_namespaces(classes.len() as u32);
+        for (i, (class, key, sql)) in classes.iter().enumerate() {
+            let mut n = ns.reborrow().get(i as u32);
+            n.set_class_name(class);
+            n.set_unique_key(format!("{name}-{key}"));
+            n.set_enable_sql(*sql);
+        }
+        if serving {
+            // Named after the worker, so it cannot collide with it.
+            let storage_service = format!("{name}-do-storage");
+            worker
+                .init_durable_object_storage()
+                .set_local_disk(&storage_service);
+            let mut disk_service = services.get(1);
+            disk_service.set_name(&storage_service);
+            let mut disk = disk_service.init_disk();
+            disk.set_path(storage.to_string_lossy());
+            disk.set_writable(true);
+        } else {
+            worker
+                .init_durable_object_storage()
+                .set_local_disk(DEPLOYMENT_STORAGE);
+        }
+    }
+
+    if serving {
+        let mut socket = conf.init_sockets(1).get(0);
+        socket.set_name("http");
+        socket.set_address(DEFAULT_ADDRESS);
+        socket.reborrow().init_http();
+        socket.init_service().set_name(&name);
+    }
+
+    let config = Config::from_words(&words_from_bytes(
+        &capnp::serialize::write_message_to_words(&message),
+    ))
+    .map_err(|e| e.to_string())?;
+    Ok((name, config))
+}
+
+/// The worker's modules: `sources`.
+fn set_modules(
+    worker: workerd_capnp::worker::Builder<'_>,
+    sources: &[Source],
+) -> Result<(), String> {
+    let mut ms = worker.init_modules(sources.len() as u32);
     for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
         let mut m = ms.reborrow().get(i as u32);
         m.set_name(module_name);
@@ -163,14 +316,16 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
             Kind::Data => m.set_data(bytes),
         }
     }
+    Ok(())
+}
 
+/// The worker's bindings: `vars`, then the Durable Object bindings.
+fn set_bindings(worker: workerd_capnp::worker::Builder<'_>, wrangler: &Wrangler) {
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
-    let mut bs = worker
-        .reborrow()
-        .init_bindings((wrangler.vars.len() + do_bindings.len()) as u32);
+    let mut bs = worker.init_bindings((wrangler.vars.len() + do_bindings.len()) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -185,39 +340,6 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         b.init_durable_object_namespace()
             .set_class_name(&d.class_name);
     }
-
-    if !classes.is_empty() {
-        let mut ns = worker
-            .reborrow()
-            .init_durable_object_namespaces(classes.len() as u32);
-        for (i, (class, key, sql)) in classes.iter().enumerate() {
-            let mut n = ns.reborrow().get(i as u32);
-            n.set_class_name(class);
-            n.set_unique_key(format!("{name}-{key}"));
-            n.set_enable_sql(*sql);
-        }
-        // Named after the worker, so it cannot collide with it.
-        let storage_service = format!("{name}-do-storage");
-        worker
-            .init_durable_object_storage()
-            .set_local_disk(&storage_service);
-        let mut disk_service = services.get(1);
-        disk_service.set_name(&storage_service);
-        let mut disk = disk_service.init_disk();
-        disk.set_path(storage.to_string_lossy());
-        disk.set_writable(true);
-    }
-
-    let mut socket = conf.init_sockets(1).get(0);
-    socket.set_name("http");
-    socket.set_address(DEFAULT_ADDRESS);
-    socket.reborrow().init_http();
-    socket.init_service().set_name(&name);
-
-    Config::from_words(&words_from_bytes(
-        &capnp::serialize::write_message_to_words(&message),
-    ))
-    .map_err(|e| e.to_string())
 }
 
 type Source = (String, Kind, Vec<u8>);
@@ -424,10 +546,12 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The Durable Object classes, each with its storage key and whether it is SQLite-backed, from
-/// `migrations` applied in order, plus any bound class the migrations never mention (not
-/// SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is never
-/// reused: a class created under a name an earlier class was keyed by (since deleted or renamed)
-/// gets `<name>~<n>` and starts empty, as in production.
+/// the live `exports` entries or `migrations` applied in order, plus any bound class neither
+/// mentions (not SQLite-backed, as in wrangler). A class keeps its key across renames, and a key is
+/// never reused: a class created under a name an earlier class was keyed by (since deleted or
+/// renamed) gets `<name>~<n>` and starts empty, as in production. `exports` holds no history, so
+/// there a class is keyed by its name, or by its old name while its `renamed` entry remains, and a
+/// `deleted` entry leaves the class's objects on disk.
 fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
     let mut classes: Vec<(String, String, bool)> = Vec::new();
     let mut used: Vec<String> = Vec::new();
@@ -439,6 +563,40 @@ fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
         used.push(k.clone());
         k
     };
+    if !w.exports.is_empty() && !w.migrations.is_empty() {
+        return Err("exports and migrations cannot both declare Durable Objects".to_owned());
+    }
+    let live = |c: &str| w.exports.get(c).is_some_and(|e| e.state == State::Created);
+    let renames = |c: &String| {
+        w.exports
+            .values()
+            .filter(|e| e.renamed_to.as_ref() == Some(c))
+            .count()
+    };
+    for (c, e) in &w.exports {
+        match (&e.state, &e.storage, &e.renamed_to) {
+            (State::Created, Some(s), None) => {
+                // A renamed class keeps the old class's key, and so its objects.
+                let from = w
+                    .exports
+                    .iter()
+                    .find(|(_, e)| e.renamed_to.as_ref() == Some(c));
+                let k = key(from.map_or(c, |(f, _)| f));
+                classes.push((c.clone(), k, *s == Storage::Sqlite));
+            }
+            (State::Deleted, None, None) => {}
+            (State::Renamed, None, Some(to)) if renames(to) > 1 => {
+                return Err(format!("exports: more than one class is renamed to {to}"));
+            }
+            (State::Renamed, None, Some(to)) if live(to) => {}
+            (State::Renamed, None, Some(to)) => {
+                return Err(format!(
+                    "exports: {c} is renamed to {to}, which is not live"
+                ));
+            }
+            _ => return Err(format!("exports: {c} has the wrong fields for its state")),
+        }
+    }
     for m in &w.migrations {
         // In wrangler's order: deletes, then renames, then new classes.
         let find = |classes: &[(String, String, bool)], c: &str, what: &str| {

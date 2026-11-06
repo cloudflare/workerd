@@ -102,6 +102,12 @@ namespace workerd::api {
 namespace {
 
 struct EncoderModuleRegistryImpl {
+  // Rust resources are described with the members they register under `flags`, as C++
+  // resources are by `jsg::rtti::Builder`.
+  explicit EncoderModuleRegistryImpl(CompatibilityFlags::Reader flags)
+      : rustTypes(::workerd::rust::jsg::new_rtti_context(
+            capnp::canonicalize(flags).asBytes().as<kj_rs::Rust>())) {}
+
   struct CppModuleContents {
     CppModuleContents(kj::String structureName): structureName(kj::mv(structureName)) {}
 
@@ -162,7 +168,16 @@ struct EncoderModuleRegistryImpl {
     modules.add(kj::mv(info));
   }
 
+  // Tells RustModuleRegistry to describe Rust modules through addRustBuiltinModule().
+  static constexpr bool describesRustModules = true;
+
+  void addRustBuiltinModule(
+      ::rust::Str specifier, ::workerd::rust::jsg::ModuleDescribeCallback describe) {
+    describe(*rustTypes, specifier);
+  }
+
   kj::Vector<ModuleInfo> modules;
+  ::rust::Box<::workerd::rust::jsg::RttiContext> rustTypes;
 };
 
 // typescript_implemented_streams replaces the C++ Web Streams globals with TypeScript
@@ -244,6 +259,17 @@ struct TypesEncoder {
     capnp::MallocMessageBuilder message;
     auto root = message.initRoot<jsg::rtti::StructureGroups>();
 
+    EncoderModuleRegistryImpl registry(flags);
+    registerModules(registry, flags);
+
+    auto rustBytes = registry.rustTypes->encode("rust");
+    KJ_REQUIRE(rustBytes.size() % sizeof(capnp::word) == 0,
+        "Rust RTTI message size must be a multiple of a Cap'n Proto word");
+    auto rustWords = kj::heapArray<capnp::word>(rustBytes.size() / sizeof(capnp::word));
+    rustWords.asBytes().copyFrom(kj::arrayPtr(rustBytes.data(), rustBytes.size()));
+    capnp::FlatArrayMessageReader rustReader(rustWords);
+    auto rustTypes = rustReader.getRoot<jsg::rtti::StructureGroups>();
+
     // Encode RTTI structures
     auto builder = jsg::rtti::Builder(flags);
 
@@ -252,22 +278,25 @@ struct TypesEncoder {
 
     unsigned int groupsSize = 0;
     EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_COUNT)
+    groupsSize += rustTypes.getGroups().size();
     auto groups = root.initGroups(groupsSize);
     groupsIndex = 0;
     EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_WRITE)
+    for (auto group: rustTypes.getGroups()) {
+      groups.setWithCaveats(groupsIndex++, group);
+    }
     KJ_ASSERT(groupsIndex == groupsSize);
 
 #undef EW_TYPE_GROUP_COUNT
 #undef EW_TYPE_GROUP_WRITE
 
     // Encode modules
-    EncoderModuleRegistryImpl registry;
-    registerModules(registry, flags);
-
     unsigned int i = 0;
-    auto modulesBuilder = root.initModules(registry.modules.size());
-    for (auto moduleBuilder: modulesBuilder) {
-      auto &module = registry.modules[i++];
+    auto moduleCount = registry.modules.size();
+    moduleCount += rustTypes.getModules().size();
+    auto modulesBuilder = root.initModules(moduleCount);
+    for (auto &module: registry.modules) {
+      auto moduleBuilder = modulesBuilder[i++];
       moduleBuilder.setSpecifier(module.specifier);
       KJ_SWITCH_ONEOF(module.contents) {
         KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
@@ -277,6 +306,9 @@ struct TypesEncoder {
           moduleBuilder.setTsDeclarations(contents.tsDeclarations);
         }
       }
+    }
+    for (auto module: rustTypes.getModules()) {
+      modulesBuilder.setWithCaveats(i++, module);
     }
 
     auto words = capnp::messageToFlatArray(message);

@@ -7,7 +7,9 @@
 ///
 /// Types that contain only plain data (no `jsg::Rc`, `jsg::v8::TracedGlobal`, etc.) do not
 /// need to participate in GC tracing. This macro produces a `Traced` impl whose
-/// `trace` method is a no-op and whose `holds_gc_references` returns `false`.
+/// `trace` method is a no-op, and a
+/// [`HoldsNoGcReferences`](crate::HoldsNoGcReferences) implementation. A generic type takes a
+/// call of its own, with its parameters first, each with at most one bound.
 ///
 /// # Example
 ///
@@ -15,16 +17,25 @@
 /// use jsg::jsg_traced;
 ///
 /// struct Id(u64);
+/// struct Slot<T>(std::sync::Arc<T>);
 /// jsg_traced!(Id);
+/// jsg_traced!(<T: jsg::HoldsNoGcReferences> Slot<T>);
 /// ```
 #[macro_export]
 macro_rules! jsg_traced {
+    (<$($g:ident $(: $b:path)?),+ $(,)?> $t:ty) => {
+        impl<$($g $(: $b)?),+> $crate::Traced for $t {
+            fn trace(&self, _visitor: &mut $crate::v8::GcVisitor) {}
+        }
+
+        impl<$($g $(: $b)?),+> $crate::HoldsNoGcReferences for $t {}
+    };
     ($($t:ty),* $(,)?) => {
         $(impl $crate::Traced for $t {
-            fn holds_gc_references() -> bool {
-                false
-            }
-        })*
+            fn trace(&self, _visitor: &mut $crate::v8::GcVisitor) {}
+        }
+
+        impl $crate::HoldsNoGcReferences for $t {})*
     };
 }
 
