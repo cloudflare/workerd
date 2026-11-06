@@ -378,3 +378,145 @@ fn a_route_ends_with_its_owners_listed_lease() {
         );
     });
 }
+
+#[test]
+fn a_draining_owner_releases_its_object_to_the_next_claim() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, b_own) = node(&store, "b");
+        a.renew(0).await.unwrap();
+        b.renew(0).await.unwrap();
+        open_x(&a_own).await;
+        a_own.may_claim.set(false);
+        // Its own object is to be handed off, not served.
+        assert_eq!(
+            a_own.acquire_or_route("ns", "x", 1).await.unwrap(),
+            Claim::Releasing(1)
+        );
+        // Only the epoch a holds is released.
+        assert!(!a_own.release("ns", "x", 2).await.unwrap());
+        assert!(a_own.release("ns", "x", 1).await.unwrap());
+        assert!(!a_own.release("ns", "x", 1).await.unwrap());
+        // While a's lease still holds, b claims the next epoch, which
+        // recovers a's.
+        let Claim::Owned(next) = b_own.acquire_or_route("ns", "x", 2).await.unwrap() else {
+            panic!("b should own x")
+        };
+        assert_eq!((next.epoch, next.recover), (2, Some(1)));
+    });
+}
+
+#[test]
+fn a_draining_node_sends_an_object_nobody_owns_to_a_peer() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        a.renew(0).await.unwrap();
+        a.peers(0).await.unwrap();
+        a_own.may_claim.set(false);
+        // With no peer to claim it, nothing can serve it.
+        let claim = a_own.acquire_or_route("ns", "x0", 1).await;
+        assert!(matches!(claim, Err(Error::NotHere(_))), "{claim:?}");
+
+        let peers: Vec<_> = ["b", "c"].iter().map(|n| node(&store, n)).collect();
+        for (registry, _) in &peers {
+            registry.renew(0).await.unwrap();
+        }
+        a.peers(1).await.unwrap();
+        let mut routes = Vec::new();
+        for i in 0..16 {
+            let actor = format!("x{i}");
+            let claim = a_own.acquire_or_route("ns", &actor, 2).await.unwrap();
+            // The same peer every time.
+            assert_eq!(
+                a_own.acquire_or_route("ns", &actor, 2).await.unwrap(),
+                claim
+            );
+            routes.push(claim);
+        }
+        for name in ["b", "c"] {
+            let route = Claim::Route {
+                node: name.into(),
+                address: format!("{name}:1"),
+                stale: false,
+            };
+            assert!(routes.contains(&route), "no object went to {name}");
+        }
+        // Nothing was claimed here; the peer a request goes to claims it.
+        assert!(store.at("cluster").list("do/").await.unwrap().is_empty());
+        let Claim::Route { node: peer, .. } = &routes[0] else {
+            panic!("x0 should route to a peer")
+        };
+        let (_, own) = &peers[usize::from(peer == "c")];
+        assert_eq!(own.acquire_or_route("ns", "x0", 3).await.unwrap(), owned(1));
+    });
+}
+
+fn route_to(node: &str) -> Claim {
+    Claim::Route {
+        node: node.into(),
+        address: format!("{node}:1"),
+        stale: false,
+    }
+}
+
+#[test]
+fn a_draining_node_routes_past_draining_and_refusing_peers() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, _) = node(&store, "b");
+        let (c, _) = node(&store, "c");
+        for registry in [&a, &b, &c] {
+            registry.renew(0).await.unwrap();
+        }
+        c.start_draining();
+        c.renew(0).await.unwrap();
+        a.peers(1).await.unwrap();
+        a_own.may_claim.set(false);
+        // c drains too: every object goes to b.
+        for i in 0..8 {
+            let claim = a_own.acquire_or_route("ns", &format!("x{i}"), 2).await;
+            assert_eq!(claim.unwrap(), route_to("b"));
+        }
+        // b refused x0; with no other peer, it is asked again.
+        a_own.forget_route("ns", "x0", "b");
+        let claim = a_own.acquire_or_route("ns", "x0", 3).await;
+        assert_eq!(claim.unwrap(), route_to("b"));
+    });
+}
+
+#[test]
+fn a_draining_node_sends_what_it_cannot_release_to_a_peer() {
+    block_on(async {
+        let store = Bucket::memory("");
+        let (a, a_own) = node(&store, "a");
+        let (b, _) = node(&store, "b");
+        a.renew(0).await.unwrap();
+        b.renew(0).await.unwrap();
+        a.peers(0).await.unwrap();
+        open_x(&a_own).await;
+        assert_eq!(
+            a_own.acquire_or_route("ns", "y", 0).await.unwrap(),
+            owned(1)
+        );
+        assert!(a_own.open("ns", "y", 1).await.unwrap());
+        a_own.may_claim.set(false);
+        for actor in ["x", "y"] {
+            let claim = a_own.acquire_or_route("ns", actor, 1).await;
+            assert_eq!(claim.unwrap(), Claim::Releasing(1));
+        }
+        // One it failed to release, and all once it left, go to a peer.
+        a_own.abandon("ns", "x");
+        assert_eq!(
+            a_own.acquire_or_route("ns", "x", 2).await.unwrap(),
+            route_to("b")
+        );
+        a.deregister().await.unwrap();
+        assert_eq!(
+            a_own.acquire_or_route("ns", "y", 2).await.unwrap(),
+            route_to("b")
+        );
+    });
+}

@@ -410,6 +410,10 @@ class ActorHooksImpl final: public Worker::Actor::Loopback,
  public:
   explicit ActorHooksImpl(::rust::Box<ActorHooks> hooks): hooks(kj::mv(hooks)) {}
 
+  const ActorHooks& getHooks() const {
+    return *hooks;
+  }
+
   kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return hooks->start_request(kj::heap<RequestMetadata>(kj::mv(metadata)));
   }
@@ -640,6 +644,16 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
 
 }  // namespace
 
+void stamp_current_actor_cause(RequestMetadata& metadata) {
+  if (!IoContext::hasCurrent()) return;
+  KJ_IF_SOME(actor, IoContext::current().getActor()) {
+    auto loopback = actor.getLoopback();
+    KJ_IF_SOME(hooks, kj::dynamicDowncastIfAvailable<ActorHooksImpl>(*loopback)) {
+      hooks.getHooks().stamp_cause(metadata);
+    }
+  }
+}
+
 ActorHandle::ActorHandle(kj::Own<Worker::Actor::FacetManager> hooks,
     kj::Own<RequestTracker> tracker,
     kj::Own<Worker::Actor> actor)
@@ -800,6 +814,20 @@ kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory) {
   kj::Vector<kj::Promise<void>> cleanups(impl.containers.size());
   for (auto& entry: impl.containers) {
     // A client's shutdown replaces its entry's `cleanup`.
+    KJ_IF_SOME(client, entry.value->client) client.shutdown();
+    cleanups.add(entry.value->cleanup.addBranch());
+  }
+  return kj::joinPromises(cleanups.releaseAsArray());
+}
+
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor) {
+  auto& impl = factory.getImpl();
+  // Container ids end in `<uniqueKey>-<actorId>` (getContainerClient).
+  auto suffix = kj::str("-", uniqueKey, "-", actor);
+  kj::Vector<kj::Promise<void>> cleanups;
+  for (auto& entry: impl.containers) {
+    if (!entry.key.endsWith(suffix)) continue;
     KJ_IF_SOME(client, entry.value->client) client.shutdown();
     cleanups.add(entry.value->cleanup.addBranch());
   }

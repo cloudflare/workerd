@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use serde::Deserialize;
@@ -71,6 +72,9 @@ pub enum Claim {
         address: String,
         stale: bool,
     },
+    /// This instance owns it at this epoch but drains: it hands the object
+    /// off (`release`), and the request goes on to whoever claims it.
+    Releasing(u64),
 }
 
 /// Claims, routes and releases Durable Objects through their owner records.
@@ -91,6 +95,9 @@ pub struct Ownership {
     /// of an object with no record writes nothing: `open` creates the
     /// record, open, in one conditional write, as celld claims a new cell.
     claimed: RefCell<HashMap<String, (OwnerRecord, Guard)>>,
+    /// Objects this draining instance owns but failed to release: like the
+    /// rest once it left, they go to whoever claims them.
+    abandoned: RefCell<HashSet<String>>,
 }
 
 struct Route {
@@ -127,6 +134,7 @@ impl Ownership {
             routes: RefCell::new(HashMap::new()),
             refused: RefCell::new(HashMap::new()),
             claimed: RefCell::new(HashMap::new()),
+            abandoned: RefCell::new(HashSet::new()),
         }
     }
 
@@ -197,14 +205,17 @@ impl Ownership {
                 None => (OwnerRecord::default(), Guard::Absent),
                 Some((body, version)) => {
                     let record: OwnerRecord = serde_json::from_slice(&body)?;
-                    if record.node == me {
-                        // A draining node lets its objects go, its own too.
-                        if !self.may_claim.get() {
-                            return Err(draining(&key));
-                        }
+                    if record.node == me && self.may_claim.get() {
                         return Ok(Claim::Owned(record.owned()));
                     }
-                    let peer = if record.node.is_empty() {
+                    // A draining node lets its objects go, its own too. One
+                    // it failed to let go, or any once it left, it serves no
+                    // more: whoever claims it next takes it over.
+                    let let_go = self.registry.left() || self.abandoned.borrow().contains(&key);
+                    if record.node == me && !let_go {
+                        return Ok(Claim::Releasing(record.epoch));
+                    }
+                    let peer = if record.node.is_empty() || record.node == me {
                         None
                     } else if refused == Some(record.node.as_str()) {
                         self.registry.live_now(&record.node, now_ms).await?
@@ -225,8 +236,10 @@ impl Ownership {
                     (record, Guard::Match(version))
                 }
             };
+            // No live instance owns it, and a draining one claims nothing:
+            // a peer does.
             if !self.may_claim.get() {
-                return Err(draining(&key));
+                return self.successor(&key, refused, now_ms).await;
             }
             let record = previous.successor(me);
             // A new object opens at its claim, where a loser still routes
@@ -239,11 +252,10 @@ impl Ownership {
                 let version = self.bucket.put_if(&key, body, guard).await?;
                 version.map(Guard::Match)
             };
-            // Draining may have started during the write. The record it
-            // wrote names this node, which leaves the cluster: the next claim
-            // takes the object over at the next epoch.
-            if !self.may_claim.get() {
-                return Err(draining(&key));
+            // Draining may have started during the write: the object it
+            // claimed is let go like the others this node owns.
+            if !self.may_claim.get() && written.is_some() {
+                return Ok(Claim::Releasing(record.epoch));
             }
             if let Some(guard) = written {
                 self.claimed
@@ -253,6 +265,82 @@ impl Ownership {
             }
         }
         Err(Error::Contended(key))
+    }
+
+    /// Where a draining instance sends a request for an object no live
+    /// instance owns: the serving peer that `handoff::successor` picks,
+    /// which claims it. Not cached: the peer may lose the claim to another.
+    /// A peer that `refused` it, or could not be reached, is passed over
+    /// while there is another, and its own record read, which drops it from
+    /// the listing if it died. A listing that names no peer is read again,
+    /// as it may predate them.
+    async fn successor(&self, key: &str, refused: Option<&str>, now_ms: u64) -> Result<Claim> {
+        if let Some(node) = refused {
+            self.registry.live_now(node, now_ms).await?;
+        }
+        let mut pick = self.pick_successor(key, refused, now_ms);
+        if pick.is_none() {
+            self.registry.peers(now_ms).await?;
+            pick = self.pick_successor(key, refused, now_ms);
+        }
+        // The only peer left may have refused for what it knew then.
+        let pick = pick.or_else(|| self.pick_successor(key, None, now_ms));
+        let (node, address) = pick.ok_or_else(|| draining(key))?;
+        Ok(Claim::Route {
+            node,
+            address,
+            stale: false,
+        })
+    }
+
+    fn pick_successor(
+        &self,
+        key: &str,
+        refused: Option<&str>,
+        now_ms: u64,
+    ) -> Option<(String, String)> {
+        let me = self.registry.node();
+        let serving = self.registry.serving_nodes(now_ms);
+        let peers = serving
+            .iter()
+            .map(String::as_str)
+            .filter(|node| *node != me && Some(*node) != refused);
+        let node = cluster_logic::handoff::successor(key, peers)?;
+        Some((node.to_owned(), self.registry.address(node)?))
+    }
+
+    /// Gives up on releasing an object this draining instance owns: requests
+    /// for it go to whoever claims it, as once this instance left.
+    pub fn abandon(&self, namespace: &str, actor: &str) {
+        self.abandoned
+            .borrow_mut()
+            .insert(owner_key(namespace, actor));
+    }
+
+    /// Hand off an object this instance owns at `epoch` and no longer
+    /// writes: the record keeps its epochs and names no owner, so the next
+    /// claim anywhere takes the object over, recovering this epoch's log
+    /// at the next. Answers whether the record still named this owner.
+    pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> Result<bool> {
+        let key = owner_key(namespace, actor);
+        self.claimed.borrow_mut().remove(&key);
+        let Some((body, version)) = self.bucket.get(&key).await? else {
+            return Ok(false);
+        };
+        let record: OwnerRecord = serde_json::from_slice(&body)?;
+        if record.node != self.registry.node() || record.epoch != epoch {
+            return Ok(false);
+        }
+        let released = OwnerRecord {
+            node: String::new(),
+            ..record
+        };
+        let body = serde_json::to_vec(&released)?;
+        let written = self
+            .bucket
+            .put_if(&key, body, Guard::Match(version))
+            .await?;
+        Ok(written.is_some())
     }
 
     fn route(&self, key: String, peer: NodeRecord, now_ms: u64) -> Claim {

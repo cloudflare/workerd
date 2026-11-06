@@ -697,6 +697,50 @@ fn a_superseded_owners_commit_is_not_acknowledged() {
     assert!(rt.block_on(x.older(2)).unwrap().is_empty());
 }
 
+#[test]
+fn a_compaction_keeps_an_object_busy_once_it_began() {
+    // a's compaction of x waits for x's lock, which an upload holds, while x
+    // stops being served here: x stays busy until the compaction ends, so a
+    // handoff releases it only then, and the compaction leaves x's log alone.
+    let dir = scratch("compacting");
+    let path = dir.join("x.db");
+    let store = Bucket::memory("").at("cluster");
+    let registry = Rc::new(Registry::new(store.clone(), "a", "a", 10_000));
+    let ownership = Ownership::new(store.clone(), registry.clone());
+    let owners = Owners::new(store.clone());
+    let rt = runtime();
+    rt.block_on(registry.renew(0)).unwrap();
+    let owned = match rt.block_on(ownership.acquire_or_route("ns", "x", 0)) {
+        Ok(Claim::Owned(owned)) => owned,
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        rt.block_on(owners.open_fresh(&ownership, "ns", "x", &owned))
+            .unwrap()
+    );
+    rt.block_on(owners.take_over(&ownership, "ns", "x", &owned, &Root(path.clone())))
+        .unwrap();
+    let app = Connection::open(path.to_str().unwrap());
+    app.execute("PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    insert(&app, 0, 10);
+    let wal = std::fs::read(dir.join("x.db-wal")).unwrap();
+    owners.wal_write("ns", "x", "x.db", 0, &wal);
+    rt.block_on(owners.commit(&ownership, "ns", "x")).unwrap();
+
+    let x = format!("{}{}", store.prefix(), crate::object_prefix("ns", "x"));
+    let x = Log::new(store.at(&x));
+    let files = rt.block_on(x.files(1)).unwrap();
+    let stopped = owners.while_locked("ns", "x", async {
+        // The compaction starts, and waits for the lock.
+        tokio::task::yield_now().await;
+        owners.close("ns", "x");
+        assert!(owners.busy("ns", "x"));
+    });
+    rt.block_on(async { futures::join!(stopped, owners.tier()) });
+    assert!(!owners.busy("ns", "x"));
+    assert_eq!(rt.block_on(x.files(1)).unwrap(), files);
+}
+
 /// Where `Owners` places an object with only a root database.
 struct Root(PathBuf);
 
