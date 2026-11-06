@@ -47,6 +47,10 @@ export const validateSpans = {
         expectedSpan: 'undefined-attr-op',
       },
       { test: 'setAttributes', expectedSpan: 'set-attributes-op' },
+      {
+        test: 'setAttributesConversion',
+        expectedSpan: 'set-attributes-conversion-op',
+      },
       { test: 'setStatus', expectedSpan: 'status-error-op' },
       { test: 'updateName', expectedSpan: 'update-name-original' },
       { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
@@ -240,6 +244,20 @@ export const validateSpans = {
       assert(
         !('skipped' in span),
         'setAttributes should ignore undefined values'
+      );
+    }
+
+    {
+      const span = (spansByTest.get('setAttributesConversion') || []).find(
+        (s) => s.name === 'set-attributes-conversion-op'
+      );
+      assert(span, 'setAttributesConversion: span present');
+      assert.strictEqual(span['ordered.scalar'], 'before');
+      assert.deepStrictEqual(span['ordered.array'], ['before']);
+      assert.strictEqual(span['ordered.later'], 'after');
+      assert(
+        !Object.keys(span).some((key) => key.startsWith('failed.')),
+        'setAttributes should not record any part of a failed batch'
       );
     }
 
