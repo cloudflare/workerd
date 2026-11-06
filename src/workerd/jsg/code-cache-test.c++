@@ -39,6 +39,7 @@ class SharedModuleCompilationCacheTestAccess {
 namespace workerd::jsg::test {
 
 WD_STRONG_BOOL(Defer);
+WD_STRONG_BOOL(CollectCompileHints);
 WD_STRONG_BOOL(UseNewModuleRegistry);
 
 namespace {
@@ -479,30 +480,33 @@ KJ_TEST("The runtime cache invokes its compilation callback on misses and hits")
 KJ_TEST("Hint production and embedded bytecode bypass runtime keys and the shared slot") {
   auto store = newStore();
   CountingObserver observer;
-  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
-    v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
-    v8::ScriptCompiler::Source source(js.str(LAZY_MODULE), origin);
-    auto module = check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
-    std::unique_ptr<v8::ScriptCompiler::CachedData> data(
-        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    KJ_ASSERT(data != nullptr);
-    SharedModuleCompilationCache sharedCache;
-    uint keyCalls = 0;
-    for (auto produceHints: {ProduceCompileHints::YES, ProduceCompileHints::NO}) {
+  for (auto collect: {CollectCompileHints::YES, CollectCompileHints::NO}) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      v8::ScriptOrigin origin(js.str("main"_kj), 0, 0, false, -1, {}, false, false, true);
+      v8::ScriptCompiler::Source source(js.str(LAZY_MODULE), origin);
+      auto module = check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+      std::unique_ptr<v8::ScriptCompiler::CachedData> data(
+          v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+      KJ_ASSERT(data != nullptr);
+      SharedModuleCompilationCache sharedCache;
+      uint keyCalls = 0;
+      if (collect) IsolateBase::from(js.v8Isolate).enableCompileHints();
       auto result = check(compileModule(js, js.str(LAZY_MODULE), origin, observer,
           [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
         ++keyCalls;
         return kj::none;
       },
           {.embeddedCache = kj::arrayPtr(data->data, data->length),
-            .produceHints = produceHints,
+            .bundleModuleName = "main"_kj,
             .sharedCache = sharedCache}));
       instantiateModule(js, result);
-    }
-    KJ_EXPECT(keyCalls == 0);
-    KJ_EXPECT(observer.found == 1);
-    KJ_EXPECT(observer.generated == 0);
-  });
+      KJ_EXPECT(keyCalls == 0);
+      auto hints = getProducedCompileHints(js);
+      KJ_EXPECT(hints.size() == (collect ? 1 : 0));
+    });
+  }
+  KJ_EXPECT(observer.found == 1);
+  KJ_EXPECT(observer.generated == 0);
   KJ_EXPECT(store->state.lockShared()->lookups == 0);
 }
 
@@ -923,12 +927,11 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
 }
 
 kj::Arc<modules::ModuleRegistry> newLazyModuleRegistry(
-    ProduceCompileHints produceHints, modules::ModuleRegistry::Builder::Options options) {
+    modules::ModuleRegistry::Builder::Options options) {
   const auto base = "file:///"_url;
   modules::ModuleRegistry::Builder builder(base, options);
   modules::ModuleBundle::BundleBuilder bundle(base);
   auto flags = modules::Module::Flags::ESM;
-  if (produceHints) flags = flags | modules::Module::Flags::PRODUCE_COMPILE_HINTS;
   bundle.addEsmModule(
       "main", jsg::copyToArc(LAZY_MODULE), flags, builder.newCodeCacheKey(LAZY_MODULE));
   return builder.add(bundle.finish()).finish();
@@ -937,14 +940,15 @@ kj::Arc<modules::ModuleRegistry> newLazyModuleRegistry(
 void evalNewRegistry(jsg::Lock& js,
     const modules::ModuleRegistry& registry,
     const CompilationObserver& observer,
-    ProduceCompileHints produceHints) {
+    CollectCompileHints produceHints) {
+  if (produceHints) IsolateBase::from(js.v8Isolate).enableCompileHints();
   auto attached = registry.attachToIsolate(js, observer);
   auto ns = KJ_ASSERT_NONNULL(modules::ModuleRegistry::tryResolveModuleNamespace(js, "main"));
   KJ_EXPECT(KJ_ASSERT_NONNULL(ns.tryCast<JsObject>()).get(js, "value").toString(js) == "6");
-  auto hints = modules::ModuleRegistry::getProducedCompileHints(js);
+  auto hints = getProducedCompileHints(js);
   if (produceHints) {
     KJ_ASSERT(hints.size() == 1, hints.size());
-    KJ_EXPECT(hints[0].specifier.getHref() == "file:///main"_kj);
+    KJ_EXPECT(hints[0].name == "main"_kj);
     KJ_ASSERT(hints[0].functionPositions.size() == 1);
     // The opening parenthesis of `compute` in LAZY_MODULE.
     KJ_EXPECT(hints[0].functionPositions[0] == 16);
@@ -957,25 +961,24 @@ KJ_TEST("New registry: producing hints bypasses an empty or populated code cache
   using Options = modules::ModuleRegistry::Builder::Options;
   auto store = newStore();
   CountingObserver observer;
-  auto registry = newLazyModuleRegistry(ProduceCompileHints::YES, Options::CODE_CACHE_KEYS);
+  auto registry = newLazyModuleRegistry(Options::CODE_CACHE_KEYS);
   KJ_ASSERT(registry->getBundleCodeCacheKeys().size() == 1);
-  auto eval = [&](const modules::ModuleRegistry& registry, ProduceCompileHints produceHints) {
+  auto eval = [&](const modules::ModuleRegistry& registry, CollectCompileHints produceHints) {
     withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
       evalNewRegistry(js, registry, observer, produceHints);
     }, UseNewModuleRegistry::YES);
   };
 
-  eval(*registry, ProduceCompileHints::YES);
+  eval(*registry, CollectCompileHints::YES);
   KJ_EXPECT(store->state.lockShared()->lookups == 0);
   KJ_EXPECT(store->state.lockShared()->inserts == 0);
   KJ_EXPECT(observer.generated == 0);
 
   // Ordinary compilation populates the same source key before the next production isolate.
-  auto normal = newLazyModuleRegistry(ProduceCompileHints::NO, Options::CODE_CACHE_KEYS);
-  eval(*normal, ProduceCompileHints::NO);
+  eval(*registry, CollectCompileHints::NO);
   KJ_EXPECT(store->state.lockShared()->entries.size() == 1);
   KJ_EXPECT(observer.generated == 1);
-  eval(*registry, ProduceCompileHints::YES);
+  eval(*registry, CollectCompileHints::YES);
 
   auto lock = store->state.lockShared();
   KJ_EXPECT(lock->lookups == 1);
@@ -989,13 +992,12 @@ KJ_TEST("New registry: producing hints bypasses an empty or populated code cache
 KJ_TEST("New registry: producing hints does not populate the shared module cache") {
   auto store = newStore();
   CountingObserver observer;
-  auto registry = newLazyModuleRegistry(
-      ProduceCompileHints::YES, modules::ModuleRegistry::Builder::Options::NONE);
+  auto registry = newLazyModuleRegistry(modules::ModuleRegistry::Builder::Options::NONE);
   KJ_ASSERT(registry->getBundleCodeCacheKeys().size() == 0);
 
   for (auto i KJ_UNUSED: kj::zeroTo(2)) {
     withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
-      evalNewRegistry(js, *registry, observer, ProduceCompileHints::YES);
+      evalNewRegistry(js, *registry, observer, CollectCompileHints::YES);
     }, UseNewModuleRegistry::YES);
   }
   KJ_EXPECT(store->state.lockShared()->lookups == 0);
