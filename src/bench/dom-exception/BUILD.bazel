@@ -1,8 +1,17 @@
 load("//:build/wd_bench.bzl", "wd_bench")
 
-# The DOMException benchmarks, against the C++ implementation.
+# The DOMException benchmarks, against the C++ implementation and the
+# TypeScript one (TS_DOM_EXCEPTION). Enabling every autogate enables
+# TS_DOM_EXCEPTION, so the C++ config has no @all-autogates variant; the
+# TypeScript config enables it itself.
 
 wd_bench(
     src = "dom-exception-cpp.wd-bench",
+    data = ["dom-exception.js"],
+    generate_all_autogates_variant = False,
+)
+
+wd_bench(
+    src = "dom-exception-ts.wd-bench",
     data = ["dom-exception.js"],
 )
