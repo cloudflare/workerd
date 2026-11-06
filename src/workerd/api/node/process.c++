@@ -50,7 +50,7 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   if (isNode && specifier == "node:process") {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableNodeJsProcessV2()) {
-      specifier = kj::str("node-internal:process_exports");
+      specifier = kj::str("node-internal:public_process");
     } else {
       specifier = kj::str("node-internal:legacy_process");
     }
@@ -79,6 +79,11 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   }
 
   return js.undefined();
+}
+
+jsg::JsObject ProcessModule::getInternalModule(jsg::Lock& js, kj::String specifier) {
+  return JSG_REQUIRE_NONNULL(js.resolveInternalModule(specifier), Error,
+      kj::str("Failed to resolve internal module ", specifier));
 }
 
 jsg::JsObject ProcessModule::getEnvObject(jsg::Lock& js) {

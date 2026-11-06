@@ -17,7 +17,6 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
-import { Buffer } from 'node-internal:internal_buffer';
 import { parseEnv } from 'node-internal:internal_utils';
 import {
   platform,
@@ -30,10 +29,11 @@ import {
 } from 'node-internal:internal_process';
 import { validateString } from 'node-internal:validators';
 import internalAssert from 'node-internal:internal_assert';
+import type { Buffer } from 'node-internal:internal_buffer';
 import type * as NodeFS from 'node:fs';
+import type * as Stdio from 'node-internal:internal_process_stdio';
 
 export { platform, nextTick, emitWarning, env, features, config };
-import { stdin, stdout, stderr } from 'node-internal:internal_process_stdio';
 
 export function chdir(path: string | Buffer | URL): void {
   validateString(path, 'directory');
@@ -364,8 +364,18 @@ export function execve(
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.execve');
 }
 
-export function openStdin(): typeof stdin {
-  return stdin;
+// The stdio streams are built on the fs streams, whose module graph is large, so they
+// are loaded on first access and exposed as accessors on `process` (as Node.js does).
+let stdio: typeof Stdio | undefined;
+function getStdio(): typeof Stdio {
+  stdio ??= processImpl.getInternalModule(
+    'node-internal:internal_process_stdio'
+  ) as typeof Stdio;
+  return stdio;
+}
+
+export function openStdin(): typeof Stdio.stdin {
+  return getStdio().stdin;
 }
 
 export function _fatalException(_err: Error): boolean {
@@ -540,9 +550,9 @@ interface Process extends EventEmitter {
   traceDeprecation: typeof traceDeprecation;
   throwDeprecation: typeof throwDeprecation;
   sourceMapsEnabled: typeof sourceMapsEnabled;
-  stdin: typeof stdin;
-  stdout: typeof stdout;
-  stderr: typeof stderr;
+  stdin: typeof Stdio.stdin;
+  stdout: typeof Stdio.stdout;
+  stderr: typeof Stdio.stderr;
   threadCpuUsage: typeof threadCpuUsage;
   cpuUsage: typeof cpuUsage;
   execPath: typeof execPath;
@@ -643,9 +653,6 @@ const _process = {
   traceDeprecation,
   throwDeprecation,
   sourceMapsEnabled,
-  stdin,
-  stdout,
-  stderr,
   threadCpuUsage,
   cpuUsage,
   execPath,
@@ -686,6 +693,25 @@ Object.defineProperty(process, Symbol.toStringTag, {
   value: 'process',
   configurable: true,
 });
+
+for (const name of ['stdin', 'stdout', 'stderr'] as const) {
+  Object.defineProperty(process, name, {
+    configurable: true,
+    enumerable: true,
+    get(): (typeof Stdio)[typeof name] {
+      return getStdio()[name];
+    },
+    // Assignment replaces the stream, as it did when these were data properties.
+    set(value: unknown): void {
+      Object.defineProperty(process, name, {
+        value,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    },
+  });
+}
 
 // We lazily attach unhandled rejection and rejection handled listeners
 // to ensure performance optimizations remain in the no listener case
