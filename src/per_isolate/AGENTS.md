@@ -21,7 +21,9 @@ at context creation, before any user code. C++ entry point:
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
-  `expose_draining_reader`.
+  `expose_draining_reader`, and the internal-testing cloneable
+  `CloneableTestBox` (`testing/cloneable-test-box.ts`, tested over RPC in
+  `src/tests/serialization/`) under `expose_serialization_test_class`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
@@ -70,13 +72,43 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
   re-exported to users.
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
-  `Symbol.hasInstance`).
+  `Symbol.hasInstance`). A cloneable class (below) brand-checks with a
+  V8-private property instead.
 - C++/bootstrap-only markers and extraction hooks are V8-private
   properties, keyed by `utils.getPrivateSymbol(name)` (`v8::Private::ForApi`)
   and read and written as `object[key]`; C++ reaches them by the same name.
   The properties are neither reflected nor inherited, and the keys must stay
   in module scope. Ordinary symbols, including `getApiSymbol` results, are
   reflection-visible and are not secrets.
+- **Structured serialization** (`structuredClone()`, `postMessage()`, RPC,
+  Durable Object storage) goes through `serialization.ts`, a leaf module
+  modelled on Node.js's js_transferable, which `main.ts` loads whatever the
+  flags; `jsg/ser.h` describes the C++ side and the format. A class whose
+  instances are not serializable marks each one with `markUncloneable()`,
+  so that serializing it throws DataCloneError rather than copying it as a
+  plain object. A cloneable class is set up once with `const cloneable =
+  makeCloneable(ctor, deserializeInfo, clone, deserialize)`, after the
+  class, and its constructor marks each instance with
+  `markCloneable(this, cloneable)`. See "Classes Implemented in JavaScript"
+  in `docs/jsg.md` for a complete example.
+  - `deserializeInfo` (`'module:Export'`) is stored in serialized data,
+    Durable Object storage included, so it can never change. A renamed
+    class keeps its old export as an alias.
+  - The module is required while the bootstrap runs whatever the
+    compatibility flags, which decide only what is exposed: a reader finds
+    only loaded modules, and may have different flags from the writer.
+  - The export is a data property of `module.exports = { ... }`. The
+    `per_isolate@eslint` test rejects TypeScript value exports, which
+    compile to getters the deserializer can't call.
+  - The deserializer makes an instance from `Export.prototype` without
+    calling the constructor (a native error if the prototype inherits from
+    `Error.prototype`), then calls `deserialize()` once the whole value has
+    been read. So the state `deserialize()` restores lives under V8-private
+    properties, not `#private` fields, which such an instance lacks, and is
+    brand-checked the same way.
+  - `deserialize()` validates its data completely, with primordials only:
+    the data may come from an untrusted peer. It does not use other objects
+    in it, whose own `deserialize()` may not have run yet.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as
@@ -135,7 +167,8 @@ objects whose prototypes are reachable by user code**:
   type checks — both are user-controllable. Use
   `TypedArrayPrototypeGetSymbolToStringTag(value)` for typed arrays
   (returns the internal `[[TypedArrayName]]` or `undefined`) and
-  private-brand `#field in obj` checks for internal classes.
+  private-brand `#field in obj` checks for internal classes (V8-private
+  properties for cloneable classes; see CONVENTIONS).
 
 ### When primordials are NOT required
 

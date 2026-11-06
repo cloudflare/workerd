@@ -113,4 +113,5 @@ promises (they resolve with undefined).
 | `pollution.js` | prototype pollution neither implementation observes: Object.prototype resolvers never reach the writer's settled ready/closed promises; omitted dictionaries read nothing from Object.prototype |
 | `unhandled-rejection.js` | a writer's ready and closed promises are marked handled where they are made (on a writable stream, under backpressure, while erroring, on an errored stream; ready replaced at capacity; either replaced at release once settled): rejected with nothing looking at them, they report no unhandledrejection (parity) |
 | `released-writer.js` | every member of a released writer: write(), abort() and close() reject, desiredSize throws, ready and closed reject with the release's error, all with the released-writer TypeError (#12); a second releaseLock() does nothing |
+| `transfer.js` | structuredClone() rejects DataCloneError for a stream (the message diverging: C++ names the RPC-only serialization), its controller and its writer; `{ transfer }` rejects TypeError (transferable streams unimplemented) |
 | `which-impl.js` | implementation + pedantic detection |

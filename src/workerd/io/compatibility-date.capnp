@@ -1799,4 +1799,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  exposeSerializationTestClass @204 :Bool
+      $compatEnableFlag("expose_serialization_test_class")
+      $experimental;
+  # Exposes the internal CloneableTestBox class on globalThis: a class implemented in the
+  # per-isolate bootstrap that is structured cloneable, for testing the protocol by which such
+  # classes are serialized (src/per_isolate/serialization.ts), such as over RPC. This flag is
+  # intended for internal testing only and may never have its experimental annotation removed.
 }

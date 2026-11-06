@@ -21,6 +21,7 @@ struct SerTestContext: public ContextGlobalObject {
     BAR,
     BAZ,
     QUX,
+    BOX,
   };
 
   struct Foo: public jsg::Object {
@@ -134,6 +135,71 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_SERIALIZABLE(SerializationTag::QUX);
   };
 
+  // Box holds any value, which it serializes with a nested write().
+  struct Box: public jsg::Object {
+    JsRef<JsValue> val;
+    Box(JsRef<JsValue> val): val(kj::mv(val)) {}
+
+    static jsg::Ref<Box> constructor(jsg::Lock& js, JsRef<JsValue> val) {
+      return js.alloc<Box>(kj::mv(val));
+    }
+
+    JsValue getVal(Lock& js) {
+      return val.getHandle(js);
+    }
+
+    JSG_RESOURCE_TYPE(Box) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(val, getVal);
+    }
+
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+      serializer.write(js, val.getHandle(js));
+    }
+    static jsg::Ref<Box> deserialize(Lock& js, SerializationTag tag, Deserializer& deserializer) {
+      return js.alloc<Box>(JsRef<JsValue>(js, deserializer.readValue(js)));
+    }
+    JSG_SERIALIZABLE(SerializationTag::BOX);
+
+   private:
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(val);
+    }
+  };
+
+  // Stands in for the per-isolate bootstrap's modules: one module, "test", whose exports
+  // setModule() sets.
+  struct TestModules final: public BootstrapModules {
+    kj::Maybe<JsRef<JsValue>> exports;
+
+    kj::Maybe<JsValue> tryGetLoadedExports(Lock& js, kj::StringPtr specifier) override {
+      if (specifier != "test"_kj) return kj::none;
+      KJ_IF_SOME(e, exports) {
+        return e.getHandle(js);
+      }
+      return kj::none;
+    }
+  };
+  TestModules modules;
+
+  void setModule(Lock& js, JsValue exports) {
+    modules.exports = JsRef<JsValue>(js, exports);
+    setAlignedPointerInEmbedderData(js.v8Context(), ContextPointerSlot::BOOTSTRAP_STATE,
+        static_cast<BootstrapModules*>(&modules));
+  }
+
+  void clearModules(Lock& js) {
+    setAlignedPointerInEmbedderData(js.v8Context(), ContextPointerSlot::BOOTSTRAP_STATE, nullptr);
+  }
+
+  // The key of the V8 private property `name`, as the bootstrap's utils.getPrivateSymbol()
+  // returns it.
+  JsValue getPrivateSymbol(Lock& js, kj::String name) {
+    v8::Local<v8::String> slot = js.strIntern("key"_kj);
+    auto holder = v8::ObjectTemplate::New(js.v8Isolate);
+    holder->Set(slot, v8::Private::ForApi(js.v8Isolate, js.str(name)));
+    return JsValue(check(check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot)));
+  }
+
   JsValue roundTrip(Lock& js, JsValue in) {
     auto content = ({
       Serializer ser(js);
@@ -150,6 +216,35 @@ struct SerTestContext: public ContextGlobalObject {
     lastSerializedData = kj::mv(content.data);
 
     return result;
+  }
+
+  // Like roundTrip(), but with class instances not serializable, as for RPC.
+  JsValue roundTripStrict(Lock& js, JsValue in) {
+    auto content = ({
+      Serializer ser(js, {.treatClassInstancesAsPlainObjects = false});
+      ser.write(js, in);
+      ser.release();
+    });
+    Deserializer deser(js, content);
+    return deser.readValue(js);
+  }
+
+  // Writes two values with one Serializer and reads them back with one Deserializer.
+  JsValue roundTripTwo(Lock& js, JsValue a, JsValue b) {
+    auto content = ({
+      Serializer ser(js);
+      ser.write(js, a);
+      ser.write(js, b);
+      ser.release();
+    });
+    Deserializer deser(js, content);
+    auto first = deser.readValue(js);
+    auto second = deser.readValue(js);
+    return js.arr(first, second);
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(modules.exports);
   }
 
   // A serializer outside C++ JSG: its own delegates drive V8's serializer, and API objects go
@@ -237,7 +332,13 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Bar);
     JSG_NESTED_TYPE(Baz);
     JSG_NESTED_TYPE(Qux);
+    JSG_NESTED_TYPE(Box);
+    JSG_METHOD(setModule);
+    JSG_METHOD(clearModules);
+    JSG_METHOD(getPrivateSymbol);
     JSG_METHOD(roundTrip);
+    JSG_METHOD(roundTripStrict);
+    JSG_METHOD(roundTripTwo);
     JSG_METHOD(foreignRoundTrip);
     JSG_METHOD(foreignMatchesSerializer);
     JSG_METHOD(foreignToSerializer);
@@ -250,7 +351,8 @@ JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
     SerTestContext::Foo,
     SerTestContext::Bar,
     SerTestContext::Baz,
-    SerTestContext::Qux);
+    SerTestContext::Qux,
+    SerTestContext::Box);
 
 KJ_TEST("deserialization header diagnostics expose metadata without payload contents") {
   Evaluator<SerTestContext, SerTestIsolate> e(v8System);
@@ -472,6 +574,276 @@ KJ_TEST("serialization of API objects by a serializer outside C++ JSG") {
       "string", "DataCloneError: () => 1 could not be cloned.");
   e.expectEval(
       "try { foreignRoundTrip(roundTrip); } catch (e) { e.name }", "string", "DataCloneError");
+}
+
+// Classes implemented in JavaScript, as the per-isolate bootstrap's serialization.ts sets them up,
+// exported by the module "test". `constructed` counts constructor calls, and `log` records the
+// clone and deserialize calls.
+constexpr kj::StringPtr JS_CLASSES = R"(
+  const kMode = getPrivateSymbol('workerd:serializeMode');
+  const kCloneable = getPrivateSymbol('workerd:cloneable');
+  const kX = getPrivateSymbol('test:x');
+  let constructed = 0;
+  const log = [];
+
+  // A class's descriptor, as makeCloneable() makes it.
+  function descriptor(deserializeInfo, clone, deserialize) {
+    return Object.freeze({ __proto__: null, deserializeInfo, clone, deserialize });
+  }
+  function makeCloneable(ctor, deserializeInfo, clone, deserialize) {
+    return ctor.prototype[kCloneable] = descriptor(deserializeInfo, clone, deserialize);
+  }
+
+  class Point {
+    constructor(x) { constructed++; this[kMode] = pointCloneable; this[kX] = x; }
+    get x() { return this[kX]; }
+  }
+  const pointCloneable = makeCloneable(Point, 'test:Point', (p) => {
+    log.push(`clone ${p[kX]}`);
+    return p[kX];
+  }, (p, data) => {
+    log.push(`deserialize ${data}`);
+    // Detects that the data went through deserialize().
+    p[kX] = data + 1;
+  });
+
+  // Holds any value as its data, which may be the instance itself.
+  class Holder {
+    constructor(value) { this[kMode] = holderCloneable; this[kX] = value; }
+    get value() { return this[kX]; }
+  }
+  const holderCloneable = makeCloneable(Holder, 'test:Holder', (h) => ({ value: h[kX] }),
+      (h, data) => { h[kX] = data.value; });
+
+  class TestError extends Error {
+    constructor(message) { super(message); this[kMode] = testErrorCloneable; }
+  }
+  const testErrorCloneable = makeCloneable(TestError, 'test:TestError', (e) => e.message,
+      (e, data) => {
+    Object.defineProperty(e, 'message', { value: data, writable: true, configurable: true });
+  });
+
+  // Accepts only a number as its data.
+  class Strict {
+    constructor(x) { this[kMode] = strictCloneable; this[kX] = x; }
+    get x() { return this[kX]; }
+  }
+  const strictCloneable = makeCloneable(Strict, 'test:Strict', (s) => s[kX], (s, data) => {
+    if (typeof data !== 'number') throw new TypeError('Strict data is not a number');
+    s[kX] = data;
+  });
+
+  class Opaque { constructor() { this[kMode] = 0; } }
+
+  // Cloneable, but written as `deserializeInfo` with `data`, so as anything a peer could send.
+  class Forged {
+    constructor(deserializeInfo, data = 1) {
+      this[kMode] = descriptor(deserializeInfo, () => data, () => {});
+    }
+  }
+
+  class Throws { constructor() { this[kMode] = throwsCloneable; } }
+  const throwsCloneable = makeCloneable(Throws, 'test:Throws', () => 1, () => {
+    throw new Error('throw from deserialize');
+  });
+
+  class NoDeserialize {}
+  class NotADescriptor {}
+  NotADescriptor.prototype[kCloneable] = 1;
+  class NoDeserializeFunction {}
+  NoDeserializeFunction.prototype[kCloneable] = descriptor('test:NoDeserializeFunction', () => 1);
+
+  setModule({ Point, Holder, TestError, Strict, Throws, NoDeserialize, NotADescriptor,
+      NoDeserializeFunction, notAFunction: 1 });
+)"_kj;
+
+KJ_TEST("serialization of classes implemented in JavaScript") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  auto expectEval = [&](kj::StringPtr code, kj::StringPtr type, kj::StringPtr value) {
+    e.expectEval(kj::str(JS_CLASSES, code), type, value);
+  };
+
+  // An instance is made from the class's prototype without calling the constructor, and
+  // initialized from its data.
+  expectEval("const p = roundTrip(new Point(1));\n"
+             "`${p instanceof Point} ${Object.getPrototypeOf(p) === Point.prototype} ${p.x} "
+             "${constructed} ${log}`",
+      "string", "true true 2 1 clone 1,deserialize 1");
+
+  // The copy is cloneable too.
+  expectEval("roundTrip(roundTrip(new Point(1))).x", "number", "3");
+
+  // A subclass's instance is serialized as one of the class whose descriptor marked it.
+  expectEval("class Sub extends Point {}\n"
+             "const p = roundTrip(new Sub(1));\n"
+             "`${Object.getPrototypeOf(p) === Point.prototype} ${p.x}`",
+      "string", "true 2");
+
+  // An instance that appears twice is written once, and read back as one object.
+  expectEval("const p = new Point(1);\n"
+             "const [a, b] = roundTrip([p, p]);\n"
+             "`${a === b} ${a.x} ${log}`",
+      "string", "true 2 clone 1,deserialize 1");
+
+  // Its data may refer to the instance itself, and to other instances.
+  expectEval("const h = new Holder(null);\n"
+             "h[kX] = h;\n"
+             "const copy = roundTrip(h);\n"
+             "copy.value === copy",
+      "boolean", "true");
+  expectEval("const r = roundTrip(new Holder([new Point(1), new Holder(new Point(5))]));\n"
+             "`${r.value[0].x} ${r.value[1].value.x}`",
+      "string", "2 6");
+  expectEval("const p = new Point(1);\n"
+             "const r = roundTrip({ p, h: new Holder(p) });\n"
+             "r.h.value === r.p",
+      "boolean", "true");
+
+  // The deserialize methods run once everything has been read, in the order the instances were
+  // read.
+  expectEval("roundTrip([new Point(1), new Holder(new Point(2)), new Point(3)]);\n"
+             "log.join()",
+      "string", "clone 1,clone 3,clone 2,deserialize 1,deserialize 3,deserialize 2");
+
+  // A class inheriting from Error makes native errors, with no own message until initialized.
+  expectEval("const err = roundTrip(new TestError('boom'));\n"
+             "`${err instanceof TestError} ${Object.prototype.toString.call(err)} ${err.message}`",
+      "string", "true [object Error] boom");
+
+  // Instances serialize the same with class instances otherwise not serializable, as for RPC.
+  expectEval("roundTripStrict(new Point(1)).x", "number", "2");
+
+  // Two top-level values each have their instances' data after them.
+  expectEval("const p = new Point(1);\n"
+             "const [a, b] = roundTripTwo(new Holder(p), p);\n"
+             "`${a.value.x} ${b.x} ${a.value === b} ${log}`",
+      "string", "2 2 true clone 1,deserialize 1");
+
+  // An instance nested in an API object's own serialization is read as part of the top-level
+  // value.
+  expectEval("const p = new Point(1);\n"
+             "const [a, b] = roundTrip([p, new Box(new Holder(p))]);\n"
+             "`${a.x} ${b.val.value === a}`",
+      "string", "2 true");
+
+  // The class that marked an instance decides how it is written, whatever its prototype is now.
+  expectEval("const p = new Point(1);\n"
+             "Object.setPrototypeOf(p, Holder.prototype);\n"
+             "const r = roundTrip(p);\n"
+             "`${Object.getPrototypeOf(r) === Point.prototype} ${r.x} ${log}`",
+      "string", "true 2 clone 1,deserialize 1");
+
+  // An instance whose mark is not a descriptor is not serializable.
+  expectEval("try { roundTrip(new Opaque()); } catch (e) { `${e.name}: ${e.message}` }", "string",
+      "DataCloneError: Could not serialize object of type \"Opaque\". This type does not support "
+      "serialization.");
+  expectEval("const p = new Point(1);\n"
+             "p[kMode] = 'yes';\n"
+             "try { roundTrip(p); } catch (e) { e.name }",
+      "string", "DataCloneError");
+  // Nor is one whose descriptor lacks a clone function or a deserializeInfo string.
+  for (auto mark: {"{}"_kj, "descriptor('test:Point')"_kj, "descriptor(1, () => 1)"_kj}) {
+    expectEval(kj::str("const n = new NoDeserialize();\n"
+                       "n[kMode] = ",
+                   mark,
+                   ";\n"
+                   "try { roundTrip(n); } catch (e) { e.name }"),
+        "string", "DataCloneError");
+  }
+
+  // Data naming anything but a loaded class with a descriptor with a deserialize function is
+  // rejected.
+  for (auto deserializeInfo: {"test:NoDeserialize"_kj, "test:NotADescriptor"_kj,
+         "test:NoDeserializeFunction"_kj, "test:notAFunction"_kj, "test:Missing"_kj,
+         "test:toString"_kj, "other:Point"_kj, "test"_kj, ""_kj}) {
+    expectEval(kj::str("try { roundTrip(new Forged('", deserializeInfo,
+                   "')); } catch (e) { `${e.name}: ${e.message}` }"),
+        "string",
+        "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
+  }
+
+  // What a deserialize function throws reaches the caller, such as its rejection of data that
+  // no instance of its class would have written.
+  expectEval("roundTrip(new Throws())", "throws", "Error: throw from deserialize");
+  expectEval("roundTrip(new Forged('test:Strict', 'nope'))", "throws",
+      "TypeError: Strict data is not a number");
+
+  // A Proxy is not an instance, whatever it wraps.
+  expectEval("try { roundTrip(new Proxy(new Point(1), {})); } catch (e) { e.name }", "string",
+      "DataCloneError");
+
+  // A mark on an object whose prototype is Object.prototype or null is ignored.
+  expectEval("const o = { a: 1 };\n"
+             "o[kMode] = 0;\n"
+             "const n = Object.create(null);\n"
+             "n[kMode] = 0;\n"
+             "`${roundTrip(o).a} ${Object.keys(roundTrip(n)).length}`",
+      "string", "1 0");
+
+  // A plain class instance is still serialized as a plain object.
+  expectEval("class Plain { constructor() { this.a = 1; } }\n"
+             "JSON.stringify(roundTrip(new Plain()))",
+      "string", "{\"a\":1}");
+
+  // A deserializer outside C++ JSG cannot finish instances.
+  expectEval("try { serializerToForeign(new Point(1)); } catch (e) { `${e.name}: ${e.message}` }",
+      "string",
+      "DataCloneError: This deserializer does not support objects implemented in JavaScript.");
+}
+
+KJ_TEST("deserialization of arbitrary classes implemented in JavaScript") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // Whatever class and data a peer names, reading it returns a value or throws; it never crashes.
+  // The peer is a Forged instance naming any class, or a random string, with any data. The
+  // pseudo-random sequence is fixed, so every run reads the same data.
+  e.expectEval(kj::str(JS_CLASSES, R"(
+    let seed = 1;
+    function random(n) {
+      seed = (seed * 48271) % 2147483647;
+      return seed % n;
+    }
+    const names = ['test:Point', 'test:Holder', 'test:TestError', 'test:Strict', 'test:Throws',
+        'test:NoDeserialize', 'test:NotADescriptor', 'test:NoDeserializeFunction',
+        'test:notAFunction', 'test:Missing', 'test:toString', 'other:Point', 'test', '', ':',
+        'test:', 'test:Point:', '\0test:Point'];
+    function randomName() {
+      if (random(4) > 0) return names[random(names.length)];
+      let name = '';
+      for (let n = random(12); n > 0; n--) name += 'test:Point\0\u00e9\u{1f600}'[random(13)];
+      return name;
+    }
+    const values = [
+      () => undefined, () => null, () => random(100), () => -0.5, () => 'x', () => ({}),
+      () => [], () => ({ value: new Point(1) }), () => new Point(2), () => new Holder(null),
+      () => new Strict(3), () => new TestError('e'), () => new Error('e'), () => new Uint8Array(2),
+      () => new Map([[1, new Point(4)]]), () => new Forged(randomName(), random(10)),
+      () => new Forged(randomName(), new Forged(randomName())),
+    ];
+    let read = 0;
+    let threw = 0;
+    for (let i = 0; i < 3000; i++) {
+      const forged = new Forged(randomName(), values[random(values.length)]());
+      try {
+        roundTrip([forged, forged]);
+        read++;
+      } catch (e) {
+        threw++;
+      }
+    }
+    `${read > 0} ${threw > 0}`
+  )"),
+      "string", "true true");
+}
+
+KJ_TEST("serialization of classes implemented in JavaScript without bootstrap modules") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // Without the modules to find classes in, nothing can be deserialized.
+  e.expectEval(kj::str(JS_CLASSES,
+                   "clearModules();\n"
+                   "try { roundTrip(new Point(1)); } catch (e) { `${e.name}: ${e.message}` }"),
+      "string", "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
 }
 
 KJ_TEST("recursive structuredClone with transfer") {
