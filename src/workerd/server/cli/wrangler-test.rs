@@ -457,6 +457,69 @@ fn kv_namespaces_bind_the_kv_worker() {
 }
 
 #[test]
+fn triggers_crons_require_experimental() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "main": "index.js", "compatibility_date": "2026-01-01",
+                 "triggers": { "crons": ["* * * * *"] } }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, false).err().unwrap();
+    assert!(error.contains("triggers.crons"), "{error}");
+    assert!(error.contains("--experimental"), "{error}");
+    let error = load_deployment(path.to_str().unwrap(), Some("app"), &process)
+        .err()
+        .unwrap();
+    assert!(error.contains("triggers.crons"), "{error}");
+}
+
+#[test]
+fn triggers_crons_run_on_the_cron_worker() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "app", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "triggers": { "crons": ["0 * * * *", "0 12 * * MON"] } }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let config = load(
+        dir.join("wrangler.jsonc").to_str().unwrap(),
+        &Process::new(None, None, Vec::new()),
+        true,
+    )
+    .unwrap();
+    let message = read(config);
+    let services = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_services()
+        .unwrap();
+    let names: Vec<_> = services
+        .iter()
+        .map(|s| s.get_name().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["app", "app-cron", "app-cron-storage"]);
+    assert!(dir.join(".wrangler/state/workerd/cron").is_dir());
+    let service::Which::Worker(w) = services.get(1).which().unwrap() else {
+        panic!("not a worker");
+    };
+    let bindings = w.unwrap().get_bindings().unwrap();
+    let worker::binding::Which::Json(crons) = bindings.get(1).which().unwrap() else {
+        panic!("CRONS is not JSON");
+    };
+    assert_eq!(
+        crons.unwrap().to_str().unwrap(),
+        r#"{"app":["0 * * * *","0 12 * * MON"]}"#
+    );
+    assert_eq!(bindings.get(2).get_name().unwrap().to_str().unwrap(), "app");
+}
+
+#[test]
 fn unbundled_typescript_main_is_an_error() {
     let error = load_project(&[
         (
