@@ -151,9 +151,8 @@ class Span: public jsg::Object {
       const jsg::TypeHandler<TagValue>& scalarHandler);
 
   // Sets each attribute in `attributes` as if by calling setAttribute().
-  jsg::Ref<Span> setAttributes(jsg::Lock& js,
-      jsg::Dict<jsg::Optional<jsg::Value>> attributes,
-      const jsg::TypeHandler<TagValue>& scalarHandler);
+  jsg::Ref<Span> setAttributes(
+      jsg::Lock& js, jsg::Value attributes, const jsg::TypeHandler<TagValue>& scalarHandler);
 
   void recordException(
       jsg::Lock& js, jsg::Value exception, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
@@ -205,6 +204,7 @@ class Span: public jsg::Object {
  private:
   kj::OneOf<kj::Own<SpanState>, IoOwn<SpanState>> state;
 
+  void setAttributeImpl(kj::String key, kj::Maybe<AttributeValue> value);
   workerd::SpanParent makeSpanParent();
 
   friend class ::workerd::api::Tracing;
