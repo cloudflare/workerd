@@ -7,6 +7,11 @@
 // common prefixes only), path-style (`/<bucket>/<key>`). One Durable Object
 // holds every key, so a conditional write is atomic. Requests are not
 // authenticated.
+//
+// A test arms faults with `POST /_faults` and a JSON array: each delays the
+// requests whose key starts with `prefix` (and does not end with `except`)
+// and whose method is `method` by `delayMs`, then answers `status` instead if
+// given, for the next `times` of them. `GET /_faults` lists them, with `hits`.
 
 import { DurableObject } from 'cloudflare:workers';
 
@@ -24,6 +29,7 @@ export class Bucket extends DurableObject {
   next = 0;
   // Requests per object key, for tests that bound a cluster's bucket traffic.
   requests = new Map();
+  faults = [];
 
   async fetch(request) {
     const storage = this.ctx.storage;
@@ -31,10 +37,31 @@ export class Bucket extends DurableObject {
     if (url.pathname === '/_requests') {
       return Response.json(this.requests.get(url.searchParams.get('key')) ?? 0);
     }
+    if (url.pathname === '/_faults') {
+      if (request.method === 'POST') {
+        this.faults = (await request.json()).map((f) => ({ ...f, hits: 0 }));
+      }
+      return Response.json(this.faults);
+    }
     const path = decodeURIComponent(url.pathname).slice(1);
     const slash = path.indexOf('/');
     const key = slash < 0 ? '' : path.slice(slash + 1);
     const headers = { date: new Date().toUTCString() };
+
+    const fault = this.faults.find(
+      (f) =>
+        f.hits < f.times &&
+        f.method === request.method &&
+        key.startsWith(f.prefix) &&
+        !(f.except !== undefined && key.endsWith(f.except))
+    );
+    if (fault !== undefined) {
+      fault.hits++;
+      await scheduler.wait(fault.delayMs ?? 0);
+      if (fault.status !== undefined) {
+        return new Response(null, { status: fault.status, headers });
+      }
+    }
 
     if (request.method === 'GET' && key === '') {
       const prefix = url.searchParams.get('prefix') ?? '';

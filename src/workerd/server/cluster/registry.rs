@@ -162,8 +162,18 @@ impl Registry {
         self.fetch(node, now_ms).await
     }
 
+    /// A peer's record while its lease holds, read now, whatever the last
+    /// listing said.
+    pub async fn live_now(&self, node: &str, now_ms: u64) -> Result<Option<NodeRecord>> {
+        self.fetch(node, now_ms).await
+    }
+
+    /// A peer's record while its lease holds. One found dead leaves the
+    /// listing, as its lease running out would, so that routes to it go
+    /// before the next listing.
     async fn fetch(&self, node: &str, now_ms: u64) -> Result<Option<NodeRecord>> {
         let Some((body, _)) = self.bucket.get(&node_key(node)).await? else {
+            self.listed.borrow_mut().remove(node);
             return Ok(None);
         };
         let record: NodeRecord = serde_json::from_slice(&body)?;
@@ -183,6 +193,7 @@ impl Registry {
             self.bucket.delete(&node_key(node)).await?;
         }
         if record.expires_ms <= now_ms {
+            self.listed.borrow_mut().remove(node);
             return Ok(None);
         }
         // Until the next listing: one read serves every request that finds
