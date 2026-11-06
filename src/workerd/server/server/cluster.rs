@@ -11,6 +11,7 @@
 //! JS RPC to the object cross unchanged. A request for an object this instance
 //! does not own routes on through its own channel to the owner.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
@@ -73,7 +74,11 @@ pub struct ClusterNode {
 /// How often an instance tidies its alarm index and adopts dead peers' alarms.
 const ALARMS_INTERVAL: Duration = Duration::from_secs(5);
 
-pub struct RpcConnection(KjOwn<ffi::RpcClient>);
+pub struct RpcConnection {
+    client: KjOwn<ffi::RpcClient>,
+    /// Set once the session it runs over disconnected: nothing sent on it arrives.
+    down: Rc<Cell<bool>>,
+}
 
 type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
 
@@ -175,7 +180,7 @@ pub async fn bind(
         .map_err(|e| kj::failed!("cluster address {address}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| kj::failed!("{e}"))?;
     let advertise = match advertise {
-        Some(advertise) => advertise,
+        Some(advertise) => with_bound_port(&advertise, bound.port()),
         // A host name that resolved to a wildcard.
         None if bound.ip().is_unspecified() => return Err(wildcard(&address)),
         None => {
@@ -185,6 +190,14 @@ pub async fn bind(
         }
     };
     Ok((listener, advertise))
+}
+
+/// `advertise` with a port of 0 replaced by `port`, the one bound; any other address as it is.
+fn with_bound_port(advertise: &str, port: u16) -> String {
+    match advertise.rsplit_once(':') {
+        Some((host, "0")) => format!("{host}:{port}"),
+        _ => advertise.to_owned(),
+    }
 }
 
 /// Whether `address` is a wildcard IP address, `0.0.0.0` or `[::]` with a port.
@@ -309,7 +322,10 @@ impl ClusterNode {
             .cluster
             .acquire_or_route(namespace, actor, now)
             .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor}: {e}"))?;
+            .map_err(|e| match e {
+                cluster::Error::NotHere(_) => moved(&format!("{namespace}/{actor}: {e}")),
+                e => kj::disconnected!("{namespace}/{actor}: {e}"),
+            })?;
         let (node, address, stale) = match route {
             Route::Owned(epoch) => return Ok(Owner::Here(epoch)),
             Route::Remote {
@@ -325,14 +341,17 @@ impl ClusterNode {
                 let _ = cluster.refresh_route(&namespace, &actor, now).await;
             });
         }
-        let session = self
-            .session(&address)
-            .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor} on {node}: {e}"))?;
+        let session = self.session(&address).await.map_err(|e| {
+            // Unreachable: its own record, not the listing, tells whether it still owns the
+            // object (`forget_route`).
+            self.cluster.forget_route(namespace, actor, &node);
+            kj::disconnected!("{namespace}/{actor} on {node}: {e}")
+        })?;
         // A channel per stub, so a stub stays with the instance it reached.
-        let connection = RpcConnection(ffi::rpc_client_debug_actor(
-            &session.0, service, class, actor,
-        ));
+        let connection = RpcConnection {
+            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor),
+            down: Rc::clone(&session.down),
+        };
         Ok(Owner::Remote(Rc::new(connection), node))
     }
 
@@ -356,13 +375,14 @@ impl ClusterNode {
                 .await
                 .map_err(|_| "no answer to CONNECT".to_owned())?
                 .map_err(|e| e.to_string())?;
-            let session = Rc::new(RpcConnection(ffi::new_rpc_client(
-                factory.raw(),
-                Dialed::from(stream).into_kj(),
-            )));
+            let session = Rc::new(RpcConnection {
+                client: ffi::new_rpc_client(factory.raw(), Dialed::from(stream).into_kj()),
+                down: Rc::default(),
+            });
             let watched = Rc::clone(&session);
             factory.spawn_detached(async move {
-                let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
+                let _ = ffi::rpc_client_on_disconnect(&watched.client).await;
+                watched.down.set(true);
                 sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
@@ -402,13 +422,53 @@ pub enum Owner {
     Remote(Rc<RpcConnection>, String),
 }
 
+/// "Moved, not started": the answer of an instance that does not serve a Durable Object.
+///
+/// It is given before anything runs. It is a disconnect, which the application sees as
+/// retryable, and its details tell it from one: the caller may send the request again to
+/// whichever instance serves the object now.
+pub fn moved(description: &str) -> crate::Error {
+    kj::disconnected!("{description}").with_details(vec![
+        (ffi::request_not_delivered_detail_id(), vec![]),
+        (ffi::actor_predecessor_rejected_detail_id(), vec![]),
+    ])
+}
+
+/// `error`, marked as a failure before the request reached the object: it may be sent again.
+pub fn not_delivered(error: crate::Error) -> crate::Error {
+    let mut details = error.details().cloned().unwrap_or_default();
+    if details
+        .iter()
+        .any(|(id, _)| *id == ffi::request_not_delivered_detail_id())
+    {
+        return error;
+    }
+    details.push((ffi::request_not_delivered_detail_id(), vec![]));
+    error.with_details(details)
+}
+
+/// Whether `error` is a `moved` answer.
+pub fn is_moved(error: &crate::Error) -> bool {
+    let has = |id| {
+        error
+            .details()
+            .is_some_and(|d| d.iter().any(|(k, _)| *k == id))
+    };
+    has(ffi::request_not_delivered_detail_id()) && has(ffi::actor_predecessor_rejected_detail_id())
+}
+
 impl RpcConnection {
+    /// Whether its session disconnected.
+    pub fn is_down(&self) -> bool {
+        self.down.get()
+    }
+
     /// Starts a request on the remote owner; the caller keeps the session alive with it.
     pub fn start_request(
         &self,
         metadata: KjOwn<ffi::RequestMetadata>,
     ) -> KjOwn<ffi::WorkerInterface> {
-        ffi::rpc_client_start_request(&self.0, metadata)
+        ffi::rpc_client_start_request(&self.client, metadata)
     }
 }
 
@@ -611,11 +671,37 @@ impl Owned {
     }
 }
 
+impl Owned {
+    /// What dropping this does, to run again for an object a restore opened after the drop.
+    pub fn retire(&self) -> Retire {
+        Retire {
+            node: Rc::clone(&self.node),
+            namespace: self.namespace.clone(),
+            actor: self.actor.clone(),
+            epoch: self.epoch,
+        }
+    }
+}
+
 impl Drop for Owned {
     fn drop(&mut self) {
+        self.retire().run();
+    }
+}
+
+/// Stops capturing an object that left this node, and evicts it (`Owned::retire`).
+pub struct Retire {
+    node: Rc<ClusterNode>,
+    namespace: String,
+    actor: String,
+    epoch: u64,
+}
+
+impl Retire {
+    pub fn run(self) {
         let cluster = Rc::clone(&self.node.cluster);
         cluster.close_actor(&self.namespace, &self.actor);
-        let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
+        let (namespace, actor, epoch) = (self.namespace, self.actor, self.epoch);
         self.node.factory.spawn_detached(async move {
             cluster.evict_actor(&namespace, &actor, epoch).await;
         });
