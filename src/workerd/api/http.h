@@ -307,6 +307,13 @@ class Fetcher: public JsRpcClientProvider {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
+
+    // A copy of this factory for the Fetcher's snapshotClone(), made and used outside any isolate
+    // or IoContext. A factory whose state cannot be copied returns none, and the Fetcher does not
+    // transfer through a startup snapshot.
+    virtual kj::Maybe<kj::Own<CrossContextOutgoingFactory>> cloneForSnapshot() const {
+      return kj::none;
+    }
   };
 
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, such as ones
@@ -467,6 +474,11 @@ class Fetcher: public JsRpcClientProvider {
   // that every request resolves through its own IoContext. See http.c++ for what does not.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
 
+  // The same copy, as a jsg::Ref for the snapshotClone() of an object that holds this Fetcher (a
+  // WrappedBinding). The copy is of the type that overrides this, so a subclass that does not gets
+  // a plain Fetcher, which its holder must refuse.
+  virtual kj::Maybe<jsg::Ref<Fetcher>> cloneForSnapshot() const;
+
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
     // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
@@ -575,7 +587,20 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<kj::String> host;
   kj::Maybe<uint16_t> port;
 
+  // What a copy of a Fetcher bound to a channel number is built from, for snapshotClone(). None
+  // for one bound to a live channel or factory, or that registered a connect override.
+  struct ChannelSnapshot {
+    uint channel;
+    RequiresHostAndProtocol requiresHost;
+    bool isInHouse;
+    RpcCompatGateBypassed rpcCompatGateBypassed;
+  };
+  kj::Maybe<ChannelSnapshot> channelForSnapshot() const;
+
  private:
+  // The base-type copy behind snapshotClone() and cloneForSnapshot().
+  kj::Maybe<kj::Own<Fetcher>> copyForSnapshot() const;
+
   static jsg::Ref<Fetcher> deserializeImpl(jsg::Lock& js,
       rpc::SerializationTag tag,
       jsg::Deserializer& deserializer,
@@ -627,9 +652,11 @@ class ExtendedFetcher final: public Fetcher {
   // Get host and set up override, if needed.
   kj::StringPtr getHost(jsg::Lock& js);
 
-  // Minted by ctx.mapVirtualHost() for one Worker's global scope, whose connect override the
-  // restored Worker's fresh global scope would lack.
+  // A binding with a connection string override transfers through a startup snapshot as its
+  // channel number and port, until reading `host` registers the override on the zygote's global
+  // scope, which the restored Worker's fresh global scope would lack.
   kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override;
+  kj::Maybe<jsg::Ref<Fetcher>> cloneForSnapshot() const override;
 
   JSG_RESOURCE_TYPE(ExtendedFetcher) {
     JSG_INHERIT(Fetcher);
@@ -643,6 +670,9 @@ class ExtendedFetcher final: public Fetcher {
   }
 
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  kj::Maybe<kj::Own<ExtendedFetcher>> copyForSnapshot() const;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter

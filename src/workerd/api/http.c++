@@ -2364,14 +2364,41 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
-kj::Maybe<kj::Own<jsg::Wrappable>> Fetcher::snapshotClone() const {
+kj::Maybe<Fetcher::ChannelSnapshot> Fetcher::channelForSnapshot() const {
   // A Fetcher bound to a live channel or factory belongs to one IoContext. One that registered a
   // connect override (ctx.mapVirtualHost()) left that override on the zygote's global scope,
   // which the restored Worker's fresh global scope does not have.
+  if (registeredConnectOverride) return kj::none;
   KJ_IF_SOME(channel, channelOrClientFactory.tryGet<uint>()) {
-    if (registeredConnectOverride) return kj::none;
-    return ownAsWrappable(
-        kj::refcounted<Fetcher>(channel, requiresHost, isInHouse, rpcCompatGateBypassed));
+    return ChannelSnapshot{channel, requiresHost, isInHouse, rpcCompatGateBypassed};
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<Fetcher>> Fetcher::copyForSnapshot() const {
+  KJ_IF_SOME(c, channelForSnapshot()) {
+    return kj::refcounted<Fetcher>(c.channel, c.requiresHost, c.isInHouse, c.rpcCompatGateBypassed);
+  }
+  if (registeredConnectOverride) return kj::none;
+  // A cross-context factory is not tied to one IoContext; it transfers if it can copy itself.
+  KJ_IF_SOME(factory, channelOrClientFactory.tryGet<kj::Own<CrossContextOutgoingFactory>>()) {
+    KJ_IF_SOME(copy, factory->cloneForSnapshot()) {
+      return kj::refcounted<Fetcher>(kj::mv(copy), requiresHost, isInHouse);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Own<jsg::Wrappable>> Fetcher::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::mv(copy));
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::Ref<Fetcher>> Fetcher::cloneForSnapshot() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return jsg::Ref<Fetcher>(kj::mv(copy));
   }
   return kj::none;
 }
@@ -2407,6 +2434,14 @@ void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
 kj::String Fetcher::mapVirtualHost(jsg::Lock& js, uint16_t port) {
   registerOverride(js, port);
   return kj::str(KJ_ASSERT_NONNULL(host), ":", KJ_ASSERT_NONNULL(this->port));
+}
+
+kj::Maybe<kj::Own<ExtendedFetcher>> ExtendedFetcher::copyForSnapshot() const {
+  KJ_IF_SOME(c, channelForSnapshot()) {
+    return kj::refcounted<ExtendedFetcher>(
+        c.channel, c.requiresHost, KJ_ASSERT_NONNULL(port), c.isInHouse, c.rpcCompatGateBypassed);
+  }
+  return kj::none;
 }
 
 kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
@@ -3190,6 +3225,16 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   }
 }
 kj::Maybe<kj::Own<jsg::Wrappable>> ExtendedFetcher::snapshotClone() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return ownAsWrappable(kj::mv(copy));
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::Ref<Fetcher>> ExtendedFetcher::cloneForSnapshot() const {
+  KJ_IF_SOME(copy, copyForSnapshot()) {
+    return jsg::Ref<Fetcher>(kj::mv(copy));
+  }
   return kj::none;
 }
 

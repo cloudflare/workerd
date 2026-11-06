@@ -768,6 +768,9 @@ class TraceMetrics final: public jsg::Object {
 
 class UnsafeTraceMetrics final: public jsg::Object {
  public:
+  // Holds no state, so a startup snapshot recreates it.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::Ref<TraceMetrics> fromTrace(jsg::Lock& js, jsg::Ref<TraceItem> item);
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {
