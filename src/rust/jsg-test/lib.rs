@@ -215,10 +215,10 @@ impl Drop for Autogates {
 
 /// Configures the process's autogates to exactly `names` for as long as the returned guard lives.
 ///
-/// Each name is in kebab-case without the `workerd-autogate-` prefix
-/// (`"jsg-integer-enforce-range"` for `AutogateKey::JSG_INTEGER_ENFORCE_RANGE`). An empty slice
-/// disables every autogate, whatever `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and
-/// the tests run serially, so a test holds the guard for its duration.
+/// Each name is in kebab-case without the `workerd-autogate-` prefix (`"test-workerd"` for
+/// `AutogateKey::TEST_WORKERD`). An empty slice disables every autogate, whatever
+/// `WORKERD_ALL_AUTOGATES` says. Autogates are process-wide and the tests run serially, so a test
+/// holds the guard for its duration.
 ///
 /// # Panics
 ///
