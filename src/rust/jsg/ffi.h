@@ -609,6 +609,9 @@ void isolate_terminate_execution(Isolate* isolate);
 bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// Whether a method that returns a promise rejects it with what it throws
+// (jsg::getCaptureThrowsAsRejections()).
+bool isolate_captures_throws_as_rejections(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context
 // frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
 // workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.

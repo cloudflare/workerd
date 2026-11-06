@@ -1804,6 +1804,10 @@ bool isolate_has_pending_exception(Isolate* isolate) {
   return isolate->HasPendingException();
 }
 
+bool isolate_captures_throws_as_rejections(Isolate* isolate) {
+  return workerd::jsg::getCaptureThrowsAsRejections(isolate);
+}
+
 Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {
   return to_ffi(isolate->GetContinuationPreservedEmbedderData().As<v8::Value>());
 }
