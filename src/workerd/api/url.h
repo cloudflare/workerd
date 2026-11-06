@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/io/compatibility-date.capnp.h>
-#include <kj/refcount.h>
+#include <workerd/jsg/jsg.h>
+
 #include <kj/compat/url.h>
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
@@ -86,8 +87,7 @@ class LegacyUrl final: public kj::Refcounted {
   void assign(const LegacyUrl& other);
   // Replaces the query with `query` parsed as application/x-www-form-urlencoded, after one
   // leading '?', reporting the parsed entries' memory to `adjustment`.
-  void assignQueryString(
-      kj::ArrayPtr<const char> query, jsg::ExternalMemoryAdjustment& adjustment);
+  void assignQueryString(kj::ArrayPtr<const char> query, jsg::ExternalMemoryAdjustment& adjustment);
   // Replaces the query with the given (name, value) pairs.
   void assignQueryPairs(kj::Array<kj::Url::QueryParam> pairs);
 
@@ -219,8 +219,10 @@ class URLSearchParams: public jsg::Object {
  public:
   explicit URLSearchParams(kj::Own<LegacyUrl> url);
 
-  using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>, kj::String, jsg::Dict<kj::String>,
-                                kj::Array<kj::Array<kj::String>>>;
+  using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>,
+      kj::String,
+      jsg::Dict<kj::String>,
+      kj::Array<kj::Array<kj::String>>>;
 
   static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
@@ -233,26 +235,19 @@ class URLSearchParams: public jsg::Object {
 
   void sort();
 
-  JSG_ITERATOR(EntryIterator, entries,
-                kj::Array<kj::String>,
-                IteratorState,
-                entryIteratorNext)
-  JSG_ITERATOR(KeyIterator, keys,
-                kj::String,
-                IteratorState,
-                keyIteratorNext)
-  JSG_ITERATOR(ValueIterator, values,
-                kj::String,
-                IteratorState,
-                valueIteratorNext)
+  JSG_ITERATOR(EntryIterator, entries, kj::Array<kj::String>, IteratorState, entryIteratorNext)
+  JSG_ITERATOR(KeyIterator, keys, kj::String, IteratorState, keyIteratorNext)
+  JSG_ITERATOR(ValueIterator, values, kj::String, IteratorState, valueIteratorNext)
 
   void forEach(jsg::Lock&,
-               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
-               jsg::Optional<jsg::Value>);
+      jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
+      jsg::Optional<jsg::Value>);
 
   kj::String toString();
 
-  inline uint getSize() { return url->size(); }
+  inline uint getSize() {
+    return url->size();
+  }
 
   JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
@@ -424,15 +419,10 @@ class LegacyUrlHandle final: public jsg::Object {
   kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
 };
 
-#define EW_URL_ISOLATE_TYPES                  \
-  api::URL,                                   \
-  api::URLSearchParams,                       \
-  api::URLSearchParams::EntryIterator,        \
-  api::URLSearchParams::EntryIterator::Next,  \
-  api::URLSearchParams::KeyIterator,          \
-  api::URLSearchParams::KeyIterator::Next,    \
-  api::URLSearchParams::ValueIterator,        \
-  api::URLSearchParams::ValueIterator::Next,  \
-  api::LegacyUrlHandle
+#define EW_URL_ISOLATE_TYPES                                                                       \
+  api::URL, api::URLSearchParams, api::URLSearchParams::EntryIterator,                             \
+      api::URLSearchParams::EntryIterator::Next, api::URLSearchParams::KeyIterator,                \
+      api::URLSearchParams::KeyIterator::Next, api::URLSearchParams::ValueIterator,                \
+      api::URLSearchParams::ValueIterator::Next, api::LegacyUrlHandle
 
 }  // namespace workerd::api
