@@ -7,6 +7,7 @@
 #include "workerd-api-isolate.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/execution-context/execution-context.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-modules.h>
@@ -249,6 +250,20 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
 const jsg::TypeHandler<api::BenchExportedHandler>& WorkerdApi::getBenchTypeHandler(
     jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::BenchExportedHandler>();
+}
+
+api::exportedhandler::ExecutionContext WorkerdApi::newExecutionContext(jsg::Lock& js,
+    jsg::JsValue exports,
+    jsg::JsValue props,
+    kj::Maybe<Worker::VersionInfo> versionInfo) const {
+  if (api::rustExecutionContextEnabled()) {
+    return api::newRustExecutionContext(js, exports, props, kj::mv(versionInfo));
+  }
+  return Worker::Api::newExecutionContext(js, exports, props, kj::mv(versionInfo));
+}
+
+bool WorkerdApi::isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const {
+  return api::isRustExecutionContext(js, value);
 }
 
 const jsg::IsolateObserver& WorkerdApi::getObserver() const {

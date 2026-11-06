@@ -218,6 +218,8 @@ wd_cc_library(
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
         "//src/workerd/api:worker-loader",
+        "//src/workerd/api/execution-context",
+        "//src/workerd/api/execution-context:ffi",
         "//src/workerd/io:promise-wrapper",
     ],
     local_defines = select({

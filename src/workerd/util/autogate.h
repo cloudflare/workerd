@@ -136,7 +136,13 @@ namespace workerd::util {
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
-  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* The `ctx` of a stateless entrypoint is the Rust ExecutionContext                              \
+     (src/workerd/api/execution-context/) rather than the C++ class in api/global-scope.h. The     \
+     C++ implementation is retained for rollback. The gate is read when a ctx is created, so       \
+     toggling it at runtime can leave a non-class handler's reused ctx of one class while new      \
+     ones are of the other. */                                                                     \
+  V(RUST_EXECUTION_CONTEXT)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
