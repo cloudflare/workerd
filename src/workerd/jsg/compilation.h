@@ -13,9 +13,33 @@ namespace workerd::jsg {
 
 class Lock;
 
-// Records the positions of functions compiled while the module runs. Producing hints bypasses
-// bytecode caches because V8 cannot record hints while consuming cached code.
-WD_STRONG_BOOL(ProduceCompileHints);
+struct ProducedCompileHints {
+  // The original name in the Worker bundle, before registry normalization.
+  kj::String name;
+  // UTF-16 function start positions, sorted and without duplicates.
+  kj::Array<int> functionPositions;
+};
+
+// One isolate's compile hint production session. Enabled before compiling a Worker's modules
+// through IsolateBase::enableCompileHints(). Only bundle ES modules participate. Their V8
+// handles remain alive until discard(), which must run under the isolate lock before disposal.
+// An enabled isolate hosts one Worker bundle, whose original names identify module definitions.
+class IsolateCompileHints {
+ public:
+  void record(Lock& js, kj::StringPtr name, v8::Local<v8::Module> module);
+  kj::Array<ProducedCompileHints> collect(Lock& js) const;
+  void discard();
+
+ private:
+  kj::HashMap<kj::String, kj::Vector<v8::Global<v8::Module>>> modules;
+};
+
+// Returns a snapshot of the enabled session, or an empty array when collection is disabled.
+// Hints accumulate during evaluation and subsequent calls, including warm-up requests.
+kj::Array<ProducedCompileHints> getProducedCompileHints(Lock& js);
+
+// Reads one source-text module's V8 collector, sorting and deduplicating its function positions.
+kj::Array<int> getProducedCompileHints(Lock& js, v8::Local<v8::Module> module);
 
 // A bytecode slot shared by replicas of one module definition. Used only when the module has
 // neither embedded bytecode nor an applicable process-wide store. Keep this with the shared
@@ -43,7 +67,9 @@ class SharedModuleCompilationCache {
 struct ModuleCompilationOptions {
   kj::ArrayPtr<const kj::byte> embeddedCache = nullptr;
   kj::ArrayPtr<const int> compileHints = nullptr;
-  ProduceCompileHints produceHints = ProduceCompileHints::NO;
+  // Present only for bundle ES modules. The session groups query/fragment instances by this
+  // original name, independently of the registry's resolution URL or path.
+  kj::Maybe<kj::StringPtr> bundleModuleName;
   kj::Maybe<const SharedModuleCompilationCache&> sharedCache;
 };
 

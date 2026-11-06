@@ -8,6 +8,7 @@
 
 namespace workerd::api {
 
+class ActorState;
 class Blob;
 
 namespace messageevent {
@@ -66,6 +67,66 @@ class MessagePort {
 };
 
 }  // namespace messageevent
+
+class ExtendableEvent: public Event {
+ public:
+  // Runtime-only (the JS constructor is deleted); always trusted.
+  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
+
+  // While ExtendableEvent is defined by the spec to be constructable, there's really not a
+  // lot of reason currently to do so, especially with the restriction that waitUntil can
+  // only be called on trusted events (which have to originate from within the system).
+  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
+
+  void waitUntil(kj::Promise<void> promise);
+
+  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ExtendableEvent) {
+    JSG_INHERIT(Event);
+    JSG_METHOD(waitUntil);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(actorState, getActorState);
+
+    JSG_TS_OVERRIDE({ actorState: never });
+    // Omit `actorState` from definitions
+  }
+};
+
+// An implementation of the Web Platform Standard CustomEvent API
+class CustomEvent: public Event {
+ public:
+  struct CustomEventInit final {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+    JSG_STRUCT(bubbles, cancelable, composed, detail);
+
+    operator Event::Init();
+  };
+
+  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
+
+  static jsg::Ref<CustomEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init);
+
+  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(CustomEvent) {
+    JSG_INHERIT(Event);
+    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+    JSG_TS_OVERRIDE(<T = any> {
+      get detail(): T;
+    });
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+
+  void visitForGc(jsg::GcVisitor& visitor);
+};
 
 class MessageEvent final: public Event {
  public:
@@ -237,6 +298,49 @@ class ErrorEvent final: public Event {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+class CloseEvent: public Event {
+ public:
+  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
+  CloseEvent(uint code, kj::String reason, bool clean);
+  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {});
+
+  struct Initializer {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<int> code;
+    jsg::Optional<jsg::USVString> reason;
+    jsg::Optional<bool> wasClean;
+
+    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
+    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
+  };
+  static jsg::Ref<CloseEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer);
+
+  int getCode();
+  kj::StringPtr getReason();
+  bool getWasClean();
+
+  JSG_RESOURCE_TYPE(CloseEvent) {
+    JSG_INHERIT(Event);
+
+    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
+    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
+    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
+
+    JSG_TS_ROOT();
+    // CloseEvent will be referenced from the `WebSocketEventMap` define
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ private:
+  int code;
+  kj::String reason;
+  bool clean;
+};
+
 // ======================================================================================
 class PromiseRejectionEvent final: public Event {
  public:
@@ -273,7 +377,8 @@ class PromiseRejectionEvent final: public Event {
 };
 
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
-  api::ErrorEvent, api::ErrorEvent::ErrorEventInit, api::MessageEvent,                             \
-      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent
+  api::ExtendableEvent, api::CustomEvent, api::CustomEvent::CustomEventInit, api::ErrorEvent,      \
+      api::ErrorEvent::ErrorEventInit, api::MessageEvent, api::MessageEvent::Initializer,          \
+      api::PromiseRejectionEvent, api::OpenEvent, api::CloseEvent, api::CloseEvent::Initializer
 
 }  // namespace workerd::api

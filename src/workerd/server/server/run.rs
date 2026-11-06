@@ -98,6 +98,17 @@ impl Control {
             "{{\"event\":\"listen-inspector\",\"port\":{port}}}\n"
         ));
     }
+
+    fn listen_cluster(&mut self, listener: &tokio::net::TcpListener) -> Result<()> {
+        let port = listener
+            .local_addr()
+            .map_err(|e| kj::failed!("{e}"))?
+            .port();
+        self.write(&format!(
+            "{{\"event\":\"listen-cluster\",\"port\":{port}}}\n"
+        ));
+        Ok(())
+    }
 }
 
 /// Everything set up before either command diverges: the graph, the listeners, the drain
@@ -203,11 +214,14 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
+    // The cluster's event goes before the sockets', so a consumer that stops reading at a
+    // socket's has it.
+    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        control.listen_cluster(&listener)?;
+        start_cluster(&factory, node, listener);
+    }
     for (name, port) in ports {
         control.listen(&name, port);
-    }
-    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        start_cluster(&factory, node, listener);
     }
 
     if let Some(address) = &options.debug_port {
@@ -419,7 +433,8 @@ pub async fn run(
             // A draining instance claims nothing more, lets its clustered objects go,
             // `preventEviction` or not, and leaves the cluster, so peers take them over at their
             // next listing while its connections finish. A request in flight on one could not
-            // commit anyway once a peer owns the object.
+            // commit anyway once a peer owns the object; one that arrives later is answered as
+            // moved, so that its caller re-resolves the object.
             if let Some(node) = server.cluster() {
                 node.cluster.start_draining();
                 let workers = server
@@ -427,8 +442,11 @@ pub async fn run(
                     .filter_map(|(_, service)| service.as_worker());
                 let namespaces = workers.flat_map(|worker| worker.namespaces());
                 for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
-                    namespace.abort_all(None);
+                    namespace.release_all();
                 }
+                // Released before the lease goes, so nothing is served after it. Until the
+                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
+                // that reads this node's record still finds it live and routes here again.
                 if let Err(e) = node.cluster.deregister().await {
                     tracing::warn!("leaving the cluster: {e}");
                 }

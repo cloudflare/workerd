@@ -589,6 +589,27 @@ KJ_TEST("encode to full flag list") {
   }
 }
 
+KJ_TEST("incoming Request.signal defaults on at 2026-11-17") {
+  auto compileFlags = [](kj::StringPtr date, kj::ArrayPtr<const kj::StringPtr> flags) {
+    capnp::MallocMessageBuilder message;
+    auto flagList = message.initRoot<capnp::List<capnp::Text>>(flags.size());
+    for (auto i: kj::indices(flags)) {
+      flagList.set(i, flags[i]);
+    }
+    auto output = message.getOrphanage().newOrphan<CompatibilityFlags>();
+    SimpleWorkerErrorReporter errorReporter;
+    compileCompatibilityFlags(date, flagList.asReader(), output.get(), errorReporter,
+        /*allowExperimentalFeatures=*/false, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
+    KJ_ASSERT(errorReporter.errors.empty());
+    return output.get().getEnableRequestSignal();
+  };
+
+  KJ_EXPECT(!compileFlags("2026-11-16", {}));
+  KJ_EXPECT(compileFlags("2026-11-17", {}));
+  KJ_EXPECT(compileFlags("2026-11-16", {"enable_request_signal"_kj}));
+  KJ_EXPECT(!compileFlags("2026-11-17", {"disable_request_signal"_kj}));
+}
+
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
   // List of specific flags that are allowed to use non-conformant dates
   // (already deployed and can't be changed for compatibility reasons)

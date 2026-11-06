@@ -22,6 +22,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/server/channel-token.h>
@@ -58,6 +59,7 @@ struct Committer;
 struct ResultTask;
 struct AbortReason;
 struct KeepAlive;
+struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
@@ -413,6 +415,17 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+
+inline uint64_t request_not_delivered_detail_id() {
+  return jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID;
+}
+inline uint64_t actor_predecessor_rejected_detail_id() {
+  return jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID;
+}
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 
