@@ -1,0 +1,43 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The URL suite runs the same test modules under a cell per implementation
+# and flag combination: standard, standard with its dated flags off, legacy
+# with prototype accessors, legacy with instance properties, and standard
+# with the dateless opt-ins (C++ only). See AGENTS.md.
+#
+# The C++ cells disable the @all-autogates variant: enabling every autogate
+# will enable TS_URL, which swaps in the TypeScript implementation under a
+# cell whose USING_TS_IMPL binding says C++.
+
+url_suite_srcs = glob(["*.js"]) + ["url-modules.capnp"]
+
+wd_test(
+    src = "url-standard-cpp.wd-test",
+    data = url_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "url-standard-legacy-flags-cpp.wd-test",
+    data = url_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "url-legacy-cpp.wd-test",
+    data = url_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "url-legacy-instance-cpp.wd-test",
+    data = url_suite_srcs,
+    generate_all_autogates_variant = False,
+)
+
+wd_test(
+    src = "url-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = url_suite_srcs,
+    generate_all_autogates_variant = False,
+)
