@@ -1116,6 +1116,18 @@ class Isolate: public IsolateBase {
       }));
     }
 
+    kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) override {
+      KJ_IF_SOME(domException,
+          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
+              *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
+        return DomExceptionInfo{
+          .name = kj::str(domException.getName()),
+          .message = kj::str(domException.getMessage()),
+        };
+      }
+      return kj::none;
+    }
+
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
     //
     // Note there's a useful property of class constructor functions: A constructor's __proto__
@@ -1224,12 +1236,8 @@ class Isolate: public IsolateBase {
     }
 
     void reportError(const JsValue& value) override {
-      auto& js = Lock::from(v8Isolate);
-      KJ_IF_SOME(domException,
-          jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
-              js, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
-        auto desc =
-            kj::str("DOMException(", domException.getName(), "): ", domException.getMessage());
+      KJ_IF_SOME(info, tryGetDomExceptionInfo(value)) {
+        auto desc = kj::str("DOMException(", info.name, "): ", info.message);
         jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));
       } else {
         jsgIsolate.reportError(
