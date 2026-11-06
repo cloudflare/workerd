@@ -175,7 +175,7 @@ pub async fn bind(
         .map_err(|e| kj::failed!("cluster address {address}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| kj::failed!("{e}"))?;
     let advertise = match advertise {
-        Some(advertise) => advertise,
+        Some(advertise) => with_bound_port(&advertise, bound.port()),
         // A host name that resolved to a wildcard.
         None if bound.ip().is_unspecified() => return Err(wildcard(&address)),
         None => {
@@ -185,6 +185,14 @@ pub async fn bind(
         }
     };
     Ok((listener, advertise))
+}
+
+/// `advertise` with a port of 0 replaced by `port`, the one bound; any other address as it is.
+fn with_bound_port(advertise: &str, port: u16) -> String {
+    match advertise.rsplit_once(':') {
+        Some((host, "0")) => format!("{host}:{port}"),
+        _ => advertise.to_owned(),
+    }
 }
 
 /// Whether `address` is a wildcard IP address, `0.0.0.0` or `[::]` with a port.
