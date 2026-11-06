@@ -260,6 +260,10 @@ const StringPrototypeIndexOf = uncurryThis(String.prototype.indexOf);
 // after ToString.
 const StringPrototypeToWellFormed = uncurryThis(String.prototype.toWellFormed);
 
+// RegExp
+// RegExpBuiltinExec: the builtin, whatever user code makes RegExp.prototype.exec.
+const RegExpPrototypeExec = uncurryThis(RegExp.prototype.exec);
+
 // Symbol
 const SymbolIterator = Symbol.iterator;
 const SymbolAsyncIterator = Symbol.asyncIterator;
@@ -848,6 +852,9 @@ module.exports = ObjectFreeze({
   StringPrototypeStartsWith,
   StringPrototypeIndexOf,
   StringPrototypeToWellFormed,
+
+  // RegExp
+  RegExpPrototypeExec,
 
   // Symbol
   SymbolAsyncIterator,
