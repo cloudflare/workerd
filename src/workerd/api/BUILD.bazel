@@ -466,7 +466,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@ssl",
     ],
 )
 
