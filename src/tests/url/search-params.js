@@ -158,6 +158,7 @@ export const recordReadOrder = {
 export const stringInitializers = {
   test() {
     strictEqual(str('?a=1&&b=&=c&d'), 'a=1&b=&=c&d=');
+    strictEqual(str('a&b&c=1=2&d&e='), 'a=&b=&c=1%3D2&d=&e=');
     strictEqual(str('??a=1'), '%3Fa=1');
     // The legacy backend's parseQueryString() drops a malformed escape's
     // `%`; the facade keeps each backend's string parsing.

@@ -100,11 +100,16 @@ function parseUrlencoded(input: string): SearchParamsEntry[] {
     StringPrototypeIndexOf(input, '%') !== -1 ||
     StringPrototypeIndexOf(input, '+') !== -1;
   let start = 0;
+  // The first '=' at or after start. Kept across segments, so the input is
+  // scanned for '=' once in total rather than once per segment.
+  let equals = StringPrototypeIndexOf(input, '=');
   while (start < length) {
     let end = StringPrototypeIndexOf(input, '&', start);
     if (end === -1) end = length;
     if (end > start) {
-      const equals = StringPrototypeIndexOf(input, '=', start);
+      if (equals !== -1 && equals < start) {
+        equals = StringPrototypeIndexOf(input, '=', start);
+      }
       let name: string;
       let value: string;
       if (equals !== -1 && equals < end) {
