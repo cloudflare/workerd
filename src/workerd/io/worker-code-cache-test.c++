@@ -260,45 +260,62 @@ KJ_TEST("A Worker with the new registry consumes a lookup prepared outside the s
   }
 }
 
-KJ_TEST("Worker registry construction forwards the compile hint production option") {
-  using Registry = jsg::modules::ModuleRegistry;
-  using Options = Registry::Builder::Options;
+KJ_TEST("A Worker's bundle modules use the isolate's compile hint session with either registry") {
   constexpr kj::StringPtr code =
       "function used() { return 1; } used(); export default { fetch() {} };"_kj;
-  capnp::MallocMessageBuilder flagsMessage;
-  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
-  flags.setNewModuleRegistry(true);
   api::pyodide::PythonConfig pythonConfig{};
-
-  for (auto options: {Options::NONE, Options::PRODUCE_COMPILE_HINTS}) {
-    Worker::Script::ModulesSource source{
-      .mainModule = "main"_kj,
-      .modules = kj::arr(Worker::Script::Module{
-        .name = "main"_kj,
-        .content = Worker::Script::EsModule{.body = code},
-      }),
-      .isPython = false,
-    };
-    auto registry = server::WorkerdApi::newWorkerdModuleRegistry(
-        source, flags.asReader(), pythonConfig, "file:///"_url, {}, kj::none, kj::none, options);
-    TestFixture fixture({
-      .featureFlags = flags.asReader(),
-      .mainModuleSource = code,
-      .useRealTimers = false,
-      .newModuleRegistry = kj::mv(registry),
-    });
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      auto hints = Registry::getProducedCompileHints(env.js);
-      if (options == Options::NONE) {
-        KJ_EXPECT(hints.size() == 0);
-      } else {
-        KJ_ASSERT(hints.size() == 1, hints.size());
-        KJ_EXPECT(hints[0].specifier.getHref() == "file:///main"_kj);
-        KJ_ASSERT(hints[0].functionPositions.size() == 1);
-        // V8 reports the opening parenthesis of `used`.
-        KJ_EXPECT(hints[0].functionPositions[0] == 13);
+  for (bool newRegistry: {false, true}) {
+    for (bool produceHints: {false, true}) {
+      capnp::MallocMessageBuilder flagsMessage;
+      auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+      flags.setNewModuleRegistry(newRegistry);
+      Worker::Script::ModulesSource source{
+        .mainModule = "main"_kj,
+        .modules = kj::arr(Worker::Script::Module{
+          .name = "./nested/../main"_kj,
+          .content = Worker::Script::EsModule{.body = code},
+        }),
+        .isPython = false,
+      };
+      kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> registry;
+      if (newRegistry) {
+        registry = server::WorkerdApi::newWorkerdModuleRegistry(
+            source, flags.asReader(), pythonConfig, "file:///"_url, {}, kj::none, kj::none);
       }
-    });
+      // The fixture runs a Worker before we can enable collection. Give it different source so
+      // V8's own compilation cache has not already compiled `used` when the session starts.
+      kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> initialRegistry;
+      if (newRegistry) {
+        const auto base = "file:///"_url;
+        jsg::modules::ModuleBundle::BundleBuilder bundle(base);
+        bundle.addEsmModule("main", MAIN_MODULE.asArray());
+        initialRegistry = jsg::modules::ModuleRegistry::Builder(base).add(bundle.finish()).finish();
+      }
+      IsolateWithStore env({
+        .featureFlags = flags.asReader(),
+        .mainModuleSource = MAIN_MODULE,
+        .useRealTimers = false,
+        .newModuleRegistry = kj::mv(initialRegistry),
+      });
+      if (produceHints) {
+        env.isolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
+            [](jsg::Lock& js) { jsg::IsolateBase::from(js.v8Isolate).enableCompileHints(); });
+      }
+      auto script = env.newScript(kj::mv(source), kj::mv(registry));
+      auto worker = env.newWorker(*script);
+      env.isolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& js) {
+        auto hints = jsg::getProducedCompileHints(js);
+        if (!produceHints) {
+          KJ_EXPECT(hints.size() == 0);
+        } else {
+          KJ_ASSERT(hints.size() == 1, hints.size());
+          KJ_EXPECT(hints[0].name == "./nested/../main"_kj);
+          KJ_ASSERT(hints[0].functionPositions.size() == 1, newRegistry);
+          // V8 reports the opening parenthesis of `used`.
+          KJ_EXPECT(hints[0].functionPositions[0] == 13);
+        }
+      });
+    }
   }
 }
 

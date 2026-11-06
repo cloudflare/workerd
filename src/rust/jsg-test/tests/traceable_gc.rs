@@ -77,9 +77,12 @@ fn enum_unit_variant_does_not_crash_during_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Closed,
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Closed,
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
@@ -103,11 +106,14 @@ fn enum_variant_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(Leaf { value: 10 });
+        let child = jsg::Rc::new(lock, Leaf { value: 10 });
 
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Readable(child.clone()),
-        });
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Readable(child.clone()),
+            },
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
@@ -135,13 +141,16 @@ fn enum_named_variant_child_kept_alive_through_gc() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let child = jsg::Rc::new(Leaf { value: 11 });
+        let child = jsg::Rc::new(lock, Leaf { value: 11 });
 
-        let parent = jsg::Rc::new(StreamController {
-            state: StreamState::Errored {
-                reason: child.clone(),
+        let parent = jsg::Rc::new(
+            lock,
+            StreamController {
+                state: StreamState::Errored {
+                    reason: child.clone(),
+                },
             },
-        });
+        );
         let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
@@ -234,14 +243,20 @@ fn cycle_through_struct_field_is_collected() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let back = jsg::Rc::new(Back {
-            node: jsg::Cell::new(None),
-        });
-        let node = jsg::Rc::new(Node {
-            link: jsg::RefCell::new(Some(Link {
-                target: back.clone(),
-            })),
-        });
+        let back = jsg::Rc::new(
+            lock,
+            Back {
+                node: jsg::Cell::new(None),
+            },
+        );
+        let node = jsg::Rc::new(
+            lock,
+            Node {
+                link: jsg::RefCell::new(Some(Link {
+                    target: back.clone(),
+                })),
+            },
+        );
         let node_wrapper = node.clone().to_js(lock)?;
         back.node.set(Some(node_wrapper.to_traced_global(lock)));
         // `Back` needs a wrapper for the `jsg::Rc<Back>` in the `Link` to trace it.
@@ -298,9 +313,12 @@ fn cycle_through_struct_js_value_field_is_collected() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let holder = jsg::Rc::new(Holder {
-            link: jsg::RefCell::new(None),
-        });
+        let holder = jsg::Rc::new(
+            lock,
+            Holder {
+                link: jsg::RefCell::new(None),
+            },
+        );
         let wrapper = holder.clone().to_js(lock)?;
         *holder.link.borrow_mut(lock) = Some(ValueLink {
             value: wrapper.to_traced_global(lock),
@@ -324,9 +342,12 @@ fn cycle_through_struct_js_value_field_is_collected() {
 fn struct_js_value_field_taken_from_a_resource_keeps_its_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let holder = jsg::Rc::new(Holder {
-            link: jsg::RefCell::new(None),
-        });
+        let holder = jsg::Rc::new(
+            lock,
+            Holder {
+                link: jsg::RefCell::new(None),
+            },
+        );
         let wrapper = holder.clone().to_js(lock)?;
         ctx.set_global(lock, "holder", wrapper);
         // Only the `Holder` keeps the value alive; the script ends in `undefined` so that no

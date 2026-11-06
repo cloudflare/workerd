@@ -14,6 +14,7 @@ const unitTests :Workerd.Config = (
           (name = "ECHO_SERVER_PORT", fromEnvironment = "ECHO_SERVER_PORT"),
           (name = "TIMEOUT_SERVER_PORT", fromEnvironment = "TIMEOUT_SERVER_PORT"),
           (name = "RECONNECT_SERVER_PORT", fromEnvironment = "RECONNECT_SERVER_PORT"),
+          (name = "RESET_SERVER_PORT", fromEnvironment = "RESET_SERVER_PORT"),
           (name = "SELF", service = "net-nodejs-test"),
         ]
       )

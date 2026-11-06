@@ -126,6 +126,42 @@ impl<V: Clone + 'static> Sessions<V> {
     }
 }
 
+/// Refuses a public cluster or advertised address from the command line or config, or a wildcard
+/// cluster address with no address to advertise.
+///
+/// These are the checks of `bind` that need no bound socket. `serve` makes them before it reads
+/// the bucket, so it reports address errors without bucket access. `address` and `advertise` are
+/// the values of `--cluster-addr` and `--cluster-advertise`.
+pub fn check_addresses(
+    conf: cluster_config::Reader<'_>,
+    address: Option<&str>,
+    advertise: Option<&str>,
+) -> Result<()> {
+    addresses(conf, address, advertise).map(drop)
+}
+
+/// The address to bind and, if one is given, the address to advertise, checked
+/// (`check_addresses`).
+fn addresses(
+    conf: cluster_config::Reader<'_>,
+    address: Option<&str>,
+    advertise: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    let address = address.map_or_else(|| text(conf.get_address()), |a| Ok(a.to_owned()))?;
+    refuse_public(conf, &address)?;
+    let advertise = match advertise {
+        Some(advertise) => Some(advertise.to_owned()),
+        None if conf.has_advertise() => Some(text(conf.get_advertise())?),
+        None => None,
+    };
+    match &advertise {
+        Some(advertise) => refuse_public(conf, advertise)?,
+        None if is_wildcard(&address) => return Err(wildcard(&address)),
+        None => {}
+    }
+    Ok((address, advertise))
+}
+
 /// Binds the cluster port, before the services start.
 /// Returns the listener and the address to advertise.
 pub async fn bind(
@@ -133,25 +169,44 @@ pub async fn bind(
     address: Option<&str>,
     advertise: Option<&str>,
 ) -> Result<(TcpListener, String)> {
-    let address = address.map_or_else(|| text(conf.get_address()), |a| Ok(a.to_owned()))?;
-    refuse_public(conf, &address)?;
+    let (address, advertise) = addresses(conf, address, advertise)?;
     let listener = TcpListener::bind(&address)
         .await
         .map_err(|e| kj::failed!("cluster address {address}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| kj::failed!("{e}"))?;
     let advertise = match advertise {
-        Some(a) => a.to_owned(),
-        None if conf.has_advertise() => text(conf.get_advertise())?,
-        None if bound.ip().is_unspecified() => {
-            return Err(kj::failed!(
-                "cluster address {address} is a wildcard, which peers cannot reach: set \
-                 cluster.advertise or --cluster-advertise"
-            ));
+        Some(advertise) => with_bound_port(&advertise, bound.port()),
+        // A host name that resolved to a wildcard.
+        None if bound.ip().is_unspecified() => return Err(wildcard(&address)),
+        None => {
+            let advertise = bound.to_string();
+            refuse_public(conf, &advertise)?;
+            advertise
         }
-        None => bound.to_string(),
     };
-    refuse_public(conf, &advertise)?;
     Ok((listener, advertise))
+}
+
+/// `advertise` with a port of 0 replaced by `port`, the one bound; any other address as it is.
+fn with_bound_port(advertise: &str, port: u16) -> String {
+    match advertise.rsplit_once(':') {
+        Some((host, "0")) => format!("{host}:{port}"),
+        _ => advertise.to_owned(),
+    }
+}
+
+/// Whether `address` is a wildcard IP address, `0.0.0.0` or `[::]` with a port.
+fn is_wildcard(address: &str) -> bool {
+    address
+        .parse::<std::net::SocketAddr>()
+        .is_ok_and(|a| a.ip().is_unspecified())
+}
+
+fn wildcard(address: &str) -> crate::Error {
+    kj::failed!(
+        "cluster address {address} is a wildcard, which peers cannot reach: set \
+         cluster.advertise or --cluster-advertise"
+    )
 }
 
 /// Fails for an `address` that is a public IP, unless the config allows it.

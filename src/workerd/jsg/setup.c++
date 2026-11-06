@@ -659,6 +659,9 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_IF_SOME(c, codeCache) {
       c.discardDeferred();
     }
+    KJ_IF_SOME(hints, compileHints) {
+      hints.discard();
+    }
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());

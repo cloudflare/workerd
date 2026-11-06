@@ -466,7 +466,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@ssl",
     ],
 )
 
@@ -859,14 +858,6 @@ kj_test(
         ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
-    ],
-)
-
-kj_test(
-    src = "encoding-test.c++",
-    deps = [
-        ":encoding",
-        "//src/workerd/io",
     ],
 )
 

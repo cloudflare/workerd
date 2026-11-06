@@ -45,6 +45,8 @@ wd_rust_crate(
         "@crates_vendor//:hashlink",
         "@crates_vendor//:http",
         "@crates_vendor//:httpdate",
+        "@crates_vendor//:hyper",
+        "@crates_vendor//:hyper-util",
         "@crates_vendor//:ipnet",
         "@crates_vendor//:percent-encoding",
         "@crates_vendor//:rand",

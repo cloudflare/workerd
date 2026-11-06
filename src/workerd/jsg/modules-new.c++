@@ -192,10 +192,12 @@ class EsModule final: public Module {
       Type type,
       Flags flags,
       kj::ArrayPtr<const char> source,
-      kj::ArrayPtr<const kj::byte> compileCache = nullptr)
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr,
+      kj::Maybe<kj::String> bundleModuleName = kj::none)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
-        staticCompileCache(compileCache) {
+        staticCompileCache(compileCache),
+        bundleModuleName(kj::mv(bundleModuleName)) {
     KJ_DASSERT(isEsm());
   }
   explicit EsModule(Url id,
@@ -215,10 +217,12 @@ class EsModule final: public Module {
       Type type,
       Flags flags,
       kj::Arc<OwnedAscii> code,
-      kj::Maybe<CodeCacheKey> codeCacheKey)
+      kj::Maybe<CodeCacheKey> codeCacheKey,
+      kj::Maybe<kj::String> bundleModuleName = kj::none)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(code)),
-        codeCacheKey(codeCacheKey) {
+        codeCacheKey(codeCacheKey),
+        bundleModuleName(kj::mv(bundleModuleName)) {
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -247,7 +251,8 @@ class EsModule final: public Module {
       });
     },
         {.embeddedCache = staticCompileCache,
-          .produceHints = ProduceCompileHints(producesCompileHints()),
+          .bundleModuleName =
+              bundleModuleName.map([](const kj::String& name) -> kj::StringPtr { return name; }),
           .sharedCache = sharedCompileCache});
   }
 
@@ -329,6 +334,9 @@ class EsModule final: public Module {
 
   // Borrowed with the same lifetime as compiled-in builtin source.
   kj::ArrayPtr<const kj::byte> staticCompileCache;
+
+  // Kept separately from the normalized URL so reports preserve the uploaded bundle name.
+  kj::Maybe<kj::String> bundleModuleName;
 
   // Replica-local compilation uses this slot when no process-wide store applies.
   SharedModuleCompilationCache sharedCompileCache;
@@ -1065,29 +1073,6 @@ class IsolateModuleRegistry final {
 
   const jsg::Url& getBundleBase() const {
     return inner.getBundleBase();
-  }
-
-  kj::Array<ModuleRegistry::ProducedCompileHints> getProducedCompileHints(Lock& js) {
-    kj::HashMap<const Module*, kj::Vector<int>> hints;
-    for (auto& entry: instantiations) {
-      if (!entry.module.producesCompileHints()) continue;
-      auto& positions = hints.findOrCreate(
-          &entry.module, [&]() -> decltype(hints)::Entry { return {&entry.module, {}}; });
-      positions.addAll(jsg::getProducedCompileHints(js, entry.key.getHandle(js)));
-    }
-    kj::Vector<ModuleRegistry::ProducedCompileHints> result;
-    for (auto& entry: hints) {
-      auto& positions = entry.value;
-      if (positions.size() > 1) {
-        std::sort(positions.begin(), positions.end());
-        positions.truncate(std::unique(positions.begin(), positions.end()) - positions.begin());
-      }
-      result.add(ModuleRegistry::ProducedCompileHints{
-        .specifier = entry.key->id().clone(),
-        .functionPositions = positions.releaseAsArray(),
-      });
-    }
-    return result.releaseAsArray();
   }
 
  private:
@@ -2002,10 +1987,6 @@ const jsg::Url processModuleName(kj::StringPtr name, const jsg::Url& base) {
 
 }  // namespace
 
-Url ModuleRegistry::resolveModuleName(Lock& js, kj::StringPtr name) {
-  return processModuleName(name, IsolateModuleRegistry::from(js.v8Isolate).getBundleBase());
-}
-
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(kj::StringPtr name,
     EvaluateCallback callback,
     kj::Array<kj::String> namedExports,
@@ -2026,9 +2007,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
+      [url = url.clone(), name = kj::str(name), source, flags, type = type()](
+          const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = kj::heap<EsModule>(kj::mv(url), type, flags, source);
+    kj::Own<Module> mod =
+        kj::heap<EsModule>(kj::mv(url), type, flags, source, nullptr, kj::mv(name));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2040,10 +2023,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(kj::Strin
     kj::Maybe<CodeCacheKey> codeCacheKey) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), source = kj::mv(source), flags, type = type(), codeCacheKey](
-          const ResolveContext& context) mutable
+      [url = url.clone(), name = kj::str(name), source = kj::mv(source), flags, type = type(),
+          codeCacheKey](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source), flags, codeCacheKey);
+    kj::Own<Module> mod =
+        kj::heap<EsModule>(kj::mv(url), type, flags, kj::mv(source), codeCacheKey, kj::mv(name));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2427,15 +2411,6 @@ bool Module::isMain() const {
 
 bool Module::isWasm() const {
   return (flags_ & Flags::WASM) == Flags::WASM;
-}
-
-bool Module::producesCompileHints() const {
-  return type() == Type::BUNDLE && isEsm() &&
-      (flags_ & Flags::PRODUCE_COMPILE_HINTS) == Flags::PRODUCE_COMPILE_HINTS;
-}
-
-kj::Array<ModuleRegistry::ProducedCompileHints> ModuleRegistry::getProducedCompileHints(Lock& js) {
-  return IsolateModuleRegistry::from(js.v8Isolate).getProducedCompileHints(js);
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {
