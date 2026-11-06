@@ -110,6 +110,9 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
+  /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
+     (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
+  V(TS_URL)                                                                                        \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

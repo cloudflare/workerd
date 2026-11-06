@@ -12,6 +12,7 @@
 #include "headers.h"
 #include "queue.h"
 #include "request-io.h"
+#include "url-bridge.h"
 #include "web-socket.h"
 #include "worker-rpc.h"
 
@@ -61,6 +62,8 @@ class Body: public jsg::Object {
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
+      // Before the async generator, which would take a URLSearchParams as an iterable.
+      JsUrlSearchParams,
       jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   // The result of the "extract a body" algorithm: the body's stream plus the Content-Type it

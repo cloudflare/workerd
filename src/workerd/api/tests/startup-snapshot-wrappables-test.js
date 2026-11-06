@@ -56,8 +56,9 @@ switch (MODE) {
     kept.decode(new Uint8Array([0xc3]), { stream: true });
     break;
   case 'searchparams':
-    // URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
-    // created lazily, but a reference the top level keeps makes it reachable.
+    // The C++ URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
+    // created lazily, but a reference the top level keeps makes it reachable. The TypeScript one
+    // (the TS_URL autogate) is a JavaScript object over its URL's LegacyUrlHandle, and travels.
     params = url.searchParams;
     break;
   case 'gc':
@@ -150,6 +151,10 @@ async function checks() {
       break;
     case 'searchparams':
       result.params = params.get('query') === 'string';
+      // The URL and its searchParams still share one query.
+      params.set('x', '2');
+      result.paramsShared =
+        params === url.searchParams && url.search === '?query=string&x=2';
       break;
     case 'midstream-decoder':
       result.midStreamDecoder = kept.decode(new Uint8Array([0xa9])) === 'é';
@@ -217,6 +222,12 @@ async function test(ctrl, env) {
   // The runner went through the same pipeline as the cases: whether it was started from a
   // snapshot says whether the pipeline is on in this variant.
   const pipelineOn = unsafe.startedFromStartupSnapshot();
+  // Whether URL is the TypeScript implementation (the TS_URL autogate), which decides whether the
+  // searchparams case can be carried. User code cannot read an autogate, but unlike a JSG class,
+  // a TypeScript class's source text is not [native code].
+  const tsUrl = !Function.prototype.toString
+    .call(URL)
+    .includes('[native code]');
 
   // Cases whose top level the zygote can carry: started from the snapshot when the pipeline is
   // on.
@@ -227,6 +238,7 @@ async function test(ctrl, env) {
     'gc',
     'finalization',
     'bindings',
+    ...(tsUrl ? ['searchparams'] : []),
   ];
   // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
   // module scope of node:fs reaches UrlUtil, a Rust JSG resource (src/rust/api/url.rs); Rust
@@ -234,7 +246,7 @@ async function test(ctrl, env) {
   const fallback = [
     'fs',
     'unclonable',
-    'searchparams',
+    ...(tsUrl ? [] : ['searchparams']),
     'midstream-decoder',
     'no-ts-streams',
   ];
