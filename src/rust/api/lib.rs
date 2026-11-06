@@ -54,7 +54,7 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:dns",
-        |_lock| Ok(DnsUtil::new()),
+        |lock| Ok(DnsUtil::new(lock)),
         jsg::modules::ModuleType::Internal,
     );
     // `node-internal:inspector` is always registered: it is imported by the `node:inspector`
@@ -64,13 +64,13 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:inspector",
-        |_lock| Ok(InspectorModule::new()),
+        |lock| Ok(InspectorModule::new(lock)),
         jsg::modules::ModuleType::Internal,
     );
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",
-        |_lock| Ok(UrlUtil::new()),
+        |lock| Ok(UrlUtil::new(lock)),
         jsg::modules::ModuleType::Internal,
     );
 }

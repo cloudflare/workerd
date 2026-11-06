@@ -63,7 +63,7 @@ pub fn wrap_opaque<'s, T: Traced + 'static>(
     let wrapper = wrappable.attach_opaque_wrapper(lock);
     // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only the
     // wrapper owns it, so the reference is dropped and the garbage collector decides.
-    wrappable.remove_strong_ref(true);
+    wrappable.remove_strong_ref();
     wrapper
 }
 

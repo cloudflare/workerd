@@ -48,9 +48,12 @@ impl Values {
 }
 
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let values = jsg::Rc::new(Values {
-        stored: jsg::RefCell::new(None),
-    })
+    let values = jsg::Rc::new(
+        lock,
+        Values {
+            stored: jsg::RefCell::new(None),
+        },
+    )
     .to_js(lock)
     .unwrap();
     ctx.set_global(lock, "values", values);

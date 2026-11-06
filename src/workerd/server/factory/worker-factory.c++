@@ -21,7 +21,6 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/compiled-bindings.capnp.h>
 #include <workerd/server/fallback-service.h>
-#include <workerd/server/pyodide.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
@@ -1521,11 +1520,22 @@ void indexDynamicChannels(CompiledWorker::Impl& impl, DynamicWorkerSource& sourc
   });
 }
 
+// Loads the Pyodide bundle a Python worker's flags select (server/pyodide.rs).
 kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags::Reader flags) {
   if (!flags.getPythonWorkers()) co_return;
   KJ_IF_SOME(release, getPythonSnapshotRelease(flags)) {
-    co_await fetchPyodideBundle(factory.options->pythonConfig, getPythonBundleName(release),
-        release.getIntegrity(), factory.network, factory.timer);
+    auto& options = *factory.options;
+    auto& manager = options.pythonConfig.pyodideBundleManager;
+    auto version = getPythonBundleName(release);
+    if (manager.getPyodideBundle(version) != kj::none) co_return;
+    auto bytes = co_await pyodide_bundle_fetch(
+        toRust(options.pyodideBundleDiskCacheDir.map(
+            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
+        toRust(version), toRust(release.getIntegrity()));
+    // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
+    // this one waited.
+    if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;
+    manager.setPyodideBundleData(kj::mv(version), kj::heapArray<kj::byte>(kj::from<Rust>(bytes)));
   }
 }
 

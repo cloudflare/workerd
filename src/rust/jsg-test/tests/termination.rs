@@ -105,7 +105,7 @@ impl Terminator {
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
         crate::Harness::terminate_and_deliver(lock);
-        let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
+        let result = jsg::ToJS::to_js(jsg::Rc::new(lock, Self), lock);
         RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
     }
@@ -201,23 +201,24 @@ fn termination_survives(method: &str) {
 fn termination_survives_in(harness: &crate::Harness, method: &str) {
     termination_survives_call(
         harness,
-        jsg::Rc::new(Terminator),
+        |lock| jsg::Rc::new(lock, Terminator),
         &format!("{method}()"),
         |_, _| {},
     );
 }
 
-/// Evaluates `obj.{call}` in `harness` from inside a JavaScript `try`/`catch`, and checks that the
-/// termination reaches the harness: the script fails without a catchable exception, and neither
-/// the `catch` block nor the code after it runs. Then runs `check`, once V8 has cleared the
-/// termination.
+/// Evaluates `obj.{call}` in `harness`, where `obj` is what `new_obj` returns, from inside a
+/// JavaScript `try`/`catch`, and checks that the termination reaches the harness: the script
+/// fails without a catchable exception, and neither the `catch` block nor the code after it
+/// runs. Then runs `check`, once V8 has cleared the termination.
 fn termination_survives_call<R: jsg::Resource + 'static>(
     harness: &crate::Harness,
-    obj: jsg::Rc<R>,
+    new_obj: impl FnOnce(&mut jsg::Lock<'_>) -> jsg::Rc<R>,
     call: &str,
     check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
 ) {
     harness.run_in_context(|lock, ctx| {
+        let obj = new_obj(lock);
         ctx.set_global(lock, "obj", obj);
         let script = format!(
             "globalThis.caught = 'nothing'; globalThis.after = false;
@@ -411,10 +412,19 @@ fn guarded_termination_survives(
     call: &str,
     check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
 ) {
-    let guarded = jsg::Rc::new(Guarded {
-        saw_pending: Cell::new(None),
-    });
-    termination_survives_call(&crate::Harness::new(), guarded.clone(), call, check);
+    let mut guarded = None;
+    let new_guarded = |lock: &mut jsg::Lock<'_>| {
+        let obj = jsg::Rc::new(
+            lock,
+            Guarded {
+                saw_pending: Cell::new(None),
+            },
+        );
+        guarded = Some(obj.clone());
+        obj
+    };
+    termination_survives_call(&crate::Harness::new(), new_guarded, call, check);
+    let guarded = guarded.expect("created by termination_survives_call");
     assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
 }
 

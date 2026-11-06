@@ -241,7 +241,7 @@ fn register_probe_module(registry: Pin<&mut ffi::ModuleRegistry>) {
                 ffi::ProbeObservation::NoRequest
             };
             PROBE_OBSERVATION.with(|cell| cell.set(observation));
-            Ok(jsg::Rc::new(probe::Probe))
+            Ok(jsg::Rc::new(lock, probe::Probe))
         },
         jsg::modules::ModuleType::Internal,
     );
@@ -753,7 +753,7 @@ mod execution_context {
         // SAFETY: forwarded from the caller.
         unsafe {
             v8::run_ffi_callback(isolate, |lock| {
-                jsg::Rc::new(RustExecutionContext).to_js(lock)
+                jsg::Rc::new(lock, RustExecutionContext).to_js(lock)
             })
         }
     }
@@ -793,7 +793,7 @@ mod execution_context {
     /// As for `new_rust_execution_context()`.
     pub unsafe fn new_gate(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
         // SAFETY: forwarded from the caller.
-        unsafe { v8::run_ffi_callback(isolate, |lock| jsg::Rc::new(Gate).to_js(lock)) }
+        unsafe { v8::run_ffi_callback(isolate, |lock| jsg::Rc::new(lock, Gate).to_js(lock)) }
     }
 
     /// Opens the gate of the last `Gate.wait()`; false if there was none.

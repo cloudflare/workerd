@@ -31,7 +31,8 @@ impl Strings {
 fn coerces_method_arguments() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "strings", jsg::Rc::new(Strings));
+        let strings = jsg::Rc::new(lock, Strings);
+        ctx.set_global(lock, "strings", strings);
         for (expr, expected) in [
             ("''", ""),
             ("'hello'", "hello"),
@@ -79,7 +80,9 @@ fn preserves_utf16_and_exposes_string_operations() {
         let number = 42_u32.to_js(lock)?;
         assert!(!JsString::is_exact(number));
 
-        ctx.set_global(lock, "strings", jsg::Rc::new(Strings));
+        let strings = jsg::Rc::new(lock, Strings);
+
+        ctx.set_global(lock, "strings", strings);
         assert!(
             ctx.eval::<bool>(
                 lock,
@@ -118,7 +121,8 @@ fn to_string_replaces_lone_surrogates() {
 fn propagates_coercion_exceptions() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "strings", jsg::Rc::new(Strings));
+        let strings = jsg::Rc::new(lock, Strings);
+        ctx.set_global(lock, "strings", strings);
         assert!(
             ctx.eval::<bool>(
                 lock,

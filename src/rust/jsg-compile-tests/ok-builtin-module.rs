@@ -23,7 +23,7 @@ pub fn register(registry: std::pin::Pin<&mut v8::ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry,
         "node-internal:example",
-        |_lock| Ok(jsg::Rc::new(Exports)),
+        |lock| Ok(jsg::Rc::new(lock, Exports)),
         jsg::modules::ModuleType::Internal,
     );
 }
