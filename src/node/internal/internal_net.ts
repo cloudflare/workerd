@@ -2507,10 +2507,11 @@ export class SocketAddress implements _SocketAddress {
 // Here we do the entire implementation as TypeScript simply because
 // we don't need the C++ parts at all.
 
+// An IPv6 address may end in a dotted-quad IPv4 address, so it is at most 45 characters.
 const kIpv6RangeRegex =
-  /Range: IPv6 ([0-9a-fA-F:]{1,39})-([0-9a-fA-F:]{1,39})/i;
-const kIpv6AddressRegex = /Address: IPv6 ([0-9a-fA-F:]{1,39})/i;
-const kIpv6SubnetRegex = /Subnet: IPv6 ([0-9a-fA-F:]{1,39})\/(\d{1,3})/i;
+  /Range: IPv6 ([0-9a-fA-F:.]{1,45})-([0-9a-fA-F:.]{1,45})/i;
+const kIpv6AddressRegex = /Address: IPv6 ([0-9a-fA-F:.]{1,45})/i;
+const kIpv6SubnetRegex = /Subnet: IPv6 ([0-9a-fA-F:.]{1,45})\/(\d{1,3})/i;
 const kIpv4RangeRegex =
   /Range: IPv4 (\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3})/;
 const kIpv4AddressRegex = /Address: IPv4 (\d{1,3}(?:\.\d{1,3}){3})/;
@@ -2536,6 +2537,10 @@ function parseIPv4(ip: string): FixedLengthArray<number, 4> | undefined {
 }
 
 function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
+  // A zone (fe80::1%eth0) does not take part in matching.
+  const percent = ip.indexOf('%');
+  if (percent !== -1) ip = ip.slice(0, percent);
+
   // A trailing dotted-quad IPv4 address, as in ::ffff:1.2.3.4, stands for the last two groups.
   const lastColon = ip.lastIndexOf(':');
   if (ip.includes('.', lastColon)) {

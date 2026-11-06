@@ -2364,5 +2364,35 @@ export const testBlockListAddressComparison = {
       'Address: IPv6 64:ff9b::192.168.10.1',
       'Subnet: IPv6 ::ffff:10.0.0.0/104',
     ]);
+
+    // Rules survive a round trip through toJSON/fromJSON.
+    const copy = new net.BlockList();
+    copy.fromJSON(embedded.toJSON());
+    deepStrictEqual(copy.rules, embedded.rules);
+    const copy2 = new net.BlockList();
+    copy2.fromJSON([
+      'Range: IPv6 ::ffff:10.0.0.1-::ffff:10.0.0.9',
+      'Address: IPv6 ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255',
+    ]);
+    ok(copy2.check('::ffff:10.0.0.5', 'ipv6'));
+    ok(!copy2.check('::ffff:10.0.0.10', 'ipv6'));
+    ok(copy2.check('ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'ipv6'));
+
+    // A zone takes no part in matching, so appending one cannot evade a rule.
+    const zoned = new net.BlockList();
+    zoned.addAddress('fe80::1', 'ipv6');
+    zoned.addSubnet('fe80:1::', 32, 'ipv6');
+    zoned.addRange('fe80:2::1', 'fe80:2::9', 'ipv6');
+    zoned.addAddress('10.0.0.1');
+    ok(zoned.check('fe80::1%eth0', 'ipv6'));
+    ok(!zoned.check('fe80::%eth0', 'ipv6'));
+    ok(zoned.check('fe80:1::5%eth0', 'ipv6'));
+    ok(zoned.check('fe80:2::5%eth0', 'ipv6'));
+    ok(zoned.check('::ffff:10.0.0.1%eth0.1', 'ipv6'));
+    ok(!zoned.check('::ffff:10.0.0.2%10.0.0.1', 'ipv6'));
+    zoned.addAddress('fe80::2%eth0', 'ipv6');
+    ok(zoned.check('fe80::2', 'ipv6'));
+    ok(zoned.check('fe80::2%eth1', 'ipv6'));
+    deepStrictEqual(zoned.rules.at(-1), 'Address: IPv6 fe80::2%eth0');
   },
 };
