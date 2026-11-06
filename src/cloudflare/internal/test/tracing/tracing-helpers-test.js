@@ -226,6 +226,78 @@ export const setAttributes = {
   },
 };
 
+export const setAttributesConversion = {
+  async test(ctrl, env, ctx) {
+    const checkConversion = (span) => {
+      let value = 'before';
+      const array = ['before'];
+      const order = [];
+      assert.strictEqual(
+        span.setAttributes({
+          'ordered.scalar': {
+            toString() {
+              order.push('coerce-first');
+              return value;
+            },
+          },
+          'ordered.array': array,
+          get 'ordered.later'() {
+            order.push('get-later');
+            value = 'after';
+            array[0] = 'after';
+            return value;
+          },
+        }),
+        span
+      );
+      assert.deepStrictEqual(order, ['coerce-first', 'get-later']);
+
+      const failure = new Error('attribute conversion failed');
+      let readAfterFailure = false;
+      assert.throws(
+        () =>
+          span.setAttributes({
+            'failed.scalar': 'not recorded',
+            'failed.array': ['not recorded'],
+            'failed.coercion': {
+              toString() {
+                throw failure;
+              },
+            },
+            get 'failed.later'() {
+              readAfterFailure = true;
+              return true;
+            },
+          }),
+        (error) => error === failure
+      );
+      assert.strictEqual(readAfterFailure, false);
+
+      assert.throws(
+        () =>
+          span.setAttributes({
+            'failed.beforeGetter': 'not recorded',
+            get 'failed.getter'() {
+              throw failure;
+            },
+          }),
+        (error) => error === failure
+      );
+
+      for (const input of [undefined, null, false, 42, 'string', []]) {
+        assert.throws(() => span.setAttributes(input), TypeError);
+      }
+      assert.strictEqual(span.setAttributes(Object.create(null)), span);
+    };
+
+    env.tracingTest.withSpan('set-attributes-conversion-op', (span) => {
+      span.setAttribute('test', 'setAttributesConversion');
+      checkConversion(span);
+    });
+    checkConversion(spanCreatedOutsideInvocationContext);
+  },
+};
+
 export const setStatus = {
   async test(ctrl, env, ctx) {
     const errorSpan = publicTracing.startSpan('status-error-op');

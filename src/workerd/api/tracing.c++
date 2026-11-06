@@ -523,22 +523,45 @@ jsg::Ref<Span> Span::setAttribute(jsg::Lock& js,
   KJ_IF_SOME(v, value) {
     maybeValue = toAttributeValue(js, key, v.getHandle(js), scalarHandler);
   }
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
-      s->setAttribute(kj::mv(key), kj::mv(maybeValue));
-    }
-    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
-      s->setAttribute(kj::mv(key), kj::mv(maybeValue));
-    }
-  }
+  setAttributeImpl(kj::mv(key), kj::mv(maybeValue));
   return JSG_THIS;
 }
 
-jsg::Ref<Span> Span::setAttributes(jsg::Lock& js,
-    jsg::Dict<jsg::Optional<jsg::Value>> attributes,
-    const jsg::TypeHandler<TagValue>& scalarHandler) {
-  for (auto& field: attributes.fields) {
-    setAttribute(js, kj::mv(field.name), kj::mv(field.value), scalarHandler);
+void Span::setAttributeImpl(kj::String key, kj::Maybe<AttributeValue> value) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
+      s->setAttribute(kj::mv(key), kj::mv(value));
+    }
+    KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
+      s->setAttribute(kj::mv(key), kj::mv(value));
+    }
+  }
+}
+
+jsg::Ref<Span> Span::setAttributes(
+    jsg::Lock& js, jsg::Value attributes, const jsg::TypeHandler<TagValue>& scalarHandler) {
+  auto handle = attributes.getHandle(js);
+  if (!handle->IsObject() || handle->IsArray()) {
+    jsg::throwTypeError(js.v8Isolate,
+        jsg::TypeErrorContext::methodArgument(typeid(Span), "setAttributes", 0), "object");
+  }
+
+  // Match JSG's dictionary conversion: read and convert each own property before reading the
+  // next, and finish conversion before recording anything so exceptions leave the batch unset.
+  auto context = js.v8Context();
+  auto object = handle.As<v8::Object>();
+  auto names = jsg::check(object->GetOwnPropertyNames(context));
+  using Field = jsg::Dict<kj::Maybe<AttributeValue>>::Field;
+  auto converted = kj::heapArrayBuilder<Field>(names->Length());
+  for (uint32_t i = 0; i < names->Length(); i++) {
+    auto name = jsg::check(jsg::check(names->Get(context, i))->ToString(context));
+    auto rawValue = jsg::check(object->Get(context, name));
+    auto key = jsg::JsString(name).toString(js);
+    auto value = toAttributeValue(js, key, rawValue, scalarHandler);
+    converted.add(Field{kj::mv(key), kj::mv(value)});
+  }
+  for (auto& field: converted.finish()) {
+    setAttributeImpl(kj::mv(field.name), kj::mv(field.value));
   }
   return JSG_THIS;
 }
