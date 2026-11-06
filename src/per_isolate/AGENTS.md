@@ -22,6 +22,10 @@ at context creation, before any user code. C++ entry point:
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`.
+- `handlers/handlers` creates the values C++ passes to the `test()` and
+  `alarm()` handlers (`TestController`, `AlarmInvocationInfo`);
+  `global-scope.c++` calls its factories through
+  `tryGetBootstrapFunction()`, so `main.ts` requires it unconditionally.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob

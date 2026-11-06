@@ -33,6 +33,10 @@
 //
 const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
+// The values passed to the test() and alarm() handlers, which C++ creates
+// through this module's exports.
+require('handlers/handlers');
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,

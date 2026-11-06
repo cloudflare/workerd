@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // The TestController passed to test() and the AlarmInvocationInfo passed to
-// alarm(), which are JSG resource types.
+// alarm(), which src/per_isolate/handlers/handlers.ts implements so that they
+// look as JSG resource types do.
 
 import * as assert from 'node:assert';
 import { inspect } from 'node:util';
@@ -80,6 +81,8 @@ export const testController = {
     assert.deepStrictEqual(Reflect.ownKeys(ctrl), []);
     assert.strictEqual(inspect(ctrl), 'TestController {}');
     assert.strictEqual(JSON.stringify(ctrl), '{}');
+    // An object without internal fields clones as a plain object.
+    assert.deepStrictEqual(structuredClone(ctrl), {});
 
     // Not an RpcTarget or a plain object, so RPC refuses it.
     const stub = env.echo.get(env.echo.idFromName('echo'));
@@ -145,6 +148,7 @@ export class AlarmObject extends DurableObject {
         `{"scheduledTime":${info.scheduledTime},` +
           `"retryCount":${info.retryCount},"isRetry":${info.isRetry}}`
       );
+      assert.deepStrictEqual(structuredClone(info), { ...info });
       // Read through an object that inherits from it.
       assert.strictEqual(Object.create(info).retryCount, info.retryCount);
 

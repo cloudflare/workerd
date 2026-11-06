@@ -198,15 +198,6 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
   static jsg::Ref<WorkerGlobalScope> constructor() = delete;
 };
 
-// Controller type for test handler.
-//
-// At present, this has no methods. It is defined for consistency with other handlers and on the
-// assumption that we'll probably want to put something here someday.
-class TestController: public jsg::Object {
- public:
-  JSG_RESOURCE_TYPE(TestController) {}
-};
-
 // Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
@@ -476,34 +467,6 @@ class ExecutionContext: public jsg::Object {
   }
 };
 
-// AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
-class AlarmInvocationInfo: public jsg::Object {
- public:
-  AlarmInvocationInfo(kj::Date scheduledTime, uint32_t retry)
-      : scheduledTime(static_cast<double>((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS)),
-        retryCount(retry) {}
-
-  bool getIsRetry() {
-    return retryCount > 0;
-  }
-  uint32_t getRetryCount() {
-    return retryCount;
-  }
-  double getScheduledTime() {
-    return scheduledTime;
-  }
-
-  JSG_RESOURCE_TYPE(AlarmInvocationInfo) {
-    JSG_READONLY_INSTANCE_PROPERTY(isRetry, getIsRetry);
-    JSG_READONLY_INSTANCE_PROPERTY(retryCount, getRetryCount);
-    JSG_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
-  }
-
- private:
-  double scheduledTime;
-  uint32_t retryCount = 0;
-};
-
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -534,13 +497,14 @@ struct ExportedHandler {
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
-  using AlarmHandler = kj::Promise<void>(jsg::Ref<AlarmInvocationInfo> alarmInfo);
+  // The AlarmInvocationInfo and TestController passed to these handlers are implemented in
+  // TypeScript, in src/per_isolate/handlers/handlers.ts.
+  using AlarmHandler = kj::Promise<void>(jsg::JsObject alarmInfo);
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  using TestHandler = jsg::Promise<void>(
+      jsg::JsObject controller, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
   using HibernatableWebSocketMessageHandler = kj::Promise<void>(
@@ -575,6 +539,12 @@ struct ExportedHandler {
   // include it in type definitions.
 
   JSG_STRUCT_TS_DEFINE(
+    interface TestController {}
+    interface AlarmInvocationInfo {
+      readonly isRetry: boolean;
+      readonly retryCount: number;
+      readonly scheduledTime: number;
+    }
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
     type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
@@ -1284,11 +1254,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 };
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
-  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
-      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
-      api::AccessContext
+  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, EW_BENCH_ISOLATE_TYPES,                   \
+      api::ExecutionContext, api::ExportedHandler, api::BenchExportedHandler,                      \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator, api::Immediate,       \
+      api::Cloudflare, api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions,        \
+      api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
