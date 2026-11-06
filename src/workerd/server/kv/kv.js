@@ -9,7 +9,7 @@
 //   kvNamespace = (name = "<this service>",
 //                  props = (json = "{\"namespace\": \"<id>\"}"))
 //
-// The config that runs this module (`builtin = "/workerd/kv.js"`) is an
+// The config that runs this module (`bundled = "/workerd/kv.js"`) is an
 // interface: cli/wrangler.rs, Miniflare and hand-written configs write it,
 // each for the workerd it ships with or runs on. Anything added to it later
 // must be optional, so that configs written before keep working. It is:

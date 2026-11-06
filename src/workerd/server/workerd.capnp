@@ -525,9 +525,10 @@ struct Worker {
       obsoletePythonRequirement @9 :Text;
       # This position used to be the pythonRequirement type that has now been deprecated.
 
-      builtin @11 :Text;
-      # An ES module whose source is compiled into workerd, by name: `/workerd/kv.js`, the KV
-      # Worker (see its header for the bindings it takes). Experimental.
+      bundled @11 :Text;
+      # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
+      # Worker (see its header for the bindings it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

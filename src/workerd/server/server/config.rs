@@ -778,7 +778,7 @@ fn collect_service_actor_configs(
 
     // Meant for parameterized workers; nothing implements it, so nothing may set it.
     // TODO(someday): implement it, so that a Worker with Durable Objects can be
-    // `inherit`ed, as a built-in Worker's config constant would be.
+    // `inherit`ed, as a bundled Worker's config constant would be.
     if worker_conf.has_durable_object_unique_key_modifier() {
         report.service_error(
             name,

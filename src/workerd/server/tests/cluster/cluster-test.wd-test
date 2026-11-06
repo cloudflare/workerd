@@ -46,7 +46,7 @@ const config :Workerd.Config = (
     # each instance's disk.
     ( name = "kv",
       worker = (
-        modules = [ ( name = "kv.js", builtin = "/workerd/kv.js" ) ],
+        modules = [ ( name = "kv.js", bundled = "/workerd/kv.js" ) ],
         compatibilityDate = "2026-01-01",
         bindings = [
           ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),

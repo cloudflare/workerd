@@ -46,14 +46,14 @@ static const PythonConfig defaultConfig{
   .createBaselineSnapshot = false,
 };
 
-// The sources of the ES modules a config names with `Worker.Module.builtin`.
-kj::Maybe<kj::StringPtr> findBuiltin(kj::StringPtr name) {
-  static const auto builtins = [] {
+// The sources of the ES modules a config names with `Worker.Module.bundled`.
+kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
+  static const auto bundled = [] {
     kj::HashMap<kj::StringPtr, kj::StringPtr> map;
     map.insert("/workerd/kv.js"_kj, KV_JS);
     return map;
   }();
-  return builtins.find(name).map([](auto& source) { return source; });
+  return bundled.find(name).map([](auto& source) { return source; });
 }
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
@@ -410,12 +410,12 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
-      case config::Worker::Module::BUILTIN: {
-        auto name = conf.getBuiltin();
-        KJ_IF_SOME(source, findBuiltin(name)) {
+      case config::Worker::Module::BUNDLED: {
+        auto name = conf.getBundled();
+        KJ_IF_SOME(source, findBundled(name)) {
           return Worker::Script::EsModule{source};
         }
-        auto message = kj::str("No built-in module named \"", name, "\".");
+        auto message = kj::str("No bundled module named \"", name, "\".");
         KJ_IF_SOME(e, errorReporter) {
           e.addError(kj::mv(message));
           return Worker::Script::TextModule{""};

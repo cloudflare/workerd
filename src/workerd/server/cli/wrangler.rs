@@ -15,7 +15,7 @@
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
 //! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
-//! (the built-in module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
+//! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
 //! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. The server listens
 //! on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
@@ -387,7 +387,7 @@ fn kv_worker(mut service: service::Builder<'_>, name: &str) {
     let mut w = service.init_worker();
     let mut module = w.reborrow().init_modules(1).get(0);
     module.set_name("kv.js");
-    module.set_builtin("/workerd/kv.js");
+    module.set_bundled("/workerd/kv.js");
     w.set_compatibility_date("2026-01-01");
     let mut class = w.reborrow().init_durable_object_namespaces(1).get(0);
     class.set_class_name("KVNamespace");
