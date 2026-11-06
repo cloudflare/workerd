@@ -1368,6 +1368,43 @@ fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
     realm.resources.take_template_handles()
 }
 
+/// Runs `body`, the body of the generated callback of a method or property that returns a
+/// promise, as C++ JSG's `LiftKj_<v8::Local<v8::Promise>>` (`src/workerd/jsg/util.h`) runs one:
+/// if the isolate captures throws as rejections (the `capture_async_api_throws` compatibility
+/// flag), what `body` throws, an argument conversion error included, is caught and returned
+/// through `set_return_value` as a rejected promise instead. A termination is not caught.
+#[doc(hidden)]
+pub fn capture_throws_as_rejection<'s, A>(
+    lock: &mut Lock<'s>,
+    args: &mut A,
+    body: impl FnOnce(&mut Lock<'s>, &mut A),
+    set_return_value: impl FnOnce(&mut A, v8::Local<'s, v8::Value>),
+) {
+    if !lock.captures_throws_as_rejections() {
+        body(lock, args);
+        return;
+    }
+    let caught = lock.try_catch(|lock| {
+        body(lock, args);
+        // `body` throws rather than returning an error; a thrown exception is pending in the
+        // `TryCatch` of `try_catch` until it returns.
+        if lock.has_pending_exception() {
+            Err(Error::pending())
+        } else {
+            Ok(())
+        }
+    });
+    match caught {
+        Ok(Ok(())) => {}
+        Ok(Err(exception)) => match v8::Promise::rejected(lock, exception) {
+            Ok(promise) => set_return_value(args, promise.into()),
+            Err(err) => lock.throw_exception(&err),
+        },
+        // Execution is terminating, and the termination stays pending.
+        Err(err) => lock.throw_exception(&err),
+    }
+}
+
 /// Opens `scope` and runs `f` with its lock, catching any panic and converting it to a JS
 /// internal error. Returns what `f` returns, or `None` if it panicked.
 ///
