@@ -172,6 +172,7 @@ EsModule extends Module {
   codeCacheKey:  Maybe<CodeCacheKey>                             // Worker bundle key
   builtinCodeCacheKey: Lazy<CodeCacheKey>                        // Encoded builtin/fallback key
   staticCompileCache: ArrayPtr<const byte>                      // Embedded builtin bytecode
+  compileHints: Array<int>                                     // Owned bundle function positions
   sharedCompileCache: SharedModuleCompilationCache             // Cross-isolate fallback cache
 }
 ```
@@ -201,6 +202,22 @@ Positions accumulate as functions compile during evaluation and subsequent
 requests; taking a snapshot does not end collection. The session retains module
 handles and releases them under the isolate lock before disposal.
 
+#### Compile hint consumption
+
+Bundle ES modules retain their supplied `WorkerSource::EsModule::compileHints`
+in the shared definition. The bundle builder copies the function positions before
+the source bundle is released, so they remain valid through lazy resolution and
+across isolate replicas. Both registries pass hints to `jsg::compileModule`, which
+uses one sorted-position callback for V8's `kConsumeCompileHints` and reports actual
+consumption through `CompilationObserver::onCompileHintsConsumed`.
+
+Embedded bytecode takes precedence. For bundle modules with a `codeCacheKey`, an
+installed isolate code cache takes precedence on both misses and hits. Modules
+without an applicable store use the definition-local shared slot: existing bytecode
+takes precedence, while an empty slot compiles with hints and can cache the result
+for subsequent isolates. Hint production bypasses caches and supplied hints. Missing
+hints preserve ordinary source compilation, and builtins do not consume bundle hints.
+
 #### Source Encoding (`EncodedSource`)
 
 V8 has no internal UTF-8 string representation — external source strings must be
@@ -229,7 +246,7 @@ and the shared compile cache stays consistent.
 ```
 First isolate compiles module:
   1. lockShared(sharedCompileCache) -> empty -> no cached data
-  2. CompileModule(source) -> v8::Module
+  2. CompileModule(source, supplied hints if present) -> v8::Module
   3. lockExclusive(sharedCompileCache) -> still empty?
      -> CreateCodeCache(module) -> store Own<CachedData>
 
