@@ -29,7 +29,6 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "unsafe", unsafeEval = void),
-          (name = "specCompliant", json = "true"),
         ],
       )
     ),
@@ -41,7 +40,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat", "enable_nodejs_perf_hooks_module"],
         bindings = [
           (name = "unsafe", unsafeEval = void),
-          (name = "perfHooks", json = "true"),
         ],
       )
     ),

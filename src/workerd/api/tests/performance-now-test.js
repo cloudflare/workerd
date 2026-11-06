@@ -7,14 +7,22 @@
 // the TypeScript one (performance-now-ts-test.wd-test), so that drift between
 // the two fails one config or the other.
 //
+// The compat flags the shape depends on are read at runtime, so each variant
+// checks against the flags it actually runs with:
+// - spec_compliant_property_attributes names the getter "get timeOrigin".
+// - enable_nodejs_perf_hooks_module makes Performance a global that inherits
+//   from EventTarget.
+//
 // Bindings:
-// - specCompliant: spec_compliant_property_attributes is on.
-// - perfHooks: enable_nodejs_perf_hooks_module is on, which makes Performance
-//   a global that inherits from EventTarget.
 // - expectTypeScript: the TypeScript implementation must be installed.
 // - unsafe: an unsafeEval binding, for optimizedCalls.
 
 import assert from 'node:assert';
+
+const specCompliant =
+  Cloudflare.compatibilityFlags.spec_compliant_property_attributes;
+const perfHooksEnabled =
+  Cloudflare.compatibilityFlags.enable_nodejs_perf_hooks_module;
 
 const proto = Object.getPrototypeOf(performance);
 const nowDescriptor = Object.getOwnPropertyDescriptor(proto, 'now');
@@ -51,7 +59,7 @@ export const nowShape = {
 };
 
 export const timeOriginShape = {
-  test(_ctrl, env) {
+  test() {
     const { get, set, enumerable, configurable } = timeOriginDescriptor;
     assert.strictEqual(typeof get, 'function');
     assert.strictEqual(set, undefined);
@@ -59,7 +67,7 @@ export const timeOriginShape = {
     assert.strictEqual(configurable, true);
     assert.strictEqual(Object.hasOwn(performance, 'timeOrigin'), false);
 
-    assert.strictEqual(get.name, env.specCompliant ? 'get timeOrigin' : '');
+    assert.strictEqual(get.name, specCompliant ? 'get timeOrigin' : '');
     assert.strictEqual(get.length, 0);
   },
 };
@@ -143,8 +151,8 @@ export const values = {
 };
 
 export const everyRouteSharesTheMembers = {
-  async test(_ctrl, env) {
-    if (!env.perfHooks) return;
+  async test() {
+    if (!perfHooksEnabled) return;
     assert.strictEqual(globalThis.Performance.prototype, proto);
 
     const perfHooks = await import('node:perf_hooks');
