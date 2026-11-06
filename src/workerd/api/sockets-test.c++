@@ -96,6 +96,7 @@ kj::Promise<size_t> turnTimeout(int n) {
 struct AsyncSendState {
   bool called = false;
   bool closed = false;
+  uint sent = 0;
   kj::Array<kj::byte> observed;
 };
 
@@ -114,8 +115,9 @@ class AsyncObservingDatagramChannel final: public DatagramChannel {
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
     KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed").called = true;
     return kj::evalLater([state = state, datagram]() {
-      KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed").observed =
-          kj::heapArray<kj::byte>(datagram);
+      auto& live = KJ_REQUIRE_NONNULL(state.tryGet(), "test state destroyed");
+      ++live.sent;
+      live.observed = kj::heapArray<kj::byte>(datagram);
     });
   }
 
@@ -249,6 +251,33 @@ KJ_TEST("UDP writable stream snapshots bytes before asynchronous send") {
       flags.setTypeScriptImplementedStreams(tsStreams);
       runDatagramSnapshotTest(flags.asReader());
     }
+  }
+}
+
+KJ_TEST("UDP socket close waits for an already queued writable close") {
+  for (bool tsStreams: {false, true}) {
+    capnp::MallocMessageBuilder flagsMessage;
+    auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setOutboundUdpSockets(true);
+    flags.setTypeScriptImplementedStreams(tsStreams);
+    TestFixture fixture(TestFixture::SetupParams{.featureFlags = flags.asReader()});
+    kj::Pin<AsyncSendState> state;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto socket = setupDatagramSocket(
+          env.js, kj::heap<AsyncObservingDatagramChannel>(state.addWeak()), kj::none, kj::none);
+      auto writable = socket->getWritable(env.js);
+      writable.writeForTest(env.js, jsg::JsUint8Array::create(env.js, "first"_kjb))
+          .markAsHandled(env.js);
+      writable.writeForTest(env.js, jsg::JsUint8Array::create(env.js, "second"_kjb))
+          .markAsHandled(env.js);
+      writable.forceClose(env.js).markAsHandled(env.js);
+      env.js.runMicrotasks();
+      return env.context.awaitJs(env.js, socket->close(env.js));
+    });
+    KJ_EXPECT(state->sent == 2, tsStreams);
+    KJ_EXPECT(state->observed.asPtr() == "second"_kjb, tsStreams);
+    KJ_EXPECT(state->closed, tsStreams);
   }
 }
 

@@ -135,6 +135,7 @@ class JsWritableStream final {
   // Closes the stream once all pending writes complete, bypassing the writer-lock check by going
   // through the controller. Used when the stream must be closed regardless of what JavaScript is
   // doing with it (e.g. closing a Socket's write side when its readable side reaches EOF).
+  // For value streams, joins a close already queued by JavaScript and waits for it to drain.
   // Precondition: !isNull().
   jsg::Promise<void> forceClose(jsg::Lock& js);
 
