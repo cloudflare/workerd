@@ -996,11 +996,14 @@ export function maybeRestoreSnapshot(Module: Module): void {
     },
     () => ({ snapshot_type: settings.snapshotType })
   );
-  // Invalidate caches if we have a snapshot because the contents of site-packages
-  // may have changed.
-  enterJaegerSpan('invalidate_caches', () => {
-    invalidateCaches(Module);
-  });
+  // Invalidate caches if we have a baseline snapshot
+  // because the contents of site-packages may have changed.
+  // We don't need this for dedicated snapshots.
+  if (settings.snapshotType !== 'dedicated') {
+    enterJaegerSpan('invalidate_caches', () => {
+      invalidateCaches(Module);
+    });
+  }
 }
 
 function collectSnapshot(
