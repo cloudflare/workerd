@@ -1,12 +1,15 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 # Top-level console output across the startup-snapshot zygote: `workerd test` is run on the
-# config and its stdout/stderr are checked for every line to appear exactly once.
+# configs and its stdout/stderr are checked for every line to appear exactly once, and for a
+# top level that throws to get no snapshot.
 js_test(
     name = "startup-snapshot-console-test",
     data = [
         ":fallback.js",
         ":startup-snapshot-console.wd-test",
+        ":startup-snapshot-throws.wd-test",
+        ":throws.js",
         ":used.js",
         "//src/workerd/server:workerd",
     ],
@@ -14,5 +17,6 @@ js_test(
     env = {
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WD_TEST_CONFIG": "$(rootpath :startup-snapshot-console.wd-test)",
+        "WD_THROWS_CONFIG": "$(rootpath :startup-snapshot-throws.wd-test)",
     },
 )
