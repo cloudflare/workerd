@@ -125,6 +125,35 @@ KJ_TEST("newDOMException while an exception is pending creates nothing and keeps
   });
 }
 
+KJ_TEST("A DOMException from jsg::Lock domException serializes its stack") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      auto roundTrip = [&](JsValue value) {
+        auto content = ({
+          Serializer serializer(js);
+          serializer.write(js, value);
+          serializer.release();
+        });
+        Deserializer deserializer(js, content);
+        return KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
+      };
+
+      auto given = js.domException(kj::str("AbortError"), kj::str("m"), kj::str("given stack"));
+      auto givenClone = roundTrip(JsValue(KJ_ASSERT_NONNULL(given.tryGetHandle(js))));
+      KJ_EXPECT(givenClone.get(js, "stack"_kj).toString(js) == "given stack"_kj);
+
+      auto captured = JsObject(
+          KJ_ASSERT_NONNULL(js.domException(kj::str("AbortError"), kj::str("m")).tryGetHandle(js)));
+      auto capturedStack = captured.get(js, "stack"_kj).toString(js);
+      KJ_EXPECT(capturedStack.startsWith("AbortError: m"_kj), capturedStack);
+      KJ_EXPECT(roundTrip(captured).get(js, "stack"_kj).toString(js) == capturedStack);
+    });
+  });
+}
+
 KJ_TEST("DOMException deserializes the legacy tag") {
   // The legacy format: the name, then an object holding the message and the stack.
   // clang-format off
