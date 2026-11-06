@@ -98,35 +98,9 @@ class URLSearchParams: public jsg::Object {
     JSG_METHOD(toString);
     JSG_ITERABLE(entries);
 
-    if (!flags.getSpecCompliantUrl()) {
-      // This is a hack. The spec-compliant URLSearchParams type is used in the Body constructor,
-      // see https://github.com/cloudflare/workerd/blob/v1.20241127.0/src/workerd/api/http.h#L255
-      // This means that when the TypeScript generation scripts are visiting root types for
-      // inclusion, we'll always visit the spec-compliant type even if we have the "url-standard"
-      // flag disabled. Rather than updating those usages based on which flags are enabled, we just
-      // delete the spec compliant declaration in an override if "url-standard" is disabled.
-      // We do the same for the non-spec-compliant URLSearchParams
-      // (https://github.com/cloudflare/workerd/blob/v1.20241127.0/src/workerd/api/url.h#L219).
-      JSG_TS_OVERRIDE(type URLSearchParams = never);
-    } else if (flags.getUrlSearchParamsDeleteHasValueArg()) {
-      JSG_TS_OVERRIDE(URLSearchParams {
-        entries(): IterableIterator<[key: string, value: string]>;
-        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-
-        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
-      });
-    } else {
-      JSG_TS_OVERRIDE(URLSearchParams {
-        delete(name: string): void;
-        has(name: string): boolean;
-
-        entries(): IterableIterator<[key: string, value: string]>;
-        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-
-        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
-      });
-    }
-    // Rename from urlURLSearchParams
+    // Declared in types/defines/url.d.ts, the same at every compatibility date. Also renames the
+    // references to this class from urlURLSearchParams.
+    JSG_TS_OVERRIDE(type URLSearchParams = never);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -245,11 +219,9 @@ class URL: public jsg::Object {
     JSG_STATIC_METHOD(createObjectURL);
     JSG_STATIC_METHOD(revokeObjectURL);
 
-    JSG_TS_OVERRIDE(URL {
-      constructor(url: string | URL, base?: string | URL);
-    });
-    // Rename from urlURL, and allow URLs which get coerced to strings in either
-    // constructor parameter
+    // Declared in types/defines/url.d.ts, the same at every compatibility date. Also renames the
+    // references to this class from urlURL.
+    JSG_TS_OVERRIDE(type URL = never);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
