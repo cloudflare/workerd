@@ -681,6 +681,29 @@ pub fn collect_actor_configs(
     Ok(actor_configs)
 }
 
+/// Bundled modules (`Worker.Module.bundled`) need `--experimental`.
+fn check_bundled(
+    name: &str,
+    worker: worker::Reader<'_>,
+    experimental: bool,
+    report: &Reporter,
+) -> capnp::Result<()> {
+    let bundled = match worker.which() {
+        Ok(worker::Which::Modules(modules)) => modules?
+            .iter()
+            .any(|m| matches!(m.which(), Ok(worker::module::Which::Bundled(_)))),
+        _ => false,
+    };
+    if bundled && !experimental {
+        report.error_in(
+            name,
+            "Bundled modules are an experimental feature which may change or go away in the \
+             future. You must run workerd with `--experimental` to use this feature.",
+        );
+    }
+    Ok(())
+}
+
 /// [`collect_actor_configs`] for the service `name`, whose config is `service_conf`.
 fn collect_service_actor_configs(
     name: &str,
@@ -696,6 +719,7 @@ fn collect_service_actor_configs(
         return Ok(configs);
     };
     let worker_conf = worker_conf?;
+    check_bundled(name, worker_conf, experimental, report)?;
     let mut had_durable = false;
     for (namespace_index, ns) in (0..).zip(worker_conf.get_durable_object_namespaces()?) {
         let class_name = ns.get_class_name()?.to_string()?;

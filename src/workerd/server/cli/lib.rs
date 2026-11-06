@@ -311,7 +311,7 @@ fn run_compile(
         );
     }
     let process = Process::new(executable, None, Vec::new());
-    // The binary checks `--experimental` when it runs.
+    // The binary checks `--experimental` when it runs (the server, for bundled modules).
     let config = load_config::<T>(config, const_name, &process, true);
     let written = if config_only {
         config.write_to_stdout()
