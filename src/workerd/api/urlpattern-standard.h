@@ -5,6 +5,7 @@
 #pragma once
 
 #include "ada.h"
+#include "urlpattern-regex.h"
 
 #include <workerd/jsg/jsg.h>
 
@@ -37,16 +38,6 @@ namespace urlpattern {
 // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 class URLPattern final: public jsg::Object {
  public:
-  class URLPatternRegexEngine {
-   public:
-    URLPatternRegexEngine() = default;
-    using regex_type = jsg::JsRef<jsg::JsRegExp>;
-    static std::optional<regex_type> create_instance(std::string_view pattern, bool ignore_case);
-    static std::optional<std::vector<std::optional<std::string>>> regex_search(
-        std::string_view input, const regex_type& pattern);
-    static bool regex_match(std::string_view input, const regex_type& pattern);
-  };
-
   // A structure providing matching patterns for individual components
   // of a URL. When a URLPattern is created, or when a URLPattern is
   // used to match or test against a URL, the input can be given as
@@ -103,7 +94,7 @@ class URLPattern final: public jsg::Object {
     ada::url_pattern_options toAdaType() const;
   };
 
-  explicit URLPattern(ada::url_pattern<URLPatternRegexEngine> i): inner(kj::mv(i)) {};
+  explicit URLPattern(ada::url_pattern<UrlPatternRegexProvider> i): inner(kj::mv(i)) {};
 
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
       jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
@@ -133,7 +124,7 @@ class URLPattern final: public jsg::Object {
   }
 
  private:
-  ada::url_pattern<URLPatternRegexEngine> inner;
+  ada::url_pattern<UrlPatternRegexProvider> inner;
 
   static URLPatternInit createURLPatternInit(jsg::Lock& js, const ada::url_pattern_init& other);
   static URLPatternComponentResult createURLPatternComponentResult(
