@@ -1,0 +1,42 @@
+using Workerd = import "/workerd/workerd.capnp";
+using DomExceptionModules = import "dom-exception-modules.capnp";
+
+# Runs the DOMException suite against the C++ implementation
+# (jsg/dom-exception.h) with the dated flags it branches on off:
+# set_tostring_tag (2024-09-26) and enhanced_error_serialization
+# (2026-04-21).
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util), rpc, expose_global_message_channel,
+# streams_enable_constructors, global_navigator,
+# service_binding_extra_handlers (Fetcher.queue()) and
+# enable_web_file_system. The last two are experimental, hence
+# --experimental in BUILD.bazel.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "dom-exception-legacy-flags-cpp",
+      worker = (
+        modules = DomExceptionModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "expose_global_message_channel",
+          "service_binding_extra_handlers",
+          "enable_web_file_system",
+          "streams_enable_constructors",
+          "global_navigator",
+          "do_not_set_tostring_tag",
+          "legacy_error_serialization",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+          (name = "SELF", service = "dom-exception-legacy-flags-cpp"),
+          (name = "RPC", service = (name = "dom-exception-legacy-flags-cpp", entrypoint = "DomExceptionRpc")),
+        ],
+      )
+    ),
+  ],
+);

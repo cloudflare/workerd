@@ -1,0 +1,26 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The DOMException suite runs the same test modules under a cell per
+# implementation and flag combination. See AGENTS.md. Every cell needs
+# --experimental for service_binding_extra_handlers and
+# enable_web_file_system.
+
+dom_exception_suite_srcs = glob(["*.js"]) + ["dom-exception-modules.capnp"]
+
+wd_test(
+    src = "dom-exception-cpp.wd-test",
+    args = ["--experimental"],
+    data = dom_exception_suite_srcs,
+)
+
+wd_test(
+    src = "dom-exception-legacy-flags-cpp.wd-test",
+    args = ["--experimental"],
+    data = dom_exception_suite_srcs,
+)
+
+wd_test(
+    src = "dom-exception-opt-in-cpp.wd-test",
+    args = ["--experimental"],
+    data = dom_exception_suite_srcs,
+)
