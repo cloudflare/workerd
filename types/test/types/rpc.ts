@@ -5,8 +5,11 @@
 import {
   cache,
   DurableObject,
+  RpcPromise,
+  RpcProperty,
   RpcStub,
   RpcTarget,
+  ServiceStub,
   WorkerEntrypoint,
   type WorkflowBackoff,
   type WorkflowCronSchedule,
@@ -1434,3 +1437,43 @@ expectTypeOf(workflowInstanceEventType).toEqualTypeOf<
   | 'rollback_completed'
   | 'rollback_errored'
 >();
+
+// Check the runtime classes `cloudflare:workers` exports for `instanceof` checks:
+// `ServiceStub` is `Fetcher`, `RpcPromise` and `RpcProperty` are the custom
+// thenables of RPC calls and pipelined property accesses. None of them can be
+// constructed from JavaScript.
+expectTypeOf(ServiceStub).toEqualTypeOf<abstract new () => Fetcher>();
+expectTypeOf<ServiceStub>().toEqualTypeOf<Fetcher>();
+expectTypeOf<ServiceStub<TestEntrypoint>>().toEqualTypeOf<
+  Fetcher<TestEntrypoint>
+>();
+expectTypeOf(RpcPromise).toEqualTypeOf<abstract new () => Promise<unknown>>();
+expectTypeOf(RpcProperty).toEqualTypeOf<abstract new () => Promise<unknown>>();
+// @ts-expect-error `ServiceStub` cannot be constructed
+new ServiceStub();
+// @ts-expect-error `RpcPromise` cannot be constructed
+new RpcPromise();
+// @ts-expect-error `RpcProperty` cannot be constructed
+new RpcProperty();
+
+export function narrowRuntimeClasses(value: unknown, env: Env) {
+  if (value instanceof ServiceStub) {
+    expectTypeOf(value).toEqualTypeOf<Fetcher>();
+    expectTypeOf(value.fetch).returns.toEqualTypeOf<Promise<Response>>();
+  }
+  if (env.RPC_SERVICE instanceof ServiceStub) {
+    expectTypeOf(env.RPC_SERVICE).toEqualTypeOf<Service<TestEntrypoint>>();
+  }
+  if (value instanceof RpcPromise) {
+    expectTypeOf(value).toEqualTypeOf<Promise<unknown>>();
+  }
+  const result = env.RPC_SERVICE.method();
+  if (result instanceof RpcPromise) {
+    expectTypeOf(result).toEqualTypeOf<Promise<null>>();
+  }
+  if (env.RPC_SERVICE.method instanceof RpcProperty) {
+    expectTypeOf(env.RPC_SERVICE.method).toEqualTypeOf<
+      (() => Promise<null>) & Promise<unknown>
+    >();
+  }
+}
