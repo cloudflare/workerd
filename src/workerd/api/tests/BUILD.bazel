@@ -298,6 +298,16 @@ wd_test(
 )
 
 wd_test(
+    src = "handler-controllers-test.wd-test",
+    data = ["handler-controllers-test.js"],
+)
+
+wd_test(
+    src = "handler-controllers-immutable-prototypes-test.wd-test",
+    data = ["handler-controllers-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-in-memory-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-in-memory-test.js"],
