@@ -1108,6 +1108,8 @@ class Isolate: public IsolateBase {
         }
 
         auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
+        // Wrapping through the TypeWrapper would do this, so that serialize() can read `stack`.
+        de->jsgInitReflection(*jsgIsolate.getWrapperByContext(*this));
         de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
 
         return kj::mv(de);
