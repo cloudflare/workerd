@@ -9,11 +9,17 @@ import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 import { kLegacyCodes, kLoneSurrogate } from 'helpers';
 
+const kNotInWebIdlNames = new Set([
+  'DOMStringSizeError',
+  'NoDataAllowedError',
+  'ValidationError',
+]);
+
 export const constructorRequiresNew = {
   test() {
     throws(() => DOMException('m'), {
       name: 'TypeError',
-      // Ledger #13: the language's message for a class.
+      // Ledger #12: the language's message for a class.
       message: usingTsImpl
         ? "Class constructor DOMException cannot be invoked without 'new'"
         : "Failed to construct 'DOMException': Please use the 'new' operator, " +
@@ -94,7 +100,10 @@ export const argumentConversionOrder = {
 export const codes = {
   test() {
     for (const [, value, name] of kLegacyCodes) {
-      strictEqual(new DOMException('', name).code, value);
+      // Ledger #13: WebIDL's table of names has no DOMStringSizeError,
+      // NoDataAllowedError or ValidationError.
+      const expected = usingTsImpl && kNotInWebIdlNames.has(name) ? 0 : value;
+      strictEqual(new DOMException('', name).code, expected, name);
     }
     // Names without a legacy code, including the modern ones.
     for (const name of [
@@ -122,7 +131,7 @@ export const loneSurrogates = {
   test() {
     const error = new DOMException(kLoneSurrogate, `${kLoneSurrogate}x`);
     if (usingTsImpl) {
-      // Ledger #9: DOMStrings keep lone surrogates.
+      // Ledger #8: DOMStrings keep lone surrogates.
       strictEqual(error.message, kLoneSurrogate);
       strictEqual(error.name, `${kLoneSurrogate}x`);
     } else {

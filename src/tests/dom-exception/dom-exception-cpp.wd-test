@@ -9,8 +9,8 @@ using DomExceptionModules = import "dom-exception-modules.capnp";
 # pinned, as are the ones its modules need: nodejs_compat (node:assert,
 # node:util), rpc, expose_global_message_channel,
 # streams_enable_constructors, global_navigator,
-# service_binding_extra_handlers (Fetcher.queue()) and
-# enable_web_file_system. The last two are experimental, hence
+# service_binding_extra_handlers (Fetcher.queue()), enable_web_file_system
+# and enable_abortsignal_rpc. The last three are experimental, hence
 # --experimental in BUILD.bazel.
 
 const unitTests :Workerd.Config = (
@@ -24,6 +24,7 @@ const unitTests :Workerd.Config = (
           "expose_global_message_channel",
           "service_binding_extra_handlers",
           "enable_web_file_system",
+          "enable_abortsignal_rpc",
           "streams_enable_constructors",
           "global_navigator",
           "set_tostring_tag",

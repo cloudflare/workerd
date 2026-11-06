@@ -6,6 +6,7 @@
 // Public API for setting up JavaScript context. Only high-level code needs to include this file.
 
 #include "async-context.h"
+#include "dom-exception.h"
 #include "jsg.h"
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
@@ -111,6 +112,9 @@ class IsolateBase {
   // The V8 private symbol named JS_SERIALIZE_MODE_KEY (see Serializer), which every Serializer
   // uses: looked up once per isolate, rather than once per Serializer.
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
+
+  // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
+  static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
   static IsolateBase& from(v8::Isolate* isolate);
 
@@ -670,6 +674,9 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
+  // FunctionTemplate returned by getDomExceptionTemplate().
+  v8::Global<v8::FunctionTemplate> domExceptionTemplate;
+
   // Created by getJsSerializeModeKey() on first use.
   v8::Global<v8::Private> jsSerializeModeKey;
 
@@ -804,6 +811,8 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
+  static void constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static bool isJsApiWrapperNativeErrorCallback(v8::Isolate* isolate, v8::Local<v8::Object> object);
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
@@ -1089,7 +1098,12 @@ class Isolate: public IsolateBase {
 
     JsObject domException(
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
-      return JsObject(withinHandleScope([&] {
+      return JsObject(withinHandleScope([&]() -> v8::Local<v8::Object> {
+        KJ_IF_SOME(prototype, tryGetBootstrapDomExceptionPrototype(*this)) {
+          return newBootstrapDomException(*this, prototype, name, message,
+              maybeStack.map([](kj::String& s) -> kj::StringPtr { return s; }));
+        }
+
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
             v8Isolate, static_cast<DOMException*>(nullptr));
         KJ_DASSERT(!tmpl.IsEmpty());
@@ -1117,6 +1131,12 @@ class Isolate: public IsolateBase {
     }
 
     kj::Maybe<DomExceptionInfo> tryGetDomExceptionInfo(const JsValue& value) override {
+      KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(*this, value)) {
+        return DomExceptionInfo{
+          .name = info.name.toString(*this),
+          .message = info.message.toString(*this),
+        };
+      }
       KJ_IF_SOME(domException,
           jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
               *this, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {

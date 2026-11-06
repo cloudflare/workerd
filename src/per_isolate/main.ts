@@ -38,7 +38,32 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 require('serialization');
 
 // Loaded before any module that may create or recognize a DOMException.
-require('dom-exception');
+const { DOMException } = require('dom-exception');
+
+// The TypeScript DOMException replaces the C++ one, which global-scope.h then
+// leaves out. Installed as JSG_NESTED_TYPE installs the C++ class.
+if (autogates['ts-dom-exception']) {
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    DOMException: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: DOMException,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      DOMException: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: DOMException,
+      },
+    });
+  }
+}
 
 if (compatFlags['typescript_implemented_streams']) {
   const {

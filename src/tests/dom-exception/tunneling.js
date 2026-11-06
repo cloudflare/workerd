@@ -6,7 +6,7 @@
 // with its name and message: through the kj::Exception it tunnels as
 // (`jsg.DOMException(Name): message`), or serialized over RPC.
 
-import { rejects, strictEqual } from 'node:assert';
+import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
 import { env } from 'cloudflare:workers';
 import { assertDomException } from 'helpers';
 
@@ -47,6 +47,26 @@ export const returnedOverRpc = {
       'Symbol(Symbol.dispose)'
     );
     strictEqual(error.extra, undefined);
+  },
+};
+
+// An aborted AbortSignal's reason is deserialized with it, and the signal
+// aborted with it, while V8 forbids JavaScript: reading the reason's name
+// must not run the attribute's getter.
+export const abortReasonsOverRpc = {
+  async test() {
+    const reason = new DOMException('m', 'NotFoundError');
+    deepStrictEqual(
+      await env.RPC.describeAbortReason(AbortSignal.abort(reason)),
+      [true, 'NotFoundError', 'm', 8, 'string']
+    );
+    deepStrictEqual(await env.RPC.describeAbortReason(AbortSignal.abort()), [
+      true,
+      'AbortError',
+      'The operation was aborted',
+      20,
+      'string',
+    ]);
   },
 };
 

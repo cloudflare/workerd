@@ -275,6 +275,13 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 // Reflect
 const ReflectConstruct = Reflect.construct;
 
+// Error
+const ErrorCaptureStackTrace = (
+  Error as unknown as {
+    captureStackTrace(target: object, constructorOpt?: unknown): void;
+  }
+).captureStackTrace;
+
 // Math / Number (statics — plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
@@ -784,6 +791,9 @@ module.exports = ObjectFreeze({
 
   // Reflect
   ReflectConstruct,
+
+  // Error
+  ErrorCaptureStackTrace,
 
   // Math / Number
   MathMax,

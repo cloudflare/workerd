@@ -4,6 +4,11 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript DOMException (the TS_DOM_EXCEPTION autogate) follows WebIDL,
+// and its instances are native errors; the C++ one's are not
+// (src/tests/dom-exception/).
+const usingTsDomException = Error.isError(new DOMException());
+
 export default {
   'ecmascript-binding/builtin-function-properties.any.js': {},
   'ecmascript-binding/class-string-interface.any.js': {
@@ -31,24 +36,24 @@ export default {
   },
   'ecmascript-binding/es-exceptions/DOMException-constants.any.js': {
     comment: 'DOMException constants have wrong configurable descriptor',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-constructor-and-prototype.any.js':
     {
       comment: 'DOMException property descriptors differ from spec',
-      expectedFailures: true,
+      expectedFailures: usingTsDomException ? [] : true,
     },
   'ecmascript-binding/es-exceptions/DOMException-constructor-behavior.any.js': {
     comment: 'DOMException property inheritance differs from spec',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-custom-bindings.any.js': {
     comment: 'DOMException property descriptors differ from spec',
-    expectedFailures: true,
+    expectedFailures: usingTsDomException ? [] : true,
   },
   'ecmascript-binding/es-exceptions/DOMException-is-error.any.js': {
-    comment: 'DOMException.prototype not in Error.prototype chain',
-    expectedFailures: [''],
+    comment: 'DOMException instances are not native errors',
+    expectedFailures: usingTsDomException ? [] : [''],
   },
   'ecmascript-binding/es-exceptions/DOMException-stack-accessor.any.js': {
     comment:
@@ -108,12 +113,17 @@ export default {
     comment:
       'Remaining IDL failures: DOMException attribute/inherit checks and QuotaExceededError (not implemented)',
     expectedFailures: [
-      // DOMException attributes (name, message, code) use instance properties instead of
-      // prototype accessors, so both the attribute descriptor checks and inherit checks fail
-      'DOMException interface: attribute name',
-      'DOMException interface: attribute message',
-      'DOMException interface: attribute code',
-      /^DOMException interface: new DOMException.*must inherit property/,
+      // The C++ DOMException's attributes (name, message, code) are instance properties
+      // instead of prototype accessors, so both the attribute descriptor checks and inherit
+      // checks fail
+      ...(usingTsDomException
+        ? []
+        : [
+            'DOMException interface: attribute name',
+            'DOMException interface: attribute message',
+            'DOMException interface: attribute code',
+            /^DOMException interface: new DOMException.*must inherit property/,
+          ]),
       // QuotaExceededError is not implemented
       /^QuotaExceededError interface/,
     ],

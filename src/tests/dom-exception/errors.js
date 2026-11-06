@@ -14,18 +14,23 @@ export const isAnError = {
     strictEqual(error instanceof Error, true);
     // Ledger #3: WebIDL gives DOMException [[ErrorData]].
     strictEqual(Error.isError(error), usingTsImpl);
+    strictEqual(
+      Error.isError(new (class extends DOMException {})()),
+      usingTsImpl
+    );
+    strictEqual(Error.isError(AbortSignal.abort().reason), usingTsImpl);
+    strictEqual(Error.isError(structuredClone(error)), usingTsImpl);
     strictEqual(Error.isError(DOMException.prototype), false);
+    strictEqual(Error.isError(Object.create(DOMException.prototype)), false);
   },
 };
 
 export const objectToString = {
   test() {
     const error = new DOMException('m', 'AbortError');
-    // Ledger #4: with no Symbol.toStringTag, [[ErrorData]] makes it an
-    // Error.
-    let expected = '[object Object]';
-    if (setToStringTag) expected = '[object DOMException]';
-    else if (usingTsImpl) expected = '[object Error]';
+    const expected = setToStringTag
+      ? '[object DOMException]'
+      : '[object Object]';
     strictEqual(Object.prototype.toString.call(error), expected);
   },
 };
@@ -46,7 +51,7 @@ export const attributesAreBrandChecked = {
   test() {
     const notADomException = Object.create(DOMException.prototype);
     if (usingTsImpl) {
-      // Ledger #7: the getters throw for anything but a DOMException.
+      // Ledger #6: the getters throw for anything but a DOMException.
       for (const attribute of ['name', 'message', 'code']) {
         throws(() => notADomException[attribute], TypeError);
         const { get } = Object.getOwnPropertyDescriptor(

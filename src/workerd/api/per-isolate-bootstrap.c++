@@ -504,6 +504,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "parseUrl",
     "mimeTypeEssence",
     "readableStreamState",
+    "DOMExceptionBase",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -535,6 +536,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, ParseUrl),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
+    v8::Local<v8::Value>(jsg::getBootstrapDomExceptionBase(js)),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

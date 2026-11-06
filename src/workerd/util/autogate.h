@@ -117,6 +117,10 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
+  /* DOMException is the TypeScript implementation from the per-isolate bootstrap                  \
+     (src/per_isolate/dom-exception.ts), whose instances are native errors, rather than the C++    \
+     class in jsg/dom-exception.h. */                                                              \
+  V(TS_DOM_EXCEPTION)                                                                              \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
