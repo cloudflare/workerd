@@ -96,3 +96,17 @@ test('Inspector async stacks continue across setTimeout and queueMicrotask', asy
   await inspectorClient.Debugger.disable();
   await inspectorClient.close();
 });
+
+test('Inspector answers Runtime.getHeapUsage', async () => {
+  const inspectorClient = await connectInspector(
+    await workerd.getListenInspectorPort()
+  );
+
+  const usage = await inspectorClient.Runtime.getHeapUsage();
+  assert(usage.usedSize > 0, JSON.stringify(usage));
+  assert(usage.totalSize >= usage.usedSize, JSON.stringify(usage));
+  assert.strictEqual(typeof usage.embedderHeapUsedSize, 'number');
+  assert.strictEqual(typeof usage.backingStorageSize, 'number');
+
+  await inspectorClient.close();
+});
