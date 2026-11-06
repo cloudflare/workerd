@@ -1572,6 +1572,11 @@ JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
 JsRpcStub::~JsRpcStub() noexcept(false) {
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
+    KJ_IF_SOME(c, capnpClient) {
+      // The group's disposal boundary still applies after the JavaScript wrapper is collected.
+      d.collectedStubs.add(kj::mv(c));
+    }
+    return;
   }
 
   KJ_IF_SOME(c, capnpClient) {
@@ -1734,12 +1739,17 @@ void RpcStubDisposalGroup::disownAll() {
     stub.disposalGroup = kj::none;
     list.remove(stub);
   }
+  for (auto& cap: collectedStubs) {
+    kj::mv(cap).deferGcToContext();
+  }
+  collectedStubs.clear();
 }
 
 void RpcStubDisposalGroup::disposeAll() {
   for (auto& stub: list) {
     stub.dispose();
   }
+  collectedStubs.clear();
   callPipeline = kj::none;
 
   // Each stub should have removed itself.
