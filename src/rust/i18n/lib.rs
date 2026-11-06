@@ -21,6 +21,23 @@ mod ffi;
 
 use crate::dispatch::Transcoder;
 use crate::error::TranscodeError;
+pub use crate::ffi::Encoding;
+
+/// Transcodes `source` from `from_encoding` to `to_encoding` into a new `Uint8Array`, for Rust
+/// callers. C++ reaches the same conversion through the bridge's `transcode`.
+///
+/// # Errors
+///
+/// As `workerd::api::node::i18n::transcode`: an `Error` if `source` cannot be transcoded, or a
+/// `RangeError` if the result cannot be allocated.
+pub fn transcode<'s>(
+    lock: &mut Lock<'s>,
+    source: &[u8],
+    from_encoding: Encoding,
+    to_encoding: Encoding,
+) -> jsg::Result<v8::Local<'s, v8::Uint8Array>> {
+    transcode_impl(lock, source, from_encoding, to_encoding)
+}
 
 /// Transcodes `source` into a freshly allocated `Uint8Array`.
 ///
