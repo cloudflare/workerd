@@ -255,13 +255,6 @@ impl Drop for Host {
     }
 }
 
-impl jsg::VisitForMemoryInfo for Host {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"label", &self.label);
-        tracker.track_field(c"held", &self.held);
-    }
-}
-
 #[jsg_resource]
 impl Host {
     /// Takes a C++ resource and calls one of its methods, as `mapVirtualHost(fetcher, port)` does.

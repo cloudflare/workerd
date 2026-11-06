@@ -1214,8 +1214,9 @@ pub enum Member {
 ///
 /// `#[jsg_resource]` auto-derives both `Traced` and `GarbageCollected`.
 /// Use `#[jsg_resource(custom_trace)]` to suppress the generated `Traced`
-/// impl and provide your own, and `#[jsg_resource(memory_info)]` to have
-/// `memory_info` call the resource's [`VisitForMemoryInfo`] impl.
+/// impl and provide your own, and `#[jsg_resource(memory_info)]` (generated) or
+/// `#[jsg_resource(custom_memory_info)]` (hand-written) to have `memory_info` call the resource's
+/// [`VisitForMemoryInfo`] impl.
 pub trait GarbageCollected: Traced {
     /// Class name for heap snapshots / debugging.
     ///

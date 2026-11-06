@@ -8,7 +8,7 @@ use std::ffi::CString;
 
 use jsg_macros::jsg_resource;
 
-#[jsg_resource(memory_info)]
+#[jsg_resource(custom_memory_info)]
 struct Holder {
     name: String,
 }

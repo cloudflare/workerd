@@ -205,12 +205,6 @@ struct Child {
 #[jsg_resource]
 impl Child {}
 
-impl jsg::VisitForMemoryInfo for Child {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"parent", &self.parent);
-    }
-}
-
 fn new_child(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Child> {
     jsg::Rc::new(
         lock,
@@ -254,23 +248,12 @@ struct Parent {
     pub cache: Cache,
     pub object: v8::TracedGlobal<v8::Value>,
     pub missing: Option<jsg::Rc<Child>>,
+    #[jsg_memory_info(skip)]
     pub unreported: String,
 }
 
 #[jsg_resource]
 impl Parent {}
-
-impl jsg::VisitForMemoryInfo for Parent {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"name", &self.name);
-        tracker.track_field(c"child", &self.child);
-        tracker.track_field(c"children", &self.children);
-        tracker.track_field(c"numbers", &self.numbers);
-        tracker.track_field(c"cache", &self.cache);
-        tracker.track_field(c"object", &self.object);
-        tracker.track_field(c"missing", &self.missing);
-    }
-}
 
 /// A resource without `memory_info`, which reports no fields.
 #[jsg_resource]
@@ -603,40 +586,6 @@ struct Fields {
 
 #[jsg_resource]
 impl Fields {}
-
-impl jsg::VisitForMemoryInfo for Fields {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"outer", &self.outer);
-        tracker.track_field(c"empty_a", &self.empty_a);
-        tracker.track_field(c"empty_b", &self.empty_b);
-        tracker.track_field(c"cell_a", &self.cell_a);
-        tracker.track_field(c"cell_b", &self.cell_b);
-        tracker.track_field(c"inners", &self.inners);
-        tracker.track_field(c"optional_inners", &self.optional_inners);
-        tracker.track_field(c"boxed_inner", &self.boxed_inner);
-        tracker.track_field(c"boxed_optional_inner", &self.boxed_optional_inner);
-        tracker.track_field(c"shared_a", &self.shared_a);
-        tracker.track_field(c"shared_b", &self.shared_b);
-        tracker.track_field(c"ring", &self.ring);
-        tracker.track_field(c"boxed_child", &self.boxed_child);
-        tracker.track_field(c"boxed_number", &self.boxed_number);
-        tracker.track_field(c"boxed_str", &self.boxed_str);
-        tracker.track_field(c"boxed_slice", &self.boxed_slice);
-        tracker.track_field(c"nested", &self.nested);
-        tracker.track_field(c"optional_numbers", &self.optional_numbers);
-        tracker.track_field(c"deque", &self.deque);
-        tracker.track_field(c"array", &self.array);
-        tracker.track_field(c"set", &self.set);
-        tracker.track_field(c"tree", &self.tree);
-        tracker.track_field(c"plain_dict", &self.plain_dict);
-        tracker.track_field(c"dict", &self.dict);
-        tracker.track_field(c"weak", &self.weak);
-        tracker.track_field(c"lenient", &self.lenient);
-        tracker.track_field(c"global", &self.global);
-        tracker.track_field(c"store", &self.store);
-        tracker.track_field(c"borrowed", &self.borrowed);
-    }
-}
 
 impl jsg::Traced for Fields {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
@@ -975,12 +924,6 @@ fn handle_of_another_isolate_is_not_reported() {
     #[jsg_resource]
     impl Holder {}
 
-    impl jsg::VisitForMemoryInfo for Holder {
-        fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-            tracker.track_field(c"handle", &self.handle);
-        }
-    }
-
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let mut global = None;
@@ -1035,16 +978,6 @@ struct Pending {
 
 #[jsg_resource]
 impl Pending {}
-
-impl jsg::VisitForMemoryInfo for Pending {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"promise", &self.promise);
-        tracker.track_field(c"resolver", &self.resolver);
-        tracker.track_field(c"frame", &self.frame);
-        tracker.track_field(c"root_frame", &self.root_frame);
-        tracker.track_field(c"arguments", &self.arguments);
-    }
-}
 
 #[test]
 fn promises_and_frames_are_edges_into_the_v8_heap() {
@@ -1107,14 +1040,6 @@ impl jsg::Traced for Shared {
 
 #[jsg_resource]
 impl Shared {}
-
-impl jsg::VisitForMemoryInfo for Shared {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"number", &self.number);
-        tracker.track_field(c"string", &self.string);
-        tracker.track_field(c"copied", &self.copied);
-    }
-}
 
 #[test]
 fn shared_pointers_count_their_allocations() {
@@ -1218,13 +1143,6 @@ impl jsg::Traced for Deep {
 #[jsg_resource]
 impl Deep {}
 
-impl jsg::VisitForMemoryInfo for Deep {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"list", &self.list);
-        tracker.track_field(c"ring", &self.ring);
-    }
-}
-
 /// Whether `count` nodes nested in a resource's node reach `MAX_DEPTH` and stop there: the
 /// resource is a node or two deep, depending on how the snapshot reached it.
 fn stops_at_max_depth(count: usize) -> bool {
@@ -1267,12 +1185,6 @@ struct Chain {
 #[jsg_resource]
 impl Chain {}
 
-impl jsg::VisitForMemoryInfo for Chain {
-    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-        tracker.track_field(c"next", &self.next);
-    }
-}
-
 #[test]
 fn reporting_a_chain_of_resources_stops_at_max_depth() {
     let harness = crate::Harness::new();
@@ -1286,6 +1198,46 @@ fn reporting_a_chain_of_resources_stops_at_max_depth() {
         let snapshot = Snapshot::take(lock);
         let links = snapshot.find_all("Chain").len();
         assert!(stops_at_max_depth(links), "{links} resource nodes");
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Custom reporting
+// =============================================================================
+
+/// A resource that reports its fields itself.
+#[jsg_resource(custom_memory_info)]
+struct Custom {
+    pub entries: Vec<String>,
+    pub count: u32,
+}
+
+#[jsg_resource]
+impl Custom {}
+
+impl jsg::VisitForMemoryInfo for Custom {
+    fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"cached_entries", &self.entries);
+    }
+}
+
+#[test]
+fn custom_memory_info_reports_what_its_impl_reports() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let custom = Custom {
+            entries: vec!["entry".to_owned()],
+            count: 1,
+        };
+        let custom = jsg::Rc::new(lock, custom);
+        expose(lock, ctx, "custom", &custom)?;
+
+        let snapshot = Snapshot::take(lock);
+        let node = snapshot.find("Custom");
+        let entries = snapshot.target(node, "cached_entries");
+        assert_eq!(snapshot.target_names(entries), ["workerd / String"]);
+        assert!(snapshot.targets(node, "entries").is_empty());
         Ok(())
     });
 }

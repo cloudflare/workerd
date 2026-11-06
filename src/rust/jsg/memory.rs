@@ -17,7 +17,8 @@
 //! - [`MemoryRetainer`] makes a type a node of its own, as C++ `JSG_MEMORY_INFO` does;
 //!   [`jsg_memory_retainer!`](crate::jsg_memory_retainer) gives it its `MemoryInfo` impl.
 //! - [`VisitForMemoryInfo`] reports the fields of a resource, as C++ `visitForMemoryInfo` does.
-//!   `#[jsg_resource(memory_info)]` on the struct opts the resource in.
+//!   `#[jsg_resource(memory_info)]` on the struct opts the resource in and generates it from the
+//!   named fields; `#[jsg_resource(custom_memory_info)]` opts in with a hand-written impl.
 //!
 //! Every resource is a node, named after its type and sized as the resource plus its C++
 //! `Wrappable`, with an edge to its JavaScript wrapper if it has one, whether it reports its
@@ -428,22 +429,37 @@ macro_rules! jsg_memory_retainer {
 /// The fields that a resource reports to heap snapshots.
 ///
 /// It is the Rust counterpart of C++ `visitForMemoryInfo`. `#[jsg_resource(memory_info)]` on the
-/// resource's struct makes its node call this; without it a resource reports no fields.
+/// resource's struct generates it, reporting each named field under its name, as the generated
+/// `Traced` traces each field, so that a field added later is reported too, or fails to compile
+/// if its type has no [`MemoryInfo`]. `#[jsg_memory_info(skip)]` on a field leaves it out:
 ///
 /// ```ignore
 /// #[jsg_resource(memory_info)]
 /// struct Foo {
 ///     name: String,
 ///     child: Option<jsg::Rc<Bar>>,
+///     #[jsg_memory_info(skip)]
+///     handle: SomeHandleWithoutMemoryInfo,
+/// }
+/// ```
+///
+/// `#[jsg_resource(custom_memory_info)]` instead leaves the impl to the author, as for C++, to
+/// report under other names or report values that are not fields:
+///
+/// ```ignore
+/// #[jsg_resource(custom_memory_info)]
+/// struct Foo {
+///     name: String,
 /// }
 ///
 /// impl jsg::VisitForMemoryInfo for Foo {
 ///     fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
 ///         tracker.track_field(c"name", &self.name);
-///         tracker.track_field(c"child", &self.child);
 ///     }
 /// }
 /// ```
+///
+/// Without either flag a resource reports no fields.
 pub trait VisitForMemoryInfo {
     /// Reports the fields that retain memory, with [`MemoryTracker::track_field`]. It follows the
     /// [rules for reporting code](MemoryInfo#rules-for-reporting-code): it must not panic, must

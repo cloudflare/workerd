@@ -572,8 +572,10 @@ impl MyResource {
 
 - `impl jsg::Traced for MyType { fn trace(&self, visitor) { ... } }`
 - `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`, which with
-  `#[jsg_resource(memory_info)]` also reports the fields to heap snapshots (see
-  [Heap Snapshots](#heap-snapshots))
+  `#[jsg_resource(memory_info)]` or `#[jsg_resource(custom_memory_info)]` also reports the
+  fields to heap snapshots (see [Heap Snapshots](#heap-snapshots))
+- with `#[jsg_resource(memory_info)]`, `impl jsg::VisitForMemoryInfo for MyType`, which
+  reports every named field not marked `#[jsg_memory_info(skip)]`
 
 The generated `Traced::trace` body simply calls `Traced::trace` on **every named
 field**:
@@ -705,9 +707,10 @@ impl jsg::Traced for DynamicResource {
 Every resource is a node in a V8 heap snapshot, as a C++ resource is: it is named after the
 struct (`workerd / MyType`), sized as the struct plus its C++ `Wrappable`, and linked to its
 JavaScript wrapper. To report its fields as well, as C++ `visitForMemoryInfo` does, add
-`memory_info` to the struct's `#[jsg_resource]` and implement `jsg::VisitForMemoryInfo`. The
-generated `GarbageCollected::memory_info` calls it; without `memory_info` a resource reports no
-fields, and with it but without the impl the resource does not compile.
+`memory_info` to the struct's `#[jsg_resource]`. It generates `jsg::VisitForMemoryInfo` from the
+named fields, as `Traced` is generated: each field is reported under its name, so a field added
+later is reported too, and a field whose type has no `jsg::MemoryInfo` does not compile.
+`#[jsg_memory_info(skip)]` leaves a field out. Without `memory_info` a resource reports no fields.
 
 ```rust
 #[jsg_resource(memory_info)]
@@ -715,13 +718,24 @@ pub struct EventRouter {
     handlers: HashMap<String, jsg::Rc<Handler>>,
     on_error: jsg::RefCell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
     name: String,
+    #[jsg_memory_info(skip)]
+    scratch: SomeTypeWithoutMemoryInfo,
+}
+```
+
+To write the impl yourself, for example to report a field under another name or a value that is
+not a field, use `custom_memory_info` instead and implement `jsg::VisitForMemoryInfo`; without
+the impl the resource does not compile:
+
+```rust
+#[jsg_resource(custom_memory_info)]
+pub struct EventRouter {
+    handlers: HashMap<String, jsg::Rc<Handler>>,
 }
 
 impl jsg::VisitForMemoryInfo for EventRouter {
     fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
         tracker.track_field(c"handlers", &self.handlers);
-        tracker.track_field(c"on_error", &self.on_error);
-        tracker.track_field(c"name", &self.name);
     }
 }
 ```
@@ -774,5 +788,6 @@ rules in `jsg::MemoryInfo`'s docs:
   reported only for `T: Copy`, by a copy; hold a retainer in a `jsg::Cell` instead.
 - It must not call into JavaScript.
 
-`memory_info` can be combined with `name`, `custom_trace` and `ts_root`. Any other flag on the
-struct is a compile error, so a misspelled `memory_info` is not silently off.
+`memory_info` or `custom_memory_info` (not both) can be combined with `name`, `custom_trace` and
+`ts_root`. Any other flag on the struct is a compile error, so a misspelled `memory_info` is not
+silently off.

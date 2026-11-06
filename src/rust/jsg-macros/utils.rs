@@ -47,14 +47,6 @@ pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
     has_flag(attr, "custom_trace")
 }
 
-/// Returns `true` if the `memory_info` bare word is present in the attribute token stream.
-///
-/// When set, the `GarbageCollected::memory_info` that `#[jsg_resource]` generates on a struct
-/// calls the user's `jsg::VisitForMemoryInfo` impl.
-pub fn has_memory_info_flag(attr: &TokenStream) -> bool {
-    has_flag(attr, "memory_info")
-}
-
 /// Returns `true` if the bare word `name` is present in the comma-separated attribute token
 /// stream.
 pub fn has_flag(attr: &TokenStream, name: &str) -> bool {

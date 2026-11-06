@@ -708,6 +708,7 @@ fn struct_args_accept_the_struct_flags() {
     assert!(validate_struct_args(quote! {}).is_none());
     assert!(validate_struct_args(quote! { name = "Foo", custom_trace }).is_none());
     assert!(validate_struct_args(quote! { memory_info, ts_root, name = "Foo" }).is_none());
+    assert!(validate_struct_args(quote! { custom_memory_info }).is_none());
 }
 
 #[test]

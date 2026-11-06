@@ -24,7 +24,6 @@ use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
 use crate::utils::has_flag;
-use crate::utils::has_memory_info_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -51,8 +50,12 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let memory_info = has_memory_info_flag(&attr);
     let ts_root = has_flag(&attr, "ts_root");
+    let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
+        Ok(generated) => generated,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let input = &input;
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -87,24 +90,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         }
     };
 
-    let memory_info_fn = generate_memory_info_fn(memory_info);
-
-    let gc_impl = quote! {
-        #[automatically_derived]
-        impl jsg::GarbageCollected for #name {
-            fn memory_name(&self) -> &'static ::std::ffi::CStr {
-                // from_bytes_with_nul on a concat!(name, "\0") literal is a
-                // compile-time constant expression — the compiler folds the
-                // unwrap and emits a direct pointer into the read-only data
-                // segment. The C++ side constructs a kj::StringPtr directly
-                // from data()+size() with no allocation.
-                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
-                    .unwrap()
-            }
-
-            #memory_info_fn
-        }
-    };
+    let gc_impl = generate_gc_impl(&name, &name_str, &memory_info.gc_fn);
+    let visit_for_memory_info_impl = &memory_info.visit_impl;
 
     quote! {
         #input
@@ -166,6 +153,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
         #traced_impl
         #gc_impl
+        #visit_for_memory_info_impl
     }
     .into()
 }
@@ -571,29 +559,40 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
-/// The `GarbageCollected::memory_info` of a resource with `memory_info`, which reports the fields
-/// through the user's `VisitForMemoryInfo` impl, as C++ `JSG_RESOURCE_TYPE` calls a resource's
-/// `visitForMemoryInfo`; none, which reports no fields, without it.
-fn generate_memory_info_fn(memory_info: bool) -> proc_macro2::TokenStream {
-    if memory_info {
-        quote! {
-            fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
-                <Self as jsg::VisitForMemoryInfo>::visit_for_memory_info(self, tracker);
+/// The `jsg::GarbageCollected` impl of a resource named `name`, with `memory_info_fn`, its
+/// `memory_info` method or nothing.
+fn generate_gc_impl(
+    name: &syn::Ident,
+    name_str: &str,
+    memory_info_fn: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        #[automatically_derived]
+        impl jsg::GarbageCollected for #name {
+            fn memory_name(&self) -> &'static ::std::ffi::CStr {
+                // from_bytes_with_nul on a concat!(name, "\0") literal is a
+                // compile-time constant expression — the compiler folds the
+                // unwrap and emits a direct pointer into the read-only data
+                // segment. The C++ side constructs a kj::StringPtr directly
+                // from data()+size() with no allocation.
+                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
+                    .unwrap()
             }
+
+            #memory_info_fn
         }
-    } else {
-        quote! {}
     }
 }
 
 /// Returns an error if the arguments of `#[jsg_resource]` on a struct are not `name = "..."`,
-/// `custom_trace`, `memory_info` and `ts_root`, so that a misspelled flag does not compile instead
-/// of being ignored. `nested_types(...)` and `custom_members` belong on the impl block.
+/// `custom_trace`, `memory_info`, `custom_memory_info` and `ts_root`, so that a misspelled flag
+/// does not compile instead of being ignored. `nested_types(...)` and `custom_members` belong on
+/// the impl block.
 fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
-    const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info` or \
-                            `ts_root` on a #[jsg_resource] struct";
+    const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
+                            `custom_memory_info` or `ts_root` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
         match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
@@ -615,9 +614,14 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
         }
         match meta {
             syn::Meta::Path(path)
-                if ["custom_trace", "memory_info", "ts_root"]
-                    .iter()
-                    .any(|flag| path.is_ident(flag)) =>
+                if [
+                    "custom_trace",
+                    "memory_info",
+                    "custom_memory_info",
+                    "ts_root",
+                ]
+                .iter()
+                .any(|flag| path.is_ident(flag)) =>
             {
                 None
             }
@@ -742,8 +746,8 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name`, `custom_trace` and \
-                            `memory_info` belong on the struct)";
+                            #[jsg_resource] impl block (`name`, `custom_trace`, `memory_info` \
+                            and `custom_memory_info` belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;
