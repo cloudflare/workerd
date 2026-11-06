@@ -1,0 +1,119 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# cluster-test.wd-test, with a cron trigger on "main": cluster-cron-test's config.
+#
+# Each instance keeps its SQLite files on its own disk ("local", one directory per instance), and
+# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.wd-test) that the
+# test starts, whose address it passes in AWS_ENDPOINT_URL.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "local",
+      disk = (
+        writable = true,
+        allowDotfiles = true,
+      )
+    ),
+
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["nodejs_compat", "allow_irrevocable_stub_storage"],
+        bindings = [
+          ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+          ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+          ( name = "ON_HIBERNATE", service = "on-hibernate" ),
+          ( name = "KV",
+            kvNamespace = (
+              name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+          ( name = "KV_WORKER",
+            service = (
+              name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+
+    # KV, whose large values are in the bucket at `services/kv/`, cached on
+    # each instance's disk.
+    ( name = "kv",
+      worker = (
+        modules = [ ( name = "kv.js", builtin = "/workerd/kv.js" ) ],
+        compatibilityDate = "2026-01-01",
+        bindings = [
+          ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),
+          ( name = "BLOBS", service = "kv-blobs" ),
+          ( name = "BLOB_CACHE", service = "local" ),
+          ( name = "CLUSTERED", json = "true" ),
+          ( name = "TEST_CLOCK", json = "true" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "KVNamespace", uniqueKey = "kv", enableSql = true ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+    ( name = "kv-blobs", bucket = ( path = "kv" ) ),
+
+    # Runs main's scheduled() every minute.
+    ( name = "cron",
+      worker = (
+        modules = [ ( name = "cron.js", builtin = "/workerd/cron.js" ) ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["service_binding_extra_handlers"],
+        bindings = [
+          ( name = "SCHEDULE", durableObjectNamespace = "Schedule" ),
+          ( name = "CRONS", json = "{\"main\": [\"* * * * *\"]}" ),
+          ( name = "main", service = "main" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Schedule", uniqueKey = "cron", enableSql = true ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+
+    ( name = "on-hibernate",
+      worker = (
+        modules = [
+          ( name = "cluster-on-hibernate-worker.js",
+            esModule = embed "cluster-on-hibernate-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental", "unsafe_module"],
+        bindings = [
+          ( name = "SLEEPER", durableObjectNamespace = "Sleeper" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Sleeper", uniqueKey = "on-hibernate-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "main" ),
+  ],
+
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = [
+      "aws_region=us-east-1",
+      "aws_access_key_id=wdtest",
+      "aws_secret_access_key=wdtest-secret",
+    ],
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret-of-32-bytes",
+  ),
+);
