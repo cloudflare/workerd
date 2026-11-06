@@ -13,8 +13,8 @@ private-brand dispatch, no `instanceof`) apply here — see
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; `drain()` settles a whole queue, emptying it before the first settlement can run user code; leaf module |
-| `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; leaf module |
-| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t), `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush) and the promise-slot helpers (`newHandledPending`, `newHandledRejected`, `slotPromise`, `slotResolved` and `slotRejected`: a writer's ready and closed promises and a reader's closed promise are made, read and settled through them, and every promise they make is marked handled); leaf module |
+| `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; requires only `common` |
+| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t), `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush) and the promise-slot helpers (`newHandledPending`, `newHandledRejected`, `slotPromise`, `slotResolved` and `slotRejected`: a writer's ready and closed promises and a reader's closed promise are made, read and settled through them, and every promise they make is marked handled) and `nullPrototypeRecord`, which makes a class's instances null-prototype records (the `convert*` results are its record classes); leaf module |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
 | `readable.ts` | Reader layer + queued controllers (their shared state machine in `QueuedControllerCore`) + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
@@ -116,7 +116,8 @@ A stream whose data moves to another stream is closed at the handoff,
 left locked and disturbed, and drops its controller
 (`closeReadableStreamHusk`): a teed branch (above), the source of a
 native-backed tee, a native-backed stream whose source is extracted
-(a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
+(a native-to-native pipe, the C++ bridge's `pumpTo`, a body consumption
+of a native-backed stream: see below) or detached (the
 bridge's `detach()`: `new Request(request)`, socket upgrades), and a
 detached queued stream other than the source's own stream (a tee
 branch, or a copy detached again). The legacy C++ streams leave the
@@ -155,7 +156,12 @@ connection.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
   an omitted argument (`kNullProtoObject`) — is null-prototype, so a
-  polluted `Object.prototype` cannot supply members. Members of the C++
+  polluted `Object.prototype` cannot supply members. The internal pairs
+  build theirs from the same record classes the `convert*` functions
+  return (`QueuingStrategyRecord`, `UnderlyingSinkRecord`,
+  `UnderlyingSourceRecord`, `TransformerRecord` in `common.ts`), whose
+  prototypes `nullPrototypeRecord` detaches; see `src/per_isolate/AGENTS.md`
+  for when to use a record class. Members of the C++
   native source are read with `declaresMember`, which stops before
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
   (spec CloneArrayBuffer), never the species-consulting `slice`.
@@ -178,6 +184,18 @@ connection.
   its own reads. Suite guard: `thenPatchOnlyInterceptsConsumptionResult`
   (readable), plus the patched-`then` consumption test in
   `js-readable-stream-test.c++`.
+- A body consumption of a native-backed stream that the JS collector
+  would read straight from its source (readable, unlocked, undisturbed,
+  not pending closure, any declared `expectedLength` within the limit)
+  skips the JS collector: `extractNativeSourceForCollection` hands the
+  source over, and the bridge collects it in C++
+  (`collectNativeSource` in `js-readable-stream.c++`), failing as the
+  JS path would: the conduit's `expectedLength` errors, and
+  `collectChunks()`'s memory-limit error, which cancels the source. The
+  stream is handed off at once (HANDED-OFF STREAMS), so it is closed
+  while the bytes are still being read, and a source failure no longer
+  errors it. Keep the two paths' outcomes identical when changing
+  either.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (V8-private marker, standard pull/cancel hooks,

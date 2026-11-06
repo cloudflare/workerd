@@ -31,6 +31,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
 use crate::config::Reporter;
@@ -66,6 +67,9 @@ pub struct RunOptions {
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
+    /// The source deployment of each appended service and of each service left absent because its
+    /// deployment was skipped.
+    pub deployments: Deployments,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -93,6 +97,17 @@ impl Control {
         self.write(&format!(
             "{{\"event\":\"listen-inspector\",\"port\":{port}}}\n"
         ));
+    }
+
+    fn listen_cluster(&mut self, listener: &tokio::net::TcpListener) -> Result<()> {
+        let port = listener
+            .local_addr()
+            .map_err(|e| kj::failed!("{e}"))?
+            .port();
+        self.write(&format!(
+            "{{\"event\":\"listen-cluster\",\"port\":{port}}}\n"
+        ));
+        Ok(())
     }
 }
 
@@ -199,11 +214,14 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
+    // The cluster's event goes before the sockets', so a consumer that stops reading at a
+    // socket's has it.
+    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        control.listen_cluster(&listener)?;
+        start_cluster(&factory, node, listener);
+    }
     for (name, port) in ports {
         control.listen(&name, port);
-    }
-    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        start_cluster(&factory, node, listener);
     }
 
     if let Some(address) = &options.debug_port {
@@ -346,6 +364,11 @@ fn report_unmatched_overrides(
     let mut directories: Vec<&str> = overrides.directories.keys().map(String::as_str).collect();
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
+        // The overrides are for the node's own services, so whether one matches does not depend
+        // on the bucket's deployments.
+        if server.report().from_deployment(&name) {
+            continue;
+        }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
             Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
@@ -410,7 +433,8 @@ pub async fn run(
             // A draining instance claims nothing more, lets its clustered objects go,
             // `preventEviction` or not, and leaves the cluster, so peers take them over at their
             // next listing while its connections finish. A request in flight on one could not
-            // commit anyway once a peer owns the object.
+            // commit anyway once a peer owns the object; one that arrives later is answered as
+            // moved, so that its caller re-resolves the object.
             if let Some(node) = server.cluster() {
                 node.cluster.start_draining();
                 let workers = server
@@ -418,8 +442,11 @@ pub async fn run(
                     .filter_map(|(_, service)| service.as_worker());
                 let namespaces = workers.flat_map(|worker| worker.namespaces());
                 for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
-                    namespace.abort_all(None);
+                    namespace.release_all();
                 }
+                // Released before the lease goes, so nothing is served after it. Until the
+                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
+                // that reads this node's record still finds it live and routes here again.
                 if let Err(e) = node.cluster.deregister().await {
                     tracing::warn!("leaving the cluster: {e}");
                 }

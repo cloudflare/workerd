@@ -34,6 +34,8 @@ use crate::Result;
 use crate::bench;
 use crate::bridge::ffi;
 use crate::channels::AbortReason;
+use crate::config::DeploymentLog;
+use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Reporter;
 use crate::log::Severity;
@@ -174,11 +176,25 @@ fn report(structured: bool, severity: Severity, message: &str) {
 
 /// Where config errors and warnings go (see `report`). With `--watch` the server serves despite
 /// the errors, since this is a development server and someone is about to fix the config.
-fn reporter(watching: bool, structured: bool) -> Reporter {
+///
+/// Messages produced while loading `deployments` are printed here. Deployment errors and warnings
+/// do not make the server refuse or change its exit status.
+fn reporter(watching: bool, structured: bool, deployments: Deployments) -> Reporter {
+    for line in &deployments.log {
+        match line {
+            DeploymentLog::Info(message) => report(structured, Severity::Info, message),
+            DeploymentLog::Error(message) => report(structured, Severity::Error, message),
+        }
+    }
     Reporter::new(
         Box::new(move |message| error(structured, &message)),
         Box::new(move |message| report(structured, Severity::Warning, &message)),
         watching,
+    )
+    .with_deployments(
+        deployments,
+        Box::new(move |message| report(structured, Severity::Error, &message)),
+        Box::new(move |message| report(structured, Severity::Warning, &message)),
     )
 }
 
@@ -223,12 +239,13 @@ fn sigterm() -> impl Future<Output = ()> {
 /// replaces the process). A listener failure is the error.
 async fn server_serve(
     factory: KjOwn<ffi::WorkerFactory>,
-    options: RunOptions,
+    mut options: RunOptions,
     mut watch: Option<Watch>,
     structured: bool,
 ) -> Result<()> {
     crate::log::install();
-    let report = reporter(watch.is_some(), structured);
+    let deployments = std::mem::take(&mut options.deployments);
+    let report = reporter(watch.is_some(), structured, deployments);
     let factory = Rc::new(Factory::new(factory));
     let result = with_watch(
         crate::run::run(Rc::clone(&factory), options, report, sigterm()),
@@ -262,7 +279,8 @@ async fn run_local<T, Fut: Future<Output = Result<T>>>(
     command: impl FnOnce(Rc<Factory>, Reporter) -> Fut,
 ) -> Result<T> {
     crate::log::install();
-    let report = reporter(watch.is_some(), structured);
+    // Only `serve` composes deployments.
+    let report = reporter(watch.is_some(), structured, Deployments::default());
     let factory = Rc::new(Factory::new(factory));
     // Loopback sockets are for tests and benchmarks only.
     factory.loopback().enable();

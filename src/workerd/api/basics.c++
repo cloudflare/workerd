@@ -5,7 +5,6 @@
 #include "basics.h"
 
 #include "abort-bootstrap.h"
-#include "actor-state.h"
 #include "global-scope.h"
 
 #include <workerd/io/features.h>
@@ -196,7 +195,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
       auto sizeBefore = handlerSet.handlers.size();
       handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
       if (handlerSet.handlers.size() != sizeBefore) {
-        listenerCountChanged(js, type, handlerSet.handlers.size());
+        notifyListenerCountChanged(js, type, handlerSet.handlers.size());
       }
     });
   }
@@ -222,10 +221,23 @@ void EventTarget::removeEventListener(jsg::Lock& js,
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
         if (handlerSet.handlers.eraseMatch(handler)) {
-          listenerCountChanged(js, type, handlerSet.handlers.size());
+          notifyListenerCountChanged(js, type, handlerSet.handlers.size());
         }
       }
     });
+  }
+}
+
+void EventTarget::notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {
+  listenerCountChanged(js, type, count);
+  for (auto& entry: listenerCountHooks) {
+    if (entry.type == type) {
+      // The hook may replace itself, reallocating listenerCountHooks, so nothing here touches
+      // `entry` once the call has started.
+      auto hook = entry.hook.getHandle(js);
+      hook.call(js, js.undefined(), js.str(type), js.num(static_cast<double>(count)));
+      return;
+    }
   }
 }
 
@@ -245,7 +257,7 @@ void EventTarget::addEventHandlerListener(jsg::Lock& js,
   auto sizeBefore = handlerSet.handlers.size();
   handlerSet.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   if (handlerSet.handlers.size() != sizeBefore) {
-    listenerCountChanged(js, type, handlerSet.handlers.size());
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
   }
 }
 
@@ -1390,6 +1402,9 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(identity);
     }
   }
+  for (auto& entry: listenerCountHooks) {
+    visitor.visit(entry.hook);
+  }
 }
 
 kj::Promise<void> Scheduler::wait(
@@ -1432,42 +1447,6 @@ kj::Promise<void> Scheduler::wait(
   return kj::mv(promise);
 }
 
-void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  JSG_REQUIRE(
-      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
-  IoContext& context = IoContext::current();
-  return context.getActor().map([&](Worker::Actor& actor) {
-    auto& lock = context.getCurrentLock();
-    auto persistent = actor.makeStorageForSwSyntax(lock);
-    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
-  });
-}
-
-CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
-    : Event(kj::mv(ownType), Event::Init(init)),
-      detail(kj::mv(init.detail)) {}
-
-jsg::Ref<CustomEvent> CustomEvent::constructor(
-    jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
-}
-
-jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
-  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.getHandle(js); });
-}
-
-CustomEvent::CustomEventInit::operator Event::Init() {
-  return {
-    .bubbles = this->bubbles.map([](auto& val) { return val; }),
-    .cancelable = this->cancelable.map([](auto& val) { return val; }),
-    .composed = this->composed.map([](auto& val) { return val; }),
-  };
-}
-
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
   return sizeof(EventHandler);
 }
@@ -1494,6 +1473,9 @@ void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
   tracker.trackFieldWithSize("eventHandlerAttributes",
       eventHandlerAttributes.size() * sizeof(decltype(eventHandlerAttributes)::Entry));
+  for (const auto& entry: listenerCountHooks) {
+    tracker.trackField("listenerCountHook", entry.hook);
+  }
 }
 
 }  // namespace workerd::api

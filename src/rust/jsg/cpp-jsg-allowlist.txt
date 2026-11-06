@@ -17,6 +17,12 @@ src/rust/jsg/jsg.h jsg::Lock 3
 src/rust/jsg/jsg.h JsExceptionThrown 1
 src/rust/jsg/jsg.h jsg::Data 1
 
-# A reviewed exception: io_context_await_io_and_run() propagates the exception that a failed
-# callback left pending to IoContext::run() as JsExceptionThrown, which is how run() learns of it.
-src/workerd/io/io-context/ffi.c++ JsExceptionThrown 1
+# A reviewed exception, explained under "C++ JSG" in that file: io_context_await_io_and_run()
+# propagates the exception that a failed callback left pending to IoContext::run() as
+# JsExceptionThrown, which is how run() learns of it, and io_context_add_wait_until() and
+# io_context_abort() reuse what ctx.waitUntil() and ctx.abort() call. Don't add to it.
+src/workerd/io/io-context/ffi.c++ jsg::Lock 2
+src/workerd/io/io-context/ffi.c++ getCurrentLock 2
+src/workerd/io/io-context/ffi.c++ JsExceptionThrown 3
+src/workerd/io/io-context/ffi.c++ jsg::Data 1
+src/workerd/io/io-context/ffi.c++ jsg::Promise 1

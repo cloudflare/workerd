@@ -452,18 +452,6 @@ bool Lock::pumpMsgLoop() {
   return IsolateBase::from(v8Isolate).pumpMsgLoop();
 }
 
-Name Lock::newSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
-Name Lock::newSharedSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::For(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
-Name Lock::newApiSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
 kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
@@ -629,59 +617,6 @@ void ExternalMemoryAdjustment::set(size_t amount) {
 
 void ExternalMemoryAdjustment::setNow(Lock& js, size_t amount) {
   adjustNow(js, amount - this->amount);
-}
-
-Name::Name(kj::String string): hash(kj::hashCode(string)), inner(kj::mv(string)) {}
-
-Name::Name(kj::StringPtr string): hash(kj::hashCode(string)), inner(kj::str(string)) {}
-
-Name::Name(Lock& js, v8::Local<v8::Symbol> symbol)
-    : hash(kj::hashCode(symbol->GetIdentityHash())),
-      inner(js.v8Ref(symbol)) {}
-
-kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* isolate) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return str.asPtr();
-    }
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      return symbol.getHandle(isolate);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-void Name::visitForGc(GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(string, kj::String) {}
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      visitor.visit(symbol);
-    }
-  }
-}
-
-Name Name::clone(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return Name(kj::str(str));
-    }
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      return Name(js, symbol.getHandle(js));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::String Name::toString(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
-    }
-    KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
-      return kj::str("Symbol(", sym.getHandle(js)->Description(js.v8Isolate), ")");
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 bool isInGcDestructor() {

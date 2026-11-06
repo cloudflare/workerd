@@ -28,8 +28,9 @@
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
-//! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! drop, under the isolate lock, `wrappable_remove_strong_ref()` releases its strong reference,
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount; without the lock, its isolate's
+//! [`IsolateState`] queues both until the next lock. A function created by
 //! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
 //! function's V8 data.
 
@@ -58,6 +59,9 @@ use crate::UnitType;
 use crate::isolate_state::IsolateState;
 pub use crate::promise::Promise;
 pub use crate::promise::PromiseResolver;
+pub use crate::promise::VoidPromise;
+use crate::rtti::Context as RttiContext;
+use crate::rtti::new_rtti_context;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -480,6 +484,7 @@ pub mod ffi {
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
         pub unsafe fn local_promise_result(promise: &Local) -> Local;
         pub unsafe fn local_promise_mark_as_handled(promise: &Local);
+        pub unsafe fn local_promise_has_handler(promise: &Local) -> bool;
         pub unsafe fn local_promise_then_or_catch(
             isolate: *mut Isolate,
             promise: &Local,
@@ -560,7 +565,7 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
-        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>, is_strong: bool);
+        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
             ref_parent: *mut usize,
@@ -666,6 +671,18 @@ pub mod ffi {
         // throws.
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
+        // JSON
+        // Leave what parsing and stringifying throw pending; see `call_into_js()`.
+        // Infallible: JSON::Parse reports what it throws in its result.
+        pub unsafe fn value_json_parse(isolate: *mut Isolate, text: &Local) -> MaybeLocal;
+        // Fallible: the result is a rust::String.
+        pub unsafe fn local_json_stringify(
+            isolate: *mut Isolate,
+            value: &Local,
+            gap: &Local,
+            result: &mut String,
+        ) -> Result<bool>;
+
         // Errors
         // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
         pub unsafe fn exception_create_from_bytes(
@@ -690,6 +707,7 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
+        pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
@@ -802,6 +820,12 @@ pub mod ffi {
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
         pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.dispose]`.
+        pub dispose: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.asyncDispose]`.
+        pub async_dispose: KjMaybe<usize>,
+        /// The `v8::FunctionCallback` that runs when an instance is called as a function.
+        pub callable: KjMaybe<usize>,
     }
 
     // Resources
@@ -830,6 +854,11 @@ pub mod ffi {
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
         ) -> Result<MaybeLocal>;
+        // Infallible: returns kj::none for anything but the opaque wrapper of a Rust Wrappable.
+        pub unsafe fn wrappable_try_unwrap_opaque(
+            isolate: *mut Isolate,
+            value: &Local, /* v8::Local<Value> */
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -878,13 +907,27 @@ pub mod ffi {
         Internal = 2,
     }
 
+    extern "Rust" {
+        type RttiContext;
+
+        /// Creates a context that describes resource members as registered under the
+        /// compatibility flags in `feature_flags_data`, canonical `CompatibilityFlags` bytes as
+        /// for `realm_create`.
+        fn new_rtti_context(feature_flags_data: &[u8]) -> Box<RttiContext>;
+        fn encode(self: &RttiContext, group: &str) -> Vec<u8>;
+    }
+
     unsafe extern "C++" {
         type ModuleRegistry;
 
+        /// Registers a builtin module. The registry calls `callback` to instantiate the
+        /// module, while a metadata registry (the RTTI encoder) calls `describe` instead, to
+        /// describe the module's exports without instantiating it.
         pub unsafe fn register_add_builtin_module(
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> MaybeLocal,
+            describe: fn(&mut RttiContext, &str),
             module_type: ModuleType,
         );
     }
@@ -1824,10 +1867,6 @@ impl Eq for Local<'_, String> {}
 struct FunctionData<T>(T);
 
 impl<T: Traced> Traced for FunctionData<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         self.0.trace(visitor);
     }
@@ -1912,7 +1951,7 @@ impl Function {
         let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
-        wrappable.remove_strong_ref(true);
+        wrappable.remove_strong_ref();
         functions
     }
 
@@ -3237,7 +3276,8 @@ impl<'s> Local<'s, String> {
     /// Writes the string as UTF-8 into `buffer`.
     ///
     /// Returns the number of bytes written. `flags` is a combination of
-    /// [`WriteFlags`] constants.
+    /// [`WriteFlags`] constants. Use [`WriteFlags::ReplaceInvalidUtf8`] to replace lone
+    /// surrogates with U+FFFD; without it, they are written as WTF-8, not valid UTF-8.
     ///
     /// Corresponds to `v8::String::WriteUtf8()`.
     pub fn write_utf8(
@@ -3264,19 +3304,14 @@ impl<'s> Local<'s, String> {
 
     /// Decodes the string to an owned Rust `String` via UTF-8.
     ///
-    /// Allocates a buffer using `utf8_length`, writes into it, and converts.
+    /// Replaces each lone UTF-16 surrogate with U+FFFD.
     pub fn to_string(&self, lock: &mut crate::Lock) -> std::string::String {
         let byte_len = self.utf8_length(lock);
         let mut buf = vec![0u8; byte_len];
-        let written = self.write_utf8(lock, &mut buf, WriteFlags::None);
+        let written = self.write_utf8(lock, &mut buf, WriteFlags::ReplaceInvalidUtf8);
         buf.truncate(written);
-        // V8 guarantees valid UTF-8 output when REPLACE_INVALID_UTF8 is not set and
-        // the string was originally created from valid data. Use from_utf8 to avoid a
-        // redundant allocation in the common (valid UTF-8) case; fall back to
-        // from_utf8_lossy only when the bytes are not valid UTF-8 (e.g. two-byte strings
-        // with unpaired surrogates).
         std::string::String::from_utf8(buf)
-            .unwrap_or_else(|e| std::string::String::from_utf8_lossy(e.as_bytes()).into_owned())
+            .unwrap_or_else(|_| unreachable!("V8 guarantees valid UTF-8 with ReplaceInvalidUtf8"))
     }
 
     // -------------------------------------------------------------------------
@@ -4550,9 +4585,23 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
 /// `GcVisitor` wraps a C++ `jsg::GcVisitor` pointer. All GC visitation logic
 /// (strong/traced switching, parent tracking) is handled by the C++ side via
 /// `Wrappable::visitRef()`.
+///
+/// A visitor can also detach a value from its GC owner (see [`GcVisitor::is_detaching`]):
+/// that visit has no C++ visitor.
 #[derive(Debug)]
 pub struct GcVisitor {
     pub(crate) handle: ffi::GcVisitor,
+    pub(crate) mode: VisitMode,
+}
+
+/// What a [`GcVisitor`] visits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VisitMode {
+    /// For the C++ `jsg::GcVisitor` of its owner's visit.
+    Visit,
+    /// To detach the value from its owner, under the lock of the given isolate; see
+    /// [`GcVisitor::is_detaching`].
+    Detach(*mut ffi::Isolate),
 }
 
 impl GcVisitor {
@@ -4567,7 +4616,32 @@ impl GcVisitor {
                 // SAFETY: visitor is a valid, non-null pointer (guaranteed by caller).
                 ptr: unsafe { (*visitor).ptr },
             },
+            mode: VisitMode::Visit,
         }
+    }
+
+    /// Detaches `value`, which its GC owner no longer holds, from that owner, as moving a C++
+    /// `jsg::Ref` out of its field does: every `jsg::Rc` it traces becomes strong again and
+    /// forgets its parent, and every `TracedGlobal` it traces lets go of its traced reference and
+    /// makes its strong handle strong. The value is then safe to use and to put in another owner,
+    /// however the garbage collector last visited it.
+    ///
+    /// # Panics
+    /// Panics if `value` holds a `TracedGlobal` of an isolate other than the lock's.
+    pub(crate) fn detach<T: crate::Traced>(lock: &Lock<'_>, value: &T) {
+        let mut visitor = Self {
+            handle: ffi::GcVisitor { ptr: 0 },
+            mode: VisitMode::Detach(lock.isolate().as_ffi()),
+        };
+        value.trace(&mut visitor);
+    }
+
+    /// Whether this visit detaches the value from its GC owner rather than tracing it. Such a
+    /// visit runs under the isolate lock and has no C++ visitor, so [`GcVisitor::as_ffi`] returns
+    /// `None`: a `Traced` impl that visits through it must instead make its reference strong
+    /// again and forget its parent, as a moved C++ `jsg::Ref` does.
+    pub fn is_detaching(&self) -> bool {
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -4575,14 +4649,19 @@ impl GcVisitor {
     /// Delegates to the C++ `Wrappable::visitRef()` which handles all the
     /// strong/traced switching logic and transitive tracing.
     pub fn visit_rc<R: crate::Resource>(&mut self, r: &crate::Rc<R>) {
-        r.visit(self);
+        if self.is_detaching() {
+            r.detach();
+        } else {
+            r.visit(self);
+        }
     }
 
     /// The C++ `jsg::GcVisitor` of this visit, for a `Traced` impl in another crate that visits a
     /// reference Rust JSG doesn't know, such as a C++ JSG `jsg::Ref`, through its own FFI. The
-    /// pointer is valid for the duration of the visit.
-    pub fn as_ffi(&mut self) -> *mut ffi::GcVisitor {
-        &raw mut self.handle
+    /// pointer is valid for the duration of the visit. A detaching visit has none, so this
+    /// returns `None` (see [`GcVisitor::is_detaching`]).
+    pub fn as_ffi(&mut self) -> Option<*mut ffi::GcVisitor> {
+        (!self.is_detaching()).then_some(&raw mut self.handle)
     }
 
     /// Visits a `v8::TracedGlobal<T>` field during GC tracing.
@@ -4597,7 +4676,7 @@ impl GcVisitor {
     /// # Traced nodes
     ///
     /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (`Cell::take`, `mem::replace`) is traced by nothing until it is put back, and nothing
+    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -4616,13 +4695,15 @@ impl GcVisitor {
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
     ///
-    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a visit
-    /// on behalf of another isolate, which debug builds assert against: a `TracedGlobal` belongs in
-    /// resources of its own isolate. A visit has no isolate when its resource has neither been
+    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
+    /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
+    /// under another isolate's lock panics. A `TracedGlobal` belongs in resources of its own
+    /// isolate. A visit has no isolate when its resource has neither been
     /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
     /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
-    /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
-    /// The visit then touches the handles only if this thread holds the lock, and otherwise
+    /// makes that reference under the lock of the isolate the resource is created in, which
+    /// need not be the `TracedGlobal`'s isolate. The visit then touches the handles only if
+    /// this thread holds the `TracedGlobal`'s isolate lock, and otherwise
     /// leaves them as they are: a weak handle stays weak until a later visit under the lock,
     /// so its value can die meanwhile, after which `TracedGlobal::as_local` panics.
     ///
@@ -4637,17 +4718,41 @@ impl GcVisitor {
     /// last visit wins, and the value can be collected while the other owner still uses it. So
     /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
     /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    ///
+    /// # Panics
+    /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
+    /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
             // of a dropped `TracedGlobal` are.
             return;
         }
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                global.state.belongs_to(isolate),
+                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+            );
+            // SAFETY: see below, and `GlobalSlot`.
+            let (strong, traced) = unsafe {
+                (
+                    &raw mut (*global.slot.strong.get()).ptr,
+                    &mut *global.slot.traced.get(),
+                )
+            };
+            if traced.ptr != 0 {
+                traced.ptr = 0;
+                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
+                // isolate, as checked above.
+                unsafe { ffi::global_clear_weak(strong) };
+            }
+            return;
+        }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
         if visiting.is_null() {
             // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes without a `Lock`.
+            // `jsg::Rc::new` makes under the lock of the resource's isolate.
             if !global.state.this_thread_holds_lock() {
                 return;
             }
@@ -4952,22 +5057,19 @@ impl WrappableRc {
     ///
     /// Called when a new `Rc<R>` is created (clone, unwrap) to inform the GC
     /// that this Wrappable has an additional strong reference from Rust.
-    pub(crate) fn add_strong_ref(&mut self) {
+    pub(crate) fn add_strong_ref(&self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }
 
-    /// Decrements the strong reference count and potentially defers destruction.
+    /// Decrements the strong reference count on the underlying Wrappable, which releases its
+    /// strong wrapper handle, or weakens the references it holds, when the count reaches zero.
     ///
-    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
-    /// the C++ side with the ref's current `strong` flag. If `is_strong` is
-    /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
-    /// was already weakened by GC tracing), it skips the decrement.
-    // The bool maps directly to the C++ FFI parameter; an enum would just
-    // convert back to bool immediately before crossing the boundary.
-    pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
+    /// Called when an `Rc<R>` that counts as strong is released. The caller must hold the
+    /// Wrappable's isolate lock, which [`IsolateState::release`] ensures for an `Rc`.
+    pub(crate) fn remove_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
-        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };
+        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut()) };
     }
 
     /// Returns the current strong reference count from the C++ Wrappable.
@@ -4990,9 +5092,39 @@ impl WrappableRc {
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
+        let data = self.attach_opaque_wrapper(lock)?;
+        let mut functions = Vec::with_capacity(N);
+        for callback in callbacks {
+            // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+            // (guaranteed by Lock); `callback` is a V8 function callback and `data` a handle in
+            // the lock's scope, in which the function is created.
+            let function = unsafe {
+                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
+            };
+            functions.push(function.ok_or_else(Error::pending)?);
+        }
+        let Ok(functions) = functions.try_into() else {
+            unreachable!("one function per callback")
+        };
+        Ok(functions)
+    }
+
+    /// Attaches an opaque wrapper to this Wrappable and returns it: an object with no properties
+    /// and a null prototype, which keeps the Wrappable alive, and traced, while it is reachable,
+    /// and which [`of_opaque`](Self::of_opaque) finds the Wrappable from. The Wrappable must not
+    /// have a wrapper yet.
+    ///
+    /// While an exception or a termination is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shim checks before
+    /// creating the wrapper, which would clear the exception.
+    pub(crate) fn attach_opaque_wrapper<'s>(
+        &self,
+        lock: &Lock<'s>,
+    ) -> crate::Result<Local<'s, Value>> {
+        let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
         // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
-        let data: Local<Value> = unsafe {
+        unsafe {
             Local::from_ffi_maybe(
                 ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
                     |exception| {
@@ -5009,20 +5141,20 @@ impl WrappableRc {
                 )?,
             )
         }
-        .ok_or_else(Error::pending)?;
-        let mut functions = Vec::with_capacity(N);
-        for callback in callbacks {
-            // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
-            // lock's scope, in which the function is created.
-            let function = unsafe {
-                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, data.raw()))
-            };
-            functions.push(function.ok_or_else(Error::pending)?);
-        }
-        let Ok(functions) = functions.try_into() else {
-            unreachable!("one function per callback")
-        };
-        Ok(functions)
+        .ok_or_else(Error::pending)
+    }
+
+    /// Returns the Rust Wrappable whose opaque wrapper `value` is, as
+    /// [`attach_opaque_wrapper`](Self::attach_opaque_wrapper) returns it, or `None` if `value` is
+    /// anything else.
+    pub(crate) fn of_opaque<'s>(lock: &Lock<'s>, value: Local<'s, Value>) -> Option<Self> {
+        value.debug_assert_isolate(lock);
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); `value` is a handle in the
+        // lock's scope.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::wrappable_try_unwrap_opaque(lock.isolate().as_ffi(), value.raw()) }
+                .into();
+        handle.map(|handle| Self { handle })
     }
 
     /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as

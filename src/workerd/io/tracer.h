@@ -171,6 +171,9 @@ class WorkerTracer final: public BaseTracer {
       kj::Date startTime) override;
   void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) override;
+  // Variant for RPC-based tracing, where the caller supplies the timestamp from its IoContext.
+  void addSpanUpdateInternal(
+      tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp);
   void addSpanAttribute(const tracing::InvocationSpanContext& context,
       kj::ConstString key,
       tracing::Attribute::Value value) override;

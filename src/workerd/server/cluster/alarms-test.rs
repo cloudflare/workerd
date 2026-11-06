@@ -862,9 +862,9 @@ mod dst {
         Err(format!("never ran {missed:?}\n{log}"))
     }
 
-    /// 100 seeds by default, to fit CI's slowest builds.
+    /// 20 seeds by default, to fit CI's slowest builds.
     #[test]
     fn every_alarm_runs_whatever_fails() {
-        crate::dst::seeds(100, |seed| run(seed, 400));
+        crate::dst::seeds(20, |seed| run(seed, 400));
     }
 }

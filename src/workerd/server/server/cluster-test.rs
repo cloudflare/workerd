@@ -69,3 +69,16 @@ fn a_disconnected_session_is_forgotten() {
         Ok(2)
     );
 }
+
+#[test]
+fn an_advertised_port_of_zero_is_the_bound_port() {
+    assert_eq!(with_bound_port("127.0.0.1:0", 7000), "127.0.0.1:7000");
+    assert_eq!(with_bound_port("[::1]:0", 7000), "[::1]:7000");
+    assert_eq!(
+        with_bound_port("node1.internal:0", 7000),
+        "node1.internal:7000"
+    );
+    // A port given stays, whatever was bound.
+    assert_eq!(with_bound_port("10.0.0.4:7001", 7000), "10.0.0.4:7001");
+    assert_eq!(with_bound_port("10.0.0.4:10", 7000), "10.0.0.4:10");
+}

@@ -22,6 +22,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/server/channel-token.h>
@@ -58,6 +59,7 @@ struct Committer;
 struct ResultTask;
 struct AbortReason;
 struct KeepAlive;
+struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
@@ -125,6 +127,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool tailWorkers = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
+    // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute
+    // path.
+    kj::Maybe<kj::String> pyodideBundleDiskCacheDir;
     // When set, async activity in every worker is traced to this file (--async-trace), which must
     // outlive the factory.
     kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
@@ -213,6 +218,12 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
+kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
+    const ActorHandle& actor,
+    ::rust::Str className,
+    ::rust::Box<ChannelFactory> channels,
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Own<RequestMetadata> metadata);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
@@ -255,6 +266,8 @@ class ActorHandle final {
 kj::Own<ActorBroken> actor_on_broken(const ActorHandle& actor);
 kj::Promise<void> actor_broken(kj::Own<ActorBroken> broken);
 void actor_abort(const ActorHandle& actor, const AbortReason& reason);
+bool actor_has_on_hibernate_handler(const ActorHandle& actor);
+bool actor_is_shared(const ActorHandle& actor);
 kj::Promise<kj::Own<ActorLock>> actor_lock(const ActorHandle& actor);
 bool actor_shutdown(
     const ActorHandle& actor, ::rust::Str reason, kj::Maybe<kj::Own<ActorLock>> lock);
@@ -402,6 +415,17 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+
+inline uint64_t request_not_delivered_detail_id() {
+  return jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID;
+}
+inline uint64_t actor_predecessor_rejected_detail_id() {
+  return jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID;
+}
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 

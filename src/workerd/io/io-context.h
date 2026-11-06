@@ -70,6 +70,8 @@ WD_STRONG_BOOL(ReportRunWithoutRequest);
 // Whether IoContext::IncomingRequest::delivered() drops the cross-context actions queued while the
 // actor had no request, rather than run them.
 WD_STRONG_BOOL(DropQueuedCrossContextActions);
+// Whether a warning IoContext logs later deduplicates like logWarningOnce().
+WD_STRONG_BOOL(WarnOnce);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -469,6 +471,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // of an isolate. Emits to the same destinations as logWarning().
   void logWarningOnce(kj::StringPtr description);
 
+  // Like logWarning() and logWarningOnce(), but logged later, from a task of this context running
+  // under its locks (see run()). For callers that must not touch V8 where they detect the problem:
+  // a destructor the garbage collector runs on an unreachable API object, for one, since with an
+  // inspector attached logging captures a JS stack trace, which allocates on the V8 heap inside a
+  // GC callback. The warning is dropped if the context has no current IncomingRequest, as it then
+  // can no longer run tasks.
+  void logWarningLater(kj::String description);
+  void logWarningOnceLater(kj::String description);
+
   // Log an internal error message. Deduplicates log messages such that a single unique message will
   // only be logged once for the lifetime of an isolate.
   void logErrorOnce(kj::StringPtr description);
@@ -504,6 +515,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Note that abort() is safe to call while the IoContext is current. Becaues of this, it cannot
   // cancel any tasks synchronously, as this might cancel the current promise, leading to a crash.
   void abort(kj::Exception&& e);
+
+  // The exception ctx.abort() aborts with when called without a reason.
+  static kj::Exception abortWithoutReasonException();
 
   // Await the given promise and, if it throws, call `abort()` with the exception. The promise
   // given here should just be a monitoring promise, it should not represent any sort of background
@@ -813,6 +827,36 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
+  // Like awaitJs(), but `func(js, T&&)` (or `func(js)` if `T` is void) runs when the JS promise
+  // resolves, and the KJ promise resolves to `func`'s result. If `func` throws, the KJ promise
+  // rejects with the tunneled exception, as if the JS promise itself had rejected. If the returned
+  // KJ promise has already been destroyed, such as when the caller was canceled or this IoContext
+  // was aborted, `func` doesn't run, so it may refer to state that the caller owns.
+  //
+  // Prefer this over `awaitJs(js, promise.then(js, func))` when `func` produces KJ objects whose
+  // lifetime must be tied to the returned KJ promise, such as a promise that owns an HTTP response
+  // body stream or an accepted WebSocket. Chaining `.then()` first hands `func`'s result to KJ in a
+  // second microtask; if the microtask queue is discarded between the two (e.g. execution is
+  // terminated for exceeding a limit), the result stays parked in this IoContext, outliving the
+  // request that expected to own it. Here, `func` runs and its result is handed to KJ in the same
+  // continuation.
+  template <typename T, typename Func>
+  auto awaitJs(jsg::Lock& js, jsg::Promise<T> promise, Func&& func);
+
+ private:
+  // Implements both awaitJs() overloads. `func` maps the value `promise` resolves to into a
+  // `Result`, which is handed directly to the KJ fulfiller: it's called as `func(js, T&&)`, or
+  // `func(js)` if `T` is void. If `Result` is a KJ promise, it's chained into the returned promise.
+  // The plain overload passes a `func` that forwards ordinary values, unwraps IoOwn values, and
+  // handles void; the other overload passes the caller's `func`. See AwaitJsFulfiller for when
+  // `func` runs.
+  template <typename Result, typename T, typename Func>
+  kj::_::ReducePromises<Result> awaitJsImpl(jsg::Lock& js, jsg::Promise<T> promise, Func&& func);
+
+  template <typename Result, typename Func>
+  class AwaitJsFulfiller;
+
+ public:
   enum TopUpFlag { NO_TOP_UP, TOP_UP };
 
   // Make a kj::Function which, when called, re-enters this IoContext to run some code.
@@ -1317,6 +1361,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
  private:
   jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
   jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
+  void logWarningLaterImpl(kj::String description, WarnOnce once);
 
   ThreadContext& thread;
 
@@ -1944,57 +1990,87 @@ void IoContext::awaitIoAndRun(kj::Promise<T> promise, Func&& func) {
 
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
-  auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
-  struct RefcountedFulfiller: public kj::Refcounted {
-    kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
-    kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
-    // Settled when the JavaScript promise settles.
-    AsyncResource asyncTraceResource;
-    bool isDone = false;
-
-    RefcountedFulfiller(kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate,
-        kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller)
-        : fulfiller(kj::mv(fulfiller)),
-          maybeIsolate(kj::mv(maybeIsolate)) {}
-
-    ~RefcountedFulfiller() noexcept(false) {
-      if (!isDone) {
-        reject();
-      }
-    }
-
-   private:
-    void reject() {
-      // We use a weak isolate reference here in case the isolate gets dropped before this code
-      // is executed. In that case we default to `false` as we cannot access the original isolate.
-      auto hasExcessivelyExceededHeapLimit = maybeIsolate->tryAddStrongRef()
-                                                 .map([](kj::Own<const Worker::Isolate> isolate) {
-        return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
-      }).orDefault(false);
-      if (hasExcessivelyExceededHeapLimit) {
-        auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
-        e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        fulfiller->reject(kj::mv(e));
+  if constexpr (jsg::isVoid<T>()) {
+    return awaitJsImpl<void>(js, kj::mv(jsPromise), [](jsg::Lock&) {});
+  } else {
+    return awaitJsImpl<RemoveIoOwn<T>>(
+        js, kj::mv(jsPromise), [](jsg::Lock&, T&& result) -> RemoveIoOwn<T> {
+      if constexpr (isIoOwn<T>()) {
+        return kj::mv(*result);
       } else {
-        // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
-        // this promise.
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+        return kj::mv(result);
       }
-    }
-  };
-  auto& isolate = Worker::Isolate::from(js);
-  auto fulfiller = kj::refcounted<RefcountedFulfiller>(isolate.getWeakRef(), kj::mv(paf.fulfiller));
-  fulfiller->asyncTraceResource = makeAwaitJsResource();
+    });
+  }
+}
 
-  auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller))](
-                          jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
-    // Note: `context` can possibly be different than the one that started the wait, if the
-    // promise resolved from a different context. In that case the use of `fulfiller` will
-    // throw later on. But it's OK to use the wrong context up until that point.
+template <typename T, typename Func>
+auto IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise, Func&& func) {
+  if constexpr (jsg::isVoid<T>()) {
+    using Result = decltype(func(js));
+    return awaitJsImpl<Result>(js, kj::mv(jsPromise), kj::fwd<Func>(func));
+  } else {
+    using Result = decltype(func(js, kj::instance<T&&>()));
+    return awaitJsImpl<Result>(js, kj::mv(jsPromise), kj::fwd<Func>(func));
+  }
+}
+
+// Settles the KJ promise returned by awaitJsImpl() when the JavaScript promise settles. Both of
+// the JavaScript promise's handlers hold it through an IoOwn, so it's used only in the IoContext
+// that started the wait and is destroyed with that IoContext at the latest. If the JavaScript
+// promise never settles and its handlers are garbage-collected, it rejects the KJ promise.
+template <typename Result, typename Func>
+class IoContext::AwaitJsFulfiller final: public kj::Refcounted {
+ public:
+  AwaitJsFulfiller(kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate,
+      kj::Own<kj::PromiseFulfiller<Result>> fulfiller,
+      Func func,
+      AsyncResource asyncTraceResource)
+      : fulfiller(kj::mv(fulfiller)),
+        maybeIsolate(kj::mv(maybeIsolate)),
+        asyncTraceResource(kj::mv(asyncTraceResource)),
+        func(kj::mv(func)) {}
+
+  ~AwaitJsFulfiller() noexcept(false) {
+    if (!isDone) {
+      rejectNeverSettled();
+    }
+  }
+
+  // Called when the JavaScript promise resolves to `result` (nothing, if it's void). Fulfills the
+  // KJ promise with `func(js, result...)`, or rejects it if `func` throws.
+  //
+  // `func` runs and its result is handed to KJ within this one continuation, so no further
+  // microtask is needed to transfer the result to the KJ promise chain.
+  //
+  // If the KJ promise has been destroyed, such as when the wait was canceled or the IoContext's
+  // abort won, `func` doesn't run, since it may refer to state owned by a caller that no longer
+  // exists. This decides whether to run `func`; it isn't a guard for fulfill(), which is
+  // idempotent.
+  void fulfill(jsg::Lock& js, auto&&... result) {
+    if (!fulfiller->isWaiting()) {
+      // The trace still reports how the JavaScript promise settled, as it does when the promise
+      // rejects.
+      settle(AsyncOutcome::OK);
+      return;
+    }
+
+    js.tryCatch([&]() {
+      if constexpr (jsg::isVoid<Result>()) {
+        func(js, kj::fwd<decltype(result)>(result)...);
+        fulfiller->fulfill();
+      } else {
+        fulfiller->fulfill(func(js, kj::fwd<decltype(result)>(result)...));
+      }
+      settle(AsyncOutcome::OK);
+    }, [&](jsg::Value jsException) { rejectWithJsException(js, jsException.getHandle(js)); });
+  }
+
+  // Called when the JavaScript promise rejects with `jsException`, or `func` throws it.
+  void rejectWithJsException(jsg::Lock& js, v8::Local<v8::Value> jsException) {
     auto& context = IoContext::current();
 
     auto isolate = context.getCurrentLock().getIsolate();
-    auto jsException = jsExceptionRef.getHandle(js);
 
     // TODO(someday): We log an "uncaught exception" here whenever a promise returned from JS to
     //   C++ rejects. However, the C++ code waiting on the promise may do its own logging (e.g.
@@ -2006,30 +2082,69 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     context.logUncaughtException(
         UncaughtExceptionSource::INTERNAL_ASYNC, jsg::JsValue(jsException));
 
-    fulfiller->fulfiller->reject(jsg::createTunneledException(isolate, jsException));
-    fulfiller->isDone = true;
-    fulfiller->asyncTraceResource.settle(AsyncOutcome::ERROR);
+    fulfiller->reject(jsg::createTunneledException(isolate, jsException));
+    settle(AsyncOutcome::ERROR);
+  }
+
+ private:
+  kj::Own<kj::PromiseFulfiller<Result>> fulfiller;
+  kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
+  // Settled when the JavaScript promise settles.
+  AsyncResource asyncTraceResource;
+  bool isDone = false;
+  // Stored here rather than in its own allocation. It may outlive the KJ wait, although fulfill()
+  // won't invoke it after cancellation, so its captures must remain safe to destroy later.
+  Func func;
+
+  void settle(AsyncOutcome outcome) {
+    isDone = true;
+    asyncTraceResource.settle(outcome);
+  }
+
+  void rejectNeverSettled() {
+    // We use a weak isolate reference here in case the isolate gets dropped before this code
+    // is executed. In that case we default to `false` as we cannot access the original isolate.
+    auto hasExcessivelyExceededHeapLimit = maybeIsolate->tryAddStrongRef()
+                                               .map([](kj::Own<const Worker::Isolate> isolate) {
+      return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
+    }).orDefault(false);
+    if (hasExcessivelyExceededHeapLimit) {
+      auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
+      e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      fulfiller->reject(kj::mv(e));
+    } else {
+      // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
+      // this promise.
+      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+    }
+  }
+};
+
+template <typename Result, typename T, typename Func>
+kj::_::ReducePromises<Result> IoContext::awaitJsImpl(
+    jsg::Lock& js, jsg::Promise<T> jsPromise, Func&& func) {
+  auto paf = kj::newPromiseAndFulfiller<Result>();
+  auto& isolate = Worker::Isolate::from(js);
+  auto fulfiller = kj::rc<AwaitJsFulfiller<Result, kj::Decay<Func>>>(
+      isolate.getWeakRef(), kj::mv(paf.fulfiller), kj::fwd<Func>(func), makeAwaitJsResource());
+
+  auto errorHandler = [fulfiller = addObject(fulfiller.addRef())](
+                          jsg::Lock& js, jsg::Value jsException) mutable {
+    fulfiller->rejectWithJsException(js, jsException.getHandle(js));
   };
 
   if constexpr (jsg::isVoid<T>()) {
-    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&) mutable {
-      fulfiller->fulfiller->fulfill();
-      fulfiller->isDone = true;
-      fulfiller->asyncTraceResource.settle(AsyncOutcome::OK);
+    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock& js) mutable {
+      fulfiller->fulfill(js);
     }, kj::mv(errorHandler));
   } else {
-    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&, T&& result) mutable {
-      if constexpr (isIoOwn<T>()) {
-        fulfiller->fulfiller->fulfill(kj::mv(*result));
-      } else {
-        fulfiller->fulfiller->fulfill(kj::mv(result));
-      }
-      fulfiller->isDone = true;
-      fulfiller->asyncTraceResource.settle(AsyncOutcome::OK);
+    jsPromise.then(
+        js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock& js, T&& result) mutable {
+      fulfiller->fulfill(js, kj::mv(result));
     }, kj::mv(errorHandler));
   }
 
-  return paf.promise.exclusiveJoin(onAbort().then([]() -> RemoveIoOwn<T> { KJ_UNREACHABLE; }));
+  return paf.promise.exclusiveJoin(onAbort().then([]() -> Result { KJ_UNREACHABLE; }));
 }
 
 template <IoContext::TopUpFlag topUp, typename Func>

@@ -76,13 +76,13 @@ jobs:
           # Built on bazelflare, in its trusted instance (see _bazel.yml).
           - title: linux
             os-name: Linux
-            image: ubuntu-22.04-16core
+            image: ubuntu-24.04-16core
             bazel-config: release_linux
             target-arch: X64
             bazelflare: true
           - title: linux-arm64
             os-name: Linux
-            image: ubuntu-22.04-arm-16core
+            image: ubuntu-24.04-arm-16core
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
@@ -210,15 +210,10 @@ jobs:
         with:
           repository: cloudflare/workers-sdk
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-      - name: Use Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: lts/*
-          cache: 'pnpm'
-      - name: Install workers-sdk dependencies
-        run: pnpm install
+      # workers-sdk's own setup action, so Miniflare runs on the Node.js version workers-sdk
+      # tests with.
+      - name: Install pnpm, Node.js and workers-sdk dependencies
+        uses: ./.github/actions/install-dependencies
 
       - name: Download workerd binary
         uses: actions/download-artifact@v8
@@ -239,7 +234,7 @@ jobs:
   publish-wrapper:
     name: Publish `workerd` to NPM
     needs: [version, upload-artifacts]
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-24.04-16core
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v7
@@ -295,7 +290,7 @@ jobs:
       - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
 
   build-and-publish-types:
-    runs-on: ubuntu-22.04-16core
+    runs-on: ubuntu-24.04-16core
     needs: [version, upload-artifacts]
     steps:
       - uses: actions/checkout@v7

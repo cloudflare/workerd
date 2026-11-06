@@ -246,12 +246,26 @@ fn unknown_durable_object_namespaces_take_no_channel() {
         compiled.errors,
         [
             "Worker \"main\"'s binding \"LOCAL\" refers to a Durable Object namespace named \
-                 \"Missing\", but no such Durable Object namespace is defined by this Worker.",
-            "Worker \"main\"'s binding \"NO_SERVICE\" refers to a service \"nowhere\", but no \
-                 such service is defined.",
-            "Worker \"main\"'s binding \"NO_CLASS\" refers to a Durable Object namespace \
-                 named \"Missing\" in service \"other\", but no such Durable Object namespace is \
-                 defined by that service.",
+                 \"Missing\", but no such Durable Object namespace is defined by this Worker."
+        ]
+    );
+    // These name the service they refer to.
+    assert_eq!(
+        compiled.reference_errors,
+        [
+            (
+                "nowhere".to_owned(),
+                "Worker \"main\"'s binding \"NO_SERVICE\" refers to a service \"nowhere\", but \
+                 no such service is defined."
+                    .to_owned()
+            ),
+            (
+                "other".to_owned(),
+                "Worker \"main\"'s binding \"NO_CLASS\" refers to a Durable Object namespace \
+                 named \"Missing\" in service \"other\", but no such Durable Object namespace \
+                 is defined by that service."
+                    .to_owned()
+            ),
         ]
     );
     assert!(compiled.actors.is_empty());

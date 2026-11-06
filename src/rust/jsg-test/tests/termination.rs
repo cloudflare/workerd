@@ -6,8 +6,9 @@
 //! after it replaces it, and JavaScript cannot catch it. See `src/rust/jsg/README.md` §Safety
 //! rules, rule 1.
 //!
-//! Each method first has the harness deliver a termination, as a call into JavaScript that ran
+//! Most methods first have the harness deliver a termination, as a call into JavaScript that ran
 //! out of CPU time would, so that the termination exception is pending when the method goes on.
+//! The `terminate_now` methods terminate with `Lock::terminate_execution_now()` instead.
 
 use std::cell::Cell;
 
@@ -104,7 +105,7 @@ impl Terminator {
         lock: &mut jsg::Lock<'s>,
     ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
         crate::Harness::terminate_and_deliver(lock);
-        let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
+        let result = jsg::ToJS::to_js(jsg::Rc::new(lock, Self), lock);
         RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
     }
@@ -138,6 +139,55 @@ impl Terminator {
         crate::Harness::terminate_and_deliver(lock);
         lock.throw_internal_error("thrown while terminating");
     }
+
+    /// Terminates execution itself, with no termination delivered first, and returns the error,
+    /// as `ctx.abort()` does.
+    #[jsg_method]
+    fn terminate_now<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
+        assert!(!lock.is_execution_terminating());
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        TERMINATE_NOW_RETURNED.set(true);
+        Err(err)
+    }
+
+    /// Terminates execution itself, then goes on to throw, which throws nothing.
+    #[jsg_method]
+    fn terminate_now_then_throw_error(&self, lock: &mut jsg::Lock) {
+        let _ = lock.terminate_execution_now();
+        lock.throw_error("thrown while terminating");
+    }
+
+    /// Terminates execution itself twice, as Rust can after catching a termination. The second
+    /// call finds the termination pending and does not enter V8 again.
+    #[jsg_method]
+    fn terminate_now_twice(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        let _ = lock.terminate_execution_now();
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        Err(err)
+    }
+
+    /// Throws an ordinary exception, leaving it pending, then terminates execution itself. The
+    /// termination replaces the exception, so JavaScript cannot catch it.
+    #[jsg_method]
+    fn throw_error_then_terminate_now(&self, lock: &mut jsg::Lock) -> jsg::Result<()> {
+        lock.throw_error("thrown before terminating");
+        let err = lock.terminate_execution_now();
+        assert!(lock.is_execution_terminating());
+        assert!(err.is_pending());
+        Err(err)
+    }
+}
+
+thread_local! {
+    /// Whether `terminate_now` returned.
+    static TERMINATE_NOW_RETURNED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Calls `method` on a `Terminator` from inside a JavaScript `try`/`catch`, and checks that the
@@ -151,23 +201,24 @@ fn termination_survives(method: &str) {
 fn termination_survives_in(harness: &crate::Harness, method: &str) {
     termination_survives_call(
         harness,
-        jsg::Rc::new(Terminator),
+        |lock| jsg::Rc::new(lock, Terminator),
         &format!("{method}()"),
         |_, _| {},
     );
 }
 
-/// Evaluates `obj.{call}` in `harness` from inside a JavaScript `try`/`catch`, and checks that the
-/// termination reaches the harness: the script fails without a catchable exception, and neither
-/// the `catch` block nor the code after it runs. Then runs `check`, once V8 has cleared the
-/// termination.
+/// Evaluates `obj.{call}` in `harness`, where `obj` is what `new_obj` returns, from inside a
+/// JavaScript `try`/`catch`, and checks that the termination reaches the harness: the script
+/// fails without a catchable exception, and neither the `catch` block nor the code after it
+/// runs. Then runs `check`, once V8 has cleared the termination.
 fn termination_survives_call<R: jsg::Resource + 'static>(
     harness: &crate::Harness,
-    obj: jsg::Rc<R>,
+    new_obj: impl FnOnce(&mut jsg::Lock<'_>) -> jsg::Rc<R>,
     call: &str,
     check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
 ) {
     harness.run_in_context(|lock, ctx| {
+        let obj = new_obj(lock);
         ctx.set_global(lock, "obj", obj);
         let script = format!(
             "globalThis.caught = 'nothing'; globalThis.after = false;
@@ -268,6 +319,31 @@ fn returning_a_big_int_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenReturnBigInt");
 }
 
+/// `terminate_execution_now()` delivers the termination before it returns, unlike
+/// `terminate_execution()`, so the method returns its error with the termination pending, and
+/// none of the caller's JavaScript runs after the call.
+#[test]
+fn terminate_execution_now_stops_javascript_at_once() {
+    TERMINATE_NOW_RETURNED.set(false);
+    termination_survives("terminateNow");
+    assert!(TERMINATE_NOW_RETURNED.get());
+}
+
+#[test]
+fn throw_error_after_terminate_execution_now_keeps_the_termination() {
+    termination_survives("terminateNowThenThrowError");
+}
+
+#[test]
+fn terminate_execution_now_while_terminating_keeps_the_termination() {
+    termination_survives("terminateNowTwice");
+}
+
+#[test]
+fn terminate_execution_now_replaces_a_pending_exception() {
+    termination_survives("throwErrorThenTerminateNow");
+}
+
 /// A resource type that nothing uses before `terminateThenGetConstructor`, so that getting its
 /// constructor creates its template.
 #[jsg_resource]
@@ -336,10 +412,19 @@ fn guarded_termination_survives(
     call: &str,
     check: impl FnOnce(&mut jsg::Lock<'_>, &crate::EvalContext<'_>),
 ) {
-    let guarded = jsg::Rc::new(Guarded {
-        saw_pending: Cell::new(None),
-    });
-    termination_survives_call(&crate::Harness::new(), guarded.clone(), call, check);
+    let mut guarded = None;
+    let new_guarded = |lock: &mut jsg::Lock<'_>| {
+        let obj = jsg::Rc::new(
+            lock,
+            Guarded {
+                saw_pending: Cell::new(None),
+            },
+        );
+        guarded = Some(obj.clone());
+        obj
+    };
+    termination_survives_call(&crate::Harness::new(), new_guarded, call, check);
+    let guarded = guarded.expect("created by termination_survives_call");
     assert_eq!(guarded.saw_pending.get(), Some(true), "{call}");
 }
 

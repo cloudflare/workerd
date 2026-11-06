@@ -15,6 +15,7 @@
     reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
 )]
 
+pub use crate::actor::MovedHook;
 pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
@@ -34,6 +35,7 @@ pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 
@@ -383,6 +385,18 @@ pub mod ffi {
             metadata: KjOwn<RequestMetadata>,
             tails: Box<WorkerInterfaceList>,
         ) -> Result<KjOwn<WorkerInterface>>;
+        /// Runs an idle actor's captured hook and flushes its writes, without starting a request
+        /// through the container's retirement gate or counting the actor as active. `tails`
+        /// receive the hook's trace, as they would a request's on `class_name`. Only
+        /// `metadata`'s self token is used.
+        async fn worker_run_actor_on_hibernate(
+            worker: &CompiledWorker,
+            actor: &ActorHandle,
+            class_name: &str,
+            channels: Box<ChannelFactory>,
+            tails: Box<WorkerInterfaceList>,
+            metadata: KjOwn<RequestMetadata>,
+        ) -> Result<()>;
         /// `inner` with `keep` attached: dropped once `inner` has been.
         fn worker_interface_attach(
             inner: KjOwn<WorkerInterface>,
@@ -421,6 +435,8 @@ pub mod ffi {
         /// Aborts the actor with `reason`; every in-flight request fails. Without a reason the
         /// actor is shut down instead: its background work stops, and nothing is failed.
         fn actor_abort(actor: &ActorHandle, reason: &AbortReason);
+        fn actor_has_on_hibernate_handler(actor: &ActorHandle) -> bool;
+        fn actor_is_shared(actor: &ActorHandle) -> bool;
         /// The isolate lock hibernating the actor's WebSockets takes, with no request to take
         /// it on behalf of.
         type ActorLock;
@@ -610,6 +626,24 @@ pub mod ffi {
             client: &RpcClient,
             metadata: KjOwn<RequestMetadata>,
         ) -> KjOwn<WorkerInterface>;
+        /// `inner`, calling `hook.moved()` on each of its events that fails with a `moved`
+        /// answer (`cluster::moved`).
+        fn worker_interface_watch_moved(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
+        /// marked as before or after delivery is marked as after it, and one that is a
+        /// disconnect calls `hook.lost()`.
+        fn worker_interface_watch_peer(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+
+        /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+        /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+        fn request_not_delivered_detail_id() -> u64;
+        fn actor_predecessor_rejected_detail_id() -> u64;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -714,6 +748,8 @@ pub mod ffi {
             params: &'a [u64],
         ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
+        fn add_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
+        fn add_skipped_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
         async unsafe fn accept<'a>(
@@ -728,6 +764,18 @@ pub mod ffi {
         /// `task_run` is the promise the task set holds.
         type SpawnedTask;
         async fn task_run(task: Box<SpawnedTask>) -> Result<()>;
+
+        /// The bytes of Pyodide bundle `version` (pyodide.rs): read from the disk cache in
+        /// `cache_dir`, else downloaded and written to the cache. Empty when there is no bundle
+        /// to be had; a bundle is never empty.
+        // TODO(cleanup): Return `KjMaybe<Vec<u8>>` rather than an empty `Vec` for no bundle, once
+        // the cxx fork's `KjMaybe` supports `Vec` (`check_type_kj_maybe` in
+        // src/rust/cxx/syntax/check.rs).
+        async unsafe fn pyodide_bundle_fetch<'a>(
+            cache_dir: KjMaybe<&'a str>,
+            version: &'a str,
+            integrity: &'a str,
+        ) -> Result<Vec<u8>>;
 
         /// The server, for the factory's callbacks: resolving channel tokens and debug-port
         /// requests to channels. A weak handle: the server owns the factory, and every call
@@ -932,6 +980,12 @@ pub mod ffi {
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
+
+        /// What a stub forgets when the instance it reached answers that the object moved
+        /// (`worker_interface_watch_moved`).
+        type MovedHook;
+        fn moved(self: &MovedHook);
+        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.

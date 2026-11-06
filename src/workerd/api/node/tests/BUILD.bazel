@@ -326,6 +326,11 @@ wd_test(
 )
 
 wd_test(
+    src = "process-version-nodejs-test.wd-test",
+    data = ["process-version-nodejs-test.js"],
+)
+
+wd_test(
     src = "process-getbuiltin-newmodreg-test.wd-test",
     args = ["--experimental"],
     data = ["process-getbuiltin-newmodreg-test.js"],
@@ -491,6 +496,7 @@ wd_test(
         "ECHO_SERVER_PORT",
         "TIMEOUT_SERVER_PORT",
         "RECONNECT_SERVER_PORT",
+        "RESET_SERVER_PORT",
     ],
 )
 

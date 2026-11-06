@@ -85,17 +85,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub fn new(setup: Setup) -> Result<Rc<Self>> {
-        let options: Vec<_> = setup
-            .options
-            .iter()
-            .filter_map(|option| option.split_once('='))
-            .map(|(key, value)| (key.to_owned(), value.to_owned()))
-            .collect();
-        let (s3, prefix) = S3::new(&setup.url, &options)?;
-        Ok(Self::over(
-            Bucket::new(s3, &format!("{prefix}/{FORMAT}")),
-            setup,
-        ))
+        Ok(Self::over(open_bucket(&setup.url, &setup.options)?, setup))
     }
 
     /// Over `bucket`, not the one `setup` names.
@@ -177,6 +167,11 @@ impl Cluster {
                 break;
             }
             claim = self.ownership.acquire_or_route(ns, actor, now_ms).await?;
+        }
+        if matches!(claim, Claim::Owned(_)) && self.is_draining() {
+            return Err(crate::Error::NotHere(format!(
+                "{ns}/{actor}: this node is draining"
+            )));
         }
         Ok(match claim {
             Claim::Owned(owned) => {
@@ -326,6 +321,11 @@ impl Cluster {
         self.ownership.refresh_route(ns, actor, now_ms).await
     }
 
+    /// `node` answered that it does not serve the object (`Ownership::forget_route`).
+    pub fn forget_route(&self, ns: &str, actor: &str, node: &str) {
+        self.ownership.forget_route(ns, actor, node);
+    }
+
     /// The MAC a peer call carries. The cluster key is used only through
     /// labelled derivations, so no two uses share a key: this, with each
     /// message labelled, and the channel token key.
@@ -395,9 +395,15 @@ impl Cluster {
         self.ownership.may_claim.set(false);
     }
 
+    /// Whether `start_draining` ran: this node claims nothing more.
+    pub fn is_draining(&self) -> bool {
+        !self.ownership.may_claim.get()
+    }
+
     /// The first renewal, before the node serves.
     pub async fn join(&self) -> Result<()> {
-        check_conditional_writes(&self.bucket, self.node()).await?;
+        let probe = format!("nodes/{}.probe", self.node());
+        check_conditional_writes(&self.bucket, &probe).await?;
         let until = self.renew(now_ms()).await?;
         self.lease.borrow_mut().renewed(now_ms(), Ok(until));
         Ok(())
@@ -412,6 +418,19 @@ impl Cluster {
 
 /// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
+/// under the layout's version: what every key of the layout is relative to.
+/// `options` are `name=value` (see `S3::new`).
+pub fn open_bucket(url: &str, options: &[String]) -> Result<Bucket> {
+    let options: Vec<_> = options
+        .iter()
+        .filter_map(|option| option.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    let (s3, prefix) = S3::new(url, &options)?;
+    Ok(Bucket::new(s3, &format!("{prefix}/{FORMAT}")))
+}
 
 const fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)
@@ -431,15 +450,15 @@ pub fn now_ms() -> u64 {
     u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Refuse a store that ignores write preconditions: fencing rests on
-/// them. GCS's S3 API, for one, ignores `If-Match` on a PUT.
-async fn check_conditional_writes(bucket: &Bucket, node: &str) -> Result<()> {
-    let key = format!("nodes/{node}.probe");
+/// Refuse a store that ignores write preconditions: fencing and the
+/// deployment catalog rest on them. GCS's S3 API, for one, ignores
+/// `If-Match` on a PUT. `key` is an object only this check writes.
+pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
     let stale = Guard::Match(Version("\"0\"".into()));
-    let created = bucket.put_if(&key, vec![], Guard::Absent).await?;
-    let again = bucket.put_if(&key, vec![], Guard::Absent).await?;
-    let replaced = bucket.put_if(&key, vec![], stale).await?;
-    bucket.delete(&key).await?;
+    let created = bucket.put_if(key, vec![], Guard::Absent).await?;
+    let again = bucket.put_if(key, vec![], Guard::Absent).await?;
+    let replaced = bucket.put_if(key, vec![], stale).await?;
+    bucket.delete(key).await?;
     if created.is_none() || again.is_some() || replaced.is_some() {
         return Err(Error::Config(
             "the bucket ignores conditional writes (If-None-Match, If-Match)".into(),
@@ -460,14 +479,14 @@ mod tests {
     fn a_bucket_that_ignores_preconditions_is_refused() {
         block_on(async {
             assert!(
-                check_conditional_writes(&Bucket::memory(""), "n")
+                check_conditional_writes(&Bucket::memory(""), "n.probe")
                     .await
                     .is_ok()
             );
             let lax = Memory::default();
             lax.ignores_guards.set(true);
             let lax = Bucket::new(lax, "");
-            assert!(check_conditional_writes(&lax, "n").await.is_err());
+            assert!(check_conditional_writes(&lax, "n.probe").await.is_err());
         });
     }
 }

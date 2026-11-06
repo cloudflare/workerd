@@ -23,7 +23,6 @@ namespace workerd::api {
 class EventTarget;
 class AbortSignal;
 class AbortController;
-class ActorState;
 
 WD_STRONG_BOOL(Trusted);
 
@@ -279,73 +278,6 @@ class Event: public jsg::Object {
   }
 };
 
-class ExtendableEvent: public Event {
- public:
-  // Runtime-only (the JS constructor is deleted); always trusted.
-  explicit ExtendableEvent(kj::StringPtr type): Event(type, {}, Trusted::YES) {}
-
-  // While ExtendableEvent is defined by the spec to be constructable, there's really not a
-  // lot of reason currently to do so, especially with the restriction that waitUntil can
-  // only be called on trusted events (which have to originate from within the system).
-  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
-
-  void waitUntil(kj::Promise<void> promise);
-
-  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(ExtendableEvent) {
-    JSG_INHERIT(Event);
-    JSG_METHOD(waitUntil);
-
-#if !WORKERD_API_BASICS_TEST
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(actorState, getActorState);
-#endif
-
-    JSG_TS_OVERRIDE({ actorState: never });
-    // Omit `actorState` from definitions
-  }
-};
-
-// An implementation of the Web Platform Standard CustomEvent API
-class CustomEvent: public Event {
- public:
-  struct CustomEventInit final {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-    JSG_STRUCT(bubbles, cancelable, composed, detail);
-
-    operator Event::Init();
-  };
-
-  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
-
-  static jsg::Ref<CustomEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init);
-
-  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(CustomEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
-    JSG_TS_OVERRIDE(<T = any> {
-      get detail(): T;
-    });
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("detail", detail);
-  }
-
- private:
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(detail);
-  }
-};
-
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
  public:
@@ -481,7 +413,8 @@ class EventTarget: public jsg::Object {
   // addEventListener() and removeEventListener() — including once-listener removal during
   // dispatch and {signal}-triggered removals — and on managed event handler attribute
   // activation and deactivation, whose trampoline occupies a regular listener slot.
-  // removeAllHandlers() does not notify: it is only used for wholesale teardown.
+  // removeAllHandlers() does not notify: it is only used for wholesale teardown. Hooks registered
+  // through EventTargetBootstrap::setListenerCountHook() are called on the same occasions.
   virtual void listenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count) {}
 
   // The result of a setEventHandlerAttribute() assignment: cleared, or activated with a
@@ -508,6 +441,19 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback);
 
  private:
+  friend class EventTargetBootstrap;
+
+  // Calls listenerCountChanged(), then the bootstrap hook registered for `type`, if any.
+  void notifyListenerCountChanged(jsg::Lock& js, kj::StringPtr type, size_t count);
+
+  struct ListenerCountHook {
+    kj::String type;
+    jsg::JsRef<jsg::JsFunction> hook;
+  };
+  // Hooks registered through EventTargetBootstrap::setListenerCountHook(), at most one per type.
+  // Only EventTargets implemented in the per-isolate bootstrap have any, and then one or two.
+  kj::Vector<ListenerCountHook> listenerCountHooks;
+
   struct EventHandler {
     // The listener's identity (the function or object passed to addEventListener, or a
     // synthesized object for internally-registered listeners), used for removeEventListener
@@ -1063,8 +1009,7 @@ class Scheduler final: public jsg::Object {
   api::Event, api::Event::Init, api::EventTarget, api::EventTarget::EventListenerOptions,          \
       api::EventTarget::AddEventListenerOptions, api::EventTarget::HandlerObject,                  \
       api::AbortController, api::AbortSignal, api::AbortAlgorithmHandle, api::Scheduler,           \
-      api::Scheduler::WaitOptions, api::ExtendableEvent, api::CustomEvent,                         \
-      api::CustomEvent::CustomEventInit
+      api::Scheduler::WaitOptions
 // The list of basics.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

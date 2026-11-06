@@ -39,7 +39,7 @@ fn frame_storing(lock: &mut jsg::Lock, value: &str) -> AsyncContextFrame {
 /// Lets JavaScript read the current frame, and holds a frame for later calls.
 #[jsg_resource]
 struct Probe {
-    frame: Cell<Option<TracedAsyncContextFrame>>,
+    frame: jsg::Cell<Option<TracedAsyncContextFrame>>,
     /// Whether the frame current before `run_in_frame` entered its frame was current again
     /// after it.
     restored: Cell<bool>,
@@ -51,7 +51,7 @@ impl Probe {
     /// A strong handle to the captured frame. The traced frame goes back into its field before
     /// anything can run JavaScript, which the caller may do with the handle it gets.
     fn frame(&self, lock: &mut jsg::Lock) -> AsyncContextFrame {
-        let traced = self.frame.take().unwrap();
+        let traced = self.frame.take(lock).unwrap();
         let frame = traced.to_async_context_frame(lock);
         self.frame.set(Some(traced));
         frame
@@ -108,11 +108,14 @@ impl Probe {
 }
 
 fn install_probe(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Probe> {
-    let probe = jsg::Rc::new(Probe {
-        frame: Cell::new(None),
-        restored: Cell::new(false),
-        saw_pending: Cell::new(false),
-    });
+    let probe = jsg::Rc::new(
+        lock,
+        Probe {
+            frame: jsg::Cell::new(None),
+            restored: Cell::new(false),
+            saw_pending: Cell::new(false),
+        },
+    );
     ctx.set_global(lock, "probe", probe.clone());
     probe
 }
@@ -345,7 +348,7 @@ static STORED_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct Stored {
     /// The probe whose frame stores this value, which closes a cycle through the frame.
-    owner: Cell<Option<jsg::Rc<Probe>>>,
+    owner: jsg::Cell<Option<jsg::Rc<Probe>>>,
 }
 
 impl Drop for Stored {
@@ -369,17 +372,23 @@ fn frame_in_resource_is_traced() {
     let harness = Harness::new();
     let mut kept = None;
     harness.run_in_context(|lock, _ctx| {
-        let probe = jsg::Rc::new(Probe {
-            frame: Cell::new(None),
-            restored: Cell::new(false),
-            saw_pending: Cell::new(false),
-        });
+        let probe = jsg::Rc::new(
+            lock,
+            Probe {
+                frame: jsg::Cell::new(None),
+                restored: Cell::new(false),
+                saw_pending: Cell::new(false),
+            },
+        );
         // The probe's wrapper is reachable, but the probe has no strong reference from Rust, so
         // GC traces its frame through the wrapper.
         let wrapper = probe.clone().to_js(lock)?;
-        let stored = jsg::Rc::new(Stored {
-            owner: Cell::new(Some(probe.clone())),
-        })
+        let stored = jsg::Rc::new(
+            lock,
+            Stored {
+                owner: jsg::Cell::new(Some(probe.clone())),
+            },
+        )
         .to_js(lock)?;
         probe.capture_in(lock, stored);
         kept = Some((wrapper.to_global(lock), probe.downgrade()));
@@ -443,7 +452,7 @@ fn frame_in_function_data_lives_as_long_as_function() {
     let harness = Harness::new();
     let mut kept = None;
     harness.run_in_context(|lock, _ctx| {
-        let marker = jsg::Rc::new(Marker).to_js(lock)?;
+        let marker = jsg::Rc::new(lock, Marker).to_js(lock)?;
         let frame = Harness::run_in_async_context(lock, marker, TracedAsyncContextFrame::current);
         let run_in_frame = v8::Function::new(lock, frame, |lock, frame, args| {
             let callback = v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();

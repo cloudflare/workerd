@@ -162,7 +162,9 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {}
+impl jsg::Traced for DropCounter {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 static UNREACHABLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -217,9 +219,12 @@ impl TerminatingCreator {
 #[test]
 fn function_new_while_terminating_keeps_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let creator = jsg::Rc::new(TerminatingCreator {
-            saw_pending: Cell::new(false),
-        });
+        let creator = jsg::Rc::new(
+            lock,
+            TerminatingCreator {
+                saw_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "creator", creator.clone());
         let result = ctx.eval_raw(
             lock,
@@ -266,9 +271,12 @@ impl ThrowingCreator {
 #[test]
 fn function_new_while_exception_pending_keeps_the_exception() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let creator = jsg::Rc::new(ThrowingCreator {
-            saw_pending: Cell::new(false),
-        });
+        let creator = jsg::Rc::new(
+            lock,
+            ThrowingCreator {
+                saw_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "creator", creator.clone());
         assert_eq!(
             ctx.eval::<String>(
@@ -301,9 +309,12 @@ impl Leaf {}
 fn data_keeps_traced_resources_alive() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let leaf = jsg::Rc::new(Leaf {
-            _drops: DropCounter(&LEAF_DROPS),
-        });
+        let leaf = jsg::Rc::new(
+            lock,
+            Leaf {
+                _drops: DropCounter(&LEAF_DROPS),
+            },
+        );
         let function =
             v8::Function::new(lock, leaf, |lock, leaf, _| leaf.clone().to_js(lock)).unwrap();
         ctx.set_global(lock, "getLeaf", v8::Local::<v8::Value>::from(function));
@@ -325,7 +336,7 @@ static CYCLE_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// Data that can hold a handle back to its own function.
 struct CycleData {
     _drops: DropCounter,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for CycleData {
@@ -340,10 +351,10 @@ fn cycle_through_data_is_collected() {
     harness.run_in_context(|lock, ctx| {
         let data = CycleData {
             _drops: DropCounter(&CYCLE_DROPS),
-            stored: RefCell::new(None),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();
@@ -395,7 +406,7 @@ static TEARDOWN_LEAF_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct TeardownData {
     _drops: DropCounter,
     leaf: jsg::Rc<Leaf>,
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 impl jsg::Traced for TeardownData {
@@ -413,13 +424,16 @@ fn data_of_reachable_function_is_dropped_with_its_isolate() {
     harness.run_in_context(|lock, ctx| {
         let data = TeardownData {
             _drops: DropCounter(&TEARDOWN_DATA_DROPS),
-            leaf: jsg::Rc::new(Leaf {
-                _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
-            }),
-            stored: RefCell::new(None),
+            leaf: jsg::Rc::new(
+                lock,
+                Leaf {
+                    _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
+                },
+            ),
+            stored: jsg::RefCell::new(None),
         };
         let function = v8::Function::new(lock, data, |lock, data, args| {
-            *data.stored.borrow_mut() = Some(args.get(0).to_traced_global(lock));
+            *data.stored.borrow_mut(lock) = Some(args.get(0).to_traced_global(lock));
             Ok(lock.undefined())
         })
         .unwrap();

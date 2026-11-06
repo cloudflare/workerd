@@ -6,10 +6,12 @@
 //!
 //! - On a **struct**: emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`,
 //!   `jsg::Traced`, and `jsg::GarbageCollected` implementations.
-//! - On an **impl block**: emits member factories and, unless `custom_members` is set,
-//!   the `jsg::Resource` trait with automatic member and nested type registration.
+//! - On an **impl block**: emits member factories, which also describe their members for
+//!   RTTI, and, unless `custom_members` is set, the `jsg::Resource` trait with automatic
+//!   member and nested type registration.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -21,6 +23,7 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
+use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
@@ -47,6 +50,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
+    let ts_root = has_flag(&attr, "ts_root");
 
     // Clone the name before mutating `input` so we can borrow freely later.
     let name = input.ident.clone();
@@ -112,12 +116,19 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         }
 
         #[automatically_derived]
+        impl jsg::TypeInfo for #name {
+            fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+            }
+        }
+
+        #[automatically_derived]
         impl<'s> jsg::ToJS<'s> for #name {
             fn to_js(
                 self,
                 lock: &mut jsg::Lock<'s>,
             ) -> ::std::result::Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
-                let r = jsg::Rc::new(self);
+                let r = jsg::Rc::new(lock, self);
                 jsg::ToJS::to_js(r, lock)
             }
         }
@@ -154,10 +165,19 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 }
 
 /// A generated member factory and its invocation for automatic registration.
+///
+/// The factory returns a `jsg::MemberDefinition`: template creation builds `member`, and RTTI
+/// export evaluates `description`, with the `jsg::rtti::Context` bound to `cx`. Both see the
+/// factory's parameters.
 struct MemberRegistration {
     source_name: syn::Ident,
     factory_name: syn::Ident,
-    factory: proc_macro2::TokenStream,
+    params: proc_macro2::TokenStream,
+    /// A `jsg::Member` expression.
+    member: proc_macro2::TokenStream,
+    /// A `jsg::rtti::Member` expression, or `None` for a member without a TypeScript
+    /// declaration.
+    description: Option<proc_macro2::TokenStream>,
     automatic: proc_macro2::TokenStream,
 }
 
@@ -166,26 +186,62 @@ fn member_factory_name(rust_name: &syn::Ident) -> syn::Ident {
 }
 
 impl MemberRegistration {
-    fn new(rust_name: &syn::Ident, member: &proc_macro2::TokenStream) -> Self {
-        Self::with_factory_name(rust_name, member_factory_name(rust_name), member)
+    fn new(
+        rust_name: &syn::Ident,
+        member: proc_macro2::TokenStream,
+        description: Option<proc_macro2::TokenStream>,
+    ) -> Self {
+        Self::with_factory_name(
+            rust_name,
+            member_factory_name(rust_name),
+            member,
+            description,
+        )
     }
 
     fn with_factory_name(
         rust_name: &syn::Ident,
         factory_name: syn::Ident,
-        member: &proc_macro2::TokenStream,
+        member: proc_macro2::TokenStream,
+        description: Option<proc_macro2::TokenStream>,
     ) -> Self {
         Self {
-            factory: quote! {
-                #[automatically_derived]
-                #[must_use]
-                fn #factory_name() -> jsg::Member {
-                    #member
-                }
-            },
             automatic: quote! { Self::#factory_name() },
+            params: quote! {},
+            member,
+            description,
             source_name: rust_name.clone(),
             factory_name,
+        }
+    }
+
+    fn factory(&self) -> proc_macro2::TokenStream {
+        let Self {
+            factory_name,
+            params,
+            member,
+            description,
+            ..
+        } = self;
+        let definition = if let Some(description) = description {
+            quote! {
+                jsg::described_member(
+                    move || #member,
+                    move |cx: &mut jsg::rtti::Context| {
+                        let _ = &cx;
+                        #description
+                    },
+                )
+            }
+        } else {
+            quote! { jsg::undescribed(#member) }
+        };
+        quote! {
+            #[automatically_derived]
+            #[must_use]
+            fn #factory_name(#params) -> impl jsg::MemberDefinition {
+                #definition
+            }
         }
     }
 }
@@ -202,13 +258,7 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
             let attr = method.attrs.iter().find(|a| is_attr(a, "jsg_method"))?;
 
             let rust_method_name = &method.sig.ident;
-            let js_name = attr
-                .meta
-                .require_list()
-                .ok()
-                .map(|list| list.tokens.clone())
-                .and_then(extract_name_attribute)
-                .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
+            let js_name = method_js_name(attr, rust_method_name);
             let callback_name = syn::Ident::new(
                 &format!("{rust_method_name}_callback"),
                 rust_method_name.span(),
@@ -254,30 +304,98 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
                     }
                 }
             };
-            Some(MemberRegistration::new(rust_method_name, &member))
+            let args = describe_args(method, Callable::Method);
+            let result = describe_result(method);
+            let is_static = !has_self;
+            let description = quote! {
+                jsg::rtti::Member::Method {
+                    name: #js_name,
+                    args: vec![#(#args),*],
+                    result: #result,
+                    is_static: #is_static,
+                }
+            };
+            Some(MemberRegistration::new(
+                rust_method_name,
+                member,
+                Some(description),
+            ))
         })
         .collect()
 }
 
 /// Scans `impl_block` for `#[jsg_wildcard_property]` methods. A resource type has at most one
-/// wildcard property, so with automatic registration a second method is a compile error, which
-/// is returned alongside the registrations so that the type is still registered and adds no
-/// errors of its own. Custom registration may choose between several by compatibility flag;
-/// registering more than one at once fails at runtime.
+/// wildcard property.
 fn collect_wildcard_registrations(
     impl_block: &ItemImpl,
     mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    collect_at_most_one(
+        impl_block,
+        mode,
+        "jsg_wildcard_property",
+        member_factory_name,
+        |method| {
+            let rust_name = &method.sig.ident;
+            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
+            let query_callback = crate::wildcard::query_callback_name(rust_name);
+            let member = quote! {
+                jsg::Member::WildcardProperty {
+                    getter_callback: Self::#getter_callback(),
+                    query_callback: Self::#query_callback(),
+                }
+            };
+            // C++ RTTI does not describe wildcard properties either.
+            (member, None)
+        },
+    )
+}
+
+/// Scans `impl_block` for `#[jsg_callable]` methods. As with wildcard properties, a resource
+/// type is callable at most one way. The factory is `{name}_callable_member`, so that a method
+/// can also be a `#[jsg_method]`, whose factory is `{name}_member`.
+fn collect_callable_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let factory_name = |rust_name: &syn::Ident| {
+        syn::Ident::new(&format!("{rust_name}_callable_member"), rust_name.span())
+    };
+    collect_at_most_one(impl_block, mode, "jsg_callable", factory_name, |method| {
+        let callback = crate::callable_callback_name(&method.sig.ident);
+        let member = quote! { jsg::Member::Callable { callback: Self::#callback() } };
+        let args = describe_args(method, Callable::Method);
+        let result = describe_result(method);
+        let description = quote! {
+            jsg::rtti::Member::Callable {
+                args: vec![#(#args),*],
+                result: #result,
+            }
+        };
+        (member, Some(description))
+    })
+}
+
+/// Registers each method of `impl_block` annotated with `#[attr]`, a member a resource type has
+/// at most one of, in a factory named by `factory_name`; `registration` gives the member and its
+/// RTTI description. With automatic registration a second such method is a compile error,
+/// which is returned alongside the registrations so that the type is still registered and adds
+/// no errors of its own. Custom registration may choose between several by compatibility flag;
+/// registering more than one at once fails at runtime.
+fn collect_at_most_one(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+    attr: &str,
+    factory_name: impl Fn(&syn::Ident) -> syn::Ident,
+    registration: impl Fn(
+        &syn::ImplItemFn,
+    ) -> (proc_macro2::TokenStream, Option<proc_macro2::TokenStream>),
 ) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
     let methods: Vec<_> = impl_block
         .items
         .iter()
         .filter_map(|item| match item {
-            syn::ImplItem::Fn(method)
-                if method
-                    .attrs
-                    .iter()
-                    .any(|a| is_attr(a, "jsg_wildcard_property")) =>
-            {
+            syn::ImplItem::Fn(method) if method.attrs.iter().any(|a| is_attr(a, attr)) => {
                 Some(method)
             }
             _ => None,
@@ -289,8 +407,10 @@ fn collect_wildcard_registrations(
         .map(|second| {
             syn::Error::new_spanned(
                 &second.sig.ident,
-                "a resource type has at most one #[jsg_wildcard_property]; use \
-                 `custom_members` to choose between several by compatibility flag",
+                format!(
+                    "a resource type has at most one #[{attr}]; use `custom_members` to choose \
+                     between several by compatibility flag"
+                ),
             )
             .to_compile_error()
         });
@@ -298,18 +418,112 @@ fn collect_wildcard_registrations(
         .iter()
         .map(|method| {
             let rust_name = &method.sig.ident;
-            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
-            let query_callback = crate::wildcard::query_callback_name(rust_name);
-            let member = quote! {
-                jsg::Member::WildcardProperty {
-                    getter_callback: Self::#getter_callback(),
-                    query_callback: Self::#query_callback(),
-                }
-            };
-            MemberRegistration::new(rust_name, &member)
+            let (member, description) = registration(method);
+            MemberRegistration::with_factory_name(
+                rust_name,
+                factory_name(rust_name),
+                member,
+                description,
+            )
         })
         .collect();
     (registrations, error)
+}
+
+/// The attributes of members that take a receiver but are registered without the type's
+/// `v8::Signature`, which a disposer cannot also be. (A constructor has no receiver.)
+pub const NON_DISPOSER_MEMBERS: [&str; 3] = [
+    "jsg_property",
+    "jsg_inspect_property",
+    "jsg_wildcard_property",
+];
+
+/// Scans `impl_block` for `#[jsg_dispose]` and `#[jsg_async_dispose]` methods, returning their
+/// registrations and the compile errors of those that are invalid.
+///
+/// A disposer needs a receiver, and it is not also a property, an inspect property or a wildcard
+/// property: its callback trusts the type's `v8::Signature`, which those are registered without. A
+/// type has at most one disposer of each kind, sync and async, as C++ JSG allows, so with automatic
+/// registration a second one of a kind is an error too; custom registration may choose between
+/// several by compatibility flag, and registering two of a kind at once panics when the template
+/// is created. A method rejected for its shape is not registered; a second disposer is, so that
+/// the type adds no errors of its own.
+fn collect_dispose_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Vec<proc_macro2::TokenStream>) {
+    let mut registrations = Vec::new();
+    let mut errors = Vec::new();
+    // The first sync and the first async disposer.
+    let mut first: [Option<&syn::Ident>; 2] = [None, None];
+    for item in &impl_block.items {
+        let syn::ImplItem::Fn(method) = item else {
+            continue;
+        };
+        let has_dispose = method.attrs.iter().any(|a| is_attr(a, "jsg_dispose"));
+        let is_async = method.attrs.iter().any(|a| is_attr(a, "jsg_async_dispose"));
+        if !has_dispose && !is_async {
+            continue;
+        }
+        let attr_name = if is_async {
+            "jsg_async_dispose"
+        } else {
+            "jsg_dispose"
+        };
+        let rust_name = &method.sig.ident;
+        let mut error = |message: String| {
+            errors.push(syn::Error::new_spanned(rust_name, message).to_compile_error());
+        };
+        let has_receiver = method.sig.receiver().is_some() || this_param(&method.sig).is_some();
+        if !has_receiver {
+            error(format!(
+                "a #[{attr_name}] method takes `&self`, or `this: jsg::Rc<Self>` in its place"
+            ));
+            continue;
+        }
+        if let Some(other) = method
+            .attrs
+            .iter()
+            .find_map(|a| NON_DISPOSER_MEMBERS.iter().find(|name| is_attr(a, name)))
+        {
+            error(format!(
+                "a #[{attr_name}] method cannot be a #[{other}]; only #[jsg_method] and \
+                 #[jsg_callable] combine with it"
+            ));
+            continue;
+        }
+        if has_dispose && is_async {
+            error(
+                "a method cannot be both #[jsg_dispose] and #[jsg_async_dispose]: a sync \
+                 disposer and an async one are different methods"
+                    .to_owned(),
+            );
+        }
+        if mode == RegistrationMode::Automatic {
+            let first = &mut first[usize::from(is_async)];
+            if let Some(first) = first {
+                error(format!(
+                    "a resource type has at most one #[{attr_name}], and `{first}` is one already. \
+                     Use `custom_members` to choose between several by compatibility flag"
+                ));
+            }
+            first.get_or_insert(rust_name);
+        }
+        let callback_name = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
+        let (variant, suffix) = if is_async {
+            (quote! { AsyncDispose }, "async_dispose_member")
+        } else {
+            (quote! { Dispose }, "dispose_member")
+        };
+        // C++ RTTI describes disposers, but the TypeScript generator ignores them.
+        registrations.push(MemberRegistration::with_factory_name(
+            rust_name,
+            syn::Ident::new(&format!("{rust_name}_{suffix}"), rust_name.span()),
+            quote! { jsg::Member::#variant { callback: Self::#callback_name() } },
+            None,
+        ));
+    }
+    (registrations, errors)
 }
 
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts.
@@ -327,25 +541,25 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
                 .find(|a| is_attr(a, "jsg_static_constant"))?;
 
             let rust_name = &constant.ident;
-            let js_name = attr
-                .meta
-                .require_list()
-                .ok()
-                .map(|list| list.tokens.clone())
-                .and_then(extract_name_attribute)
-                .unwrap_or_else(|| rust_name.to_string());
+            let js_name = constant_js_name(attr, rust_name);
 
             let factory_base =
                 syn::Ident::new(&rust_name.to_string().to_lowercase(), rust_name.span());
             Some(MemberRegistration::with_factory_name(
                 rust_name,
                 member_factory_name(&factory_base),
-                &quote! {
+                quote! {
                     jsg::Member::StaticConstant {
                         name: #js_name.to_owned(),
                         value: jsg::ConstantValue::from(Self::#rust_name),
                     }
                 },
+                Some(quote! {
+                    jsg::rtti::Member::Constant {
+                        name: #js_name,
+                        value: jsg::ConstantValue::from(Self::#rust_name),
+                    }
+                }),
             ))
         })
         .collect()
@@ -393,23 +607,18 @@ impl syn::parse::Parse for NestedTypeArg {
     }
 }
 
-/// Returns a `Member::NestedType` token stream for a nested type.
+/// Returns the registration of a nested type.
 fn nested_type_registration(arg: &NestedTypeArg) -> proc_macro2::TokenStream {
     use syn::ext::IdentExt;
 
     let ty = &arg.ty;
     let name = if let Some(name) = &arg.name {
         let name = name.unraw().to_string();
-        quote! { #name.to_owned() }
+        quote! { #name }
     } else {
-        quote! { <#ty as jsg::Type>::class_name().to_owned() }
+        quote! { <#ty as jsg::Type>::class_name() }
     };
-    quote! {
-        jsg::Member::NestedType {
-            name: #name,
-            nested_type: jsg::NestedType::of::<#ty>(),
-        }
-    }
+    quote! { jsg::nested_type::<#ty>(#name) }
 }
 
 /// Check factory names against each other and the user's value-namespace associated items.
@@ -535,8 +744,8 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     if let (Some(custom_members), Some(nested)) = (custom_members, first_nested_types) {
         let mut error = syn::Error::new_spanned(
             nested,
-            "`nested_types(...)` cannot be combined with `custom_members`; add \
-             `jsg::Member::NestedType` entries to `Resource::members` instead",
+            "`nested_types(...)` cannot be combined with `custom_members`; register \
+             `jsg::nested_type::<T>(name)` in `Resource::members` instead",
         );
         error.combine(syn::Error::new_spanned(
             custom_members,
@@ -592,8 +801,12 @@ fn generate_resource_bindings(
     registrations.extend(collect_constant_registrations(impl_block));
     let (wildcard, wildcard_error) = collect_wildcard_registrations(impl_block, mode);
     registrations.extend(wildcard);
+    let (disposers, dispose_errors) = collect_dispose_registrations(impl_block, mode);
+    registrations.extend(disposers);
+    let (callable, callable_error) = collect_callable_registrations(impl_block, mode);
+    registrations.extend(callable);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
-    let factories = registrations.iter().map(|r| &r.factory);
+    let factories = registrations.iter().map(MemberRegistration::factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
     let nested_type_registrations = nested_types.iter().map(nested_type_registration);
 
@@ -602,12 +815,12 @@ fn generate_resource_bindings(
             #[automatically_derived]
             impl jsg::Resource for #self_ty {
                 fn members(
+                    registry: &mut impl jsg::MemberRegistry,
                     _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
-                ) -> Vec<jsg::Member>
-                where
-                    Self: Sized,
-                {
-                    vec![#(#automatic,)* #(#nested_type_registrations,)*]
+                ) {
+                    let _ = &registry;
+                    #(registry.add(#automatic);)*
+                    #(registry.add(#nested_type_registrations);)*
                 }
             }
         }
@@ -617,6 +830,8 @@ fn generate_resource_bindings(
 
     Ok(quote! {
         #wildcard_error
+        #(#dispose_errors)*
+        #callable_error
 
         #[automatically_derived]
         impl #self_ty {
@@ -625,6 +840,81 @@ fn generate_resource_bindings(
 
         #resource_impl
     })
+}
+
+/// The kind of callable whose JavaScript parameters are described.
+#[derive(Clone, Copy)]
+enum Callable {
+    /// A method, whose first parameter receives the resource if it is named `this`.
+    Method,
+    /// A constructor, which has no receiver; a parameter named `this` is an argument.
+    Constructor,
+}
+
+fn describe_args(method: &syn::ImplItemFn, callable: Callable) -> Vec<proc_macro2::TokenStream> {
+    let args: Vec<_> = method
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| match arg {
+            FnArg::Typed(arg) => Some(arg),
+            FnArg::Receiver(_) => None,
+        })
+        .collect();
+    // Injected parameters come first: a method's `this`, then the lock.
+    let this_params = match callable {
+        Callable::Method => usize::from(this_param(&method.sig).is_some()),
+        Callable::Constructor => 0,
+    };
+    let offset = this_params
+        + usize::from(
+            args.get(this_params)
+                .is_some_and(|arg| is_lock_ref(&arg.ty)),
+        );
+    let mut names = HashSet::new();
+    args.iter().skip(offset).enumerate().map(|(i, arg)| {
+        let ty = elide_named_lifetimes(&arg.ty);
+        let name = match arg.pat.as_ref() {
+            syn::Pat::Ident(pat) => {
+                let ident = pat.ident.to_string();
+                let name = ident.trim_start_matches("r#").trim_start_matches('_');
+                if name.is_empty() { format!("param{i}") } else { snake_to_camel(name) }
+            }
+            _ => format!("param{i}"),
+        };
+        if !names.insert(name.clone()) {
+            return syn::Error::new_spanned(
+                &arg.pat,
+                format!("duplicate TypeScript parameter name `{name}`"),
+            ).to_compile_error();
+        }
+        quote! { jsg::rtti::Parameter { name: #name, ty: <#ty as jsg::TypeInfo>::describe(cx) } }
+    }).collect()
+}
+
+fn describe_result(method: &syn::ImplItemFn) -> proc_macro2::TokenStream {
+    match &method.sig.output {
+        syn::ReturnType::Default => quote! { jsg::rtti::Type::Void },
+        syn::ReturnType::Type(_, ty) => {
+            let ty = elide_named_lifetimes(ty);
+            quote! { <#ty as jsg::TypeInfo>::describe(cx) }
+        }
+    }
+}
+
+fn explicit_js_name(attr: &syn::Attribute) -> Option<String> {
+    attr.meta
+        .require_list()
+        .ok()
+        .and_then(|list| extract_name_attribute(list.tokens.clone()))
+}
+
+fn method_js_name(attr: &syn::Attribute, ident: &syn::Ident) -> String {
+    explicit_js_name(attr).unwrap_or_else(|| snake_to_camel(&ident.to_string()))
+}
+
+fn constant_js_name(attr: &syn::Attribute, ident: &syn::Ident) -> String {
+    explicit_js_name(attr).unwrap_or_else(|| ident.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -718,16 +1008,7 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
-            let elided_ty = elide_named_lifetimes(ty);
-            let unwrap = quote! {
-                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        lock.throw_exception(&err);
-                        return;
-                    }
-                };
-            };
+            let unwrap = crate::unwrap_argument(ty, &var, js_index, None);
             (unwrap, quote! { #var })
         })
         .unzip();
@@ -770,6 +1051,9 @@ fn generate_constructor_registration(
     let call = quote! { #self_ty::#rust_method_name };
 
     let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
+    // Reported inside the callback, so that the type is still registered and adds no errors of
+    // its own.
+    let rest_error = crate::rest_parameter_error(&method.sig).map(|error| error.to_compile_error());
     let length = required_argument_count(method.sig.inputs.iter());
     let lock_arg = if has_lock_param {
         quote! { &mut *lock, }
@@ -805,16 +1089,22 @@ fn generate_constructor_registration(
                     return;
                 }
 
+                #rest_error
                 #(#unwraps)*
 
                 #construct
-                let rc = jsg::Rc::new(resource);
+                let rc = jsg::Rc::new(lock, resource);
                 rc.attach_to_this(args);
             }),
             length: #length,
         }
     };
-    Ok(Some(MemberRegistration::new(rust_method_name, &member)))
+    let args = describe_args(method, Callable::Constructor);
+    Ok(Some(MemberRegistration::new(
+        rust_method_name,
+        member,
+        Some(quote! { jsg::rtti::Member::Constructor(vec![#(#args),*]) }),
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -825,13 +1115,15 @@ fn generate_constructor_registration(
 ///
 /// `is_readonly` only affects the lazy instance placement: other placements are read-only
 /// exactly when there is no setter, but a lazy instance property never has a setter and is
-/// writable unless `readonly` is given, like C++ `JSG_LAZY_INSTANCE_PROPERTY`.
+/// writable unless `readonly` is given, like C++ `JSG_LAZY_INSTANCE_PROPERTY`. `ty` is the
+/// `jsg::rtti::Type` expression of the getter's result.
 fn emit_property_group(
     js_name: &str,
     kind: PropertyKind,
     getter: Option<syn::Ident>,
     setter: Option<syn::Ident>,
     is_readonly: bool,
+    ty: &proc_macro2::TokenStream,
 ) -> Result<MemberRegistration, proc_macro2::TokenStream> {
     let Some(getter_name) = getter else {
         return Err(quote! {
@@ -861,7 +1153,12 @@ fn emit_property_group(
         }
     };
     if kind == PropertyKind::Inspect {
-        return Ok(MemberRegistration::new(&getter_name, &prototype_member));
+        // Inspect properties are symbol-keyed and have no TypeScript declaration.
+        return Ok(MemberRegistration::new(
+            &getter_name,
+            prototype_member,
+            None,
+        ));
     }
 
     let instance_getter_cb = syn::Ident::new(
@@ -869,6 +1166,7 @@ fn emit_property_group(
         getter_name.span(),
     );
     let has_setter = setter.is_some();
+    let accessor_readonly = !has_setter;
     let instance_setter = if let Some(setter_name) = setter {
         let setter_cb = syn::Ident::new(
             &format!("{setter_name}_instance_callback"),
@@ -908,25 +1206,53 @@ fn emit_property_group(
         }
     };
     Ok(MemberRegistration {
-        factory: quote! {
-            #[automatically_derived]
-            #[must_use]
-            fn #factory_name(placement: jsg::PropertyPlacement) -> jsg::Member {
-                match placement {
-                    jsg::PropertyPlacement::Prototype => #prototype_member,
-                    jsg::PropertyPlacement::Instance => jsg::Member::InstanceProperty {
-                        name: #js_name.to_owned(),
-                        getter_callback: Self::#instance_getter_cb(),
-                        setter_callback: #instance_setter,
-                    },
-                    jsg::PropertyPlacement::LazyInstance => #lazy_instance_member,
-                }
+        params: quote! { placement: jsg::PropertyPlacement },
+        member: quote! {
+            match placement {
+                jsg::PropertyPlacement::Prototype => #prototype_member,
+                jsg::PropertyPlacement::Instance => jsg::Member::InstanceProperty {
+                    name: #js_name.to_owned(),
+                    getter_callback: Self::#instance_getter_cb(),
+                    setter_callback: #instance_setter,
+                },
+                jsg::PropertyPlacement::LazyInstance => #lazy_instance_member,
             }
         },
+        description: Some(property_description(
+            js_name,
+            ty,
+            accessor_readonly,
+            is_readonly,
+        )),
         automatic: quote! { Self::#factory_name(#placement) },
         source_name: getter_name,
         factory_name,
     })
+}
+
+/// Returns the RTTI description of an ordinary property, given its factory's `placement`.
+/// Accessor placements are read-only when there is no setter, and the lazy instance placement
+/// when `readonly` is given.
+fn property_description(
+    js_name: &str,
+    ty: &proc_macro2::TokenStream,
+    accessor_readonly: bool,
+    lazy_readonly: bool,
+) -> proc_macro2::TokenStream {
+    quote! {
+        jsg::rtti::Member::Property {
+            name: #js_name,
+            ty: #ty,
+            readonly: match placement {
+                jsg::PropertyPlacement::Prototype | jsg::PropertyPlacement::Instance => {
+                    #accessor_readonly
+                }
+                jsg::PropertyPlacement::LazyInstance => #lazy_readonly,
+            },
+            prototype: matches!(placement, jsg::PropertyPlacement::Prototype),
+            lazy: matches!(placement, jsg::PropertyPlacement::LazyInstance),
+        }
+    }
 }
 
 /// Parses the argument list of `#[jsg_property([placement,] [name = "..."] [, readonly])]`.
@@ -1011,6 +1337,8 @@ pub fn parse_jsg_property_args(
 
 struct PropMethod {
     rust_name: syn::Ident,
+    /// The `jsg::rtti::Type` expression of the method's result.
+    result: proc_macro2::TokenStream,
     is_setter: bool,
     is_readonly: bool,
 }
@@ -1077,6 +1405,7 @@ fn scan_property_annotations(
             let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
             prop_groups_find_or_insert(&mut groups, (js_name, kind)).push(PropMethod {
                 rust_name: rust_method_name,
+                result: describe_result(method),
                 is_setter,
                 is_readonly,
             });
@@ -1099,6 +1428,7 @@ fn scan_property_annotations(
             prop_groups_find_or_insert(&mut groups, (js_name, PropertyKind::Inspect)).push(
                 PropMethod {
                     rust_name: rust_method_name,
+                    result: describe_result(method),
                     is_setter,
                     is_readonly: false,
                 },
@@ -1156,6 +1486,8 @@ fn validate_and_emit_property(
 
     let mut getter: Option<syn::Ident> = None;
     let mut setter: Option<syn::Ident> = None;
+    // Without a getter, `emit_property_group` reports an error and the type is unused.
+    let mut ty = quote! { jsg::rtti::Type::Unknown };
     for m in methods {
         if m.is_setter {
             if setter.replace(m.rust_name).is_some() {
@@ -1167,9 +1499,11 @@ fn validate_and_emit_property(
             return Err(
                 quote! { compile_error!(concat!("duplicate getter for property \"", #js_name, "\"")); },
             );
+        } else {
+            ty = m.result;
         }
     }
-    emit_property_group(js_name, kind, getter, setter, has_readonly_getter)
+    emit_property_group(js_name, kind, getter, setter, has_readonly_getter, &ty)
 }
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
