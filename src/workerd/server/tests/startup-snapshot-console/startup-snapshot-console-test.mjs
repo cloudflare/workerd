@@ -14,14 +14,18 @@ assert(
   env.WD_TEST_CONFIG !== undefined,
   'You must set the WD_TEST_CONFIG environment variable.'
 );
+assert(
+  env.WD_THROWS_CONFIG !== undefined,
+  'You must set the WD_THROWS_CONFIG environment variable.'
+);
 
-// Runs `workerd test` on the config and returns its stdout and stderr, interleaved.
-function runWorkerd(extraArgs) {
+// Runs `workerd test` on a config and returns its stdout and stderr, interleaved.
+function runWorkerd(config, extraArgs) {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(
       env.WORKERD_BINARY,
-      ['test', env.WD_TEST_CONFIG, '--experimental', ...extraArgs],
+      ['test', config, '--experimental', ...extraArgs],
       { stdio: ['pipe', 'pipe', 'pipe'] }
     );
     child.stdout.on('data', (data) => (output += data));
@@ -54,7 +58,7 @@ function assertEachMarkOnce(output) {
 const SKIPPED = 'startup snapshot skipped';
 
 test('top-level console output is printed once, snapshot used or not', async () => {
-  const { code, output } = await runWorkerd([]);
+  const { code, output } = await runWorkerd(env.WD_TEST_CONFIG, []);
   assert.strictEqual(code, 0, output);
   assertEachMarkOnce(output);
   const skipped = output.split(SKIPPED).length - 1;
@@ -63,11 +67,33 @@ test('top-level console output is printed once, snapshot used or not', async () 
 });
 
 test('with an inspector configured, the zygote does not run', async () => {
-  const { code, output } = await runWorkerd(['--inspector-addr=127.0.0.1:0']);
+  const { code, output } = await runWorkerd(env.WD_TEST_CONFIG, [
+    '--inspector-addr=127.0.0.1:0',
+  ]);
   assert.strictEqual(code, 0, output);
   assertEachMarkOnce(output);
   assert(
     !output.includes(SKIPPED),
     `zygote ran under an inspector:\n${output}`
   );
+});
+
+test('a top level that throws gets no snapshot and reports its error once', async () => {
+  const { code, output } = await runWorkerd(env.WD_THROWS_CONFIG, []);
+  // The Worker's own evaluation fails, so the config is refused.
+  assert.notStrictEqual(code, 0, output);
+  // The zygote fails before anything is recorded and says why.
+  const skipped = output.split(SKIPPED).length - 1;
+  assert.strictEqual(skipped, 1, `expected one fallback:\n${output}`);
+  assert(output.includes('the zygote Worker threw'), output);
+  assert(output.includes("the zygote's top level failed"), output);
+  // The zygote's console line is dropped with it; the Worker's evaluation prints it.
+  const logged = output.split('MARK throws log').length - 1;
+  assert.strictEqual(
+    logged,
+    1,
+    `"MARK throws log" printed ${logged} times:\n${output}`
+  );
+  // The Worker's failure is the one reported.
+  assert(output.includes('Uncaught Error: MARK throws error'), output);
 });
