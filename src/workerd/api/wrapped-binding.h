@@ -30,6 +30,23 @@ class WrappedBinding final: public jsg::Object {
     return js.alloc<WrappedBinding>(kj::mv(fetcher));
   }
 
+  // Transfers through a startup snapshot with a copy of its fetcher, so that a wrapper the zygote
+  // built for `env` comes with it. Not when the fetcher cannot be copied, or copies as a type other
+  // than its own (a subclass that does not override Fetcher::cloneForSnapshot()).
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    kj::Maybe<jsg::Ref<Fetcher>> fetcherCopy;
+    KJ_IF_SOME(f, fetcher) {
+      KJ_IF_SOME(copy, f->cloneForSnapshot()) {
+        if (copy->jsgGetMemoryName() != f->jsgGetMemoryName()) return kj::none;
+        fetcherCopy = kj::mv(copy);
+      } else {
+        return kj::none;
+      }
+    }
+    return ownAsWrappable(kj::refcounted<WrappedBinding>(SnapshotCloneTag{}, kj::mv(fetcherCopy),
+        wrapperModule.map([](const kj::String& s) { return kj::str(s); })));
+  }
+
   JSG_RESOURCE_TYPE(WrappedBinding) {}
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -48,6 +65,16 @@ class WrappedBinding final: public jsg::Object {
   }
 
  private:
+  struct SnapshotCloneTag {};
+
+ public:
+  // The copy snapshotClone() makes.
+  WrappedBinding(
+      SnapshotCloneTag, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::Maybe<kj::String> wrapperModule)
+      : fetcher(kj::mv(fetcher)),
+        wrapperModule(kj::mv(wrapperModule)) {}
+
+ private:
   kj::Maybe<jsg::Ref<Fetcher>> fetcher;
   kj::Maybe<kj::String> wrapperModule;
 
@@ -62,6 +89,9 @@ class WrappedBindingModule final: public jsg::Object {
  public:
   WrappedBindingModule() = default;
   WrappedBindingModule(jsg::Lock&, const jsg::Url&) {}
+
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
 
   JSG_RESOURCE_TYPE(WrappedBindingModule) {
     JSG_NESTED_TYPE(WrappedBinding);

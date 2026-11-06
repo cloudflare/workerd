@@ -11,6 +11,9 @@ class Base64Module final: public jsg::Object {
   Base64Module() = default;
   Base64Module(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  static constexpr bool jsgSnapshotStateless = true;
+
   jsg::JsBufferSource decodeArray(jsg::Lock& js, jsg::JsBufferSource source);
   jsg::JsBufferSource encodeArray(jsg::Lock& js, jsg::JsBufferSource source);
   jsg::JsString encodeArrayToString(jsg::Lock&, jsg::JsBufferSource source);
