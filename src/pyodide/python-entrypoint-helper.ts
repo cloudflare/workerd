@@ -30,7 +30,7 @@ import {
 import {
   PythonUserError,
   PythonWorkersInternalError,
-  loadPythonMod,
+  loadOrReusePythonMod,
   reportError,
 } from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
@@ -556,7 +556,7 @@ async function getIntrospectionMod(): Promise<IntrospectionMod> {
   if (introspectionModPromise === null) {
     introspectionModPromise = (async (): Promise<IntrospectionMod> => {
       const pyodide = await getPyodide();
-      return loadPythonMod(
+      return loadOrReusePythonMod(
         pyodide,
         'introspection',
         introspectionSource
