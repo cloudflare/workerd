@@ -772,11 +772,12 @@ A retainer held as a field of a resource without `custom_trace` is traced too, s
 `Traced` impl: `jsg::jsg_traced!(Cache);` for one that holds no GC references.
 
 A retainer's node counts its own bytes, so a collection of retainers counts only its spare
-capacity. A retainer reached twice, as through two `Rc`s, is one node, so a type in a cycle through
-`std::rc::Rc` or `std::sync::Arc` should be a retainer: anything else is reported again each time
-it is reached. Nodes nest at most `jsg::MemoryTracker::MAX_DEPTH` deep, and a node that deep is
-reported without what it holds, which bounds such a cycle and any long chain. A retainer type is
-`'static`.
+capacity. A retainer reached twice is one node, and so is an allocation that several
+`std::rc::Rc`s or `std::sync::Arc`s share, which also ends a cycle through them. Nodes nest at most
+`jsg::MemoryTracker::MAX_DEPTH` deep: a node that would be that deep is a leaf with nothing inside
+it, or an edge to a resource's JavaScript wrapper, which bounds any long chain, and which is not
+deduplicated, so that a shorter path to the same value still reports it in full. A retainer type
+is `'static`.
 
 The reporting code (`visit_for_memory_info`, `memory_info` and any `MemoryInfo` impl) follows the
 rules in `jsg::MemoryInfo`'s docs:
@@ -784,10 +785,11 @@ rules in `jsg::MemoryInfo`'s docs:
 - It must not panic. It runs in a callback from C++, where a panic aborts the process.
 - It must not write into anything it can reach. A `jsg::Cell<T>` is reported in place and its
   `set`, `replace` and `take` panic while it is, and a `RefCell` is borrowed while its value is
-  reported, so a `borrow_mut` panics; either aborts the process. A `std::cell::Cell<T>` is
-  reported only for `T: Copy`, by a copy; hold a retainer in a `jsg::Cell` instead.
+  reported, so a `borrow_mut` panics; either aborts the process. A `std::cell::Cell<T>` exists
+  only for `T: Copy` and reports nothing, as plain data does; hold a retainer in a `jsg::Cell`
+  instead.
 - It must not call into JavaScript.
 
 `memory_info` or `custom_memory_info` (not both) can be combined with `name`, `custom_trace` and
-`ts_root`. Any other flag on the struct is a compile error, so a misspelled `memory_info` is not
-silently off.
+`ts_root`. Any other flag on the struct, or one given twice, is a compile error, so a misspelled
+`memory_info` is not silently off.

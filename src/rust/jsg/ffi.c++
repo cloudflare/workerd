@@ -1170,6 +1170,22 @@ void memory_tracker_track_wrappable(
       memoryTrackerEdgeName(edge_name), static_cast<const ::workerd::jsg::Wrappable*>(&wrappable));
 }
 
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  // Reading the wrapper changes nothing, but tryGetHandle() is not const.
+  auto& base = const_cast<::workerd::jsg::Wrappable&>(
+      static_cast<const ::workerd::jsg::Wrappable&>(wrappable));
+  KJ_IF_SOME(handle, base.tryGetHandle(isolate)) {
+    tracker.trackField(memoryTrackerEdgeName(edge_name), handle);
+  } else {
+    // The name is a literal, as `jsgGetMemoryName()` says.
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), wrappable.jsgGetMemorySelfSize(),
+        wrappable.jsgGetMemoryName());
+  }
+}
+
 void memory_tracker_track_global(
     MemoryTracker& tracker, const char* edge_name, const Global& global) {
   if (global.ptr == 0) return;
@@ -1198,7 +1214,7 @@ void memory_tracker_pop_node(MemoryTracker& tracker) {
   tracker.popNode();
 }
 
-size_t memory_tracker_depth(MemoryTracker& tracker) {
+size_t memory_tracker_depth(const MemoryTracker& tracker) {
   return tracker.depth();
 }
 

@@ -107,10 +107,16 @@ pub fn generate(mode: Mode, input: &mut syn::DeriveInput) -> syn::Result<MemoryI
         let statements = reported.iter().filter(|field| field.reported).map(|field| {
             let ident = &field.ident;
             let edge_name = &field.edge_name;
-            // Spanned to the field's type, so that a type without `jsg::MemoryInfo` is reported
-            // at the field.
-            quote_spanned! {field.ty_span=>
-                jsg::MemoryTracker::track_field(tracker, #edge_name, &self.#ident);
+            let ty = &field.ty;
+            // Only the trait path takes the type's span, so that a type without
+            // `jsg::MemoryInfo` is reported at the field; `self` and `tracker` keep the span of
+            // the generated method, whose parameters they are, as the type's tokens may come from
+            // another hygiene context, such as the caller of a `macro_rules!` macro.
+            let track = quote_spanned! {ty.span()=>
+                <#ty as jsg::MemoryInfo>::track_as_field
+            };
+            quote! {
+                #track(&self.#ident, tracker, ::std::option::Option::Some(#edge_name));
             }
         });
         quote! {
@@ -134,7 +140,7 @@ pub fn generate(mode: Mode, input: &mut syn::DeriveInput) -> syn::Result<MemoryI
 struct Field {
     ident: syn::Ident,
     edge_name: syn::LitCStr,
-    ty_span: proc_macro2::Span,
+    ty: syn::Type,
     reported: bool,
     /// The span of the `#[jsg_memory_info(skip)]` attribute, if any.
     attr_span: proc_macro2::Span,
@@ -189,7 +195,7 @@ fn take_reported_fields(input: &mut syn::DeriveInput) -> syn::Result<Vec<Field>>
         result.push(Field {
             edge_name: syn::LitCStr::new(&edge_name, ident.span()),
             ident,
-            ty_span: field.ty.span(),
+            ty: field.ty.clone(),
             reported: skip.is_none(),
             attr_span: skip.unwrap_or_else(proc_macro2::Span::call_site),
         });

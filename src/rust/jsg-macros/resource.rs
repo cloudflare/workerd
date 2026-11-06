@@ -599,8 +599,14 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
             Ok(metas) => metas,
             Err(err) => return Some(err),
         };
-    metas.iter().find_map(|meta| {
+    metas.iter().enumerate().find_map(|(i, meta)| {
         let path = meta.path();
+        if metas.iter().take(i).any(|earlier| earlier.path() == path) {
+            return Some(syn::Error::new_spanned(
+                path,
+                "a #[jsg_resource] struct flag can be given once",
+            ));
+        }
         if path.is_ident("nested_types") || path.is_ident("custom_members") {
             let flag = if path.is_ident("nested_types") {
                 "nested_types(...)"

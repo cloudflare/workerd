@@ -132,6 +132,10 @@ void memory_tracker_track_field_with_size(
 // Tracks a Wrappable, as `trackField` tracks a `jsg::Ref` field.
 void memory_tracker_track_wrappable(
     MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable);
+// Adds an edge to the JavaScript wrapper of a Wrappable of the tracker's isolate, or, if it has
+// none, a node of its name and size with nothing inside it, which is not deduplicated.
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable);
 // Adds an edge to the value of `global`, a handle of the tracker's isolate, unless it is empty.
 void memory_tracker_track_global(
     MemoryTracker& tracker, const char* edge_name, const Global& global);
@@ -145,7 +149,7 @@ bool memory_tracker_push_retainer(MemoryTracker& tracker,
 void memory_tracker_push_container(
     MemoryTracker& tracker, const char* name, size_t size, const char* edge_name);
 void memory_tracker_pop_node(MemoryTracker& tracker);
-size_t memory_tracker_depth(MemoryTracker& tracker);
+size_t memory_tracker_depth(const MemoryTracker& tracker);
 
 // Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
 // - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,

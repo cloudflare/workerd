@@ -737,6 +737,18 @@ fn struct_args_reject_unknown_flags() {
 }
 
 #[test]
+fn struct_args_reject_repeated_flags() {
+    for attr in [
+        quote! { memory_info, memory_info },
+        quote! { custom_trace, ts_root, custom_trace },
+        quote! { name = "Foo", name = "Bar" },
+    ] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(err.contains("can be given once"), "{err}");
+    }
+}
+
+#[test]
 fn nested_types_and_custom_members_together_are_rejected() {
     for attr in [
         quote! { custom_members, nested_types(Foo) },

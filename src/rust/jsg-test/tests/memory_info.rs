@@ -906,15 +906,16 @@ fn handles_and_buffers() {
     });
 }
 
-/// A heap snapshot of one isolate leaves alone a handle of another that a resource of the first
-/// holds. Debug builds assert instead, in a callback from C++, where a panic aborts.
+/// A heap snapshot of one isolate leaves alone a handle and a resource of another that a
+/// resource of the first holds.
 #[test]
-#[cfg(not(debug_assertions))]
-fn handle_of_another_isolate_is_not_reported() {
-    // A `Global` has no `Traced` impl, and is never visited.
+fn handle_and_resource_of_another_isolate_are_not_reported() {
+    // A `Global` has no `Traced` impl, and is never visited; nor is `resource`, which GC would
+    // visit in the wrong isolate.
     #[jsg_resource(memory_info, custom_trace)]
     struct Holder {
         handle: RefCell<Option<v8::Global<v8::Value>>>,
+        resource: RefCell<Option<jsg::Rc<Child>>>,
     }
 
     impl jsg::Traced for Holder {
@@ -927,9 +928,13 @@ fn handle_of_another_isolate_is_not_reported() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let mut global = None;
-    a.run_in_context(|lock, _ctx| {
+    let mut resource = None;
+    a.run_in_context(|lock, ctx| {
         let object: v8::Local<'_, v8::Value> = lock.new_object().into();
         global = Some(object.to_global(lock));
+        let child = new_child(lock);
+        expose(lock, ctx, "child", &child)?;
+        resource = Some(child);
         Ok(())
     });
     let mut holder = None;
@@ -938,23 +943,23 @@ fn handle_of_another_isolate_is_not_reported() {
             lock,
             Holder {
                 handle: RefCell::new(global.take()),
+                resource: RefCell::new(resource.take()),
             },
         );
         expose(lock, ctx, "holder", &held)?;
         holder = Some(held);
         let snapshot = Snapshot::take(lock);
-        assert!(
-            snapshot
-                .targets(snapshot.find("Holder"), "handle")
-                .is_empty()
-        );
+        let node = snapshot.find("Holder");
+        assert!(snapshot.targets(node, "handle").is_empty());
+        assert!(snapshot.targets(node, "resource").is_empty());
         Ok(())
     });
 
     let holder = holder.expect("set above");
-    // Each handle is released under the lock of its own isolate.
+    // Each handle and resource is released under the lock of its own isolate.
     a.run_in_context(|_lock, _ctx| {
         drop(holder.handle.borrow_mut().take().expect("set above"));
+        drop(holder.resource.borrow_mut().take().expect("set above"));
         Ok(())
     });
     b.run_in_context(move |_lock, _ctx| {
@@ -1068,8 +1073,81 @@ fn shared_pointers_count_their_allocations() {
         assert_eq!(snapshot.size(string), size_of::<String>());
         assert_eq!(snapshot.target_names(string), ["workerd / String"]);
 
-        // A std cell of plain data reports nothing, as the data does.
+        // A std cell reports nothing, as plain data does.
         assert!(snapshot.targets(node, "copied").is_empty());
+        Ok(())
+    });
+}
+
+/// A value that is not a retainer, two of whose pointers share each allocation: a ladder that
+/// reporting each pointer in full would visit `2^RUNGS` times.
+struct Rung {
+    left: Option<std::rc::Rc<Rung>>,
+    right: Option<std::rc::Rc<Rung>>,
+}
+
+impl jsg::MemoryInfo for Rung {
+    fn track_as_field(
+        &self,
+        tracker: &mut jsg::MemoryTracker<'_>,
+        edge_name: Option<&'static CStr>,
+    ) {
+        self.left.track_as_field(tracker, edge_name);
+        self.right.track_as_field(tracker, edge_name);
+    }
+}
+
+const RUNGS: usize = 64;
+
+#[jsg_resource(memory_info, custom_trace)]
+struct Ladder {
+    pub top: std::rc::Rc<Rung>,
+    pub number: std::rc::Rc<u64>,
+    pub same_number: std::rc::Rc<u64>,
+}
+
+impl jsg::Traced for Ladder {
+    fn trace(&self, _: &mut jsg::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl Ladder {}
+
+#[test]
+fn allocation_shared_through_rc_is_one_node() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let mut top = std::rc::Rc::new(Rung {
+            left: None,
+            right: None,
+        });
+        for _ in 1..RUNGS {
+            top = std::rc::Rc::new(Rung {
+                left: Some(top.clone()),
+                right: Some(top),
+            });
+        }
+        let number = std::rc::Rc::new(7);
+        let ladder = Ladder {
+            top,
+            same_number: number.clone(),
+            number,
+        };
+        let ladder = jsg::Rc::new(lock, ladder);
+        expose(lock, ctx, "ladder", &ladder)?;
+
+        let snapshot = Snapshot::take(lock);
+        let node = snapshot.find("Ladder");
+        // One node for each rung's allocation, and one for the number's.
+        assert_eq!(snapshot.find_all("Rc").len(), RUNGS + 1);
+        let top = snapshot.target(node, "top");
+        let next = snapshot.targets(top, "");
+        assert_eq!(next.len(), 2);
+        assert_eq!(next[0], next[1]);
+        assert_eq!(
+            snapshot.target(node, "number"),
+            snapshot.target(node, "same_number")
+        );
         Ok(())
     });
 }
@@ -1113,6 +1191,35 @@ fn new_list(len: usize) -> ListNode {
         };
     }
     head
+}
+
+/// A list of retainers, of which the last holds `payload`.
+struct Tail {
+    next: Option<Box<Tail>>,
+    payload: Option<std::rc::Rc<Inner>>,
+}
+
+impl jsg::MemoryRetainer for Tail {
+    fn memory_name(&self) -> &'static CStr {
+        c"Tail"
+    }
+
+    fn memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
+        tracker.track_field(c"next", &self.next);
+        tracker.track_field(c"payload", &self.payload);
+    }
+}
+
+jsg::jsg_memory_retainer!(Tail);
+
+impl Drop for Tail {
+    // Drops the list link by link, since a recursive drop of a long list overflows the stack.
+    fn drop(&mut self) {
+        let mut next = self.next.take();
+        while let Some(mut node) = next {
+            next = node.next.take();
+        }
+    }
 }
 
 /// A value that is not a retainer, in a cycle through `std::rc::Rc`.
@@ -1168,11 +1275,67 @@ fn reporting_stops_at_max_depth() {
         let snapshot = Snapshot::take(lock);
         let lists = snapshot.find_all("ListNode").len();
         assert!(stops_at_max_depth(lists), "{lists} list nodes");
-        let rings = snapshot.find_all("Rc").len();
-        assert!(stops_at_max_depth(rings), "{rings} Rc nodes");
+        // The allocation of the cycle is one node, which points to itself.
+        let ring = snapshot.find("Rc");
+        assert_eq!(snapshot.targets(ring, ""), [ring]);
 
         // Break the cycle, which would leak.
         deep.ring.next.borrow_mut().take();
+        Ok(())
+    });
+}
+
+/// Reports each payload first at the end of a list, then as a field of its own. The lists end
+/// around `MAX_DEPTH`, so that one of the payloads is first reached at it.
+#[jsg_resource(memory_info, custom_trace)]
+struct DeepFirst {
+    pub lists: Vec<Tail>,
+    pub payloads: Vec<std::rc::Rc<Inner>>,
+}
+
+impl jsg::Traced for DeepFirst {
+    fn trace(&self, _: &mut jsg::GcVisitor) {}
+}
+
+#[jsg_resource]
+impl DeepFirst {}
+
+#[test]
+fn retainer_reached_past_max_depth_is_reported_in_full_from_closer() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let max = jsg::MemoryTracker::MAX_DEPTH;
+        let mut lists = Vec::new();
+        let mut payloads = Vec::new();
+        for len in max - 8..=max {
+            let payload = std::rc::Rc::new(new_inner("payload"));
+            let mut list = Tail {
+                next: None,
+                payload: Some(payload.clone()),
+            };
+            for _ in 1..len {
+                list = Tail {
+                    next: Some(Box::new(list)),
+                    payload: None,
+                };
+            }
+            lists.push(list);
+            payloads.push(payload);
+        }
+        let deep = jsg::Rc::new(lock, DeepFirst { lists, payloads });
+        expose(lock, ctx, "deep", &deep)?;
+
+        let snapshot = Snapshot::take(lock);
+        let node = snapshot.find("DeepFirst");
+        let payloads = snapshot.targets(snapshot.target(node, "payloads"), "");
+        assert_eq!(payloads.len(), 9);
+        for payload in payloads {
+            assert_eq!(snapshot.name(payload), "workerd / Inner");
+            assert_eq!(
+                snapshot.name(snapshot.target(payload, "name")),
+                "workerd / String"
+            );
+        }
         Ok(())
     });
 }

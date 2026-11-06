@@ -624,6 +624,12 @@ pub mod ffi {
             edge_name: *const c_char,
             wrappable: &Wrappable,
         );
+        /// `wrappable` is a resource of the tracker's isolate.
+        pub unsafe fn memory_tracker_track_wrappable_leaf(
+            tracker: Pin<&mut MemoryTracker>,
+            edge_name: *const c_char,
+            wrappable: &Wrappable,
+        );
         /// `global` is a handle of the tracker's isolate, or empty.
         pub unsafe fn memory_tracker_track_global(
             tracker: Pin<&mut MemoryTracker>,
@@ -647,7 +653,7 @@ pub mod ffi {
         );
         pub unsafe fn memory_tracker_pop_node(tracker: Pin<&mut MemoryTracker>);
         /// How many nodes are being tracked, each inside the one before.
-        pub unsafe fn memory_tracker_depth(tracker: Pin<&mut MemoryTracker>) -> usize;
+        pub unsafe fn memory_tracker_depth(tracker: &MemoryTracker) -> usize;
 
         // Unwrappers
         //
@@ -4048,7 +4054,7 @@ impl<T> crate::MemoryInfo for TracedGlobal<T> {
         tracker: &mut crate::MemoryTracker<'_>,
         edge_name: Option<&'static std::ffi::CStr>,
     ) {
-        if !tracker.can_track_handle_of(&self.state) {
+        if !tracker.can_track_object_of(&self.state) {
             return;
         }
         // SAFETY: the handle belongs to the snapshot's isolate, as checked above, whose lock the
@@ -4211,7 +4217,7 @@ impl<T> crate::MemoryInfo for Global<T> {
         tracker: &mut crate::MemoryTracker<'_>,
         edge_name: Option<&'static std::ffi::CStr>,
     ) {
-        if !tracker.can_track_handle_of(&self.state) {
+        if !tracker.can_track_object_of(&self.state) {
             return;
         }
         // SAFETY: the handle belongs to the snapshot's isolate, as checked above.
@@ -4685,11 +4691,9 @@ unsafe fn wrappable_invoke_get_memory_info(
         let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
             return;
         };
+        // A resource's fields are reported however deep its node is: what they hold is a leaf
+        // past `MAX_DEPTH`.
         let mut tracker = crate::MemoryTracker::from_ffi(tracker);
-        // The resource's node is the one being tracked: one `MAX_DEPTH` deep reports no fields.
-        if tracker.is_too_deep() {
-            return;
-        }
         trait_ptr.as_gc_ref().memory_info(&mut tracker);
     }
 }
