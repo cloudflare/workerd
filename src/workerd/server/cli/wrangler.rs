@@ -10,20 +10,24 @@
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
 //! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
-//! `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
+//! `triggers` (`crons`), `no_bundle` and `$schema`. Any other field is an error rather than
+//! silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
 //! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
 //! (the built-in module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
 //! its props; `preview_id` and `remote` are ignored. Its objects are in
-//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. The server listens
+//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. `triggers.crons`,
+//! also `--experimental`, are the schedule of the Worker `<name>-cron` (the built-in module
+//! `/workerd/cron.js`), whose objects are in `.wrangler/state/workerd/cron/`. The server listens
 //! on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 //!
 //! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
 //! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
 //! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
-//! each node's own config defines. A deployment cannot have `kv_namespaces` yet.
+//! each node's own config defines. A deployment cannot have `kv_namespaces` or
+//! `triggers.crons` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -67,7 +71,16 @@ struct Wrangler {
     #[serde(default)]
     kv_namespaces: Vec<KvNamespace>,
     #[serde(default)]
+    triggers: Triggers,
+    #[serde(default)]
     no_bundle: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Triggers {
+    #[serde(default)]
+    crons: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -233,7 +246,7 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
-    check_kv(&wrangler, target)?;
+    check_experimental(&wrangler, target)?;
     let root = file.parent().unwrap_or(&file);
 
     let name = match target {
@@ -259,13 +272,14 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
         fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
     }
     let kv = !wrangler.kv_namespaces.is_empty();
+    let crons = &wrangler.triggers.crons;
 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
     let do_storage = u32::from(serving && !classes.is_empty());
     let mut services = conf
         .reborrow()
-        .init_services(1 + do_storage + 3 * u32::from(kv));
+        .init_services(1 + do_storage + 3 * u32::from(kv) + 2 * u32::from(!crons.is_empty()));
     // Named after the worker, so they cannot collide with it.
     let kv_service = format!("{name}-kv");
     if kv {
@@ -275,6 +289,10 @@ fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, 
             &kv_service,
             &storage.join("kv"),
         )?;
+    }
+    if !crons.is_empty() {
+        let at = 1 + do_storage + 3 * u32::from(kv);
+        cron_services(&mut services, at, &name, &storage.join("cron"), crons)?;
     }
 
     let mut service = services.reborrow().get(0);
@@ -348,17 +366,28 @@ fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), St
     Ok(())
 }
 
-/// `kv_namespaces` need `--experimental`, and a deployment cannot have them yet.
-fn check_kv(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
-    match target {
-        _ if wrangler.kv_namespaces.is_empty() => Ok(()),
-        Target::Serve { experimental: true } => Ok(()),
-        Target::Serve { .. } => Err("kv_namespaces is an experimental feature which may change \
-                                     or go away in the future. You must run workerd with \
-                                     `--experimental` to use it."
-            .to_owned()),
-        Target::Deployment { .. } => Err("A deployment cannot have kv_namespaces yet.".to_owned()),
+/// `kv_namespaces` and `triggers.crons` need `--experimental`, and a deployment cannot have them
+/// yet.
+fn check_experimental(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
+    for (used, field) in [
+        (!wrangler.kv_namespaces.is_empty(), "kv_namespaces"),
+        (!wrangler.triggers.crons.is_empty(), "triggers.crons"),
+    ] {
+        match target {
+            _ if !used => {}
+            Target::Serve { experimental: true } => {}
+            Target::Serve { .. } => {
+                return Err(format!(
+                    "{field} is an experimental feature which may change or go away in the \
+                     future. You must run workerd with `--experimental` to use it."
+                ));
+            }
+            Target::Deployment { .. } => {
+                return Err(format!("A deployment cannot have {field} yet."));
+            }
+        }
     }
+    Ok(())
 }
 
 /// The KV Worker `name` at `services[at]`, then its disks under `dir`.
@@ -405,6 +434,54 @@ fn kv_worker(mut service: service::Builder<'_>, name: &str) {
     let mut blobs = bindings.get(1);
     blobs.set_name("BLOBS");
     blobs.init_service().set_name(format!("{name}-blobs"));
+}
+
+/// The cron Worker `<target>-cron` at `services[at]`, running `crons` on the Worker `target`,
+/// then its disk `dir`.
+fn cron_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    target: &str,
+    dir: &Path,
+    crons: &[String],
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let name = format!("{target}-cron");
+    let mut disk_service = services.reborrow().get(at + 1);
+    disk_service.set_name(format!("{name}-storage"));
+    let mut disk = disk_service.init_disk();
+    disk.set_path(dir.to_string_lossy());
+    disk.set_writable(true);
+    let mut service = services.reborrow().get(at);
+    service.set_name(&name);
+    let mut w = service.init_worker();
+    let mut module = w.reborrow().init_modules(1).get(0);
+    module.set_name("cron.js");
+    module.set_builtin("/workerd/cron.js");
+    w.set_compatibility_date("2026-01-01");
+    w.reborrow()
+        .init_compatibility_flags(1)
+        .set(0, "service_binding_extra_handlers");
+    let mut class = w.reborrow().init_durable_object_namespaces(1).get(0);
+    class.set_class_name("Schedule");
+    class.set_unique_key("Schedule");
+    class.set_enable_sql(true);
+    w.reborrow()
+        .init_durable_object_storage()
+        .set_local_disk(format!("{name}-storage"));
+    let mut bindings = w.init_bindings(3);
+    let mut schedule = bindings.reborrow().get(0);
+    schedule.set_name("SCHEDULE");
+    schedule
+        .init_durable_object_namespace()
+        .set_class_name("Schedule");
+    let mut list = bindings.reborrow().get(1);
+    list.set_name("CRONS");
+    list.set_json(serde_json::json!({ target: crons }).to_string());
+    let mut binding = bindings.get(2);
+    binding.set_name(target);
+    binding.init_service().set_name(target);
+    Ok(())
 }
 
 fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, kv_service: &str) {

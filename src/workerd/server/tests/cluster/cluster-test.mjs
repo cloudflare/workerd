@@ -28,6 +28,8 @@
 //      services or conflicts with another.
 //  12. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
+//  13. A cron trigger runs once a minute, through its schedule owner's death
+//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one).
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -46,9 +48,13 @@ import { connect, createServer } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
 import { setTimeout as sleep } from 'node:timers/promises';
+
+// CLUSTER_TESTS, a regular expression, picks the tests a target runs.
+const picked = new RegExp(env.CLUSTER_TESTS ?? '');
+const test = (name, ...rest) => picked.test(name) && nodeTest(name, ...rest);
 
 assert(
   env.WORKERD_BINARY !== undefined,
@@ -2000,4 +2006,38 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
   } finally {
     await rm(project, { recursive: true, force: true });
   }
+});
+
+test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
+  await withCluster(3, async ({ nodes, bucket, nodeKeys }) => {
+    const ticks = async (port) =>
+      (await fetchJson(port, '/ticks?name=ticks').catch(() => null))?.body
+        ?.ticks ?? [];
+    const waitFor = async (port, n, ms) => {
+      const deadline = Date.now() + ms;
+      let seen = [];
+      while ((seen = await ticks(port)).length < n && Date.now() < deadline) {
+        await sleep(1000);
+      }
+      return seen;
+    };
+    const first = await waitFor(nodes[0].httpPort, 1, 75_000);
+    assert.strictEqual(first.length, 1, JSON.stringify(first));
+
+    // The schedule's owner: the one object of the cron Worker's namespace.
+    const prefix = objectPrefix('', 'cron');
+    const [own] = (await bucket.list(prefix)).filter((k) =>
+      k.endsWith('/own.json')
+    );
+    const ownerKey = JSON.parse(await bucket.get(own)).node;
+    const ownerId = [...nodeKeys].find(([, key]) => key === ownerKey)[0];
+    const ownerIndex = nodes.findIndex((n) => n.nodeId === ownerId);
+    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    const survivor = nodes[(ownerIndex + 1) % nodes.length];
+
+    // The next minute once, though the schedule's owner died.
+    const seen = await waitFor(survivor.httpPort, 2, 90_000);
+    assert.strictEqual(seen[0] % 60_000, 0, JSON.stringify(seen));
+    assert.deepStrictEqual(seen, [seen[0], seen[0] + 60_000]);
+  });
 });

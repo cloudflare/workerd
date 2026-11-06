@@ -17,6 +17,7 @@
 #include <workerd/rust/transpiler/lib.rs.h>
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/cron/cron_js.embed.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/util/autogate.h>
@@ -403,6 +404,9 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
         auto name = conf.getBuiltin();
         if (name == "/workerd/kv.js"_kj) {
           return Worker::Script::EsModule{kj::StringPtr(KV_JS_begin, KV_JS_size)};
+        }
+        if (name == "/workerd/cron.js"_kj) {
+          return Worker::Script::EsModule{kj::StringPtr(CRON_JS_begin, CRON_JS_size)};
         }
         auto message = kj::str("No built-in module named \"", name, "\".");
         KJ_IF_SOME(e, errorReporter) {
