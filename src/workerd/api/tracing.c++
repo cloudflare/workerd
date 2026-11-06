@@ -18,6 +18,7 @@ namespace {
 // modification requests. This is a soft cap to prevent accidental misuse from unbounded
 // memory growth; downstream tail-stream submission may apply additional limits.
 constexpr size_t MAX_SPAN_BYTES = 64 * 1024;
+constexpr size_t MAX_SPAN_LINK_ARRAY_ELEMENTS = 512;
 
 size_t estimateTagValueSize(TagValue& value) {
   // Approximate size; different encodings will produce different sizes. The goal is to bound
@@ -629,6 +630,11 @@ jsg::Ref<Span> Span::addLinks(jsg::Lock& js,
   if (!handle->IsArray()) return JSG_THIS;
   auto array = handle.As<v8::Array>();
   auto length = array->Length();
+  if (length > MAX_SPAN_LINK_ARRAY_ELEMENTS) {
+    js.logWarning(kj::str("Ignoring span links: arrays may contain at most ",
+        MAX_SPAN_LINK_ARRAY_ELEMENTS, " elements."));
+    return JSG_THIS;
+  }
   // Read each entry immediately before recording it: getters can end the receiver.
   for (uint32_t i = 0; i < length && getIsTraced(); ++i) {
     addLink(js, jsg::Value(js.v8Isolate, jsg::check(array->Get(js.v8Context(), i))), linkHandler,

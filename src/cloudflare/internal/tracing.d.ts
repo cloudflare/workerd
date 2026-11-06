@@ -89,6 +89,7 @@ declare class Span {
 
   // Links are snapshots and do not change the span's parent, active context, or sampling decision.
   addLink(link: TracingSpanLink): this;
+  // Arrays longer than 512 elements are ignored with a warning before reading any entries.
   addLinks(links: readonly TracingSpanLink[]): this;
 
   // Ends the span and submits its attributes to the tracing system. Idempotent.
