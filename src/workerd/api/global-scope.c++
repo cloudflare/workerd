@@ -231,12 +231,39 @@ void ServiceWorkerGlobalScope::clear() {
   unhandledRejections.clear();
 }
 
+ConnectTlsUpgrade takeConnectTlsUpgrade(kj::HttpConnectSettings& settings, bool enabled) {
+  ConnectTlsUpgrade result;
+  auto slot = settings.tlsStarter;
+  settings.tlsStarter = kj::none;
+  KJ_IF_SOME(starter, slot) {
+    if (!enabled) return result;
+    KJ_IF_SOME(s, starter) {
+      // The transport can run a real handshake on this connection -- a TCP listener holding a
+      // server-side TLS context, for instance. Take its callback over; only the application
+      // knows the point in the protocol where the upgrade belongs.
+      *result.starter = kj::mv(s);
+      // The callback is ours now, so leave nothing behind for the peer to invoke.
+      starter = kj::none;
+      result.secureTransport = SecureTransportKind::STARTTLS;
+    } else {
+      // The slot is here but empty: the peer is another Socket on one of our internal
+      // transports, waiting to hear when we upgrade and to tell us when it does.
+      auto rendezvous = setupInternalTlsRendezvous(starter);
+      result.starter = kj::mv(rendezvous.handlerStarter).toOwn();
+      result.inboundUpgrade = kj::mv(rendezvous.peerRequests);
+      result.handlerRun = kj::mv(rendezvous.handlerRun);
+      result.secureTransport = SecureTransportKind::STARTTLS;
+    }
+  }
+  return result;
+}
+
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     kj::Maybe<kj::String> clientAddress,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
-    kj::HttpConnectSettings settings,
+    ConnectTlsUpgrade tlsUpgrade,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
@@ -258,27 +285,10 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
-    auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
-    auto secureTransport = SecureTransportKind::OFF;
-    KJ_IF_SOME(starter, settings.tlsStarter) {
-      if (FeatureFlags::get(lock).getConnectHandlerStartTls()) {
-        KJ_IF_SOME(s, starter) {
-          // The transport can run a real handshake on this connection -- a TCP listener holding a
-          // server-side TLS context, for instance. Take its callback over; only the application
-          // knows the point in the protocol where the upgrade belongs.
-          *tlsStarter = kj::mv(s);
-          // The callback is ours now, so leave nothing behind for the peer to invoke.
-          starter = kj::none;
-          secureTransport = SecureTransportKind::STARTTLS;
-        } else {
-          // The slot is here but empty: the peer is another Socket on one of our internal
-          // transports, waiting to hear when we upgrade and to tell us when it does.
-          tlsStarter = setupInternalTlsRendezvous(starter).toOwn();
-          secureTransport = SecureTransportKind::STARTTLS;
-        }
-      }
-    }
+    auto secureTransport = tlsUpgrade.secureTransport;
+    auto tlsStarter = kj::mv(tlsUpgrade.starter);
+    auto inboundTlsUpgrade = kj::mv(tlsUpgrade.inboundUpgrade);
+    auto tlsHandlerRun = kj::mv(tlsUpgrade.handlerRun);
 
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
@@ -296,10 +306,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+    KJ_IF_SOME(upgrade, inboundTlsUpgrade) {
+      jsSocket->setInboundTlsUpgrade(kj::mv(upgrade));
+    }
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+    return ioContext.awaitJs(js, kj::mv(promise))
+        .attach(kj::mv(span), kj::mv(deferredNeuter), kj::mv(tlsHandlerRun));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");
