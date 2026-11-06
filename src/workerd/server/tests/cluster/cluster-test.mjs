@@ -37,6 +37,8 @@
 //      paced by the nodes' readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
+//  13. A cron trigger runs once a minute, through its schedule owner's death
+//      (cluster-cron-test, whose config, cluster-cron.wd-test, has one).
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -72,15 +74,18 @@ assert(
   'You must set the FAKE_S3_CONFIG environment variable.'
 );
 
-// Bazel shards this file (`shard_count`): each shard runs every n-th test.
+// CLUSTER_TESTS, a regular expression, picks the tests a target runs, and
+// Bazel shards those (`shard_count`): each shard runs every n-th of them.
+const picked = new RegExp(env.CLUSTER_TESTS ?? '');
 const SHARDS = Number(env.TEST_TOTAL_SHARDS ?? 1);
 const SHARD = Number(env.TEST_SHARD_INDEX ?? 0);
 if (env.TEST_SHARD_STATUS_FILE !== undefined) {
   await writeFile(env.TEST_SHARD_STATUS_FILE, '');
 }
 let testIndex = 0;
-function test(...args) {
-  if (testIndex++ % SHARDS === SHARD) nodeTest(...args);
+function test(name, ...rest) {
+  if (picked.test(name) && testIndex++ % SHARDS === SHARD)
+    nodeTest(name, ...rest);
 }
 
 const CONTROL_FD = 3;
@@ -2789,4 +2794,38 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
   } finally {
     await rm(project, { recursive: true, force: true });
   }
+});
+
+test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
+  await withCluster(3, async ({ nodes, bucket, nodeKeys }) => {
+    const ticks = async (port) =>
+      (await fetchJson(port, '/ticks?name=ticks').catch(() => null))?.body
+        ?.ticks ?? [];
+    const waitFor = async (port, n, ms) => {
+      const deadline = Date.now() + ms;
+      let seen = [];
+      while ((seen = await ticks(port)).length < n && Date.now() < deadline) {
+        await sleep(1000);
+      }
+      return seen;
+    };
+    const first = await waitFor(nodes[0].httpPort, 1, 75_000);
+    assert.strictEqual(first.length, 1, JSON.stringify(first));
+
+    // The schedule's owner: the one object of the cron Worker's namespace.
+    const prefix = objectPrefix('', 'cron');
+    const [own] = (await bucket.list(prefix)).filter((k) =>
+      k.endsWith('/own.json')
+    );
+    const ownerKey = JSON.parse(await bucket.get(own)).node;
+    const ownerId = [...nodeKeys].find(([, key]) => key === ownerKey)[0];
+    const ownerIndex = nodes.findIndex((n) => n.nodeId === ownerId);
+    await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    const survivor = nodes[(ownerIndex + 1) % nodes.length];
+
+    // The next minute once, though the schedule's owner died.
+    const seen = await waitFor(survivor.httpPort, 2, 90_000);
+    assert.strictEqual(seen[0] % 60_000, 0, JSON.stringify(seen));
+    assert.deepStrictEqual(seen, [seen[0], seen[0] + 60_000]);
+  });
 });

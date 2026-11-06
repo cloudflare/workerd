@@ -1,0 +1,50 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# cluster-cron-test's config: cluster-test.wd-test's sockets and cluster, and
+# "main", whose scheduled() a cron Worker runs every minute.
+
+using Workerd = import "/workerd/workerd.capnp";
+using Base = import "cluster-test.wd-test";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "local", disk = ( writable = true, allowDotfiles = true ) ),
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+          ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+    ( name = "cron",
+      worker = (
+        modules = [ ( name = "cron.js", bundled = "/workerd/cron.js" ) ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["service_binding_extra_handlers"],
+        bindings = [
+          ( name = "SCHEDULE", durableObjectNamespace = "Schedule" ),
+          ( name = "CRONS", json = "{\"main\": [\"* * * * *\"]}" ),
+          ( name = "main", service = "main" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Schedule", uniqueKey = "cron", enableSql = true ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+  ],
+  sockets = Base.sockets,
+  cluster = Base.cluster,
+);
