@@ -37,6 +37,9 @@ const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 // cloneable class must be (see serialization.ts).
 require('serialization');
 
+// Loaded before any module that may create or recognize a DOMException.
+require('dom-exception');
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,

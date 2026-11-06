@@ -26,6 +26,8 @@ at context creation, before any user code. C++ entry point:
   `src/tests/serialization/`) under `expose_serialization_test_class`.
 - EventTarget subclasses reach the (still C++) EventTarget they extend only
   through `events/event-target-internals`; see `events/AGENTS.md`.
+- Modules get `DOMException` from `require('dom-exception')`, which
+  `main.ts` loads first, not from the global or `primordials`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
