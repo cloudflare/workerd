@@ -467,16 +467,19 @@ kj::StringPtr errnoFor(kj::StringPtr description) {
 
 KJ_TEST("os error codes map to errno names") {
 #if _WIN32
-  constexpr int refused = 10061, timedOut = 10060, hostUnreach = 10065, netUnreach = 10051;
+  constexpr int refused = 10061, reset = 10054, timedOut = 10060, hostUnreach = 10065,
+                netUnreach = 10051;
   KJ_EXPECT(errnoFor("No such host is known. (os error 11001)") == "ENOTFOUND");
   KJ_EXPECT(errnoFor("The requested name is valid, but no data of the requested type was found. "
                      "(os error 11004)") == "ENOTFOUND");
   KJ_EXPECT(errnoFor("This is usually a temporary error. (os error 11002)") == "EAI_AGAIN");
 #else
-  constexpr int refused = ECONNREFUSED, timedOut = ETIMEDOUT, hostUnreach = EHOSTUNREACH,
-                netUnreach = ENETUNREACH;
+  constexpr int refused = ECONNREFUSED, reset = ECONNRESET, timedOut = ETIMEDOUT,
+                hostUnreach = EHOSTUNREACH, netUnreach = ENETUNREACH;
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", EPIPE, ")")) == "EPIPE");
 #endif
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", refused, ")")) == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", reset, ")")) == "ECONNRESET");
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", timedOut, ")")) == "ETIMEDOUT");
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", hostUnreach, ")")) == "EHOSTUNREACH");
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", netUnreach, ")")) == "ENETUNREACH");
@@ -489,6 +492,8 @@ KJ_TEST("os error codes map to errno names") {
 
 KJ_TEST("connect failure exceptions map to errno names") {
   KJ_EXPECT(errnoFor("connect(): Connection refused; address = 127.0.0.1:1") == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor("read(fd, buffer, maxBytes): Connection reset by peer") == "ECONNRESET");
+  KJ_EXPECT(errnoFor("write(fd, buffer, size): Broken pipe") == "EPIPE");
   KJ_EXPECT(errnoFor("connect(): Connection timed out") == "ETIMEDOUT");
   KJ_EXPECT(errnoFor("connect(): Operation timed out") == "ETIMEDOUT");
   KJ_EXPECT(errnoFor("connect(): No route to host") == "EHOSTUNREACH");

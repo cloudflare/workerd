@@ -63,7 +63,11 @@ use crate::cluster::Owned;
 use crate::cluster::Owner;
 use crate::cluster::ResultTask;
 use crate::cluster::RpcConnection;
+use crate::cluster::is_moved;
+use crate::cluster::moved;
+use crate::cluster::not_delivered;
 use crate::config::Factory;
+use crate::config::invalid_config_error;
 use crate::tasks::TaskHandle;
 
 /// How long an actor stays up after its last request ends before it is shut down.
@@ -108,6 +112,8 @@ pub struct ActorNamespace {
     directory: OnceCell<String>,
     /// Actors being resolved in the cluster, each woken when its first resolution ends.
     resolving: RefCell<HashMap<String, Rc<Notify>>>,
+    /// Set for the namespace of a worker that cannot handle requests (`set_broken`).
+    broken: Cell<bool>,
 }
 
 /// The first resolution of an actor: its end, however it ends, wakes the requests that waited.
@@ -152,7 +158,14 @@ impl ActorNamespace {
             cluster: OnceCell::new(),
             directory: OnceCell::new(),
             resolving: RefCell::new(HashMap::new()),
+            broken: Cell::new(false),
         })
+    }
+
+    /// Fails every request for one of the namespace's actors before it is routed, so that the
+    /// instance never claims an actor it cannot run, and declines dead peers' alarms.
+    pub fn set_broken(&self) {
+        self.broken.set(true);
     }
 
     /// Puts a durable namespace on disk under the cluster's ownership; before `link`.
@@ -165,6 +178,11 @@ impl ActorNamespace {
 
     /// Schedules an alarm adopted from a dead peer: it claims the object when it fires.
     pub fn adopt_alarm(&self, actor: &str, name: Option<&str>, at_ms: u64) -> Result<()> {
+        if self.broken.get() {
+            return Err(kj::failed!(
+                "the namespace cannot adopt alarms because its worker cannot handle requests"
+            ));
+        }
         ffi::actor_storage_set_alarm(self.storage()?, actor, name.unwrap_or_default(), at_ms)?;
         Ok(())
     }
@@ -203,6 +221,9 @@ impl ActorNamespace {
     /// The owner of the actor with `id`: a container here, holding its ownership, or a session
     /// with the instance that owns it.
     async fn resolve(&self, id: KjOwn<ActorIdHandle>) -> Result<Resolved> {
+        if self.broken.get() {
+            return Err(invalid_config_error());
+        }
         let key = ffi::actor_id_key(&id);
         if let Some(container) = self.owned_container(&key) {
             return Ok(Resolved::Here(Client(container)));
@@ -238,6 +259,10 @@ impl ActorNamespace {
                 if let Some(container) = self.owned_container(&key) {
                     return Ok(Resolved::Here(Client(container)));
                 }
+                // A container added once `release_all` ran would never be released.
+                if cluster.cluster.is_draining() {
+                    return Err(moved(&format!("{key}: this node is draining")));
+                }
                 let container = ActorContainer::new_root(key.clone(), self, id);
                 let owned = Owned::new(Rc::clone(cluster), &unique_key, &key, epoch);
                 *container.owned.borrow_mut() = Some(owned);
@@ -261,6 +286,18 @@ impl ActorNamespace {
             ));
         }
         Ok(())
+    }
+
+    /// Removes `container` from the map, unless a newer container has taken its key: one whose
+    /// restore or shutdown ends after it was released and replaced must leave its successor.
+    fn remove_container(&self, container: &ActorContainer) {
+        let mut actors = self.actors.borrow_mut();
+        if actors
+            .get(&container.key)
+            .is_some_and(|c| std::ptr::eq(Rc::as_ptr(c), container))
+        {
+            actors.remove(&container.key);
+        }
     }
 
     fn owned_container(&self, key: &str) -> Option<Rc<ActorContainer>> {
@@ -389,6 +426,19 @@ impl ActorNamespace {
         }
     }
 
+    /// Lets every actor go as this instance drains, failing nothing in flight. A later request
+    /// that still reaches one here, through a stub or a peer that found it here, started nothing:
+    /// it is answered as `moved`, so that it can follow the actor to its next owner.
+    pub fn release_all(&self) {
+        let actors = std::mem::take(&mut *self.actors.borrow_mut());
+        for (key, container) in &actors {
+            // `moved` is only the error of requests that start after this: the actor is shut down
+            // without a reason, so no request in flight fails with it.
+            let left = moved(&format!("{key}: this node is draining"));
+            container.abort_then(None, Some(left));
+        }
+    }
+
     /// Aborts every actor and deletes the namespace's storage and alarms.
     pub fn delete_all(&self, reason: Option<&crate::Error>) -> Result<()> {
         // The databases are reset while their connections are open, before the abort closes
@@ -442,6 +492,14 @@ impl ActorNamespace {
         if !path.is_empty() {
             let directory = format!("{path}/{unique_key}");
             if self.cluster.get().is_some() {
+                // Composition rejects this in a deployment; this check also prevents any other
+                // config from claiming a directory outside `path`.
+                if !::cluster::compose::is_path_component(unique_key) {
+                    return Err(kj::failed!(
+                        "Durable Object namespace uniqueKey {unique_key:?} is not one path \
+                         component"
+                    ));
+                }
                 claim_directory(&directory)?;
             }
             let _ = self.directory.set(directory);
@@ -467,6 +525,20 @@ impl ActorNamespace {
         match &self.config {
             ActorConfig::Durable { unique_key, .. } => Some(unique_key),
             ActorConfig::Ephemeral { .. } => None,
+        }
+    }
+
+    /// Gives `metadata` a self token naming the root actor `id`, for `ctx.restore()`. An
+    /// ephemeral namespace's actors have none.
+    fn set_self_token(&self, metadata: &mut KjOwn<RequestMetadata>, id: &ActorIdHandle) {
+        if let Some(unique_key) = self.unique_key() {
+            ffi::request_metadata_set_actor_self_token(
+                self.factory.raw(),
+                metadata.as_mut(),
+                unique_key,
+                id,
+                self.persistent_self_tokens,
+            );
         }
     }
 
@@ -633,8 +705,17 @@ enum Resolved {
     Remote(Rc<RpcConnection>, String),
 }
 
+impl Resolved {
+    fn is_down(&self) -> bool {
+        matches!(self, Self::Remote(connection, _) if connection.is_down())
+    }
+}
+
 /// A stub's channel to an actor in a clustered namespace. Its first request finds the owner;
-/// the stub stays with that instance, as a local stub stays with its container.
+/// the stub stays with that instance, as a local stub stays with its container, until the
+/// instance answers that the object moved, or the connection to it is lost (`MovedHook`).
+/// A failure before the request reaches that instance is marked as not delivered
+/// (`not_delivered`): a peer that forwards the request answers it so, and its caller may retry.
 struct RoutedChannel {
     namespace: Weak<ActorNamespace>,
     id: KjOwn<ActorIdHandle>,
@@ -648,25 +729,49 @@ impl Channel for RoutedChannel {
         mut metadata: KjOwn<RequestMetadata>,
     ) -> Result<KjOwn<WorkerInterface>> {
         ffi::request_metadata_set_from_persistent_stub(metadata.as_mut(), self.persistent);
-        let namespace = self
-            .namespace
-            .upgrade()
-            .ok_or_else(|| kj::disconnected!("the Durable Object namespace is gone"))?;
+        let namespace = self.namespace.upgrade().ok_or_else(|| {
+            not_delivered(kj::disconnected!("the Durable Object namespace is gone"))
+        })?;
         let id = ffi::actor_id_clone(&self.id);
+        let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
         Ok(PromisedInterface::new(async move {
-            let resolved = bound.borrow().clone();
-            let resolved = if let Some(resolved) = resolved {
+            // A resolution over a session known to be down would fail unsent: resolve again.
+            let live = bound
+                .borrow()
+                .clone()
+                .filter(|resolved| !resolved.is_down());
+            let resolved = if let Some(resolved) = live {
                 resolved
             } else {
-                let resolved = Rc::new(namespace.resolve(id).await?);
-                Rc::clone(bound.borrow_mut().get_or_insert(resolved))
+                let resolved = Rc::new(namespace.resolve(id).await.map_err(not_delivered)?);
+                let mut bound = bound.borrow_mut();
+                match &*bound {
+                    Some(other) if !other.is_down() => Rc::clone(other),
+                    _ => Rc::clone(bound.insert(resolved)),
+                }
+            };
+            let hook = MovedHook {
+                namespace: Rc::downgrade(&namespace),
+                key,
+                bound,
+                tried: Rc::clone(&resolved),
             };
             match &*resolved {
-                Resolved::Here(container) => container.start_request(metadata),
-                Resolved::Remote(connection, _) => Ok(attach(
-                    connection.start_request(metadata),
-                    Rc::clone(connection),
+                Resolved::Here(container) => match container.start_request(metadata) {
+                    Ok(interface) => {
+                        Ok(ffi::worker_interface_watch_moved(interface, Box::new(hook)))
+                    }
+                    Err(e) => {
+                        if is_moved(&e) {
+                            hook.moved();
+                        }
+                        Err(e)
+                    }
+                },
+                Resolved::Remote(connection, _) => Ok(ffi::worker_interface_watch_peer(
+                    attach(connection.start_request(metadata), Rc::clone(connection)),
+                    Box::new(hook),
                 )),
             }
         })
@@ -703,6 +808,39 @@ impl Channel for RoutedChannel {
                 )),
             }
         })
+    }
+}
+
+/// What a stub's request does when the instance it reached answers that the object moved, or
+/// the connection to it is lost.
+///
+/// The stub forgets that resolution, so that the stub's next request, or a retry of this one,
+/// resolves the object again. On a move the cluster also forgets its route there.
+pub struct MovedHook {
+    namespace: Weak<ActorNamespace>,
+    key: String,
+    bound: Rc<RefCell<Option<Rc<Resolved>>>>,
+    /// The resolution the request used.
+    tried: Rc<Resolved>,
+}
+
+impl MovedHook {
+    pub fn moved(&self) {
+        self.lost();
+        if let Resolved::Remote(_, node) = &*self.tried
+            && let Some(namespace) = self.namespace.upgrade()
+            && let (Some(cluster), Some(unique_key)) = (namespace.cluster(), namespace.unique_key())
+        {
+            cluster.cluster.forget_route(unique_key, &self.key, node);
+        }
+    }
+
+    /// The connection to the instance was lost.
+    pub fn lost(&self) {
+        let mut bound = self.bound.borrow_mut();
+        if bound.as_ref().is_some_and(|b| Rc::ptr_eq(b, &self.tried)) {
+            *bound = None;
+        }
     }
 }
 
@@ -975,13 +1113,23 @@ impl ActorContainer {
                 ns: Rc::clone(&ns),
                 root_key: self.root_key.clone(),
             });
-            let Some(restore) = self.owned.borrow().as_ref().map(|o| o.restore(layout)) else {
+            let restoring = self
+                .owned
+                .borrow()
+                .as_ref()
+                .map(|o| (o.restore(layout), o.retire()));
+            let Some((restore, retire)) = restoring else {
                 return Err(kj::failed!("a clustered actor without ownership"));
             };
             if let Err(e) = restore.await {
                 self.abort(Some(e.clone()));
-                ns.actors.borrow_mut().remove(&self.key);
+                ns.remove_container(self);
                 return Err(e);
+            }
+            // Released meanwhile: its ownership went before the restore opened the object here.
+            // Unless another container serves the object now, what the restore opened goes too.
+            if self.broken_reason.borrow().is_some() && ns.owned_container(&self.key).is_none() {
+                retire.run();
             }
         } else {
             // A facet runs once its root has taken the object over: its database is a lane of
@@ -1082,15 +1230,7 @@ impl Client {
                 // container that would block eviction. A facet is only ever called by its
                 // parent, or through a restored channel the parent set up, which brings its own
                 // trusted factory.
-                if let Some(unique_key) = ns.unique_key() {
-                    ffi::request_metadata_set_actor_self_token(
-                        ns.factory.raw(),
-                        metadata.as_mut(),
-                        unique_key,
-                        id,
-                        ns.persistent_self_tokens,
-                    );
-                }
+                ns.set_self_token(&mut metadata, id);
             }
             class.start_request(metadata, actor)?
         };
@@ -1179,7 +1319,7 @@ impl ActorContainer {
             }
             None => {
                 if let Some(ns) = self.namespace.upgrade() {
-                    ns.actors.borrow_mut().remove(&self.key);
+                    ns.remove_container(self);
                 }
             }
         }
@@ -1209,6 +1349,11 @@ impl ActorContainer {
     /// that could route traffic to it: at most call sites the map is at hand, and `abort` on a
     /// facet's tree leaves the facets filed under their parent.
     fn abort(&self, reason: Option<crate::Error>) {
+        self.abort_then(reason, None);
+    }
+
+    /// `abort`, with `later`, if given, the error of every request after it.
+    fn abort_then(&self, reason: Option<crate::Error>, later: Option<crate::Error>) {
         if self.broken_reason.borrow().is_some() {
             return;
         }
@@ -1231,7 +1376,9 @@ impl ActorContainer {
         self.cancel_shutdown();
         *self.manager.borrow_mut() = None;
         *self.broken_reason.borrow_mut() = Some(
-            reason.unwrap_or_else(|| kj::failed!("jsg.Error: Actor aborted for unknown reason.")),
+            later
+                .or(reason)
+                .unwrap_or_else(|| kj::failed!("jsg.Error: Actor aborted for unknown reason.")),
         );
         self.release(actor.as_deref());
         drop(actor);
@@ -1344,13 +1491,15 @@ impl ActorContainer {
             let ns = self.namespace()?;
             ns.require_lease()?;
             let class = self.class()?;
+            let mut metadata = ffi::new_request_metadata(KjMaybe::None, KjMaybe::None);
+            ns.set_self_token(&mut metadata, &*self.id()?);
             let container = Weak::clone(&self.this);
             let reason = reason.to_owned();
             let retirement = ns
                 .factory
-                .spawn(
-                    async move { retire_actor(container, actor, class, reason, hibernate).await },
-                )
+                .spawn(async move {
+                    retire_actor(container, actor, class, metadata, reason, hibernate).await
+                })
                 .shared();
             *self.retirement.borrow_mut() = Some(retirement.clone());
             self.cancel_shutdown();
@@ -1402,10 +1551,11 @@ async fn retire_actor(
     container: Weak<ActorContainer>,
     actor: Rc<KjOwn<ffi::ActorHandle>>,
     class: Rc<dyn ActorClass>,
+    metadata: KjOwn<RequestMetadata>,
     reason: String,
     hibernate: bool,
 ) -> Result<()> {
-    let hook = class.run_on_hibernate(&actor).await;
+    let hook = class.run_on_hibernate(metadata, &actor).await;
     let container = container
         .upgrade()
         .ok_or_else(|| kj::disconnected!("the retiring actor's container is gone"))?;

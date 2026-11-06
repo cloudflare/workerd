@@ -97,6 +97,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
   as the creator for an instance method and `None` for a static one, as C++ JSG passes
   `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A method, property or call handler that returns a promise (`jsg::Promise<T>` or
+  `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
+  conversion error included, when the isolate captures throws as rejections (the
+  `capture_async_api_throws` compatibility flag), as C++ JSG does; otherwise it throws. A
+  termination still propagates.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
@@ -110,10 +115,14 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- A last parameter of type `jsg::Arguments<T>` takes the remaining arguments, each converted
+  to `T`, like C++ JSG's `jsg::Arguments<T>`; it is empty when there are none. It must be the
+  last parameter, of a method or a `#[jsg_constructor]`, and TypeScript declares it as
+  `...name: any[]`. See [Rest parameters](../jsg/README.md#rest-parameters).
 - When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
-  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
-  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
-  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
+  Web IDL count of leading required arguments: `this`, the lock and a `jsg::Arguments` are not
+  counted, and counting stops at the first type whose `FromJS::is_optional()` returns true (such
+  as `Option<T>` or `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -134,7 +143,7 @@ impl DnsUtil {
 
     // Static — DnsUtil.create(…)
     #[jsg_method]
-    pub fn create(name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
+    pub fn create(lock: &mut Lock, name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
 }
 ```
 
@@ -154,14 +163,14 @@ The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
 Each factory also describes its member for RTTI, which describes a resource type with the
 members its `Resource::members` registers, in registration order. Methods, properties,
-constructors, and constants are described; inspect and wildcard properties are not. Parameter
+constructors, and constants are described; inspect and wildcard properties and disposers are not. Parameter
 names are retained, injected `this` and lock parameters are excluded, and fallible return types
 describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
@@ -244,6 +253,9 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
 | Wildcard property `get_var` | `Self::get_var_member()` |
+| Disposer `close` (`#[jsg_dispose]`) | `Self::close_dispose_member()` |
+| Async disposer `close` (`#[jsg_async_dispose]`) | `Self::close_async_dispose_member()` |
+| Callable `call` | `Self::call_callable_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -458,6 +470,67 @@ impl Env {
 // JS: env.HOME        // "/home/user"
 //     env.MISSING     // undefined
 //     'HOME' in env   // true
+```
+
+## `#[jsg_dispose]` and `#[jsg_async_dispose]`
+
+Registers a method as `Symbol.dispose` (for `using`) or `Symbol.asyncDispose` (for
+`await using`) of the prototype of a `#[jsg_resource]` type. Equivalent to C++ `JSG_DISPOSE` and
+`JSG_ASYNC_DISPOSE`. The method takes `&self` or `this: jsg::Rc<Self>` and is called like a
+`#[jsg_method]`; with `#[jsg_method]` on the same function it is also exposed under its own name.
+An async disposer should return `jsg::Promise<'s, T>` or `jsg::v8::Local<'s, jsg::v8::Promise>`,
+optionally in a `Result`. The attributes take no arguments, and a disposer cannot also be a
+property, inspect property or wildcard property. A type has at most one disposer of each kind,
+sync and async, and one method cannot be both; with automatic registration a second of a kind is
+a compile error, and a custom `members` list that includes two of a kind panics when the template
+is created.
+
+A disposer must be idempotent and safe to re-enter. JavaScript can call it directly any number of
+times, and from inside itself when it runs JavaScript: mark the resource disposed before calling
+out, and hold no `RefCell` borrow across the call. See
+[Explicit resource management](../jsg/README.md#explicit-resource-management) for how to write one.
+
+```rust
+use jsg_macros::{jsg_dispose, jsg_method, jsg_resource};
+
+#[jsg_resource]
+struct Connection { closed: std::cell::Cell<bool> }
+
+#[jsg_resource]
+impl Connection {
+    #[jsg_method]
+    #[jsg_dispose]
+    pub fn close(&self) { self.closed.set(true); }
+}
+// JS: { using conn = connect(); /* ... */ }  // conn.close() runs here
+```
+
+## `#[jsg_callable]`
+
+Makes the instances of a `#[jsg_resource]` type callable as functions, running the method.
+Equivalent to C++ `JSG_CALLABLE`.
+
+The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape of
+a `#[jsg_method]`. The attribute takes no arguments. A type is callable at most one way; with
+automatic registration a second `#[jsg_callable]` is a compile error, and a custom `members` list
+that includes two fails at runtime. The macro generates `<name>_callable_callback()` and, through
+`#[jsg_resource]`, the factory `<name>_callable_member()`, which differ from a `#[jsg_method]`'s,
+so a method may also be a `#[jsg_method]`. See [Callable resources](../jsg/README.md#callable-resources)
+for how they behave.
+
+```rust
+use jsg_macros::{jsg_callable, jsg_resource};
+
+#[jsg_resource]
+struct Greeter { greeting: String }
+
+#[jsg_resource]
+impl Greeter {
+    #[jsg_callable]
+    pub fn greet(&self, name: String) -> String { format!("{}, {name}", self.greeting) }
+}
+// JS: greeter('world')   // "Hello, world"
+//     typeof greeter     // "function"
 ```
 
 ## `#[jsg_oneof]`

@@ -87,13 +87,13 @@ class Wrappable: public ::workerd::jsg::Wrappable {
 struct ResourceDescriptor;
 
 // Wrappable lifecycle — returns KjRc<Wrappable> to Rust for reference-counted ownership.
-// Ref::clone calls wrappable_add_strong_ref; Ref::drop calls wrappable_remove_strong_ref.
-// wrappable_remove_strong_ref does addRef(+1) + maybeDeferDestruction(-1) = net 0 on kj::Rc;
-// the actual kj::Rc decrement happens when WrappableRc (KjRc<Wrappable>) is dropped.
+// Rc::clone calls wrappable_add_strong_ref. A dropped strong Rc calls
+// wrappable_remove_strong_ref under the isolate lock (Rust's IsolateState defers it until the
+// lock otherwise), then drops its KjRc<Wrappable>, which decrements the kj::Rc refcount.
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong);
+void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
 
@@ -561,6 +561,20 @@ bool local_serialize(Isolate* isolate,
 // exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
+// JSON
+// As jsg::Lock::parseJson() and serializeJson(), through v8::JSON.
+//
+// Parses `text`, a string, and returns the value, or none if it is not valid JSON, leaving the
+// SyntaxError pending. Runs no JavaScript.
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text);
+// Stringifies `value`, indenting by `gap`, a string (no indenting if it is empty), stores the
+// result in `result` and returns true, or returns false if stringifying threw, leaving the
+// exception pending: what a getter, toJSON() or Proxy trap threw, or a TypeError for a cycle or a
+// BigInt. A value that JSON can't represent, such as undefined or a function, gives the string
+// "undefined".
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result);
+
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
@@ -595,6 +609,9 @@ void isolate_terminate_execution(Isolate* isolate);
 bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// Whether a method that returns a promise rejects it with what it throws
+// (jsg::getCaptureThrowsAsRejections()).
+bool isolate_captures_throws_as_rejections(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context
 // frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
 // workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.

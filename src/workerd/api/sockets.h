@@ -131,6 +131,12 @@ class Datagram: public jsg::Object {
   jsg::JsRef<jsg::JsUint8Array> data;
 };
 
+// The errno names of the first recognized read and write failures on a socket's connection.
+struct SocketStreamErrnos final: public kj::Refcounted {
+  kj::Maybe<kj::StringPtr> read;
+  kj::Maybe<kj::StringPtr> write;
+};
+
 class Socket: public jsg::Object {
  public:
   Socket(jsg::Lock& js,
@@ -184,6 +190,22 @@ class Socket: public jsg::Object {
   // recognized. See connectErrnoName().
   kj::Maybe<kj::StringPtr> getConnectErrno() {
     return connectErrno;
+  }
+
+  kj::Maybe<kj::StringPtr> getReadErrno() {
+    KJ_IF_SOME(e, streamErrnos) {
+      return e->read;
+    }
+    return kj::none;
+  }
+  kj::Maybe<kj::StringPtr> getWriteErrno() {
+    KJ_IF_SOME(e, streamErrnos) {
+      return e->write;
+    }
+    return kj::none;
+  }
+  void setStreamErrnos(kj::Rc<SocketStreamErrnos> errnos) {
+    streamErrnos = kj::mv(errnos);
   }
 
   bool getUpgraded() const {
@@ -353,6 +375,7 @@ class Socket: public jsg::Object {
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   kj::Maybe<kj::StringPtr> connectErrno;
+  kj::Maybe<kj::Rc<SocketStreamErrnos>> streamErrnos;
   // This fulfiller is used to resolve the `openedPromise` below.
   jsg::Promise<SocketInfo>::Resolver openedResolver;
   // Copy kept so that it can be used in `close`.
@@ -584,6 +607,11 @@ class SocketsModule final: public jsg::Object {
   // to report connection failures the way Node.js does.
   jsg::Optional<kj::StringPtr> getConnectFailureCode(jsg::Lock& js, jsg::Ref<Socket> socket);
 
+  // Returns the errno name of the failed read or write on `socket`'s connection, or undefined,
+  // including when `socket` is not a Socket (node:tls wraps arbitrary duplex streams).
+  jsg::Optional<kj::StringPtr> getReadFailureCode(jsg::Lock& js, jsg::JsValue socket);
+  jsg::Optional<kj::StringPtr> getWriteFailureCode(jsg::Lock& js, jsg::JsValue socket);
+
   struct InboundListener {
     kj::String protocol;
     kj::String address;
@@ -597,6 +625,8 @@ class SocketsModule final: public jsg::Object {
     JSG_METHOD(connect);
     JSG_METHOD(getCallerDnsOverride);
     JSG_METHOD(getConnectFailureCode);
+    JSG_METHOD(getReadFailureCode);
+    JSG_METHOD(getWriteFailureCode);
     JSG_METHOD(getInboundListeners);
 
     if (flags.getWorkerdExperimental()) {
@@ -605,9 +635,9 @@ class SocketsModule final: public jsg::Object {
   }
 };
 
-// Classifies a failed connection attempt as the errno name Node.js reports for it (ECONNREFUSED,
-// ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND or EAI_AGAIN), or none when the cause is not
-// recognized.
+// Classifies a failed connection attempt, read or write as the errno name Node.js reports for it
+// (ECONNREFUSED, ECONNRESET, EPIPE, ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND or EAI_AGAIN),
+// or none when the cause is not recognized.
 // A direct connection fails with the connect(2) or getaddrinfo(3) exception; a connection made
 // through a proxy fails with a non-2xx status whose Proxy-Status header (RFC 9209) names the error.
 kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception);

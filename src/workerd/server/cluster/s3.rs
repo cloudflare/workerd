@@ -98,7 +98,12 @@ impl S3 {
                 .map(|(_, value)| value.clone())
                 .or_else(|| std::env::var(var).ok())
         };
-        let required = |name: &str| option(name).ok_or_else(|| Error::Config(name.to_owned()));
+        let required = |name: &str| {
+            option(name).ok_or_else(|| {
+                let var = name.to_uppercase();
+                Error::Config(format!("set {name} or {var}"))
+            })
+        };
         let region = option("aws_region").unwrap_or_else(|| "us-east-1".into());
         let endpoint = option("aws_endpoint")
             .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com"))
@@ -355,7 +360,7 @@ impl S3 {
                 (head, REQUEST_TIMEOUT),
             )
             .await
-            .map_err(|error| Error::Http(format!("{method} {key}: {error}")))?;
+            .map_err(|error| request_error(method, key, &error))?;
         if let Some(date) = http_date_ms(&response.date) {
             // The bucket stamped the header, in whole seconds, between the
             // send and the answer: this clock is off only by what lies
@@ -499,6 +504,15 @@ pub fn format_rfc3339_nano(unix_millis: i64) -> String {
     out + "Z"
 }
 
+/// Converts `error` from a request for `key` to a bucket error.
+fn request_error(method: &str, key: &str, error: &str) -> Error {
+    if error == crate::http::TOO_LARGE {
+        Error::TooLarge(format!("{method} {key}"))
+    } else {
+        Error::Http(format!("{method} {key}: {error}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -546,6 +560,25 @@ mod tests {
             ("k", "s", Some("t="))
         );
         assert!(Credentials::parse("AWS_ACCESS_KEY_ID=k\n", None).is_none());
+    }
+
+    #[test]
+    fn a_missing_credential_names_its_variable() {
+        // Unless the environment supplies it.
+        if ["AWS_SECRET_ACCESS_KEY", "AWS_CREDENTIALS_FILE"]
+            .iter()
+            .any(|var| std::env::var_os(var).is_some())
+        {
+            return;
+        }
+        let options = [("aws_access_key_id".to_owned(), "k".to_owned())];
+        let Err(Error::Config(message)) = S3::new("s3://bucket/prefix", &options) else {
+            panic!("expected a config error");
+        };
+        assert_eq!(
+            message,
+            "set aws_secret_access_key or AWS_SECRET_ACCESS_KEY"
+        );
     }
 
     #[test]

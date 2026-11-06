@@ -586,7 +586,7 @@ kj::Promise<void> runOnHibernate(TestFixture& fixture,
     kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none) {
   return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
-      kj::mv(observer), kj::mv(tracer));
+      kj::mv(observer), kj::mv(tracer), kj::none /* selfTokenFactory */);
 }
 
 // An actor whose onHibernate handler never settles, leaving a timer behind.
