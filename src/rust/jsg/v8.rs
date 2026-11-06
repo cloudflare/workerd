@@ -710,6 +710,7 @@ pub mod ffi {
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
             isolate: *mut Isolate,
         ) -> Local;
