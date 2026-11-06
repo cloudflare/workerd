@@ -13,6 +13,7 @@
 #include <workerd/api/filesystem-bootstrap.h>
 #include <workerd/api/request-io.h>
 #include <workerd/api/url-bootstrap.h>
+#include <workerd/api/urlpattern-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -400,6 +401,37 @@ static void CreateLegacySearchParams(const v8::FunctionCallbackInfo<v8::Value>& 
   });
 }
 
+static void UrlPatternCompile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlPatternBootstrap::compile(
+        js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2])));
+  });
+}
+
+static void UrlPatternProcessInit(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlPatternBootstrap::processInit(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void LegacyUrlPatternCompile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlPatternBootstrap::compileLegacy(
+        js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2])));
+  });
+}
+
+static void LegacyUrlPatternProcessInit(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::UrlPatternBootstrap::processInitLegacy(js, jsg::JsValue(args[0])));
+  });
+}
+
 static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -564,6 +596,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createLegacyUrl",
     "tryCreateLegacyUrl",
     "createLegacySearchParams",
+    "urlPatternCompile",
+    "urlPatternProcessInit",
+    "legacyUrlPatternCompile",
+    "legacyUrlPatternProcessInit",
     "mimeTypeEssence",
     "readableStreamState",
   };
@@ -602,6 +638,10 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateLegacyUrl),
     getMethod(js, TryCreateLegacyUrl),
     getMethod(js, CreateLegacySearchParams),
+    getMethod(js, UrlPatternCompile),
+    getMethod(js, UrlPatternProcessInit),
+    getMethod(js, LegacyUrlPatternCompile),
+    getMethod(js, LegacyUrlPatternProcessInit),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
   };
