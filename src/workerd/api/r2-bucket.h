@@ -116,7 +116,9 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
     JSG_STRUCT(onlyIf, range, ssecKey);
-    JSG_STRUCT_TS_OVERRIDE(R2GetOptions);
+    JSG_STRUCT_TS_OVERRIDE(R2GetOptions {
+      ssecKey?: ArrayBuffer | ArrayBufferView | string;
+    });
   };
 
   struct StringChecksums {
@@ -246,7 +248,9 @@ class R2Bucket: public jsg::Object {
         sha512,
         storageClass,
         ssecKey);
-    JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
+    JSG_STRUCT_TS_OVERRIDE(R2PutOptions {
+      ssecKey?: ArrayBuffer | ArrayBufferView | string;
+    });
   };
 
   struct MultipartOptions {
@@ -256,7 +260,9 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
     JSG_STRUCT(httpMetadata, customMetadata, storageClass, ssecKey);
-    JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
+    JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions {
+      ssecKey?: ArrayBuffer | ArrayBufferView | string;
+    });
   };
 
   // Internal JSRPC payload types. SerializableChecksums, SerializableHeadResult, and
