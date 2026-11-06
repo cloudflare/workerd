@@ -606,8 +606,20 @@ wd_cc_library(
     hdrs = ["urlpattern-standard.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":urlpattern-regex",
         "//src/workerd/jsg",
         "@ada-url",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-regex",
+    srcs = ["urlpattern-regex.c++"],
+    hdrs = ["urlpattern-regex.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
 )
