@@ -374,7 +374,6 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
  private:
   IoPtr<ActorCacheInterface> cache;
   bool enableSql;
-  uint transactionSyncDepth = 0;
 
   // Set if this is a replica Durable Object.
   kj::Maybe<jsg::Ref<DurableObject>> maybePrimary;

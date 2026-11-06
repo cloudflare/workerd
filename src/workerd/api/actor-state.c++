@@ -747,16 +747,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite.notifyWrite();
 
-    uint depth = transactionSyncDepth++;
-    KJ_DEFER(--transactionSyncDepth);
-
-    // TODO(perf): SQLite actually allows multiple savepoints with the same name. The name refers
-    //   to the most-recent of these savepoints. This means we don't actually have to append the
-    //   depth to each savepoint name like I originally thought. We should refactor this -- and use
-    //   prepared statements.
-
-    sqlite.run(
-        {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+    // SQLite resolves a savepoint name to the most recent savepoint with that name, so a
+    // constant name works at any nesting depth.
+    //
+    // These statements stay unprepared: a prepared statement must be destroyed with its
+    // database (see SqliteDatabase's ResetListener), but this object can outlive the actor's
+    // database, which is destroyed and recreated when the actor is reset. Preparing them would
+    // require managing their lifetime elsewhere, e.g. attached to the IoContext the way
+    // SqlStorage::execMemoized() caches its statements.
+    sqlite.run("SAVEPOINT _cf_sync_savepoint");
 
     StoredExternalHandler::SyncNestedTransaction syncExternalTxn(
         context.getActorOrThrow().getOrCreateStoredExternalHandler());
@@ -769,18 +768,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
       JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
           "Cannot commit transaction due to an earlier SQL critical error");
 
-      sqlite.run(
-          {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      sqlite.run("RELEASE _cf_sync_savepoint");
       syncExternalTxn.commit();
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       // If a critical error forced an automatic rollback, we skip the rollback and release
       // attempt, because savepoints should already be released.
       if (!sqlite.observedCriticalError()) {
-        sqlite.run({.regulator = SqliteDatabase::TRUSTED},
-            kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-        sqlite.run(
-            {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+        sqlite.run("ROLLBACK TO _cf_sync_savepoint");
+        sqlite.run("RELEASE _cf_sync_savepoint");
       }
       js.throwException(kj::mv(exception));
     });
