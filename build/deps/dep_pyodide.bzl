@@ -18,7 +18,7 @@ PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/"
 def _stdlib_wheels_repo_impl(rctx):
     # Built-in Python package support has been removed, so workers can no longer
     # request arbitrary packages. The checked-in lock files
-    # (src/pyodide/python-lock/) are pre-filtered to contain exactly the
+    # (src/pyodide/bundle/python-lock/) are pre-filtered to contain exactly the
     # packages that are still loaded at runtime (the CPython stdlib modules and
     # the shared libraries they depend on). We download just those wheels. They
     # are embedded directly into the Pyodide bundle.
@@ -55,7 +55,7 @@ def _pyodide_packages(*, tag, **_kwds):
     _stdlib_wheels_repo(
         name = name,
         tag = tag,
-        lockfile = "@workerd//src/pyodide:python-lock/pyodide-lock_%s.json" % tag,
+        lockfile = "@workerd//src/pyodide/bundle:python-lock/pyodide-lock_%s.json" % tag,
     )
     return [name]
 
