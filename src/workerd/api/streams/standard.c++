@@ -1006,6 +1006,8 @@ class WritableStreamJsController final: public WritableStreamController {
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
+  jsg::Promise<void> closeForTeardown(jsg::Lock& js) override;
+
   jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override {
     KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
   }
@@ -1102,6 +1104,8 @@ class WritableStreamJsController final: public WritableStreamController {
 
   WritableLockImpl lock;
   kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
+
+  kj::Maybe<jsg::Promise<void>> maybeClosePromise;
 
   friend WritableLockImpl;
 };
@@ -4127,10 +4131,21 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
       return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), markAsHandled);
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->close(js);
+      auto promise = controller->close(js);
+      // Retain the same promise for teardown without suppressing an unhandled public close error.
+      maybeClosePromise = promise.whenResolved(js);
+      return promise;
     }
   }
   KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> WritableStreamJsController::closeForTeardown(jsg::Lock& js) {
+  if (state.is<StreamStates::Closed>()) return js.resolvedPromise();
+  KJ_IF_SOME(closing, maybeClosePromise) {
+    return closing.whenResolved(js);
+  }
+  return close(js);
 }
 
 void WritableStreamJsController::doClose(jsg::Lock& js) {
@@ -4523,7 +4538,7 @@ jsg::Promise<void> WritableStreamJsController::write(
 
 void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
   state.visitForGc(visitor);
-  visitor.visit(maybeAbortPromise, lock);
+  visitor.visit(maybeAbortPromise, maybeClosePromise, lock);
 }
 
 // =======================================================================================
@@ -4995,6 +5010,7 @@ void WritableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
   }
   tracker.trackField("lock", lock);
   tracker.trackField("maybeAbortPromise", maybeAbortPromise);
+  tracker.trackField("maybeClosePromise", maybeClosePromise);
 }
 
 void WritableStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

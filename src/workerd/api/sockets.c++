@@ -1191,7 +1191,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   if (protocol == SocketProtocol::UDP) {
     // Value streams have a normal close queue, rather than the byte controller's flush and
     // pending-closure hooks. Queue close now so subsequent writes fail and prior packets drain.
-    datagramClose = writable.isClosedOrClosing(js) ? js.resolvedPromise() : writable.forceClose(js);
+    datagramClose = writable.forceClose(js);
     KJ_ASSERT_NONNULL(datagramClose).markAsHandled(js);
   } else {
     writable.setPendingClosure(js);
