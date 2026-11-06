@@ -58,6 +58,23 @@ export const webfsTest = {
   },
 };
 
+// A file that can't be opened makes createWritable() reject, not throw, with
+// the DOMException that native code creates.
+export const createWritableRejectsWhenTheFileIsGone = {
+  async test() {
+    const file = await temp.getFileHandle('gone.txt', { create: true });
+    await temp.removeEntry('gone.txt');
+    const opened = file.createWritable();
+    ok(opened instanceof Promise);
+    await rejects(opened, (error) => {
+      ok(error instanceof DOMException);
+      strictEqual(error.name, 'NotFoundError');
+      strictEqual(error.message, 'File not found');
+      return true;
+    });
+  },
+};
+
 // A write command whose `position` is past the end of the file zero-pads up to
 // that position. What it must NOT do is resize the file down to the current
 // cursor first, which discarded everything between the cursor and the old EOF.
