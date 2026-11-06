@@ -572,6 +572,18 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "url-bootstrap",
+    srcs = ["url-bootstrap.c++"],
+    hdrs = ["url-bootstrap.h"],
+    implementation_deps = ["//src/workerd/jsg:url"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "urlpattern",
     srcs = ["urlpattern.c++"],
     hdrs = ["urlpattern.h"],
@@ -724,6 +736,15 @@ kj_test(
 kj_test(
     src = "bootstrap-utils-test.c++",
     deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "url-bootstrap-test.c++",
+    deps = [
+        ":url-bootstrap",
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],

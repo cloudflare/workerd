@@ -183,6 +183,23 @@ declare const utils: {
   parseUrl(
     input: string
   ): { readonly href: string; readonly origin: string } | undefined;
+  // The ada members of api/url-bootstrap.h. `out` is a Uint32Array of 9:
+  // jsg::Url::Components' offsets into the href, then the scheme type.
+  // `attribute` is a UrlBootstrap::Attribute, 0 (href) to 9 (hash).
+  urlParse(
+    input: string,
+    base: string | undefined,
+    out: Uint32Array
+  ): string | undefined;
+  urlCanParse(input: string, base?: string): boolean;
+  // Undefined only if the href setter rejected the value.
+  urlUpdate(
+    href: string,
+    attribute: number,
+    value: string,
+    out: Uint32Array
+  ): string | undefined;
+  urlOrigin(href: string): string;
   // The lowercased `type/subtype`, or undefined if not a MIME type.
   mimeTypeEssence(input: string): string | undefined;
   // Undefined for anything but a ReadableStream of either implementation.
