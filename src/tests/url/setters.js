@@ -162,14 +162,34 @@ export const setterValuesAreConverted = {
 export const legacyStringifyErrors = {
   test() {
     if (urlStandard) return;
-    const url = new URL('http://a/');
-    url.host = 'a b';
-    const error = {
-      name: 'TypeError',
-      message: 'Invalid hostname when stringifying URL.',
+    // kj::Url accepts a host it cannot serialize, and decodes a path's %2E
+    // into a component it cannot serialize. Anything that serializes the
+    // URL then throws, the protocol, username and password setters
+    // included.
+    const withBadHost = () => {
+      const url = new URL('https://a/');
+      url.host = 'a b';
+      return url;
     };
-    throws(() => url.href, error);
-    throws(() => url.toString(), error);
-    throws(() => JSON.stringify(url), error);
+    for (const [make, component] of [
+      [withBadHost, 'hostname'],
+      [() => new URL('https://a/%2E'), 'pathname'],
+    ]) {
+      const error = {
+        name: 'TypeError',
+        message: `Invalid ${component} when stringifying URL.`,
+      };
+      for (const serialize of [
+        (url) => url.href,
+        (url) => url.toString(),
+        (url) => JSON.stringify(url),
+        (url) => (url.protocol = 'http:'),
+        (url) => (url.username = 'nemo'),
+        (url) => (url.password = 'hunter12'),
+      ]) {
+        const url = make();
+        throws(() => serialize(url), error);
+      }
+    }
   },
 };

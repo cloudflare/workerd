@@ -29,13 +29,17 @@ which would run the TypeScript implementation under them.
 
 - **Parsing:** the standard backend is ada; the legacy backend is `kj::Url`,
   whose results, quirks included, are pinned as they are (`setters.js`,
-  `construction.js`). Legacy constructor errors distinguish `Invalid base
-  URL string.`; the standard one says `Invalid URL string.` for everything.
+  `construction.js`, and the URL test data `kj::Url` passes in
+  `legacy-conformance.js`). Legacy constructor errors distinguish `Invalid
+  base URL string.`; the standard one says `Invalid URL string.` for
+  everything.
 - **Setters:** only `href` throws (`Failed to set the 'href' property on
   'URL': ...`); the others leave the URL unchanged on a value they reject.
-  The legacy `host`, `hostname` and `port` setters do not validate, and a
-  host `kj::Url` cannot stringify makes `href`, `toString()` and `toJSON()`
-  throw `Invalid hostname when stringifying URL.`
+  The legacy `host`, `hostname` and `port` setters do not validate. A host
+  `kj::Url` cannot stringify, or a path whose `%2E` it decoded, makes
+  `href`, `toString()`, `toJSON()` and the `protocol`, `username` and
+  `password` setters throw `Invalid hostname when stringifying URL.` or
+  `Invalid pathname when stringifying URL.`
 - **searchParams** is the same object for the URL's lifetime. The `href`
   and `search` setters reach it, and every mutator, even one that changes
   nothing, reserializes the URL's query (`?a=b%20c` becomes `?a=b+c`).
