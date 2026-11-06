@@ -11,3 +11,7 @@ build:clang-tidy-warnings --config=clang-tidy --aspects_parameters=clang_tidy_ar
 # Unsafe continuation captures: flags bare references, raw pointers, and
 # non-owning views captured into lambdas passed to async sinks.
 build:clang-tidy-unsafe-continuation-capture --config=clang-tidy --aspects_parameters=clang_tidy_args=--checks=workerd-unsafe-continuation-capture
+
+# Lambdas capturing `this` in constructor initializer lists, before the object
+# is fully constructed. Not yet clean on existing code.
+build:clang-tidy-ctor-initializer-this-capture --config=clang-tidy --aspects_parameters=clang_tidy_args=--checks=workerd-ctor-initializer-this-capture
