@@ -1875,6 +1875,42 @@ test(
 );
 
 test(
+  "cluster: a draining node's own JS RPC call that waits for a handoff follows the DO",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      await fetchJson(nodes[0].httpPort, '/increment?name=rpc-own');
+      // Node 1 finds the DO on node 0 and keeps the route there.
+      const before = await fetchJson(
+        nodes[1].httpPort,
+        '/rpc-identity?name=rpc-own'
+      );
+      assert.strictEqual(before.body.nodeId, nodes[0].nodeId);
+      const held = fetchJson(
+        nodes[0].httpPort,
+        '/hold-increment?name=rpc-own&ms=1500',
+        { timeoutMs: 20_000 }
+      );
+      await sleep(300);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      await sleep(200);
+      // A call made on node 0 itself waits there for the request in flight,
+      // then goes to node 1, which does not route it back on its route from
+      // before the handoff.
+      const called = await fetchJson(
+        nodes[0].httpPort,
+        '/rpc-identity?name=rpc-own',
+        { timeoutMs: 20_000 }
+      );
+      assert.strictEqual(called.status, 200, JSON.stringify(called.body));
+      assert.strictEqual(called.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual((await held).status, 200);
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
   'cluster: two nodes stopping at once under load hand their DOs to the third',
   SIGTERM_DRAINS,
   async () => {

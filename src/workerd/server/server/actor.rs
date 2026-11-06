@@ -846,8 +846,7 @@ impl Channel for RoutedChannel {
         let key = ffi::actor_id_key(&self.id);
         let bound = Rc::clone(&self.bound);
         let remote = self.remote;
-        // A peer that let the object go sent the request on here: a route back there predates
-        // the handoff.
+        // A draining peer sent the request on here: a route back there predates its handoff.
         if remote
             && let Some(by) = Option::<String>::from(ffi::request_metadata_forwarded_by(&metadata))
             && let (Some(node), Some(unique_key)) = (namespace.cluster(), namespace.unique_key())
@@ -863,9 +862,10 @@ impl Channel for RoutedChannel {
         let counted = remote.then(|| namespace.cluster().map(|node| node.peer_request()));
         Ok(PromisedInterface::new(async move {
             // A peer's request that waited for a handoff is sent on to where the object went, so
-            // that it does not outlast its caller's retries, naming this node, which the node it
-            // goes to does not route it back to. It binds nothing, so that the peer's next request
-            // is answered `moved` and finds the object itself (`resolve`).
+            // that it does not outlast its caller's retries. It binds nothing, so that the peer's
+            // next request is answered `moved` and finds the object itself (`resolve`). Any request
+            // a draining instance sends to a peer names it, so that the peer does not route it back
+            // here on a route from before the handoff.
             let mut forward = false;
             let resolved = loop {
                 // A resolution over a session known to be down would fail unsent: resolve again.
@@ -902,9 +902,9 @@ impl Channel for RoutedChannel {
                 forget(&bound, &resolved);
                 forward = remote;
             };
-            if forward
-                && matches!(&*resolved, Resolved::Remote(..))
+            if matches!(&*resolved, Resolved::Remote(..))
                 && let Some(node) = namespace.cluster()
+                && node.cluster.is_draining()
             {
                 ffi::request_metadata_set_forwarded_by(metadata.as_mut(), node.cluster.node());
             }

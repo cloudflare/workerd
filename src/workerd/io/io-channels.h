@@ -205,8 +205,9 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // `WorkerEntrypoint::construct()`.
     Persistent fromPersistentStub = Persistent::NO;
 
-    // The cluster node that let the requested Durable Object go and sent this request on to where
-    // the object went. The node it is sent to does not route it back there.
+    // The draining cluster node that sent this request on to a peer, which may pass it on further.
+    // As that node is letting its Durable Objects go, the peers do not route the request back there
+    // on a route from before its handoff.
     kj::Maybe<kj::String> forwardedBy;
 
     // Whether the work of a Durable Object being handed off made this request, directly or through
