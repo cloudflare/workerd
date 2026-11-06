@@ -31,6 +31,7 @@
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
 #include <kj/compat/url.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -44,6 +45,16 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
+
+// The sources of the ES modules a config names with `Worker.Module.builtin`.
+kj::Maybe<kj::StringPtr> findBuiltin(kj::StringPtr name) {
+  static const auto builtins = [] {
+    kj::HashMap<kj::StringPtr, kj::StringPtr> map;
+    map.insert("/workerd/kv.js"_kj, KV_JS);
+    return map;
+  }();
+  return builtins.find(name).map([](auto& source) { return source; });
+}
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
@@ -401,8 +412,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
         return Worker::Script::PythonModule{conf.getPythonModule()};
       case config::Worker::Module::BUILTIN: {
         auto name = conf.getBuiltin();
-        if (name == "/workerd/kv.js"_kj) {
-          return Worker::Script::EsModule{kj::StringPtr(KV_JS_begin, KV_JS_size)};
+        KJ_IF_SOME(source, findBuiltin(name)) {
+          return Worker::Script::EsModule{source};
         }
         auto message = kj::str("No built-in module named \"", name, "\".");
         KJ_IF_SOME(e, errorReporter) {
