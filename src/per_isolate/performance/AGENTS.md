@@ -88,6 +88,8 @@ unmodified. `performance-now-test.wd-test` runs it against JSG, and its
 on the `typescript-performance-now` autogate, so all of its variants run
 against TS. Each config covers the default compat date, the
 `spec_compliant_property_attributes` attributes, and the perf-hooks flag.
+The test reads both flags from `Cloudflare.compatibilityFlags`, so every
+variant, `@all-compat-flags` included, checks the shape its own flags produce.
 `optimizedCalls` optimizes callers with `%OptimizeFunctionOnNextCall` (the
 configs set `--allow-natives-syntax`, and the natives are compiled through an
 `unsafeEval` binding). The callers read `p.now()` and `p.timeOrigin`, as user

@@ -33,7 +33,6 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "unsafe", unsafeEval = void),
           (name = "expectTypeScript", json = "true"),
-          (name = "specCompliant", json = "true"),
         ],
       )
     ),
@@ -46,7 +45,6 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "unsafe", unsafeEval = void),
           (name = "expectTypeScript", json = "true"),
-          (name = "perfHooks", json = "true"),
         ],
       )
     ),
