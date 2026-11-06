@@ -6,10 +6,7 @@ wd_test(
     size = "large",
     src = "kv-test.wd-test",
     args = ["--experimental"],
-    data = [
-        "kv-test.js",
-        "//src/workerd/server/kv:kv.js",
-    ],
+    data = ["kv-test.js"],
 )
 
 # `workerd serve` of a wrangler.jsonc's kv_namespaces.

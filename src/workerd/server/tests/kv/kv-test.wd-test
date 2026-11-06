@@ -23,7 +23,7 @@ const unitTests :Workerd.Config = (
     # Its objects and large values both in TEST_TMPDIR.
     ( name = "kv",
       worker = (
-        modules = [ ( name = "kv.js", esModule = embed "../../kv/kv.js" ) ],
+        modules = [ ( name = "kv.js", builtin = "/workerd/kv.js" ) ],
         compatibilityFlags = ["rpc"],
         bindings = [
           ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),

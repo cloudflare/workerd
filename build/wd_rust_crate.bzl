@@ -65,7 +65,6 @@ def wd_rust_crate(
         test_deps = [],
         test_proc_macro_deps = [],
         test_compile_data = [],
-        compile_data = [],
         test_size = "medium",
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
@@ -95,7 +94,6 @@ def wd_rust_crate(
         test_tags: additional test tags.
         test_deps: test-only dependencies.
         test_proc_macro_deps: test-only proc_macro dependencies.
-        compile_data: files the sources include at compile time (`include_str!`).
         test_compile_data: files the unit tests read at compile time (include_str!, include_bytes!),
             such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
         test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
@@ -175,7 +173,6 @@ def wd_rust_crate(
         rustc_env = rustc_env,
         visibility = visibility,
         data = data,
-        compile_data = compile_data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
         lint_config = None if testonly else "@workerd//build/rust:lints",
@@ -185,7 +182,7 @@ def wd_rust_crate(
 
     wd_rust_test(
         name = name + "_test",
-        compile_data = test_srcs + compile_data + test_compile_data,
+        compile_data = test_srcs + test_compile_data,
         crate = ":" + name,
         env = test_env,
         size = test_size,

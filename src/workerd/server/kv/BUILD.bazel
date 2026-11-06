@@ -1,17 +1,8 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 
-# The KV Worker (kv.js), which cli/wrangler.rs embeds and tests load.
-
-exports_files(
-    ["kv.js"],
-    visibility = [
-        "//src/workerd/server:__pkg__",
-        "//src/workerd/server/tests:__subpackages__",
-    ],
-)
-
-js_library(
-    name = "kv_js",
-    srcs = ["kv.js"],
-    visibility = ["//src/workerd/server/tests:__subpackages__"],
+# The KV Worker, the built-in module `/workerd/kv.js` (Worker.Module.builtin).
+wd_cc_embed(
+    name = "kv-js",
+    src = "kv.js",
+    visibility = ["//src/workerd/server:__pkg__"],
 )

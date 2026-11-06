@@ -9,10 +9,19 @@
 //   kvNamespace = (name = "<this service>",
 //                  props = (json = "{\"namespace\": \"<id>\"}"))
 //
-// Bindings, which the config gives this Worker (wrangler configs get them
-// from cli/wrangler.rs):
+// The config that runs this module (`builtin = "/workerd/kv.js"`) is an
+// interface: cli/wrangler.rs, Miniflare and hand-written configs write it,
+// each for the workerd it ships with or runs on. Anything added to it later
+// must be optional, so that configs written before keep working. It is:
 //
-//   SHARD       the `KVNamespace` class, SQLite-backed, on a local disk
+//   - a Worker with RPC: a compatibility date of 2024-04-03 or later, or
+//     the `rpc` flag;
+//   - the Durable Object class `KVNamespace`, SQLite-backed (`enableSql`),
+//     stored on a local disk. Its `uniqueKey` and that disk are where the
+//     namespaces live: a config that changes either starts empty;
+//   - these bindings:
+//
+//   SHARD       the `KVNamespace` class
 //   BLOBS       values over `INLINE` bytes: a writable `disk`, or in a
 //               cluster a `bucket` service
 //   BLOB_CACHE  in a cluster, a writable `disk` on the node that caches
@@ -74,6 +83,7 @@ const fail = (status, text) =>
   new Response(null, { status, statusText: text.replace(/[\r\n]/g, ' ') });
 
 let clustered;
+let hasRpc = false;
 let skew = 0;
 const clock = () => Date.now() + skew;
 
@@ -83,6 +93,16 @@ export default {
     const ns = ctx.props?.namespace;
     if (typeof ns !== 'string') {
       return fail(400, 'No namespace: props must be {"namespace": "<id>"}.');
+    }
+    // Without RPC every call to the object fails as "not a function".
+    hasRpc ||=
+      typeof env.SHARD.get(env.SHARD.idFromName(ns)).read === 'function';
+    if (!hasRpc) {
+      return fail(
+        500,
+        'KV needs RPC: give its Worker a compatibility date of 2024-04-03 ' +
+          'or later, or the "rpc" compatibility flag.'
+      );
     }
     try {
       return await serve(request, env, ns);

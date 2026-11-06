@@ -18,6 +18,7 @@
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -395,6 +396,18 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
+      case config::Worker::Module::BUILTIN: {
+        auto name = conf.getBuiltin();
+        if (name == "/workerd/kv.js"_kj) {
+          return Worker::Script::EsModule{kj::StringPtr(KV_JS_begin, KV_JS_size)};
+        }
+        auto message = kj::str("No built-in module named \"", name, "\".");
+        KJ_IF_SOME(e, errorReporter) {
+          e.addError(kj::mv(message));
+          return Worker::Script::TextModule{""};
+        }
+        KJ_FAIL_REQUIRE(message);
+      }
       case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
         KJ_FAIL_REQUIRE(
             "NOSENTRY Worker bundle specified Python requirement which is no longer supported");
