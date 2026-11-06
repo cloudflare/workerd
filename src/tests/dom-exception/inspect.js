@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// util.inspect(), which console.log() uses (ledger #5).
+// util.inspect(), which console.log() uses (ledger #4). The TypeScript
+// implementation renders as Node renders its own DOMException.
 
 import { strictEqual } from 'node:assert';
 import { inspect } from 'node:util';
@@ -14,7 +15,7 @@ export const inspectInstance = {
     const error = new DOMException('m', 'AbortError');
     error.stack = 'AbortError: m\n    at somewhere';
     const expected = usingTsImpl
-      ? 'AbortError: m\n    at somewhere'
+      ? 'DOMException [AbortError]: m\n    at somewhere'
       : 'DOMException {\n' +
         '  code: 20,\n' +
         "  name: 'AbortError',\n" +
@@ -31,7 +32,9 @@ export const inspectNested = {
     error.stack = 'AbortError: m\n    at somewhere';
     strictEqual(
       inspect({ error }, { depth: 0 }),
-      usingTsImpl ? '{ error: [AbortError: m] }' : '{ error: [DOMException] }'
+      usingTsImpl
+        ? '{\n  error: DOMException [AbortError]: m\n      at somewhere\n}'
+        : '{ error: [DOMException] }'
     );
   },
 };
@@ -43,9 +46,12 @@ export const inspectPrototype = {
       .join(',\n');
     const tag = setToStringTag ? ' [DOMException]' : '';
     // The TypeScript prototype is not a DOMException, so its brand-checked
-    // getters must not be what inspect() renders.
+    // getters throw, and inspect() renders it as an object.
+    const objectTag = setToStringTag ? 'DOMException' : 'Object';
+    const accessors =
+      '  name: [Getter],\n  message: [Getter],\n  code: [Getter],\n';
     const expected = usingTsImpl
-      ? `Object [DOMException] {}`
+      ? `[object ${objectTag}] {\n${accessors}${constants}\n}`
       : `[Error${tag}] {\n${constants}\n}`;
     strictEqual(inspect(DOMException.prototype), expected);
   },

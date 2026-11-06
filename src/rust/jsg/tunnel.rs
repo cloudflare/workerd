@@ -98,8 +98,8 @@ impl TunneledException {
             Some(object) if truthy(lock, object, "retryable")? => Kind::Disconnected,
             _ => Kind::Failed,
         };
-        let description = if let Some((name, message)) = try_unwrap_dom_exception(lock, exception)?
-        {
+        let dom_exception = try_unwrap_dom_exception(lock, exception)?;
+        let description = if let Some((name, message)) = &dom_exception {
             format!("{JSG_PREFIX}DOMException({name}): {message}")
         } else {
             let reason = exception.to_detail_string(lock)?;
@@ -120,8 +120,11 @@ impl TunneledException {
         let detail = lock.try_catch(|lock| ser::serialize(lock, exception))?.ok();
         let detail_drops_stacks = lock.feature_flags().get_enhanced_error_serialization();
         if let Some(object) = object {
-            // C++ JSG reads these for the exception's metadata, which runs their getters.
-            object.get(lock, "name")?;
+            // C++ JSG reads these for the exception's metadata, which runs their getters, except
+            // that it takes a DOMException's name as `try_unwrap_dom_exception` returns it.
+            if dom_exception.is_none() {
+                object.get(lock, "name")?;
+            }
             object.get(lock, "stack")?;
         }
         Ok(Self {
@@ -242,23 +245,34 @@ fn js_error<'s>(lock: &mut Lock<'s>, ty: JsErrorType, message: &str) -> v8::Loca
     }
 }
 
-/// The name and message of the `DOMException` that `value` unwraps as, as C++ JSG unwraps a
-/// `DOMException&` parameter: `value` or the first object in its prototype chain that is one.
+/// The name and message of `value`, if it is a `DOMException`, as C++ JSG's
+/// `jsg::Lock::tryGetDomExceptionInfo()` returns them: the ones it was created with, which own
+/// properties that shadow them do not change. Runs no JavaScript.
+///
+/// # Errors
+///
+/// Fails, calling nothing in V8, while an exception or a termination is pending; see
+/// [`Error::is_pending`].
 pub fn try_unwrap_dom_exception<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
 ) -> Result<Option<(String, String)>> {
+    let mut is_dom_exception = false;
     let mut name = String::new();
     let mut message = String::new();
-    // SAFETY: the lock guarantees the isolate is valid and locked, with a context entered;
-    // `value` belongs to its scope.
-    let is_dom_exception = unsafe {
-        v8::ffi::dom_exception_try_unwrap(
-            lock.isolate().as_ffi(),
-            value.raw(),
-            &mut name,
-            &mut message,
-        )
-    }?;
+    v8::call_into_js(lock, |lock| {
+        // SAFETY: the lock guarantees the isolate is valid and locked, with a context entered;
+        // `value` belongs to its scope.
+        let ok = unsafe {
+            v8::ffi::dom_exception_try_unwrap(
+                lock.isolate().as_ffi(),
+                value.raw(),
+                &mut is_dom_exception,
+                &mut name,
+                &mut message,
+            )
+        }?;
+        Ok(ok.then_some(()))
+    })?;
     Ok(is_dom_exception.then_some((name, message)))
 }

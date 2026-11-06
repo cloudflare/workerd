@@ -79,6 +79,8 @@ const VALUES: &[&str] = &[
     "new Error('a\\0b')",
     "Object.assign(new Error('boom'), { name: 'A\\0B' })",
     "new DOMException('a\\0b', 'Data\\0Error')",
+    "Object.defineProperty(new DOMException('boom', 'DataError'), 'name', { value: 'Other' })",
+    "Object.defineProperty(new DOMException('boom', 'DataError'), 'message', { value: 'other' })",
     "undefined",
     "null",
     "1",
@@ -212,6 +214,32 @@ fn reads_properties_as_cpp_jsg_does() {
         let cpp_reads: String = ctx.eval(lock, "reads.join()").unwrap();
         assert_eq!(rust_reads, cpp_reads);
         assert_eq!(rust_reads, "overloaded,retryable,name,stack,message");
+        Ok(())
+    });
+}
+
+/// A `DOMException`'s name and message are read without running their getters, as C++ reads them.
+#[test]
+fn reads_a_dom_exception_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        define_dom_exception(lock, ctx);
+        let expr = "globalThis.reads = []; \
+                    ['name', 'stack', 'message'].reduce((e, key) => \
+                      Object.defineProperty(e, key, { \
+                        get() { reads.push(key); return key; }, \
+                      }), \
+                      new DOMException('boom', 'DataError'))";
+        let value = eval(lock, ctx, expr);
+        lock.exception_to_kj(value).unwrap();
+        let rust_reads: String = ctx.eval(lock, "reads.join()").unwrap();
+        eval(lock, ctx, "reads.length = 0");
+        Harness::cpp_exception_to_kj(lock, value).unwrap();
+        let cpp_reads: String = ctx.eval(lock, "reads.join()").unwrap();
+        assert_eq!(rust_reads, cpp_reads);
+        assert!(
+            !rust_reads.contains("name") && !rust_reads.contains("message"),
+            "{rust_reads}"
+        );
         Ok(())
     });
 }

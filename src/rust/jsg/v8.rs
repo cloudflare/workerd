@@ -828,6 +828,7 @@ pub mod ffi {
         pub unsafe fn dom_exception_try_unwrap(
             isolate: *mut Isolate,
             value: &Local,
+            is_dom_exception: &mut bool,
             name: &mut String,
             message: &mut String,
         ) -> Result<bool>;

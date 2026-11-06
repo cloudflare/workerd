@@ -6,6 +6,7 @@
 
 #include "jsvalue.h"
 #include "ser.h"
+#include "setup.h"
 
 #include <workerd/jsg/memory.h>
 
@@ -14,6 +15,71 @@
 #include <map>
 
 namespace workerd::jsg {
+
+namespace {
+kj::Maybe<v8::Local<v8::Value>> tryGetOwnDataProperty(
+    Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
+  auto context = js.v8Context();
+  v8::Local<v8::String> key = js.strIntern(name);
+  if (!check(object->HasRealNamedProperty(context, key))) return kj::none;
+  return check(object->GetRealNamedProperty(context, key));
+}
+}  // namespace
+
+kj::Maybe<JsObject> tryGetBootstrapDomExceptionPrototype(Lock& js) {
+  auto& modules = KJ_UNWRAP_OR(tryGetBootstrapModules(js), return kj::none);
+  auto exports = KJ_UNWRAP_OR(modules.tryGetLoadedExports(js, "dom-exception"_kj), return kj::none);
+  auto exportsObject = KJ_UNWRAP_OR(exports.tryCast<JsObject>(), return kj::none);
+  auto ctor =
+      KJ_UNWRAP_OR(tryGetOwnDataProperty(js, exportsObject, "DOMException"_kj), return kj::none);
+  if (!ctor->IsFunction()) return kj::none;
+  auto prototype = KJ_UNWRAP_OR(
+      tryGetOwnDataProperty(js, ctor.As<v8::Object>(), "prototype"_kj), return kj::none);
+  if (!prototype->IsObject()) return kj::none;
+  auto result = JsObject(prototype.As<v8::Object>());
+  if (!result.hasPrivate(js, DOM_EXCEPTION_PROTOTYPE_KEY)) return kj::none;
+  return result;
+}
+
+JsObject getBootstrapDomExceptionBase(Lock& js) {
+  return JsObject(
+      check(IsolateBase::getDomExceptionTemplate(js.v8Isolate)->GetFunction(js.v8Context())));
+}
+
+JsObject newBootstrapDomException(Lock& js,
+    JsObject prototype,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  // As the TypeScript constructor makes one. V8 formats the stack's header lazily, from the name
+  // and message the prototype's getters return.
+  auto context = js.v8Context();
+  auto tmpl = IsolateBase::getDomExceptionTemplate(js.v8Isolate);
+  auto object = check(tmpl->InstanceTemplate()->NewInstance(context));
+  check(object->SetPrototype(context, prototype));
+  auto result = JsObject(object);
+  result.setPrivate(js, DOM_EXCEPTION_NAME_KEY, js.str(name));
+  result.setPrivate(js, DOM_EXCEPTION_MESSAGE_KEY, js.str(message));
+  KJ_IF_SOME(s, stack) {
+    v8::Local<v8::String> stackName = js.strIntern("stack"_kj);
+    v8::Local<v8::String> stackValue = js.str(s);
+    check(object->DefineOwnProperty(context, stackName, stackValue, v8::DontEnum));
+  } else {
+    check(v8::Exception::CaptureStackTrace(context, object));
+  }
+  return result;
+}
+
+kj::Maybe<BootstrapDomExceptionInfo> tryGetBootstrapDomExceptionInfo(
+    Lock& js, v8::Local<v8::Value> value) {
+  if (!value->IsObject()) return kj::none;
+  auto object = JsObject(value.As<v8::Object>());
+  auto name = KJ_UNWRAP_OR(
+      object.getPrivate(js, DOM_EXCEPTION_NAME_KEY).tryCast<JsString>(), return kj::none);
+  auto message = KJ_UNWRAP_OR(
+      object.getPrivate(js, DOM_EXCEPTION_MESSAGE_KEY).tryCast<JsString>(), return kj::none);
+  return BootstrapDomExceptionInfo{.name = name, .message = message};
+}
 
 Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
     Optional<kj::String> message,

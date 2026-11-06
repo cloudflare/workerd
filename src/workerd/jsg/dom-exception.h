@@ -30,6 +30,42 @@ namespace workerd::jsg {
 class Serializer;
 class Deserializer;
 
+// The DOMException implemented in the per-isolate bootstrap (src/per_isolate/dom-exception.ts)
+// holds an instance's name and message under the V8 private symbols named
+// DOM_EXCEPTION_NAME_KEY and DOM_EXCEPTION_MESSAGE_KEY; the name is also its brand. Its
+// prototype carries DOM_EXCEPTION_PROTOTYPE_KEY. Through them native code creates, recognizes
+// and serializes such an instance without running JavaScript.
+constexpr kj::StringPtr DOM_EXCEPTION_NAME_KEY = "workerd:domExceptionName"_kj;
+constexpr kj::StringPtr DOM_EXCEPTION_MESSAGE_KEY = "workerd:domExceptionMessage"_kj;
+constexpr kj::StringPtr DOM_EXCEPTION_PROTOTYPE_KEY = "workerd:domExceptionPrototype"_kj;
+
+// The prototype of the bootstrap's DOMException, if the context has a bootstrap and its
+// `dom-exception` module exports the TypeScript class rather than the C++ one.
+kj::Maybe<JsObject> tryGetBootstrapDomExceptionPrototype(Lock& js);
+
+// The constructor the bootstrap's DOMException constructs its instances with, passing its own
+// new.target: an API wrapper object, which Error.isError() reports as a native error by its name
+// (IsolateBase::isJsApiWrapperNativeErrorCallback()). An Error would be one too, but V8 reads
+// accessors on a JSError receiver several times slower.
+JsObject getBootstrapDomExceptionBase(Lock& js);
+
+// Creates an instance of the bootstrap's DOMException, whose prototype is `prototype`, without
+// running JavaScript: an instance of getBootstrapDomExceptionBase(), with V8's stack unless
+// `stack` is given, which becomes an own non-enumerable data property.
+JsObject newBootstrapDomException(Lock& js,
+    JsObject prototype,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack);
+
+// The name and message of an instance of the bootstrap's DOMException.
+struct BootstrapDomExceptionInfo {
+  JsString name;
+  JsString message;
+};
+kj::Maybe<BootstrapDomExceptionInfo> tryGetBootstrapDomExceptionInfo(
+    Lock& js, v8::Local<v8::Value> value);
+
 // JSG allows DOMExceptions to be tunneled through kj::Exceptions (see exceptionToJs() for
 // details). While this feature is activated conditionally at run-time, and thus does not depend
 // on any specific concrete C++ type, JSG needs to be able to unit test the tunneled exception
@@ -128,7 +164,8 @@ struct DOMExceptionNameAndMessage {
 
 // If `value` is a DOMException, the name and message it was created with, as
 // Lock::tryGetDomExceptionInfo() returns them, for native code that holds no jsg::Lock, such as
-// Rust JSG's shims. Requires an entered context. Runs no JavaScript.
+// Rust JSG's shims. Requires an entered context, and no exception or termination pending, since
+// recognizing the bootstrap's DOMException passes the context to V8. Runs no JavaScript.
 //
 // Callers depend only on this signature, not on how DOMException is implemented.
 kj::Maybe<DOMExceptionNameAndMessage> tryGetDOMExceptionNameAndMessage(

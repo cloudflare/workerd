@@ -194,35 +194,47 @@ fn copies_own_properties_only_with_enhanced_error_serialization() {
     }
 }
 
-/// The properties read run their getters as C++ JSG runs them, in the same order.
+/// The properties read run their getters as C++ JSG runs them, in the same order, for an error
+/// and for a `DOMException`.
 #[test]
 fn reads_properties_like_cpp_jsg() {
     for enhanced in [false, true] {
-        let harness =
-            Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
-        harness.run_in_context(|lock, ctx| {
-            let make = "(() => {
-                globalThis.reads = [];
-                const e = new Error('m');
-                for (const k of ['overloaded', 'retryable', 'name', 'stack', 'code']) {
-                    Object.defineProperty(e, k, {
-                        get() { reads.push(k); return undefined; },
-                        enumerable: true,
-                        configurable: true,
-                    });
-                }
-                return e;
-            })()";
-            let exception = eval(lock, ctx, make);
-            tunnel(lock, exception)?;
-            let rust = ctx.eval::<String>(lock, "reads.join()").unwrap();
-            let exception = eval(lock, ctx, make);
-            Harness::cpp_tunnel_exception(lock, exception)?;
-            let cpp = ctx.eval::<String>(lock, "reads.join()").unwrap();
-            assert_eq!(rust, cpp, "enhanced_error_serialization: {enhanced}");
-            assert!(rust.starts_with("overloaded,retryable"), "{rust}");
-            Ok(())
-        });
+        for base in [
+            "new Error('m')",
+            "new dataError.constructor('m', 'DataError')",
+        ] {
+            let harness =
+                Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(enhanced));
+            harness.run_in_context(|lock, ctx| {
+                set_up(lock, ctx);
+                let make = format!(
+                    "(() => {{
+                        globalThis.reads = [];
+                        const e = {base};
+                        for (const k of ['overloaded', 'retryable', 'name', 'stack', 'code']) {{
+                            Object.defineProperty(e, k, {{
+                                get() {{ reads.push(k); return undefined; }},
+                                enumerable: true,
+                                configurable: true,
+                            }});
+                        }}
+                        return e;
+                    }})()"
+                );
+                let exception = eval(lock, ctx, &make);
+                tunnel(lock, exception)?;
+                let rust = ctx.eval::<String>(lock, "reads.join()").unwrap();
+                let exception = eval(lock, ctx, &make);
+                Harness::cpp_tunnel_exception(lock, exception)?;
+                let cpp = ctx.eval::<String>(lock, "reads.join()").unwrap();
+                assert_eq!(
+                    rust, cpp,
+                    "{base}, enhanced_error_serialization: {enhanced}"
+                );
+                assert!(rust.starts_with("overloaded,retryable"), "{rust}");
+                Ok(())
+            });
+        }
     }
 }
 

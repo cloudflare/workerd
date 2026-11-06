@@ -528,6 +528,7 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+    ptr->SetIsJSApiWrapperNativeErrorCallback(&isJsApiWrapperNativeErrorCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -578,6 +579,10 @@ IsolateBase::IsolateBase(V8System& system,
       errorPrototypeTemplate->SetIntrinsicDataProperty(
           v8StrIntern(ptr, ERROR_PROTOTYPE_KEY), v8::kErrorPrototype);
       this->errorPrototypeTemplate.Reset(ptr, errorPrototypeTemplate);
+
+      auto domExceptionTemplate = v8::FunctionTemplate::New(ptr, &constructDomException);
+      registerExternalReference(reinterpret_cast<intptr_t>(&constructDomException));
+      this->domExceptionTemplate.Reset(ptr, domExceptionTemplate);
     }
   });
 }
@@ -751,6 +756,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
 
   // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
+  domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
   errorPrototypeTemplate.Reset();
   workerEnvObj.Reset();
@@ -1241,6 +1247,10 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
+v8::Local<v8::FunctionTemplate> IsolateBase::getDomExceptionTemplate(v8::Isolate* isolate) {
+  return from(isolate).domExceptionTemplate.Get(isolate);
+}
+
 v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->jsSerializeModeKey.Get(isolate);
@@ -1279,6 +1289,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
     KJ_DEFER(errorPrototypeTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
@@ -1367,6 +1378,18 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   }
 
   return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
+}
+
+// The constructor of getDomExceptionTemplate(), which does nothing: the bootstrap's DOMException
+// constructs it with its own new.target, and native code instantiates its instance template.
+void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value>& args) {}
+
+// V8 asks whether an API wrapper object is a native error for Error.isError(), as WebIDL
+// requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its name.
+bool IsolateBase::isJsApiWrapperNativeErrorCallback(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  auto key = v8::Private::ForApi(isolate, v8StrIntern(isolate, DOM_EXCEPTION_NAME_KEY));
+  return jsg::check(object->HasPrivate(isolate->GetCurrentContext(), key));
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {

@@ -25,7 +25,7 @@ export const constructorShape = {
     strictEqual(Object.getPrototypeOf(DOMException), Function.prototype);
     strictEqual(attributesOf(DOMException, 'length'), 'datac');
     strictEqual(attributesOf(DOMException, 'name'), 'datac');
-    // Ledger #11: JSG leaves the constructor's `prototype` writable unless
+    // Ledger #10: JSG leaves the constructor's `prototype` writable unless
     // immutable_api_prototypes is set.
     strictEqual(
       attributesOf(DOMException, 'prototype'),
@@ -46,17 +46,11 @@ export const prototypeShape = {
     strictEqual(attributesOf(proto, 'constructor'), 'datawc');
 
     // Ledger #1: WebIDL attributes are prototype accessors; the C++ makes
-    // them own properties of each instance. Ledger #6: JSG's internal
-    // symbols.
+    // them own properties of each instance. Ledger #5: JSG's inspect hook.
     const symbols = Object.getOwnPropertySymbols(proto).map(String);
-    const expectedSymbols = [];
+    const expectedSymbols = ['Symbol(cloudflare:internal-class)'];
     if (setToStringTag) expectedSymbols.push('Symbol(Symbol.toStringTag)');
-    if (!usingTsImpl) {
-      expectedSymbols.push(
-        'Symbol(cloudflare:internal-class)',
-        'Symbol(kResourceTypeInspect)'
-      );
-    }
+    if (!usingTsImpl) expectedSymbols.push('Symbol(kResourceTypeInspect)');
     deepStrictEqual(symbols.sort(), expectedSymbols.sort());
     const attributeNames = usingTsImpl ? ['code', 'message', 'name'] : [];
     deepStrictEqual(
@@ -93,7 +87,7 @@ export const legacyCodeConstants = {
     for (const [constant, value] of kLegacyCodes) {
       strictEqual(DOMException[constant], value);
       strictEqual(DOMException.prototype[constant], value);
-      // Ledger #8: WebIDL constants are not configurable.
+      // Ledger #7: WebIDL constants are not configurable.
       const expected = webIdlAttributes ? 'datae' : 'dataec';
       strictEqual(attributesOf(DOMException, constant), expected);
       strictEqual(attributesOf(DOMException.prototype, constant), expected);
@@ -111,7 +105,7 @@ export const toStringTag = {
       return;
     }
     strictEqual(DOMException.prototype[Symbol.toStringTag], 'DOMException');
-    // Ledger #12: JSG's tag is writable.
+    // Ledger #11: JSG's tag is writable.
     strictEqual(
       attributesOf(DOMException.prototype, Symbol.toStringTag),
       usingTsImpl ? 'datac' : 'datawc'

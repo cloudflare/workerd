@@ -1274,20 +1274,20 @@ impl<'s> Lock<'s> {
             }
         }
 
-        let description =
-            if let Some((name, message)) = tunnel::try_unwrap_dom_exception(self, exception)? {
-                exception_type = cxx::KjExceptionType::Failed;
-                format!("jsg.DOMException({name}): {message}")
+        let dom_exception = tunnel::try_unwrap_dom_exception(self, exception)?;
+        let description = if let Some((name, message)) = &dom_exception {
+            exception_type = cxx::KjExceptionType::Failed;
+            format!("jsg.DOMException({name}): {message}")
+        } else {
+            let detail = exception.to_detail_string(self)?;
+            // C++ copies the description out of V8 as a C string.
+            let detail = up_to_nul(&detail);
+            if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
+                format!("jsg.{detail}")
             } else {
-                let detail = exception.to_detail_string(self)?;
-                // C++ copies the description out of V8 as a C string.
-                let detail = up_to_nul(&detail);
-                if object.is_some() && v8::ffi::starts_with_tunneled_error_type(detail) {
-                    format!("jsg.{detail}")
-                } else {
-                    format!("jsg.Error: {detail}")
-                }
-            };
+                format!("jsg.Error: {detail}")
+            }
+        };
 
         let mut details = Vec::new();
         let options = ser::SerializeOptions {
@@ -1304,7 +1304,7 @@ impl<'s> Lock<'s> {
         if let Some(object) = object {
             details.push((
                 v8::ffi::js_exception_metadata_detail_id(),
-                exception_metadata(self, exception, object)?,
+                exception_metadata(self, exception, object, dom_exception)?,
             ));
         }
 
@@ -1315,39 +1315,55 @@ impl<'s> Lock<'s> {
 }
 
 /// The `name`, `stack` and `message` of `exception`, which is `object`, and whether it is a native
-/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes.
+/// error, as the `JsExceptionMetadata` message that C++ `addJsExceptionMetadata()` writes. The
+/// name and message of a `DOMException` are those `dom_exception` holds, which C++ takes as they
+/// are rather than reading the properties, so it runs no getter and copies them whole.
 fn exception_metadata<'s>(
     lock: &mut Lock<'s>,
     exception: v8::Local<'s, v8::Value>,
     object: v8::Local<'s, v8::Object>,
+    dom_exception: Option<(String, String)>,
 ) -> Result<Vec<u8>> {
     let mut builder = capnp::message::Builder::new_default();
     let mut metadata =
         builder.init_root::<exception_metadata_capnp::js_exception_metadata::Builder<'_>>();
-    let name = object.get(lock, "name")?;
-    if name.is_string() {
-        let name = String::from_js(lock, name)?;
-        metadata.set_error_type(capped(&name));
+    let (dom_exception_name, dom_exception_message) = dom_exception.unzip();
+    if let Some(name) = &dom_exception_name {
+        metadata.set_error_type(truncated(name));
+    } else {
+        let name = object.get(lock, "name")?;
+        if name.is_string() {
+            let name = String::from_js(lock, name)?;
+            metadata.set_error_type(capped(&name));
+        }
     }
     let stack = object.get(lock, "stack")?;
     if stack.is_string() {
         let stack = String::from_js(lock, stack)?;
         metadata.set_stack_trace(capped(&stack));
     }
-    let message = object.get(lock, "message")?;
-    if message.is_string() {
-        let message = String::from_js(lock, message)?;
-        metadata.set_message(capped(&message));
+    if let Some(message) = &dom_exception_message {
+        metadata.set_message(truncated(message));
+    } else {
+        let message = object.get(lock, "message")?;
+        if message.is_string() {
+            let message = String::from_js(lock, message)?;
+            metadata.set_message(capped(&message));
+        }
     }
     metadata.set_is_native_error(exception.is_native_error());
     Ok(capnp::serialize::write_message_to_words(&builder))
 }
 
-/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut to at most the
-/// length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last character boundary within
-/// it, as C++ cuts it.
+/// `text` up to its first NUL, as C++ copies it out of V8 as a C string, then cut as [`truncated`]
+/// cuts it.
 fn capped(text: &str) -> &str {
-    let text = up_to_nul(text);
+    truncated(up_to_nul(text))
+}
+
+/// `text` cut to at most the length C++ `addJsExceptionMetadata()` keeps, in bytes, at the last
+/// character boundary within it, as C++ cuts it.
+fn truncated(text: &str) -> &str {
     let mut end = v8::ffi::js_exception_metadata_max_field_size();
     if end >= text.len() {
         return text;

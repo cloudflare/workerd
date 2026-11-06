@@ -116,6 +116,9 @@ declare const utils: {
   // name (jsg::JsObject::getPrivate() and setPrivate()). V8-private
   // properties are neither reflected by JavaScript nor inherited.
   getPrivateSymbol(name: string): symbol;
+  // The constructor the TypeScript DOMException constructs its instances with
+  // (jsg::getBootstrapDomExceptionBase()).
+  DOMExceptionBase: new () => object;
   // The C++ compression codec factory (api/compression.h:
   // newCompressionCodecCallback), consumed by webstreams/compression.
   newCompressionCodec(mode: string, format: string): unknown;

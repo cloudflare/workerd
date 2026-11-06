@@ -644,10 +644,15 @@ MaybeLocal dom_exception_create_from_bytes(
 // exception_create_from_bytes() reads it. Never fails.
 Local js_error_create_from_bytes(
     Isolate* isolate, JsErrorType error_type, ::rust::Slice<const uint8_t> message);
-// If `value` unwraps as a DOMException, as jsg::tryGetDOMExceptionNameAndMessage() unwraps it,
-// stores its name and message and returns true; otherwise returns false. Runs no JavaScript.
-bool dom_exception_try_unwrap(
-    Isolate* isolate, const Local& value, ::rust::String& name, ::rust::String& message);
+// Sets `isDomException` to whether `value` is a DOMException, as
+// jsg::tryGetDOMExceptionNameAndMessage() tells, and if it is, stores its name and message.
+// Returns false, calling nothing in V8, while an exception or a termination is pending. Runs no
+// JavaScript.
+bool dom_exception_try_unwrap(Isolate* isolate,
+    const Local& value,
+    bool& isDomException,
+    ::rust::String& name,
+    ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);

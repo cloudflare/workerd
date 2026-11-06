@@ -50,7 +50,7 @@ export const subclassFrames = {
     }
     const lines = make().stack.split('\n');
     strictEqual(lines[0], 'NotFoundError: m');
-    // Ledger #10: V8 leaves out the subclass constructor's frame, as for
+    // Ledger #9: V8 leaves out the subclass constructor's frame, as for
     // subclasses of Error.
     const firstFrame = lines[1].trim();
     if (usingTsImpl) {

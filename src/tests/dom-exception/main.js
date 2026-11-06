@@ -77,6 +77,7 @@ export {
   thrownFromAFetchHandler,
   thrownOverRpc,
   returnedOverRpc,
+  abortReasonsOverRpc,
   erroredStreams,
 } from 'tunneling';
 
@@ -86,6 +87,17 @@ export { inspectInstance, inspectNested, inspectPrototype } from 'inspect';
 export class DomExceptionRpc extends WorkerEntrypoint {
   throwDomException() {
     throw new DOMException('thrown', 'NotFoundError');
+  }
+
+  describeAbortReason(signal) {
+    const { reason } = signal;
+    return [
+      reason instanceof DOMException,
+      reason.name,
+      reason.message,
+      reason.code,
+      typeof reason.stack,
+    ];
   }
 
   returnDomException() {
