@@ -3297,10 +3297,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     // clang-format off
     TargetInfo targetInfo{
       .target = target,
-      .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
+      .envCtx = handler->ctx.map([&](exportedhandler::ExecutionContext& execCtx) -> EnvCtx {
         return {
           .env = handler->env.getHandle(js),
-          .ctx = lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()),
+          .ctx = execCtx.getHandle(js),
         };
       })
     };

@@ -484,6 +484,16 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-shape-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "ctx-shape.js",
+        "ctx-shape-flagged.js",
+        "ctx-shape-test.js",
+    ],
+)
+
+wd_test(
     src = "cache-test.wd-test",
     args = ["--experimental"],
     data = [
