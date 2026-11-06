@@ -35,6 +35,7 @@ import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
   PythonUserError,
   PythonWorkersInternalError,
+  invalidateCaches,
   loadPythonMod,
   reportError,
   setInternalErrorReporter,
@@ -258,6 +259,11 @@ export async function loadPyodide(
       // present in snapshot memory.
       enterJaegerSpan('mount_worker_files', () => {
         mountWorkerFiles(Module);
+        // A dedicated snapshot was collected with the worker files already mounted, so the
+        // import caches restored with it are still right.
+        if (LOADED_SNAPSHOT_TYPE !== 'dedicated') {
+          invalidateCaches(Module);
+        }
       });
 
       if (Module.API.version === PyodideVersion.V0_26_0a2) {
