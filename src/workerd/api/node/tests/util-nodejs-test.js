@@ -4490,6 +4490,27 @@ export const utilFormat = {
   },
 };
 
+// An error whose stack can't be read, because reading its name throws, is
+// rendered as an object, as Node renders it.
+export const utilInspectErrorWithThrowingName = {
+  test() {
+    class ThrowingName extends Error {
+      get name() {
+        throw new TypeError('Illegal invocation');
+      }
+    }
+    assert.strictEqual(util.inspect(ThrowingName.prototype), '[object Object]');
+    const withKey = Object.create(ThrowingName.prototype, {
+      tag: { value: 1, enumerable: true },
+    });
+    assert.strictEqual(util.inspect(withKey), '[object Object] { tag: 1 }');
+    assert.strictEqual(
+      util.inspect({ p: ThrowingName.prototype }),
+      '{ p: [object Object] }'
+    );
+  },
+};
+
 export const utilInspectError = {
   // message/util_inspect_error.js
   async test(ctrl, env, ctx) {
