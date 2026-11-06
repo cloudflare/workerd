@@ -25,16 +25,19 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       kj::Rc<IoChannelFactory::SubrequestChannel> service,
       kj::Maybe<kj::String> cfBlobJson,
-      Persistent fromPersistentStub)
+      Persistent fromPersistentStub,
+      kj::Maybe<kj::String> forwardedBy)
       : httpOverCapnpFactory(httpOverCapnpFactory),
         service(kj::mv(service)),
         cfBlobJson(kj::mv(cfBlobJson)),
-        fromPersistentStub(fromPersistentStub) {}
+        fromPersistentStub(fromPersistentStub),
+        forwardedBy(kj::mv(forwardedBy)) {}
 
   kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
     IoChannelFactory::SubrequestMetadata metadata;
     metadata.cfBlobJson = cfBlobJson.clone();
     metadata.fromPersistentStub = fromPersistentStub;
+    metadata.forwardedBy = kj::mv(forwardedBy);
     context.initResults(capnp::MessageSize{4, 1})
         .setHttp(httpOverCapnpFactory.kjToCapnp(getService()->startRequest(kj::mv(metadata))));
     return kj::READY_NOW;
@@ -88,6 +91,7 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
   kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> service;
   kj::Maybe<kj::String> cfBlobJson;
   Persistent fromPersistentStub;
+  kj::Maybe<kj::String> forwardedBy;
 
   kj::Rc<IoChannelFactory::SubrequestChannel> getService() {
     auto result =
@@ -98,7 +102,9 @@ class WorkerdBootstrapImpl::EventDispatcherImpl final: public rpc::EventDispatch
 
   // Events other than HTTP carry no cf blob.
   kj::Own<WorkerInterface> getWorker() {
-    return getService()->startRequest({});
+    IoChannelFactory::SubrequestMetadata metadata;
+    metadata.forwardedBy = kj::mv(forwardedBy);
+    return getService()->startRequest(kj::mv(metadata));
   }
 
   [[noreturn]] void throwUnsupported() {
@@ -115,9 +121,11 @@ kj::Promise<void> WorkerdBootstrapImpl::startEvent(StartEventContext context) {
   auto params = context.getParams();
   kj::Maybe<kj::String> cfBlobJson;
   if (params.hasCfBlobJson()) cfBlobJson = kj::str(params.getCfBlobJson());
+  kj::Maybe<kj::String> forwardedBy;
+  if (params.hasForwardedBy()) forwardedBy = kj::str(params.getForwardedBy());
   context.initResults(capnp::MessageSize{4, 1})
       .setDispatcher(kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->addRef(),
-          kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub())));
+          kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()), kj::mv(forwardedBy)));
   return kj::READY_NOW;
 }
 
@@ -214,6 +222,7 @@ kj::Own<WorkerInterface> rpc_client_start_request(
   auto request = impl.target.startEventRequest(capnp::MessageSize{4, 0});
   KJ_IF_SOME(cf, metadata->cfBlobJson) request.setCfBlobJson(cf);
   request.setFromPersistentStub(metadata->fromPersistentStub == Persistent::YES);
+  KJ_IF_SOME(node, metadata->forwardedBy) request.setForwardedBy(node);
   auto dispatcher = request.send().getDispatcher();
   auto& factory = impl.factory.getImpl();
   return kj::heap<RpcWorkerInterface>(factory.httpOverCapnpFactory, factory.byteStreamFactory,

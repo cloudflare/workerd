@@ -201,6 +201,10 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // `WorkerEntrypoint::construct()`.
     Persistent fromPersistentStub = Persistent::NO;
 
+    // The cluster node that let the requested Durable Object go and sent this request on to where
+    // the object went. The node it is sent to does not route it back there.
+    kj::Maybe<kj::String> forwardedBy;
+
     // Address of the client as IP:port on whose behalf this request is being made.
     kj::Maybe<kj::String> clientAddress;
   };

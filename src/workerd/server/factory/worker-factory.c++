@@ -1258,6 +1258,14 @@ void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool p
   if (persistent) metadata.fromPersistentStub = Persistent::YES;
 }
 
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata) {
+  return metadata.forwardedBy.map([](const kj::String& s) { return toRustString(s); });
+}
+
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node) {
+  metadata.forwardedBy = kj::str(node);
+}
+
 namespace {
 
 // The self-token of a root actor, for `ctx.restore()`: only the namespace and id, so that

@@ -1081,7 +1081,8 @@ interface EventDispatcher @0xf20697475ec1752d {
 interface WorkerdBootstrap {
   # Bootstrap interface exposed by workerd when serving Cap'n Proto RPC.
 
-  startEvent @0 (cfBlobJson :Text, fromPersistentStub :Bool) -> (dispatcher :EventDispatcher);
+  startEvent @0 (cfBlobJson :Text, fromPersistentStub :Bool, forwardedBy :Text)
+      -> (dispatcher :EventDispatcher);
   # Start a new event. Exactly one event should be delivered to the returned EventDispatcher.
   #
   # If the event is an HTTP request, `cfBlobJson` optionally carries the JSON-encoded `request.cf`
@@ -1091,6 +1092,9 @@ interface WorkerdBootstrap {
   # ("persistent") stub. The target worker re-verifies it still has the
   # `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the event. The
   # dispatcher passes it through to the worker via SubrequestMetadata.
+  #
+  # `forwardedBy` names the cluster node that sent the request on, as
+  # `SubrequestMetadata::forwardedBy`.
 }
 
 interface WorkerdDebugPort {

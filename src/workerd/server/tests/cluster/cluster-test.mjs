@@ -30,8 +30,9 @@
 //      the nodes to start on, and refuses a deployment that holds more than
 //      services or conflicts with another.
 //  12. A node stopping under load hands its DOs to its peers: requests that
-//      arrive meanwhile wait for a DO's handoff and follow it, and a DO whose
-//      handoff outlasts its deadline moves once the node left.
+//      arrive meanwhile wait for a DO's handoff and follow it, JS RPC calls
+//      included, and a DO whose handoff outlasts its deadline moves once the
+//      node left.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -1710,6 +1711,42 @@ test(
         [local.body.count, peer.body.count].sort(),
         [3, 4]
       );
+      assert.deepStrictEqual(await exit, { code: 0, signal: null });
+    });
+  }
+);
+
+test(
+  'cluster: a JS RPC call that waits for a handoff follows the DO',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      await fetchJson(nodes[0].httpPort, '/increment?name=rpc-waited');
+      // Node 1 finds the DO on node 0 and keeps the route there.
+      const before = await fetchJson(
+        nodes[1].httpPort,
+        '/rpc-identity?name=rpc-waited'
+      );
+      assert.strictEqual(before.body.nodeId, nodes[0].nodeId);
+      const held = fetchJson(
+        nodes[0].httpPort,
+        '/hold-increment?name=rpc-waited&ms=1500',
+        { timeoutMs: 20_000 }
+      );
+      await sleep(300);
+      const exit = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+      await sleep(200);
+      // The call waits on node 0 for the request in flight, and node 0 sends
+      // it on to node 1, which does not route it back on its route from
+      // before the handoff.
+      const called = await fetchJson(
+        nodes[1].httpPort,
+        '/rpc-identity?name=rpc-waited',
+        { timeoutMs: 20_000 }
+      );
+      assert.strictEqual(called.status, 200, JSON.stringify(called.body));
+      assert.strictEqual(called.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual((await held).status, 200);
       assert.deepStrictEqual(await exit, { code: 0, signal: null });
     });
   }

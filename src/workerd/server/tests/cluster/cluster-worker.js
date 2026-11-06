@@ -75,6 +75,9 @@
 // flight on a node and SIGTERM that node while the request has not yet routed
 // to the DO's owner.
 //
+// Its /rpc-identity calls the DO's identity() method over JS RPC rather than
+// fetch(). A failure is reported with the error's `retryable`.
+//
 // Paths under /on-hibernate/ go to the worker in cluster-on-hibernate-worker.js.
 
 import {
@@ -103,6 +106,17 @@ export default {
     const delay = url.searchParams.get('delay');
     if (delay !== null) {
       await scheduler.wait(Number(delay));
+    }
+
+    if (url.pathname === '/rpc-identity') {
+      try {
+        return Response.json(await stub.identity());
+      } catch (err) {
+        return Response.json(
+          { error: String(err), retryable: err.retryable },
+          { status: 500 }
+        );
+      }
     }
 
     // Forward to the DO with the same path and query.

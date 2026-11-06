@@ -547,6 +547,10 @@ pub mod ffi {
             metadata: Pin<&mut RequestMetadata>,
             persistent: bool,
         );
+        /// The cluster node that sent the request on after letting its object go.
+        fn request_metadata_forwarded_by(metadata: &RequestMetadata) -> KjMaybe<String>;
+        /// Names this node as the one that sent the request on after letting its object go.
+        fn request_metadata_set_forwarded_by(metadata: Pin<&mut RequestMetadata>, node: &str);
         /// Makes stubs the request creates for the actor itself restorable: they encode the
         /// actor's namespace and id.
         fn request_metadata_set_actor_self_token(

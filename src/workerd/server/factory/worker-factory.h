@@ -328,6 +328,8 @@ kj::Own<RequestMetadata> new_request_metadata(
     kj::Maybe<::rust::Str> cfBlobJson, kj::Maybe<::rust::Str> clientAddress);
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata);
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent);
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata);
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node);
 void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     RequestMetadata& metadata,
     ::rust::Str uniqueKey,
