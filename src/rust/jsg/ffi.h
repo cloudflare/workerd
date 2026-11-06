@@ -64,7 +64,7 @@ struct TraitObjectPtr {
 // with cppgc via the CppgcShim bridge pattern that Wrappable provides.
 //
 // The data[] field stores a Rust fat pointer (data + vtable) to `dyn GarbageCollected`
-// from a leaked Box<dyn GarbageCollected>. This lets us call back into Rust for tracing
+// from a leaked Rc<dyn GarbageCollected>. This lets us call back into Rust for tracing
 // and destruction without knowing the concrete type at compile time.
 class Wrappable: public ::workerd::jsg::Wrappable {
  public:
@@ -87,13 +87,13 @@ class Wrappable: public ::workerd::jsg::Wrappable {
 struct ResourceDescriptor;
 
 // Wrappable lifecycle — returns KjRc<Wrappable> to Rust for reference-counted ownership.
-// Ref::clone calls wrappable_add_strong_ref; Ref::drop calls wrappable_remove_strong_ref.
-// wrappable_remove_strong_ref does addRef(+1) + maybeDeferDestruction(-1) = net 0 on kj::Rc;
-// the actual kj::Rc decrement happens when WrappableRc (KjRc<Wrappable>) is dropped.
+// Rc::clone calls wrappable_add_strong_ref. A dropped strong Rc calls
+// wrappable_remove_strong_ref under the isolate lock (Rust's IsolateState defers it until the
+// lock otherwise), then drops its KjRc<Wrappable>, which decrements the kj::Rc refcount.
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong);
+void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
 
@@ -431,11 +431,10 @@ MaybeLocal wrap_resource(
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates, or the value of a typed promise: the wrapper keeps the Wrappable alive,
-// and traced if `needs_gc_tracing`, for as long as it is reachable. Returns empty if an exception
+// and traced, for as long as it is reachable. Returns empty if an exception
 // or a termination is pending. Throws if `wrappable` already has a wrapper, or if V8 could not
 // create one.
-MaybeLocal wrappable_attach_opaque_wrapper(
-    Isolate* isolate, kj::Rc<Wrappable> wrappable, bool needs_gc_tracing);
+MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable);
 // The Rust Wrappable whose opaque wrapper `value` is, as wrappable_attach_opaque_wrapper() returns
 // it; none if `value` is anything else, including the opaque wrapper of a C++ Wrappable.
 kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value);
@@ -561,6 +560,20 @@ bool local_serialize(Isolate* isolate,
 // none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
 // exception if the header is missing or of an unsupported version.
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+
+// JSON
+// As jsg::Lock::parseJson() and serializeJson(), through v8::JSON.
+//
+// Parses `text`, a string, and returns the value, or none if it is not valid JSON, leaving the
+// SyntaxError pending. Runs no JavaScript.
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text);
+// Stringifies `value`, indenting by `gap`, a string (no indenting if it is empty), stores the
+// result in `result` and returns true, or returns false if stringifying threw, leaving the
+// exception pending: what a getter, toJSON() or Proxy trap threw, or a TypeError for a cycle or a
+// BigInt. A value that JSON can't represent, such as undefined or a function, gives the string
+// "undefined".
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

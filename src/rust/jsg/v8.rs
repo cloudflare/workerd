@@ -28,8 +28,9 @@
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
-//! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! drop, under the isolate lock, `wrappable_remove_strong_ref()` releases its strong reference,
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount; without the lock, its isolate's
+//! [`IsolateState`] queues both until the next lock. A function created by
 //! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
 //! function's V8 data.
 
@@ -564,7 +565,7 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
-        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>, is_strong: bool);
+        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
             ref_parent: *mut usize,
@@ -669,6 +670,18 @@ pub mod ffi {
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
         // throws.
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+
+        // JSON
+        // Leave what parsing and stringifying throw pending; see `call_into_js()`.
+        // Infallible: JSON::Parse reports what it throws in its result.
+        pub unsafe fn value_json_parse(isolate: *mut Isolate, text: &Local) -> MaybeLocal;
+        // Fallible: the result is a rust::String.
+        pub unsafe fn local_json_stringify(
+            isolate: *mut Isolate,
+            value: &Local,
+            gap: &Local,
+            result: &mut String,
+        ) -> Result<bool>;
 
         // Errors
         // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
@@ -807,6 +820,12 @@ pub mod ffi {
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
         pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.dispose]`.
+        pub dispose: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.asyncDispose]`.
+        pub async_dispose: KjMaybe<usize>,
+        /// The `v8::FunctionCallback` that runs when an instance is called as a function.
+        pub callable: KjMaybe<usize>,
     }
 
     // Resources
@@ -834,7 +853,6 @@ pub mod ffi {
         pub unsafe fn wrappable_attach_opaque_wrapper(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
-            needs_gc_tracing: bool,
         ) -> Result<MaybeLocal>;
         // Infallible: returns kj::none for anything but the opaque wrapper of a Rust Wrappable.
         pub unsafe fn wrappable_try_unwrap_opaque(
@@ -1849,10 +1867,6 @@ impl Eq for Local<'_, String> {}
 struct FunctionData<T>(T);
 
 impl<T: Traced> Traced for FunctionData<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         self.0.trace(visitor);
     }
@@ -1937,7 +1951,7 @@ impl Function {
         let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
-        wrappable.remove_strong_ref(true);
+        wrappable.remove_strong_ref();
         functions
     }
 
@@ -4585,8 +4599,9 @@ pub struct GcVisitor {
 pub(crate) enum VisitMode {
     /// For the C++ `jsg::GcVisitor` of its owner's visit.
     Visit,
-    /// To detach the value from its owner; see [`GcVisitor::is_detaching`].
-    Detach,
+    /// To detach the value from its owner, under the lock of the given isolate; see
+    /// [`GcVisitor::is_detaching`].
+    Detach(*mut ffi::Isolate),
 }
 
 impl GcVisitor {
@@ -4610,10 +4625,13 @@ impl GcVisitor {
     /// forgets its parent, and every `TracedGlobal` it traces lets go of its traced reference and
     /// makes its strong handle strong. The value is then safe to use and to put in another owner,
     /// however the garbage collector last visited it.
-    pub(crate) fn detach<T: crate::Traced>(_lock: &mut Lock<'_>, value: &T) {
+    ///
+    /// # Panics
+    /// Panics if `value` holds a `TracedGlobal` of an isolate other than the lock's.
+    pub(crate) fn detach<T: crate::Traced>(lock: &Lock<'_>, value: &T) {
         let mut visitor = Self {
             handle: ffi::GcVisitor { ptr: 0 },
-            mode: VisitMode::Detach,
+            mode: VisitMode::Detach(lock.isolate().as_ffi()),
         };
         value.trace(&mut visitor);
     }
@@ -4623,7 +4641,7 @@ impl GcVisitor {
     /// `None`: a `Traced` impl that visits through it must instead make its reference strong
     /// again and forget its parent, as a moved C++ `jsg::Ref` does.
     pub fn is_detaching(&self) -> bool {
-        self.mode == VisitMode::Detach
+        matches!(self.mode, VisitMode::Detach(_))
     }
 
     /// Visits a `jsg::Rc<R>` field during GC tracing.
@@ -4658,7 +4676,7 @@ impl GcVisitor {
     /// # Traced nodes
     ///
     /// Rust never resets a traced reference. A `TracedGlobal` taken out of its resource
-    /// (`Cell::take`, `mem::replace`) is traced by nothing until it is put back, and nothing
+    /// (in its `Drop` impl, say) is traced by nothing until it is put back, and nothing
     /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
     /// its node while it still points to it. Every visit therefore first lets go of the traced
     /// reference: it clears the pointer without a reset, and makes the strong handle strong
@@ -4677,13 +4695,15 @@ impl GcVisitor {
     /// node seen live before the collection in progress is still there until its marking
     /// completes.
     ///
-    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a visit
-    /// on behalf of another isolate, which debug builds assert against: a `TracedGlobal` belongs in
-    /// resources of its own isolate. A visit has no isolate when its resource has neither been
+    /// A visit after the `TracedGlobal`'s isolate is closed does nothing, and neither does a GC
+    /// visit on behalf of another isolate, which debug builds assert against; a detaching visit
+    /// under another isolate's lock panics. A `TracedGlobal` belongs in resources of its own
+    /// isolate. A visit has no isolate when its resource has neither been
     /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
     /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
-    /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
-    /// The visit then touches the handles only if this thread holds the lock, and otherwise
+    /// makes that reference under the lock of the isolate the resource is created in, which
+    /// need not be the `TracedGlobal`'s isolate. The visit then touches the handles only if
+    /// this thread holds the `TracedGlobal`'s isolate lock, and otherwise
     /// leaves them as they are: a weak handle stays weak until a later visit under the lock,
     /// so its value can die meanwhile, after which `TracedGlobal::as_local` panics.
     ///
@@ -4698,13 +4718,21 @@ impl GcVisitor {
     /// last visit wins, and the value can be collected while the other owner still uses it. So
     /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
     /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
+    ///
+    /// # Panics
+    /// Panics in a detaching visit (see [`GcVisitor::is_detaching`]) if `global` belongs to an
+    /// isolate other than the lock's.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
             // of a dropped `TracedGlobal` are.
             return;
         }
-        if self.is_detaching() {
+        if let VisitMode::Detach(isolate) = self.mode {
+            assert!(
+                global.state.belongs_to(isolate),
+                "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+            );
             // SAFETY: see below, and `GlobalSlot`.
             let (strong, traced) = unsafe {
                 (
@@ -4714,7 +4742,8 @@ impl GcVisitor {
             };
             if traced.ptr != 0 {
                 traced.ptr = 0;
-                // SAFETY: the strong handle is valid, and `detach` runs under the isolate lock.
+                // SAFETY: the strong handle is valid, and `detach` runs under the lock of its
+                // isolate, as checked above.
                 unsafe { ffi::global_clear_weak(strong) };
             }
             return;
@@ -4723,7 +4752,7 @@ impl GcVisitor {
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
         if visiting.is_null() {
             // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes without a `Lock`.
+            // `jsg::Rc::new` makes under the lock of the resource's isolate.
             if !global.state.this_thread_holds_lock() {
                 return;
             }
@@ -5033,17 +5062,14 @@ impl WrappableRc {
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }
 
-    /// Decrements the strong reference count and potentially defers destruction.
+    /// Decrements the strong reference count on the underlying Wrappable, which releases its
+    /// strong wrapper handle, or weakens the references it holds, when the count reaches zero.
     ///
-    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
-    /// the C++ side with the ref's current `strong` flag. If `is_strong` is
-    /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
-    /// was already weakened by GC tracing), it skips the decrement.
-    // The bool maps directly to the C++ FFI parameter; an enum would just
-    // convert back to bool immediately before crossing the boundary.
-    pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
+    /// Called when an `Rc<R>` that counts as strong is released. The caller must hold the
+    /// Wrappable's isolate lock, which [`IsolateState::release`] ensures for an `Rc`.
+    pub(crate) fn remove_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
-        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };
+        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut()) };
     }
 
     /// Returns the current strong reference count from the C++ Wrappable.
@@ -5066,7 +5092,7 @@ impl WrappableRc {
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
-        let data = self.attach_opaque_wrapper(lock, true)?;
+        let data = self.attach_opaque_wrapper(lock)?;
         let mut functions = Vec::with_capacity(N);
         for callback in callbacks {
             // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
@@ -5091,33 +5117,28 @@ impl WrappableRc {
     /// While an exception or a termination is pending, creates nothing and returns
     /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shim checks before
     /// creating the wrapper, which would clear the exception.
-    // The bool maps directly to the C++ parameter, as in `remove_strong_ref`.
     pub(crate) fn attach_opaque_wrapper<'s>(
         &self,
         lock: &Lock<'s>,
-        needs_gc_tracing: bool,
     ) -> crate::Result<Local<'s, Value>> {
         let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
         // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
         unsafe {
             Local::from_ffi_maybe(
-                ffi::wrappable_attach_opaque_wrapper(
-                    isolate,
-                    self.handle.clone(),
-                    needs_gc_tracing,
-                )
-                .map_err(|exception| {
-                    // `jsg::check` throws when creating the wrapper leaves an exception
-                    // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
-                    if ffi::isolate_has_pending_exception(isolate)
-                        || ffi::isolate_is_execution_terminating(isolate)
-                    {
-                        Error::pending()
-                    } else {
-                        Error::from(exception)
-                    }
-                })?,
+                ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
+                    |exception| {
+                        // `jsg::check` throws when creating the wrapper leaves an exception
+                        // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
+                        if ffi::isolate_has_pending_exception(isolate)
+                            || ffi::isolate_is_execution_terminating(isolate)
+                        {
+                            Error::pending()
+                        } else {
+                            Error::from(exception)
+                        }
+                    },
+                )?,
             )
         }
         .ok_or_else(Error::pending)

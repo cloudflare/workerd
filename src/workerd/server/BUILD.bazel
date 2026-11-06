@@ -90,6 +90,7 @@ wd_rust_crate(
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
+        "//src/workerd/server/cluster",
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
@@ -173,26 +174,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "pyodide",
-    srcs = [
-        "pyodide.c++",
-    ],
-    hdrs = [
-        "pyodide.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/api:pyodide",
-        "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
-    ],
-)
-
-wd_cc_library(
     name = "workerd-debug-port-client",
     srcs = [
         "workerd-debug-port-client.c++",
@@ -251,7 +232,6 @@ wd_cc_library(
         ":actor-id-impl",
         ":compiled-bindings_capnp",
         ":fallback-service",
-        ":pyodide",
         ":workerd-debug-port-client",
         ":workerd_capnp",
         "//src/cloudflare",
@@ -271,7 +251,6 @@ wd_cc_library(
         "//src/workerd/server/kv:kv-js",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ] + select({
         ":set_use_transpiler": ["//src/rust/transpiler"],
         "//conditions:default": [],

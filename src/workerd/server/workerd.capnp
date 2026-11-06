@@ -115,6 +115,79 @@ struct ClusterConfig {
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
   # may differ in backwards-compatible ways.
+  #
+  # The bucket can also hold named deployments. Each deployment is an encoded `Config` that contains
+  # only services. A catalog record in the bucket selects the current version of every deployment.
+  #
+  # Each workerd process is one cluster instance. Each instance reads the catalog at startup and
+  # serves accepted deployments beside the services in its own config. It considers deployments
+  # in catalog order and skips a deployment as a whole when it breaks any of these rules, alone
+  # or against the instance's config or a deployment accepted before it. Instances with the same
+  # config and catalog skip the same deployments:
+  #
+  # - Service names must be unique across the instance's config and every deployment.
+  # - Actor namespace keys must also be unique. These keys are Durable Object `uniqueKey` values
+  #   and Workflow namespace keys. Each Durable Object `uniqueKey` must be one path component.
+  # - Every `Text` value must be valid UTF-8.
+  # - A deployment cannot define a `disk` service or a service named `internet`. It can refer to a
+  #   disk service in the instance's config by name.
+  # - A deployment cannot have `fromEnvironment` bindings, so it cannot read the instance's
+  #   environment variables.
+  #
+  # An instance also skips a deployment whose objects are missing, invalid, or larger than its
+  # bucket client can read. A catalog entry whose name is not a valid deployment name is unreadable
+  # and skipped in the same way.
+  #
+  # An error in a deployment's service, such as a worker that throws while loading, is logged with
+  # the deployment's name and does not stop the instance. The broken service fails requests and
+  # actor construction. Warnings from deployment services are also attributed to their
+  # deployments.
+  #
+  # A reference in the instance's own config to a service that neither that config nor a
+  # deployment that was read defines is treated as a deployment reference. It is logged,
+  # naming any unreadable deployments, and fails its requests without stopping the instance.
+  # A reference to a skipped deployment's service fails in the same way. When a deployment's
+  # service cannot satisfy a reference, the deployment's error names the referring service or
+  # socket.
+  #
+  # A tail whose service is missing or cannot handle requests is not started; the request it would
+  # tail proceeds. A broken deployment service's Durable Object namespace fails requests before
+  # the instance claims an object in the bucket and does not adopt dead peers' alarms.
+  #
+  # `--external-addr` and `--directory-path` overrides apply only to services in the instance's
+  # own config. An override that names only a deployment's service is unmatched and is an error in
+  # the instance's config.
+  #
+  # Only a failure to open the bucket or to reach or read its catalog ends the process. Run each
+  # instance under a supervisor that restarts it.
+  #
+  # `src/workerd/server/cluster/deploy.rs` documents the bucket layout for tools that write
+  # deployments.
+  #
+  # `workerd deploy` publishes a wrangler project or a Cap'n Proto config:
+  #
+  #     workerd deploy --experimental [<project>] --bucket s3://bucket/prefix
+  #
+  # See `workerd deploy --help` for details. A wrangler project's worker becomes a service named
+  # after the deployment. Its Durable Objects use the disk service named `do-storage`. Every
+  # instance that serves the project with Durable Objects must define this service in its own
+  # config.
+  #
+  # For a wrangler project, each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here,
+  # `<name>` is the deployment name. `<key>` is the class's storage key from the project's
+  # migrations. The storage key defaults to the class name and stays the same after a rename.
+  # Deploying the project under another name creates separate Durable Objects. They start empty.
+  # A Cap'n Proto deployment's Durable Object `uniqueKey`s and every Workflow namespace key are
+  # used as written.
+  #
+  # An instance reads the catalog only at startup. Restart it to serve a published catalog
+  # revision. `workerd deploy` checks a deployment against the catalog's other deployments. It
+  # does not read any instance config.
+  #
+  # A deployment has the authority granted by each instance's config. Its services can reach the
+  # instance's network, container engine, and named services. Anyone who can publish deployments
+  # can run code with that authority on every instance. Restricting a writer to the deployment area
+  # of the bucket does not reduce that authority.
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
@@ -562,7 +635,7 @@ struct Worker {
       # Takes the value of an environment variable from the system. The value specified here is
       # the name of a system environment variable. The value of the binding is obtained by invoking
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
-      # `null`.
+      # `null`. A deployment in a cluster's bucket cannot have this binding. See `ClusterConfig`.
 
       analyticsEngine @17 :ServiceDesignator;
       # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.

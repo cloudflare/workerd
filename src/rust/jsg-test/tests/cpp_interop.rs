@@ -6,7 +6,6 @@
 //! resources that take, return and hold it (`crate::cpp_interop`).
 
 use std::cell::Cell;
-use std::cell::RefCell;
 
 use jsg::v8;
 
@@ -31,11 +30,14 @@ impl Drop for InRequest {
     }
 }
 
-fn new_host() -> jsg::Rc<Host> {
-    jsg::Rc::new(Host {
-        label: "test".to_owned(),
-        held: RefCell::new(None),
-    })
+fn new_host(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Host> {
+    jsg::Rc::new(
+        lock,
+        Host {
+            label: "test".to_owned(),
+            held: jsg::RefCell::new(None),
+        },
+    )
 }
 
 /// Runs a C++ constructor and returns the wrapper it made.
@@ -72,7 +74,8 @@ where
 {
     let mut out = T::default();
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
     });
@@ -83,7 +86,8 @@ where
 fn eval_error(code: &str) -> (String, String) {
     let mut out = (String::new(), String::new());
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let error = ctx
             .eval::<String>(lock, code)
             .unwrap_err()
@@ -161,7 +165,8 @@ fn lazy_property_keeps_the_first_value_once_the_request_ends() {
     // An `ExecutionContext` can outlive the request that created it, so a ported one has to
     // decide whether `lazy_instance` memoization is right for each property.
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let request = InRequest::enter();
         assert!(
             ctx.eval::<bool>(lock, "globalThis.first = h.current; first !== undefined")
@@ -246,7 +251,8 @@ fn js_exception_from_cpp_passes_through() {
 #[test]
 fn cpp_is_not_called_while_an_exception_is_pending() {
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let greeter = ctx.eval_raw(lock, "greeter").unwrap();
         let greeter = <jsg_cpp::Ref<ffi::TestCppGreeter> as jsg::FromJS>::from_js(lock, greeter)?;
         let caught = lock
@@ -277,7 +283,8 @@ fn cross_heap_cycle_is_collected() {
     let destroyed = ffi::test_cpp_holders_destroyed();
     let harness = Harness::new();
     harness.run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         // A Rust resource and a C++ resource that hold each other, and nothing else holds.
         ctx.eval_raw(
             lock,
@@ -298,7 +305,8 @@ fn cross_heap_cycle_is_collected() {
 #[test]
 fn held_resources_survive_gc() {
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         ctx.eval_raw(
             lock,
             "h.hold(holder); holder.hold(h); globalThis.keep = h; globalThis.h = undefined; \
@@ -324,7 +332,7 @@ fn held_resources_survive_gc() {
 #[test]
 fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
     Harness::new().run_in_context(|lock, ctx| {
-        let host = new_host();
+        let host = new_host(lock);
         set_globals(lock, ctx, host.clone());
         let holder = ctx.eval_raw(lock, "holder").unwrap();
         let holder = <jsg_cpp::Ref<ffi::TestCppHolder> as jsg::FromJS>::from_js(lock, holder)?;
@@ -333,7 +341,7 @@ fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
         let (promise, resolver) =
             jsg::Promise::<jsg_cpp::Ref<ffi::TestCppHolder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, host, |lock, host, holder| {
-            host.hold(holder);
+            host.hold(lock, holder);
             // Traces the host, and through it the reference, from its new owner.
             Harness::request_gc(lock);
             Ok(())

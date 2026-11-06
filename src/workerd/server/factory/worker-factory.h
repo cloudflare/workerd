@@ -125,6 +125,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool tailWorkers = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
+    // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute
+    // path.
+    kj::Maybe<kj::String> pyodideBundleDiskCacheDir;
     // When set, async activity in every worker is traced to this file (--async-trace), which must
     // outlive the factory.
     kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
@@ -213,8 +216,12 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<ChannelFactory> channels,
     kj::Own<RequestMetadata> metadata,
     ::rust::Box<WorkerInterfaceList> tails);
-kj::Promise<void> worker_run_actor_on_hibernate(
-    const CompiledWorker& worker, const ActorHandle& actor, ::rust::Box<ChannelFactory> channels);
+kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
+    const ActorHandle& actor,
+    ::rust::Str className,
+    ::rust::Box<ChannelFactory> channels,
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Own<RequestMetadata> metadata);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(

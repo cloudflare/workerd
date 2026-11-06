@@ -522,18 +522,17 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    auto str = input.orDefault(js.str());
-    auto view = jsg::JsUint8Array::create(js, str.utf8Length(js));
-    [[maybe_unused]] auto result = str.writeInto(
-        js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-    KJ_DASSERT(result.written == view.size());
-    return view;
-  }
+namespace {
 
-  jsg::JsString str = input.orDefault(js.str());
+jsg::JsUint8Array encodeUtf8WithV8(jsg::Lock& js, jsg::JsString str) {
+  auto view = jsg::JsUint8Array::create(js, str.utf8Length(js));
+  [[maybe_unused]] auto result = str.writeInto(
+      js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  KJ_DASSERT(result.written == view.size());
+  return view;
+}
 
+jsg::JsUint8Array encodeUtf8WithSimdutf(jsg::Lock& js, jsg::JsString str) {
   size_t utf8_length = 0;
   auto length = str.length(js);
 
@@ -598,24 +597,46 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   return view;
 }
 
+}  // namespace
+
+jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
+  auto str = input.orDefault(js.str());
+  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
+    return encodeUtf8WithV8(js, str);
+  }
+  return encodeUtf8WithSimdutf(js, str);
+}
+
+jsg::JsUint8Array encodeUtf8Chunk(jsg::Lock& js, jsg::JsString str) {
+  // V8 writes a one-byte string straight into the result, where encodeUtf8WithSimdutf()
+  // copies it through a temporary buffer first, so V8 is the faster of the two for one-byte
+  // strings and simdutf for two-byte strings.
+  if (str.isOneByte(js)) {
+    return encodeUtf8WithV8(js, str);
+  }
+  return encodeUtf8WithSimdutf(js, str);
+}
+
 namespace {
+
+constexpr bool isLeadSurrogate(uint16_t c) {
+  return (c & 0xfc00) == 0xd800;
+}
 
 constexpr bool isSurrogatePair(uint16_t lead, uint16_t trail) {
   // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
   // to work right on invalid UTF-16. Hence, we need this method to check for
   // surrogate pairs and correctly trim utf16 chunks.
-  return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
+  return isLeadSurrogate(lead) && (trail & 0xfc00) == 0xdc00;
 }
 
-// Ignores surrogates conservatively.
+// Counts a surrogate as three bytes, as for U+FFFD; findBestFit() corrects for a pair.
 constexpr size_t simpleUtfEncodingLength(uint16_t c) {
-  return 1 + (c >= 0x80) + (c >= 0x400);
+  return 1 + (c >= 0x80) + (c >= 0x800);
 }
 
-// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
-// May conservatively underestimate the largest number of code units we can fit
-// because of undetected surrogate pairs on boundaries.
-// Works even on malformed UTF-16.
+// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8, without splitting a
+// surrogate pair. Works even on malformed UTF-16.
 template <typename Char>
 size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
@@ -648,6 +669,13 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
     size_t chunkSize = kj::min(remainingInput, fitEstimate);
     if (chunkSize == 1) break;  // Not worth running this complicated stuff one char at a time.
+    if constexpr (UTF16) {
+      // Measured apart, the halves of a pair split between two chunks would each count as
+      // U+FFFD, six bytes instead of four, so don't end a chunk on a lead surrogate.
+      if (chunkSize < remainingInput && isLeadSurrogate(data[pos + chunkSize - 1])) {
+        chunkSize--;
+      }
+    }
     // No div-by-zero because remainingInput and fitEstimate are at least 1.
     KJ_DASSERT(chunkSize >= 1);
 

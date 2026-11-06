@@ -2,7 +2,7 @@
 
 Test suites for EventTarget subclasses that are moving from C++ to the
 per-isolate bootstrap (`src/per_isolate/`), one subdirectory per API
-(`messagechannel/`). Every test here runs against **both** implementations
+(`messagechannel/`, `eventsource/`). Every test here runs against **both** implementations
 of its API, the C++ one and the TypeScript one, to prove parity.
 
 The suite rules are those of `src/tests/streams/AGENTS.md`, applied
@@ -37,9 +37,11 @@ ledger. Read that file first.
 
 - `src/workerd/api/tests/messageport-postmessage-uaf-test.js`: a security
   regression single, deliberately not merged into the suite.
-- `messagePortLegacyRedispatch` in
+- `messagePortLegacyRedispatch` and `eventSourceLegacyError` in
   `src/workerd/api/tests/legacy-dispatch-exceptions-test.js`, which pins
   the legacy dispatch policy across several APIs at once.
+- `src/workerd/api/eventsource-test.c++`: a unit test of the C++
+  EventSource's native pump.
 
 ## Running
 

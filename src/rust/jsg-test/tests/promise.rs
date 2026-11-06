@@ -298,7 +298,8 @@ impl VoidPromiseTaker {
 #[test]
 fn void_promise_argument_is_required() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "taker", jsg::Rc::new(VoidPromiseTaker));
+        let taker = jsg::Rc::new(lock, VoidPromiseTaker);
+        ctx.set_global(lock, "taker", taker);
         assert_eq!(
             log_after_microtasks(
                 lock,
@@ -580,7 +581,9 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {}
+impl jsg::Traced for DropCounter {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -728,9 +731,12 @@ impl Leaf {}
 fn then_or_catch_data_holds_a_resource() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let leaf = jsg::Rc::new(Leaf {
-            _drops: DropCounter(&SHARED_LEAF_DROPS),
-        });
+        let leaf = jsg::Rc::new(
+            lock,
+            Leaf {
+                _drops: DropCounter(&SHARED_LEAF_DROPS),
+            },
+        );
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let settled = resolver
             .promise()
@@ -786,9 +792,12 @@ fn reaction_data_of_pending_promise_is_dropped_with_its_isolate() {
         let promise = resolver.promise();
         let data = TeardownData {
             _drops: DropCounter(&TEARDOWN_DATA_DROPS),
-            leaf: jsg::Rc::new(Leaf {
-                _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
-            }),
+            leaf: jsg::Rc::new(
+                lock,
+                Leaf {
+                    _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
+                },
+            ),
             promise: promise.to_traced_global(lock),
         };
         promise
@@ -872,11 +881,13 @@ impl Watcher {
 #[test]
 fn reaction_calls_back_into_the_resource_that_registered_it() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let watcher = jsg::Rc::new(Watcher {
-            state: jsg::Rc::new(WatcherState {
+        let state = jsg::Rc::new(
+            lock,
+            WatcherState {
                 seen: RefCell::new(Vec::new()),
-            }),
-        });
+            },
+        );
+        let watcher = jsg::Rc::new(lock, Watcher { state });
         ctx.set_global(lock, "watcher", watcher);
         let code = format!(
             "{RECORD}
@@ -986,10 +997,13 @@ impl TerminatingPromises {
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises.clone());
         let result = ctx.eval_raw(
             lock,
@@ -1029,7 +1043,7 @@ fn promise_operations_while_terminating_keep_the_termination() {
 /// the resolver in between, as an API waiting on an event would.
 #[jsg_resource]
 struct Deferred {
-    resolver: RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
+    resolver: jsg::RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
 }
 
 #[jsg_resource]
@@ -1037,7 +1051,7 @@ impl Deferred {
     #[jsg_method]
     fn wait<'s>(&self, lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
         let resolver = v8::PromiseResolver::new(lock)?;
-        *self.resolver.borrow_mut() = Some(resolver.to_traced_global(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.to_traced_global(lock));
         Ok(resolver.promise())
     }
 
@@ -1063,7 +1077,7 @@ impl Deferred {
         &self,
         lock: &mut jsg::Lock<'s>,
     ) -> Result<v8::Local<'s, v8::PromiseResolver>, jsg::Error> {
-        let resolver = self.resolver.borrow_mut().take();
+        let resolver = self.resolver.borrow_mut(lock).take();
         resolver
             .map(|resolver| resolver.as_local(lock))
             .ok_or_else(|| jsg::Error::new_type_error("nothing is waiting"))
@@ -1073,9 +1087,12 @@ impl Deferred {
 #[test]
 fn resource_settles_promise_from_later_call() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(Deferred {
-            resolver: RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            Deferred {
+                resolver: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         let code = format!(
             "{RECORD}
@@ -1100,7 +1117,7 @@ static DEFERRED_DROPS: AtomicUsize = AtomicUsize::new(0);
 #[jsg_resource]
 struct DroppedDeferred {
     _drops: DropCounter,
-    resolver: RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
+    resolver: jsg::RefCell<Option<v8::TracedGlobal<v8::PromiseResolver>>>,
 }
 
 #[jsg_resource]
@@ -1108,7 +1125,7 @@ impl DroppedDeferred {
     #[jsg_method]
     fn wait<'s>(&self, lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
         let resolver = v8::PromiseResolver::new(lock)?;
-        *self.resolver.borrow_mut() = Some(resolver.to_traced_global(lock));
+        *self.resolver.borrow_mut(lock) = Some(resolver.to_traced_global(lock));
         Ok(resolver.promise())
     }
 }
@@ -1117,10 +1134,13 @@ impl DroppedDeferred {
 fn cycle_through_held_resolver_is_collected() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(DroppedDeferred {
-            _drops: DropCounter(&DEFERRED_DROPS),
-            resolver: RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            DroppedDeferred {
+                _drops: DropCounter(&DEFERRED_DROPS),
+                resolver: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         // The promise's reaction holds the resource, which holds the resolver of the promise.
         ctx.eval_raw(
@@ -1146,8 +1166,8 @@ fn cycle_through_held_resolver_is_collected() {
 /// its handles once, through it.
 #[jsg_resource]
 struct CacheStore {
-    entries: RefCell<HashMap<String, v8::TracedGlobal<v8::Value>>>,
-    in_flight: RefCell<HashMap<String, v8::TracedGlobal<v8::Promise>>>,
+    entries: jsg::RefCell<HashMap<String, v8::TracedGlobal<v8::Value>>>,
+    in_flight: jsg::RefCell<HashMap<String, v8::TracedGlobal<v8::Promise>>>,
 }
 
 #[jsg_resource]
@@ -1219,10 +1239,10 @@ impl ReadThroughCache {
             },
             |lock, fill, value| {
                 let entry = value.to_traced_global(lock);
-                fill.store.in_flight.borrow_mut().remove(&fill.key);
+                fill.store.in_flight.borrow_mut(lock).remove(&fill.key);
                 fill.store
                     .entries
-                    .borrow_mut()
+                    .borrow_mut(lock)
                     .insert(fill.key.clone(), entry);
                 Ok(value)
             },
@@ -1234,14 +1254,14 @@ impl ReadThroughCache {
                 key: key.clone(),
             },
             |lock, fill, _reason| {
-                fill.store.in_flight.borrow_mut().remove(&fill.key);
+                fill.store.in_flight.borrow_mut(lock).remove(&fill.key);
                 Ok(lock.undefined())
             },
         )?;
         let in_flight = filled.to_traced_global(lock);
         self.store
             .in_flight
-            .borrow_mut()
+            .borrow_mut(lock)
             .insert(key.clone(), in_flight);
 
         let key_js = key.as_str().to_js(lock)?;
@@ -1253,7 +1273,7 @@ impl ReadThroughCache {
             Ok(Err(exception)) => resolver.reject(lock, exception)?,
             Err(err) => {
                 // Execution is terminating, so nothing will settle the fill.
-                self.store.in_flight.borrow_mut().remove(&key);
+                self.store.in_flight.borrow_mut(lock).remove(&key);
                 return Err(err);
             }
         }
@@ -1262,12 +1282,14 @@ impl ReadThroughCache {
 }
 
 fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let cache = jsg::Rc::new(ReadThroughCache {
-        store: jsg::Rc::new(CacheStore {
-            entries: RefCell::new(HashMap::new()),
-            in_flight: RefCell::new(HashMap::new()),
-        }),
-    });
+    let store = jsg::Rc::new(
+        lock,
+        CacheStore {
+            entries: jsg::RefCell::new(HashMap::new()),
+            in_flight: jsg::RefCell::new(HashMap::new()),
+        },
+    );
+    let cache = jsg::Rc::new(lock, ReadThroughCache { store });
     ctx.set_global(lock, "cache", cache);
 }
 
@@ -1409,10 +1431,13 @@ fn cache_fallback_that_throws_rejects_the_read() {
 fn cache_removes_in_flight_fill_when_fallback_terminates() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises);
         let result = ctx.eval_raw(
             lock,

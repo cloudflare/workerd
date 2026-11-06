@@ -385,13 +385,9 @@ impl CallbackOutcome {
     }
 }
 
-/// Holds no handle that GC traces: the value's `Global` is strong, and is taken by the reaction,
-/// which runs in the microtask checkpoint after the callback.
-impl jsg::Traced for CallbackOutcome {
-    fn holds_gc_references() -> bool {
-        false
-    }
-}
+// Holds no handle that GC traces: the value's `Global` is strong, and is taken by the reaction,
+// which runs in the microtask checkpoint after the callback.
+jsg::jsg_traced!(CallbackOutcome);
 
 /// The reaction to the promise that [`IoContext::await_io`] resolves once its callback has
 /// returned: returns the callback's value, or throws its error. Throwing in a reaction gives the
@@ -468,8 +464,8 @@ impl<T> IoOwned<T> {
     }
 }
 
-/// Holds no JavaScript handles; see [`IoContext::add_object`].
-impl<T> jsg::Traced for IoOwned<T> {}
+// Holds no JavaScript handles; see `IoContext::add_object`.
+jsg::jsg_traced!(<T> IoOwned<T>);
 
 /// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
 struct SlotRef<T>(Arc<Mutex<Option<T>>>);

@@ -34,6 +34,7 @@ const {
   TypeError,
   getProtoGetter,
   uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { markPromiseHandled } = utils;
@@ -42,6 +43,9 @@ const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
+  QueuingStrategyRecord,
+  UnderlyingSinkRecord,
+  UnderlyingSourceRecord,
   toStringTagProperty,
   promiseResolvedWith,
   newHandledPending,
@@ -112,7 +116,6 @@ function makeTransformerAlgorithms<I, O>(
 ): TransformerAlgorithms<I> {
   let transform: TransformerAlgorithms<I>['transform'];
   if (transformFn !== undefined) {
-    const callTransform = uncurryThis(transformFn);
     // Adopts the result (PromiseResolve) rather than settling a new
     // promise with it as cancel and flush do: on the per-chunk path
     // that would cost an allocation and a microtask or two per write.
@@ -120,7 +123,9 @@ function makeTransformerAlgorithms<I, O>(
     // the spec.
     transform = (chunk: I) => {
       try {
-        return PromiseResolve(callTransform(transformer, chunk, controller));
+        return PromiseResolve(
+          FunctionPrototypeCall(transformFn, transformer, chunk, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -128,10 +133,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let flush: TransformerAlgorithms<I>['flush'];
   if (flushFn !== undefined) {
-    const callFlush = uncurryThis(flushFn);
     flush = () => {
       try {
-        return promiseResolvedWith(callFlush(transformer, controller));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(flushFn, transformer, controller)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -139,10 +145,11 @@ function makeTransformerAlgorithms<I, O>(
   }
   let cancel: TransformerAlgorithms<I>['cancel'];
   if (cancelFn !== undefined) {
-    const callCancel = uncurryThis(cancelFn);
     cancel = (reason: unknown) => {
       try {
-        return promiseResolvedWith(callCancel(transformer, reason));
+        return promiseResolvedWith(
+          FunctionPrototypeCall(cancelFn, transformer, reason)
+        );
       } catch (e) {
         return PromiseReject(e);
       }
@@ -538,16 +545,16 @@ class TransformStream<I = unknown, O = unknown> {
 
     // --- The inner streams (both paths) ---
     this.#writable = new WritableStream(
-      {
-        __proto__: null,
-        start: (c: object) => {
+      new UnderlyingSinkRecord<I>(
+        (reason: unknown) => this.#finish('abort', reason), // abort
+        () => this.#finish('close'), // close
+        (c: object) => {
           this.#writableController = c;
           return startPromise;
-        },
-        write: sinkWrite,
-        close: () => this.#finish('close'),
-        abort: (reason: unknown) => this.#finish('abort', reason),
-      },
+        }, // start
+        undefined, // type
+        sinkWrite // write
+      ),
       // Converted already: the inner stream reads its own data properties,
       // and its default highWaterMark (1) is the TransformStream's.
       writableStrategyDict as QueuingStrategy<I>
@@ -558,26 +565,26 @@ class TransformStream<I = unknown, O = unknown> {
       return this.#backpressureChange.promise;
     };
     this.#readable = new ReadableStream(
-      {
-        __proto__: null,
-        start: (c: object) => {
-          this.#readableController = c;
-          return startPromise;
-        },
-        pull: sourcePull,
-        cancel: (reason: unknown) => this.#finish('cancel', reason),
+      new UnderlyingSourceRecord<O>(
+        undefined, // autoAllocateChunkSize
+        (reason: unknown) => this.#finish('cancel', reason), // cancel
         // Non-standard workerd extension: the TOTAL bytes the readable
         // side will produce (undefined = unknown), from which the C++
         // bridge derives a Content-Length for bodies built from this
         // transform.
-        expectedLength,
-      },
-      {
-        __proto__: null,
+        expectedLength, // expectedLength
+        sourcePull, // pull
+        (c: object) => {
+          this.#readableController = c;
+          return startPromise;
+        }, // start
+        undefined // type
+      ),
+      new QueuingStrategyRecord(
         // The TransformStream default, where the ReadableStream's is 1.
-        highWaterMark: readableStrategyDict.highWaterMark ?? 0,
-        size: readableStrategyDict.size,
-      }
+        readableStrategyDict.highWaterMark ?? 0, // highWaterMark
+        readableStrategyDict.size // size
+      )
     );
 
     // --- Start the transformer (the elided path has none to start) ---
@@ -587,7 +594,7 @@ class TransformStream<I = unknown, O = unknown> {
       const startResult: unknown =
         startFn === undefined
           ? undefined
-          : uncurryThis(startFn)(transformer, controller);
+          : FunctionPrototypeCall(startFn, transformer, controller);
       startHolder.resolve(startResult as void | PromiseLike<void>);
     }
 
@@ -615,21 +622,21 @@ class TransformStream<I = unknown, O = unknown> {
 }
 
 ObjectDefineProperties(TransformStream, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(TransformStreamDefaultController, {
-  __proto__: null,
-  length: { __proto__: null, value: 0 },
+  __proto__: kNullProtoObject,
+  length: { __proto__: kNullProtoObject, value: 0 },
 });
 ObjectDefineProperties(TransformStream.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   readable: kEnumerable,
   writable: kEnumerable,
   [SymbolToStringTag]: toStringTagProperty('TransformStream'),
 });
 ObjectDefineProperties(TransformStreamDefaultController.prototype, {
-  __proto__: null,
+  __proto__: kNullProtoObject,
   desiredSize: kEnumerable,
   enqueue: kEnumerable,
   error: kEnumerable,

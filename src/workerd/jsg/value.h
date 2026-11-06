@@ -424,44 +424,6 @@ class PrimitiveWrapper {
 };
 
 // =======================================================================================
-// Name
-class NameWrapper {
- public:
-  static constexpr const char* getName(Name*) {
-    return "string or Symbol";
-  }
-
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Name value) {
-    KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
-      KJ_CASE_ONEOF(string, kj::StringPtr) {
-        return js.str(string);
-      }
-      KJ_CASE_ONEOF(symbol, v8::Local<v8::Symbol>) {
-        return symbol;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
-
-  kj::Maybe<Name> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      Name*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    if (handle->IsSymbol()) {
-      return Name(js, handle.As<v8::Symbol>());
-    }
-
-    // Since most things are coercible to a string, this ought to catch pretty much
-    // any value other than symbol
-    return Name(js.toString(handle));
-  }
-};
-
-// =======================================================================================
 // Strings
 
 // TypeWrapper mixin for strings.

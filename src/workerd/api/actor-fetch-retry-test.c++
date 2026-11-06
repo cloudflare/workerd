@@ -1484,12 +1484,6 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
   });
 }
 
-CompatibilityFlags::Reader makeExperimentalFlags(capnp::MallocMessageBuilder& message) {
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  return flags.asReader();
-}
-
 // Runs `ns.get(id, <options>)` as a worker would, so that JSG converts the options. The result is
 // the stub, or the error get() threw as "<name>: <message>".
 jsg::JsValue getWithOptions(
@@ -1529,8 +1523,7 @@ kj::String retryErrorFor(jsg::Lock& js, jsg::Ref<DurableObjectNamespace>& ns, kj
 }
 
 KJ_TEST("DurableObjectNamespace.get() gives the stub the retry policy it was passed") {
-  capnp::MallocMessageBuilder flagsMessage;
-  TestFixture fixture({.featureFlags = makeExperimentalFlags(flagsMessage)});
+  TestFixture fixture;
   util::Autogate::initAutogateNamesForTest(
       {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
@@ -1576,8 +1569,7 @@ KJ_TEST("DurableObjectNamespace.get() gives the stub the retry policy it was pas
 
 KJ_TEST("DurableObjectNamespace.get() validates but doesn't apply the retry option while the "
         "userland gate is off") {
-  capnp::MallocMessageBuilder flagsMessage;
-  TestFixture fixture({.featureFlags = makeExperimentalFlags(flagsMessage)});
+  TestFixture fixture;
   util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -1591,26 +1583,6 @@ KJ_TEST("DurableObjectNamespace.get() validates but doesn't apply the retry opti
     KJ_EXPECT(retryErrorFor(js, ns, "{ timeoutMs: 0.5 }") ==
         "RangeError: retry.timeoutMs must be an integer between 500 and 60000");
     KJ_EXPECT(retryErrorFor(js, ns, "{ maxRetries: '1' }").startsWith("TypeError"));
-  });
-}
-
-KJ_TEST("DurableObjectNamespace.get() ignores the retry option without the experimental flag") {
-  TestFixture fixture;
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& js = env.js;
-    auto ns = js.alloc<DurableObjectNamespace>(static_cast<uint>(1), kj::heap<MockActorIdFactory>(),
-        ActorCallRetriesAllowed::YES, Persistent::NO);
-
-    // The option isn't converted, so even values that would fail conversion don't throw.
-    for (const auto& retry: {"{ maxRetries: 1 }"_kj, "{ maxRetries: 11 }"_kj,
-           "{ maxRetries: '1' }"_kj, "null"_kj, "5"_kj}) {
-      KJ_EXPECT(retryPolicyFor(js, ns, retry) == kj::none);
-    }
-    // The property isn't read either, so a getter doesn't run.
-    KJ_EXPECT(policyForOptions(js, ns, "{ get retry() { throw new Error('read'); } }") == kj::none);
   });
 }
 

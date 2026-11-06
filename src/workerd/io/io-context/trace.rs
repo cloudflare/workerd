@@ -164,11 +164,8 @@ impl TraceContext {
     }
 }
 
-/// Holds no JavaScript handles.
-impl jsg::Traced for SpanBuilder {}
-
-/// Holds no JavaScript handles.
-impl jsg::Traced for TraceContext {}
+// Holds no JavaScript handles.
+jsg::jsg_traced!(SpanBuilder, TraceContext);
 
 /// A literal as the bridge passes it: the bytes of `str` with its NUL.
 fn literal(str: &'static CStr) -> &'static [u8] {
