@@ -1897,7 +1897,7 @@ impl ServerHandle {
             )
         })?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.channel(ffi::actor_id_from_hex(actor_id)?, false),
+            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
             None => namespace.channel_by_name(actor_id, false),
         }))
     }

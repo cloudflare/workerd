@@ -69,6 +69,9 @@ pub enum Route {
         address: String,
         stale: bool,
     },
+    /// Here at this epoch, but this instance drains: `release_actor`, then
+    /// route the request again, to whoever claims the object.
+    Releasing(u64),
 }
 
 pub struct Cluster {
@@ -127,7 +130,10 @@ impl Cluster {
         self.bucket.clock_skew_ms().unwrap_or(0)
     }
 
+    /// Expires this instance's membership: it renews its lease no more,
+    /// and peers take over what it still owns and adopt its alarms.
     pub async fn deregister(&self) -> Result<()> {
+        self.lease.borrow_mut().left = true;
         self.registry.deregister().await
     }
 
@@ -189,7 +195,41 @@ impl Cluster {
                 address,
                 stale,
             },
+            Claim::Releasing(epoch) => Route::Releasing(epoch),
         })
+    }
+
+    /// Hand off an object this draining instance stopped, whose capture
+    /// `close_actor` closed: upload what the bucket lacks, then write the
+    /// owner record as unowned (`Ownership::release`). Nothing writes the
+    /// object here any more, so no write can follow the release; the next
+    /// owner's epoch fences anything else. Answers whether it was released.
+    pub async fn hand_off_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.owners.retire(ns, actor);
+        self.owners.evict(ns, actor, epoch).await;
+        self.release_actor(ns, actor, epoch).await
+    }
+
+    /// Hand off an object this draining instance owns but does not serve,
+    /// once no capture, eviction or compaction of it is in flight here: the
+    /// next owner reads the files a compaction deletes. The caller bounds
+    /// the wait.
+    pub async fn release_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        while self.owners.busy(ns, actor) {
+            tokio::time::sleep(BUSY_POLL).await;
+        }
+        let released = self.ownership.release(ns, actor, epoch).await?;
+        if released {
+            self.owners.forget(ns, actor);
+            tracing::info!("cluster: {ns}/{actor} epoch {epoch} handed off");
+        }
+        Ok(released)
+    }
+
+    /// Gives up on handing off an object this draining instance failed to
+    /// release (`Ownership::abandon`).
+    pub fn abandon_actor(&self, ns: &str, actor: &str) {
+        self.ownership.abandon(ns, actor);
     }
 
     /// Take a claimed object over: recover what earlier epochs committed
@@ -339,7 +379,7 @@ impl Cluster {
     /// serving: answers why. Runs for the life of the process.
     pub async fn maintain(&self) -> String {
         loop {
-            if self.lease.borrow().draining {
+            if self.lease.borrow().left {
                 std::future::pending::<()>().await;
             }
             let observed = lease::Observed {
@@ -354,9 +394,9 @@ impl Cluster {
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err("renewal timed out".into()),
                 };
-                // A drain began meanwhile, and its deregistration may have
-                // failed this renewal: what it found no longer matters.
-                if self.lease.borrow().draining {
+                // The instance left meanwhile, which may have failed this
+                // renewal: what it found no longer matters.
+                if self.lease.borrow().left {
                     continue;
                 }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
@@ -388,11 +428,23 @@ impl Cluster {
         }
     }
 
-    /// Stops claiming before the claim reaches the bucket, and parks the
-    /// lease loop; then `deregister`.
+    /// Stops claiming before the claim reaches the bucket. The lease is
+    /// still renewed, so that the objects this instance owns stay where
+    /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
-        self.lease.borrow_mut().draining = true;
         self.ownership.may_claim.set(false);
+        self.registry.start_draining();
+    }
+
+    /// Publishes that this instance drains, so that peers choose it for no
+    /// object or alarm, and lists the peers, so that it chooses none that
+    /// drains too. Peers that list it before learn of it from its answers.
+    pub async fn announce_draining(&self) {
+        let renew = timeout(ms(lease::RENEW_TIMEOUT_MS), self.renew(now_ms()));
+        if !matches!(renew.await, Ok(Ok(_))) {
+            tracing::warn!("cluster: publishing the drain failed");
+        }
+        let _ = timeout(ms(lease::LIST_TIMEOUT_MS), self.peers(now_ms())).await;
     }
 
     /// Whether `start_draining` ran: this node claims nothing more.
@@ -418,6 +470,8 @@ impl Cluster {
 
 /// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
+/// How often a release checks whether an object's eviction ended.
+const BUSY_POLL: Duration = Duration::from_millis(10);
 
 /// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
 /// under the layout's version: what every key of the layout is relative to.

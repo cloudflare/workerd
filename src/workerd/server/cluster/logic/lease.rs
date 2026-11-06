@@ -50,7 +50,8 @@ pub enum Step {
 pub struct Lease {
     /// The lease expires at this time; 0 before the first renewal.
     until_ms: u64,
-    pub draining: bool,
+    /// The instance left the cluster: it renews no more.
+    pub left: bool,
 }
 
 impl Lease {
