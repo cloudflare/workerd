@@ -848,4 +848,119 @@ kj::String URLSearchParams::toString() {
   return url->serialize();
 }
 
+// =======================================================================================
+// LegacyUrlHandle
+
+kj::String LegacyUrlHandle::getHref() {
+  return url->getHref();
+}
+bool LegacyUrlHandle::setHref(jsg::USVString value) {
+  return url->setHref(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getOrigin() {
+  return url->getOrigin();
+}
+kj::String LegacyUrlHandle::getProtocol() {
+  return url->getProtocol();
+}
+void LegacyUrlHandle::setProtocol(jsg::USVString value) {
+  url->setProtocol(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getUsername() {
+  return url->getUsername();
+}
+void LegacyUrlHandle::setUsername(jsg::USVString value) {
+  url->setUsername(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getPassword() {
+  return url->getPassword();
+}
+void LegacyUrlHandle::setPassword(jsg::USVString value) {
+  url->setPassword(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getHost() {
+  return url->getHost();
+}
+void LegacyUrlHandle::setHost(jsg::USVString value) {
+  url->setHost(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getHostname() {
+  return url->getHostname();
+}
+void LegacyUrlHandle::setHostname(jsg::USVString value) {
+  url->setHostname(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getPort() {
+  return url->getPort();
+}
+void LegacyUrlHandle::setPort(jsg::USVString value) {
+  url->setPort(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getPathname() {
+  return url->getPathname();
+}
+void LegacyUrlHandle::setPathname(jsg::USVString value) {
+  url->setPathname(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getSearch() {
+  return url->getSearch();
+}
+void LegacyUrlHandle::setSearch(jsg::USVString value) {
+  url->setSearch(kj::mv(value));
+}
+kj::String LegacyUrlHandle::getHash() {
+  return url->getHash();
+}
+void LegacyUrlHandle::setHash(jsg::USVString value) {
+  url->setHash(kj::mv(value));
+}
+
+uint32_t LegacyUrlHandle::size() {
+  return url->size();
+}
+void LegacyUrlHandle::append(jsg::USVString name, jsg::USVString value) {
+  url->append(kj::mv(name), kj::mv(value));
+}
+void LegacyUrlHandle::delete_(jsg::USVString name, jsg::Optional<jsg::USVString> value) {
+  url->delete_(name, value.map([](jsg::USVString& v) -> kj::StringPtr { return v; }));
+}
+kj::Maybe<kj::String> LegacyUrlHandle::get(jsg::USVString name) {
+  return url->get(name);
+}
+kj::Array<kj::String> LegacyUrlHandle::getAll(jsg::USVString name) {
+  return url->getAll(name);
+}
+bool LegacyUrlHandle::has(jsg::USVString name, jsg::Optional<jsg::USVString> value) {
+  return url->has(name, value.map([](jsg::USVString& v) -> kj::StringPtr { return v; }));
+}
+void LegacyUrlHandle::set(jsg::USVString name, jsg::USVString value) {
+  url->set(kj::mv(name), kj::mv(value));
+}
+void LegacyUrlHandle::sort() {
+  url->sort();
+}
+kj::String LegacyUrlHandle::nameAt(uint32_t index) {
+  JSG_REQUIRE(index < url->size(), RangeError, "index out of range");
+  return kj::str(url->nameAt(index));
+}
+kj::String LegacyUrlHandle::valueAt(uint32_t index) {
+  JSG_REQUIRE(index < url->size(), RangeError, "index out of range");
+  return kj::str(url->valueAt(index));
+}
+kj::String LegacyUrlHandle::serialize() {
+  return url->serialize();
+}
+void LegacyUrlHandle::assignQueryString(jsg::Lock& js, jsg::USVString query) {
+  auto& adjustment = externalMemoryAdjustment.emplace(js.getExternalMemoryAdjustment());
+  url->assignQueryString(query, adjustment);
+}
+void LegacyUrlHandle::assignQueryPairs(kj::Array<jsg::USVString> pairs) {
+  JSG_REQUIRE(pairs.size() % 2 == 0, TypeError, "pairs must alternate names and values");
+  kj::Vector<kj::Url::QueryParam> query(pairs.size() / 2);
+  for (size_t i = 0; i < pairs.size(); i += 2) {
+    query.add(kj::Url::QueryParam{kj::mv(pairs[i]), kj::mv(pairs[i + 1])});
+  }
+  url->assignQueryPairs(query.releaseAsArray());
+}
+
 }  // namespace workerd::api

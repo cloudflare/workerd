@@ -13,9 +13,9 @@ namespace workerd::api {
 
 class URLSearchParams;
 
-// The legacy, non-standard URL logic, over kj::Url: what URL and URLSearchParams share. A URL
-// and its searchParams share one LegacyUrl; a URLSearchParams made on its own has one with only
-// a query.
+// The legacy, non-standard URL logic, over kj::Url: what URL, URLSearchParams and
+// LegacyUrlHandle share. A URL and its searchParams share one LegacyUrl; a URLSearchParams
+// made on its own has one with only a query.
 //
 // The href setter is the only one that reports failure. The others ignore a value they reject,
 // leaving the URL unchanged.
@@ -327,6 +327,103 @@ class URLSearchParams: public jsg::Object {
   }
 };
 
+// A LegacyUrl as the per-isolate bootstrap's URL implementation holds it: the native backend of a
+// URL, and of its searchParams, on the legacy path. utils.createLegacyUrl() and its siblings
+// (api/url-bootstrap.h) make one. A URL and its searchParams share one handle.
+//
+// The members are LegacyUrl's. Their string arguments are USVStrings.
+class LegacyUrlHandle final: public jsg::Object {
+ public:
+  explicit LegacyUrlHandle(kj::Own<LegacyUrl> url): url(kj::mv(url)) {}
+
+  kj::String getHref();
+  bool setHref(jsg::USVString value);
+  kj::String getOrigin();
+  kj::String getProtocol();
+  void setProtocol(jsg::USVString value);
+  kj::String getUsername();
+  void setUsername(jsg::USVString value);
+  kj::String getPassword();
+  void setPassword(jsg::USVString value);
+  kj::String getHost();
+  void setHost(jsg::USVString value);
+  kj::String getHostname();
+  void setHostname(jsg::USVString value);
+  kj::String getPort();
+  void setPort(jsg::USVString value);
+  kj::String getPathname();
+  void setPathname(jsg::USVString value);
+  kj::String getSearch();
+  void setSearch(jsg::USVString value);
+  kj::String getHash();
+  void setHash(jsg::USVString value);
+
+  uint32_t size();
+  void append(jsg::USVString name, jsg::USVString value);
+  void delete_(jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  kj::Maybe<kj::String> get(jsg::USVString name);
+  kj::Array<kj::String> getAll(jsg::USVString name);
+  bool has(jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  void set(jsg::USVString name, jsg::USVString value);
+  void sort();
+  // Throws a RangeError for an index at or past size().
+  kj::String nameAt(uint32_t index);
+  kj::String valueAt(uint32_t index);
+  kj::String serialize();
+  void assignQueryString(jsg::Lock& js, jsg::USVString query);
+  // `pairs` alternates names and values.
+  void assignQueryPairs(kj::Array<jsg::USVString> pairs);
+
+  JSG_RESOURCE_TYPE(LegacyUrlHandle) {
+    JSG_METHOD(getHref);
+    JSG_METHOD(setHref);
+    JSG_METHOD(getOrigin);
+    JSG_METHOD(getProtocol);
+    JSG_METHOD(setProtocol);
+    JSG_METHOD(getUsername);
+    JSG_METHOD(setUsername);
+    JSG_METHOD(getPassword);
+    JSG_METHOD(setPassword);
+    JSG_METHOD(getHost);
+    JSG_METHOD(setHost);
+    JSG_METHOD(getHostname);
+    JSG_METHOD(setHostname);
+    JSG_METHOD(getPort);
+    JSG_METHOD(setPort);
+    JSG_METHOD(getPathname);
+    JSG_METHOD(setPathname);
+    JSG_METHOD(getSearch);
+    JSG_METHOD(setSearch);
+    JSG_METHOD(getHash);
+    JSG_METHOD(setHash);
+
+    JSG_METHOD(size);
+    JSG_METHOD(append);
+    JSG_METHOD_NAMED(delete, delete_);
+    JSG_METHOD(get);
+    JSG_METHOD(getAll);
+    JSG_METHOD(has);
+    JSG_METHOD(set);
+    JSG_METHOD(sort);
+    JSG_METHOD(nameAt);
+    JSG_METHOD(valueAt);
+    JSG_METHOD(serialize);
+    JSG_METHOD(assignQueryString);
+    JSG_METHOD(assignQueryPairs);
+
+    // Internal plumbing type: keep it out of the generated TypeScript types.
+    JSG_TS_OVERRIDE(type LegacyUrlHandle = never);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("url", url->memorySize());
+  }
+
+ private:
+  kj::Own<LegacyUrl> url;
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+};
+
 #define EW_URL_ISOLATE_TYPES                  \
   api::URL,                                   \
   api::URLSearchParams,                       \
@@ -335,6 +432,7 @@ class URLSearchParams: public jsg::Object {
   api::URLSearchParams::KeyIterator,          \
   api::URLSearchParams::KeyIterator::Next,    \
   api::URLSearchParams::ValueIterator,        \
-  api::URLSearchParams::ValueIterator::Next
+  api::URLSearchParams::ValueIterator::Next,  \
+  api::LegacyUrlHandle
 
 }  // namespace workerd::api

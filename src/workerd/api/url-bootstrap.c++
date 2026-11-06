@@ -4,6 +4,8 @@
 
 #include "url-bootstrap.h"
 
+#include "url.h"
+
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {
@@ -97,6 +99,13 @@ bool applySetter(jsg::Url& url, UrlBootstrap::Attribute attribute, kj::ArrayPtr<
   KJ_UNREACHABLE;
 }
 
+jsg::JsValue wrapLegacyUrl(jsg::Lock& js, kj::Own<LegacyUrl> url) {
+  // LegacyUrlHandle is registered in EW_URL_ISOLATE_TYPES.
+  auto& handler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<LegacyUrlHandle>>(),
+      "LegacyUrlHandle is missing from the isolate type list");
+  return jsg::JsValue(handler.wrap(js, js.alloc<LegacyUrlHandle>(kj::mv(url))));
+}
+
 }  // namespace
 
 jsg::JsValue UrlBootstrap::parse(
@@ -136,6 +145,26 @@ jsg::JsValue UrlBootstrap::update(jsg::Lock& js,
 
 jsg::JsValue UrlBootstrap::origin(jsg::Lock& js, jsg::JsValue href) {
   return js.str(parseHref(js, href).getOrigin());
+}
+
+jsg::JsValue UrlBootstrap::createLegacyUrl(jsg::Lock& js, jsg::JsValue input, jsg::JsValue base) {
+  auto inputStr = toUsvString(js, input, "input"_kj);
+  auto baseStr = toOptionalUsvString(js, base, "base"_kj);
+  return wrapLegacyUrl(js, LegacyUrl::parse(kj::mv(inputStr), kj::mv(baseStr)));
+}
+
+jsg::JsValue UrlBootstrap::tryCreateLegacyUrl(
+    jsg::Lock& js, jsg::JsValue input, jsg::JsValue base) {
+  auto inputStr = toUsvString(js, input, "input"_kj);
+  auto baseStr = toOptionalUsvString(js, base, "base"_kj);
+  KJ_IF_SOME(url, LegacyUrl::tryParse(kj::mv(inputStr), kj::mv(baseStr))) {
+    return wrapLegacyUrl(js, kj::mv(url));
+  }
+  return js.undefined();
+}
+
+jsg::JsValue UrlBootstrap::createLegacySearchParams(jsg::Lock& js) {
+  return wrapLegacyUrl(js, kj::refcounted<LegacyUrl>());
 }
 
 }  // namespace workerd::api
