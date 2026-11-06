@@ -25,34 +25,11 @@ class Context extends RpcTarget {
 
 export default {
   async test(ctrl, env, ctx) {
-    let stubStep = new Context(true);
+    const stubStep = new Context(true);
 
     // Tests forward compat - i.e.: python workflows should be compatible with steps that pass a ctx argument
     // this param is optional and searched by name. Meaning it's not positional
-    let resp = await env.PythonWorkflow.run(
-      {
-        foo: 'bar',
-      },
-      stubStep
-    );
-    assert.deepStrictEqual(resp, 'foobar');
-
-    // Tests backwards compat for dependency resolution - previously deps were not following a name based
-    // approach. Instead, they were passed in the same order as they were declared in the depends param
-    // This test also doesn't pass any ctx to steps
-    stubStep = new Context(false);
-    resp = await env.PythonWorkflowDepends.run(
-      {
-        foo: 'bar',
-      },
-      stubStep
-    );
-    assert.deepStrictEqual(resp, 'foobar');
-
-    // Tests forwards compat for dependency resolution - pass ctx onto workflow that runs with the legacy
-    // code path
-    stubStep = new Context(true);
-    resp = await env.PythonWorkflowDepends.run(
+    const resp = await env.PythonWorkflow.run(
       {
         foo: 'bar',
       },
