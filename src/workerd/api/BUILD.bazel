@@ -575,7 +575,10 @@ wd_cc_library(
     name = "url-bootstrap",
     srcs = ["url-bootstrap.c++"],
     hdrs = ["url-bootstrap.h"],
-    implementation_deps = ["//src/workerd/jsg:url"],
+    implementation_deps = [
+        ":url",
+        "//src/workerd/jsg:url",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",

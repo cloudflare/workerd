@@ -377,6 +377,29 @@ static void UrlOrigin(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+static void CreateLegacyUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::UrlBootstrap::createLegacyUrl(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void TryCreateLegacyUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::UrlBootstrap::tryCreateLegacyUrl(js, jsg::JsValue(args[0]), jsg::JsValue(args[1])));
+  });
+}
+
+static void CreateLegacySearchParams(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::UrlBootstrap::createLegacySearchParams(js));
+  });
+}
+
 static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
     auto& js = jsg::Lock::from(args.GetIsolate());
@@ -538,6 +561,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "urlCanParse",
     "urlUpdate",
     "urlOrigin",
+    "createLegacyUrl",
+    "tryCreateLegacyUrl",
+    "createLegacySearchParams",
     "mimeTypeEssence",
     "readableStreamState",
   };
@@ -573,6 +599,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, UrlCanParse),
     getMethod(js, UrlUpdate),
     getMethod(js, UrlOrigin),
+    getMethod(js, CreateLegacyUrl),
+    getMethod(js, TryCreateLegacyUrl),
+    getMethod(js, CreateLegacySearchParams),
     getMethod(js, MimeTypeEssence),
     getMethod(js, ReadableStreamState),
   };

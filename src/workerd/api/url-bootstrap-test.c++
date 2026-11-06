@@ -40,6 +40,18 @@ jsg::JsObject makeHelpers(jsg::Lock& js) {
       [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
     return UrlBootstrap::origin(js, arg(info, 0));
   });
+  add("createLegacyUrl"_kj,
+      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    return UrlBootstrap::createLegacyUrl(js, arg(info, 0), arg(info, 1));
+  });
+  add("tryCreateLegacyUrl"_kj,
+      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    return UrlBootstrap::tryCreateLegacyUrl(js, arg(info, 0), arg(info, 1));
+  });
+  add("createLegacySearchParams"_kj,
+      [=](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    return UrlBootstrap::createLegacySearchParams(js);
+  });
   return helpers;
 }
 
@@ -186,6 +198,122 @@ KJ_TEST("The URL helpers reject arguments of the wrong type") {
       "TypeError: value must be a string\n"
       "TypeError: href must be a URL\n"
       "TypeError: input must be a string"_kj);
+}
+
+KJ_TEST("createLegacyUrl parses with the legacy parser and throws its errors") {
+  expectHelperScript(R"js(
+    const attempt = (fn) => {
+      try {
+        return fn();
+      } catch (e) {
+        return `${e.name}: ${e.message}`;
+      }
+    };
+    return [
+      helpers.createLegacyUrl('http://a.com:80/x?a=b c').getHref(),
+      helpers.createLegacyUrl('../y', 'http://a.com/b/c').getHref(),
+      // The legacy parser accepts this with a base, rather than rejecting it.
+      helpers.createLegacyUrl('http://[', 'http://a/').getHref(),
+      attempt(() => helpers.createLegacyUrl('nope')),
+      attempt(() => helpers.createLegacyUrl('x', 'nope')),
+      attempt(() => helpers.createLegacyUrl('http://a/', 1)),
+      String(helpers.tryCreateLegacyUrl('nope')),
+      String(helpers.tryCreateLegacyUrl('x', 'nope')),
+      helpers.tryCreateLegacyUrl('/z', 'http://a/').getHref(),
+    ].join('\n');
+  )js"_kj,
+      "http://a.com/x?a=b+c\n"
+      "http://a.com/y\n"
+      "http://[\n"
+      "TypeError: Invalid URL string.\n"
+      "TypeError: Invalid base URL string.\n"
+      "TypeError: base must be a string\n"
+      "undefined\n"
+      "undefined\n"
+      "http://a/z"_kj);
+}
+
+KJ_TEST("A LegacyUrlHandle's attributes and setters are the legacy URL's") {
+  expectHelperScript(R"js(
+    const url = helpers.createLegacyUrl('http://u:p@a.com:81/p?q=1#h');
+    const get = () => [
+      url.getHref(), url.getOrigin(), url.getProtocol(), url.getUsername(), url.getPassword(),
+      url.getHost(), url.getHostname(), url.getPort(), url.getPathname(), url.getSearch(),
+      url.getHash(),
+    ].join(' ');
+    const before = get();
+    const rejected = url.setHref('nope');
+    url.setProtocol('https:');
+    url.setUsername('v');
+    url.setPassword('');
+    url.setHostname('b.com');
+    url.setPort('99');
+    url.setPathname('/x/../y z');
+    url.setSearch('?a=b c');
+    url.setHash('#k');
+    return [before, String(rejected), get()].join('\n');
+  )js"_kj,
+      "http://u:p@a.com:81/p?q=1#h http://a.com:81 http: u p a.com:81 a.com 81 /p ?q=1 #h\n"
+      "false\n"
+      "https://v@b.com:99/y%20z?a=b+c#k https://b.com:99 https: v  b.com:99 b.com 99 /y%20z "
+      "?a=b+c #k"_kj);
+}
+
+KJ_TEST("A LegacyUrlHandle's query is a URLSearchParams list") {
+  expectHelperScript(R"js(
+    const url = helpers.createLegacyUrl('http://a/?b=1&a=2&b=3&c');
+    const list = () => {
+      const entries = [];
+      for (let i = 0; i < url.size(); i++) entries.push(`${url.nameAt(i)}=${url.valueAt(i)}`);
+      return entries.join('&');
+    };
+    const lines = [
+      list(), url.serialize(), String(url.get('b')), String(url.get('z')), url.getAll('b').join(),
+      String(url.has('b')), String(url.has('b', '3')), String(url.has('b', '4')),
+    ];
+    url.append('d', '\uD800');
+    url.delete('b', '1');
+    lines.push(list());
+    url.delete('b');
+    url.set('a', 'x');
+    url.set('e', 'y');
+    url.sort();
+    lines.push(list(), url.getHref());
+    try {
+      url.nameAt(url.size());
+    } catch (e) {
+      lines.push(`${e.name}: ${e.message}`);
+    }
+
+    const params = helpers.createLegacySearchParams();
+    lines.push(`${params.size()} ${params.serialize()}`);
+    params.assignQueryString('?x=1&y=a+b');
+    lines.push(params.serialize());
+    params.assignQueryPairs(['m', 'n', 'o', 'p']);
+    lines.push(params.serialize());
+    try {
+      params.assignQueryPairs(['m']);
+    } catch (e) {
+      lines.push(`${e.name}: ${e.message}`);
+    }
+    return lines.join('\n');
+  )js"_kj,
+      "b=1&a=2&b=3&c=\n"
+      "b=1&a=2&b=3&c=\n"
+      "1\n"
+      "null\n"
+      "1,3\n"
+      "true\n"
+      "true\n"
+      "false\n"
+      "a=2&b=3&c=&d=\uFFFD\n"
+      "a=x&c=&d=\uFFFD&e=y\n"
+      "http://a/?a=x&c&d=%EF%BF%BD&e=y\n"
+      "RangeError: index out of range\n"
+      "0 \n"
+      "x=1&y=a+b\n"
+      "m=n&o=p\n"
+      "TypeError: pairs must alternate names and values"_kj);
 }
 
 }  // namespace

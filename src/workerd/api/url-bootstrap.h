@@ -10,7 +10,8 @@ namespace workerd::api {
 
 // The native backend of the per-isolate bootstrap's URL implementation, exposed as utils members.
 // The ada members are stateless: the TypeScript side keeps a URL as its href and the offsets these
-// write, and passes the href back for each change.
+// write, and passes the href back for each change. The legacy members make a LegacyUrlHandle
+// (api/url.h), which holds a kj::Url.
 //
 // Every string argument is converted to a USVString here, whatever the caller has done. A
 // TypeError is thrown for an argument of the wrong type.
@@ -54,6 +55,17 @@ class UrlBootstrap {
 
   // The serialization of the origin of the URL `href`.
   static jsg::JsValue origin(jsg::Lock& js, jsg::JsValue href);
+
+  // A LegacyUrlHandle for `input` parsed against `base` (a string, or undefined for none) by the
+  // legacy parser. Throws its TypeErrors: "Invalid URL string.", or with a base, "Invalid base URL
+  // string." or "Invalid relative URL string.".
+  static jsg::JsValue createLegacyUrl(jsg::Lock& js, jsg::JsValue input, jsg::JsValue base);
+
+  // As createLegacyUrl(), but undefined where that throws.
+  static jsg::JsValue tryCreateLegacyUrl(jsg::Lock& js, jsg::JsValue input, jsg::JsValue base);
+
+  // A LegacyUrlHandle with an empty query and nothing else: a URLSearchParams' own.
+  static jsg::JsValue createLegacySearchParams(jsg::Lock& js);
 };
 
 }  // namespace workerd::api
