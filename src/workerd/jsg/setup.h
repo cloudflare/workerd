@@ -1087,9 +1087,9 @@ class Isolate: public IsolateBase {
           *this, context, handle, jsg::TypeErrorContext::other());
     }
 
-    Ref<DOMException> domException(
+    JsObject domException(
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
-      return withinHandleScope([&] {
+      return JsObject(withinHandleScope([&] {
         v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.getWrapperByContext(*this)->getTemplate(
             v8Isolate, static_cast<DOMException*>(nullptr));
         KJ_DASSERT(!tmpl.IsEmpty());
@@ -1112,8 +1112,8 @@ class Isolate: public IsolateBase {
         de->jsgInitReflection(*jsgIsolate.getWrapperByContext(*this));
         de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
 
-        return kj::mv(de);
-      });
+        return obj;
+      }));
     }
 
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.

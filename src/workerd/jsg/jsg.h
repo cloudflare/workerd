@@ -3118,7 +3118,9 @@ class Lock {
     }
   }
 
-  virtual Ref<DOMException> domException(
+  // Creates a DOMException without running JavaScript. Its stack is `stackValue` if given, or
+  // else captured from the current one.
+  virtual JsObject domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
   // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).

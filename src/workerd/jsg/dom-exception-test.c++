@@ -52,16 +52,10 @@ KJ_TEST("jsg::Lock domException") {
     JSG_WITHIN_CONTEXT_SCOPE(lock,
         lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
         [&](jsg::Lock& js) {
-      Ref<DOMException> exception = js.domException(kj::str("foo"), kj::str("bar"));
-
-      // The DOMException object should have the JS handle created already.
-      auto handle = JsObject(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
-
-      // And it will have the stack.
-      KJ_ASSERT(handle.has(js, "stack"_kj));
-
-      KJ_ASSERT(exception->getName() == "foo"_kj);
-      KJ_ASSERT(exception->getMessage() == "bar"_kj);
+      auto exception = js.domException(kj::str("foo"), kj::str("bar"));
+      KJ_ASSERT(exception.has(js, "stack"_kj));
+      KJ_ASSERT(exception.get(js, "name"_kj).toString(js) == "foo"_kj);
+      KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "bar"_kj);
     });
   });
 }
@@ -83,11 +77,10 @@ KJ_TEST("A DOMException from jsg::Lock domException serializes its stack") {
       };
 
       auto given = js.domException(kj::str("AbortError"), kj::str("m"), kj::str("given stack"));
-      auto givenClone = roundTrip(JsValue(KJ_ASSERT_NONNULL(given.tryGetHandle(js))));
+      auto givenClone = roundTrip(given);
       KJ_EXPECT(givenClone.get(js, "stack"_kj).toString(js) == "given stack"_kj);
 
-      auto captured = JsObject(
-          KJ_ASSERT_NONNULL(js.domException(kj::str("AbortError"), kj::str("m")).tryGetHandle(js)));
+      auto captured = js.domException(kj::str("AbortError"), kj::str("m"));
       auto capturedStack = captured.get(js, "stack"_kj).toString(js);
       KJ_EXPECT(capturedStack.startsWith("AbortError: m"_kj), capturedStack);
       KJ_EXPECT(roundTrip(captured).get(js, "stack"_kj).toString(js) == capturedStack);
