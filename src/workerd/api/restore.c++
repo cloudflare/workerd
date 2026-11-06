@@ -8,6 +8,7 @@
 #include "http.h"
 #include "worker-rpc.h"
 
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/completion-membrane.h>
 
@@ -476,8 +477,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
 
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
-    capFulfiller->fulfill(
-        capnp::membrane(kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+    capFulfiller->fulfill(capnp::membrane(kj::mv(cap),
+        kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller), redirectPushAbortSignal)));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -517,11 +518,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
 
   rpc::JsRpcTarget::Client cap = sent.getTarget();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap),
+      kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise), redirectPushAbortSignal));
 
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap),
+      kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller), redirectPushAbortSignal));
 
   capFulfiller->fulfill(kj::mv(cap));
 

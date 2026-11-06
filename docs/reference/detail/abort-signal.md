@@ -136,8 +136,10 @@ requested from any other context is routed there through the signal's
 `DEFER_CROSS_CONTEXT_ACTIONS` autogate, an idle actor's next event, and the signal queues at
 most one such request). If the receiving IoContext is destroyed, or its idle actor's
 onHibernate event starts, first, the routing is dropped: no delivery is possible anymore.
-Polling stays accurate regardless: the box holds any abort the peer delivered before the
-receiving request ended, and a signal whose trigger capability is dropped without an abort
-never aborts.
+Polling stays accurate regardless: the box holds any abort the peer delivers, including one
+that arrives after the receiving request ended, and a signal whose trigger capability is
+dropped without an abort never aborts.
 Registrations made after that point observe a delivered abort through the already-aborted
-pre-checks instead.
+pre-checks instead. The trigger capability doesn't keep the JS RPC session that delivered the
+signal open (see `redirectPushAbortSignal()` in `src/workerd/io/external-pusher.h`), so the
+receiving request can end while the sender still holds it.
