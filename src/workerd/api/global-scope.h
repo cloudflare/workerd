@@ -328,17 +328,15 @@ class ExecutionContext: public jsg::Object {
       jsg::JsValue props,
       kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, props) {
-    auto featureFlags = FeatureFlags::get(js);
-    if (featureFlags.getEnableVersionApi()) {
-      version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
-        return jsg::JsRef{js,
-          v.toJs(js,
-              featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
-                                                         : PopulateVersionInfoMetadata::NO)};
-      });
-    }
-  }
+        props(js, props),
+        version(versionToJs(js, kj::mv(versionInfo)).map([&js](jsg::JsValue v) {
+          return jsg::JsRef<jsg::JsValue>(js, v);
+        })) {}
+
+  // The value of `ctx.version` for `versionInfo`: none unless the `enable_version_api`
+  // compatibility flag is on and there is version information.
+  static kj::Maybe<jsg::JsValue> versionToJs(
+      jsg::Lock& js, kj::Maybe<Worker::VersionInfo> versionInfo);
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -512,26 +510,27 @@ class AlarmInvocationInfo: public jsg::Object {
 struct ExportedHandler {
   using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  using ConnectHandler = jsg::Promise<void>(jsg::Ref<Socket> socket,
+      jsg::Value env,
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
   using TailStreamHandler = kj::Promise<void>(
-      jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::JsObject obj, jsg::Value env, jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
   using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
   using AlarmHandler = kj::Promise<void>(jsg::Ref<AlarmInvocationInfo> alarmInfo);
@@ -540,7 +539,7 @@ struct ExportedHandler {
 
   using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
   using HibernatableWebSocketMessageHandler = kj::Promise<void>(
@@ -610,7 +609,7 @@ struct ExportedHandler {
   // TODO(cleanup): Why isn't `env` a `jsg::Optional` too? Or maybe the pair should be wrapped in
   //   a struct that is `Maybe`?
   jsg::Value env = nullptr;
-  jsg::Optional<jsg::Ref<ExecutionContext>> ctx = kj::none;
+  jsg::Optional<exportedhandler::ExecutionContext> ctx = kj::none;
   // TODO(cleanup): These are shoved here as a bit of a hack. At present, this is convenient and
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
@@ -619,8 +618,8 @@ struct ExportedHandler {
   // permit RPC to this class.
   bool missingSuperclass = false;
 
-  jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
-    return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
+  jsg::Optional<exportedhandler::ExecutionContext> getCtx(jsg::Lock& js) {
+    return ctx.map([&](exportedhandler::ExecutionContext& p) { return p.addRef(js); });
   }
 
   ExportedHandler clone(jsg::Lock& js);
@@ -637,7 +636,7 @@ struct ExportedHandler {
 struct BenchExportedHandler {
   using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
       jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
 
   JSG_STRUCT(bench);

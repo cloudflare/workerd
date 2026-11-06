@@ -16,7 +16,9 @@
 
 namespace workerd::api {
 
+namespace exportedhandler {
 class ExecutionContext;
+}  // namespace exportedhandler
 
 // Binding types
 
@@ -425,7 +427,7 @@ class QueueController final: public jsg::Object {
 struct QueueExportedHandler {
   using QueueHandler = kj::Promise<void>(jsg::Ref<QueueController> controller,
       jsg::JsRef<jsg::JsValue> env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Optional<exportedhandler::ExecutionContext> ctx);
   jsg::LenientOptional<jsg::Function<QueueHandler>> queue;
 
   JSG_STRUCT(queue);

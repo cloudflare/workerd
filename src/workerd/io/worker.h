@@ -5,6 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
+#include <workerd/api/exported-handler-ctx.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/async-lock-scheduler.h>
@@ -87,7 +88,7 @@ struct NonHibernatableWebSocketCount: public kj::Refcounted {
 
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
-    kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
+    kj::OneOf<api::exportedhandler::ExecutionContext, jsg::Ref<api::DurableObjectState>>;
 using EntrypointClass =
     jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::Value env)>;
 
@@ -699,11 +700,20 @@ class Worker::Api {
     return kj::none;
   }
 
-  // Apply JSG wrapping to the given ExecutionContext. This is needed in particular by the RPC
-  // server-side implementation, when invoking a top-level RPC method that takes env and ctx as
-  // params.
-  virtual jsg::JsObject wrapExecutionContext(
-      jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
+  // Creates the `ctx` passed to a stateless entrypoint's handlers, or to its class constructor.
+  // `versionInfo` is the version of the Worker handling the request, if known. The default
+  // implementation creates a C++ api::ExecutionContext.
+  virtual api::exportedhandler::ExecutionContext newExecutionContext(jsg::Lock& js,
+      jsg::JsValue exports,
+      jsg::JsValue props,
+      kj::Maybe<VersionInfo> versionInfo) const;
+
+  // Whether `value` is a Rust ExecutionContext, which a handler may be passed as its `ctx`; see
+  // newExecutionContext(). An implementation that creates them overrides this. The default
+  // returns false.
+  virtual bool isRustExecutionContext(jsg::Lock& js, v8::Local<v8::Value> value) const {
+    return false;
+  }
 
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).
