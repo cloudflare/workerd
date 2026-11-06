@@ -109,7 +109,7 @@ jsg::Ref<DOMException> DOMException::deserialize(
       });
       kj::String message = messageJs.toString(js);
       kj::String stack = stackJs.toString(js);
-      return js.domException(kj::mv(message), kj::mv(name), kj::mv(stack));
+      return js.domException(kj::mv(name), kj::mv(message), kj::mv(stack));
     }
     default:
       KJ_UNREACHABLE;
