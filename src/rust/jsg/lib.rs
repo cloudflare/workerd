@@ -59,6 +59,7 @@ pub use oneof::try_union_from_js;
 #[doc(hidden)]
 pub use oneof::validate_union_names;
 pub use resource::DescribedMember;
+pub use resource::InheritIntrinsicMember;
 pub use resource::MemberDefinition;
 pub use resource::MemberRegistry;
 pub use resource::NestedType;
@@ -68,6 +69,7 @@ pub use resource::Resource;
 pub use resource::Undescribed;
 pub use resource::Weak;
 pub use resource::described_member;
+pub use resource::inherit_intrinsic;
 pub use resource::nested_type;
 pub use resource::undescribed;
 pub use rtti::TypeInfo;
@@ -1091,6 +1093,13 @@ impl From<u64> for ConstantValue {
     }
 }
 
+/// An object built into every context that a resource type's prototype can inherit from with
+/// [`inherit_intrinsic`], like C++ JSG's `JSG_INHERIT_INTRINSIC` with a `v8::Intrinsic`.
+///
+/// - `IteratorPrototype` — `Iterator.prototype` (`v8::kIteratorPrototype`). An iterator that
+///   inherits it gets the iterator helpers (`map()`, `filter()`, `toArray()`, ...) and a
+///   `[Symbol.iterator]()` that returns the iterator itself.
+pub use crate::v8::ffi::Intrinsic;
 /// Where a [`Member::Property`] is attached on the JavaScript object.
 ///
 /// This is a re-export of the CXX bridge type in [`v8::ffi`] so that callers
@@ -1199,6 +1208,19 @@ pub enum Member {
     /// call names it. A type has at most one.
     Callable {
         callback: RawFunctionCallback,
+    },
+    /// The method installed as `prototype[Symbol.iterator]`, which makes instances iterable
+    /// with `for...of`, spread and `Array.from()`, like C++ JSG's `JSG_ITERABLE`. It returns the
+    /// iterator. Like a [`Member::Method`], it is registered with the type's `v8::Signature`;
+    /// unlike one, it is not enumerable. A type has at most one.
+    Iterable {
+        callback: RawFunctionCallback,
+    },
+    /// Makes `intrinsic` the [[Prototype]] of the type's prototype, like C++ JSG's
+    /// `JSG_INHERIT_INTRINSIC`, so that instances inherit its methods. A type has at most one.
+    /// Register it with [`inherit_intrinsic`], which also describes it for RTTI.
+    InheritIntrinsic {
+        intrinsic: Intrinsic,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

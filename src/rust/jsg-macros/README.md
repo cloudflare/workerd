@@ -158,14 +158,18 @@ The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_wildcard_property]`, `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, `#[jsg_iterable]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
+Use `#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` to make a `jsg::Intrinsic` the
+[[Prototype]] of the type's prototype (equivalent to `JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype)`);
+see [`#[jsg_iterable]`](#jsg_iterable).
 Each factory also describes its member for RTTI, which describes a resource type with the
 members its `Resource::members` registers, in registration order. Methods, properties,
-constructors, and constants are described; inspect and wildcard properties and disposers are not. Parameter
+constructors, constants, iterable methods and inherited intrinsics are described; inspect and
+wildcard properties and disposers are not. Parameter
 names are retained, injected `this` and lock parameters are excluded, and fallible return types
 describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
@@ -251,6 +255,7 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Disposer `close` (`#[jsg_dispose]`) | `Self::close_dispose_member()` |
 | Async disposer `close` (`#[jsg_async_dispose]`) | `Self::close_async_dispose_member()` |
 | Callable `call` | `Self::call_callable_member()` |
+| Iterable `entries` | `Self::entries_iterable_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -263,7 +268,8 @@ property with a setter panics when the template is created.
 Properties are registered in the order they are added to `registry`. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
-types itself, as `jsg::nested_type::<Foo>(name)`.
+types itself, as `jsg::nested_type::<Foo>(name)`. Neither can `inherit_intrinsic`; a custom
+`members` registers `jsg::inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)` instead.
 
 ---
 
@@ -526,6 +532,55 @@ impl Greeter {
 }
 // JS: greeter('world')   // "Hello, world"
 //     typeof greeter     // "function"
+```
+
+## `#[jsg_iterable]`
+
+Makes the instances of a `#[jsg_resource]` type iterable, with the method as their
+`[Symbol.iterator]()`. Equivalent to C++ `JSG_ITERABLE`.
+
+The method takes `&self`, or `this: jsg::Rc<Self>` in its place, and otherwise has the shape of
+a `#[jsg_method]`. It returns the iterator. The attribute takes no arguments. A type has at most
+one `#[jsg_iterable]`; with automatic registration a second is a compile error, and a custom
+`members` that registers two panics when the template is created. The macro generates
+`<name>_iterable_callback()` and, through `#[jsg_resource]`, the factory
+`<name>_iterable_member()`, which differ from a `#[jsg_method]`'s, so a method such as `entries`
+may also be a `#[jsg_method]`. See [Iterable resources](../jsg/README.md#iterable-resources) for
+how they behave.
+
+An iterator is usually a resource of its own. Its `next()` is a `#[jsg_method]` that returns a
+`#[jsg_struct]` with `done` and an optional `value`. With
+`#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` on its impl block it inherits
+`Iterator.prototype`, which gives it the iterator helpers and a `[Symbol.iterator]()` that
+returns the iterator.
+
+```rust
+use jsg_macros::{jsg_iterable, jsg_method, jsg_resource, jsg_struct};
+
+#[jsg_struct]
+pub struct Next { pub done: bool, pub value: Option<Vec<String>> }
+
+#[jsg_resource]
+pub struct Entries { entries: Vec<Vec<String>>, cursor: Cell<usize> }
+
+#[jsg_resource(inherit_intrinsic = IteratorPrototype)]
+impl Entries {
+    #[jsg_method]
+    pub fn next(&self) -> Next { … }
+
+    // Like C++ JSG iterators, which register `JSG_ITERABLE(self)` too.
+    #[jsg_iterable]
+    pub fn iterator(this: jsg::Rc<Self>) -> jsg::Rc<Self> { this }
+}
+
+#[jsg_resource]
+impl Headers {
+    #[jsg_iterable]
+    #[jsg_method]
+    pub fn entries(&self, lock: &mut jsg::Lock) -> jsg::Rc<Entries> { … }
+}
+// JS: for (const [name, value] of headers) …
+//     headers.entries().map(([name]) => name).toArray()
 ```
 
 ## `#[jsg_oneof]`

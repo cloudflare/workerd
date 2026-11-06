@@ -1459,6 +1459,60 @@ A callable resource behaves as in C++ JSG:
   C++ RTTI describes a `JSG_CALLABLE`. The TypeScript generator does not read it, so C++ types
   declare their call signatures with `JSG_TS_OVERRIDE`.
 
+## Iterable resources
+
+`#[jsg_iterable]`, the equivalent of C++ JSG's `JSG_ITERABLE`, makes a method the
+`[Symbol.iterator]()` of a resource type, so its instances work with `for...of`, spread,
+destructuring and `Array.from()`. `inherit_intrinsic = IteratorPrototype` on the impl block, the
+equivalent of `JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype)`, makes an iterator type inherit
+from `Iterator.prototype`:
+
+```rust
+#[jsg_struct]
+pub struct Next {
+    pub done: bool,
+    pub value: Option<Vec<String>>,
+}
+
+#[jsg_resource(inherit_intrinsic = IteratorPrototype)]
+impl AttributesIterator {
+    #[jsg_method]
+    pub fn next(&self) -> Result<Next, jsg::Error> { /* ... */ }
+
+    #[jsg_iterable]
+    pub fn iterator(this: jsg::Rc<Self>) -> jsg::Rc<Self> {
+        this
+    }
+}
+```
+
+They behave as in C++ JSG:
+
+- The `#[jsg_iterable]` method takes `&self`, or `this: jsg::Rc<Self>` in its place, and
+  otherwise has the shape of a `#[jsg_method]`. It is a method of the prototype keyed by
+  `Symbol.iterator`, installed as a disposer is: not enumerable, unlike the type's other
+  methods, and with the type's `v8::Signature`, so it throws `TypeError: Illegal invocation` on
+  anything but an instance. It may also be a `#[jsg_method]`, as `entries()` often is; the two
+  are separate functions. A type has at most one.
+- The iterator is an object with a `next()` that returns `{ done, value }`; a `#[jsg_struct]`
+  leaves `value` out when it is `None`, as C++ JSG's `jsg::Optional` does. An error that
+  `next()` returns is thrown to the code that is iterating, such as the `for...of` loop or an
+  iterator helper, which stops.
+- With `inherit_intrinsic = IteratorPrototype`, `Iterator.prototype` is the [[Prototype]] of the
+  type's prototype, for every instance in every context. Instances get the iterator helpers
+  (`map()`, `filter()`, `take()`, `toArray()`, ...), are `instanceof Iterator`, and are returned
+  as they are by `Iterator.from()`. They also inherit `Iterator.prototype[Symbol.iterator]()`,
+  which returns `this`, so such an iterator is iterable without a `#[jsg_iterable]`; C++ JSG
+  iterators register `JSG_ITERABLE(self)` anyway, and a port can keep it.
+- Without `set_to_string_tag`, a type has no `Symbol.toStringTag` of its own, so an iterator
+  that inherits `Iterator.prototype` reads as `[object Iterator]`.
+- A type inherits from at most one intrinsic. `custom_members` registers it with
+  `jsg::inherit_intrinsic(jsg::Intrinsic::IteratorPrototype)`, and the iterator method with its
+  factory `<name>_iterable_member()`. Two of either panic when the template is created.
+- RTTI describes them as C++ RTTI does: the method as the structure's `iterator`, with
+  `iterable` set, and the intrinsic as its `extends`, which the TypeScript generator declares as
+  `[Symbol.iterator]()` and `extends Iterator<unknown>`.
+
 ## Static Constants
 
 To expose numeric constants on a resource class (equivalent to `JSG_STATIC_CONSTANT` in C++), use `#[jsg_static_constant]` on `const` items inside a `#[jsg_resource]` impl block:
