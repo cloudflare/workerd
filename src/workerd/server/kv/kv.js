@@ -122,7 +122,12 @@ async function serve(request, env, ns) {
   const params = new URLSearchParams(q < 0 ? '' : target.slice(q + 1));
   const id = env.SHARD.idFromName(ns);
   const space = { ns, dir: id.toString(), shard: env.SHARD.get(id) };
-  const key = decodeURIComponent(path.slice(1));
+  let key;
+  try {
+    key = decodeURIComponent(path.slice(1));
+  } catch {
+    throw new Fail(400, 'Invalid key encoding');
+  }
   switch (request.method) {
     case 'POST':
       if (path === '/bulk/get') return bulk(request, env, space);
@@ -318,6 +323,9 @@ async function bulk(request, env, space) {
   try {
     body = await request.json();
   } catch {
+    throw new Fail(400, 'Invalid JSON');
+  }
+  if (typeof body !== 'object' || body === null) {
     throw new Fail(400, 'Invalid JSON');
   }
   const keys = Array.isArray(body.keys) ? body.keys : [];

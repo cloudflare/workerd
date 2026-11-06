@@ -323,6 +323,19 @@ export const errors = {
   },
 };
 
+// A malformed key escape or a bulk body that isn't an object is a 400.
+export const malformedRequests = {
+  async test(ctrl, env) {
+    const bad = await env.KV_WORKER.fetch('http://kv/%E0%A4%A');
+    assert.strictEqual(bad.status, 400);
+    const bulk = await env.KV_WORKER.fetch('http://kv/bulk/get', {
+      method: 'POST',
+      body: 'null',
+    });
+    assert.strictEqual(bulk.status, 400);
+  },
+};
+
 // Keys disappear from get and list once the expiration clock passes them.
 export const expiry = {
   async test(ctrl, env) {
