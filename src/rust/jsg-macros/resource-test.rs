@@ -797,6 +797,72 @@ fn property_descriptions_follow_the_requested_placement() {
 }
 
 #[test]
+fn dispose_factories_register_undescribed_symbol_members() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_async_dispose]
+            fn close_async<'s>(&self, lock: &mut Lock<'s>) -> jsg::Result<jsg::Promise<'s, ()>> {
+                todo!()
+            }
+        }
+    };
+    let (registrations, errors) = collect_dispose_registrations(&input, RegistrationMode::Custom);
+    assert!(errors.is_empty());
+    let factories: Vec<_> = registrations
+        .iter()
+        .map(|r| {
+            (
+                r.factory_name.to_string(),
+                r.member.to_string(),
+                r.description.is_none(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        factories,
+        [
+            (
+                "close_dispose_member".to_owned(),
+                quote!(jsg::Member::Dispose {
+                    callback: Self::close_callback()
+                })
+                .to_string(),
+                true,
+            ),
+            (
+                "close_async_async_dispose_member".to_owned(),
+                quote!(jsg::Member::AsyncDispose {
+                    callback: Self::close_async_callback()
+                })
+                .to_string(),
+                true,
+            ),
+        ]
+    );
+
+    // A type registers one disposer of each kind automatically, and not a second of a kind.
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert!(errors.is_empty());
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_dispose]
+            fn close(&self) {}
+            #[jsg_dispose]
+            fn close_again(&self) {}
+        }
+    };
+    let (registrations, errors) =
+        collect_dispose_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
 fn callable_factory_registers_and_describes_the_callable_callback() {
     let input: ItemImpl = parse_quote! {
         impl Sample {

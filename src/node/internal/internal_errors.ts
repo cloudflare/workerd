@@ -726,6 +726,8 @@ export class EPIPE extends NodeError {
 // libuv's errno values on Linux, which Node.js reports there.
 const UV_ERRNO: Record<string, number> = {
   ECONNREFUSED: -111,
+  ECONNRESET: -104,
+  EPIPE: -32,
   ETIMEDOUT: -110,
   EHOSTUNREACH: -113,
   ENETUNREACH: -101,
@@ -747,6 +749,21 @@ export class ConnectException extends Error {
     this.errno = UV_ERRNO[code];
     this.address = address;
     this.port = port;
+  }
+}
+
+// A failed read or write on a connected socket, as Node reports it (its
+// errnoException): `Error: read ECONNRESET`.
+export class SocketErrnoException extends Error {
+  code: string;
+  errno: number | undefined;
+  syscall: string;
+
+  constructor(code: string, syscall: string) {
+    super(`${syscall} ${code}`);
+    this.code = code;
+    this.errno = UV_ERRNO[code];
+    this.syscall = syscall;
   }
 }
 
