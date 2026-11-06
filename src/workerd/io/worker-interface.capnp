@@ -152,6 +152,7 @@ struct Trace @0x8e8d911203762d34 {
     trace @18 :TraceEventInfo;
     hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
     connect @29 :ConnectEventInfo;
+    onHibernate @31 :OnHibernateEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -179,6 +180,18 @@ struct Trace @0x8e8d911203762d34 {
 
   struct AlarmEventInfo {
     scheduledTimeMs @0 :Int64;
+  }
+
+  struct OnHibernateEventInfo {
+    # A Durable Object's onHibernate handler.
+    reason @0 :Reason;
+
+    enum Reason {
+      # Why the Durable Object is hibernating, as passed to its onHibernate handler.
+      inactive @0;
+      codeUpdated @1;
+      system @2;
+    }
   }
 
   struct QueueEventInfo {
@@ -346,6 +359,7 @@ struct Trace @0x8e8d911203762d34 {
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
       connect @9 :ConnectEventInfo;
+      onHibernate @10 :OnHibernateEventInfo;
       custom @8 :CustomEventInfo;
     }
     }
@@ -558,6 +572,15 @@ enum SerializationTag {
   # An EmailMessage (the `cloudflare:email` class): envelope sender and recipient followed by the
   # raw message body as a readableStream. Implemented upstream of workerd; the tag is allocated here
   # so that every embedder agrees on the wire value.
+
+  r2Checksums @20;
+  # Checksums attached to an R2 object.
+
+  r2Object @21;
+  # R2 object metadata without a body.
+
+  r2ObjectBody @22;
+  # R2 object metadata with a transferred body stream.
 }
 
 enum StreamEncoding {

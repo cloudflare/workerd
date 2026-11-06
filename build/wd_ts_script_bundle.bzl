@@ -130,7 +130,8 @@ def wd_ts_script_bundle(
         scripts,
         tsconfig_json,
         deps = [],
-        gen_compile_cache = True):
+        gen_compile_cache = True,
+        embedder_prefix = None):
     """Build a per-isolate script bundle from TypeScript sources.
 
     Compiles TypeScript to JavaScript, optionally generates V8 compile caches,
@@ -147,6 +148,11 @@ def wd_ts_script_bundle(
       tsconfig_json: Path to tsconfig.json.
       deps: Additional TypeScript dependencies.
       gen_compile_cache: Generate V8 compile caches (default True).
+      embedder_prefix: Set for a bundle an embedder contributes to workerd's
+        per-isolate bootstrap (see EmbedderBootstrap in
+        src/workerd/api/per-isolate-bootstrap.h). Every script is named under
+        this prefix, which must end with "/" (e.g., "embedder/main"), and the
+        sources are type-checked against workerd's bootstrap pseudo-globals.
     """
 
     # 1. TypeScript compilation (type-stripping only)
@@ -158,6 +164,21 @@ def wd_ts_script_bundle(
 
     ts_srcs = [s for s in scripts if s.endswith(".ts")]
     non_dts = [s for s in ts_srcs if not s.endswith(".d.ts")]
+
+    script_prefix = ""
+    if embedder_prefix != None:
+        if not embedder_prefix.endswith("/") or len(embedder_prefix) < 2:
+            fail("embedder_prefix must be a non-empty path ending with '/': " + embedder_prefix)
+        script_prefix = embedder_prefix
+
+        # The ambient declarations of the pseudo-globals (require, primordials, ...), copied
+        # into this package so that the tsconfig's includes find them.
+        copy_file(
+            name = name + "@per_isolate-env",
+            src = "@workerd//src/per_isolate:per_isolate-env.d.ts",
+            out = "per_isolate-env.d.ts",
+        )
+        ts_srcs = ts_srcs + [":per_isolate-env.d.ts"]
 
     ts_project(
         name = name + "@tsproject",
@@ -181,7 +202,7 @@ def wd_ts_script_bundle(
         sname = _script_name(js)
         flat = _flat_name(sname)
         copy_file(name = flat + "@copy", src = js, out = flat)
-        scripts_dict[flat] = sname
+        scripts_dict[flat] = script_prefix + sname
 
     # 3. Optional: generate V8 compile caches
     data = list(scripts_dict.keys())

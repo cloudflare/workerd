@@ -170,9 +170,7 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
   } else {
-    auto e =
-        JSG_KJ_EXCEPTION(FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
-    IoContext::current().abort(kj::mv(e));
+    IoContext::current().abort(IoContext::abortWithoutReasonException());
   }
 
   js.terminateExecutionNow();
@@ -507,35 +505,23 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::none;  // Release reference to request body stream. We don't need it.
     auto body2 = kj::addRef(*ownRequestBody);
 
-    // HACK: If the client disconnects, the `response` reference is no longer valid. But our
-    //   promise resolves in JavaScript space, so won't be canceled. So we need to track
-    //   cancellation separately. We use a refcounted boolean.
-    // TODO(cleanup): Is there something less ugly we can do here?
-    auto canceled = kj::rc<bool>(false);
-
+    // The response is sent from within awaitJs()'s own continuation so that the promise returned
+    // by send(), which owns the response body stream or the accepted WebSocket, is handed to the
+    // KJ promise chain in the same microtask that created it. See awaitJs() for why. awaitJs()
+    // also skips the continuation if this request was canceled, such as when the client
+    // disconnected, in which case `response` would be a dangling reference.
     return ioContext
-        .awaitJs(lock,
-            promise.then(kj::implicitCast<jsg::Lock&>(lock),
-                ioContext.addFunctor(
-                    [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = canceled.addRef(), &headers, span = kj::mv(span)](
-                        jsg::Lock& js, IoContext& context, jsg::Ref<Response> innerResponse) mutable
-                    -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+        .awaitJs(lock, kj::mv(promise),
+            [&response, allowWebSocket = headers.isWebSocket(), &headers, span = kj::mv(span)](
+                jsg::Lock& js,
+                jsg::Ref<Response> innerResponse) mutable -> kj::Promise<DeferredProxy<void>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
-      if (*canceled) {
-        // Oops, the client disconnected before the response was ready to send. `response` is
-        // a dangling reference, let's not use it.
-        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
-      } else {
-        return context.addObject(kj::heap(
-            innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
-      }
-    })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { *canceled = true; }))
+      return innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers);
+    })
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {

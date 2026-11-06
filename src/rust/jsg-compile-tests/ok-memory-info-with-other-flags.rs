@@ -17,7 +17,9 @@ pub struct Holder {
 #[jsg_resource]
 impl Holder {}
 
-impl jsg::Traced for Holder {}
+impl jsg::Traced for Holder {
+    fn trace(&self, _: &mut jsg::v8::GcVisitor) {}
+}
 
 impl jsg::VisitForMemoryInfo for Holder {
     fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
@@ -33,7 +35,9 @@ pub struct Other {
 #[jsg_resource]
 impl Other {}
 
-impl jsg::Traced for Other {}
+impl jsg::Traced for Other {
+    fn trace(&self, _: &mut jsg::v8::GcVisitor) {}
+}
 
 impl jsg::VisitForMemoryInfo for Other {
     fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
@@ -57,13 +61,16 @@ impl jsg::MemoryRetainer for Cache {
 
 jsg::jsg_memory_retainer!(Cache);
 
-pub fn t(name: String) -> (jsg::Rc<Holder>, jsg::Rc<Other>) {
+pub fn t(lock: &mut jsg::Lock<'_>, name: String) -> (jsg::Rc<Holder>, jsg::Rc<Other>) {
     (
-        jsg::Rc::new(Holder { name }),
-        jsg::Rc::new(Other {
-            cache: Cache {
-                entries: Vec::new(),
+        jsg::Rc::new(lock, Holder { name }),
+        jsg::Rc::new(
+            lock,
+            Other {
+                cache: Cache {
+                    entries: Vec::new(),
+                },
             },
-        }),
+        ),
     )
 }

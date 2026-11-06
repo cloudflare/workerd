@@ -354,9 +354,12 @@ fn number_from_valueof_side_effects_are_observed() {
 fn string_coercion_reentrant_into_rust_resource_method() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -382,9 +385,12 @@ fn string_coercion_reentrant_into_rust_resource_method() {
 fn number_coercion_reentrant_into_rust_resource_method() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -412,9 +418,12 @@ fn number_coercion_reentrant_into_rust_resource_method() {
 fn string_coercion_handles_deeply_nested_reentrancy() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -446,9 +455,12 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
 fn string_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -473,9 +485,12 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
 fn number_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -500,9 +515,12 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
 fn reentrant_panic_during_coercion_does_not_poison_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
@@ -635,9 +653,12 @@ fn array_set_from_throwing_setter_returns_err() {
 fn coercion_exception_propagates_through_method() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
+        let resource = jsg::Rc::new(
+            lock,
+            ReentrantResource {
+                call_count: Cell::new(0),
+            },
+        );
         ctx.set_global(lock, "resource", resource.clone());
         let caught = ctx.eval::<bool>(
             lock,
@@ -663,6 +684,7 @@ fn coercion_exception_propagates_through_method() {
 enum Conversion {
     String,
     JsString,
+    JsStringFromJs,
     Number,
     Int32,
     Uint32,
@@ -679,9 +701,10 @@ enum Conversion {
 }
 
 impl Conversion {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::String,
         Self::JsString,
+        Self::JsStringFromJs,
         Self::Number,
         Self::Int32,
         Self::Uint32,
@@ -702,6 +725,7 @@ impl Conversion {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
             Self::JsString => value.to_js_string(lock).map(drop),
+            Self::JsStringFromJs => jsg::JsString::from_js(lock, value).map(drop),
             Self::Number => f64::from_js(lock, value).map(drop),
             Self::Int32 => value.int32_value(lock).map(drop),
             Self::Uint32 => value.uint32_value(lock).map(drop),
@@ -743,7 +767,9 @@ impl Conversion {
     /// A value whose conversion, property `x` or element 0 calls `f`.
     fn value_calling(self, f: &str) -> String {
         match self {
-            Self::String | Self::JsString => format!("({{ toString: {f} }})"),
+            Self::String | Self::JsString | Self::JsStringFromJs => {
+                format!("({{ toString: {f} }})")
+            }
             Self::Number | Self::Int32 | Self::Uint32 | Self::Integer => {
                 format!("({{ valueOf: {f} }})")
             }
@@ -822,18 +848,21 @@ fn converting_resource(
     ctx: &crate::EvalContext<'_>,
     conversion: Conversion,
 ) -> jsg::Rc<ConvertingResource> {
-    let resource = jsg::Rc::new(ConvertingResource {
-        conversion: Cell::new(Some(conversion)),
-        saw_pending: Cell::new(false),
-    });
-    ctx.set_global(lock, "obj", resource.clone());
-    ctx.set_global(
+    let resource = jsg::Rc::new(
         lock,
-        "panicker",
-        jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        }),
+        ConvertingResource {
+            conversion: Cell::new(Some(conversion)),
+            saw_pending: Cell::new(false),
+        },
     );
+    ctx.set_global(lock, "obj", resource.clone());
+    let panicker = jsg::Rc::new(
+        lock,
+        ReentrantResource {
+            call_count: Cell::new(0),
+        },
+    );
+    ctx.set_global(lock, "panicker", panicker);
     resource
 }
 

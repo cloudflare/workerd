@@ -7,7 +7,9 @@
 #include <workerd/api/node/exceptions.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/io/features.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -492,6 +494,15 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
 void FileSystemModule::close(jsg::Lock& js, int fd) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   vfs.closeFd(js, fd);
+}
+
+bool FileSystemModule::tsStdio() {
+  return util::Autogate::isEnabled(util::AutogateKey::TS_STDIO);
+}
+
+kj::StringPtr FileSystemModule::stdioPrefix(jsg::Lock& js, int fd) {
+  auto& isolate = Worker::Isolate::from(js);
+  return fd == 1 ? isolate.getStdoutPrefix() : isolate.getStderrPrefix();
 }
 
 uint32_t FileSystemModule::write(
@@ -2046,12 +2057,14 @@ FileFdHandle::~FileFdHandle() noexcept {
       }
     }
 
-    // If we have an active IoContext, then we'll go ahead and log a warning.
+    // If we have an active IoContext, then we'll go ahead and log a warning. Logged later: this
+    // destructor runs inside a GC callback, where logging is not allowed to touch V8.
     KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-      ioContext.logWarning("A FileHandle was destroyed without being closed. This is "
-                           "not recommended and may lead to file descriptors being held "
-                           "far longer than necessary. Please make sure to explicitly close "
-                           "the FileHandle object explicitly before it is destroyed."_kj);
+      ioContext.logWarningLater(
+          kj::str("A FileHandle was destroyed without being closed. This is "
+                  "not recommended and may lead to file descriptors being held "
+                  "far longer than necessary. Please make sure to explicitly close "
+                  "the FileHandle object explicitly before it is destroyed."));
     }
   }
 }

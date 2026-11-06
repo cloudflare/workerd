@@ -21,7 +21,6 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/compiled-bindings.capnp.h>
 #include <workerd/server/fallback-service.h>
-#include <workerd/server/pyodide.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
@@ -435,6 +434,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     if (outcome == EventOutcome::OK) {
       outcome = RequestObserver::outcomeFromException(exception, source);
     }
+  }
+
+  void reportOnHibernateOutcome(EventOutcome hookOutcome) override {
+    if (outcome == EventOutcome::OK) outcome = hookOutcome;
   }
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -1053,6 +1056,67 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
 };
 
+// The tracer of one event on `worker`, or none if the event has no tails. A dynamic worker's tails
+// are its source's; the server passes it none in `tails`.
+kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::Actor&> actor,
+    ::rust::Box<WorkerInterfaceList> tails) {
+  kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
+  kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
+  for (size_t i = 0; i < tails->len(); i++) {
+    (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
+  }
+  KJ_IF_SOME(dynamic, worker.dynamicSource) {
+    for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
+    for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
+  }
+  if (bufferedTailWorkers.empty() && streamingTailWorkers.empty()) return kj::none;
+
+  auto executionModel =
+      actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
+  kj::Maybe<kj::String> durableObjectId;
+  KJ_IF_SOME(a, actor) {
+    KJ_SWITCH_ONEOF(a.getId()) {
+      KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+        durableObjectId = id->toString();
+      }
+      KJ_CASE_ONEOF(id, kj::String) {
+        durableObjectId = kj::str(id);
+      }
+    }
+  }
+  auto tailStreamWriter = tracing::initializeTailStreamWriter(
+      streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
+      entrypointName.clone(), executionModel, kj::mv(durableObjectId));
+  kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
+      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
+
+  // The buffered tail workers get the trace once it completes. The observer and the IoContext
+  // each hold the tracer, so it lives until every event is recorded.
+  if (!bufferedTailWorkers.empty()) {
+    worker.waitUntilTasks.add(tracer->onComplete().then(
+        kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
+                          kj::Own<Trace> trace) mutable -> kj::Promise<void> {
+      for (auto& tailWorker: tailWorkers) {
+        auto event = kj::heap<api::TraceCustomEvent>(
+            api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
+        co_await tailWorker->customEvent(kj::mv(event));
+      }
+    })));
+  }
+  auto& threadContext = worker.factory.getImpl().threadContext;
+  tracer->setMakeUserRequestSpanFunc(
+      [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
+          tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+    return SpanParent(kj::rc<UserSpanObserver>(
+        kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
+        kj::mv(traceId), traceFlags));
+  });
+  return kj::mv(tracer);
+}
+
 kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     IoChannelFactory::SubrequestMetadata metadata,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -1063,63 +1127,10 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
   auto& threadContext = worker.factory.getImpl().threadContext;
 
-  // The test event is not traced. A dynamic worker's tails are its source's; the server passes
-  // it none.
-  kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
-  kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
-  if (entrypointName.orDefault("") != "test"_kj) {
-    for (size_t i = 0; i < tails->len(); i++) {
-      (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
-    }
-    KJ_IF_SOME(dynamic, worker.dynamicSource) {
-      for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
-      for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
-    }
-  }
-
+  // The test event is not traced.
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
-  if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
-    auto executionModel =
-        actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-    kj::Maybe<kj::String> durableObjectId;
-    KJ_IF_SOME(a, actor) {
-      KJ_SWITCH_ONEOF(a->getId()) {
-        KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
-          durableObjectId = id->toString();
-        }
-        KJ_CASE_ONEOF(id, kj::String) {
-          durableObjectId = kj::str(id);
-        }
-      }
-    }
-    auto tailStreamWriter = tracing::initializeTailStreamWriter(
-        streamingTailWorkers.releaseAsArray(), worker.waitUntilTasks);
-    auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr,
-        entrypointName.clone(), executionModel, kj::mv(durableObjectId));
-    kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
-        kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
-
-    // The buffered tail workers get the trace once it completes. The observer and the IoContext
-    // each hold the tracer, so it lives until every event is recorded.
-    if (!bufferedTailWorkers.empty()) {
-      worker.waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
-                            kj::Own<Trace> trace) mutable -> kj::Promise<void> {
-        for (auto& tailWorker: tailWorkers) {
-          auto event = kj::heap<api::TraceCustomEvent>(
-              api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
-          co_await tailWorker->customEvent(kj::mv(event));
-        }
-      })));
-    }
-    tracer->setMakeUserRequestSpanFunc(
-        [&tracerRef = *tracer, &entropySource = threadContext.getEntropySource()](
-            tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
-      return SpanParent(kj::rc<UserSpanObserver>(
-          kj::refcounted<SequentialSpanSubmitter>(tracerRef.getWeakRef(), entropySource),
-          kj::mv(traceId), traceFlags));
-    });
-    workerTracer = kj::mv(tracer);
+  if (entrypointName.orDefault("") != "test"_kj) {
+    workerTracer = makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails));
   }
 
   kj::Own<RequestObserver> observer =
@@ -1180,6 +1191,23 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   }
   return createEntrypoint(impl, kj::mv(meta), entrypointName, kj::mv(propsValue), kj::mv(actorRef),
       kj::mv(channels), kj::mv(tails), kj::none);
+}
+
+kj::Promise<void> worker_run_actor_on_hibernate(const CompiledWorker& worker,
+    const ActorHandle& actor,
+    ::rust::Str className,
+    ::rust::Box<ChannelFactory> channels,
+    ::rust::Box<WorkerInterfaceList> tails,
+    kj::Own<RequestMetadata> metadata) {
+  auto& impl = worker.getImpl();
+  auto& actorRef = actor.getActor();
+  auto entrypointName = kj::str(className);
+  auto tracer = makeWorkerTracer(impl, entrypointName.asPtr(), actorRef, kj::mv(tails));
+  auto observer = kj::refcounted<RequestObserverWithTracer>(tracer.clone());
+  auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(impl), kj::mv(channels));
+  return actorRef.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(tracer),
+      kj::mv(metadata->restoredSelfTokenFactory));
 }
 
 kj::Promise<::rust::Vec<uint64_t>> worker_bench(
@@ -1488,11 +1516,22 @@ void indexDynamicChannels(CompiledWorker::Impl& impl, DynamicWorkerSource& sourc
   });
 }
 
+// Loads the Pyodide bundle a Python worker's flags select (server/pyodide.rs).
 kj::Promise<void> preloadPython(WorkerFactory::Impl& factory, CompatibilityFlags::Reader flags) {
   if (!flags.getPythonWorkers()) co_return;
   KJ_IF_SOME(release, getPythonSnapshotRelease(flags)) {
-    co_await fetchPyodideBundle(factory.options->pythonConfig, getPythonBundleName(release),
-        release.getIntegrity(), factory.network, factory.timer);
+    auto& options = *factory.options;
+    auto& manager = options.pythonConfig.pyodideBundleManager;
+    auto version = getPythonBundleName(release);
+    if (manager.getPyodideBundle(version) != kj::none) co_return;
+    auto bytes = co_await pyodide_bundle_fetch(
+        toRust(options.pyodideBundleDiskCacheDir.map(
+            [](const kj::String& dir) -> kj::StringPtr { return dir; })),
+        toRust(version), toRust(release.getIntegrity()));
+    // Empty when there is no bundle to be had. Another worker may have loaded the bundle while
+    // this one waited.
+    if (bytes.empty() || manager.getPyodideBundle(version) != kj::none) co_return;
+    manager.setPyodideBundleData(kj::mv(version), kj::heapArray<kj::byte>(kj::from<Rust>(bytes)));
   }
 }
 
@@ -1633,8 +1672,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
     auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
         IsolateObserver::StartType::COLD, SpanParent(nullptr),
-        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
-        zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
+        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), zygoteErrors,
+        api::pyodide::ArtifactBundler::makeDisabledBundler());
     // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
     // zygote isolate breaks snapshot creation.
     auto zygote =
@@ -1711,7 +1750,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), false, errorReporter,
+      SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
 
   // `ctx.exports` is filled in once the validator has found the entrypoints, which needs the

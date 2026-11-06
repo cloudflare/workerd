@@ -25,6 +25,36 @@
 
 namespace workerd::jsg {
 
+CodeCacheKey codeCacheKeyForModule(StaticExternalStringSource source) {
+  KJ_SWITCH_ONEOF(source) {
+    KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::TWO_BYTE_ESM, twoByte.asBytes().asChars());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+CodeCacheKey codeCacheKeyForModule(const ExternalStringSource& source) {
+  KJ_SWITCH_ONEOF(source) {
+    KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::TWO_BYTE_ESM, twoByte.asBytes().asChars());
+    }
+    KJ_CASE_ONEOF(oneByte, kj::Arc<OwnedAscii>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::ONE_BYTE_ESM, *oneByte);
+    }
+    KJ_CASE_ONEOF(twoByte, kj::Arc<OwnedUtf16>) {
+      return CodeCacheKey::compute(CodeCacheKey::Unit::TWO_BYTE_ESM, twoByte->asBytes().asChars());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.getCaptureThrowsAsRejections();

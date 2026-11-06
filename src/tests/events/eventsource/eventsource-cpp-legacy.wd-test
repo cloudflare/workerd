@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventSourceModules = import "eventsource-modules.capnp";
+
+# Legacy cell, C++ implementation: without set_tostring_tag EventSource
+# is untagged, and without spec_compliant_dispatch_exceptions the first
+# throwing listener ends a dispatch and its exception is not reported. See
+# legacy-*.js. Both flags are pinned off by their disable names, so the cell
+# holds at every date.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-eventsource-cpp-legacy",
+      worker = (
+        modules = EventSourceModules.legacyModules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "do_not_set_tostring_tag",
+          "no_spec_compliant_dispatch_exceptions",
+        ],
+        bindings = [
+          (name = "USING_TS_IMPL", json = "false"),
+        ],
+      )
+    ),
+  ],
+);

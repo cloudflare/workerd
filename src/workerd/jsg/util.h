@@ -562,6 +562,11 @@ using ExternalStringSource = kj::OneOf<kj::ArrayPtr<const char>,
     kj::Arc<OwnedAscii>,
     kj::Arc<OwnedUtf16>>;
 
+struct CodeCacheKey;
+// Hashes the exact external-string representation handed to CompileModule().
+CodeCacheKey codeCacheKeyForModule(const ExternalStringSource& source);
+CodeCacheKey codeCacheKeyForModule(StaticExternalStringSource source);
+
 inline kj::Arc<OwnedAscii> copyToArc(kj::ArrayPtr<const char> source) {
   return kj::arc<OwnedAscii>(kj::heapArray(source));
 }

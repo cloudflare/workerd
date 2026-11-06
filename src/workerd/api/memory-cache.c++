@@ -366,8 +366,6 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                           CacheValueProduceResult result) mutable -> jsg::JsRef<jsg::JsValue> {
                 // NOTE: `callback` is IoPtr, not IoOwn. The catch block gets the IoOwn, which
                 //   ensures the object still exists at this point.
-                fallbackSpan->setTag("fallback_success"_kjc, true);
-
                 auto serialized = hackySerialize(js, result.value);
                 fallbackSpan->setTag(
                     "fallback_result_size"_kjc, static_cast<double>(serialized.size()));
@@ -379,6 +377,9 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                 } else {
                   fallbackSpan->setTag("has_expiration"_kjc, false);
                 }
+                // Only now, so that the catch block, which handles what this throws, does not
+                // overwrite it.
+                fallbackSpan->setTag("fallback_success"_kjc, true);
                 (*callback)(MemoryCacheUse::FallbackResult{kj::mv(serialized), result.expiration},
                     *fallbackSpan);
                 return kj::mv(result.value);

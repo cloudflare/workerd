@@ -496,6 +496,23 @@ struct AlarmEventInfo final {
   kj::String toString() const;
 };
 
+// Describes a Durable Object onHibernate handler invocation
+struct OnHibernateEventInfo final {
+  using Reason = rpc::Trace::OnHibernateEventInfo::Reason;
+
+  explicit OnHibernateEventInfo(Reason reason);
+  OnHibernateEventInfo(rpc::Trace::OnHibernateEventInfo::Reader reader);
+  OnHibernateEventInfo(OnHibernateEventInfo&&) noexcept = default;
+  OnHibernateEventInfo& operator=(OnHibernateEventInfo&&) = default;
+  KJ_DISALLOW_COPY(OnHibernateEventInfo);
+
+  Reason reason;
+
+  void copyTo(rpc::Trace::OnHibernateEventInfo::Builder builder) const;
+  OnHibernateEventInfo clone() const;
+  kj::String toString() const;
+};
+
 // Describes a queue worker request
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
@@ -747,6 +764,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
     ConnectEventInfo,
+    OnHibernateEventInfo,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);

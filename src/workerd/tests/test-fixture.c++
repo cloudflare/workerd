@@ -124,9 +124,11 @@ class MockEntropySource final: public kj::EntropySource {
 
 struct MockLimitEnforcer final: public LimitEnforcer {
   MockLimitEnforcer(kj::Maybe<uint&> checkedSubrequestCount,
-      kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver)
+      kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver,
+      const kj::Maybe<EventOutcome>& limitsExceeded)
       : checkedSubrequestCount(checkedSubrequestCount),
-        actorCallReplayMemoryReserver(actorCallReplayMemoryReserver) {}
+        actorCallReplayMemoryReserver(actorCallReplayMemoryReserver),
+        limitsExceeded(limitsExceeded) {}
 
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
     return {};
@@ -158,13 +160,15 @@ struct MockLimitEnforcer final: public LimitEnforcer {
     return kj::none;
   }
   kj::Maybe<EventOutcome> getLimitsExceeded() override {
-    return kj::none;
+    return limitsExceeded;
   }
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
   void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
-  void requireLimitsNotExceeded() override {}
+  void requireLimitsNotExceeded() override {
+    KJ_REQUIRE(limitsExceeded == kj::none, "the test exceeded its limits");
+  }
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
@@ -175,6 +179,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
 
   kj::Maybe<uint&> checkedSubrequestCount;
   kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver;
+  const kj::Maybe<EventOutcome>& limitsExceeded;
 };
 
 // The number of startup limit scopes that the calling thread is in.
@@ -345,10 +350,8 @@ kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
 
 using api::pyodide::PythonConfig;
 
-const PythonConfig defaultPythonConfig{.packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
-  .createSnapshot = false,
-  .createBaselineSnapshot = false};
+const PythonConfig defaultPythonConfig{
+  .packageDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false};
 
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),
@@ -380,7 +383,10 @@ TestFixture::TestFixture(SetupParams&& params)
           isolateGroup,
           kj::mv(params.jsgIsolateObserver).orDefault(kj::atomicRefcounted<JsgIsolateObserver>()),
           *memoryCacheProvider,
-          defaultPythonConfig)),
+          defaultPythonConfig,
+          /*inboundListeners=*/nullptr,
+          /*snapshotConfig=*/kj::none,
+          params.embedderBootstrap)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::mv(params.isolateObserver).orDefault(kj::atomicRefcounted<IsolateObserver>()),
@@ -396,7 +402,6 @@ TestFixture::TestFixture(SetupParams&& params)
               params.featureFlags.orDefault(CompatibilityFlags::Reader()),
               *errorReporter),
           IsolateObserver::StartType::COLD,
-          false,
           kj::none,
           kj::none,
           SpanParent(nullptr),
@@ -520,7 +525,8 @@ kj::Own<IoContext> TestFixture::newStatelessIoContext() {
 
 kj::Own<IoContext> TestFixture::newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor) {
   return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), maybeActor,
-      kj::heap<MockLimitEnforcer>(checkedSubrequestCount, actorCallReplayMemoryReserver));
+      kj::heap<MockLimitEnforcer>(
+          checkedSubrequestCount, actorCallReplayMemoryReserver, limitsExceeded));
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
@@ -592,13 +598,93 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
   }
 
   return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), kj::none, Frankenvalue(),
-      kj::mv(actorRef), kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver),
+      kj::mv(actorRef),
+      kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver, limitsExceeded),
       kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
       kj::none, kj::none);
 }
 
 bool TestFixture::isInStartupLimitScope() {
   return startupLimitScopeDepth > 0;
+}
+
+namespace {
+
+class SpanRecorder final: public SpanObserver {
+ public:
+  SpanRecorder(kj::Rc<RecordedSpans> records, kj::Maybe<size_t> parent)
+      : records(kj::mv(records)),
+        index(this->records->spans.size()) {
+    this->records->spans.add(RecordedSpan{.name = kj::str(), .parent = parent, .tags = kj::str()});
+  }
+
+  kj::Rc<SpanObserver> newChild() override {
+    return kj::rc<SpanRecorder>(records.addRef(), index);
+  }
+  void onOpen(kj::ConstString operationName, kj::Date) override {
+    records->spans[index].name = kj::str(operationName);
+  }
+  void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
+    auto entries = KJ_MAP(entry, tags) {
+      KJ_SWITCH_ONEOF(entry.value) {
+        KJ_CASE_ONEOF(str, kj::ConstString) {
+          return kj::str(entry.key, "=str:", str);
+        }
+        KJ_CASE_ONEOF(b, bool) {
+          return kj::str(entry.key, "=bool:", b);
+        }
+        KJ_CASE_ONEOF(d, double) {
+          return kj::str(entry.key, "=float:", d);
+        }
+        KJ_CASE_ONEOF(i, int64_t) {
+          return kj::str(entry.key, "=int:", i);
+        }
+      }
+      KJ_UNREACHABLE;
+    };
+    std::sort(entries.begin(), entries.end());
+    records->spans[index].tags = kj::strArray(entries, " ");
+    records->spans[index].ended = true;
+  }
+
+ private:
+  kj::Rc<RecordedSpans> records;
+  size_t index;
+};
+
+class SpanRequestObserver final: public RequestObserver {
+ public:
+  explicit SpanRequestObserver(kj::Rc<RecordedSpans> records)
+      : span(kj::rc<SpanRecorder>(kj::mv(records), kj::none), "request"_kjc) {}
+
+  SpanParent getSpan() override {
+    return SpanParent(span);
+  }
+
+ private:
+  SpanBuilder span;
+};
+
+}  // namespace
+
+kj::Maybe<RecordedSpan&> RecordedSpans::find(kj::StringPtr name) {
+  for (auto& span: spans) {
+    if (span.name == name) return span;
+  }
+  return kj::none;
+}
+
+kj::StringPtr RecordedSpans::parentName(const RecordedSpan& span) const {
+  KJ_IF_SOME(parent, span.parent) {
+    return spans[parent].name;
+  }
+  return "none"_kj;
+}
+
+kj::Function<kj::Own<RequestObserver>()> RecordedSpans::requestObserverFactory() {
+  return [records = addRefToThis()]() mutable -> kj::Own<RequestObserver> {
+    return kj::refcounted<SpanRequestObserver>(records.addRef());
+  };
 }
 
 }  // namespace workerd

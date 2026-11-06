@@ -276,6 +276,14 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
 }
 
 void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  if (maybeTailStreamWriter == kj::none) {
+    return;
+  }
+  addSpanUpdateInternal(spanId, kj::mv(update), getTime());
+}
+
+void WorkerTracer::addSpanUpdateInternal(
+    tracing::SpanId spanId, tracing::SpanUpdate&& update, kj::Date timestamp) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -285,7 +293,7 @@ void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& u
   auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
       topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
   auto size = update.size();
-  tailStreamWriter->report(context, kj::mv(update), getTime(), size);
+  tailStreamWriter->report(context, kj::mv(update), timestamp, size);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,

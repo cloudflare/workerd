@@ -24,4 +24,8 @@ void cpp_ref_track(
   ref.trackField(tracker, ::workerd::rust::jsg::memoryTrackerEdgeName(edge_name));
 }
 
+void cpp_ref_detach(const CppRef& ref) {
+  ref.detach();
+}
+
 }  // namespace workerd::rust::jsg_cpp

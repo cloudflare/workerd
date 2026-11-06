@@ -47,6 +47,7 @@
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
+#include <v8-metrics.h>
 #include <v8-profiler.h>
 #include <v8-wasm.h>
 
@@ -158,10 +159,11 @@ const capnp::JsonCodec& getCdpJsonCodec() {
 }
 
 void maybePerIsolateBootstrap(
-    CompatibilityFlags::Reader& featureFlags, jsg::Lock& lock, v8::Local<v8::Context> context) {
+    const Worker::Api& api, jsg::Lock& lock, v8::Local<v8::Context> context) {
   TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
-  JSG_WITHIN_CONTEXT_SCOPE(
-      lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
+  JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+    runPerIsolateBootstrap(js, api.getFeatureFlags(), api.getEmbedderBootstrap());
+  });
 }
 
 }  // namespace
@@ -583,7 +585,6 @@ struct Worker::Isolate::Impl {
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   // The isolate `inspector` belongs to.
   v8::Isolate* v8Isolate;
-  InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
@@ -644,8 +645,11 @@ struct Worker::Isolate::Impl {
       __atomic_add_fetch(&impl.lockSuccessCount, 1, __ATOMIC_RELAXED);
       metrics.locked();
 
-      // We record the current lock so our GC prologue/epilogue callbacks can report GC time via
-      // Jaeger tracing.
+      // Start measuring the garbage collection this lock pays for. We use only this window of
+      // V8's LongTaskStats; nothing else may call Reset().
+      v8::metrics::LongTaskStats::Reset(lock->v8Isolate);
+
+      // We record the current lock so our GC prologue/epilogue callbacks can reach it.
       KJ_DASSERT(impl.currentLock == kj::none, "Isolate lock taken recursively");
       impl.currentLock = *this;
 
@@ -676,6 +680,7 @@ struct Worker::Isolate::Impl {
         // The isolate asked this lock to report the stats when it released. Let's do it.
         limitEnforcer.reportMetrics(impl.metrics);
       }
+      reportGc();
       impl.currentLock = kj::none;
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
@@ -705,14 +710,15 @@ struct Worker::Isolate::Impl {
     }
 
     void gcPrologue() {
-      metrics.gcPrologue();
       // Filter out tracked WASM instance entries where the instance has been
       // garbage-collected (weak instanceRef is empty), allowing the linear memory
       // to be reclaimed.
       limitEnforcer.getTrackedWasmInstances().filter(*lock);
     }
-    void gcEpilogue() {
-      metrics.gcEpilogue();
+    void gcEpilogue(v8::GCType type) {
+      if (type == v8::kGCTypeMarkSweepCompact) {
+        ++fullGcCount;
+      }
     }
 
     // Call limitEnforcer.exitJs(), and also schedule to call limitEnforcer.reportMetrics()
@@ -721,10 +727,21 @@ struct Worker::Isolate::Impl {
     bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
 
    private:
+    // Reports to `metrics` the garbage collection performed since the lock was taken.
+    void reportGc() {
+      auto stats = v8::metrics::LongTaskStats::Get(lock->v8Isolate);
+      int64_t gcUs = stats.gc_young_wall_clock_duration_us +
+          stats.gc_full_atomic_wall_clock_duration_us +
+          stats.gc_full_incremental_wall_clock_duration_us;
+      metrics.reportGc(gcUs * kj::MICROSECONDS, fullGcCount);
+    }
+
     const Impl& impl;
     IsolateObserver::LockRecord metrics;
     ThreadProgressCounter progressCounter;
     bool shouldReportIsolateMetrics = false;
+    // Full (mark-compact) collections finished while this lock was held.
+    uint fullGcCount = 0;
     const Api* oldCurrentApi;
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
@@ -807,15 +824,11 @@ struct Worker::Isolate::Impl {
       kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm)), v8Isolate};
   }
 
-  Impl(IsolateObserver& metrics,
-      IsolateLimitEnforcer& limitEnforcer,
-      InspectorPolicy inspectorPolicy,
-      IsolateState state)
+  Impl(IsolateObserver& metrics, IsolateLimitEnforcer& limitEnforcer, IsolateState state)
       : metrics(metrics),
         inspectorClient(kj::mv(state.inspectorClient)),
         inspector(kj::mv(state.inspector)),
         v8Isolate(state.v8Isolate),
-        inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
         realm(kj::mv(state.realm)) {}
 
@@ -823,10 +836,7 @@ struct Worker::Isolate::Impl {
       IsolateObserver& metrics,
       IsolateLimitEnforcer& limitEnforcer,
       InspectorPolicy inspectorPolicy)
-      : Impl(metrics,
-            limitEnforcer,
-            inspectorPolicy,
-            initIsolate(api, limitEnforcer, inspectorPolicy)) {}
+      : Impl(metrics, limitEnforcer, initIsolate(api, limitEnforcer, inspectorPolicy)) {}
 };
 
 namespace {
@@ -1285,8 +1295,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // as well just throw the switch to "moderate" right away.
     lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
 
-    // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
-    // "request_context" Jaeger span.
+    // Register GC prologue and epilogue callbacks so that the current lock can release tracked
+    // WebAssembly instances and count the full collections it pays for.
     lock->v8Isolate->AddGCPrologueCallback(
         [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
       // We assume that a v8::Locker is alive during GC.
@@ -1304,7 +1314,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       KJ_DASSERT(v8::Locker::IsLocked(isolate));
       auto& self = *reinterpret_cast<Isolate*>(data);
       KJ_IF_SOME(currentLock, self.impl->currentLock) {
-        currentLock.gcEpilogue();
+        currentLock.gcEpilogue(type);
       }
     }, this);
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
@@ -1497,7 +1507,6 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
     const Script::Source& source,
     IsolateObserver::StartType startType,
-    bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     SpanParent parentSpan,
@@ -1572,8 +1581,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
 
-        auto featureFlags = isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context);
+        maybePerIsolateBootstrap(isolate->getApi(), lock, context);
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -1588,18 +1596,6 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-        // const_cast OK because we hold the isolate lock.
-        Worker::Isolate& lockedWorkerIsolate = const_cast<Isolate&>(*isolate);
-
-        if (logNewScript) {
-          // HACK: Log a message indicating that a new script was loaded. This is used only when the
-          //   inspector is enabled. We want to do this immediately after the context is created,
-          //   before the user gets a chance to modify the behavior of the console, which if they
-          //   did, we'd then need to be more careful to apply time limits and such.
-          lockedWorkerIsolate.logMessage(lock, static_cast<uint16_t>(cdp::LogType::WARNING),
-              "Script modified; context reset.");
-        }
-
         // We need to register this context with the inspector, otherwise errors won't be
         // reported. But we want it to be un-registered as soon as the script has been
         // compiled, otherwise the inspector will end up with multiple contexts active which
@@ -1891,7 +1887,11 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       if (terminatedRaw >= 0) {
         terminatedOffset = static_cast<uint32_t>(terminatedRaw);
       }
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      auto backingStore = memory->GetBuffer()->GetBackingStore();
+#else
       auto backingStore = memory->Buffer()->GetBackingStore();
+#endif
       auto wasmMemory =
           kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
               .attach(kj::mv(backingStore));
@@ -2327,8 +2327,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
       if (freshContext) {
-        auto featureFlags = script->isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context);
+        maybePerIsolateBootstrap(script->isolate->getApi(), lock, context);
       }
 
       // Install the virtual file system on the context. Keep in mind that for service
@@ -3194,9 +3193,9 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     ioHandler.connect(*this);
   }
 
-  // In preview sessions, synchronous locks are not an issue. We declare an alternate spelling of
-  // the type so that all the individual locks below don't turn up in a search for synchronous
-  // locks.
+  // Inspector sessions are for debugging, where synchronous locks are not an issue. We declare an
+  // alternate spelling of the type so that all the individual locks below don't turn up in a search
+  // for synchronous locks.
   using InspectorLock = Worker::Lock::TakeSynchronously;
 
   ~InspectorChannelImpl() noexcept try {
@@ -3708,9 +3707,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
                       ->connect(1,
                           self,
                           v8_inspector::StringView(),
-                          isolate->impl->inspectorPolicy == InspectorPolicy::ALLOW_UNTRUSTED
-                              ? v8_inspector::V8Inspector::kUntrusted
-                              : v8_inspector::V8Inspector::kFullyTrusted)) {}
+                          v8_inspector::V8Inspector::kFullyTrusted)) {}
     ~State() noexcept(false) {
       if (session != nullptr) {
         KJ_LOG(ERROR,
@@ -3766,26 +3763,6 @@ bool Worker::Isolate::InspectorChannelImpl::dispatchOneMessageDuringPause() {
 bool Worker::InspectorClient::dispatchOneMessageDuringPause(
     Worker::Isolate::InspectorChannelImpl& channel) {
   return channel.dispatchOneMessageDuringPause();
-}
-
-kj::Promise<void> Worker::Isolate::attachInspector(kj::Timer& timer,
-    kj::Duration timerOffset,
-    kj::HttpService::Response& response,
-    const kj::HttpHeaderTable& headerTable,
-    kj::HttpHeaderId controlHeaderId) const {
-  KJ_REQUIRE(impl->inspector != kj::none);
-
-  kj::HttpHeaders headers(headerTable);
-  headers.setPtr(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
-  auto webSocket = response.acceptWebSocket(headers);
-
-  // This `attachInspector()` overload is used by the internal Cloudflare Workers runtime, which has
-  // no concept of a single Isolate thread. Instead, it's OK for all inspector messages to be
-  // dispatched on the calling thread.
-  auto executor = kj::getCurrentThreadExecutor().addRef();
-
-  return attachInspector(kj::mv(executor), timer, timerOffset, *webSocket)
-      .attach(kj::mv(webSocket));
 }
 
 kj::Promise<void> Worker::Isolate::attachInspector(
@@ -3938,6 +3915,9 @@ struct Worker::Actor::Impl {
   MakeStorageFunc makeStorage;
 
   kj::Own<ActorObserver> metrics;
+
+  kj::Rc<NonHibernatableWebSocketCount> nonHibernatableWebSocketCount =
+      kj::rc<NonHibernatableWebSocketCount>();
 
   // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
   // on the first `ensureConstructed()`.
@@ -4729,6 +4709,10 @@ ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
 }
 
+kj::Rc<NonHibernatableWebSocketCount> Worker::Actor::getNonHibernatableWebSocketCount() {
+  return impl->nonHibernatableWebSocketCount.addRef();
+}
+
 kj::Own<Worker::Actor::WaitUntilTaskHandle> Worker::Actor::addedWaitUntilTask() {
   KJ_IF_SOME(tracker, waitUntilTaskTracker) {
     return tracker->registerTask();
@@ -4847,18 +4831,6 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
 
 namespace {
 
-kj::StringPtr hibernationReasonName(Worker::Actor::HibernationReason reason) {
-  switch (reason) {
-    case Worker::Actor::HibernationReason::INACTIVE:
-      return "inactive"_kj;
-    case Worker::Actor::HibernationReason::CODE_UPDATED:
-      return "codeUpdated"_kj;
-    case Worker::Actor::HibernationReason::SYSTEM:
-      return "system"_kj;
-  }
-  KJ_UNREACHABLE;
-}
-
 // Calls the actor's onHibernate handler and waits for it to settle, up to the handler's budget.
 kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
     IoContext& context,
@@ -4867,7 +4839,7 @@ kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
     Worker::Actor::HibernationReason reason) {
   jsg::Lock& js = lock;
   auto info = js.obj();
-  info.set(js, "reason", js.str(hibernationReasonName(reason)));
+  info.set(js, "reason", js.str(kj::str(reason)));
   info.recursivelyFreeze(js);
 
   // Unlike an alarm timeout, this doesn't abort the IoContext. The caller then cancels whatever
@@ -4909,16 +4881,18 @@ bool Worker::Actor::hasOnHibernateHandler() {
 kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
-  return impl->abortCanceler.wrap(
-      runOnHibernateImpl(reason, kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer)));
+  return impl->abortCanceler.wrap(runOnHibernateImpl(reason, kj::mv(ioChannelFactory),
+      kj::mv(observer), kj::mv(workerTracer), kj::mv(selfTokenFactory)));
 }
 
 kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
   // without the request tracking that addRef() adds.
   auto self = kj::addRef(*this);
@@ -4935,12 +4909,23 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   RequestObserver& observerRef = *observer;
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
-          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */,
+          kj::none /* accessInfo */, kj::mv(selfTokenFactory));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::OnHibernateEventInfo(reason));
+  }
   // Cross-context actions queued while the actor was idle are dropped rather than run with the
   // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
   // start. Those queued once its request is current still run, since the handler may await them.
   incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
+
+  // A call canceled before the handler settles, e.g. by abort(), never reaches the reports below.
+  bool reported = false;
+  KJ_DEFER(if (!reported) {
+    observerRef.reportOnHibernateOutcome(EventOutcome::CANCELED);
+    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
+  });
 
   {
     // Nothing may run in the actor after its handler, including during the flush below. The
@@ -4966,6 +4951,10 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
     }
     observerRef.reportOnHibernateOutcome(outcome);
     impl->metrics->onHibernateFinished(outcome);
+    reported = true;
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setReturn(context.now());
+    }
   }
 
   // The writes the handler made must be flushed before a successor can read storage. A failed
@@ -4999,13 +4988,12 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
     IsolateObserver::StartType startType,
     SpanParent parentSpan,
     kj::Own<workerd::VirtualFileSystem> vfs,
-    bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry) const {
   // Script doesn't already exist, so compile it.
   return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, source, startType,
-      logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan), kj::mv(vfs),
+      errorReporter, kj::mv(artifacts), kj::mv(parentSpan), kj::mv(vfs),
       kj::mv(maybeNewModuleRegistry));
 }
 

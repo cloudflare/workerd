@@ -199,7 +199,7 @@ impl Snapshot {
 
 #[jsg_resource(memory_info)]
 struct Child {
-    pub parent: RefCell<Option<jsg::Rc<Parent>>>,
+    pub parent: jsg::RefCell<Option<jsg::Rc<Parent>>>,
 }
 
 #[jsg_resource]
@@ -211,10 +211,13 @@ impl jsg::VisitForMemoryInfo for Child {
     }
 }
 
-fn new_child() -> jsg::Rc<Child> {
-    jsg::Rc::new(Child {
-        parent: RefCell::new(None),
-    })
+fn new_child(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Child> {
+    jsg::Rc::new(
+        lock,
+        Child {
+            parent: jsg::RefCell::new(None),
+        },
+    )
 }
 
 /// A helper that is a node of its own, like a C++ type with `JSG_MEMORY_INFO`.
@@ -234,7 +237,7 @@ impl jsg::MemoryRetainer for Cache {
 
 jsg::jsg_memory_retainer!(Cache);
 
-impl jsg::Traced for Cache {}
+jsg::jsg_traced!(Cache);
 
 fn new_cache() -> Cache {
     Cache {
@@ -279,7 +282,8 @@ struct Silent {
 impl Silent {}
 
 fn parent(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Parent> {
-    parent_of(lock, ctx, new_child())
+    let child = new_child(lock);
+    parent_of(lock, ctx, child)
 }
 
 fn parent_of(
@@ -288,16 +292,17 @@ fn parent_of(
     child: jsg::Rc<Child>,
 ) -> jsg::Rc<Parent> {
     let object = ctx.eval_raw(lock, "({ marker: 1 })").unwrap();
-    jsg::Rc::new(Parent {
+    let parent = Parent {
         name: "a name".to_owned(),
         child,
-        children: vec![new_child(), new_child()],
+        children: vec![new_child(lock), new_child(lock)],
         numbers: vec![1, 2, 3],
         cache: new_cache(),
         object: v8::TracedGlobal::new(lock, object),
         missing: None,
         unreported: "unreported".to_owned(),
-    })
+    };
+    jsg::Rc::new(lock, parent)
 }
 
 /// Wraps `resource` and stores the wrapper as the global `name`, so that the snapshot reaches it
@@ -395,9 +400,12 @@ fn resource_node_reports_its_fields() {
 fn resource_without_memory_info_reports_no_fields() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let silent = jsg::Rc::new(Silent {
-            name: "a name".to_owned(),
-        });
+        let silent = jsg::Rc::new(
+            lock,
+            Silent {
+                name: "a name".to_owned(),
+            },
+        );
         expose(lock, ctx, "silent", &silent)?;
 
         let snapshot = Snapshot::take(lock);
@@ -417,7 +425,7 @@ fn resource_without_memory_info_reports_no_fields() {
 fn shared_resource_is_one_node() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let shared = new_child();
+        let shared = new_child(lock);
         let first = parent_of(lock, ctx, shared.clone());
         let second = parent_of(lock, ctx, shared.clone());
         expose(lock, ctx, "first", &first)?;
@@ -439,7 +447,7 @@ fn cycle_of_resources_is_tracked_once() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let parent = parent(lock, ctx);
-        *parent.child.parent.borrow_mut() = Some(parent.clone());
+        *parent.child.parent.borrow_mut(lock) = Some(parent.clone());
         expose(lock, ctx, "parent", &parent)?;
 
         let snapshot = Snapshot::take(lock);
@@ -449,7 +457,7 @@ fn cycle_of_resources_is_tracked_once() {
         assert_eq!(snapshot.target(child, "parent"), node);
 
         // Break the cycle, which GC cannot collect while Rust holds a strong reference.
-        parent.child.parent.borrow_mut().take();
+        parent.child.parent.borrow_mut(lock).take();
         Ok(())
     });
 }
@@ -649,10 +657,10 @@ impl jsg::Traced for Fields {
 fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let weak_target = new_child();
+        let weak_target = new_child(lock);
         let unconvertable = ctx.eval_raw(lock, "({ unconvertable: 1 })").unwrap();
         let global = ctx.eval_raw(lock, "({ global: 1 })").unwrap();
-        let (c1, c2) = (new_child(), new_child());
+        let (c1, c2) = (new_child(lock), new_child(lock));
         ctx.set_global(lock, "c1", c1);
         ctx.set_global(lock, "c2", c2);
         let dict = ctx.eval_raw(lock, "({ a: c1, b: c2 })").unwrap();
@@ -660,7 +668,7 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
         let plain_dict = ctx.eval_raw(lock, "({ a: 1, bb: 2 })").unwrap();
         let plain_dict = jsg::Dict::<u32>::from_js(lock, plain_dict)?;
         let shared = std::rc::Rc::new(new_cache());
-        let fields = jsg::Rc::new(Fields {
+        let fields = Fields {
             outer: Outer {
                 inner: new_inner("inner"),
                 label: "label".to_owned(),
@@ -684,15 +692,18 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             shared_a: shared.clone(),
             shared_b: shared,
             ring: new_ring(),
-            boxed_child: Box::new(Some(new_child())),
+            boxed_child: Box::new(Some(new_child(lock))),
             boxed_number: Box::new(7),
             boxed_str: "boxed str".into(),
-            boxed_slice: vec![new_child(), new_child()].into_boxed_slice(),
-            nested: vec![vec![new_child()], vec![new_child(), new_child()]],
+            boxed_slice: vec![new_child(lock), new_child(lock)].into_boxed_slice(),
+            nested: vec![
+                vec![new_child(lock)],
+                vec![new_child(lock), new_child(lock)],
+            ],
             optional_numbers: vec![Some(1), None],
             deque: VecDeque::from(["d".to_owned()]),
-            array: [new_child(), new_child()],
-            set: HashSet::from([new_child()]),
+            array: [new_child(lock), new_child(lock)],
+            set: HashSet::from([new_child(lock)]),
             tree: BTreeMap::from([(1, "one".to_owned())]),
             plain_dict,
             dict,
@@ -701,7 +712,8 @@ fn with_fields(check: impl FnOnce(&Snapshot, usize, &Fields)) {
             global: global.to_global(lock),
             store: v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]).backing_store(),
             borrowed: RefCell::new("borrowed".to_owned()),
-        });
+        };
+        let fields = jsg::Rc::new(lock, fields);
         expose(lock, ctx, "fields", &fields)?;
         expose(lock, ctx, "weakTarget", &weak_target)?;
 
@@ -954,7 +966,9 @@ fn handle_of_another_isolate_is_not_reported() {
         handle: Cell<Option<v8::Global<v8::Value>>>,
     }
 
-    impl jsg::Traced for Holder {}
+    impl jsg::Traced for Holder {
+        fn trace(&self, _: &mut jsg::GcVisitor) {}
+    }
 
     #[jsg_resource]
     impl Holder {}
@@ -973,12 +987,16 @@ fn handle_of_another_isolate_is_not_reported() {
         global = Some(object.to_global(lock));
         Ok(())
     });
-    let holder = jsg::Rc::new(Holder {
-        handle: Cell::new(global),
-    });
-
+    let mut holder = None;
     b.run_in_context(|lock, ctx| {
-        expose(lock, ctx, "holder", &holder)?;
+        let held = jsg::Rc::new(
+            lock,
+            Holder {
+                handle: Cell::new(global.take()),
+            },
+        );
+        expose(lock, ctx, "holder", &held)?;
+        holder = Some(held);
         let snapshot = Snapshot::take(lock);
         assert!(
             snapshot
@@ -988,6 +1006,7 @@ fn handle_of_another_isolate_is_not_reported() {
         Ok(())
     });
 
+    let holder = holder.expect("set above");
     // Each handle is released under the lock of its own isolate.
     a.run_in_context(|_lock, _ctx| {
         drop(holder.handle.take().expect("set above"));
