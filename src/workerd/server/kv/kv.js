@@ -607,6 +607,7 @@ export class KVNamespace extends DurableObject {
             `(${MIGRATIONS.length}).`
         );
       }
+      if (v === MIGRATIONS.length) return;
       for (const migrate of MIGRATIONS.slice(v)) migrate(this.sql);
       this.sql.exec('DELETE FROM schema');
       this.sql.exec('INSERT INTO schema VALUES (?)', MIGRATIONS.length);
