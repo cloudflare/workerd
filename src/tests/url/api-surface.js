@@ -221,6 +221,8 @@ export const legacyInstancePropertiesShadowSubclasses = {
     strictEqual(url.href, instanceLayout ? 'http://a/' : 'override');
     strictEqual(String(url), 'http://a/');
     strictEqual(Object.keys(url).length, instanceLayout ? 12 : 0);
+    url.search = 'hello=xyz';
+    strictEqual(url.searchParams.get('hello'), 'xyz');
   },
 };
 

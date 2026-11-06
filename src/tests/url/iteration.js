@@ -202,5 +202,33 @@ export const forEachIsLive = {
       if (key === 'c') params.append('d', '4');
     });
     deepStrictEqual(seen, ['a', 'c', 'd']);
+
+    // A set() through the third argument shows at once, but not in the
+    // value already passed; appends are visited.
+    const params2 = new URLSearchParams('k1=v1&k2=v2');
+    const visited = [];
+    params2.forEach((value, key, self) => {
+      self.set(key, '3');
+      strictEqual(self.get(key), '3');
+      visited.push(`${key}=${value}`);
+      self.append('k3', '4');
+    });
+    deepStrictEqual(visited, ['k1=v1', 'k2=v2', 'k3=4', 'k3=4']);
+    strictEqual(params2.toString(), 'k1=3&k2=3&k3=3&k3=4');
+  },
+};
+
+export const forEachPropagatesThrows = {
+  test() {
+    const params = new URLSearchParams('a=1');
+    const error = new Error('boo');
+    throws(
+      () =>
+        params.forEach(() => {
+          throw error;
+        }),
+      (e) => e === error
+    );
+    strictEqual(params.toString(), 'a=1');
   },
 };

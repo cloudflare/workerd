@@ -84,6 +84,7 @@ export {
   forEachCallback,
   forEachReceiver,
   forEachIsLive,
+  forEachPropagatesThrows,
 } from 'iteration';
 
 export {
@@ -120,3 +121,10 @@ export {
   iteratorKeepsItsParamsAlive,
   unreachablePairsAreCollected,
 } from 'gc';
+
+export {
+  legacyConstructorCases,
+  legacySetterCases,
+  legacyWptConstructorCases,
+  legacyWptSetterCases,
+} from 'legacy-conformance';
