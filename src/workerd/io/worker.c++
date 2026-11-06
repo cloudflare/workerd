@@ -997,9 +997,17 @@ struct Worker::Script::Impl {
           v8::TryCatch tryCatch(js.v8Isolate);
           ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
           try {
-            auto limitScope = worker->getIsolate().getLimitEnforcer().enterDynamicImportJs(
-                lock, limitErrorOrTime);
-            return DynamicImportResult(handler());
+            kj::Maybe<jsg::Value> result;
+            {
+              auto limitScope = worker->getIsolate().getLimitEnforcer().enterDynamicImportJs(
+                  lock, limitErrorOrTime);
+              result = handler();
+            }
+            // The limit may have been hit in a microtask, which throws nothing.
+            KJ_IF_SOME(limitError, limitErrorOrTime.tryGet<kj::Exception>()) {
+              kj::throwException(kj::mv(limitError));
+            }
+            return DynamicImportResult(KJ_ASSERT_NONNULL(kj::mv(result)));
           } catch (jsg::JsExceptionThrown&) {
             // Handled below...
           } catch (kj::Exception& ex) {
@@ -2196,20 +2204,21 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
     const Worker::Script& script,
     ExceptionOrDuration& limitErrorOrTime) {
-  kj::Own<void> limitScope;
-  if (script.isPython()) {
-    limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
-  } else {
-    limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
-  }
-
-  KJ_DEFER({
+  // Declared before limitScope so that it runs after limitScope has recorded the limit error.
+  KJ_ON_SCOPE_SUCCESS({
     if (limitErrorOrTime.is<kj::Exception>()) {
       // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
       // thrown an exception.
       throw jsg::JsExceptionThrown();
     }
   });
+
+  kj::Own<void> limitScope;
+  if (script.isPython()) {
+    limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
+  } else {
+    limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
+  }
 
   // Before resolving the main module, if both nodejs_compat_v2 and the new
   // module registry are enabled, let's pre-resolve the process and buffer modules.
@@ -2407,16 +2416,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
-                auto limitScope =
-                    script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                unboundScript.run(lock);
-                // Flush microtasks enqueued during top-level script evaluation.
-                // Without this flush, microtasks (e.g. promise continuations from async
-                // initialization) remain on the per-isolate microtask queue and can leak across
-                // V8 contexts when multiple Workers share an isolate (same script, different
-                // zones). The leaked microtasks then execute under the wrong IoContext, making
-                // things go boom.
-                lock.runMicrotasks();
+                {
+                  auto limitScope =
+                      script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
+                  unboundScript.run(lock);
+                  // Flush microtasks enqueued during top-level script evaluation.
+                  // Without this flush, microtasks (e.g. promise continuations from async
+                  // initialization) remain on the per-isolate microtask queue and can leak
+                  // across V8 contexts when multiple Workers share an isolate (same script,
+                  // different zones). The leaked microtasks then execute under the wrong
+                  // IoContext, making things go boom.
+                  lock.runMicrotasks();
+                }
+                if (limitErrorOrTime.is<kj::Exception>()) {
+                  // If we hit the limit in runMicrotasks() we may not have actually thrown an
+                  // exception.
+                  throw jsg::JsExceptionThrown();
+                }
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,
