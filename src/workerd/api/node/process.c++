@@ -50,7 +50,7 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   if (isNode && specifier == "node:process") {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableNodeJsProcessV2()) {
-      specifier = kj::str("node-internal:public_process");
+      specifier = kj::str("node-internal:process_exports");
     } else {
       specifier = kj::str("node-internal:legacy_process");
     }
