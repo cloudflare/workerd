@@ -24,5 +24,7 @@ expectType<URLPatternResult | null>(result);
 if (result !== null) {
   expectType<(string | URLPatternInit)[]>(result.inputs);
   expectType<string>(result.pathname.input);
-  expectType<Record<string, string>>(result.pathname.groups);
+  expectType<Record<string, string | undefined>>(result.pathname.groups);
+  // @ts-expect-error an optional group that does not match is undefined.
+  void result.pathname.groups.id.length;
 }

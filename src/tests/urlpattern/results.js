@@ -96,6 +96,29 @@ export const groups = {
   },
 };
 
+// A named group whose regexp is `.*` keeps its name, though the standard
+// parser matches it without a RegExp, as it does `*`.
+export const namedFullWildcard = {
+  test() {
+    const hostname = new URLPattern({ hostname: ':domain(.*)' });
+    deepStrictEqual(hostname.exec({ hostname: 'localhost' }).hostname.groups, {
+      domain: 'localhost',
+    });
+    deepStrictEqual(hostname.exec('https://a.b/').hostname.groups, {
+      domain: 'a.b',
+    });
+    deepStrictEqual(
+      new URLPattern({ pathname: ':rest(.*)' }).exec('https://h/a/b').pathname
+        .groups,
+      { rest: '/a/b' }
+    );
+    deepStrictEqual(
+      new URLPattern({ search: ':q(.*)' }).exec({ search: '' }).search.groups,
+      { q: '' }
+    );
+  },
+};
+
 export const unmatchedOptionalGroups = {
   test() {
     const { groups } = new URLPattern({ pathname: '/:a{/:b}?' }).exec({

@@ -49,6 +49,21 @@ export const stringInputs = {
       '',
       '',
     ]);
+    // URLs that are not ordinary special ones: opaque, with an empty host,
+    // not special, with an IPv6 host, and with an empty query and fragment.
+    for (const [url, components] of [
+      ['mailto:x@y', ['mailto', '', '', '', '', 'x@y', '', '']],
+      ['mailto:x@y?s=1#h', ['mailto', '', '', '', '', 'x@y', 's=1', 'h']],
+      ['data:,x', ['data', '', '', '', '', ',x', '', '']],
+      ['file:///p', ['file', '', '', '', '', '/p', '', '']],
+      ['foo://h/p', ['foo', '', '', 'h', '', '/p', '', '']],
+      ['foo://u:p@h:9/p?q#f', ['foo', 'u', 'p', 'h', '9', '/p', 'q', 'f']],
+      ['foo:/p', ['foo', '', '', '', '', '/p', '', '']],
+      ['http://[::1]:8080/', ['http', '', '', '[::1]', '8080', '/', '', '']],
+      ['https://u@h/?#', ['https', 'u', '', 'h', '', '/', '', '']],
+    ]) {
+      deepStrictEqual(inputs(pattern.exec(url)), components, url);
+    }
     const path = new URLPattern({ pathname: '/books/:id' });
     strictEqual(path.test('https://a/books/1'), true);
     strictEqual(path.test('https://a/books/'), false);

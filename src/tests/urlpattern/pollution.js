@@ -57,6 +57,59 @@ export const regExpExecIsNotCalled = {
   },
 };
 
+// Compiling a protocol pattern that needs a RegExp, the standard parser asks
+// it whether it matches each special scheme, through the current
+// RegExp.prototype.exec, in both implementations. What that returns
+// decides how the pathname compiles, and what it throws escapes the
+// constructor. The default `*` and an exact protocol need no RegExp.
+export const constructionCallsPatchedExecForProtocol = {
+  test() {
+    const exec = RegExp.prototype.exec;
+    let calls = 0;
+    let pattern;
+    RegExp.prototype.exec = function () {
+      calls++;
+      return null;
+    };
+    try {
+      new URLPattern({ pathname: '/:x' });
+      new URLPattern({ protocol: 'https', pathname: '/:x' });
+      strictEqual(calls, 0);
+      pattern = new URLPattern({ protocol: 'http{s}?', pathname: '/:x' });
+    } finally {
+      RegExp.prototype.exec = exec;
+    }
+    const input = { protocol: 'https', pathname: '/a/b' };
+    if (urlPatternStandard) {
+      // No match for any of the six special schemes, so the pathname
+      // compiled as an opaque path's, where `:x` matches a '/'.
+      strictEqual(calls, 6);
+      strictEqual(pattern.test(input), true);
+    } else {
+      strictEqual(calls, 0);
+      strictEqual(pattern.test(input), false);
+    }
+    strictEqual(
+      new URLPattern({ protocol: 'http{s}?', pathname: '/:x' }).test(input),
+      false
+    );
+
+    const error = new Error('from exec');
+    RegExp.prototype.exec = function () {
+      throw error;
+    };
+    let thrown;
+    try {
+      new URLPattern({ protocol: 'http{s}?', pathname: '/:x' });
+    } catch (e) {
+      thrown = e;
+    } finally {
+      RegExp.prototype.exec = exec;
+    }
+    strictEqual(thrown, urlPatternStandard ? error : undefined);
+  },
+};
+
 export const groupsIgnoreObjectPrototypeSetters = {
   test() {
     // One named group, four (more than the implementation writes as a

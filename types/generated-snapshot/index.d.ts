@@ -17799,7 +17799,7 @@ interface URLPatternInit {
 }
 interface URLPatternComponentResult {
   input: string;
-  groups: Record<string, string>;
+  groups: Record<string, string | undefined>;
 }
 interface URLPatternResult {
   inputs: (string | URLPatternInit)[];
