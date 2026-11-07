@@ -129,7 +129,10 @@ namespace workerd::util {
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \
      opening one more fails with an Error. Enabling this gate removes that limit, making them      \
      unlimited. It doesn't affect Hibernatable WebSockets, which have their own limit. */          \
-  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)
+  V(DURABLE_OBJECT_WEBSOCKET_LIMIT_KILLSWITCH)                                                     \
+  /* When enabled, memory cache bindings are the Rust MemoryCache                                  \
+     (src/workerd/api/memory-cache-api) instead of the C++ one (api/memory-cache.c++). */          \
+  V(RUST_MEMORY_CACHE)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

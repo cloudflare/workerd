@@ -169,6 +169,35 @@ fn errors_with_enhanced_error_serialization() {
     });
 }
 
+/// Without `preserve_stack_in_errors`, an error keeps the stack it gets when read, and its other
+/// properties, as `jsg::Deserializer` does without `preserveStackInErrors`.
+#[test]
+fn errors_without_their_stacks() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = eval(
+            lock,
+            ctx,
+            "Object.assign(new Error('e'), { stack: 'original', code: 42 })",
+        );
+        let data = jsg::ser::serialize(lock, value)?;
+        let options = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+        };
+        let copy = jsg::ser::deserialize_with(lock, &data, options)?;
+        ctx.set_global(lock, "v", copy);
+        assert!(
+            ctx.eval::<bool>(
+                lock,
+                "v instanceof Error && v.message === 'e' && v.code === 42 && \
+                 typeof v.stack === 'string' && v.stack !== 'original'"
+            )
+            .unwrap()
+        );
+        Ok(())
+    });
+}
+
 /// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
 /// that the bytes stay the same.
 #[test]
