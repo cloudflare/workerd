@@ -174,3 +174,44 @@ fn error_message_for_v8_cuts_to_v8s_limit() {
     assert_eq!(error_message_for_v8(&message).len(), max);
     assert_eq!(error_message_for_v8(&message[..max]).len(), max);
 }
+
+#[test]
+fn dom_exception_name_outside_exception_type_is_kept() {
+    let err = from_description("expected q; jsg.DOMException(QuotaExceededError): full");
+    assert_eq!(
+        err.name,
+        ErrorName::DomException("QuotaExceededError".into())
+    );
+    assert!(err.name.is_dom_exception());
+    assert_eq!(err.name.class(), None);
+    assert_eq!(err.message, "full");
+}
+
+#[test]
+fn dom_syntax_error_is_not_the_javascript_class() {
+    let err = from_description("jsg.DOMException(SyntaxError): bad");
+    assert!(err.name.is_dom_exception());
+    assert_ne!(err.name, ExceptionType::SyntaxError);
+    assert_eq!(
+        from_description("jsg.SyntaxError: bad").name,
+        ExceptionType::SyntaxError
+    );
+}
+
+#[test]
+fn error_names_compare_by_what_they_throw() {
+    let dom = ErrorName::DomException("DataError".into());
+    assert_eq!(ErrorName::from(ExceptionType::DataError), dom);
+    assert_eq!(ErrorName::Class(ExceptionType::DataError), dom);
+    assert_eq!(dom, ExceptionType::DataError);
+    assert_eq!(ExceptionType::DataError, dom);
+    assert_ne!(
+        ErrorName::Class(ExceptionType::SyntaxError),
+        ErrorName::DomException("SyntaxError".into())
+    );
+    assert_eq!(
+        ErrorName::from(ExceptionType::TypeError).class(),
+        Some(ExceptionType::TypeError)
+    );
+    assert_eq!(ErrorName::Class(ExceptionType::AbortError).class(), None);
+}

@@ -117,6 +117,13 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
+    /// A JavaScript error class or a `DOMException` name. A `jsg::Error` holds a
+    /// `jsg::ErrorName`, which can also be a `DOMException` with a name that is not here, so a
+    /// variant is only worth adding for a name Rust code throws often. One must also be added to
+    /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
+    /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
+    /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is
+    /// not a compile error.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum ExceptionType {
         OperationError,
@@ -690,6 +697,12 @@ pub mod ffi {
             exception_type: ExceptionType,
             message: &[u8],
         ) -> Local;
+        // Leaves what creating the DOMException throws pending (see ffi.h).
+        pub unsafe fn dom_exception_create_from_bytes(
+            isolate: *mut Isolate,
+            name: &str,
+            message: &[u8],
+        ) -> MaybeLocal;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
@@ -936,7 +949,15 @@ pub mod ffi {
 
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ffi::ExceptionType {
+    /// The name of the error class or `DOMException` this type stands for.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
             Self::OperationError => "OperationError",
             Self::DataError => "DataError",
             Self::DataCloneError => "DataCloneError",
@@ -953,8 +974,29 @@ impl std::fmt::Display for ffi::ExceptionType {
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
             _ => "Error",
-        };
-        write!(f, "{name}")
+        }
+    }
+
+    /// Whether an error of this type is thrown as a `DOMException` with this name, rather than
+    /// as a JavaScript error class.
+    ///
+    /// `SyntaxError` is the JavaScript `SyntaxError`, never `DOMException(SyntaxError)`.
+    #[must_use]
+    pub fn is_dom_exception(self) -> bool {
+        matches!(
+            self,
+            Self::OperationError
+                | Self::DataError
+                | Self::DataCloneError
+                | Self::InvalidAccessError
+                | Self::InvalidStateError
+                | Self::InvalidCharacterError
+                | Self::NotSupportedError
+                | Self::TimeoutError
+                | Self::TypeMismatchError
+                | Self::AbortError
+                | Self::NotFoundError
+        )
     }
 }
 

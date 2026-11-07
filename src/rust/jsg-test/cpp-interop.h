@@ -34,6 +34,10 @@ class TestCppGreeter final: public jsg::Object {
   kj::String greet(jsg::Lock& js, kj::String name);
   // Fails as C++ API code usually does: with a kj::Exception that JSG_REQUIRE made.
   void failWithTypeError();
+  // Fails with a DOMException name that is not an ExceptionType.
+  void failWithQuotaExceededError();
+  // Fails with DOMException(SyntaxError), not the JavaScript SyntaxError.
+  void failWithDomSyntaxError();
   // Throws a JavaScript exception, as C++ code that called into JavaScript passes one on.
   void failWithJsError(jsg::Lock& js);
 
@@ -131,6 +135,10 @@ bool test_cpp_greeter_greet(
     v8::Isolate* isolate, const TestCppGreeter& greeter, ::rust::Str name, ::rust::String& result);
 bool test_cpp_greeter_fail_with_type_error(v8::Isolate* isolate, const TestCppGreeter& greeter);
 bool test_cpp_greeter_fail_with_js_error(v8::Isolate* isolate, const TestCppGreeter& greeter);
+bool test_cpp_greeter_fail_with_quota_exceeded_error(
+    v8::Isolate* isolate, const TestCppGreeter& greeter);
+bool test_cpp_greeter_fail_with_dom_syntax_error(
+    v8::Isolate* isolate, const TestCppGreeter& greeter);
 bool test_cpp_base_kind(v8::Isolate* isolate, const TestCppBase& base, ::rust::String& result);
 
 // The base of the current simulated request, as `Worker::Api::getCtxCacheProperty()` returns the

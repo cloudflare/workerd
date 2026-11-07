@@ -11,7 +11,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 #include <workerd/util/strong-bool.h>
 
@@ -916,13 +915,10 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
-// A stub's own policy applies only when it was given one and the userland gate is on. Otherwise
-// the runtime's default applies.
+// A stub's own policy applies when it was given one. Otherwise the runtime's default applies.
 ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent) {
-  if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
-      return ActorRetryPolicy::userDefined(userPolicy);
-    }
+  KJ_IF_SOME(userPolicy, parent.getUserDefinedRetryPolicy()) {
+    return ActorRetryPolicy::userDefined(userPolicy);
   }
   return ActorRetryPolicy::systemDefault();
 }
@@ -3405,13 +3401,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     }
   }
 
-  // YES if the call invokes a method marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND
-  // is enabled. This runs before the claim, so it must run no user code.
+  // YES if the call invokes a method marked with retryable(). This runs before the claim, so it
+  // must run no user code.
   IsRetryableHandler isRetryableMethod(
       jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) {
-    if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-      return IsRetryableHandler::NO;
-    }
     auto name = KJ_UNWRAP_OR(directMethodName(params), return IsRetryableHandler::NO);
     if (isReservedName(name)) return IsRetryableHandler::NO;
     auto method = KJ_UNWRAP_OR(findMethodWithoutUserCode(js, targetInfo.target,

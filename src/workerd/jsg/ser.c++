@@ -673,18 +673,9 @@ v8::MaybeLocal<v8::Object> readApiObject(
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
-  auto& js = Lock::from(isolate);
-  try {
-    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
-  } catch (JsExceptionThrown&) {
-    // Creating the DOMException threw, most likely because execution is terminating; that
-    // exception stays pending.
-    return {};
-  } catch (...) {
-    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
-    return {};
-  }
+  v8::Local<v8::Object> exception;
+  if (!newDOMException(isolate, "DataCloneError"_kj, message).ToLocal(&exception)) return {};
+  return exception;
 }
 
 void SerializedBufferDisposer::disposeImpl(void* firstElement,

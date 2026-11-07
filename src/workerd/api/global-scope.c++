@@ -31,7 +31,6 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -275,9 +274,6 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
 }
 
 IsRetryableHandler ExportedHandler::isFetchRetryable(jsg::Lock& js) {
-  if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-    return IsRetryableHandler::NO;
-  }
   KJ_IF_SOME(f, fetch) {
     KJ_IF_SOME(handle, f.tryGetHandle(js.v8Isolate)) {
       return IsRetryableHandler(jsg::JsObject(handle).hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
