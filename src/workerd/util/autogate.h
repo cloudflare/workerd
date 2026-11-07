@@ -124,6 +124,12 @@ namespace workerd::util {
      request per AbortSignal to arm its RPC subscription. When disabled, an IoContext runs the     \
      actions queued on it as soon as it can, and doing so on an idle actor aborts it. */           \
   V(DEFER_CROSS_CONTEXT_ACTIONS)                                                                   \
+  /* Visits handles that would otherwise stay unvisited strong roots, so cycles through them can   \
+     be collected; jsg::TracedOwn makes these visits safe when their owner moves. Today this       \
+     covers the resolvers of a stream's pending reads, so a ReadableStream whose read never        \
+     settles can be collected. When disabled, they stay strong roots and keep such a stream alive  \
+     until its isolate is torn down, and jsg::TracedOwn behaves like kj::Own. */                   \
+  V(GC_COMPLETE_TRACING)                                                                           \
   /* KILL SWITCH: unlike most autogates, enabling this one turns a feature OFF.                    \
      By default, each Durable Object instance can have at most 32768 non-hibernatable WebSockets   \
      open, whether accepted with accept() or opened with `new WebSocket(url)`; accepting or        \

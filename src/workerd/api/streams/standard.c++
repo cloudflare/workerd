@@ -339,10 +339,10 @@ void ReadableLockImpl<Controller>::releaseReader(
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
         KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
-        KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+        KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
           consumer->cancelPendingReads(js, reason);
         }
-        KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+        KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
           consumer->cancelPendingReads(js, reason);
         }
       }
@@ -955,8 +955,8 @@ class ReadableStreamJsController final: public ReadableStreamController, public 
       Initial,
       StreamStates::Closed,
       StreamStates::Errored,
-      kj::Own<ValueReadable>,
-      kj::Own<ByteReadable>>;
+      jsg::TracedOwn<ValueReadable>,
+      jsg::TracedOwn<ByteReadable>>;
   State state = State::create<Initial>();
 
   kj::Maybe<uint64_t> expectedLength = kj::none;
@@ -1211,6 +1211,9 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
 // and trigger the cancel algorithm.
 template <typename Self>
 void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason) {
+  // Dropping the queue leaves any reads it didn't settle unvisited, and the cancel algorithm can
+  // run a GC.
+  state.whenActive([](Queue& queue) { queue.makePendingReadsStrong(); });
   state.template transitionTo<StreamStates::Closed>();
 
   auto onSuccess =
@@ -1911,7 +1914,7 @@ namespace {
 template <typename Controller, typename Queue>
 struct ReadableState {
   Controller controller;
-  kj::Own<typename Queue::Consumer> consumer;
+  jsg::TracedOwn<typename Queue::Consumer> consumer;
   // The ReadableStreamJsController that owns the ValueReadable/ByteReadable holding
   // this state, so the pointer is always valid while this state exists.
   kj::Ptr<ReadableStreamJsController> owner;
@@ -1952,7 +1955,7 @@ struct ValueReadable final: public kj::PtrTarget,
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(s, state) {
-      visitor.visit(s.controller, *s.consumer);
+      visitor.visit(s.controller, s.consumer);
     }
   }
 
@@ -2150,7 +2153,7 @@ struct ByteReadable final: public kj::PtrTarget,
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(s, state) {
-      visitor.visit(s.controller, *s.consumer);
+      visitor.visit(s.controller, s.consumer);
     }
   }
 
@@ -2844,11 +2847,11 @@ ReadableStreamJsController::ReadableStreamJsController(StreamStates::Errored err
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer) {
-  state.transitionTo<kj::Own<ValueReadable>>(consumer.clone(js, addPtrToThis()));
+  state.transitionTo<jsg::TracedOwn<ValueReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer) {
-  state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, addPtrToThis()));
+  state.transitionTo<jsg::TracedOwn<ByteReadable>>(consumer.clone(js, addPtrToThis()));
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
@@ -2910,12 +2913,12 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<void>(errored.getHandle(js));
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       if (canceling) return js.resolvedPromise();
       canceling = true;
       return doCancel(consumer);
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       if (canceling) return js.resolvedPromise();
       canceling = true;
       return doCancel(consumer);
@@ -2964,7 +2967,7 @@ void ReadableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
 }
 
 bool ReadableStreamJsController::isByteOriented() const {
-  return state.is<kj::Own<ByteReadable>>();
+  return state.is<jsg::TracedOwn<ByteReadable>>();
 }
 
 bool ReadableStreamJsController::isClosedOrErrored() const {
@@ -3062,13 +3065,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<ReadResult>(errored.getHandle(js));
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       // The ReadableStreamDefaultController does not support ByobOptions.
       // It should never happen, but let's make sure.
       KJ_ASSERT(maybeByobOptions == kj::none);
       return deferControllerStateChange(js, *this, [&]() mutable { return consumer->read(js); });
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       return deferControllerStateChange(
           js, *this, [&]() mutable { return consumer->read(js, kj::mv(maybeByobOptions)); });
     }
@@ -3153,7 +3156,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<DrainingReadResult>(errored.getHandle(js));
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
       state.beginOperation();
       JSG_TRY(js) {
@@ -3167,7 +3170,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         return js.rejectedPromise<DrainingReadResult>(error);
       };
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
       state.beginOperation();
       JSG_TRY(js) {
@@ -3246,7 +3249,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
             js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(errored.addRef(js))),
       };
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       // Closing this stream destroys the consumer. tee() is reachable re-entrantly from a user
       // pull() callback invoked while a read is in progress, and that consumer is then still on
       // the stack in onConsumerWantsData(). deferTransitionTo() queues the transition until the
@@ -3259,7 +3262,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
         .branch2 = js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
       };
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       // Same rationale as the ValueReadable case above.
       KJ_DEFER((void)state.deferTransitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
@@ -3322,7 +3325,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     // We account for the memory usage of the ByteReadable and its controller together because
     // their lifetimes are identical (in practice) and memory accounting itself has a memory
     // overhead. The same applies to ValueReadable below.
-    state.transitionTo<kj::Own<ByteReadable>>(
+    state.transitionTo<jsg::TracedOwn<ByteReadable>>(
         kj::heap<ByteReadable>(controller.addRef(), addPtrToThis(), autoAllocateChunkSize)
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ByteReadable) + sizeof(ReadableByteStreamController))));
@@ -3332,7 +3335,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
         type == "", TypeError, kj::str("\"", type, "\" is not a valid type of ReadableStream."));
     auto controller = js.alloc<ReadableStreamDefaultController>(
         kj::mv(underlyingSource), kj::mv(queuingStrategy));
-    state.transitionTo<kj::Own<ValueReadable>>(
+    state.transitionTo<jsg::TracedOwn<ValueReadable>>(
         kj::heap<ValueReadable>(controller.addRef(), addPtrToThis())
             .attach(js.getExternalMemoryAdjustment(
                 sizeof(ValueReadable) + sizeof(ReadableStreamDefaultController))));
@@ -3356,20 +3359,17 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(pendingError);
   }
 
-  // Note: We cannot use state.visitForGc(visitor) here because the state machine's
-  // visitForGc passes kj::Own<T>& to visitor.visit(), but GcVisitor expects T& for
-  // types with visitForGc methods. We must dereference kj::Own manually.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {}
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
       visitor.visit(error);
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      visitor.visit(*consumer);
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
+      visitor.visit(consumer);
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      visitor.visit(*consumer);
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
+      visitor.visit(consumer);
     }
   }
   visitor.visit(lock);
@@ -3391,10 +3391,10 @@ kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       return consumer->getDesiredSize();
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       return consumer->getDesiredSize();
     }
   }
@@ -3427,10 +3427,10 @@ bool ReadableStreamJsController::canCloseOrEnqueue() {
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return false;
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       return consumer->canCloseOrEnqueue();
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       return consumer->canCloseOrEnqueue();
     }
   }
@@ -3460,10 +3460,10 @@ kj::Maybe<kj::OneOf<DefaultController, ByobController>> ReadableStreamJsControll
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ValueReadable>) {
       return consumer->getControllerRef();
     }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(consumer, jsg::TracedOwn<ByteReadable>) {
       return consumer->getControllerRef();
     }
   }
@@ -3876,10 +3876,10 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<T>(errored.getHandle(js));
     }
-    KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(valueReadable, jsg::TracedOwn<ValueReadable>) {
       return readAll(js);
     }
-    KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(byteReadable, jsg::TracedOwn<ByteReadable>) {
       return readAll(js);
     }
   }
@@ -3919,16 +3919,16 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       controller->state.transitionTo<StreamStates::Errored>(errored.addRef(js));
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ValueReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ValueReadable>>(
+      controller->state.transitionTo<jsg::TracedOwn<ValueReadable>>(
           readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ByteReadable>) {
       KJ_ASSERT(lock.lock());
-      controller->state.transitionTo<kj::Own<ByteReadable>>(
+      controller->state.transitionTo<jsg::TracedOwn<ByteReadable>>(
           readable->clone(js, controller->addPtrToThis()));
       state.transitionTo<StreamStates::Closed>();
       lock.onClose(js);
@@ -3969,10 +3969,10 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.exceptionToKj(errored.addRef(js));
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ValueReadable>) {
       return handlePump();
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ByteReadable>) {
       return handlePump();
     }
   }
@@ -5016,10 +5016,10 @@ void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
       tracker.trackField("error", error);
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ValueReadable>) {
       tracker.trackField("readable", readable);
     }
-    KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+    KJ_CASE_ONEOF(readable, jsg::TracedOwn<ByteReadable>) {
       tracker.trackField("readable", readable);
     }
   }

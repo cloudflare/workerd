@@ -338,7 +338,7 @@ class CryptoKey: public jsg::Object {
   bool verifyX509Private(const X509* x509) const;
 
  private:
-  kj::Own<Impl> impl;
+  jsg::TracedOwn<Impl> impl;
   kj::Maybe<jsg::MemoizedIdentity<AlgorithmVariant>> algorithmProperty;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> usagesProperty;
 

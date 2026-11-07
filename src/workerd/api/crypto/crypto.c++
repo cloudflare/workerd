@@ -696,8 +696,7 @@ bool CryptoKey::verifyX509Private(const X509* cert) const {
 
 void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(algorithmProperty, usagesProperty);
-  if (impl.get() == nullptr) return;
-  impl->visitForGc(visitor);
+  visitor.visit(impl);
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js,

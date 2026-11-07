@@ -46,6 +46,7 @@ const llvm::StringRef kVisitableLeafTemplates[] = {
   "jsg::MemoizedIdentity",
   "jsg::Generator",
   "jsg::AsyncGenerator",
+  "jsg::TracedOwn",
 };
 
 // Non-template visitable leaf types. jsg::Name is deliberately absent: its
