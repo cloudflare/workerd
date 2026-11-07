@@ -606,8 +606,36 @@ wd_cc_library(
     hdrs = ["urlpattern-standard.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":urlpattern-regex",
         "//src/workerd/jsg",
         "@ada-url",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-bootstrap",
+    srcs = ["urlpattern-bootstrap.c++"],
+    hdrs = ["urlpattern-bootstrap.h"],
+    implementation_deps = [
+        ":urlpattern-regex",
+        "//src/workerd/jsg:url",
+        "@ada-url",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-regex",
+    srcs = ["urlpattern-regex.c++"],
+    hdrs = ["urlpattern-regex.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -741,6 +769,15 @@ kj_test(
 kj_test(
     src = "bootstrap-utils-test.c++",
     deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "urlpattern-bootstrap-test.c++",
+    deps = [
+        ":urlpattern-bootstrap",
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],
