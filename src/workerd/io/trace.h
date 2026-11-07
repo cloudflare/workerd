@@ -990,7 +990,9 @@ struct Outcome final {
 // SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset,
+  // Onset is boxed because it is several times larger than any other event, and an unboxed OneOf
+  // would make every queued event, mostly logs and spans, that large too.
+  using Event = kj::OneOf<kj::Own<Onset>,
       Outcome,
       SpanOpen,
       SpanClose,
