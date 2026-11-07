@@ -1574,11 +1574,24 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
       KJ_UNREACHABLE;
   }
 
+  auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
+
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
     ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
     ctx.setTag("http.request.method"_kjc, kj::str(request.getMethodEnum()));
-    ctx.setTag("url.full"_kjc, request.getUrl());
+    if (urlList.size() == 1) {
+      // The original URL also preserves legacy relative Durable Object requests.
+      ctx.setTag("url.full"_kjc, request.getUrl());
+    } else {
+      // Use the dispatch URL so redirect userinfo is not added to telemetry. Fragments are
+      // retained for tracing even though they are not transmitted.
+      auto spanUrl = kj::str(url);
+      KJ_IF_SOME(fragment, urlList.back().fragment) {
+        spanUrl = kj::str(spanUrl, '#', uriEncodeControlChars(fragment.asBytes()));
+      }
+      ctx.setTag("url.full"_kjc, kj::mv(spanUrl));
+    }
 
     KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
       ctx.setTag("user_agent.original"_kjc, userAgent);
@@ -1597,7 +1610,6 @@ PreparedFetchRequest prepareFetchRequest(Request& request,
     }
   }
 
-  auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
   return {kj::mv(headers), kj::mv(url)};
 }
 

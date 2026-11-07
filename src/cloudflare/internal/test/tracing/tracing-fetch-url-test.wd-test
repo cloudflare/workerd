@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fetch-url", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-url-test.js")],
+      compatibilityFlags = ["nodejs_compat"],
+      bindings = [(name = "target", service = "target")],
+      streamingTails = ["tail"],
+    )),
+    (name = "legacy-fetch-url", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-url-legacy-test.js")],
+      compatibilityFlags = ["nodejs_compat", "url_original", "fetch_legacy_url", "durable_object_fetch_allows_relative_url"],
+      durableObjectNamespaces = [(className = "Actor", uniqueKey = "fetch-url")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "ns", durableObjectNamespace = "Actor")],
+      streamingTails = ["tail"],
+    )),
+    (name = "target", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-url-mock.js")],
+    )),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "tracing-fetch-url-tail.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);
