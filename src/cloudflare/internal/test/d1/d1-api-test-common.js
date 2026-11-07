@@ -561,3 +561,48 @@ export async function testD1Exec(DB) {
     }
   );
 }
+
+// bind() sends blob parameters as arrays of bytes; every ArrayBuffer view
+// must contribute the bytes it covers, not its elements.
+export async function testD1BindBlobs(DB) {
+  await itShould(
+    'store the bytes of ArrayBuffers, typed arrays and DataViews',
+    () =>
+      DB.batch([
+        DB.prepare(`CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB)`),
+        DB.prepare(`INSERT INTO blobs (id, data) VALUES (?, ?)`).bind(
+          1,
+          new Uint8Array([1, 2, 255]).buffer
+        ),
+        DB.prepare(`INSERT INTO blobs (id, data) VALUES (?, ?)`).bind(
+          2,
+          new Uint8Array([1, 2, 255])
+        ),
+        DB.prepare(`INSERT INTO blobs (id, data) VALUES (?, ?)`).bind(
+          3,
+          new Uint16Array([300])
+        ),
+        DB.prepare(`INSERT INTO blobs (id, data) VALUES (?, ?)`).bind(
+          4,
+          new Float64Array([300, 1.5])
+        ),
+        DB.prepare(`INSERT INTO blobs (id, data) VALUES (?, ?)`).bind(
+          5,
+          new DataView(new Uint8Array([9, 8, 7, 6]).buffer, 1, 2)
+        ),
+      ]).then(() =>
+        DB.prepare(
+          `SELECT id, typeof(data) AS type, hex(data) AS hex FROM blobs ORDER BY id`
+        ).raw()
+      ),
+    [
+      [1, 'blob', '0102FF'],
+      [2, 'blob', '0102FF'],
+      [3, 'blob', '2C01'],
+      [4, 'blob', '0000000000C07240000000000000F83F'],
+      [5, 'blob', '0807'],
+    ]
+  );
+
+  await DB.prepare(`DROP TABLE blobs`).run();
+}
