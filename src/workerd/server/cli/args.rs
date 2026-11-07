@@ -63,8 +63,10 @@ pub enum Command {
             AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or AWS_CREDENTIALS_FILE. A gs:// bucket \
             takes no settings: its tokens come from the service account key \
             GOOGLE_APPLICATION_CREDENTIALS names, else from the metadata server of the GCE VM or \
-            GKE pod (Workload Identity). The cluster port must stay on a private network; see \
-            --cluster-addr."
+            GKE pod (Workload Identity). An empty `cluster.bucket` falls back to \
+            WORKERD_CLUSTER_BUCKET, and an empty `cluster.key` to WORKERD_CLUSTER_KEY or the \
+            file named by WORKERD_CLUSTER_KEY_FILE. The cluster port must stay on a private \
+            network; see --cluster-addr."
     )]
     Serve {
         #[command(flatten)]

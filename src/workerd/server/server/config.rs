@@ -2002,7 +2002,11 @@ fn make_cluster(
     let conf = config.get_cluster().map_err(capnp_error)?;
     // The MAC's other inputs cross the wire, so a short key falls to an offline search.
     if text(conf.get_key())?.len() < 32 {
-        report.error("cluster.key must be at least 32 bytes.".to_owned());
+        report.error(
+            "cluster.key must be at least 32 bytes. Set it in the config, or for `workerd serve`, in \
+             WORKERD_CLUSTER_KEY or in a file named by WORKERD_CLUSTER_KEY_FILE."
+                .to_owned(),
+        );
         return Ok(None);
     }
     Ok(Some(ClusterNode::new(Rc::clone(factory), conf, address)?))

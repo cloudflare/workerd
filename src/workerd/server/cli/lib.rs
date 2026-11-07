@@ -495,12 +495,14 @@ fn load_config<T: CommandFactory>(
     config_errors(&compiled.errors, process)
 }
 
-/// Adds cluster deployments to `config` and records their service sources in `options`.
+/// Fills `config`'s cluster key and bucket from the environment, then adds cluster deployments to
+/// `config` and records their service sources in `options`.
 ///
-/// Deployments are added only with `--experimental`. A public cluster address or an error in
-/// `config` found during composition is a config error. A deployment that does not compose is
-/// skipped. A bucket that cannot be opened or read ends the process, even under `--watch`, because
-/// the cause may lie outside the config files. See `deployments.rs`.
+/// Both happen only with `--experimental`. A public cluster address or an error in `config` found
+/// during composition is a config error. A deployment that does not compose is skipped. An
+/// unusable cluster environment variable, or a bucket that cannot be opened or read, ends the
+/// process, even under `--watch`, because the cause lies outside the config files. See
+/// `deployments.rs`.
 fn with_deployments(
     config: Config,
     serve_or_test: &args::ServeOrTestArgs,
@@ -510,6 +512,13 @@ fn with_deployments(
     if !serve_or_test.experimental {
         return (config, options);
     }
+    let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let config = config
+        .with_cluster_environment(var)
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
     let address = options.cluster_address.as_deref();
     let advertise = options.cluster_advertise.as_deref();
     match deployments::add(config, address, advertise) {

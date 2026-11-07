@@ -192,6 +192,8 @@ struct ClusterConfig {
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix` for S3 or an
   # S3-compatible store (R2, MinIO), or `gs://bucket/prefix` for Google Cloud Storage.
+  # When empty, `serve` takes it from the environment variable `WORKERD_CLUSTER_BUCKET`. A bucket
+  # set nowhere is an error.
   #
   # A `gs://` bucket is reached through Cloud Storage's XML API, whose writes are conditional on
   # object generations. Its access tokens come from the service account key that
@@ -257,6 +259,12 @@ struct ClusterConfig {
   # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
   # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
   # the cluster on a private network (a VPC, WireGuard, Tailscale).
+  #
+  # When empty, `serve` takes the key from the environment variable `WORKERD_CLUSTER_KEY`, or reads
+  # it at startup from the file that `WORKERD_CLUSTER_KEY_FILE` names, such as a mounted secret,
+  # ignoring trailing whitespace. Set only one of the two. The key is text, so the file must be
+  # UTF-8. A config, or a binary that `workerd compile` builds, then holds no key. A key set
+  # nowhere is an error.
   #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 
