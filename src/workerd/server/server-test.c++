@@ -10060,6 +10060,134 @@ KJ_TEST("Server: DO facet abort during pending startup") {
   conn.recvHttp200("caught: aborted during startup");
 }
 
+// A parent can abort, delete or clone over a facet from its handler for a call that the facet
+// made back into it, which runs inside an event that the facet's IoContext owns. The facet's call
+// rejects with the abort reason, and the next get() starts a new instance on the right data.
+KJ_TEST("Server: DO facet abort from the parent's handler for the facet's call") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject, RpcTarget } from "cloudflare:workers";
+                `
+                `class Callback extends RpcTarget {
+                `  #onCall;
+                `  constructor(onCall) {
+                `    super();
+                `    this.#onCall = onCall;
+                `  }
+                `  call() { return this.#onCall(); }
+                `}
+                `
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.Parent.idFromName("test");
+                `    return await ctx.exports.Parent.get(id).fetch(request);
+                `  }
+                `}
+                `
+                `export class Parent extends DurableObject {
+                `  facet(name) {
+                `    return this.ctx.facets.get(name, () => ({class: this.ctx.exports.Child}));
+                `  }
+                `
+                `  // Has "child" call back into this object, and runs `act()` in the handler for
+                `  // that call. Reports how this object's call into "child" ended.
+                `  async callBackAndThen(act) {
+                `    try {
+                `      await this.facet("child").callBack(new Callback(act));
+                `      return "resolved";
+                `    } catch (err) {
+                `      return `rejected: ${err.message}`;
+                `    }
+                `  }
+                `
+                `  async fetch(request) {
+                `    switch (new URL(request.url).pathname) {
+                `      case "/abort": {
+                `        let result = await this.callBackAndThen(() => {
+                `          this.ctx.facets.abort("child", new Error("aborted by the parent"));
+                `        });
+                `        let then = await this.facet("child").ping();
+                `        return new Response(`${result}; then: ${then}`);
+                `      }
+                `      case "/abort-after-await": {
+                `        let result = await this.callBackAndThen(async () => {
+                `          await (async () => {})();
+                `          this.ctx.facets.abort("child", new Error("aborted by the parent"));
+                `        });
+                `        let then = await this.facet("child").ping();
+                `        return new Response(`${result}; then: ${then}`);
+                `      }
+                `      case "/delete": {
+                `        await this.facet("child").setValue(1);
+                `        let result = await this.callBackAndThen(() => {
+                `          this.ctx.facets.delete("child");
+                `        });
+                `        let then = await this.facet("child").getValue();
+                `        return new Response(`${result}; then: ${then}`);
+                `      }
+                `      case "/clone": {
+                `        await this.facet("src").setValue(2);
+                `        await this.facet("child").setValue(3);
+                `        let result = await this.callBackAndThen(() => {
+                `          this.ctx.facets.clone("src", "child");
+                `        });
+                `        let then = await this.facet("child").getValue();
+                `        return new Response(`${result}; then: ${then}`);
+                `      }
+                `    }
+                `    throw new Error(`bad url: ${request.url}`);
+                `  }
+                `}
+                `
+                `export class Child extends DurableObject {
+                `  callBack(callback) { return callback.call(); }
+                `  ping() { return "pong"; }
+                `  async setValue(value) { await this.ctx.storage.put("value", value); }
+                `  async getValue() { return (await this.ctx.storage.get("value")) ?? null; }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Parent",
+              uniqueKey = "parentkey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/abort", "rejected: aborted by the parent; then: pong");
+  conn.httpGet200("/abort-after-await", "rejected: aborted by the parent; then: pong");
+  conn.httpGet200("/delete", "rejected: Facet was deleted.; then: null");
+  conn.httpGet200("/clone", "rejected: Facet was cloned-over.; then: 2");
+}
+
 KJ_TEST("Server: ctx.access from accessBlobHeader on Worker") {
   TestServer test(R"((
     services = [

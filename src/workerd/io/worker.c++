@@ -4408,6 +4408,22 @@ void Worker::Actor::abort(const kj::Exception& error) {
       // Eagerly kill off the IoContext itself to ensure that all tasks are canceled, reentry
       // callbacks are dead, etc.
       impl->metricsFlushLoopTask = kj::none;
+      if (IoContext::hasCurrent()) {
+        // We were called from JavaScript, such as a parent's `ctx.facets.abort()`. It may be
+        // running inside an event that this IoContext owns, like its handler for an RPC call
+        // this actor made, so destroying the IoContext now would destroy that event while it is
+        // firing. Destroy it on the next turn of the event loop instead, and this Actor, which it
+        // refers to, after it. The caller may delete or replace the database's files as soon as
+        // we return, though, so close the database now.
+        KJ_IF_SOME(cache, impl->actorCache) {
+          KJ_IF_SOME(db, cache->getSqliteDatabase()) {
+            db.close();
+          }
+        }
+        kj::yield().attach(kj::mv(ctx)).attach(kj::addRef(*this)).detach([](kj::Exception&& e) {
+          LOG_EXCEPTION("abortedIoContextTeardown", e);
+        });
+      }
       impl->ioContext = kj::none;
     }
   }
