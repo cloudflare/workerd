@@ -146,6 +146,12 @@ These rules MUST be followed when writing or modifying JSG code:
     has `wasm_source_url_support`, because the URL is the module's name in the
     loaded Worker's bundle.
 
+14. **Don't visit through a shared owner.** A `kj::Rc`, `kj::Arc`, or `kj::Own` of a
+    refcounted type can have other owners that visit the same object, and a handle
+    visited from two owners is strong or traced depending on which visited last (a
+    `jsg::Ref` asserts instead). The `jsg-shared-visit` clang-tidy check flags such
+    visits; a deliberate one carries `// NOLINT(jsg-shared-visit)` with the reason.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
