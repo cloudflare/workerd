@@ -4,9 +4,10 @@
 
 //! Token handles: one resource per lol-html token type, each with one method per operation.
 //!
-//! A handle reaches its token only while lol-html runs the handler it was created for. Once the
-//! handler returns, every method fails with the `TypeError` that C++ `HTMLRewriter` throws for a
-//! token used outside its handler, whatever JavaScript does with the handle.
+//! A handle reaches its token only while lol-html runs the handler it was created for: until the
+//! handler returns, or, on a fiber, until the promise it returns settles. Then every method fails
+//! with the `TypeError` that C++ `HTMLRewriter` throws for a token used outside its handler,
+//! whatever JavaScript does with the handle.
 
 use std::sync::Arc;
 
@@ -39,6 +40,58 @@ const fn content_type(html: bool) -> ContentType {
     }
 }
 
+/// A slot of any token type, which [`lend_slot`] fills and [`handle`] makes a handle of.
+pub enum Slot {
+    Element(TokenSlot<Element<'static, 'static>>),
+    EndTag(TokenSlot<EndTag<'static>>),
+    Text(TokenSlot<TextChunk<'static>>),
+    Comment(TokenSlot<Comment<'static>>),
+    Doctype(TokenSlot<Doctype<'static>>),
+    DocumentEnd(TokenSlot<DocumentEnd<'static>>),
+}
+
+/// Runs `f` with a new slot that holds `token` until `f` returns. Needs no lock, so that it can
+/// run on lol-html's fiber.
+pub fn lend_slot<R>(token: Token<'_, '_, '_>, f: impl FnOnce(Slot) -> R) -> R {
+    macro_rules! lend {
+        ($token:expr, $variant:ident) => {{
+            let slot = TokenSlot::empty();
+            slot.lend($token, || f(Slot::$variant(slot.clone())))
+        }};
+    }
+    match token {
+        Token::Element(element) => lend!(element, Element),
+        Token::EndTag(end_tag) => lend!(end_tag, EndTag),
+        Token::Text(text) => lend!(text, Text),
+        Token::Comment(comment) => lend!(comment, Comment),
+        Token::Doctype(doctype) => lend!(doctype, Doctype),
+        Token::DocumentEnd(end) => lend!(end, DocumentEnd),
+    }
+}
+
+/// Creates the handle of the token in `slot`, which reaches it while the slot holds it.
+pub fn handle<'s>(
+    lock: &mut jsg::Lock<'s>,
+    shared: &Arc<Shared>,
+    slot: Slot,
+) -> jsg::Result<v8::Local<'s, v8::Value>> {
+    match slot {
+        Slot::Element(slot) => jsg::Rc::new(
+            lock,
+            ElementHandle {
+                slot,
+                shared: Arc::clone(shared),
+            },
+        )
+        .to_js(lock),
+        Slot::EndTag(slot) => jsg::Rc::new(lock, EndTagHandle { slot }).to_js(lock),
+        Slot::Text(slot) => jsg::Rc::new(lock, TextHandle { slot }).to_js(lock),
+        Slot::Comment(slot) => jsg::Rc::new(lock, CommentHandle { slot }).to_js(lock),
+        Slot::Doctype(slot) => jsg::Rc::new(lock, DoctypeHandle { slot }).to_js(lock),
+        Slot::DocumentEnd(slot) => jsg::Rc::new(lock, DocumentEndHandle { slot }).to_js(lock),
+    }
+}
+
 /// Runs `f` with a new handle of `token`, which reaches the token until `f` returns.
 pub fn lend<'s>(
     lock: &mut jsg::Lock<'s>,
@@ -46,35 +99,10 @@ pub fn lend<'s>(
     token: Token<'_, '_, '_>,
     f: impl FnOnce(&mut jsg::Lock<'s>, v8::Local<'s, v8::Value>) -> jsg::Result<()>,
 ) -> jsg::Result<()> {
-    macro_rules! lend {
-        ($token:expr, $handle:ident { $($field:ident: $value:expr),* }) => {{
-            let slot = TokenSlot::empty();
-            let handle = jsg::Rc::new(
-                lock,
-                $handle {
-                    slot: slot.clone(),
-                    $($field: $value),*
-                },
-            );
-            slot.lend($token, || {
-                let value = handle.to_js(lock)?;
-                f(lock, value)
-            })
-        }};
-    }
-    match token {
-        Token::Element(element) => lend!(
-            element,
-            ElementHandle {
-                shared: Arc::clone(shared)
-            }
-        ),
-        Token::EndTag(end_tag) => lend!(end_tag, EndTagHandle {}),
-        Token::Text(text) => lend!(text, TextHandle {}),
-        Token::Comment(comment) => lend!(comment, CommentHandle {}),
-        Token::Doctype(doctype) => lend!(doctype, DoctypeHandle {}),
-        Token::DocumentEnd(end) => lend!(end, DocumentEndHandle {}),
-    }
+    lend_slot(token, |slot| {
+        let handle = handle(lock, shared, slot)?;
+        f(lock, handle)
+    })
 }
 
 /// Implements `jsg::Traced` for handles, which hold no GC references, and `token()`, which runs a

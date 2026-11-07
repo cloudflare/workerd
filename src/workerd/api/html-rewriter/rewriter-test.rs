@@ -4,40 +4,9 @@
 
 //! Tests of the rewriter and token handles, driven from JavaScript as the facade drives them.
 
-use jsg::v8;
-use jsg_macros::jsg_method;
-use jsg_macros::jsg_resource;
 use jsg_test::Harness;
 
-use super::*;
-
-/// Gives JavaScript the handles, as the bootstrap's `utils` will.
-#[jsg_resource]
-struct Factory {}
-
-#[jsg_resource]
-impl Factory {
-    #[jsg_method]
-    fn selector(
-        &self,
-        lock: &mut jsg::Lock<'_>,
-        selector: String,
-    ) -> jsg::Result<jsg::Rc<HtmlSelector>> {
-        parse_selector(lock, &selector)
-    }
-
-    #[jsg_method]
-    fn rewriter<'s>(
-        &self,
-        lock: &mut jsg::Lock<'s>,
-        element: Vec<ElementHandlers>,
-        document: Vec<DocumentHandlers>,
-        encoding: String,
-        dispatcher: v8::Local<'s, v8::Function>,
-    ) -> jsg::Result<jsg::Rc<HtmlRewriterHandle>> {
-        new_rewriter(lock, element, document, &encoding, dispatcher)
-    }
-}
+use crate::HtmlRewriterUtils;
 
 /// `rewrite(chunks, ons, docs, encoding)` rewrites the document written in `chunks` (Latin-1
 /// strings) with the handlers of `on()` calls, `[selector, handlers]`, and of `onDocument()`
@@ -51,13 +20,13 @@ const names = ['element', 'comments', 'text', 'doctype', 'comments', 'text', 'en
 function newRewriter(ons, docs, encoding, sink) {
   const endTags = [];
   const element = ons.map(([selector, h]) => ({
-    selector: factory.selector(selector),
+    selector: utils.parseSelector(selector),
     element: !!h.element, comments: !!h.comments, text: !!h.text,
   }));
   const document = docs.map((h) => ({
     doctype: !!h.doctype, comments: !!h.comments, text: !!h.text, end: !!h.end,
   }));
-  return factory.rewriter(element, document, encoding ?? 'utf-8', (kind, id, token, output) => {
+  return utils.newRewriter(element, document, encoding ?? 'utf-8', (kind, id, token, output) => {
     sink(dec(output));
     if (kind === 7) return endTags[id](token);
     return (kind < 3 ? ons[id][1] : docs[id])[names[kind]](token, endTags);
@@ -87,8 +56,8 @@ fn run(code: &str) -> String {
 fn run_with(harness: &Harness, code: &str) -> String {
     let mut result = String::new();
     harness.run_in_context(|lock, ctx| {
-        let factory = jsg::Rc::new(lock, Factory {});
-        ctx.set_global(lock, "factory", factory);
+        let utils = jsg::resource::function_template_of::<HtmlRewriterUtils>(lock).unwrap();
+        ctx.set_global(lock, "utils", utils);
         result = ctx.eval(lock, &format!("{PRELUDE}\n{code}")).unwrap();
         Ok(())
     });
@@ -293,7 +262,7 @@ fn ended_and_aborted_rewriters_fail() {
 #[test]
 fn invalid_input_fails_with_parser_errors() {
     assert_eq!(
-        run(r"[error(() => factory.selector('p:hover')),
+        run(r"[error(() => utils.parseSelector('p:hover')),
              error(() => rewrite('', [], [], 'no-such-encoding')),
              error(() => rewrite('', [], [], 'utf-16le')),
              error(() => rewrite('<p>', [['p', { element: (el) => el.setTagName('') }]])),

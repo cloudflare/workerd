@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The rewriter handle: a `lol_html::HtmlRewriter` that calls one JavaScript function, the
-//! dispatcher, for every handler it runs.
+//! dispatcher, for every handler it runs, on the caller's stack or, for handlers that return
+//! promises, on a fiber (see [`crate::fiber`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ pub use lol_html::send::Element;
 use lol_html::send::ElementContentHandlers;
 use lol_html::send::Settings;
 
+use crate::fiber;
 use crate::parser_error;
 use crate::slot::DispatcherSlot;
 use crate::tokens;
@@ -114,7 +116,7 @@ pub struct Shared {
 }
 
 impl Shared {
-    fn take_output(&self) -> Vec<u8> {
+    pub(crate) fn take_output(&self) -> Vec<u8> {
         std::mem::take(&mut *lock_mutex(&self.output))
     }
 
@@ -194,33 +196,40 @@ pub struct DocumentHandlers {
     pub end: bool,
 }
 
-enum State {
+pub enum State {
     Open(Box<Rewriter>),
+    /// The fiber of a `writeAsync()` or `endAsync()` call has the rewriter.
+    Running,
     Ended,
     Failed,
 }
 
 /// A rewriter, to which JavaScript writes the document in chunks.
 ///
-/// Each call returns the output. lol-html calls the dispatcher, a JavaScript function, for every handler:
-/// `dispatcher(kind, id, token, output)`, where `kind` is a [`HandlerKind`], `id` numbers the
-/// handlers, `token` is the token's handle, valid until the dispatcher returns, and `output` is
-/// a `Uint8Array` of the output since the previous call, or `undefined` if there is none.
+/// Each call returns the output. lol-html calls the dispatcher, a JavaScript function, for every
+/// handler: `dispatcher(kind, id, token, output)`, where `kind` is a [`HandlerKind`], `id`
+/// numbers the handlers, `token` is the token's handle, and `output` is a `Uint8Array` of the
+/// output since the previous call, or `undefined` if there is none.
 ///
-/// The dispatcher runs within the `write()` or `end()` call, and must return `undefined`.
-/// Handlers that run after the call returns, on a separate stack, are not supported yet.
+/// The dispatcher runs in the async context frame the rewriter was created in. `write()` and
+/// `end()` run it within the call, and fail if it returns a promise; the token is valid until it
+/// returns. `writeAsync()` and `endAsync()`, which need a request, return promises; the token is
+/// valid until the promise the dispatcher returns, if any, settles.
 #[jsg_resource(custom_trace)]
 pub struct HtmlRewriterHandle {
     dispatcher: v8::TracedGlobal<v8::Function>,
+    frame: jsg::TracedAsyncContextFrame,
     shared: Arc<Shared>,
     /// Locked for the whole of `write()` and `end()`, so that a handler can't run them, or
-    /// `abort()`, again.
-    state: Mutex<State>,
+    /// `abort()`, again. Shared with the fiber of a `writeAsync()` or `endAsync()` call, which
+    /// leaves the rewriter in it.
+    state: Arc<Mutex<State>>,
 }
 
 impl jsg::Traced for HtmlRewriterHandle {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
         jsg::Traced::trace(&self.dispatcher, visitor);
+        jsg::Traced::trace(&self.frame, visitor);
     }
 }
 
@@ -307,12 +316,14 @@ pub fn new_rewriter<'s>(
 
     let rewriter = Rewriter::new(settings, Output(Arc::clone(&shared)));
     let dispatcher = dispatcher.to_traced_global(lock);
+    let frame = jsg::TracedAsyncContextFrame::current(lock);
     Ok(jsg::Rc::new(
         lock,
         HtmlRewriterHandle {
             dispatcher,
+            frame,
             shared,
-            state: Mutex::new(State::Open(Box::new(rewriter))),
+            state: Arc::new(Mutex::new(State::Open(Box::new(rewriter)))),
         },
     ))
 }
@@ -361,6 +372,28 @@ impl HtmlRewriterHandle {
         Ok(self.shared.take_output().to_js_typed_array(lock))
     }
 
+    /// Rewrites the next chunk of the document on a fiber, and returns a promise for the output
+    /// that remains after the last handler.
+    #[jsg_method]
+    pub fn write_async<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        chunk: v8::Local<'s, v8::Uint8Array>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        let chunk = chunk.as_slice(lock).to_vec();
+        self.start(lock, Some(chunk))
+    }
+
+    /// Ends the document on a fiber, and returns a promise for the output that remains after the
+    /// last handler.
+    #[jsg_method]
+    pub fn end_async<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        self.start(lock, None)
+    }
+
     /// Discards the rewriter: later calls fail.
     #[jsg_method]
     pub fn abort(&self) -> jsg::Result<()> {
@@ -385,8 +418,30 @@ impl HtmlRewriterHandle {
     fn closed_error(state: &State) -> jsg::Error {
         jsg::Error::new_type_error(match state {
             State::Ended => "This HTMLRewriter has already ended.",
-            _ => "This HTMLRewriter has failed.",
+            State::Running => "An HTMLRewriter handler can't use the rewriter that is running it.",
+            State::Open(_) | State::Failed => "This HTMLRewriter has failed.",
         })
+    }
+
+    /// Starts a `writeAsync()` or `endAsync()` call.
+    fn start<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        chunk: Option<Vec<u8>>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        let context = io_context::IoContext::current(lock)?;
+        let mut state = self.borrow_state()?;
+        if !matches!(*state, State::Open(_)) {
+            return Err(Self::closed_error(&state));
+        }
+        let State::Open(rewriter) = std::mem::replace(&mut *state, State::Running) else {
+            unreachable!("the state was checked to be open");
+        };
+        drop(state);
+        let function = self.dispatcher.as_local(lock);
+        let frame = self.frame.to_async_context_frame(lock);
+        let call = fiber::AsyncCall::new(lock, function, frame, &self.shared);
+        fiber::start(lock, &context, call, &self.state, rewriter, chunk)
     }
 
     /// Runs `f`, which calls lol-html, with a dispatcher that calls the JavaScript dispatcher
@@ -396,19 +451,22 @@ impl HtmlRewriterHandle {
         lock: &mut jsg::Lock<'_>,
         f: impl FnOnce() -> Result<(), lol_html::errors::RewritingError>,
     ) -> jsg::Result<()> {
-        let function = self.dispatcher.as_local(lock);
-        let mut dispatcher = SyncDispatcher {
-            lock,
-            function,
-            shared: &self.shared,
-            error: None,
-        };
-        let result = self.shared.dispatcher.lend(&mut dispatcher, f);
-        match (result, dispatcher.error) {
-            (Ok(()), _) => Ok(()),
-            (Err(_), Some(error)) => Err(error),
-            (Err(error), None) => Err(parser_error(error)),
-        }
+        // Handlers run in the async context frame of `transform()`, as with C++ `HTMLRewriter`.
+        self.frame.enter(lock, |lock| {
+            let function = self.dispatcher.as_local(lock);
+            let mut dispatcher = SyncDispatcher {
+                lock,
+                function,
+                shared: &self.shared,
+                error: None,
+            };
+            let result = self.shared.dispatcher.lend(&mut dispatcher, f);
+            match (result, dispatcher.error) {
+                (Ok(()), _) => Ok(()),
+                (Err(_), Some(error)) => Err(error),
+                (Err(error), None) => Err(parser_error(error)),
+            }
+        })
     }
 }
 

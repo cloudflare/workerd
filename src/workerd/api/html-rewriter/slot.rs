@@ -2,15 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Lending what lives on lol-html's stack to code that runs later on the same stack.
+//! Lending what lives on lol-html's stack to code that runs while lol-html waits for it.
 //!
 //! lol-html passes a handler a `&mut` token that is valid only while the handler runs, and the
 //! handler calls JavaScript, which reaches the token through a resource it holds. A resource
 //! can't hold a borrow, so it holds the token in a [`TokenSlot`], which [`TokenSlot::lend`] fills
 //! for the duration of a closure and empties when the closure returns or unwinds. A slot's clones
-//! share it. In the same way, a rewriter's handlers reach the
-//! [`Dispatcher`](crate::rewriter::Dispatcher) of the `write()` or `end()` call that is running
-//! through a [`DispatcherSlot`].
+//! share it, so that the handler can empty it while the resource lives on: when lol-html runs on
+//! a fiber, JavaScript runs on the thread's main stack, and the slot stays filled until the
+//! handler's promise settles. In the same way, a rewriter's handlers reach the
+//! [`Dispatcher`](crate::rewriter::Dispatcher) of the call that is running through a
+//! [`DispatcherSlot`].
 //!
 //! A slot is `Send` and `Sync`, as the resources and rewriter state that hold one must be, since
 //! the isolate lock passes between threads. What a slot holds lives on the stack of the thread

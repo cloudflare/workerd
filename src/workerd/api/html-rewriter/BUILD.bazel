@@ -1,14 +1,53 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # The native handle of the TypeScript HTMLRewriter: lol-html through its Rust API. See lib.rs.
 wd_rust_crate(
     name = "html-rewriter",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io",
+    ],
+    cxx_bridge_hdrs = ["fiber.h"],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":fiber"],
     proc_macro_deps = ["//src/rust/jsg-macros"],
     test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "//src/workerd/io/io-context",
         "@crates_vendor//:encoding_rs",
+        "@crates_vendor//:futures",
         "@crates_vendor//:lol_html",
+    ],
+)
+
+# The fibers ffi.rs runs lol-html on.
+wd_cc_library(
+    name = "fiber",
+    srcs = ["fiber.c++"],
+    hdrs = ["fiber.h"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/io",
+    ],
+)
+
+# Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
+exports_files([
+    "fiber.c++",
+    "fiber.h",
+])
+
+# writeAsync() and endAsync() in the requests of a real worker.
+kj_test(
+    src = "html-rewriter-test.c++",
+    deps = [
+        ":html-rewriter",
+        "//src/rust/jsg:ffi",
+        "//src/workerd/tests:test-fixture",
     ],
 )
