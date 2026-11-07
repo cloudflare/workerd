@@ -35,6 +35,7 @@ export {
   searchParamsArgumentIsOptional,
   constructorsRequireNew,
   subclassing,
+  stackOverflowLeavesNoHandoff,
   statics,
   objectUrlsAreUnsupported,
 } from 'construction';
@@ -114,7 +115,11 @@ export {
   urlPatternFromUrl,
 } from 'consumers';
 
-export { builtinMethodsAreNotCalled, resultsRunNoSetters } from 'pollution';
+export {
+  builtinMethodsAreNotCalled,
+  percentDecodingIgnoresSpecies,
+  resultsRunNoSetters,
+} from 'pollution';
 
 export {
   searchParamsKeepsItsUrlAlive,

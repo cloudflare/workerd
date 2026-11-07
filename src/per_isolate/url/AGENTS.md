@@ -33,8 +33,9 @@ against both implementations; change the code and the ledger together.
 - The facade converts every argument before reaching the backend, so a
   backend sees only USVStrings.
 - `URL.parse()` and the `searchParams` getter hand their constructors an
-  already-made state through `adoptedUrlState` / `adoptedStore`, set just
-  before the `new`.
+  already-made state as the second argument, after the module-private
+  `kAdopt` token. Not through module state: a constructor that throws on
+  entry (a stack overflow) would leave it for the next construction.
 
 ## INVARIANTS
 

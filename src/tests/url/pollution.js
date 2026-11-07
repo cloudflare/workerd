@@ -95,6 +95,47 @@ export const builtinMethodsAreNotCalled = {
   },
 };
 
+// Percent-decoding a name or value does not consult the species constructor
+// of the bytes it decodes.
+export const percentDecodingIgnoresSpecies = {
+  test() {
+    let looked = 0;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      Uint8Array.prototype,
+      'constructor'
+    );
+    ObjectDefineProperty(Uint8Array.prototype, 'constructor', {
+      __proto__: null,
+      configurable: true,
+      get() {
+        looked++;
+        return {
+          [Symbol.species]: function (buffer) {
+            return new Uint8Array(buffer, 0, 1);
+          },
+        };
+      },
+    });
+    let entries;
+    let search;
+    try {
+      entries = [...new URLSearchParams('a%62=%41%42&c=d')];
+      const url = new URL('http://a/?x=%41%42');
+      void url.searchParams;
+      url.searchParams.append('y', '1');
+      search = url.search;
+    } finally {
+      ObjectDefineProperty(Uint8Array.prototype, 'constructor', descriptor);
+    }
+    deepStrictEqual(entries, [
+      ['ab', 'AB'],
+      ['c', 'd'],
+    ]);
+    strictEqual(search, '?x=AB&y=1');
+    strictEqual(looked, 0);
+  },
+};
+
 // Ledger #9: without enable_fast_jsg_struct, JSG makes an iterator result
 // by assignment, so inherited setters for `done` and `value` capture both,
 // and the result has no own properties. The TypeScript results are object
