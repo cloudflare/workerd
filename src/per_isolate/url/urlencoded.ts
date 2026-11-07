@@ -17,8 +17,10 @@ const {
   TextDecoderDecode,
   TextEncoder,
   TextEncoderEncode,
+  TypedArrayPrototypeGetBuffer,
+  TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeGetLength,
-  TypedArrayPrototypeSubarray,
+  Uint8Array,
 } = primordials;
 
 const { internalArray } = require('url/internal-array') as InternalArrayHelpers;
@@ -84,9 +86,14 @@ function decodeComponent(input: string): string {
       bytes[out++] = byte;
     }
   }
+  // Not subarray(), which consults the species constructor.
   return TextDecoderDecode(
     kDecoder,
-    TypedArrayPrototypeSubarray(bytes, 0, out)
+    new Uint8Array(
+      TypedArrayPrototypeGetBuffer(bytes),
+      TypedArrayPrototypeGetByteOffset(bytes),
+      out
+    )
   );
 }
 

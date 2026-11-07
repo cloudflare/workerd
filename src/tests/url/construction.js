@@ -5,7 +5,7 @@
 // Constructing URL and URLSearchParams: parse failures and their messages,
 // base handling, argument counts, `new`, and subclassing.
 
-import { throws, strictEqual, ok } from 'node:assert';
+import { throws, strictEqual, deepStrictEqual, ok } from 'node:assert';
 import { usingTsImpl, urlStandard } from 'which-impl';
 
 function invalid(message) {
@@ -112,6 +112,59 @@ export const subclassing = {
     ok(params instanceof URLSearchParams);
     strictEqual(params.count(), 2);
     strictEqual(params.toString(), 'a=1&b=2');
+  },
+};
+
+// A stack overflow at any point in URL.parse() or the searchParams getter
+// leaves nothing behind for the next construction to pick up. Unwinding from
+// the deepest frame retries both with a little more stack each time, so the
+// overflow lands at each call in turn; each frame then constructs directly.
+// Frames above the first with stack enough for everything skip the work.
+export const stackOverflowLeavesNoHandoff = {
+  test() {
+    const hasParse = typeof URL.parse === 'function';
+    const wrong = [];
+    function attempt() {
+      let completed = true;
+      try {
+        void new URL('http://first/?first=1').searchParams;
+      } catch {
+        completed = false;
+      }
+      try {
+        const params = new URLSearchParams('a=b').toString();
+        if (params !== 'a=b') wrong[wrong.length] = params;
+      } catch {
+        completed = false;
+      }
+      if (hasParse) {
+        try {
+          URL.parse('http://first/');
+        } catch {
+          completed = false;
+        }
+        try {
+          const href = new URL('http://second/').href;
+          if (href !== 'http://second/') wrong[wrong.length] = href;
+        } catch {
+          completed = false;
+        }
+      }
+      return completed;
+    }
+    function exhaust() {
+      try {
+        if (exhaust()) return true;
+      } catch {
+        // The stack ran out below this frame.
+      }
+      return attempt();
+    }
+    // Optimized code has different frame sizes; the overflow has to land in
+    // the code that runs once the functions are hot.
+    for (let i = 0; i < 2000; i++) attempt();
+    exhaust();
+    deepStrictEqual(wrong, []);
   },
 };
 

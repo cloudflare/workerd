@@ -226,11 +226,10 @@ function storeFromInit(init: unknown): SearchParamsStore {
 // ---------------------------------------------------------------------------
 // URL
 
-// What URL.parse() and URL.prototype.searchParams hand the constructors,
-// set just before they call one, so that it adopts it rather than parsing.
-// Nothing runs in between that could construct another.
-let adoptedUrlState: unknown = undefined;
-let adoptedStore: SearchParamsStore | undefined = undefined;
+// Passed as the first argument by URL.parse() and URL.prototype.searchParams,
+// which pass the state the constructor adopts, rather than parses, as the
+// second. User code cannot reach it.
+const kAdopt: symbol = Symbol('adopt');
 
 let urlState: (url: unknown) => unknown;
 
@@ -239,13 +238,13 @@ class URL {
   #searchParams: URLSearchParams | undefined;
 
   constructor(url: unknown, base?: unknown) {
-    let state = adoptedUrlState;
-    if (state === undefined) {
+    let state;
+    if (url === kAdopt) {
+      state = base;
+    } else {
       requireArguments(arguments.length, 1, "Failed to construct 'URL'");
       const urlString = toUSVString(url);
       state = backend.parse(urlString, toOptionalUSVString(base));
-    } else {
-      adoptedUrlState = undefined;
     }
     this.#state = state;
     this.#searchParams = undefined;
@@ -339,8 +338,7 @@ class URL {
     const state = urlState(this);
     let searchParams = this.#searchParams;
     if (searchParams === undefined) {
-      adoptedStore = backend.storeForUrl(state);
-      searchParams = new URLSearchParams();
+      searchParams = new URLSearchParams(kAdopt, backend.storeForUrl(state));
       this.#searchParams = searchParams;
     }
     return searchParams;
@@ -376,8 +374,7 @@ class URL {
     const urlString = toUSVString(url);
     const state = backend.tryParse(urlString, toOptionalUSVString(base));
     if (state === undefined) return null;
-    adoptedUrlState = state;
-    return new URL(undefined);
+    return new URL(kAdopt, state);
   }
 
   static createObjectURL(object: unknown): string {
@@ -427,14 +424,9 @@ const kForEach = "Failed to execute 'forEach' on 'URLSearchParams'";
 class URLSearchParams {
   #store: SearchParamsStore;
 
-  constructor(init?: unknown) {
-    let store = adoptedStore;
-    if (store === undefined) {
-      store = storeFromInit(init);
-    } else {
-      adoptedStore = undefined;
-    }
-    this.#store = store;
+  constructor(init?: unknown, store?: unknown) {
+    this.#store =
+      init === kAdopt ? (store as SearchParamsStore) : storeFromInit(init);
     (this as unknown as Record<symbol, unknown>)[kSearchParamsBrand] = true;
     markUncloneable(this);
   }
