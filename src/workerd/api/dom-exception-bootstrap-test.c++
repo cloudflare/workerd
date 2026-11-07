@@ -38,7 +38,7 @@ kj::Array<kj::byte> serialize(jsg::Lock& js, jsg::JsValue value) {
 kj::Array<kj::byte> tag8(kj::StringPtr name, kj::StringPtr message, kj::StringPtr stack) {
   kj::Vector<kj::byte> bytes;
   bytes.addAll(kj::arr<kj::byte>(0xff, 0x10, 0x5c, 8));
-  for (auto field: {name, message, stack}) {
+  for (const auto& field: {name, message, stack}) {
     KJ_ASSERT(field.size() < 0x80);
     bytes.add(field.size());
     bytes.addAll(field.asBytes());
