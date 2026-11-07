@@ -141,6 +141,20 @@ class Queue final {
     return count;
   }
 
+  // Like the above, but the callback may modify the elements.
+  inline size_t forEach(auto callback) {
+    size_t count = 0;
+    for (auto& item: inner) {
+      count++;
+      if constexpr (std::is_void_v<decltype(callback(item))>) {
+        callback(item);
+      } else {
+        if (!callback(item)) break;
+      }
+    }
+    return count;
+  }
+
   // Checks if the queue is empty.
   inline bool empty() const {
     return inner.empty();
