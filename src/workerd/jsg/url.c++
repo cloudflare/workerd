@@ -325,6 +325,21 @@ Url::SchemeType Url::getSchemeType() const {
   return static_cast<SchemeType>(value);
 }
 
+Url::Components Url::getComponents() const {
+  static_assert(Components::OMITTED == ada_url_omitted);
+  auto& components = *ada_get_components(getInner<ada_url>(inner));
+  return {
+    .protocolEnd = components.protocol_end,
+    .usernameEnd = components.username_end,
+    .hostStart = components.host_start,
+    .hostEnd = components.host_end,
+    .port = components.port,
+    .pathnameStart = components.pathname_start,
+    .searchStart = components.search_start,
+    .hashStart = components.hash_start,
+  };
+}
+
 Url::HostType Url::getHostType() const {
   uint8_t value = ada_get_host_type(getInner<ada_url>(inner));
   KJ_REQUIRE(value <= static_cast<uint8_t>(HostType::IPV6));

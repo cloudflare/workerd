@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/api/streams/writable.h>
+#include <workerd/api/url-bridge.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
@@ -51,7 +52,7 @@ class FileFdHandle final: public jsg::Object {
 
 class FileSystemModule final: public jsg::Object {
  public:
-  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>, JsUrl>;
 
   struct StatOptions {
     jsg::Optional<bool> followSymlinks;

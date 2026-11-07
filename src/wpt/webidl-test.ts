@@ -4,6 +4,14 @@
 
 import { type TestRunnerConfig } from 'harness/harness';
 
+// The TypeScript URL (the TS_URL autogate) is only an own property of the
+// global, as WebIDL installs an interface; JSG puts the C++ one on the
+// global's prototype (src/tests/url/api-surface.js).
+const usingTsUrl = !Object.hasOwn(
+  Object.getPrototypeOf(globalThis) as object,
+  'URL'
+);
+
 export default {
   'ecmascript-binding/builtin-function-properties.any.js': {},
   'ecmascript-binding/class-string-interface.any.js': {
@@ -13,12 +21,14 @@ export default {
     ],
   },
   'ecmascript-binding/class-string-iterator-prototype-object.any.js': {
-    comment: 'Iterator @@toStringTag is different in workerd',
-    expectedFailures: [
-      '@@toStringTag exists with the appropriate descriptor',
-      'Object.prototype.toString',
-      'Object.prototype.toString applied to a null-prototype instance',
-    ],
+    comment: "The C++ URLSearchParams iterator's @@toStringTag differs",
+    expectedFailures: usingTsUrl
+      ? []
+      : [
+          '@@toStringTag exists with the appropriate descriptor',
+          'Object.prototype.toString',
+          'Object.prototype.toString applied to a null-prototype instance',
+        ],
   },
   'ecmascript-binding/class-string-named-properties-object.window.js': {
     comment: 'Window-specific test',

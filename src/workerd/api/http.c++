@@ -140,6 +140,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
           MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
     }
+    KJ_CASE_ONEOF(searchParams, JsUrlSearchParams) {
+      return ExtractedBody(js, JsReadableStream(js, searchParams.serialize(js)),
+          MimeType::formUrlEncodedWithCharset("UTF-8"_kj));
+    }
   }
   KJ_UNREACHABLE;
 }

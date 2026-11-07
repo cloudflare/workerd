@@ -110,6 +110,9 @@ namespace workerd::util {
   /* EventSource is the TypeScript implementation from the per-isolate bootstrap                   \
      (src/per_isolate/eventsource/) rather than the C++ class in api/eventsource.h. */             \
   V(TS_EVENT_SOURCE)                                                                               \
+  /* URL and URLSearchParams are the TypeScript implementations from the per-isolate bootstrap     \
+     (src/per_isolate/url/) rather than the C++ classes in api/url.h and api/url-standard.h. */    \
+  V(TS_URL)                                                                                        \
   /* JSG converts a JS number to an integer of up to 32 bits by truncating it toward zero          \
      before the range check, as Web IDL's [EnforceRange] and V8's kEnforceRangeBit fast API        \
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
