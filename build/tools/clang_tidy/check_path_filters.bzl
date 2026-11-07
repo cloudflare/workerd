@@ -17,6 +17,9 @@ Once a check is fully rolled out, remove its entry to run everywhere.
 """
 
 CHECK_PATH_FILTERS = {
+    # Reports existing borrows across calls that can run JavaScript throughout src/workerd, many of
+    # them in headers; run it with --config=clang-tidy-js-reentry until they are triaged.
+    "jsg-js-reentry": [],
     "workerd-unsafe-continuation-capture": [
         # Add paths here as they are cleaned up:
         # "src/workerd/io",

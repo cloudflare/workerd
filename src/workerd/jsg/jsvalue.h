@@ -976,11 +976,12 @@ class JsFunction final: public JsBase<v8::Function, JsFunction> {
   }
 
   // Calls the function with the given receiver and arguments.
-  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue call(
+      Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function with a null receiver and arguments. When null is passed
   // as the receiver, the global object is used instead.
-  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+  JSG_MAY_RUN_JS JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
 
   // Calls the function as a constructor with the given arguments, returning the
   // new object.

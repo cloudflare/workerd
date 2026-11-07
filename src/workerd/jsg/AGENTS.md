@@ -145,10 +145,17 @@ These rules MUST be followed when writing or modifying JSG code:
     must check the same settings. It never reuses a module when either isolate
     has `wasm_source_url_support`, because the URL is the module's name in the
     loaded Worker's bundle.
+14. **MUST NOT hold a borrow into JSG-owned state across a call that can run JavaScript.**
+    JavaScript run mid-method can drop the last reference to the object a local reference,
+    pointer, iterator, or view points into. Hold a strong reference (`addRef()`), iterate a
+    copy, or look the state up again after the call. Mark C++ functions that can run
+    JavaScript or trigger GC, but hide it from the translation unit (type erasure, virtual
+    dispatch), with `JSG_MAY_RUN_JS` (`util.h`); see `README.md` §Calls That Run JavaScript.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
+The `jsg-js-reentry` check enforces invariant 14 the same way.
 
 ## CODE REVIEW RULE
 
