@@ -689,8 +689,7 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // Requires ALL of:
       // - A non-empty chunk.
       // - We are not running in an actor. An actor's output gate must serialize with
-      //   writes, and there is no synchronous way to check that the gate is open
-      //   (waitForOutputLocksIfNecessary() returns a promise for every actor).
+      //   writes.
       //
       // The legacy controller's queue-empty condition holds here by construction: the
       // writeInFlight guard above plus the TS machinery's own serialization mean no other
