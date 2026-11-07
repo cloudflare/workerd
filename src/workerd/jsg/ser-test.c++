@@ -17,11 +17,13 @@ kj::Array<kj::byte> lastSerializedData;
 
 struct SerTestContext: public ContextGlobalObject {
   enum class SerializationTag {
-    FOO,
-    BAR,
-    BAZ,
-    QUX,
-    BOX,
+    FOO = 0,
+    BAR = 1,
+    BAZ = 2,
+    QUX = 3,
+    BOX = 4,
+    // RawJsSerializable writes this tag, which the Deserializer reads itself.
+    JS_SERIALIZABLE = SERIALIZATION_TAG_JS_SERIALIZABLE,
   };
 
   struct Foo: public jsg::Object {
@@ -166,6 +168,46 @@ struct SerTestContext: public ContextGlobalObject {
     }
   };
 
+  // Writes the record of an instance of a class implemented in JavaScript as it is given, as a
+  // peer could: its deserializeInfo, its flags and, if given, its stack. The instance's data is
+  // written separately (roundTripWithData()).
+  struct RawJsSerializable: public jsg::Object {
+    kj::String deserializeInfo;
+    uint32_t flags;
+    kj::Maybe<JsRef<JsValue>> stack;
+    RawJsSerializable(kj::String deserializeInfo, uint32_t flags, kj::Maybe<JsRef<JsValue>> stack)
+        : deserializeInfo(kj::mv(deserializeInfo)),
+          flags(flags),
+          stack(kj::mv(stack)) {}
+
+    static jsg::Ref<RawJsSerializable> constructor(jsg::Lock& js,
+        kj::String deserializeInfo,
+        uint32_t flags,
+        jsg::Optional<JsRef<JsValue>> stack) {
+      return js.alloc<RawJsSerializable>(kj::mv(deserializeInfo), flags, kj::mv(stack));
+    }
+
+    JSG_RESOURCE_TYPE(RawJsSerializable) {}
+
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+      serializer.writeLengthDelimited(deserializeInfo);
+      serializer.writeRawUint32(flags);
+      KJ_IF_SOME(s, stack) {
+        serializer.write(js, s.getHandle(js));
+      }
+    }
+    static jsg::Ref<RawJsSerializable> deserialize(
+        Lock& js, SerializationTag tag, Deserializer& deserializer) {
+      KJ_UNREACHABLE;
+    }
+    JSG_SERIALIZABLE(SerializationTag::JS_SERIALIZABLE);
+
+   private:
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(stack);
+    }
+  };
+
   // Stands in for the per-isolate bootstrap's modules: one module, "test", whose exports
   // setModule() sets.
   struct TestModules final: public BootstrapModules {
@@ -241,6 +283,19 @@ struct SerTestContext: public ContextGlobalObject {
     auto first = deser.readValue(js);
     auto second = deser.readValue(js);
     return js.arr(first, second);
+  }
+
+  // Writes `raw`, a RawJsSerializable, followed by `data` as its instance's data, and reads them
+  // back.
+  JsValue roundTripWithData(Lock& js, JsValue raw, JsValue data) {
+    auto content = ({
+      Serializer ser(js);
+      ser.write(js, raw);
+      ser.write(js, data);
+      ser.release();
+    });
+    Deserializer deser(js, content);
+    return deser.readValue(js);
   }
 
   void visitForGc(GcVisitor& visitor) {
@@ -333,12 +388,14 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Baz);
     JSG_NESTED_TYPE(Qux);
     JSG_NESTED_TYPE(Box);
+    JSG_NESTED_TYPE(RawJsSerializable);
     JSG_METHOD(setModule);
     JSG_METHOD(clearModules);
     JSG_METHOD(getPrivateSymbol);
     JSG_METHOD(roundTrip);
     JSG_METHOD(roundTripStrict);
     JSG_METHOD(roundTripTwo);
+    JSG_METHOD(roundTripWithData);
     JSG_METHOD(foreignRoundTrip);
     JSG_METHOD(foreignMatchesSerializer);
     JSG_METHOD(foreignToSerializer);
@@ -352,7 +409,8 @@ JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
     SerTestContext::Bar,
     SerTestContext::Baz,
     SerTestContext::Qux,
-    SerTestContext::Box);
+    SerTestContext::Box,
+    SerTestContext::RawJsSerializable);
 
 KJ_TEST("deserialization header diagnostics expose metadata without payload contents") {
   Evaluator<SerTestContext, SerTestIsolate> e(v8System);
@@ -710,6 +768,36 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "`${err instanceof TestError} ${Object.prototype.toString.call(err)} ${err.message}`",
       "string", "true [object Error] boom");
 
+  // Its stack is written as a native error's is, and restored as an own data property: without
+  // enhanced error serialization, as here, whatever the options say.
+  expectEval("const e = new TestError('boom');\n"
+             "e.stack = 'sender stack';\n"
+             "const copy = roundTrip(e);\n"
+             "Object.getOwnPropertyDescriptor(copy, 'stack').value",
+      "string", "sender stack");
+  // Without one, it keeps the stack captured when it was made.
+  expectEval("const e = new TestError('boom');\n"
+             "delete e.stack;\n"
+             "const copy = roundTrip(e);\n"
+             "`${typeof copy.stack} ${copy.stack.includes('sender')}`",
+      "string", "string false");
+
+  // The record's flags say whether a stack follows. One of a class that doesn't inherit from
+  // Error is ignored, and flags this version doesn't know are rejected.
+  expectEval("const e = roundTripWithData(\n"
+             "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm');\n"
+             "`${e.stack} ${e.message}`",
+      "string", "forged stack m");
+  expectEval("const p = roundTripWithData(new RawJsSerializable('test:Point', 1, 'stack'), 1);\n"
+             "`${Object.hasOwn(p, 'stack')} ${p.x}`",
+      "string", "false 2");
+  expectEval("try { roundTripWithData(new RawJsSerializable('test:Point', 2), 1); } catch (e) {\n"
+             "  `${e.name}: ${e.message}`\n"
+             "}",
+      "string",
+      "DataCloneError: Deserialization failed: unsupported object implemented in "
+      "JavaScript.");
+
   // Instances serialize the same with class instances otherwise not serializable, as for RPC.
   expectEval("roundTripStrict(new Point(1)).x", "number", "2");
 
@@ -761,6 +849,35 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
         "string",
         "DataCloneError: Deserialization failed: unknown class implemented in JavaScript.");
   }
+
+  // Nor is a class found through an accessor, which the deserializer can't call: an accessor
+  // export, however it was defined, or a descriptor's accessor deserialize.
+  constexpr kj::StringPtr ACCESSOR_CLASS = R"(
+    let getterCalls = 0;
+    class Lazy {}
+    Lazy.prototype[kCloneable] = descriptor('test:Lazy', () => 1, () => {});
+    class LazyDeserialize {}
+    LazyDeserialize.prototype[kCloneable] = Object.freeze({ __proto__: null,
+        deserializeInfo: 'test:LazyDeserialize', clone: () => 1,
+        get deserialize() { getterCalls++; return () => {}; } });
+  )"_kj;
+  for (auto exports: {"{ get Lazy() { getterCalls++; return Lazy; } }"_kj,
+         "Object.defineProperty({}, 'Lazy', { get() { getterCalls++; return Lazy; } })"_kj}) {
+    expectEval(kj::str(ACCESSOR_CLASS, "setModule(", exports,
+                   ");\n"
+                   "try { roundTrip(new Forged('test:Lazy')); } catch (e) {\n"
+                   "  `${e.name}: ${e.message} ${getterCalls}`\n"
+                   "}"),
+        "string",
+        "DataCloneError: Deserialization failed: unknown class implemented in JavaScript. 0");
+  }
+  expectEval(kj::str(ACCESSOR_CLASS,
+                 "setModule({ LazyDeserialize });\n"
+                 "try { roundTrip(new Forged('test:LazyDeserialize')); } catch (e) {\n"
+                 "  `${e.name}: ${e.message} ${getterCalls}`\n"
+                 "}"),
+      "string",
+      "DataCloneError: Deserialization failed: unknown class implemented in JavaScript. 0");
 
   // What a deserialize function throws reaches the caller, such as its rejection of data that
   // no instance of its class would have written.

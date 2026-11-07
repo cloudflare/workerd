@@ -85,6 +85,7 @@ const ObjectDefineProperty = Object.defineProperty;
 const ObjectDefineProperties = Object.defineProperties;
 const ObjectFreeze = Object.freeze;
 const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectHasOwn = Object.hasOwn;
 const ObjectKeys = Object.keys;
 const ObjectGetPrototypeOf = Object.getPrototypeOf;
 const ObjectSetPrototypeOf = Object.setPrototypeOf;
@@ -712,6 +713,7 @@ module.exports = ObjectFreeze({
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  ObjectHasOwn,
   ObjectKeys,
   ObjectGetPrototypeOf,
   ObjectSetPrototypeOf,

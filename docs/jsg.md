@@ -1698,6 +1698,8 @@ part through a protocol modelled on Node.js's js_transferable, which
   `SERIALIZATION_TAG_JS_SERIALIZABLE` and its `deserializeInfo`
   (`'module:Export'`), and `clone(instance)`'s data follows the top-level
   value.
+- `getOwnDataProperty(data, key)` reads a property of the data that
+  `deserialize()` is given, without reading its prototype chain.
 
 For example, a bootstrap module `example/range` that defines a cloneable
 `Range`:
@@ -1709,7 +1711,7 @@ import type { SerializationHelpers } from '../serialization';
 
 const { NumberIsFinite, TypeError } = primordials;
 const { getPrivateSymbol } = utils;
-const { makeCloneable, markCloneable } = require(
+const { getOwnDataProperty, makeCloneable, markCloneable } = require(
   'serialization'
 ) as SerializationHelpers;
 
@@ -1778,17 +1780,20 @@ const rangeCloneable = makeCloneable(
     return { start: slots[kStart], end: slots[kEnd] };
   },
   // `data` may come from an untrusted peer and need not be anything clone()
-  // returned, so check everything about it, with primordials only. A
-  // property the data lacks is looked up on Object.prototype, which user code
-  // may have changed, so check every value read, as initRange() does. Don't
-  // use the other instances in the data: their own deserialize() may not have
-  // run yet.
+  // returned, so check everything about it, with primordials only. Read its
+  // properties with getOwnDataProperty(): `data.start` or destructuring
+  // would look a property the data lacks up on Object.prototype, where user
+  // code may have installed a getter. Don't use the other instances in the
+  // data: their own deserialize() may not have run yet.
   (range, data) => {
     if (typeof data !== 'object' || data === null) {
       throw new TypeError('Invalid Range data');
     }
-    const { start, end } = data as { start?: unknown; end?: unknown };
-    initRange(range, start, end);
+    initRange(
+      range,
+      getOwnDataProperty(data, 'start'),
+      getOwnDataProperty(data, 'end')
+    );
   }
 );
 
@@ -1799,9 +1804,10 @@ The module must be `require()`d by `main.ts` (directly or through another
 module) whatever the compatibility flags, which decide only whether `Range` is
 exposed: a reader can find only classes whose modules are loaded, and may have
 different flags from the writer. The export must be a data property, as
-`module.exports = { ... }` makes it; the `per_isolate@eslint` test rejects
-value exports (`export class`, `export function`), which TypeScript compiles to
-getters.
+`module.exports = { ... }` makes it: the deserializer can't call a getter, so
+data naming an accessor export is a `DataCloneError`. The `per_isolate@eslint`
+test rejects value exports (`export class`, `export function`), which
+TypeScript compiles to getters.
 
 The deserializer finds the class by resolving `'module:Export'` among the
 bootstrap's loaded modules (`jsg::BootstrapModules`), so there is no registry.
@@ -1809,7 +1815,9 @@ V8 runs no JavaScript while it reads a value, so the deserializer creates each
 instance from `Export.prototype` without calling the constructor (as a native
 error if the prototype inherits from `Error.prototype`), marks it with the
 class's `Cloneable`, then calls `deserialize(instance, data)` once the whole
-value has been read. The class that marked an instance decides how it is
+value has been read. An error's `stack` is not part of its data: the serializer
+writes it, and the deserializer restores it as it does a native error's,
+according to `preserveStackInErrors`. The class that marked an instance decides how it is
 written, so an instance of a subclass is written as one of `Range`, and
 changing an instance's prototype does not change which `clone()` runs. A
 `deserializeInfo` is part of the format: like a tag, it must never change.

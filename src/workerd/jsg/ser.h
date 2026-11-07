@@ -90,8 +90,10 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 // * A cloneable class has a descriptor: an object with the own data properties `deserializeInfo`,
 //   `clone` and `deserialize`. `deserializeInfo` is a string "module:Export" naming the class's
 //   constructor among the exports of a loaded bootstrap module, which is how the deserializer finds
-//   the class: there is no registry. The deserializer cannot load a module, so one that defines
-//   such a class must be loaded while the bootstrap runs, whatever the compatibility flags.
+//   the class: there is no registry. Only an own data property counts, as an export or in a
+//   descriptor: the deserializer can't call a getter, so it rejects an accessor. The deserializer
+//   cannot load a module, so one that defines such a class must be loaded while the bootstrap
+//   runs, whatever the compatibility flags.
 //   `clone(instance)` returns the instance's data, any serializable value, and
 //   `deserialize(instance, data)` initializes an instance from it. The class's constructor's
 //   `prototype` holds the descriptor under JS_CLONEABLE_KEY.
@@ -102,14 +104,22 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   prototype is Object.prototype or null is not checked for the property, which keeps plain
 //   objects cheap, so it is never an instance.
 //
-// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE and its `deserializeInfo`; its
+// An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
+// of flags, followed by the instance's own `stack` if it is a native error that has one (flag 1).
+// A reader rejects flags it doesn't know, so that later versions can add fields. The instance's
 // `data` follows the top-level value (as in Node.js), so that it can refer back to the instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
 // constructor's `prototype` without calling the constructor (as a native error if the prototype
 // inherits from Error.prototype), marks it with the descriptor, and calls `deserialize`, in the
 // order the instances were read, once the top-level value and every instance's `data` have been
 // read. The data may come from an untrusted source, so `deserialize` validates it.
-// A `deserializeInfo` is therefore part of the format, which persisted data depends on.
+//
+// The deserializer, not the class, decides whether a native error made this way keeps the writer's
+// stack, as it does for a native error: with the Deserializer's `preserveStackInErrors` option, or
+// whenever enhanced error serialization is off. Otherwise it keeps the stack captured when it was
+// made. A class does not serialize `stack` itself.
+//
+// A `deserializeInfo` is part of the format, which persisted data depends on.
 class Serializer final: v8::ValueSerializer::Delegate {
  public:
   // "Externals" are values which can be serialized, but refer to some external resource, rather
@@ -335,7 +345,8 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
     // When the enahnced error serialization feature is enabled, and we are deserializing
     // a serialized error, this option controls whether to include the serialized stack
-    // property in the deserialized error. If false, the stack property is not restored
+    // property in the deserialized error, including an instance of a class implemented in
+    // JavaScript that inherits from Error. If false, the stack property is not restored
     // and will instead be set to the captured stack at the time of deserialization.
     // This flag has no effect if the enhanced error serialization feature is disabled,
     // or the values being deserialized are not errors (or do not contain any error objects).

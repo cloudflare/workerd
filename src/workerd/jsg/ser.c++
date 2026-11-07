@@ -123,16 +123,27 @@ JsObject toJsError(Lock& js, ErrorTag tag, JsString message) {
   return JsObject(v8::Exception::Error(message).As<v8::Object>());
 }
 
-// Returns `object`'s own property `name`, without calling an interceptor or reading the prototype
-// chain, or kj::none if it has none. Runs no JavaScript as long as the property is not a
-// JavaScript accessor, which the runtime's objects it is used on do not have.
+// Returns the value of `object`'s own data property `name`, or kj::none if it has none, or has an
+// accessor instead. Runs no JavaScript: it calls no Proxy trap or JavaScript accessor, and does not
+// read the prototype chain.
 kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
     Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
   auto context = js.v8Context();
   v8::Local<v8::String> key = js.str(name);
+  // False for a Proxy, so the descriptor below is not a Proxy trap's.
   if (!check(object->HasRealNamedProperty(context, key))) return kj::none;
-  return check(object->GetRealNamedProperty(context, key));
+  // A native accessor, such as a function's `prototype`, is described as a data property.
+  auto maybeDescriptor = check(object->GetOwnPropertyDescriptor(context, key));
+  if (!maybeDescriptor->IsObject()) return kj::none;
+  auto descriptor = maybeDescriptor.As<v8::Object>();
+  v8::Local<v8::String> valueKey = js.strIntern("value"_kj);
+  if (!check(descriptor->HasOwnProperty(context, valueKey))) return kj::none;
+  return check(descriptor->GetRealNamedProperty(context, valueKey));
 }
+
+// The flags of a SERIALIZATION_TAG_JS_SERIALIZABLE instance (see ser.h).
+constexpr uint32_t JS_SERIALIZABLE_HAS_STACK = 1;
+constexpr uint32_t JS_SERIALIZABLE_KNOWN_FLAGS = JS_SERIALIZABLE_HAS_STACK;
 }  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
@@ -404,11 +415,28 @@ void Serializer::writeJsSerializable(
     throwDataCloneErrorForObject(js, object);
   }
 
+  auto context = js.v8Context();
   v8::Local<v8::Value> arg = object;
-  auto data = check(clone.As<v8::Function>()->Call(js.v8Context(), js.undefined(), 1, &arg));
+  auto data = check(clone.As<v8::Function>()->Call(context, js.undefined(), 1, &arg));
+
+  // An error's stack is written as a native error's is, so that the deserializer, rather than the
+  // class, decides whether to keep it.
+  uint32_t flags = 0;
+  kj::Maybe<JsValue> stack;
+  if (object->IsNativeError()) {
+    v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
+    if (check(object->HasOwnProperty(context, stackKey))) {
+      flags |= JS_SERIALIZABLE_HAS_STACK;
+      stack = JsValue(check(object->Get(context, stackKey)));
+    }
+  }
 
   writeRawUint32(SERIALIZATION_TAG_JS_SERIALIZABLE);
   writeLengthDelimited(JsString(deserializeInfo.As<v8::String>()).toString(js));
+  writeRawUint32(flags);
+  KJ_IF_SOME(s, stack) {
+    write(js, s);
+  }
   pendingJsSerializableData.add(js.v8Ref(data));
 }
 
@@ -744,6 +772,13 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   // Runs no JavaScript: V8 forbids it while it reads a value. The data may come from an untrusted
   // source, so whatever it names is checked to be a class that opted into the protocol.
   auto deserializeInfo = readLengthDelimitedString();
+  auto flags = readRawUint32();
+  JSG_REQUIRE((flags & ~JS_SERIALIZABLE_KNOWN_FLAGS) == 0, DOMDataCloneError,
+      "Deserialization failed: unsupported object implemented in JavaScript.");
+  kj::Maybe<JsValue> stack;
+  if (flags & JS_SERIALIZABLE_HAS_STACK) {
+    stack = readValue(js);
+  }
   auto unknownClass = [&]() -> v8::Local<v8::Object> {
     JSG_FAIL_REQUIRE(
         DOMDataCloneError, "Deserialization failed: unknown class implemented in JavaScript.");
@@ -799,6 +834,14 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
     // until it is initialized.
     check(instance->Delete(context, js.strIntern("message"_kj)));
     check(instance->SetPrototype(context, prototype));
+    // The writer's stack replaces the one just captured, as for a native error. Without enhanced
+    // error serialization, native errors keep their stacks whatever the options say.
+    KJ_IF_SOME(s, stack) {
+      if (preserveStackInErrors || !js.isUsingEnhancedErrorSerialization()) {
+        v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
+        check(instance->CreateDataProperty(context, stackKey, s));
+      }
+    }
   } else {
     instance = v8::Object::New(js.v8Isolate, prototype, nullptr, nullptr, 0);
   }

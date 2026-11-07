@@ -319,9 +319,10 @@ fn classes_implemented_in_javascript_throw_data_clone_error() {
         }
 
         // What C++ JSG writes for one: V8's tag for a host object, jsg::Serializer's tag for an
-        // instance of a class implemented in JavaScript, and its length-delimited deserializeInfo.
+        // instance of a class implemented in JavaScript, its length-delimited deserializeInfo, and
+        // its flags.
         let mut data = header(lock);
-        data.extend_from_slice(b"\\\x17\x0atest:Point");
+        data.extend_from_slice(b"\\\x17\x0atest:Point\x00");
         let exception = deserialize_exception(lock, &data);
         assert_error(
             lock,

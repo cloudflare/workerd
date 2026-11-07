@@ -23,7 +23,7 @@
 //   exposed: data naming a class whose module isn't loaded can't be read,
 //   and a reader may have different flags from the writer. The export must
 //   be a data property, as `module.exports = { ... }` makes it: the
-//   deserializer can't call a getter.
+//   deserializer can't call a getter, so data naming one can't be read.
 // - clone(instance) returns the instance's data: any serializable value,
 //   which may refer to the instance itself.
 // - deserialize(instance, data) initializes an instance from the data.
@@ -46,11 +46,22 @@
 //   as an RPC peer, and need not be anything clone() returned. Don't keep
 //   anything derived from it that later reaches a native binding unchecked.
 // - Use primordials only: deserialize() runs on an instance whose prototype
-//   and globals user code may have changed.
+//   and globals user code may have changed. Read the data's properties with
+//   getOwnDataProperty(), not `data.x` or destructuring, which look a
+//   property the data lacks up on its prototype chain, where user code may
+//   have installed a getter.
 // - Don't use other objects in the data: their deserialize() may not have
 //   run yet.
+// - Leave an error's `stack` out of the data, and don't set it in
+//   deserialize(). The serializer writes it, and the deserializer restores
+//   it or keeps the one it captured, as it does for a native error.
 
-const { ObjectFreeze, ObjectSetPrototypeOf } = primordials;
+const {
+  ObjectFreeze,
+  ObjectGetOwnPropertyDescriptor,
+  ObjectHasOwn,
+  ObjectSetPrototypeOf,
+} = primordials;
 const { getPrivateSymbol } = utils;
 
 const kSerializeMode = getPrivateSymbol('workerd:serializeMode');
@@ -109,16 +120,30 @@ function makeCloneable<T extends object>(
   return cloneable;
 }
 
+// Returns the value of `data`'s own data property `key`, or undefined if it
+// has none, or has an accessor instead. Reads neither the prototype chain nor
+// the property descriptor's, and calls no getter. Runs no user code unless
+// `data` is a Proxy, which deserialized data never is.
+function getOwnDataProperty(data: object, key: string): unknown {
+  const descriptor = ObjectGetOwnPropertyDescriptor(data, key);
+  if (descriptor === undefined || !ObjectHasOwn(descriptor, 'value')) {
+    return undefined;
+  }
+  return descriptor.value;
+}
+
 export type { Cloneable };
 
 export type SerializationHelpers = {
   markUncloneable: typeof markUncloneable;
   markCloneable: typeof markCloneable;
   makeCloneable: typeof makeCloneable;
+  getOwnDataProperty: typeof getOwnDataProperty;
 };
 
 module.exports = ObjectFreeze({
   markUncloneable,
   markCloneable,
   makeCloneable,
+  getOwnDataProperty,
 } satisfies SerializationHelpers);

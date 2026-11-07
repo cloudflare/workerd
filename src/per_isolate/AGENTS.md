@@ -107,8 +107,14 @@ returns it from `Worker::Api::getEmbedderBootstrap()`.
     properties, not `#private` fields, which such an instance lacks, and is
     brand-checked the same way.
   - `deserialize()` validates its data completely, with primordials only:
-    the data may come from an untrusted peer. It does not use other objects
-    in it, whose own `deserialize()` may not have run yet.
+    the data may come from an untrusted peer. It reads the data's
+    properties with `getOwnDataProperty()`, never `data.x` or
+    destructuring, which read the prototype chain for a property the data
+    lacks. It does not use other objects in it, whose own `deserialize()`
+    may not have run yet.
+  - An error class leaves `stack` to the runtime: the serializer writes it,
+    and the deserializer restores it or not, as for a native error
+    (`preserveStackInErrors`).
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as

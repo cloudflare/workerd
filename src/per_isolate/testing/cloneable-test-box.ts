@@ -11,7 +11,7 @@ import type { SerializationHelpers } from '../serialization';
 
 const { TypeError } = primordials;
 const { getPrivateSymbol } = utils;
-const { makeCloneable, markCloneable } =
+const { getOwnDataProperty, makeCloneable, markCloneable } =
   require('serialization') as SerializationHelpers;
 
 const kLabel = getPrivateSymbol('testing:CloneableTestBox:label');
@@ -64,8 +64,11 @@ const boxCloneable = makeCloneable(
     if (typeof data !== 'object' || data === null) {
       throw new TypeError('Invalid CloneableTestBox data');
     }
-    const { label, value } = data as { label?: unknown; value?: unknown };
-    initBox(box, label, value);
+    initBox(
+      box,
+      getOwnDataProperty(data, 'label'),
+      getOwnDataProperty(data, 'value')
+    );
   }
 );
 
