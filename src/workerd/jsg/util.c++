@@ -301,8 +301,7 @@ DecodedException decodeTunneledException(
         auto& js = Lock::from(isolate);
         auto errorName = kj::str(errorType.first(closeParen));
         auto message = appMessage(errorType.slice(1 + closeParen));
-        auto exception = js.domException(kj::mv(errorName), kj::mv(message));
-        result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+        result.handle = js.domException(kj::mv(errorName), kj::mv(message));
         addAdditionalInfo();
         return result;
       }
@@ -541,10 +540,19 @@ void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Va
   // Limit for user-controlled fields (4KB)
   constexpr size_t MAX_FIELD_SIZE = 4096;
 
-  // Extract error name (e.g., "Error", "TypeError", "RangeError")
-  auto nameProp = errorObj.get(js, "name"_kj);
-  if (nameProp.isString()) {
-    auto errorType = nameProp.toString(js);
+  // Extract error name (e.g., "Error", "TypeError", "RangeError"). A DOMException's is read
+  // without running its getter, since this may run where JavaScript can't, as when the
+  // deserializer aborts an AbortSignal with a deserialized reason.
+  kj::Maybe<kj::String> maybeErrorType;
+  KJ_IF_SOME(info, js.tryGetDomExceptionInfo(JsValue(handle))) {
+    maybeErrorType = kj::mv(info.name);
+  } else {
+    auto nameProp = errorObj.get(js, "name"_kj);
+    if (nameProp.isString()) {
+      maybeErrorType = nameProp.toString(js);
+    }
+  }
+  KJ_IF_SOME(errorType, maybeErrorType) {
     // Truncate to 4KB if needed
     if (errorType.size() > MAX_FIELD_SIZE) {
       errorType = kj::str(errorType.slice(0, MAX_FIELD_SIZE));

@@ -926,7 +926,11 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
-    JSG_NESTED_TYPE(DOMException);
+    // Under the TS_DOM_EXCEPTION autogate, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript DOMException instead.
+    if (!util::Autogate::isEnabled(util::AutogateKey::TS_DOM_EXCEPTION)) {
+      JSG_NESTED_TYPE(DOMException);
+    }
     JSG_NESTED_TYPE(WorkerGlobalScope);
     if (flags.getSpecCompliantPropertyAttributes()) {
       // EventTarget is also declared on WorkerGlobalScope, but V8's

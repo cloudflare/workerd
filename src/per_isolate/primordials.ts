@@ -275,6 +275,13 @@ const FinalizationRegistryPrototypeUnregister = uncurryThis(
 // Reflect
 const ReflectConstruct = Reflect.construct;
 
+// Error
+const ErrorCaptureStackTrace = (
+  Error as unknown as {
+    captureStackTrace(target: object, constructorOpt?: unknown): void;
+  }
+).captureStackTrace;
+
 // Math / Number (statics — plain value captures)
 const MathMax = Math.max;
 const MathMin = Math.min;
@@ -637,7 +644,6 @@ const EventTargetRemoveEventListener = uncurryThis(
 
 const TextDecoderCtor = globalThis.TextDecoder;
 const TextEncoderCtor = globalThis.TextEncoder;
-const DOMException = globalThis.DOMException;
 
 const TextEncoderEncode = uncurryThis(TextEncoderCtor.prototype.encode) as (
   encoder: TextEncoder,
@@ -743,9 +749,6 @@ module.exports = ObjectFreeze({
   ArrayPrototypeSlice,
   ArrayPrototypeSplice,
 
-  // DOMException
-  DOMException,
-
   // Map
   MapPrototypeGet,
   MapPrototypeSet,
@@ -788,6 +791,9 @@ module.exports = ObjectFreeze({
 
   // Reflect
   ReflectConstruct,
+
+  // Error
+  ErrorCaptureStackTrace,
 
   // Math / Number
   MathMax,

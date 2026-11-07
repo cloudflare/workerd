@@ -155,6 +155,7 @@ Serializer::Serializer(Lock& js, Options options)
 #endif
   prototypeOfObject = js.obj().getPrototype(js);
   jsSerializeModeKey = IsolateBase::getJsSerializeModeKey(js.v8Isolate);
+  domExceptionNameKey = IsolateBase::getDomExceptionNameKey(js.v8Isolate);
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.
     ser.SetTreatFunctionsAsHostObjects(true);
@@ -204,8 +205,7 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   auto message = kj::str("Could not serialize object of type \"", obj->GetConstructorName(),
       "\". This type does "
       "not support serialization.");
-  auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
-  js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
+  js.throwException(js.domException(kj::str("DataCloneError"), kj::mv(message)));
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
@@ -242,6 +242,14 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
     if (hasMode) {
       return v8::Just(true);
     }
+    bool isDomException;
+    if (!object->HasPrivate(isolate->GetCurrentContext(), domExceptionNameKey)
+             .To(&isDomException)) {
+      return v8::Nothing<bool>();
+    }
+    if (isDomException) {
+      return v8::Just(true);
+    }
   }
 
   // Native errors are host object if the enhanced_error_serialization compat flag is enalbed.
@@ -265,7 +273,16 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
 
-    // Checked first, since such a class may make native errors.
+    // The bootstrap's DOMException, a native error, writes what the C++ class does.
+    KJ_IF_SOME(info, tryGetBootstrapDomExceptionInfo(js, object)) {
+      writeRawUint32(DOMException::SERIALIZATION_TAG_V2);
+      writeLengthDelimited(info.name.toString(js));
+      writeLengthDelimited(info.message.toString(js));
+      writeLengthDelimited(JsObject(object).get(js, "stack"_kj).toString(js));
+      return v8::Just(true);
+    }
+
+    // Checked before native errors, since such a class may make them.
     KJ_IF_SOME(mark, tryGetJsSerializeMark(js, object)) {
       writeJsSerializable(js, object, mark);
       return v8::Just(true);
@@ -872,8 +889,8 @@ v8::MaybeLocal<v8::Object> readApiObject(
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {
   auto& js = Lock::from(isolate);
   try {
-    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+    v8::Local<v8::Value> exception = js.domException(kj::str("DataCloneError"), kj::str(message));
+    return exception;
   } catch (JsExceptionThrown&) {
     // Creating the DOMException threw, most likely because execution is terminating; that
     // exception stays pending.
