@@ -303,7 +303,10 @@ export {
   backpressureReadableHwmLarge,
 } from 'backpressure';
 
-export { structuredCloneReadable } from 'transfer';
+export {
+  structuredCloneReadable,
+  structuredCloneReadableParts,
+} from 'transfer';
 
 export {
   nativeHandlesAreNotReflectable,

@@ -120,6 +120,7 @@ import type {
   PromiseSlot,
   UnderlyingSourceDict,
 } from './common';
+import type { SerializationHelpers } from '../serialization';
 const {
   isActualObject,
   kNullProtoObject,
@@ -141,6 +142,8 @@ const {
   extractSizeAlgorithm,
   convertUnderlyingSource,
 } = require('webstreams/common') as CommonHelpers;
+
+const { markUncloneable } = require('serialization') as SerializationHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
@@ -980,6 +983,7 @@ class ReadableStreamDefaultReader<
   }
 
   constructor(stream: ReadableStream<R>) {
+    markUncloneable(this);
     this.#base = new ReadableStreamReaderBase();
     if (isReadableStreamLocked(stream)) {
       throw new TypeError('Cannot get a reader for a stream that is locked');
@@ -1051,6 +1055,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   }
 
   constructor(stream: ReadableStream<ArrayBufferView>) {
+    markUncloneable(this);
     this.#base = new ReadableStreamReaderBase();
     if (isReadableStreamLocked(stream)) {
       throw new TypeError('Cannot get a reader for a stream that is locked');
@@ -1832,6 +1837,7 @@ class ReadableStreamDefaultController<
     sizeAlgorithm: (chunk: R) => number,
     highWaterMark: number
   ) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
@@ -2007,6 +2013,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
   }
 
   constructor(privateSymbol: symbol) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
   }
 
@@ -2192,6 +2199,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     sourceDict: UnderlyingSourceDict<Uint8Array, UnderlyingByteSource>,
     highWaterMark: number
   ) {
+    markUncloneable(this);
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
@@ -2771,6 +2779,7 @@ class ReadableStreamDrainingReader<R> {
   }
 
   constructor(stream: ReadableStream<R>) {
+    markUncloneable(this);
     this.#base = new ReadableStreamReaderBase();
     if (isReadableStreamLocked(stream)) {
       throw new TypeError('Cannot get a reader for a stream that is locked');
@@ -4482,6 +4491,7 @@ class ReadableStream<R> {
     // the early returns below so every instance carries it: internal
     // shells and native-backed streams included.
     (this as unknown as Record<symbol, unknown>)[kReadableStreamBrand] = true;
+    markUncloneable(this);
 
     // Internal shell creation (makeShell: tee branches, detached copies):
     // skip controller setup entirely — the shell takes over another
@@ -4709,6 +4719,7 @@ class ReadableStream<R> {
     const reader = acquireReadableStreamDefaultReader(this);
 
     const iter = ObjectCreate(ReadableStreamAsyncIteratorPrototype);
+    markUncloneable(iter);
     iteratorStateMap.set(iter, {
       reader,
       preventCancel: !!preventCancel,
