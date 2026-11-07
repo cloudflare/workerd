@@ -30,7 +30,7 @@ export default {
     // The ordering assertion requires registration within one millisecond. Instrumentation or
     // preemption can cross that boundary, letting the 1ms timer expire before 0ms is registered.
     // Retry only registration across a clock tick; retain the upstream ordering assertion.
-    replace(code) {
+    replace(code): string {
       const registration = `  setTimeout(t.step_func(() => append(2)), 2);
   setTimeout(t.step_func(() => append(1)), 1);
   setTimeout(t.step_func(() => append(0)), 0);`;

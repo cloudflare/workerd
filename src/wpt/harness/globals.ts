@@ -89,13 +89,7 @@ globalThis.fetch = async (
       });
     }
   }
-  const request = relativizeRequest(input, init);
-  if (new URL(request.url).pathname.endsWith('.asis')) {
-    // WPT's AsIsHandler closes the connection after writing the raw response, which may not
-    // contain Connection: close. Keep the next fetch from reusing that closing connection.
-    request.headers.set('Connection', 'close');
-  }
-  return realFetch(request);
+  return realFetch(relativizeRequest(input, init));
 };
 
 function loadResourceBinding(input: string): unknown {
