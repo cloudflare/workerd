@@ -492,7 +492,6 @@ declare function setImmediate(
 ): Immediate;
 declare function clearImmediate(immediate: Immediate | null): void;
 declare const navigator: Navigator;
-interface TestController {}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
@@ -503,6 +502,12 @@ interface ExecutionContext<Props = unknown> {
   mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
+}
+interface TestController {}
+interface AlarmInvocationInfo {
+  readonly isRetry: boolean;
+  readonly retryCount: number;
+  readonly scheduledTime: number;
 }
 type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -581,11 +586,6 @@ declare abstract class Navigator {
   readonly platform: string;
   readonly language: string;
   readonly languages: string[];
-}
-interface AlarmInvocationInfo {
-  readonly isRetry: boolean;
-  readonly retryCount: number;
-  readonly scheduledTime: number;
 }
 interface Immediate {
   ref(): void;

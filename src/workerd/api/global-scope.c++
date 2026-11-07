@@ -15,6 +15,7 @@
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/http.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/restore.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -60,6 +61,16 @@ kj::Exception makeNeuterException(NeuterReason reason) {
           DISCONNECTED, TypeError, "Can't read from request stream because client disconnected.");
   }
   KJ_UNREACHABLE;
+}
+
+// Calls a factory of the per-isolate bootstrap's handlers/handlers module, which creates the
+// values passed to the test() and alarm() handlers.
+template <typename... Args>
+jsg::JsObject callHandlersExport(jsg::Lock& js, kj::StringPtr name, Args... args) {
+  // main.ts requires the module unconditionally.
+  auto fn = KJ_ASSERT_NONNULL(tryGetBootstrapFunction(js, "handlers/handlers"_kj, name),
+      "the per-isolate bootstrap did not load handlers/handlers", name);
+  return KJ_ASSERT_NONNULL(fn.call(js, js.undefined(), args...).template tryCast<jsg::JsObject>());
 }
 
 }  // namespace
@@ -735,7 +746,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .outcome = EventOutcome::EXCEEDED_WALL_TIME};
         });
 
-        return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))
+        auto alarmInfo = callHandlersExport(js, "createAlarmInvocationInfo"_kj,
+            js.num(static_cast<double>((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS)),
+            js.num(static_cast<double>(retryCount)));
+        return alarm(lock, alarmInfo)
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
@@ -870,7 +884,8 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
   jsg::Lock& js = lock;
-  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  auto controller = callHandlersExport(js, "createTestController"_kj);
+  return testHandler(lock, controller, eh.env.addRef(lock), eh.getCtx());
 }
 
 jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,

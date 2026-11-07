@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# handler-controllers-test under immutable_api_prototypes, which no compatibility date enables.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc", "immutable_api_prototypes"],
+
+  modules = [
+    (name = "worker", esModule = embed "handler-controllers-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "AlarmObject", uniqueKey = "8c3f2e4a6d9f4b2a9c5e7d0f3a4b5c6d"),
+    (className = "EchoObject", uniqueKey = "9d4a3f5b7e0a4c3b0d6f8e1a4b5c6d7e"),
+  ],
+
+  # Alarm retries need storage on disk.
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "alarm", durableObjectNamespace = "AlarmObject"),
+    (name = "echo", durableObjectNamespace = "EchoObject"),
+  ],
+);

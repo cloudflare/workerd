@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "handler-controllers-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "AlarmObject", uniqueKey = "6a1f0c2e4b7d4f0e9a3c5b8d1e2f3a4b"),
+    (className = "EchoObject", uniqueKey = "7b2e1d3f5c8e4a1f8b4d6c9e2f3a4b5c"),
+  ],
+
+  # Alarm retries need storage on disk.
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "alarm", durableObjectNamespace = "AlarmObject"),
+    (name = "echo", durableObjectNamespace = "EchoObject"),
+  ],
+);
