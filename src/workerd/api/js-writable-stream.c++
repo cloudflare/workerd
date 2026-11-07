@@ -48,8 +48,8 @@ jsg::Promise<void> writableStreamAbort(
 }
 
 // The forcible close: the TS-side internal close algorithm (spec WritableStreamClose
-// equivalent), likewise lock-blind. Already closed-or-closing resolves (idempotent);
-// errored rejects with the stored error -- matching the legacy controller's close().
+// equivalent), likewise lock-blind. A pending close is awaited; already closed resolves,
+// and errored rejects with the stored error.
 jsg::Promise<void> writableStreamClose(jsg::Lock& js, jsg::JsObject obj) {
   jsg::JsValue result = webstreams::dispatchCall(js, "writableStreamClose", obj);
   // The result must be a promise
@@ -463,7 +463,7 @@ jsg::Promise<void> JsWritableStream::forceClose(jsg::Lock& js) {
     KJ_CASE_ONEOF(stream, jsg::Ref<WritableStream>) {
       // Going through the controller (rather than WritableStream::close()) deliberately
       // bypasses the "is locked to a writer" check.
-      return stream->getController().close(js);
+      return stream->getController().closeForTeardown(js);
     }
     KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
       // The TS-side internal close algorithm is likewise lock-blind.

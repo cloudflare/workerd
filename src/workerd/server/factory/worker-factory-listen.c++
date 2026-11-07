@@ -102,6 +102,21 @@ class UdpFlowChannel final: public DatagramChannel {
   ::rust::Box<UdpFlow> flow;
 };
 
+class UdpEgressChannel final: public DatagramChannel {
+ public:
+  explicit UdpEgressChannel(::rust::Box<UdpEgress> socket): socket(kj::mv(socket)) {}
+  kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() override {
+    auto datagram = co_await socket->udp_receive();
+    co_return kj::heapArray<kj::byte>(kj::from<Rust>(datagram.data));
+  }
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) override {
+    co_await socket->udp_send(datagram.as<Rust>());
+  }
+
+ private:
+  ::rust::Box<UdpEgress> socket;
+};
+
 }  // namespace
 
 kj::Own<kj::HttpHeaders> edit_headers(const kj::HttpHeaderTable& table,
@@ -139,6 +154,23 @@ kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow) {
   auto channel = kj::heap<UdpFlowChannel>(kj::mv(flow));
   return kj::heap<api::UdpConnectCustomEvent>(kj::str(address), *channel).attach(kj::mv(channel));
+}
+
+bool is_udp_egress(WorkerInterface::CustomEvent& event) {
+  return event.getType() == api::UdpEgressCustomEvent::EVENT_TYPE;
+}
+
+::rust::String udp_egress_host(WorkerInterface::CustomEvent& event) {
+  KJ_REQUIRE(is_udp_egress(event));
+  return ::rust::String(static_cast<api::UdpEgressCustomEvent&>(event).getHost().cStr());
+}
+
+kj::Promise<rust::worker::CustomEventResult> complete_udp_egress(
+    kj::Own<WorkerInterface::CustomEvent> event, ::rust::Box<UdpEgress> socket) {
+  KJ_REQUIRE(is_udp_egress(*event));
+  kj::Own<DatagramChannel> channel = kj::heap<UdpEgressChannel>(kj::mv(socket));
+  auto result = co_await static_cast<api::UdpEgressCustomEvent&>(*event).complete(kj::mv(channel));
+  co_return rust::worker::CustomEventResult{.outcome = rust::worker::toRustOutcome(result.outcome)};
 }
 
 }  // namespace workerd::server

@@ -25,6 +25,11 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 Note: the `ReadableStream`/`WritableStream` APIs provide no way to inspect whether a
 stream is byte-oriented or value-oriented at runtime.
 
+Owner teardown uses `JsWritableStream::forceClose()` for value streams. It joins an
+already queued close and waits for pending writes before releasing the underlying
+connection. A closed-or-closing state query alone does not establish that writes
+have drained. Public `writer.close()` still rejects repeated close requests.
+
 ## Standard ReadableStream
 
 ### Queue Mechanics

@@ -4061,8 +4061,9 @@ interface Socket {
 }
 interface SocketOptions {
   secureTransport?: string;
-  allowHalfOpen: boolean;
+  allowHalfOpen?: boolean;
   highWaterMark?: number | bigint;
+  protocol?: "tcp" | "udp";
 }
 interface SocketAddress {
   hostname: string;

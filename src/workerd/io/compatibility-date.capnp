@@ -1800,4 +1800,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  outboundUdpSockets @204 :Bool
+      $compatEnableFlag("outbound_udp_sockets")
+      $experimental;
+  # Enables connect(address, { protocol: "udp" }). UDP sockets use value-mode streams of
+  # Uint8Array, with one chunk per packet. Also selects this chunk type for UDP ingress.
 }
