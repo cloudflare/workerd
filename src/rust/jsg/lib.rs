@@ -18,6 +18,7 @@ mod isolate_state;
 pub mod json;
 pub mod lenient;
 pub mod macros;
+mod memory;
 pub mod modules;
 pub mod null_or_undefined;
 pub mod nullable;
@@ -44,6 +45,10 @@ pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
+pub use memory::MemoryInfo;
+pub use memory::MemoryRetainer;
+pub use memory::MemoryTracker;
+pub use memory::VisitForMemoryInfo;
 pub use null_or_undefined::NullOrUndefined;
 pub use nullable::Nullable;
 #[doc(hidden)]
@@ -1010,19 +1015,12 @@ impl<'s> Lock<'s> {
 
 /// Provides metadata about Rust types exposed to JavaScript.
 ///
-/// This trait provides type information used for error messages, memory tracking,
-/// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
-/// `ToJS` (Rust → JS) and `FromJS` (JS → Rust).
-///
-/// TODO: Implement `memory_info(jsg::MemoryTracker)`
+/// This trait provides type information used for error messages and type validation (for
+/// `NonCoercible<T>`). The actual conversion logic is in `ToJS` (Rust → JS) and `FromJS`
+/// (JS → Rust). What a resource reports to heap snapshots is in [`GarbageCollected`].
 pub trait Type: Sized {
     /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
-
-    /// Same as jsgGetMemorySelfSize
-    fn memory_self_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
@@ -1212,11 +1210,13 @@ pub enum Member {
 /// Trait for types that participate in V8 garbage collection as tracked resources.
 ///
 /// Extends [`Traced`] (which provides the `trace` method for visiting nested
-/// GC-visible references) with a class name for heap snapshot tooling.
+/// GC-visible references) with what the resource reports to heap snapshots.
 ///
 /// `#[jsg_resource]` auto-derives both `Traced` and `GarbageCollected`.
 /// Use `#[jsg_resource(custom_trace)]` to suppress the generated `Traced`
-/// impl and provide your own.
+/// impl and provide your own, and `#[jsg_resource(memory_info)]` (generated) or
+/// `#[jsg_resource(custom_memory_info)]` (hand-written) to have `memory_info` call the resource's
+/// [`VisitForMemoryInfo`] impl.
 pub trait GarbageCollected: Traced {
     /// Class name for heap snapshots / debugging.
     ///
@@ -1224,6 +1224,16 @@ pub trait GarbageCollected: Traced {
     /// construct a `kj::StringPtr` directly from the NUL-terminated pointer without any
     /// allocation or caching. Implementations must not access `self`.
     fn memory_name(&self) -> &'static std::ffi::CStr;
+
+    /// The size of the resource in a heap snapshot, without what it allocates. C++ adds it to
+    /// the size of the resource's `Wrappable`.
+    fn memory_self_size(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+
+    /// Reports the resource's fields to a heap snapshot: the C++ `jsgGetMemoryInfo` of a
+    /// resource. Reports nothing by default.
+    fn memory_info(&self, _tracker: &mut MemoryTracker<'_>) {}
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.

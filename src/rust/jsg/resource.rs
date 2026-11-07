@@ -10,6 +10,7 @@
 use std::any::TypeId;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::hash::Hasher;
@@ -27,6 +28,8 @@ use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
+use crate::MemoryInfo;
+use crate::MemoryTracker;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
@@ -448,6 +451,22 @@ impl<R: Resource> Traced for Rc<R> {
 
 // Weak references don't keep the target alive and have no GC edges to trace.
 crate::jsg_traced!(<R: Resource> Weak<R>);
+
+/// The resource's node, as C++ reports a `jsg::Ref`; nothing for a resource of another isolate,
+/// whose wrapper the snapshot cannot read.
+impl<R: Resource> MemoryInfo for Rc<R> {
+    fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
+        if !tracker.can_track_object_of(&self.state) {
+            return;
+        }
+        self.wrappable.track(tracker, edge_name);
+    }
+}
+
+/// A weak reference retains nothing.
+impl<R: Resource> MemoryInfo for Weak<R> {
+    fn track_as_field(&self, _: &mut MemoryTracker<'_>, _: Option<&'static CStr>) {}
+}
 
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {

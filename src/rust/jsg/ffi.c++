@@ -111,7 +111,12 @@ kj::StringPtr Wrappable::jsgGetMemoryName() const {
 }
 
 size_t Wrappable::jsgGetMemorySelfSize() const {
-  return sizeof(Wrappable);
+  return sizeof(Wrappable) + wrappable_invoke_get_memory_self_size(*this);
+}
+
+void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
+  ::workerd::jsg::Wrappable::jsgGetMemoryInfo(tracker);
+  wrappable_invoke_get_memory_info(*this, tracker);
 }
 
 // Local<T>
@@ -1142,6 +1147,75 @@ void global_clear_weak(uintptr_t* global) {
   if (!handle.IsEmpty()) {
     handle.ClearWeak<void>();
   }
+}
+
+// MemoryTracker
+Isolate* memory_tracker_isolate(MemoryTracker& tracker) {
+  return tracker.isolate();
+}
+
+void memory_tracker_track_field_with_size(
+    MemoryTracker& tracker, const char* edge_name, size_t size, const char* node_name) {
+  if (node_name == nullptr) {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size);
+  } else {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size, kj::StringPtr(node_name));
+  }
+}
+
+void memory_tracker_track_wrappable(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  // As the base class, so that the node is the one HeapTracer adds for the same Wrappable.
+  tracker.trackField(
+      memoryTrackerEdgeName(edge_name), static_cast<const ::workerd::jsg::Wrappable*>(&wrappable));
+}
+
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  // Reading the wrapper changes nothing, but tryGetHandle() is not const.
+  auto& base = const_cast<::workerd::jsg::Wrappable&>(
+      static_cast<const ::workerd::jsg::Wrappable&>(wrappable));
+  KJ_IF_SOME(handle, base.tryGetHandle(isolate)) {
+    tracker.trackField(memoryTrackerEdgeName(edge_name), handle);
+  } else {
+    // The name is a literal, as `jsgGetMemoryName()` says.
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), wrappable.jsgGetMemorySelfSize(),
+        wrappable.jsgGetMemoryName());
+  }
+}
+
+void memory_tracker_track_global(
+    MemoryTracker& tracker, const char* edge_name, const Global& global) {
+  if (global.ptr == 0) return;
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  tracker.trackField(memoryTrackerEdgeName(edge_name),
+      v8::Local<v8::Value>::New(isolate, global_as_ref_from_ffi<v8::Value>(global)));
+}
+
+bool memory_tracker_push_retainer(MemoryTracker& tracker,
+    size_t address,
+    size_t type,
+    const char* name,
+    size_t size,
+    const char* edge_name) {
+  return tracker.pushRetainer(reinterpret_cast<const void*>(address),
+      reinterpret_cast<const void*>(type), name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_push_container(
+    MemoryTracker& tracker, const char* name, size_t size, const char* edge_name) {
+  tracker.pushContainer(name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_pop_node(MemoryTracker& tracker) {
+  tracker.popNode();
+}
+
+size_t memory_tracker_depth(const MemoryTracker& tracker) {
+  return tracker.depth();
 }
 
 void wrappable_visit_ref(

@@ -47,6 +47,8 @@ pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
     has_flag(attr, "custom_trace")
 }
 
+/// Returns `true` if the bare word `name` is present in the comma-separated attribute token
+/// stream.
 pub fn has_flag(attr: &TokenStream, name: &str) -> bool {
     use syn::Meta;
     use syn::punctuated::Punctuated;

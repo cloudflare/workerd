@@ -317,6 +317,36 @@ class MemoryTracker final {
     return isolate_;
   }
 
+  // The following track objects that are not C++ types, such as Rust JSG's, whose fields are
+  // reported between a push and the matching popNode(). V8 reads `name` and `edgeName` after the
+  // BuildEmbedderGraph callback returns, so they must outlive it, as string literals do. An
+  // empty `edgeName` is the name `trackField` gives the elements of a container.
+
+  // Tracks a retainer that `address` and `type` identify together, so that a retainer and one
+  // of its fields at the same address are two nodes. If the retainer was tracked already, only
+  // adds an edge to its node and returns false: there is nothing to report and nothing to pop.
+  // Otherwise adds a node for it, makes the node the one that fields are reported to, and
+  // returns true. A null `address` identifies nothing: the retainer always gets a new node.
+  bool pushRetainer(const void* address,
+      const void* type,
+      kj::StringPtr name,
+      size_t size,
+      kj::StringPtr edgeName);
+
+  // Adds a node for a container, as `trackField` does for a C++ container, and makes it the one
+  // that the elements are reported to.
+  void pushContainer(kj::StringPtr name, size_t size, kj::StringPtr edgeName);
+
+  // Ends the node of the most recent push that has not been popped and needs a pop. Release
+  // builds ignore a pop without such a push; debug builds assert.
+  void popNode();
+
+  // How many nodes are being tracked, each inside the one before: the depth of the node that
+  // fields are reported to, or 0 for none.
+  size_t depth() const {
+    return nodeStack_.size();
+  }
+
   KJ_DISALLOW_COPY_AND_MOVE(MemoryTracker);
 
  private:
@@ -324,6 +354,20 @@ class MemoryTracker final {
   v8::EmbedderGraph* graph_;
   std::stack<MemoryRetainerNode*> nodeStack_;
   kj::HashMap<const void*, MemoryRetainerNode*> seen_;
+
+  // The retainers that pushRetainer() tracked, by address and type.
+  struct RetainerKey {
+    const void* address;
+    const void* type;
+
+    bool operator==(const RetainerKey& other) const {
+      return address == other.address && type == other.type;
+    }
+    kj::uint hashCode() const {
+      return kj::hashCode(address, type);
+    }
+  };
+  kj::HashMap<RetainerKey, MemoryRetainerNode*> seenRetainers_;
   KJ_DISALLOW_AS_COROUTINE_PARAM;
 
   explicit MemoryTracker(v8::Isolate* isolate, v8::EmbedderGraph* graph);
