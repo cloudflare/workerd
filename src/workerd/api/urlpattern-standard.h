@@ -5,8 +5,8 @@
 #pragma once
 
 #include "ada.h"
-#include "urlpattern-regex.h"
 
+#include <workerd/api/urlpattern-regex.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/array.h>
