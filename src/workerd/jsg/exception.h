@@ -229,6 +229,8 @@ inline bool isActorPredecessorRejection(const kj::Exception& exception) {
       exception.getDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none;
 }
 
+struct JsErrorDescription;
+
 struct ExceptionToJsOptions {
   // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
   // exception detail in the kj::Exception.
@@ -244,6 +246,11 @@ struct ExceptionToJsOptions {
   // to preserve existing behavior, but setting this to false may be useful in some
   // cases. When false, the kjExceptionToJs() might return a non-object value.
   bool allowNonObjects = false;
+
+  // Set to how describeAsJsError() described the exception, if it did. An internal exception was
+  // logged then, under the internal error id that the description's message refers to, so the
+  // error's message refers to the same id and the exception is not logged or reported again.
+  kj::Maybe<const JsErrorDescription&> alreadyDescribed;
 };
 
 }  // namespace workerd::jsg

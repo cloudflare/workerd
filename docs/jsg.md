@@ -2393,10 +2393,13 @@ kj::Own<ResolveStatus> onResolveModule(kj::StringPtr specifier, Context context,
 ### `InternalExceptionObserver`
 
 ```cpp
-void reportInternalException(const kj::Exception& exception, Detail detail) override {
+void reportInternalException(const kj::Exception& exception, Detail detail) const override {
   // detail.isInternal, detail.isFromRemote, detail.isDurableObjectReset, detail.internalErrorId
 }
 ```
+
+`reportInternalException` can be called without the isolate lock, so implementations must be
+thread-safe.
 
 ---
 
