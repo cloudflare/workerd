@@ -117,6 +117,27 @@
       "patches": [
         "@workerd//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch"
       ]
+    },
+    //sqlite
+    // SQLite's GitHub mirror tags each release as version-X.Y.Z, but publishes no GitHub releases.
+    // Version is frozen because SQLite releases can change behavior that Workers depend on, and
+    // the patches usually need rebasing. See patches/sqlite/README.md for how to upgrade.
+    {
+      "name": "sqlite3",
+      "type": "github_release",
+      "owner": "sqlite",
+      "repo": "sqlite",
+      "tag_regex": "version-([0-9]+)[.]([0-9]+)[.]([0-9]+)",
+      "build_file": "@workerd//:build/BUILD.sqlite3",
+      "freeze_version": "version-3.54.1",
+      "patches": [
+        "@workerd//:patches/sqlite/0001-row-counts-plain.patch",
+        "@workerd//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+        "@workerd//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "@workerd//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+        "@workerd//:patches/sqlite/0005-legacy-subquery-subtypes.patch",
+        "@workerd//:patches/sqlite/0006-cte-nesting-depth.patch"
+      ]
     }
   ]
 }
