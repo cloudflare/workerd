@@ -403,12 +403,26 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    bucket @6 :ClusterBucket;
+    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
   #   be a list of Worker names, where each Worker must have a binding called `next`. This
   #   implicitly creates an inherited worker that wraps this service, with the `next` binding
   #   pointing to the service itself (or to the next middleware in the stack).
+}
+
+struct ClusterBucket {
+  # GET, PUT and DELETE on `/<file>` read, write and remove the object
+  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
+  # that every instance sees the same files. The cluster keeps its own state outside
+  # `services/`, where this service cannot reach it. A binding to this service grants only its
+  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 }
 
 struct ServiceDesignator {
@@ -553,6 +567,11 @@ struct Worker {
 
       obsoletePythonRequirement @9 :Text;
       # This position used to be the pythonRequirement type that has now been deprecated.
+
+      bundled @11 :Text;
+      # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
+      # Worker (see its header for the bindings it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

@@ -18,6 +18,7 @@
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -30,6 +31,7 @@
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
 #include <kj/compat/url.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -43,6 +45,16 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
+
+// The sources of the ES modules a config names with `Worker.Module.bundled`.
+kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
+  static const auto bundled = [] {
+    kj::HashMap<kj::StringPtr, kj::StringPtr> map;
+    map.insert("/workerd/kv.js"_kj, KV_JS);
+    return map;
+  }();
+  return bundled.find(name).map([](auto& source) { return source; });
+}
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
@@ -398,6 +410,18 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
+      case config::Worker::Module::BUNDLED: {
+        auto name = conf.getBundled();
+        KJ_IF_SOME(source, findBundled(name)) {
+          return Worker::Script::EsModule{source};
+        }
+        auto message = kj::str("No bundled module named \"", name, "\".");
+        KJ_IF_SOME(e, errorReporter) {
+          e.addError(kj::mv(message));
+          return Worker::Script::TextModule{""};
+        }
+        KJ_FAIL_REQUIRE(message);
+      }
       case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
         KJ_FAIL_REQUIRE(
             "NOSENTRY Worker bundle specified Python requirement which is no longer supported");

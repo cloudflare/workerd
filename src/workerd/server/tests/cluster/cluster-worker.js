@@ -102,6 +102,16 @@ export default {
       return env.ON_HIBERNATE.fetch(request);
     }
 
+    if (url.pathname.startsWith('/kv/')) {
+      if (url.pathname === '/kv/clock') {
+        await env.KV_WORKER.fetch(`http://kv/clock${url.search}`, {
+          method: 'POST',
+        });
+        return Response.json({});
+      }
+      return kv(url, env.KV);
+    }
+
     // The DO name to act on is given via the `name` query parameter (defaults
     // to "default"). All instances using the same name will route to the same
     // DO id.
@@ -139,6 +149,37 @@ export default {
     }
   },
 };
+
+// The KV binding, by query parameters: /kv/put?key=K&value=V (or &size=N
+// for N 'x's)[&metadata=JSON]
+// [&ttl=S], /kv/get?key=K[&cacheTtl=S], /kv/delete?key=K and /kv/list?prefix=P[&limit=N]
+// [&cursor=C]. Answers JSON.
+async function kv(url, ns) {
+  const q = Object.fromEntries(url.searchParams);
+  switch (url.pathname) {
+    case '/kv/put': {
+      const options = {};
+      if (q.metadata) options.metadata = JSON.parse(q.metadata);
+      if (q.ttl) options.expirationTtl = Number(q.ttl);
+      const value = q.size ? 'x'.repeat(Number(q.size)) : q.value;
+      await ns.put(q.key, value, options);
+      return Response.json({});
+    }
+    case '/kv/get': {
+      const options = q.cacheTtl ? { cacheTtl: Number(q.cacheTtl) } : {};
+      return Response.json(await ns.getWithMetadata(q.key, options));
+    }
+    case '/kv/delete':
+      await ns.delete(q.key);
+      return Response.json({});
+    case '/kv/list': {
+      const options = { prefix: q.prefix, cursor: q.cursor };
+      if (q.limit) options.limit = Number(q.limit);
+      return Response.json(await ns.list(options));
+    }
+  }
+  return Response.json({ error: 'no such path' }, { status: 404 });
+}
 
 // RpcTarget vended by Counter's [restore]() that mutates the counter's storage.
 // It runs in the Counter's context on whichever node owns the Counter.

@@ -35,6 +35,8 @@
 //      handoff's work are not held, and a DO whose handoff outlasts its
 //      deadline moves once the node left. A rolling restart of the cluster,
 //      paced by the nodes' readiness, fails, loses and replays no request.
+//  13. KV: a namespace is seen from every node, its large values are in the
+//      bucket and cached on each node's disk, and it survives its owner.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -391,6 +393,14 @@ class FakeS3 {
     const query = new URLSearchParams({ key });
     return (
       await fetch(`http://127.0.0.1:${this.port}/_requests?${query}`)
+    ).json();
+  }
+
+  // How many body bytes GETs of `key` were served.
+  async served(key) {
+    const query = new URLSearchParams({ key });
+    return (
+      await fetch(`http://127.0.0.1:${this.port}/_served?${query}`)
     ).json();
   }
 
@@ -902,6 +912,192 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
       `${objectPrefix(results[0].body.id)}/own.json`
     );
     assert(requests <= 8, `${requests} owner record requests for one cold DO`);
+  });
+});
+
+test('cluster: a KV namespace is an object, seen from every node', async () => {
+  await withCluster(2, async ({ nodes, bucket }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    for (const key of ['p/1', 'p/2', 'p/3', 'q']) {
+      const put = await fetchJson(a, `/kv/put?${q({ key, value: key })}`);
+      assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+    }
+    const meta = { key: 'm', value: 'v', metadata: '{"n":1}', ttl: '3600' };
+    await fetchJson(a, `/kv/put?${q(meta)}`);
+
+    const got = await fetchJson(b, `/kv/get?${q({ key: 'm' })}`);
+    assert.deepStrictEqual(got.body, {
+      value: 'v',
+      metadata: { n: 1 },
+      cacheStatus: 'MISS',
+    });
+
+    const names = [];
+    let page = { list_complete: false };
+    while (!page.list_complete) {
+      const query = { prefix: 'p/', limit: '2', cursor: page.cursor ?? '' };
+      page = (await fetchJson(b, `/kv/list?${q(query)}`)).body;
+      names.push(...page.keys.map((k) => k.name));
+    }
+    assert.deepStrictEqual(names, ['p/1', 'p/2', 'p/3']);
+    const listed = (await fetchJson(b, `/kv/list?${q({ prefix: 'm' })}`)).body;
+    assert.deepStrictEqual(listed.keys[0].metadata, { n: 1 });
+    assert.ok(listed.keys[0].expiration > Date.now() / 1000 + 3500);
+
+    await fetchJson(b, `/kv/delete?${q({ key: 'q' })}`);
+    const gone = await fetchJson(b, `/kv/get?${q({ key: 'q' })}`);
+    assert.strictEqual(gone.body.value, null);
+    // Small values are inline in the object: none is in the bucket.
+    assert.deepStrictEqual(await bucket.list('services/kv/'), []);
+
+    // A large value is a blob, and a listing does not read it.
+    for (const size of ['65536', '65537']) {
+      const big = { key: `big/${size}`, size, metadata: '{"b":1}' };
+      await fetchJson(a, `/kv/put?${q(big)}`);
+    }
+    const blobs = await bucket.list('services/kv/');
+    assert.strictEqual(blobs.length, 1, blobs.join());
+    const served = () => bucket.served(`v1/${blobs[0]}`);
+    const before = await served();
+    const bigListed = (await fetchJson(b, `/kv/list?${q({ prefix: 'big' })}`))
+      .body;
+    assert.deepStrictEqual(
+      bigListed.keys.map((k) => k.name),
+      ['big/65536', 'big/65537']
+    );
+    assert.strictEqual(await served(), before);
+    const value = await fetchJson(b, `/kv/get?${q({ key: 'big/65537' })}`);
+    assert.strictEqual(value.body.value.length, 65537);
+    assert.strictEqual(await served(), before + 65537);
+  });
+});
+
+// A node keeps the KV blobs it writes and reads on its disk, so it
+// downloads a value once.
+test('cluster: a node caches KV blobs on its disk', async () => {
+  await withCluster(2, async ({ nodes, bucket }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const MiB = 1024 * 1024;
+    const put = (port, key, size) =>
+      fetchJson(port, `/kv/put?${q({ key, size: String(size) })}`);
+    const get = async (port, key) =>
+      (await fetchJson(port, `/kv/get?${q({ key })}`)).body.value.length;
+    // Bytes the bucket served of every blob it has held.
+    const seen = new Set();
+    const served = async () => {
+      for (const key of await bucket.list('services/kv/')) seen.add(key);
+      let n = 0;
+      for (const key of seen) n += await bucket.served(`v1/${key}`);
+      return n;
+    };
+
+    await put(a, 'k1', 1.5 * MiB);
+    const before = await served();
+    // The writer wrote it through; another node downloads it once.
+    assert.strictEqual(await get(a, 'k1'), 1.5 * MiB);
+    assert.strictEqual(await served(), before);
+    for (let i = 0; i < 2; i++) {
+      assert.strictEqual(await get(b, 'k1'), 1.5 * MiB);
+      assert.strictEqual(await served(), before + 1.5 * MiB);
+    }
+
+    // An overwrite is a new blob.
+    await put(a, 'k1', 1.25 * MiB);
+    assert.strictEqual(await get(a, 'k1'), 1.25 * MiB);
+    assert.strictEqual(await served(), before + 1.5 * MiB);
+  });
+});
+
+// A read whose reply arrives after a newer write from the same node does
+// not replace the write's entry in the node's cache.
+test('cluster: a KV read racing a write keeps the write cached', async () => {
+  await withCluster(1, async ({ nodes }) => {
+    const [a] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const size = String(2 * 1024 * 1024);
+    await fetchJson(a, `/kv/put?${q({ key: 'race', size })}`);
+    await Promise.all([
+      fetchJson(a, `/kv/get?${q({ key: 'race' })}`),
+      fetchJson(a, `/kv/put?${q({ key: 'race', value: 'new' })}`),
+    ]);
+    const now = (await fetchJson(a, `/kv/get?${q({ key: 'race' })}`)).body;
+    assert.deepStrictEqual([now.value, now.cacheStatus], ['new', 'HIT']);
+  });
+});
+
+// A node's cache keeps what it read for the read's cacheTtl; another
+// node's write does not reach it sooner.
+test('cluster: KV reads are stale for at most cacheTtl', async () => {
+  await withCluster(2, async ({ nodes }) => {
+    const [a, b] = nodes.map((n) => n.httpPort);
+    const q = (params) => new URLSearchParams(params);
+    const read = async (port) =>
+      (await fetchJson(port, `/kv/get?${q({ key: 's', cacheTtl: '30' })}`))
+        .body;
+    await fetchJson(b, `/kv/put?${q({ key: 's', value: 'old' })}`);
+    assert.strictEqual((await read(a)).value, 'old');
+    await fetchJson(b, `/kv/put?${q({ key: 's', value: 'new' })}`);
+    assert.strictEqual((await read(b)).value, 'new');
+    const stale = await read(a);
+    assert.deepStrictEqual([stale.value, stale.cacheStatus], ['old', 'HIT']);
+    await fetchJson(a, `/kv/clock?${q({ advance: '31000' })}`);
+    assert.strictEqual((await read(a)).value, 'new');
+  });
+});
+
+// KV fails over as any object does: once a namespace's owner dies, the
+// survivor reads its large values from the bucket, expires its keys, and
+// collects the blobs it replaces.
+test('cluster: a KV namespace survives its owner', async () => {
+  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
+    const kv = (node, op, params) =>
+      fetchJson(node.httpPort, `/kv/${op}?${new URLSearchParams(params)}`, {
+        timeoutMs: 10_000,
+      });
+    await kv(nodes[0], 'put', { key: 'big', size: '100000' });
+    await kv(nodes[0], 'put', { key: 'ttl', value: 'v', ttl: '60' });
+    const records = await bucket.list(objectPrefix('', 'kv'));
+    const own = records.find((key) => key.endsWith('/own.json'));
+    const ownerKey = JSON.parse(await bucket.get(own)).node;
+    const owner = nodes.find((n) => nodeKeys.get(n.nodeId) === ownerKey);
+    const survivor = nodes.find((n) => n !== owner);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+
+    // Requests fail until the dead owner's lease expires.
+    let got = null;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      got = await kv(survivor, 'get', { key: 'big' }).catch(() => null);
+      if (got?.status === 200) break;
+      await sleep(200);
+    }
+    assert.strictEqual(got?.status, 200, JSON.stringify(got?.body));
+    assert.strictEqual(got.body.value.length, 100000);
+
+    assert.strictEqual(
+      (await kv(survivor, 'get', { key: 'ttl' })).body.value,
+      'v'
+    );
+    await kv(survivor, 'clock', { advance: '61000' });
+    assert.strictEqual(
+      (await kv(survivor, 'get', { key: 'ttl' })).body.value,
+      null
+    );
+    const listed = await kv(survivor, 'list', { prefix: '' });
+    assert.deepStrictEqual(
+      listed.body.keys.map((k) => k.name),
+      ['big']
+    );
+
+    assert.strictEqual((await bucket.list('services/kv/')).length, 1);
+    await kv(survivor, 'put', { key: 'big', value: 'small' });
+    const collected = Date.now() + 10_000;
+    while ((await bucket.list('services/kv/')).length > 0) {
+      assert(Date.now() < collected, 'the replaced blob was never collected');
+      await sleep(100);
+    }
   });
 });
 

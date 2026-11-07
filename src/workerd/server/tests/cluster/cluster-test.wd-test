@@ -46,6 +46,12 @@ const services :List(Workerd.Service) = [
         ( name = "COUNTER", durableObjectNamespace = "Counter" ),
         ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
         ( name = "ON_HIBERNATE", service = "on-hibernate" ),
+        ( name = "KV",
+          kvNamespace = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ( name = "KV_WORKER",
+          service = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
       ],
       durableObjectNamespaces = [
         ( className = "Counter", uniqueKey = "counter-test-namespace" ),
@@ -53,6 +59,27 @@ const services :List(Workerd.Service) = [
       durableObjectStorage = ( localDisk = "local" ),
     )
   ),
+
+  # KV, whose large values are in the bucket at `services/kv/`, cached on
+  # each instance's disk.
+  ( name = "kv",
+    worker = (
+      modules = [ ( name = "kv.js", bundled = "/workerd/kv.js" ) ],
+      compatibilityDate = "2026-01-01",
+      bindings = [
+        ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),
+        ( name = "BLOBS", service = "kv-blobs" ),
+        ( name = "BLOB_CACHE", service = "local" ),
+        ( name = "CLUSTERED", json = "true" ),
+        ( name = "TEST_CLOCK", json = "true" ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "KVNamespace", uniqueKey = "kv", enableSql = true ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+    )
+  ),
+  ( name = "kv-blobs", bucket = ( path = "kv" ) ),
 
   ( name = "on-hibernate",
     worker = (

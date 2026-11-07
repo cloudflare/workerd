@@ -116,6 +116,13 @@ impl Cluster {
         })
     }
 
+    /// The bucket below `<prefix>services/<path>/`, apart from the cluster's
+    /// own state (`ClusterBucket` in workerd.capnp).
+    pub fn services(&self, path: &str) -> Bucket {
+        self.bucket
+            .at(&format!("{}services/{path}", self.bucket.prefix()))
+    }
+
     pub fn node(&self) -> &str {
         self.registry.node()
     }
