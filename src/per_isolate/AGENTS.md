@@ -29,6 +29,26 @@ at context creation, before any user code. C++ entry point:
 - Local convention: no copyright headers in this directory's bootstrap
   scripts (deviation from the repo-wide new-file rule; keep consistent).
 
+## EMBEDDER SCRIPTS
+
+An embedder can contribute scripts to the same bootstrap. It builds them with
+`wd_ts_script_bundle(embedder_prefix = "<prefix>/", ...)`, wraps the bundle
+in an `EmbedderBootstrap` (`src/workerd/api/per-isolate-bootstrap.h`), and
+returns it from `Worker::Api::getEmbedderBootstrap()`.
+
+- Order: `primordials`, workerd's `main`, then `<prefix>main`, all before
+  the WeakRef globals are removed. A failure is fatal, as for workerd's.
+- Every embedder script is named under the prefix; `require()` takes the
+  full specifier (`require('embedder/foo')`, not `require('./foo')`).
+- Embedder scripts share the require() cache and pseudo-globals and can
+  `require()` workerd's scripts. workerd's scripts cannot `require()` the
+  embedder's: nothing here may depend on what an embedder provides.
+- `EmbedderBootstrap`'s constructor rejects a prefix that overlaps a
+  workerd script name, so a new top-level directory here must not match
+  an embedder's prefix.
+- Test: `src/workerd/api/per-isolate-embedder-bootstrap-test.c++`, with
+  its stand-in bundle in `src/workerd/api/tests/embedder-bootstrap/`.
+
 ## CONVENTIONS
 
 - **Primordials discipline**: no bare prototype lookups on builtins after
@@ -51,10 +71,12 @@ at context creation, before any user code. C++ entry point:
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
-- C++/bootstrap-only markers and extraction hooks use `utils.setPrivate` /
-  `utils.getPrivate`, backed by `v8::Private::ForApi`. Labels are strings;
-  the properties are neither reflected nor inherited. Ordinary symbols,
-  including `getApiSymbol` results, are reflection-visible and are not secrets.
+- C++/bootstrap-only markers and extraction hooks are V8-private
+  properties, keyed by `utils.getPrivateSymbol(name)` (`v8::Private::ForApi`)
+  and read and written as `object[key]`; C++ reaches them by the same name.
+  The properties are neither reflected nor inherited, and the keys must stay
+  in module scope. Ordinary symbols, including `getApiSymbol` results, are
+  reflection-visible and are not secrets.
 - **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
   each script's bytes as a one-byte (Latin-1) string, without transcoding,
   so a non-ASCII character in a string or template literal reaches users as

@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -26,6 +27,10 @@ pub struct NodeRecord {
     /// The process that wrote it.
     #[serde(default)]
     pub instance: u64,
+    /// The instance is stopping: it hands its objects off, and peers
+    /// choose it for none.
+    #[serde(default)]
+    pub draining: bool,
 }
 
 /// This instance's membership: it publishes its own record and reads its
@@ -45,6 +50,10 @@ pub struct Registry {
     listed: RefCell<HashMap<String, NodeRecord>>,
     /// Dead peers whose records remain, as of the last listing.
     dead: RefCell<Vec<String>>,
+    /// This instance left the cluster: it renews its record no more.
+    left: Cell<bool>,
+    /// This instance drains, which its record says from its next renewal.
+    draining: Cell<bool>,
 }
 
 fn node_key(node: &str) -> String {
@@ -65,6 +74,8 @@ impl Registry {
             ),
             listed: RefCell::new(HashMap::new()),
             dead: RefCell::new(Vec::new()),
+            left: Cell::new(false),
+            draining: Cell::new(false),
         }
     }
 
@@ -87,23 +98,31 @@ impl Registry {
     /// process), and every later one requires our last version, so a record
     /// someone else wrote fences this process instead of being overwritten.
     pub async fn renew(&self, now_ms: u64) -> Result<u64> {
-        let record = NodeRecord {
-            node: self.node.clone(),
-            address: self.address.clone(),
-            expires_ms: now_ms + self.ttl_ms,
-            instance: self.instance,
-        };
+        let expires_ms = now_ms + self.ttl_ms;
         let key = node_key(&self.node);
-        let body = serde_json::to_vec(&record)?;
         let mut guard = self
             .own
             .borrow()
             .clone()
             .map_or(Guard::Absent, Guard::Match);
         loop {
-            if let Some(version) = self.bucket.put_if(&key, body.clone(), guard).await? {
+            // A renewal that lands after `deregister` would bring this
+            // instance back to life.
+            if self.left.get() {
+                return Err(Error::NotHere(format!("{} left the cluster", self.node)));
+            }
+            // Built for each attempt, so that a renewal that races
+            // `start_draining` retries with the flag set.
+            let body = serde_json::to_vec(&NodeRecord {
+                node: self.node.clone(),
+                address: self.address.clone(),
+                expires_ms,
+                instance: self.instance,
+                draining: self.draining.get(),
+            })?;
+            if let Some(version) = self.bucket.put_if(&key, body, guard).await? {
                 self.own.replace(Some(version));
-                return Ok(record.expires_ms);
+                return Ok(expires_ms);
             }
             // Not the version we know. If this process wrote it, earlier
             // renewals landed and only their answers were lost (timed-out
@@ -122,9 +141,11 @@ impl Registry {
 
     /// Expire this instance's record on a clean shutdown, so peers stop
     /// routing to it before its lease would have run out and adopt its
-    /// alarms. The record goes once they have.
+    /// alarms. The record goes once they have. A renewal of ours that lands
+    /// first is expired too; no renewal starts after this.
     pub async fn deregister(&self) -> Result<()> {
-        let Some(version) = self.own.take() else {
+        self.left.set(true);
+        let Some(mut version) = self.own.take() else {
             return Ok(());
         };
         let record = NodeRecord {
@@ -132,13 +153,40 @@ impl Registry {
             address: self.address.clone(),
             expires_ms: 0,
             instance: self.instance,
+            draining: true,
         };
         let body = serde_json::to_vec(&record)?;
         let key = node_key(&self.node);
-        self.bucket
-            .put_if(&key, body, Guard::Match(version))
-            .await
-            .map(drop)
+        for _ in 0..DEREGISTER_ATTEMPTS {
+            let guard = Guard::Match(version);
+            if self
+                .bucket
+                .put_if(&key, body.clone(), guard)
+                .await?
+                .is_some()
+            {
+                return Ok(());
+            }
+            let Some((current, current_version)) = self.bucket.get(&key).await? else {
+                return Ok(());
+            };
+            let current: NodeRecord = serde_json::from_slice(&current)?;
+            if current.instance != self.instance {
+                return Err(Error::Fenced(self.node.clone()));
+            }
+            version = current_version;
+        }
+        Err(Error::Contended(key))
+    }
+
+    /// Marks this instance's record as draining from its next renewal.
+    pub fn start_draining(&self) {
+        self.draining.set(true);
+    }
+
+    /// Whether `deregister` ran.
+    pub fn left(&self) -> bool {
+        self.left.get()
     }
 
     /// Whether `node` held a lease past `now_ms` at the last listing. No
@@ -162,8 +210,18 @@ impl Registry {
         self.fetch(node, now_ms).await
     }
 
+    /// A peer's record while its lease holds, read now, whatever the last
+    /// listing said.
+    pub async fn live_now(&self, node: &str, now_ms: u64) -> Result<Option<NodeRecord>> {
+        self.fetch(node, now_ms).await
+    }
+
+    /// A peer's record while its lease holds. One found dead leaves the
+    /// listing, as its lease running out would, so that routes to it go
+    /// before the next listing.
     async fn fetch(&self, node: &str, now_ms: u64) -> Result<Option<NodeRecord>> {
         let Some((body, _)) = self.bucket.get(&node_key(node)).await? else {
+            self.listed.borrow_mut().remove(node);
             return Ok(None);
         };
         let record: NodeRecord = serde_json::from_slice(&body)?;
@@ -183,6 +241,7 @@ impl Registry {
             self.bucket.delete(&node_key(node)).await?;
         }
         if record.expires_ms <= now_ms {
+            self.listed.borrow_mut().remove(node);
             return Ok(None);
         }
         // Until the next listing: one read serves every request that finds
@@ -226,6 +285,16 @@ impl Registry {
         live.map(|r| r.node.clone()).collect()
     }
 
+    /// The live nodes that are not draining, as of the last listing: those
+    /// that may take objects and alarms on.
+    pub fn serving_nodes(&self, now_ms: u64) -> Vec<String> {
+        let listed = self.listed.borrow();
+        let live = listed
+            .values()
+            .filter(|r| r.expires_ms > now_ms && !r.draining);
+        live.map(|r| r.node.clone()).collect()
+    }
+
     /// Whether `node` has a record, live or not.
     pub async fn recorded(&self, node: &str) -> Result<bool> {
         Ok(self.bucket.get(&node_key(node)).await?.is_some())
@@ -239,130 +308,9 @@ impl Registry {
 
 /// How many lease lifetimes past its expiry a node record is deleted.
 const DEAD_RECORD_TTLS: u64 = 10;
+/// How many renewals of ours in flight a deregistration outlasts.
+const DEREGISTER_ATTEMPTS: usize = 4;
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use super::*;
-
-    fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(f)
-    }
-
-    #[test]
-    fn a_renewal_whose_answer_was_lost_is_not_a_fence() {
-        block_on(async {
-            let bucket = Bucket::memory("");
-            let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
-            a.renew(0).await.unwrap();
-            // The renewal at 1_000 lands, but its answer never arrives.
-            let landed = NodeRecord {
-                node: "a".into(),
-                address: "a:1".into(),
-                expires_ms: 11_000,
-                instance: a.instance,
-            };
-            let body = serde_json::to_vec(&landed).unwrap();
-            bucket.put(&node_key("a"), body, &[]).await.unwrap();
-            assert_eq!(a.renew(2_000).await.unwrap(), 12_000);
-            // Someone else's write is still a fence.
-            let other = NodeRecord {
-                instance: a.instance + 1,
-                ..landed
-            };
-            let body = serde_json::to_vec(&other).unwrap();
-            bucket.put(&node_key("a"), body, &[]).await.unwrap();
-            assert!(matches!(a.renew(3_000).await, Err(Error::Fenced(_))));
-        });
-    }
-
-    /// A write's key and body.
-    type Write = (String, Vec<u8>);
-
-    /// Lands `late`, a write of ours a timed-out round left in flight, just
-    /// after serving the next GET.
-    #[derive(Default)]
-    struct Late {
-        inner: crate::bucket::memory::Memory,
-        late: std::rc::Rc<RefCell<Option<Write>>>,
-    }
-
-    #[async_trait::async_trait(?Send)]
-    impl crate::bucket::Store for Late {
-        async fn get(
-            &self,
-            key: &str,
-            to: Option<&std::path::Path>,
-        ) -> Result<Option<(Vec<u8>, Version)>> {
-            let got = self.inner.get(key, to).await;
-            if let Some((key, body)) = self.late.take() {
-                let body = crate::bucket::Payload::Bytes(body.into());
-                self.inner.put(&key, body, None, &[]).await?;
-            }
-            got
-        }
-        async fn put(
-            &self,
-            key: &str,
-            body: crate::bucket::Payload,
-            guard: Option<Guard>,
-            metadata: &[(&str, String)],
-        ) -> Result<Option<Version>> {
-            self.inner.put(key, body, guard, metadata).await
-        }
-        async fn list(&self, prefix: &str) -> Result<Vec<crate::bucket::Entry>> {
-            self.inner.list(prefix).await
-        }
-        async fn delete(&self, key: &str) -> Result<()> {
-            self.inner.delete(key).await
-        }
-    }
-
-    #[test]
-    fn two_late_renewals_of_ours_are_not_a_fence() {
-        block_on(async {
-            let store = Late::default();
-            let late = store.late.clone();
-            let bucket = Bucket::new(store, "");
-            let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
-            a.renew(0).await.unwrap();
-            let ours = |expires_ms| {
-                let record = NodeRecord {
-                    node: "a".into(),
-                    address: "a:1".into(),
-                    expires_ms,
-                    instance: a.instance,
-                };
-                serde_json::to_vec(&record).unwrap()
-            };
-            // Two timed-out rounds landed: one before this renewal's first
-            // read, one just after it.
-            bucket.put(&node_key("a"), ours(11_000), &[]).await.unwrap();
-            late.replace(Some((node_key("a"), ours(12_000))));
-            assert_eq!(a.renew(3_000).await.unwrap(), 13_000);
-        });
-    }
-
-    #[test]
-    fn a_listing_deletes_records_long_expired() {
-        block_on(async {
-            let bucket = Bucket::memory("");
-            let a = Registry::new(bucket.clone(), "a", "a:1", 10_000);
-            let b = Registry::new(bucket.clone(), "b", "b:1", 10_000);
-            let c = Registry::new(bucket.clone(), "c", "c:1", 10_000);
-            a.renew(0).await.unwrap();
-            b.renew(90_000).await.unwrap();
-            c.renew(115_000).await.unwrap();
-            // a expired at 10s, b at 100s: at 115s only a is ten lives dead.
-            let live = c.peers(115_000).await.unwrap();
-            assert_eq!(live.iter().map(|p| &*p.node).collect::<Vec<_>>(), ["c"]);
-            let keys: Vec<_> = bucket.list("nodes/").await.unwrap();
-            let keys: Vec<_> = keys.iter().map(|e| &*e.key).collect();
-            assert_eq!(keys, ["nodes/b.json", "nodes/c.json"]);
-        });
-    }
-}
+#[path = "registry-test.rs"]
+mod tests;

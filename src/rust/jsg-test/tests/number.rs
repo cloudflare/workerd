@@ -50,7 +50,7 @@ impl Numbers {
 }
 
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let resource = jsg::Rc::new(Numbers).to_js(lock).unwrap();
+    let resource = jsg::Rc::new(lock, Numbers).to_js(lock).unwrap();
     ctx.set_global(lock, "r", resource);
 }
 
@@ -135,7 +135,7 @@ fn number_handles() {
 fn number_handle_parameter_does_not_coerce() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(Numbers).to_js(lock)?;
+        let resource = jsg::Rc::new(lock, Numbers).to_js(lock)?;
         ctx.set_global(lock, "r", resource);
 
         assert_eq!(ctx.eval::<f64>(lock, "r.double(21)").unwrap(), 42.0);

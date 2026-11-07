@@ -16,6 +16,7 @@ use jsg::ToJS;
 use jsg::v8;
 use jsg::v8::PromiseState;
 use jsg_macros::jsg_method;
+use jsg_macros::jsg_property;
 use jsg_macros::jsg_resource;
 
 /// Evaluates `code`, which records what happens in the global array `log`, runs the microtasks,
@@ -298,7 +299,8 @@ impl VoidPromiseTaker {
 #[test]
 fn void_promise_argument_is_required() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "taker", jsg::Rc::new(VoidPromiseTaker));
+        let taker = jsg::Rc::new(lock, VoidPromiseTaker);
+        ctx.set_global(lock, "taker", taker);
         assert_eq!(
             log_after_microtasks(
                 lock,
@@ -580,7 +582,9 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {}
+impl jsg::Traced for DropCounter {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -728,9 +732,12 @@ impl Leaf {}
 fn then_or_catch_data_holds_a_resource() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let leaf = jsg::Rc::new(Leaf {
-            _drops: DropCounter(&SHARED_LEAF_DROPS),
-        });
+        let leaf = jsg::Rc::new(
+            lock,
+            Leaf {
+                _drops: DropCounter(&SHARED_LEAF_DROPS),
+            },
+        );
         let resolver = v8::PromiseResolver::new(lock).unwrap();
         let settled = resolver
             .promise()
@@ -786,9 +793,12 @@ fn reaction_data_of_pending_promise_is_dropped_with_its_isolate() {
         let promise = resolver.promise();
         let data = TeardownData {
             _drops: DropCounter(&TEARDOWN_DATA_DROPS),
-            leaf: jsg::Rc::new(Leaf {
-                _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
-            }),
+            leaf: jsg::Rc::new(
+                lock,
+                Leaf {
+                    _drops: DropCounter(&TEARDOWN_LEAF_DROPS),
+                },
+            ),
             promise: promise.to_traced_global(lock),
         };
         promise
@@ -872,11 +882,13 @@ impl Watcher {
 #[test]
 fn reaction_calls_back_into_the_resource_that_registered_it() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let watcher = jsg::Rc::new(Watcher {
-            state: jsg::Rc::new(WatcherState {
+        let state = jsg::Rc::new(
+            lock,
+            WatcherState {
                 seen: RefCell::new(Vec::new()),
-            }),
-        });
+            },
+        );
+        let watcher = jsg::Rc::new(lock, Watcher { state });
         ctx.set_global(lock, "watcher", watcher);
         let code = format!(
             "{RECORD}
@@ -986,10 +998,13 @@ impl TerminatingPromises {
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises.clone());
         let result = ctx.eval_raw(
             lock,
@@ -1073,9 +1088,12 @@ impl Deferred {
 #[test]
 fn resource_settles_promise_from_later_call() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(Deferred {
-            resolver: jsg::RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            Deferred {
+                resolver: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         let code = format!(
             "{RECORD}
@@ -1117,10 +1135,13 @@ impl DroppedDeferred {
 fn cycle_through_held_resolver_is_collected() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(DroppedDeferred {
-            _drops: DropCounter(&DEFERRED_DROPS),
-            resolver: jsg::RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            DroppedDeferred {
+                _drops: DropCounter(&DEFERRED_DROPS),
+                resolver: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         // The promise's reaction holds the resource, which holds the resolver of the promise.
         ctx.eval_raw(
@@ -1262,12 +1283,14 @@ impl ReadThroughCache {
 }
 
 fn install_cache(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    let cache = jsg::Rc::new(ReadThroughCache {
-        store: jsg::Rc::new(CacheStore {
+    let store = jsg::Rc::new(
+        lock,
+        CacheStore {
             entries: jsg::RefCell::new(HashMap::new()),
             in_flight: jsg::RefCell::new(HashMap::new()),
-        }),
-    });
+        },
+    );
+    let cache = jsg::Rc::new(lock, ReadThroughCache { store });
     ctx.set_global(lock, "cache", cache);
 }
 
@@ -1409,10 +1432,13 @@ fn cache_fallback_that_throws_rejects_the_read() {
 fn cache_removes_in_flight_fill_when_fallback_terminates() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         install_cache(lock, ctx);
-        let promises = jsg::Rc::new(TerminatingPromises {
-            pending: RefCell::new(Vec::new()),
-            still_pending: Cell::new(false),
-        });
+        let promises = jsg::Rc::new(
+            lock,
+            TerminatingPromises {
+                pending: RefCell::new(Vec::new()),
+                still_pending: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "promises", promises);
         let result = ctx.eval_raw(
             lock,
@@ -1443,4 +1469,160 @@ fn cache_rejects_non_function_fallback() {
         );
         Ok(())
     });
+}
+
+// =============================================================================
+// capture_async_api_throws
+// =============================================================================
+
+/// Methods and a property that return a promise, and fail in each way a callback can: in
+/// argument conversion, with an error, with what JavaScript threw, and by terminating.
+#[jsg_resource]
+struct AsyncThrows;
+
+#[jsg_resource]
+impl AsyncThrows {
+    #[jsg_method]
+    fn keys<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        object: v8::Local<'s, v8::Object>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        v8::Promise::resolved(lock, object.into())
+    }
+
+    #[jsg_method]
+    fn fail<'s>(&self, _lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        Err(jsg::Error::new_range_error("failed"))
+    }
+
+    #[jsg_method]
+    fn call<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        f: v8::Local<'s, v8::Function>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        let value = f.call(lock, None, &[])?;
+        v8::Promise::resolved(lock, value)
+    }
+
+    #[jsg_method]
+    fn typed<'s>(&self, _lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::Promise<'s, String>> {
+        Err(jsg::Error::new_type_error("typed failed"))
+    }
+
+    #[jsg_method]
+    fn terminate<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        spin: v8::Local<'s, v8::Function>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        lock.terminate_execution();
+        spin.call(lock, None, &[])?;
+        unreachable!("the termination was not delivered")
+    }
+
+    /// Doesn't return a promise, so it throws whatever the flag.
+    #[jsg_method]
+    fn sync_fail(&self) -> jsg::Result<()> {
+        Err(jsg::Error::new_range_error("sync failed"))
+    }
+
+    #[jsg_property(prototype, readonly)]
+    fn get_failing<'s>(
+        &self,
+        _lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
+        Err(jsg::Error::new_range_error("getter failed"))
+    }
+}
+
+/// What each call does: `rejected: ...` or `fulfilled: ...` for a returned promise, `threw: ...`
+/// for a synchronous throw.
+const ASYNC_THROWS_CALLS: &str = "
+    const attempt = (label, f) => {
+      let p;
+      try { p = f(); } catch (e) { log.push(`${label} threw: ${e.name}: ${e.message}`); return; }
+      p.then((v) => log.push(`${label} fulfilled`),
+             (e) => log.push(`${label} rejected: ${e.name}: ${e.message}`));
+    };
+    attempt('keys(42)', () => t.keys(42));
+    attempt('keys({})', () => t.keys({}));
+    attempt('fail', () => t.fail());
+    attempt('call', () => t.call(() => { throw new SyntaxError('from js'); }));
+    attempt('typed', () => t.typed());
+    attempt('failing', () => t.failing);
+    attempt('sync_fail', () => t.syncFail());
+";
+
+/// Under `capture_async_api_throws`, as with C++ JSG's `LiftKj_<v8::Local<v8::Promise>>`, a
+/// callback that returns a promise rejects it with whatever it throws, argument conversion errors
+/// included; a callback that returns no promise still throws.
+#[test]
+fn capture_async_api_throws_rejects_the_returned_promise() {
+    crate::Harness::with_flags(|mut flags| flags.set_capture_throws_as_rejections(true))
+        .run_in_context(|lock, ctx| {
+            let t = jsg::Rc::new(lock, AsyncThrows);
+            ctx.set_global(lock, "t", t);
+            assert_eq!(
+                log_after_microtasks(lock, ctx, ASYNC_THROWS_CALLS),
+                [
+                    "sync_fail threw: RangeError: sync failed",
+                    "keys(42) rejected: TypeError: Failed to execute 'keys' on 'AsyncThrows': \
+                     parameter 1 is not of type 'Object'.",
+                    "keys({}) fulfilled",
+                    "fail rejected: RangeError: failed",
+                    "call rejected: SyntaxError: from js",
+                    "typed rejected: TypeError: typed failed",
+                    "failing rejected: RangeError: getter failed",
+                ]
+                .join("|")
+            );
+            Ok(())
+        });
+}
+
+/// Without the flag, the same callbacks throw synchronously.
+#[test]
+fn without_capture_async_api_throws_promise_callbacks_throw() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let t = jsg::Rc::new(lock, AsyncThrows);
+        ctx.set_global(lock, "t", t);
+        assert_eq!(
+            log_after_microtasks(lock, ctx, ASYNC_THROWS_CALLS),
+            [
+                "keys(42) threw: TypeError: Failed to execute 'keys' on 'AsyncThrows': \
+                 parameter 1 is not of type 'Object'.",
+                "fail threw: RangeError: failed",
+                "call threw: SyntaxError: from js",
+                "typed threw: TypeError: typed failed",
+                "failing threw: RangeError: getter failed",
+                "sync_fail threw: RangeError: sync failed",
+                "keys({}) fulfilled",
+            ]
+            .join("|")
+        );
+        Ok(())
+    });
+}
+
+/// A termination is not captured: it keeps propagating, so the script stops.
+#[test]
+fn capture_async_api_throws_keeps_a_termination() {
+    crate::Harness::with_flags(|mut flags| flags.set_capture_throws_as_rejections(true))
+        .run_in_context(|lock, ctx| {
+            let t = jsg::Rc::new(lock, AsyncThrows);
+            ctx.set_global(lock, "t", t);
+            let result = ctx.eval_raw(
+                lock,
+                "globalThis.caught = false; globalThis.after = false;
+                 try { t.terminate(() => { while (true) {} }); }
+                 catch (e) { globalThis.caught = true; }
+                 globalThis.after = true;",
+            );
+            assert!(result.is_err(), "the script was not terminated");
+            assert!(!ctx.eval::<bool>(lock, "globalThis.caught").unwrap());
+            assert!(!ctx.eval::<bool>(lock, "globalThis.after").unwrap());
+            Ok(())
+        });
 }

@@ -178,10 +178,6 @@ impl Promise {
 struct ReactionData<T>(crate::RefCell<Option<T>>);
 
 impl<T: Traced> Traced for ReactionData<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut crate::GcVisitor) {
         self.0.trace(visitor);
     }

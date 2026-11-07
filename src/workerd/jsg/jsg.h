@@ -1871,51 +1871,6 @@ struct Identified {
   }
 };
 
-// jsg::Name represents a value that is either a string or a v8::Symbol. It is most useful for
-// use in APIs that can accept both interchangeably.
-//
-// Name implements hashCode() so it is suitable for use as a key in kj::HashMap, etc.
-class Name final {
- public:
-  explicit Name(kj::String string);
-  explicit Name(kj::StringPtr string);
-  explicit Name(Lock& js, v8::Local<v8::Symbol> symbol);
-  KJ_DISALLOW_COPY(Name);
-  Name(Name&&) = default;
-  Name& operator=(Name&&) = default;
-
-  inline int hashCode() const {
-    return hash;
-  }
-
-  Name clone(jsg::Lock& js);
-
-  kj::String toString(jsg::Lock& js);
-
-  JSG_MEMORY_INFO(Name) {
-    KJ_SWITCH_ONEOF(inner) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        tracker.trackField("inner", str);
-      }
-      KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
-        tracker.trackField("inner", sym);
-      }
-    }
-  }
-
- private:
-  int hash;
-  kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
-
-  kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
-
-  friend class NameWrapper;
-
-  void visitForGc(GcVisitor& visitor);
-
-  friend class MemoryTracker;
-};
-
 // jsg::Function<T> behaves much like kj::Function<T>, but can be passed to/from JS. It works in
 // both directions: you can receive a jsg::Function from JavaScript and call it from C++, and you
 // can also initialize a jsg::Function from a C++ lambda and pass it back to JavaScript.
@@ -2971,20 +2926,6 @@ class Lock {
   // allowed since `func` is invoked synchronously.
   template <class Func>
   PromiseForResult<Func, void, false> evalNow(Func&& func);
-
-  // ---------------------------------------------------------------------------
-  // Name/Symbol stuff
-
-  // Creates a Name encapsulating a new unique v8::Symbol.
-  Name newSymbol(kj::StringPtr symbol);
-
-  // Creates a Name encapsulating a name from the global symbol registry.
-  // Equivalent to Symbol.for(symbol) in JavaScript.
-  Name newSharedSymbol(kj::StringPtr symbol);
-
-  // Similar to newSharedSymbol except that it uses a separate isolate registry
-  // that is not accessible by JavaScript.
-  Name newApiSymbol(kj::StringPtr symbol);
 
   // ---------------------------------------------------------------------------
   // Logging stuff

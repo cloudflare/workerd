@@ -19,7 +19,7 @@ const {
   PromiseWithResolvers,
   RangeError,
   TypeError,
-  uncurryThis,
+  FunctionPrototypeCall,
 } = primordials;
 
 const { isPromise, markPromiseHandled } = utils;
@@ -118,6 +118,17 @@ function slotRejected(slot: PromiseSlot, error: unknown): Promise<void> {
   slot.reject(error);
   return slot.promise;
 }
+
+// What releasing an internal reader or writer, one that no code outside
+// this implementation can reach, rejects its promises with: the reader
+// of an async iterator or of a pipe, and the writer of a pipe. Nothing
+// observes those rejections (the iterator has no read pending at release,
+// and the pipe has begun shutting down, so it ignores them), so one error
+// serves every release, sparing the stack trace that a new error
+// captures.
+const kInternalReleaseError = new TypeError(
+  'This internal reader or writer has been released'
+);
 
 function toStringTagProperty(tag: string): PropertyDescriptor {
   return {
@@ -272,8 +283,7 @@ function extractSizeAlgorithm<T>(
 ): (chunk: T) => number {
   const { size } = strategy;
   if (size === undefined) return () => 1;
-  const callSize = uncurryThis(size);
-  return (chunk: T) => callSize(undefined, chunk);
+  return (chunk: T) => FunctionPrototypeCall(size, undefined, chunk);
 }
 
 // WebIDL's conversion of an optional callback member of a source, sink or
@@ -476,6 +486,7 @@ export type CommonHelpers = {
   slotPromise: typeof slotPromise;
   slotResolved: typeof slotResolved;
   slotRejected: typeof slotRejected;
+  kInternalReleaseError: typeof kInternalReleaseError;
   convertCallback: typeof convertCallback;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
@@ -506,6 +517,7 @@ module.exports = ObjectFreeze({
   slotPromise,
   slotResolved,
   slotRejected,
+  kInternalReleaseError,
   convertCallback,
   normalizeExpectedLength,
   requireObject,

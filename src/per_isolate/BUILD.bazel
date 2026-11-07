@@ -1,5 +1,8 @@
 load("@workerd//:build/wd_ts_script_bundle.bzl", "wd_ts_script_bundle")
 
+# For embedder bundles (wd_ts_script_bundle's embedder_prefix), which are type-checked against it.
+exports_files(["per_isolate-env.d.ts"])
+
 wd_ts_script_bundle(
     name = "per_isolate",
     gen_compile_cache = True,

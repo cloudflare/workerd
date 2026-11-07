@@ -57,14 +57,15 @@ where
     T: for<'a> jsg::FromJS<'a, ResultType = T> + Default,
 {
     let mut out = T::default();
-    let lazy = jsg::Rc::new(Lazy::new());
-    let resource = lazy.clone();
+    let mut resource = None;
     Harness::new().run_in_context(|lock, ctx| {
+        let lazy = jsg::Rc::new(lock, Lazy::new());
+        resource = Some(lazy.clone());
         ctx.set_global(lock, "l", lazy);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
     });
-    (out, resource)
+    (out, resource.expect("created in the context"))
 }
 
 #[test]
@@ -85,16 +86,18 @@ fn lazy_getter_does_not_run_until_first_access() {
 
 #[test]
 fn lazy_getters_run_per_instance() {
-    let lazy = jsg::Rc::new(Lazy::new());
-    let other = jsg::Rc::new(Lazy::new());
-    let (first, second) = (lazy.clone(), other.clone());
+    let mut created = None;
     Harness::new().run_in_context(|lock, ctx| {
+        let lazy = jsg::Rc::new(lock, Lazy::new());
+        let other = jsg::Rc::new(lock, Lazy::new());
+        created = Some((lazy.clone(), other.clone()));
         ctx.set_global(lock, "a", lazy);
         ctx.set_global(lock, "b", other);
         let distinct: bool = ctx.eval(lock, "a.list !== b.list").unwrap();
         assert!(distinct);
         Ok(())
     });
+    let (first, second) = created.expect("created in the context");
     assert_eq!(first.list_calls.get(), 1);
     assert_eq!(second.list_calls.get(), 1);
 }
@@ -152,10 +155,11 @@ fn readonly_lazy_property_rejects_assignment() {
 
 #[test]
 fn lazy_getter_error_is_thrown_and_not_cached() {
-    let lazy = jsg::Rc::new(Lazy::new());
-    lazy.fail.set(true);
-    let resource = lazy.clone();
+    let mut resource = None;
     Harness::new().run_in_context(|lock, ctx| {
+        let lazy = jsg::Rc::new(lock, Lazy::new());
+        lazy.fail.set(true);
+        resource = Some(lazy.clone());
         ctx.set_global(lock, "l", lazy.clone());
         let thrown: String = ctx
             .eval(
@@ -172,7 +176,10 @@ fn lazy_getter_error_is_thrown_and_not_cached() {
         assert_eq!(cached, "lazy");
         Ok(())
     });
-    assert_eq!(resource.label_calls.get(), 2);
+    assert_eq!(
+        resource.expect("created in the context").label_calls.get(),
+        2
+    );
 }
 
 #[jsg_resource]
@@ -199,7 +206,8 @@ impl Mixed {
 #[test]
 fn lazy_and_native_instance_properties_enumerate_in_reverse_registration_order() {
     Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "m", jsg::Rc::new(Mixed {}));
+        let m = jsg::Rc::new(lock, Mixed {});
+        ctx.set_global(lock, "m", m);
         let keys: String = ctx.eval(lock, "Object.keys(m).join()").unwrap();
         assert_eq!(keys, "tags,kind,id");
         Ok(())
@@ -236,17 +244,21 @@ impl Resource for Placed {
 }
 
 fn eval_placed(harness: &Harness, code: &str) -> (String, u32) {
-    let placed = jsg::Rc::new(Placed {
-        calls: Cell::new(0),
-    });
-    let resource = placed.clone();
     let mut out = String::new();
+    let mut calls = 0;
     harness.run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "p", placed);
+        let placed = jsg::Rc::new(
+            lock,
+            Placed {
+                calls: Cell::new(0),
+            },
+        );
+        ctx.set_global(lock, "p", placed.clone());
         out = ctx.eval(lock, code).unwrap();
+        calls = placed.calls.get();
         Ok(())
     });
-    (out, resource.calls.get())
+    (out, calls)
 }
 
 #[test]

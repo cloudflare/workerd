@@ -20,6 +20,7 @@
 #endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/server/kv/kv_js.embed.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strong-bool.h>
 #include <workerd/util/thread-scopes.h>
@@ -31,8 +32,8 @@
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
-#include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -43,10 +44,19 @@ using api::pyodide::PythonConfig;
 namespace {
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
+
+// The sources of the ES modules a config names with `Worker.Module.bundled`.
+kj::Maybe<kj::StringPtr> findBundled(kj::StringPtr name) {
+  static const auto bundled = [] {
+    kj::HashMap<kj::StringPtr, kj::StringPtr> map;
+    map.insert("/workerd/kv.js"_kj, KV_JS);
+    return map;
+  }();
+  return bundled.find(name).map([](auto& source) { return source; });
+}
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
@@ -183,7 +193,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Array<Worker::Api::InboundListener> inboundListeners,
-    kj::Maybe<jsg::SnapshotConfig> snapshotConfig)
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig,
+    kj::Maybe<const EmbedderBootstrap&> embedderBootstrap)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -193,7 +204,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           memoryCacheProvider,
           pythonConfig,
           kj::mv(snapshotConfig))),
-      inboundListeners(kj::mv(inboundListeners)) {}
+      inboundListeners(kj::mv(inboundListeners)),
+      embedderBootstrap(embedderBootstrap) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -204,6 +216,9 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 }
 kj::ArrayPtr<const Worker::Api::InboundListener> WorkerdApi::getInboundListeners() const {
   return inboundListeners;
+}
+kj::Maybe<const EmbedderBootstrap&> WorkerdApi::getEmbedderBootstrap() const {
+  return embedderBootstrap;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
     jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
@@ -397,6 +412,18 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
+      case config::Worker::Module::BUNDLED: {
+        auto name = conf.getBundled();
+        KJ_IF_SOME(source, findBundled(name)) {
+          return Worker::Script::EsModule{source};
+        }
+        auto message = kj::str("No bundled module named \"", name, "\".");
+        KJ_IF_SOME(e, errorReporter) {
+          e.addError(kj::mv(message));
+          return Worker::Script::TextModule{""};
+        }
+        KJ_FAIL_REQUIRE(message);
+      }
       case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
         KJ_FAIL_REQUIRE(
             "NOSENTRY Worker bundle specified Python requirement which is no longer supported");

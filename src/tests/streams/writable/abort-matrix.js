@@ -246,6 +246,34 @@ export const abortSignalReason = {
   },
 };
 
+// A signal first read after the abort is already aborted, and stays the
+// same object, with the same reason, across reads.
+export const abortSignalReadAfterAbort = {
+  async test() {
+    for (const reason of [undefined, new Error('why')]) {
+      let controller;
+      const ws = new WritableStream({
+        start(c) {
+          controller = c;
+        },
+      });
+      await ws.abort(reason);
+      const signal = controller.signal;
+      strictEqual(signal.aborted, true);
+      strictEqual(controller.signal, signal);
+      strictEqual(signal.reason, controller.signal.reason);
+      if (reason !== undefined) strictEqual(signal.reason, reason);
+      let fired = false;
+      signal.addEventListener('abort', () => {
+        fired = true;
+      });
+      await ws.abort('again');
+      strictEqual(fired, false);
+      strictEqual(controller.signal.reason, signal.reason);
+    }
+  },
+};
+
 // DIVERGENCE: two aborts issued while the first is still pending. The
 // spec returns the SAME promise for both (TypeScript); C++ mints a new
 // promise per call (the WPT aborting.any "multiple writer.abort()s"

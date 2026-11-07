@@ -219,11 +219,11 @@ fn read_with_fallback<'s>(
     }
 }
 
-/// The cache binding. Its empty `Traced` impl is correct: the cache holds serialized bytes,
+/// The cache binding. It holds no GC references: the cache holds serialized bytes,
 /// never JavaScript values, so the binding refers to nothing in the V8 heap.
 struct CacheBinding(memory_cache::Binding);
 
-impl jsg::Traced for CacheBinding {}
+jsg::jsg_traced!(CacheBinding);
 
 impl Drop for CacheBinding {
     fn drop(&mut self) {
@@ -277,7 +277,7 @@ fn millis_since_epoch(time: SystemTime) -> f64 {
 /// The data of a reaction that needs none.
 pub(crate) struct NoData;
 
-impl jsg::Traced for NoData {}
+jsg::jsg_traced!(NoData);
 
 /// A promise that follows `promise` through a reaction that passes on what it settles with, as
 /// C++ JSG follows a promise when it converts it, so that it settles after as many microtasks.

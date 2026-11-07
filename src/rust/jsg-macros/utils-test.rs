@@ -65,6 +65,15 @@ fn required_argument_count_uses_from_js_for_js_parameters() {
             parse_quote!(fn f<'s>(&self, lock: &mut Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>)),
             vec![parse_quote!(jsg::v8::Local<'_, jsg::v8::Value>)],
         ),
+        // A rest parameter is not counted.
+        (
+            parse_quote!(fn f(&self, a: String, rest: jsg::Arguments<u32>)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(rest: Arguments<String>)),
+            vec![],
+        ),
     ];
     for (sig, types) in cases {
         let expected = quote::quote! {{
@@ -93,6 +102,22 @@ fn is_result_type_cases() {
     assert!(is_result_type(&parse_quote!(std::result::Result<(), ()>)));
     assert!(!is_result_type(&parse_quote!(Option<String>)));
     assert!(!is_result_type(&parse_quote!(String)));
+}
+
+#[test]
+fn is_promise_type_cases() {
+    assert!(is_promise_type(&parse_quote!(v8::Local<'s, v8::Promise>)));
+    assert!(is_promise_type(&parse_quote!(jsg::Promise<'s, String>)));
+    assert!(is_promise_type(&parse_quote!(
+        jsg::Result<v8::Local<'s, v8::Promise>>
+    )));
+    assert!(is_promise_type(&parse_quote!(
+        Result<jsg::Promise<'s, String>, jsg::Error>
+    )));
+    assert!(!is_promise_type(&parse_quote!(v8::Local<'s, v8::Value>)));
+    assert!(!is_promise_type(&parse_quote!(jsg::Result<()>)));
+    assert!(!is_promise_type(&parse_quote!(v8::VoidPromise<'s>)));
+    assert!(!is_promise_type(&parse_quote!(String)));
 }
 
 #[test]
@@ -212,6 +237,26 @@ fn fast_api_signature_cases() {
         fast(parse_quote!(fn f(this: jsg::Rc<Self>, a: i32) -> bool)),
         None
     );
+}
+
+#[test]
+fn arguments_element_cases() {
+    let element =
+        |ty: syn::Type| arguments_element(&ty).map(|element| quote::quote!(#element).to_string());
+    assert_eq!(
+        element(parse_quote!(jsg::Arguments<u32>)).as_deref(),
+        Some("u32")
+    );
+    assert_eq!(
+        element(parse_quote!(Arguments<jsg::v8::Local<'s, jsg::v8::Value>>)).as_deref(),
+        Some("jsg :: v8 :: Local < 's , jsg :: v8 :: Value >")
+    );
+    // Another module's `Arguments`, a reference, or no single type argument.
+    assert_eq!(element(parse_quote!(other::Arguments<u32>)), None);
+    assert_eq!(element(parse_quote!(&jsg::Arguments<u32>)), None);
+    assert_eq!(element(parse_quote!(jsg::Arguments)), None);
+    assert_eq!(element(parse_quote!(jsg::Arguments<u32, u32>)), None);
+    assert_eq!(element(parse_quote!(Vec<u32>)), None);
 }
 
 #[test]

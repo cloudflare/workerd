@@ -35,7 +35,9 @@ struct Token {
     name: String,
 }
 
-impl jsg::Traced for Token {}
+impl jsg::Traced for Token {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 // =============================================================================
 // Carrying Rust values
@@ -187,7 +189,9 @@ impl Drop for Carried {
     }
 }
 
-impl jsg::Traced for Carried {}
+impl jsg::Traced for Carried {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// The reaction takes the value out of its wrapper, so the value is dropped when the callback is
 /// done with it, and the wrapper, which the garbage collector frees later, holds nothing.
@@ -223,7 +227,9 @@ impl Drop for Untaken {
     }
 }
 
-impl jsg::Traced for Untaken {}
+impl jsg::Traced for Untaken {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// A value that no reaction takes is dropped with its wrapper, by the garbage collector.
 #[test]
@@ -276,16 +282,18 @@ impl Keeper {
 #[test]
 fn carried_resource_can_be_kept_after_garbage_collection() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let keeper = jsg::Rc::new(Keeper {
-            kept: jsg::RefCell::new(None),
-        });
+        let keeper = jsg::Rc::new(
+            lock,
+            Keeper {
+                kept: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "keeper", keeper.clone());
         let object = lock.new_object();
         let alive = "alive".to_js(lock)?;
         object.set(lock, "state", alive)?;
-        let holder = jsg::Rc::new(Holder {
-            object: object.to_traced_global(lock),
-        });
+        let object = object.to_traced_global(lock);
+        let holder = jsg::Rc::new(lock, Holder { object });
         let (promise, resolver) = jsg::Promise::<jsg::Rc<Holder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, keeper, |lock, keeper, holder| {
             *keeper.kept.borrow_mut(lock) = Some(holder);
@@ -418,7 +426,9 @@ fn try_consume_resolved_returns_pending_and_rejected_promises() {
 /// A value whose conversion to JavaScript fails.
 struct Unconvertible;
 
-impl jsg::Traced for Unconvertible {}
+impl jsg::Traced for Unconvertible {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
@@ -602,10 +612,14 @@ struct Leaf {
 impl Leaf {}
 
 fn install_doubler(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
-    ctx.set_global(lock, "doubler", jsg::Rc::new(Doubler));
-    let leaf = jsg::Rc::new(Leaf {
-        name: "leaf".to_owned(),
-    });
+    let doubler = jsg::Rc::new(lock, Doubler);
+    ctx.set_global(lock, "doubler", doubler);
+    let leaf = jsg::Rc::new(
+        lock,
+        Leaf {
+            name: "leaf".to_owned(),
+        },
+    );
     ctx.set_global(lock, "leaf", leaf);
 }
 
@@ -832,9 +846,12 @@ fn from_js_names_promise_and_rejects_other_values() {
 #[test]
 fn carried_resource_survives_garbage_collection() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let leaf = jsg::Rc::new(Leaf {
-            name: "kept".to_owned(),
-        });
+        let leaf = jsg::Rc::new(
+            lock,
+            Leaf {
+                name: "kept".to_owned(),
+            },
+        );
         let promise = jsg::Promise::<jsg::Rc<Leaf>>::resolved(lock, leaf)?;
         let name: jsg::Promise<String> =
             promise.then(lock, (), |_lock, (), leaf| Ok(leaf.name.clone()))?;
@@ -891,10 +908,13 @@ impl Deferred {
 #[test]
 fn resource_keeps_typed_promise_and_resolver() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let deferred = jsg::Rc::new(Deferred {
-            resolver: jsg::RefCell::new(None),
-            promise: jsg::RefCell::new(None),
-        });
+        let deferred = jsg::Rc::new(
+            lock,
+            Deferred {
+                resolver: jsg::RefCell::new(None),
+                promise: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "deferred", deferred);
         ctx.eval_raw(lock, "deferred.start()").unwrap();
         // The resource's fields alone keep the promise and its resolver.
@@ -959,7 +979,8 @@ impl Evaluator {
 #[test]
 fn eval_now_keeps_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "evaluator", jsg::Rc::new(Evaluator));
+        let evaluator = jsg::Rc::new(lock, Evaluator);
+        ctx.set_global(lock, "evaluator", evaluator);
         let result = ctx.eval_raw(
             lock,
             "globalThis.after = false;
@@ -975,7 +996,8 @@ fn eval_now_keeps_the_termination() {
 #[test]
 fn eval_now_rejects_with_what_fails() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "evaluator", jsg::Rc::new(Evaluator));
+        let evaluator = jsg::Rc::new(lock, Evaluator);
+        ctx.set_global(lock, "evaluator", evaluator);
         assert_eq!(
             log_after_microtasks(
                 lock,
@@ -1035,9 +1057,12 @@ impl Later {
 }
 
 fn install_later(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg::Rc<Later> {
-    let later = jsg::Rc::new(Later {
-        resolver: jsg::RefCell::new(None),
-    });
+    let later = jsg::Rc::new(
+        lock,
+        Later {
+            resolver: jsg::RefCell::new(None),
+        },
+    );
     ctx.set_global(lock, "later", later.clone());
     later
 }
@@ -1184,7 +1209,9 @@ impl Drop for WaiterDrops {
     }
 }
 
-impl jsg::Traced for WaiterDrops {}
+impl jsg::Traced for WaiterDrops {
+    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
+}
 
 /// Returns promises that a `Source` settles.
 #[jsg_resource]
@@ -1222,14 +1249,20 @@ impl Waiter {
 fn returned_promise_keeps_its_creator_alive(method: &str) {
     WAITER_DROPS.store(0, Ordering::SeqCst);
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let source = jsg::Rc::new(Source {
-            resolver: jsg::RefCell::new(None),
-        });
+        let source = jsg::Rc::new(
+            lock,
+            Source {
+                resolver: jsg::RefCell::new(None),
+            },
+        );
         ctx.set_global(lock, "source", source);
         let make_waiter = v8::Function::new(lock, (), |lock, (), _args| {
-            jsg::Rc::new(Waiter {
-                _drops: WaiterDrops,
-            })
+            jsg::Rc::new(
+                lock,
+                Waiter {
+                    _drops: WaiterDrops,
+                },
+            )
             .to_js(lock)
         })?;
         ctx.set_global(lock, "makeWaiter", make_waiter);

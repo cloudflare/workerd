@@ -355,8 +355,7 @@ KJ_TEST("retry-capable RPC calls resolve the destination only after safe seriali
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setFetcherRpc(true);
   flags.setRpcParamsDupStubs(false);
-  TestFixture fixture(
-      {.featureFlags = flags.asReader(), .autogates = kj::arr("durable-object-retries-jsrpc"_kj)});
+  TestFixture fixture({.featureFlags = flags.asReader()});
 
   uint singleUseCount = 0;
   uint actorAttemptCount = 0;
@@ -589,13 +588,12 @@ struct ActorCallDispatch {
   uint actorAttemptCount = 0;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
 };
-ActorCallDispatch makeReplayableActorCall(kj::ArrayPtr<const kj::StringPtr> autogates) {
+ActorCallDispatch makeReplayableActorCall() {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setFetcherRpc(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
-  // Exactly these gates, even under WORKERD_ALL_AUTOGATES: the gate-off cases assert on absence.
-  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   ActorCallDispatch dispatch;
   auto& singleUseCount = dispatch.singleUseCount;
@@ -618,12 +616,12 @@ ActorCallDispatch makeReplayableActorCall(kj::ArrayPtr<const kj::StringPtr> auto
   return dispatch;
 }
 
-ActorCallDispatch makeActorPropertyRead(kj::ArrayPtr<const kj::StringPtr> autogates) {
+ActorCallDispatch makeActorPropertyRead() {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setFetcherRpc(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
-  util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
+  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   ActorCallDispatch dispatch;
   auto& singleUseCount = dispatch.singleUseCount;
@@ -648,8 +646,8 @@ ActorCallDispatch makeActorPropertyRead(kj::ArrayPtr<const kj::StringPtr> autoga
   return dispatch;
 }
 
-KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
-  auto dispatch = makeReplayableActorCall(kj::arr("durable-object-retries-jsrpc"_kj));
+KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
+  auto dispatch = makeReplayableActorCall();
 
   KJ_EXPECT(dispatch.singleUseCount == 0);
   KJ_EXPECT(dispatch.actorAttemptCount == 1);
@@ -658,25 +656,8 @@ KJ_TEST("replayable actor RPC calls carry observe-only retry metadata") {
   KJ_EXPECT(recordedMetadata.retryGateEnabled == ActorRetryGateEnabled::NO);
 }
 
-KJ_TEST("actor RPC retries stay disabled when replay memory is not reserved") {
-  auto dispatch = makeReplayableActorCall(
-      kj::arr("durable-object-retries-jsrpc"_kj, "durable-object-retries-jsrpc-retry-requests"_kj));
-
-  KJ_EXPECT(dispatch.singleUseCount == 0);
-  KJ_EXPECT(dispatch.actorAttemptCount == 1);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(dispatch.metadata).retryGateEnabled == ActorRetryGateEnabled::NO);
-}
-
-KJ_TEST("replayable actor RPC calls carry no retry metadata without the JSRPC gate") {
-  auto dispatch = makeReplayableActorCall({});
-
-  KJ_EXPECT(dispatch.singleUseCount == 1);
-  KJ_EXPECT(dispatch.actorAttemptCount == 0);
-  KJ_EXPECT(dispatch.metadata == kj::none);
-}
-
 KJ_TEST("actor RPC property reads carry retry metadata") {
-  auto dispatch = makeActorPropertyRead(kj::arr("durable-object-retries-jsrpc"_kj));
+  auto dispatch = makeActorPropertyRead();
 
   KJ_EXPECT(dispatch.singleUseCount == 0);
   KJ_EXPECT(dispatch.actorAttemptCount == 1);
@@ -946,16 +927,12 @@ constexpr kj::StringPtr RETRYABLE_JSRPC_ACTOR_SOURCE = R"JS(
   export default Actor;
 )JS"_kj;
 
-// Owns a worker running `source` with only the given autogates enabled, ignoring the
-// @all-autogates variant. The call target is the actor, or the default export for PLAIN_OBJECT.
+// Owns a worker running `source`. The call target is the actor, or the default export for
+// PLAIN_OBJECT.
 struct RetryableClaimTest {
   enum class Target { ACTOR, PLAIN_OBJECT };
 
-  RetryableClaimTest(kj::StringPtr source, kj::ArrayPtr<const kj::StringPtr> autogates)
-      : RetryableClaimTest(source, autogates, Target::ACTOR) {}
-
-  RetryableClaimTest(
-      kj::StringPtr source, kj::ArrayPtr<const kj::StringPtr> autogates, Target target)
+  explicit RetryableClaimTest(kj::StringPtr source, Target target = Target::ACTOR)
       : fixture([&]() {
           auto params = retryClaimActorParams(*observer);
           params.mainModuleSource = source;
@@ -964,10 +941,7 @@ struct RetryableClaimTest {
             params.actorClassName = kj::none;
           }
           return params;
-        }()) {
-    // Set after the fixture, which initializes autogates.
-    util::Autogate::initAutogateNamesForTest(autogates, util::IgnoreAllAutogatesEnv::YES);
-  }
+        }()) {}
 
   enum class CallOutcome { SUCCEEDS, FAILS };
 
@@ -1001,11 +975,10 @@ struct RetryableClaimTest {
   TestFixture fixture;
 };
 
-constexpr auto USERLAND_GATE = "durable-object-retries-userland"_kj;
 using CallOutcome = RetryableClaimTest::CallOutcome;
 
 KJ_TEST("JSRPC claims as retryable only for a retryable() method found without user code") {
-  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
+  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE);
 
   KJ_EXPECT(
       test.claimForMethod("retryableMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
@@ -1042,13 +1015,6 @@ KJ_TEST("JSRPC claims as retryable only for a retryable() method found without u
   KJ_EXPECT(getJsEvents(test.fixture).contains("getter;"));
 }
 
-KJ_TEST("JSRPC claims a retryable() method as not retryable when the userland gate is disabled") {
-  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, nullptr);
-
-  KJ_EXPECT(
-      test.claimForMethod("retryableMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
-}
-
 KJ_TEST("JSRPC treats a method shadowing an Object.prototype getter as not retryable") {
   // The method lookup also reads Object.prototype's property of the same name, running the getter.
   RetryableClaimTest test(R"JS(
@@ -1064,8 +1030,7 @@ KJ_TEST("JSRPC treats a method shadowing an Object.prototype getter as not retry
       configurable: true,
     });
     export default Actor;
-  )JS"_kj,
-      kj::arr(USERLAND_GATE));
+  )JS"_kj);
 
   KJ_EXPECT(test.claimForMethod("shadowing", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
   KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("getter;"), test.observer->jsEventsAtClaim);
@@ -1083,8 +1048,7 @@ KJ_TEST("JSRPC treats a retryable() method also on Object.prototype as not retry
     retryable(Actor.prototype.shared);
     Object.prototype.shared = Actor.prototype.shared;
     export default Actor;
-  )JS"_kj,
-      kj::arr(USERLAND_GATE));
+  )JS"_kj);
 
   KJ_EXPECT(test.claimForMethod("shared", CallOutcome::FAILS) == IsRetryableHandler::NO);
 }
@@ -1098,7 +1062,7 @@ KJ_TEST("JSRPC claims only a plain object's own retryable() method as retryable"
     retryable(Object.getPrototypeOf(handler).inherited, handler.own);
     export default handler;
   )JS"_kj,
-      kj::arr(USERLAND_GATE), RetryableClaimTest::Target::PLAIN_OBJECT);
+      RetryableClaimTest::Target::PLAIN_OBJECT);
 
   // The call fails only because a plain object's method must receive exactly one argument.
   KJ_EXPECT(test.claimForMethod("own", CallOutcome::FAILS) == IsRetryableHandler::YES);
@@ -1122,15 +1086,14 @@ KJ_TEST("JSRPC treats a method reached through a Proxy prototype as not retryabl
       },
     }));
     export default Actor;
-  )JS"_kj,
-      kj::arr(USERLAND_GATE));
+  )JS"_kj);
 
   KJ_EXPECT(test.claimForMethod("inherited", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
   KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("trap;"), test.observer->jsEventsAtClaim);
 }
 
 KJ_TEST("after a retryable JSRPC claim, the session can only call retryable() methods") {
-  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
+  RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE);
   auto entrypoint = test.fixture.makeWorkerEntrypoint();
   auto [cap, session] = startSession(*entrypoint);
 

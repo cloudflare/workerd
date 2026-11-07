@@ -279,8 +279,6 @@ class Module {
     EVAL = 1 << 2,
     // A Module with the WASM flag set is a WebAssembly module.
     WASM = 1 << 3,
-    // Record function positions for bundle ES modules, bypassing code caches.
-    PRODUCE_COMPILE_HINTS = 1 << 4,
   };
 
   // The Evaluator is used to to ensure evaluation of a module outside of an
@@ -324,8 +322,6 @@ class Module {
 
   // If isWasm() returns true, then the module is a WebAssembly module.
   bool isWasm() const;
-
-  bool producesCompileHints() const;
 
   // Returns the content type of the module.
   inline ContentType contentType() const {
@@ -419,13 +415,19 @@ class Module {
       kj::Maybe<CodeCacheKey> codeCacheKey = kj::none);
 
   // Creates a new ESM module that does not take ownership of the given code.
-  // The backing data must have static process lifetime. This is used to
+  // The source and any embedded compileCache must have static process lifetime. This is used to
   // construct ESM modules from compiled-in built-in modules.
   // This variation of newEsm does not take Flags as none of the existing
   // Flags are relevant other than the ESM flag which will be set automatically.
-  static kj::Own<Module> newEsm(Url id, Type type, kj::ArrayPtr<const char> code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      kj::ArrayPtr<const char> code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
   // The source is already encoded as Latin-1 or UTF-16 for V8.
-  static kj::Own<Module> newEsm(Url id, Type type, StaticExternalStringSource code);
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      StaticExternalStringSource code,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr);
 
   // The following methods are used to create the evaluation callbacks for various
   // kinds of common simple synthetic module types. The module registry is not
@@ -615,12 +617,16 @@ class ModuleBundle {
     BuiltinBuilder& addSynthetic(
         const Url& id, BundleBuilder::EvaluateCallback callback) KJ_LIFETIMEBOUND;
 
-    // The source must be backed by static process-lifetime storage.
-    BuiltinBuilder& addEsm(const Url& id, kj::ArrayPtr<const char> source) KJ_LIFETIMEBOUND;
+    // The source and any embedded compileCache must be backed by static process-lifetime storage.
+    BuiltinBuilder& addEsm(const Url& id,
+        kj::ArrayPtr<const char> source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
     // The UTF-8 source shares ownership of its backing storage.
     BuiltinBuilder& addEsm(const Url& id, kj::Arc<OwnedAscii> source) KJ_LIFETIMEBOUND;
-    // The source is already encoded as Latin-1 or UTF-16 for V8.
-    BuiltinBuilder& addEsm(const Url& id, StaticExternalStringSource source) KJ_LIFETIMEBOUND;
+    // The source is already encoded as Latin-1 or UTF-16 for V8. Both buffers have process lifetime.
+    BuiltinBuilder& addEsm(const Url& id,
+        StaticExternalStringSource source,
+        kj::ArrayPtr<const kj::byte> compileCache = nullptr) KJ_LIFETIMEBOUND;
 
     // Adds a module that is implemented in C++ as a jsg::Object
     template <typename T, typename TypeWrapper>
@@ -728,8 +734,6 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       // When set, newCodeCacheKey() computes code cache keys for bundle ES
       // modules. Set it if the registry serves isolates with a code cache store.
       CODE_CACHE_KEYS = 1 << 1,
-      // newWorkerModuleRegistry() enables hint production for bundle ES modules.
-      PRODUCE_COMPILE_HINTS = 1 << 2,
     };
     Builder(const jsg::Url& bundleBase, Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
@@ -797,21 +801,6 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       kj::Maybe<const Url&> maybeReferrer = kj::none,
       UnwrapDefault unwrapDefault = UnwrapDefault::NO,
       RequireEsm requireEsm = RequireEsm::NO);
-
-  struct ProducedCompileHints {
-    // The module definition's URL, without instance query parameters or fragments.
-    Url specifier;
-    kj::Array<int> functionPositions;
-  };
-
-  // Returns hints recorded so far in the current isolate for bundle ES modules with
-  // PRODUCE_COMPILE_HINTS. Positions are sorted and deduplicated across instances of each
-  // definition. Unresolved modules, builtins, and synthetic modules are not listed.
-  static kj::Array<ProducedCompileHints> getProducedCompileHints(Lock& js);
-
-  // Resolves a bundle name using BundleBuilder's normalization and the current context's
-  // bundle base, for matching ProducedCompileHints::specifier to original bundle names.
-  static Url resolveModuleName(Lock& js, kj::StringPtr name);
 
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder

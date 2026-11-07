@@ -152,6 +152,7 @@ struct Trace @0x8e8d911203762d34 {
     trace @18 :TraceEventInfo;
     hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
     connect @29 :ConnectEventInfo;
+    onHibernate @31 :OnHibernateEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -179,6 +180,18 @@ struct Trace @0x8e8d911203762d34 {
 
   struct AlarmEventInfo {
     scheduledTimeMs @0 :Int64;
+  }
+
+  struct OnHibernateEventInfo {
+    # A Durable Object's onHibernate handler.
+    reason @0 :Reason;
+
+    enum Reason {
+      # Why the Durable Object is hibernating, as passed to its onHibernate handler.
+      inactive @0;
+      codeUpdated @1;
+      system @2;
+    }
   }
 
   struct QueueEventInfo {
@@ -346,6 +359,7 @@ struct Trace @0x8e8d911203762d34 {
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
       connect @9 :ConnectEventInfo;
+      onHibernate @10 :OnHibernateEventInfo;
       custom @8 :CustomEventInfo;
     }
     }
@@ -1067,7 +1081,8 @@ interface EventDispatcher @0xf20697475ec1752d {
 interface WorkerdBootstrap {
   # Bootstrap interface exposed by workerd when serving Cap'n Proto RPC.
 
-  startEvent @0 (cfBlobJson :Text, fromPersistentStub :Bool) -> (dispatcher :EventDispatcher);
+  startEvent @0 (cfBlobJson :Text, fromPersistentStub :Bool, fromHandoff :Bool,
+                 forwardedBy :Text, causedBy :List(Text)) -> (dispatcher :EventDispatcher);
   # Start a new event. Exactly one event should be delivered to the returned EventDispatcher.
   #
   # If the event is an HTTP request, `cfBlobJson` optionally carries the JSON-encoded `request.cf`
@@ -1077,6 +1092,12 @@ interface WorkerdBootstrap {
   # ("persistent") stub. The target worker re-verifies it still has the
   # `allow_irrevocable_stub_storage` compat flag enabled; if not, it rejects the event. The
   # dispatcher passes it through to the worker via SubrequestMetadata.
+  #
+  # `fromHandoff` and `causedBy` say which Durable Objects' work made the request, as
+  # `SubrequestMetadata::fromHandoff` and `SubrequestMetadata::causedBy`.
+  #
+  # `forwardedBy` names the cluster node that sent the request on, as
+  # `SubrequestMetadata::forwardedBy`.
 }
 
 interface WorkerdDebugPort {

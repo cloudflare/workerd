@@ -121,6 +121,23 @@ impl Isolate {
         // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
         unsafe { v8::ffi::isolate_is_execution_terminating(self.as_ffi()) }
     }
+
+    /// Returns true if an exception is pending, or caught by the innermost `v8::TryCatch` and
+    /// not yet reset (`v8::Isolate::HasPendingException`).
+    #[expect(unsafe_code, reason = "asks V8 about the locked isolate")]
+    pub fn has_pending_exception(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_has_pending_exception(self.as_ffi()) }
+    }
+
+    /// Returns true if a method or property that returns a promise rejects it with what it
+    /// throws, rather than throwing: the `capture_async_api_throws` compatibility flag, which
+    /// C++ JSG reads the same way (`jsg::getCaptureThrowsAsRejections`).
+    #[expect(unsafe_code, reason = "asks JSG about the locked isolate")]
+    pub fn captures_throws_as_rejections(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_captures_throws_as_rejections(self.as_ffi()) }
+    }
 }
 
 impl std::ops::Deref for Lock<'_> {

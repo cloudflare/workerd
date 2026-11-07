@@ -11,6 +11,7 @@
 #include "v8-platform-wrapper.h"
 
 #include <workerd/jsg/code-cache.h>
+#include <workerd/jsg/compilation.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
@@ -173,6 +174,16 @@ class IsolateBase {
   }
   kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
     return codeCache;
+  }
+
+  // Enables recording function positions for bundle ES modules compiled in this isolate.
+  // Call once before compiling the Worker's modules. Production bypasses all bytecode caches.
+  void enableCompileHints() {
+    KJ_REQUIRE(compileHints == kj::none, "compile hint collection already enabled");
+    compileHints.emplace();
+  }
+  kj::Maybe<IsolateCompileHints&> tryGetCompileHints() KJ_LIFETIMEBOUND {
+    return compileHints;
   }
 
   // Requests an extra microtask checkpoint after the current one completes.
@@ -630,6 +641,7 @@ class IsolateBase {
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
   kj::Maybe<IsolateCodeCache> codeCache;
+  kj::Maybe<IsolateCompileHints> compileHints;
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at

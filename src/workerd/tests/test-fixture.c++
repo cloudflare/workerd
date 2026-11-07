@@ -350,10 +350,8 @@ kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
 
 using api::pyodide::PythonConfig;
 
-const PythonConfig defaultPythonConfig{.packageDiskCacheRoot = kj::none,
-  .pyodideDiskCacheRoot = kj::none,
-  .createSnapshot = false,
-  .createBaselineSnapshot = false};
+const PythonConfig defaultPythonConfig{
+  .packageDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false};
 
 TestFixture::TestFixture(SetupParams&& params)
     : waitScope(params.waitScope),
@@ -385,7 +383,10 @@ TestFixture::TestFixture(SetupParams&& params)
           isolateGroup,
           kj::mv(params.jsgIsolateObserver).orDefault(kj::atomicRefcounted<JsgIsolateObserver>()),
           *memoryCacheProvider,
-          defaultPythonConfig)),
+          defaultPythonConfig,
+          /*inboundListeners=*/nullptr,
+          /*snapshotConfig=*/kj::none,
+          params.embedderBootstrap)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::mv(params.isolateObserver).orDefault(kj::atomicRefcounted<IsolateObserver>()),
@@ -401,7 +402,6 @@ TestFixture::TestFixture(SetupParams&& params)
               params.featureFlags.orDefault(CompatibilityFlags::Reader()),
               *errorReporter),
           IsolateObserver::StartType::COLD,
-          false,
           kj::none,
           kj::none,
           SpanParent(nullptr),

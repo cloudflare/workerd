@@ -28,8 +28,9 @@
 //! On destruction, `wrappable_invoke_drop` reconstructs the `Rc` via `Rc::from_raw` and
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
-//! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! drop, under the isolate lock, `wrappable_remove_strong_ref()` releases its strong reference,
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount; without the lock, its isolate's
+//! [`IsolateState`] queues both until the next lock. A function created by
 //! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
 //! function's V8 data.
 
@@ -117,6 +118,13 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
+    /// A JavaScript error class or a `DOMException` name. A `jsg::Error` holds a
+    /// `jsg::ErrorName`, which can also be a `DOMException` with a name that is not here, so a
+    /// variant is only worth adding for a name Rust code throws often. One must also be added to
+    /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
+    /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
+    /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is
+    /// not a compile error.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum ExceptionType {
         OperationError,
@@ -586,7 +594,7 @@ pub mod ffi {
 
         pub unsafe fn wrappable_to_rc(wrappable: Pin<&mut Wrappable>) -> KjRc<Wrappable>;
         pub unsafe fn wrappable_add_strong_ref(wrappable: Pin<&mut Wrappable>);
-        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>, is_strong: bool);
+        pub unsafe fn wrappable_remove_strong_ref(wrappable: Pin<&mut Wrappable>);
         pub unsafe fn wrappable_visit_ref(
             wrappable: Pin<&mut Wrappable>,
             ref_parent: *mut usize,
@@ -696,6 +704,18 @@ pub mod ffi {
             preserve_stack_in_errors: bool,
         ) -> Result<MaybeLocal>;
 
+        // JSON
+        // Leave what parsing and stringifying throw pending; see `call_into_js()`.
+        // Infallible: JSON::Parse reports what it throws in its result.
+        pub unsafe fn value_json_parse(isolate: *mut Isolate, text: &Local) -> MaybeLocal;
+        // Fallible: the result is a rust::String.
+        pub unsafe fn local_json_stringify(
+            isolate: *mut Isolate,
+            value: &Local,
+            gap: &Local,
+            result: &mut String,
+        ) -> Result<bool>;
+
         // Errors
         // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
         pub unsafe fn exception_create_from_bytes(
@@ -742,6 +762,7 @@ pub mod ffi {
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
             isolate: *mut Isolate,
         ) -> Local;
@@ -855,6 +876,12 @@ pub mod ffi {
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
         pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.dispose]`.
+        pub dispose: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.asyncDispose]`.
+        pub async_dispose: KjMaybe<usize>,
+        /// The `v8::FunctionCallback` that runs when an instance is called as a function.
+        pub callable: KjMaybe<usize>,
     }
 
     // Resources
@@ -882,7 +909,6 @@ pub mod ffi {
         pub unsafe fn wrappable_attach_opaque_wrapper(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
-            needs_gc_tracing: bool,
         ) -> Result<MaybeLocal>;
         // Infallible: returns kj::none for anything but the opaque wrapper of a Rust Wrappable.
         pub unsafe fn wrappable_try_unwrap_opaque(
@@ -965,7 +991,15 @@ pub mod ffi {
 
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match *self {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ffi::ExceptionType {
+    /// The name of the error class or `DOMException` this type stands for.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
             Self::OperationError => "OperationError",
             Self::DataError => "DataError",
             Self::DataCloneError => "DataCloneError",
@@ -982,12 +1016,9 @@ impl std::fmt::Display for ffi::ExceptionType {
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
             _ => "Error",
-        };
-        write!(f, "{name}")
+        }
     }
-}
 
-impl ffi::ExceptionType {
     /// Whether an error of this type is thrown as a `DOMException` with this name, rather than
     /// as a JavaScript error class.
     ///
@@ -1946,10 +1977,6 @@ impl Eq for Local<'_, String> {}
 struct FunctionData<T>(T);
 
 impl<T: Traced> Traced for FunctionData<T> {
-    fn holds_gc_references() -> bool {
-        T::holds_gc_references()
-    }
-
     fn trace(&self, visitor: &mut GcVisitor) {
         self.0.trace(visitor);
     }
@@ -2034,7 +2061,7 @@ impl Function {
         let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
         // the functions own it, so the reference is dropped and the garbage collector decides.
-        wrappable.remove_strong_ref(true);
+        wrappable.remove_strong_ref();
         functions
     }
 
@@ -4784,8 +4811,9 @@ impl GcVisitor {
     /// isolate. A visit has no isolate when its resource has neither been
     /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
     /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
-    /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
-    /// The visit then touches the handles only if this thread holds the lock, and otherwise
+    /// makes that reference under the lock of the isolate the resource is created in, which
+    /// need not be the `TracedGlobal`'s isolate. The visit then touches the handles only if
+    /// this thread holds the `TracedGlobal`'s isolate lock, and otherwise
     /// leaves them as they are: a weak handle stays weak until a later visit under the lock,
     /// so its value can die meanwhile, after which `TracedGlobal::as_local` panics.
     ///
@@ -4834,7 +4862,7 @@ impl GcVisitor {
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
         if visiting.is_null() {
             // Not a GC visit, but the one for a resource's first strong reference, which
-            // `jsg::Rc::new` makes without a `Lock`.
+            // `jsg::Rc::new` makes under the lock of the resource's isolate.
             if !global.state.this_thread_holds_lock() {
                 return;
             }
@@ -5144,17 +5172,14 @@ impl WrappableRc {
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }
 
-    /// Decrements the strong reference count and potentially defers destruction.
+    /// Decrements the strong reference count on the underlying Wrappable, which releases its
+    /// strong wrapper handle, or weakens the references it holds, when the count reaches zero.
     ///
-    /// Called when a `Rc<R>` is dropped. Calls `maybeDeferDestruction` on
-    /// the C++ side with the ref's current `strong` flag. If `is_strong` is
-    /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
-    /// was already weakened by GC tracing), it skips the decrement.
-    // The bool maps directly to the C++ FFI parameter; an enum would just
-    // convert back to bool immediately before crossing the boundary.
-    pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
+    /// Called when an `Rc<R>` that counts as strong is released. The caller must hold the
+    /// Wrappable's isolate lock, which [`IsolateState::release`] ensures for an `Rc`.
+    pub(crate) fn remove_strong_ref(&mut self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
-        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };
+        unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut()) };
     }
 
     /// Returns the current strong reference count from the C++ Wrappable.
@@ -5177,7 +5202,7 @@ impl WrappableRc {
         callbacks: [crate::RawFunctionCallback; N],
     ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
-        let data = self.attach_opaque_wrapper(lock, true)?;
+        let data = self.attach_opaque_wrapper(lock)?;
         let mut functions = Vec::with_capacity(N);
         for callback in callbacks {
             // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
@@ -5202,33 +5227,28 @@ impl WrappableRc {
     /// While an exception or a termination is pending, creates nothing and returns
     /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does: the shim checks before
     /// creating the wrapper, which would clear the exception.
-    // The bool maps directly to the C++ parameter, as in `remove_strong_ref`.
     pub(crate) fn attach_opaque_wrapper<'s>(
         &self,
         lock: &Lock<'s>,
-        needs_gc_tracing: bool,
     ) -> crate::Result<Local<'s, Value>> {
         let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
         // (guaranteed by Lock); a non-empty result is a handle in the lock's scope.
         unsafe {
             Local::from_ffi_maybe(
-                ffi::wrappable_attach_opaque_wrapper(
-                    isolate,
-                    self.handle.clone(),
-                    needs_gc_tracing,
-                )
-                .map_err(|exception| {
-                    // `jsg::check` throws when creating the wrapper leaves an exception
-                    // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
-                    if ffi::isolate_has_pending_exception(isolate)
-                        || ffi::isolate_is_execution_terminating(isolate)
-                    {
-                        Error::pending()
-                    } else {
-                        Error::from(exception)
-                    }
-                })?,
+                ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()).map_err(
+                    |exception| {
+                        // `jsg::check` throws when creating the wrapper leaves an exception
+                        // pending; anything else, such as a failed `KJ_REQUIRE`, is passed on.
+                        if ffi::isolate_has_pending_exception(isolate)
+                            || ffi::isolate_is_execution_terminating(isolate)
+                        {
+                            Error::pending()
+                        } else {
+                            Error::from(exception)
+                        }
+                    },
+                )?,
             )
         }
         .ok_or_else(Error::pending)

@@ -32,7 +32,8 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `ser.h`           | Structured clone: `Serializer`/`Deserializer`                                                                                                                                                                                                                             |
 | `web-idl.h`       | Web IDL types: `NonCoercible<T>`, `Sequence`, etc.                                                                                                                                                                                                                        |
 | `observer.h`      | `IsolateObserver`, `CompilationObserver` — hooks for metrics/tracing                                                                                                                                                                                                      |
-| `code-cache.h`    | `CodeCacheStore` (embedder-provided, process-wide V8 code caches for worker code, keyed by source SHA-256) and `IsolateCodeCache` (per-isolate use: prepared lookups, production window; holds pending V8 globals that must be released under the isolate lock)           |
+| `compilation.h`   | Common JS compilation boundary: cache selection, isolate-local compile hint sessions, module-definition fallback slots, and V8 operations for ESM, scripts and CommonJS                                                                                                                         |
+| `code-cache.h`    | `CodeCacheStore` (process-wide JS bytecode keyed by source and shape) and `IsolateCodeCache` (callback-based compilation, prepared lookups and startup production; pending V8 globals require the isolate lock)                                                           |
 
 ## BINDING PATTERN
 

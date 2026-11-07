@@ -5,10 +5,13 @@
 #include "per-isolate-bootstrap.h"
 
 #include <workerd/api/abort-bootstrap.h>
+#include <workerd/api/bootstrap-utils.h>
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
+#include <workerd/api/encoding.h>
 #include <workerd/api/event-target-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/request-io.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -86,12 +89,21 @@ struct BootstrapState {
   // Scripts is a const reference to the process-wide script lookup table built
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
   const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
+  // The embedder's scripts, which the caller of runPerIsolateBootstrap() keeps alive for the
+  // lifetime of the context.
+  kj::Maybe<const EmbedderBootstrap&> embedder;
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
+  // Functions found by tryGetBootstrapFunction(), by module specifier, then name.
+  kj::HashMap<kj::String, kj::HashMap<kj::String, jsg::JsRef<jsg::JsFunction>>> functionCache;
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsObject> autogatesObj;
   jsg::JsRef<jsg::JsObject> utilsObj;
+  // The require() injected into workerd's scripts, which resolves only workerd's scripts.
   jsg::JsRef<jsg::JsFunction> requireFn;
+  // The require() injected into the embedder's scripts, which also resolves the embedder's. Set
+  // when there is an embedder.
+  kj::Maybe<jsg::JsRef<jsg::JsFunction>> embedderRequireFn;
   // The primordials object, loaded before main and injected as a pseudo-global
   // into every script. Provides prototype-pollution-safe references to built-in
   // methods and constructors.
@@ -253,8 +265,9 @@ static void CreateTrustedMessageEvent(const v8::FunctionCallbackInfo<v8::Value>&
     auto& js = jsg::Lock::from(args.GetIsolate());
     js.withinHandleScope([&] {
       args.GetReturnValue().Set(
-          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(
-              js, jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]))));
+          v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedMessageEvent(js,
+              jsg::JsValue(args[0]), jsg::JsValue(args[1]), jsg::JsValue(args[2]),
+              jsg::JsValue(args[3]), jsg::JsValue(args[4]))));
     });
   });
 }
@@ -264,6 +277,59 @@ static void CreateTrustedEvent(const v8::FunctionCallbackInfo<v8::Value>& args) 
     auto& js = jsg::Lock::from(args.GetIsolate());
     return v8::Local<v8::Value>(
         api::EventTargetBootstrap::createTrustedEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void CreateTrustedOpenEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::EventTargetBootstrap::createTrustedOpenEvent(js));
+  });
+}
+
+static void CreateTrustedErrorEvent(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::EventTargetBootstrap::createTrustedErrorEvent(js, jsg::JsValue(args[0])));
+  });
+}
+
+// The request-bound I/O handle (see request-io.h) and the helpers of bootstrap-utils.h. Plain
+// methods: they allocate and can throw.
+static void CreateRequestIo(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::RequestIo::createForBootstrap(js));
+  });
+}
+
+static void IsFetcher(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.boolean(api::BootstrapUtils::isFetcher(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ParseUrl(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::parseUrl(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void MimeTypeEssence(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(api::BootstrapUtils::mimeTypeEssence(js, jsg::JsValue(args[0])));
+  });
+}
+
+static void ReadableStreamState(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return v8::Local<v8::Value>(
+        api::BootstrapUtils::readableStreamState(js, jsg::JsValue(args[0])));
   });
 }
 
@@ -314,30 +380,32 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
-static void SetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// TextEncoder.encode() for the TypeScript TextEncoderStream: see api::encodeUtf8Chunk.
+static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    // Argument 0 is an object.
-    // Argument 1 is a string label that is to be used to create a v8::Private
-    // Argument 2 is a value for that v8::Private
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
     auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto lbl = jsg::JsString(args[1].As<v8::String>());
-    auto val = jsg::JsValue(args[2]);
-    obj.setPrivate(js, lbl, jsg::JsValue(val));
-    return js.undefined();
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "encodeUtf8() expects a string");
+    return api::encodeUtf8Chunk(js, str);
   });
 }
 
-static void GetPrivate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+// The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
+// scripts use as a property key: `object[key]` reads or writes the slot that
+// jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
+// (v8::Object::GetPrivate() is that same property read). A private key is never inherited,
+// reflected or seen by Proxy traps, and only code holding the key can name it. The API does
+// not type a private symbol as a v8::Value, so it is handed over as a template property, as
+// Node.js hands over its own.
+static void GetPrivateSymbol(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
-    JSG_REQUIRE(args[0]->IsObject(), TypeError, "Object expected");
-    JSG_REQUIRE(args[1]->IsString(), TypeError, "String expected");
     auto& js = jsg::Lock::from(args.GetIsolate());
-    auto obj = jsg::JsObject(args[0].As<v8::Object>());
-    auto label = jsg::JsString(args[1].As<v8::String>());
-    return obj.getPrivate(js, label);
+    auto name = JSG_REQUIRE_NONNULL(jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError,
+        "getPrivateSymbol() expects a string argument");
+    v8::Local<v8::String> slot = js.strIntern("key"_kj);
+    auto holder = v8::ObjectTemplate::New(js.v8Isolate);
+    holder->Set(slot, v8::Private::ForApi(js.v8Isolate, name));
+    return jsg::check(jsg::check(holder->NewInstance(js.v8Context()))->Get(js.v8Context(), slot));
   });
 }
 
@@ -392,8 +460,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
-    "setPrivate",
-    "getPrivate",
+    "encodeUtf8",
+    "getPrivateSymbol",
     "setListenerCountHook",
     "getEventHandlerAttribute",
     "setEventHandlerAttribute",
@@ -402,6 +470,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createTrustedEvent",
     "cloneMessageData",
     "queueReaction",
+    "createTrustedOpenEvent",
+    "createTrustedErrorEvent",
+    "createRequestIo",
+    "isFetcher",
+    "parseUrl",
+    "mimeTypeEssence",
+    "readableStreamState",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -416,8 +491,8 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
-    getMethod(js, SetPrivate),
-    getMethod(js, GetPrivate),
+    getMethod(js, EncodeUtf8),
+    getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),
     getMethod(js, SetEventHandlerAttribute),
@@ -426,6 +501,13 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateTrustedEvent),
     getMethod(js, CloneMessageData),
     getMethod(js, QueueReaction),
+    getMethod(js, CreateTrustedOpenEvent),
+    getMethod(js, CreateTrustedErrorEvent),
+    getMethod(js, CreateRequestIo),
+    getMethod(js, IsFetcher),
+    getMethod(js, ParseUrl),
+    getMethod(js, MimeTypeEssence),
+    getMethod(js, ReadableStreamState),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -458,7 +540,7 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
     BootstrapState& state,
     const jsg::JsObject& moduleObj,
     const jsg::JsObject& exportsObj,
-    bool includeRequire) {
+    kj::Maybe<jsg::JsFunction> require) {
   v8::LocalVector<v8::Value> values(js.v8Isolate,
       {
         js.v8Undefined(),  // require
@@ -471,8 +553,8 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
       });
   KJ_ASSERT(values.size() == PSEUDO_GLOBAL_COUNT);
 
-  if (includeRequire) {
-    values[0] = v8::Local<v8::Value>(state.requireFn.getHandle(js));
+  KJ_IF_SOME(fn, require) {
+    values[0] = v8::Local<v8::Value>(fn);
   }
   KJ_IF_SOME(primordials, state.primordials) {
     values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
@@ -495,8 +577,11 @@ kj::StringPtr normalizeSpecifier(kj::StringPtr specifier) {
   return specifier;
 }
 
-// The V8 callback backing the require() function injected into bootstrap scripts.
-void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+// Which scripts a require() function resolves: workerd's only, or the embedder's as well.
+enum class RequireScope { WORKERD, EMBEDDER };
+
+// The implementation of both require() functions injected into bootstrap scripts.
+void requireImpl(const v8::FunctionCallbackInfo<v8::Value>& info, RequireScope scope) {
   jsg::liftKj(info.GetIsolate(), [&] {
     auto& js = jsg::Lock::from(info.GetIsolate());
     auto& state = getBootstrapState(js);
@@ -506,6 +591,14 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
       auto specifierUtf8 = jsg::JsValue(info[0]).toString(js);
       auto normalized = normalizeSpecifier(specifierUtf8);
+
+      // workerd's scripts cannot see the embedder's, even once they are cached.
+      bool isEmbedderScript = false;
+      KJ_IF_SOME(embedder, state.embedder) {
+        isEmbedderScript = embedder.isInNamespace(normalized);
+      }
+      KJ_REQUIRE(!isEmbedderScript || scope == RequireScope::EMBEDDER,
+          "per-isolate bootstrap: workerd's scripts cannot require the embedder's", normalized);
 
       // Check cache.
       KJ_IF_SOME(cached, state.cache.find(normalized)) {
@@ -517,9 +610,23 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       KJ_REQUIRE(!state.loading.contains(normalized),
           "circular dependency in per-isolate bootstrap", normalized);
 
-      // Look up script in bundle.
-      auto& script = KJ_REQUIRE_NONNULL(
-          state.scripts.find(normalized), "per-isolate bootstrap: unknown script", normalized);
+      // Look up the script in its bundle, and the require() it gets: the embedder's scripts
+      // resolve everything, workerd's only workerd's, and primordials nothing.
+      kj::Maybe<jsg::Module::Reader> maybeScript;
+      kj::Maybe<jsg::JsFunction> scriptRequire;
+      if (isEmbedderScript) {
+        maybeScript = KJ_ASSERT_NONNULL(state.embedder).tryGetScript(normalized);
+        scriptRequire = KJ_ASSERT_NONNULL(state.embedderRequireFn).getHandle(js);
+      } else {
+        KJ_IF_SOME(found, state.scripts.find(normalized)) {
+          maybeScript = found;
+        }
+        if (normalized != "primordials") {
+          scriptRequire = state.requireFn.getHandle(js);
+        }
+      }
+      auto script =
+          KJ_REQUIRE_NONNULL(maybeScript, "per-isolate bootstrap: unknown script", normalized);
 
       // Mark as loading.
       state.loading.insert(kj::str(normalized));
@@ -530,7 +637,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       auto exportsObj = js.obj();
       moduleObj.set(js, "exports"_kj, exportsObj);
 
-      auto args = pseudoGlobalValues(js, state, moduleObj, exportsObj, normalized != "primordials");
+      auto args = pseudoGlobalValues(js, state, moduleObj, exportsObj, scriptRequire);
 
       // Compile the script as a function whose parameters are the pseudo-globals, which
       // makes them available as variables in the script without putting them on globalThis.
@@ -612,6 +719,22 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   });
 }
 
+// The V8 callback backing the require() function injected into workerd's bootstrap scripts.
+void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  requireImpl(info, RequireScope::WORKERD);
+}
+
+// The V8 callback backing the require() function injected into the embedder's bootstrap scripts.
+void embedderRequireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  requireImpl(info, RequireScope::EMBEDDER);
+}
+
+jsg::JsRef<jsg::JsFunction> newRequireFunction(jsg::Lock& js, v8::FunctionCallback callback) {
+  // No v8::External needed: the callback reads the state from the context embedder slot.
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
+  return jsg::JsFunction(jsg::check(v8::Function::New(js.v8Context(), callback))).addRef(js);
+}
+
 // Build a JS object with { flagName: true } entries for enabled compat flags.
 // Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
 // which yields false for unset flags.
@@ -645,7 +768,34 @@ jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
 
 }  // namespace
 
-void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
+EmbedderBootstrap::EmbedderBootstrap(jsg::Bundle::Reader bundle, kj::StringPtr prefix)
+    : prefix(kj::str(prefix)),
+      entryPoint(kj::str(prefix, "main")) {
+  KJ_REQUIRE(prefix.size() > 1 && prefix.endsWith("/") && !prefix.startsWith("./"),
+      "embedder bootstrap prefix must be a non-empty path ending with '/'", prefix);
+  for (auto& entry: getScriptTable()) {
+    KJ_REQUIRE(!entry.key.startsWith(prefix),
+        "embedder bootstrap prefix overlaps workerd's bootstrap scripts", prefix, entry.key);
+  }
+  for (auto module: bundle.getModules()) {
+    auto name = module.getName();
+    KJ_REQUIRE(
+        name.startsWith(prefix), "embedder bootstrap script is not under its prefix", name, prefix);
+    scripts.insert(name, module);
+  }
+  KJ_REQUIRE(scripts.find(entryPoint) != kj::none,
+      "embedder bootstrap bundle is missing its entry point", entryPoint);
+}
+
+kj::Maybe<jsg::Module::Reader> EmbedderBootstrap::tryGetScript(kj::StringPtr specifier) const {
+  KJ_IF_SOME(script, scripts.find(specifier)) {
+    return script;
+  }
+  return kj::none;
+}
+
+void runPerIsolateBootstrap(
+    jsg::Lock& js, CompatibilityFlags::Reader flags, kj::Maybe<const EmbedderBootstrap&> embedder) {
   auto context = js.v8Context();
 
   // Get (or lazily build) the process-wide script lookup table.
@@ -663,7 +813,7 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // We use new instead of the idiomatic kj::heap<...>, etc because the
   // pointer is being stored in a raw form in the embedder data slot.
 
-  auto* state = new BootstrapState{.scripts = scripts};
+  auto* state = new BootstrapState{.scripts = scripts, .embedder = embedder};
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
   // Tell LSAN to ignore this allocation. The pointer is stored exclusively
   // in V8's embedder data (BOOTSTRAP_STATE slot), which LSAN can't trace.
@@ -681,11 +831,10 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   state->autogatesObj = buildAutogatesObject(js);
   state->utilsObj = createUtilsObject(js);
 
-  // Create the require() function. No v8::External needed — the callback
-  // reads state from the context embedder slot.
-  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(&requireCallback));
-  state->requireFn =
-      jsg::JsFunction(jsg::check(v8::Function::New(context, requireCallback))).addRef(js);
+  state->requireFn = newRequireFunction(js, requireCallback);
+  if (embedder != kj::none) {
+    state->embedderRequireFn = newRequireFunction(js, embedderRequireCallback);
+  }
 
   // Load primordials first — this must happen before any other script so that
   // built-in prototype methods are captured before anything could pollute them.
@@ -704,6 +853,15 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
       // Run the entry point. This synchronously executes main.js, which may
       // require() other scripts. All execution is synchronous.
       state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
+    }
+
+    KJ_IF_SOME(e, embedder) {
+      TRACE_EVENT("workerd", "PerIsolateBootstrap::embedderMain");
+      // The embedder's entry point runs once workerd's globals are installed, and before the
+      // WeakRef globals are removed, so that its scripts see the same environment as workerd's.
+      KJ_ASSERT_NONNULL(state->embedderRequireFn)
+          .getHandle(js)
+          .call(js, js.undefined(), js.strIntern(e.getEntryPoint()));
     }
 
     if (!flags.getJsWeakRef()) {
@@ -733,6 +891,30 @@ kj::Maybe<jsg::JsValue> tryGetBootstrapExport(jsg::Lock& js, kj::StringPtr speci
   // was never required, it won't be in the cache and we return none.
   KJ_IF_SOME(cached, state.cache.find(normalized)) {
     return cached.getHandle(js);
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
+    jsg::Lock& js, kj::StringPtr specifier, kj::StringPtr name) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+
+  KJ_IF_SOME(functions, state.functionCache.find(normalized)) {
+    KJ_IF_SOME(cached, functions.find(name)) {
+      return cached.getHandle(js);
+    }
+  }
+
+  KJ_IF_SOME(cached, state.cache.find(normalized)) {
+    KJ_IF_SOME(obj, cached.getHandle(js).tryCast<jsg::JsObject>()) {
+      KJ_IF_SOME(func, obj.get(js, name).tryCast<jsg::JsFunction>()) {
+        auto& functions = state.functionCache.findOrCreate(normalized,
+            [&]() -> decltype(state.functionCache)::Entry { return {kj::str(normalized), {}}; });
+        functions.insert(kj::str(name), func.addRef(js));
+        return func;
+      }
+    }
   }
   return kj::none;
 }

@@ -60,7 +60,7 @@ unsafe fn memory_cache_new(
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            let cache = jsg::Rc::new(crate::MemoryCache::new(binding.into_inner()));
+            let cache = jsg::Rc::new(lock, crate::MemoryCache::new(binding.into_inner()));
             cache.to_js(lock)
         })
     }

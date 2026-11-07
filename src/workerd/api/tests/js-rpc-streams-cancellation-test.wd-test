@@ -89,8 +89,4 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  autogates = [
-    "workerd-autogate-jsrpc-writable-drop-aborts-sink",
-    "workerd-autogate-jsrpc-readable-cancel-propagation",
-  ],
 );

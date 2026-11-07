@@ -281,8 +281,8 @@ struct OtherModule;
 #[jsg_resource]
 impl OtherModule {
     #[jsg_method]
-    fn make_fixture(&self) -> jsg::Rc<Fixture> {
-        jsg::Rc::new(Fixture::constructor(None))
+    fn make_fixture(&self, lock: &mut jsg::Lock) -> jsg::Rc<Fixture> {
+        jsg::Rc::new(lock, Fixture::constructor(None))
     }
 }
 

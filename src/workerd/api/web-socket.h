@@ -21,7 +21,8 @@
 
 namespace workerd {
 class ActorObserver;
-}
+struct NonHibernatableWebSocketCount;
+}  // namespace workerd
 
 namespace workerd::api {
 
@@ -29,74 +30,6 @@ class Blob;
 
 template <typename T>
 struct DeferredProxy;
-
-class CloseEvent: public Event {
- public:
-  // Runtime-only (the JS constructor uses the (type, ...) overload); always trusted.
-  CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close", {}, Trusted::YES),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean, Init init = {})
-      : Event(kj::mv(type), kj::mv(init)),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-
-  struct Initializer {
-    jsg::Optional<bool> bubbles;
-    jsg::Optional<bool> cancelable;
-    jsg::Optional<bool> composed;
-    jsg::Optional<int> code;
-    jsg::Optional<jsg::USVString> reason;
-    jsg::Optional<bool> wasClean;
-
-    JSG_STRUCT(bubbles, cancelable, composed, code, reason, wasClean);
-    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
-  };
-  static jsg::Ref<CloseEvent> constructor(
-      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
-    Initializer init = kj::mv(initializer).orDefault({});
-    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false),
-        Event::Init{
-          .bubbles = init.bubbles,
-          .cancelable = init.cancelable,
-          .composed = init.composed,
-        });
-  }
-
-  int getCode() {
-    return code;
-  }
-  kj::StringPtr getReason() {
-    return reason;
-  }
-  bool getWasClean() {
-    return clean;
-  }
-
-  JSG_RESOURCE_TYPE(CloseEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
-
-    JSG_TS_ROOT();
-    // CloseEvent will be referenced from the `WebSocketEventMap` define
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  int code;
-  kj::String reason;
-  bool clean;
-};
 
 WD_STRONG_BOOL(AllowHalfOpen);
 
@@ -440,8 +373,8 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocket::AcceptOptions,    \
-      api::WebSocketPair, api::WebSocketPair::PairIterator,                                        \
+  api::WebSocket, api::WebSocket::AcceptOptions, api::WebSocketPair,                               \
+      api::WebSocketPair::PairIterator,                                                            \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
@@ -757,6 +690,10 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
     kj::Promise<void> whenAbortedTask = nullptr;
 
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
+
+    // Set when this WebSocket counts toward its actor's limit on non-hibernatable WebSockets. The
+    // destructor gives the count back.
+    kj::Maybe<kj::Rc<NonHibernatableWebSocketCount>> nonHibernatableWebSocketCount;
 
    private:
     // Cancels the operations started with wrapIo() when leaving the Accepted state.

@@ -115,6 +115,79 @@ struct ClusterConfig {
   # All instances in the cluster MUST have identical configuration: any instance may forward any
   # request to any other and it must produce the same result. During a rolling upgrade, instances
   # may differ in backwards-compatible ways.
+  #
+  # The bucket can also hold named deployments. Each deployment is an encoded `Config` that contains
+  # only services. A catalog record in the bucket selects the current version of every deployment.
+  #
+  # Each workerd process is one cluster instance. Each instance reads the catalog at startup and
+  # serves accepted deployments beside the services in its own config. It considers deployments
+  # in catalog order and skips a deployment as a whole when it breaks any of these rules, alone
+  # or against the instance's config or a deployment accepted before it. Instances with the same
+  # config and catalog skip the same deployments:
+  #
+  # - Service names must be unique across the instance's config and every deployment.
+  # - Actor namespace keys must also be unique. These keys are Durable Object `uniqueKey` values
+  #   and Workflow namespace keys. Each Durable Object `uniqueKey` must be one path component.
+  # - Every `Text` value must be valid UTF-8.
+  # - A deployment cannot define a `disk` service or a service named `internet`. It can refer to a
+  #   disk service in the instance's config by name.
+  # - A deployment cannot have `fromEnvironment` bindings, so it cannot read the instance's
+  #   environment variables.
+  #
+  # An instance also skips a deployment whose objects are missing, invalid, or larger than its
+  # bucket client can read. A catalog entry whose name is not a valid deployment name is unreadable
+  # and skipped in the same way.
+  #
+  # An error in a deployment's service, such as a worker that throws while loading, is logged with
+  # the deployment's name and does not stop the instance. The broken service fails requests and
+  # actor construction. Warnings from deployment services are also attributed to their
+  # deployments.
+  #
+  # A reference in the instance's own config to a service that neither that config nor a
+  # deployment that was read defines is treated as a deployment reference. It is logged,
+  # naming any unreadable deployments, and fails its requests without stopping the instance.
+  # A reference to a skipped deployment's service fails in the same way. When a deployment's
+  # service cannot satisfy a reference, the deployment's error names the referring service or
+  # socket.
+  #
+  # A tail whose service is missing or cannot handle requests is not started; the request it would
+  # tail proceeds. A broken deployment service's Durable Object namespace fails requests before
+  # the instance claims an object in the bucket and does not adopt dead peers' alarms.
+  #
+  # `--external-addr` and `--directory-path` overrides apply only to services in the instance's
+  # own config. An override that names only a deployment's service is unmatched and is an error in
+  # the instance's config.
+  #
+  # Only a failure to open the bucket or to reach or read its catalog ends the process. Run each
+  # instance under a supervisor that restarts it.
+  #
+  # `src/workerd/server/cluster/deploy.rs` documents the bucket layout for tools that write
+  # deployments.
+  #
+  # `workerd deploy` publishes a wrangler project or a Cap'n Proto config:
+  #
+  #     workerd deploy --experimental [<project>] --bucket s3://bucket/prefix
+  #
+  # See `workerd deploy --help` for details. A wrangler project's worker becomes a service named
+  # after the deployment. Its Durable Objects use the disk service named `do-storage`. Every
+  # instance that serves the project with Durable Objects must define this service in its own
+  # config.
+  #
+  # For a wrangler project, each Durable Object class gets the `uniqueKey` `<name>-<key>`. Here,
+  # `<name>` is the deployment name. `<key>` is the class's storage key from the project's
+  # migrations. The storage key defaults to the class name and stays the same after a rename.
+  # Deploying the project under another name creates separate Durable Objects. They start empty.
+  # A Cap'n Proto deployment's Durable Object `uniqueKey`s and every Workflow namespace key are
+  # used as written.
+  #
+  # An instance reads the catalog only at startup. Restart it to serve a published catalog
+  # revision. `workerd deploy` checks a deployment against the catalog's other deployments. It
+  # does not read any instance config.
+  #
+  # A deployment has the authority granted by each instance's config. Its services can reach the
+  # instance's network, container engine, and named services. Anyone who can publish deployments
+  # can run code with that authority on every instance. Restricting a writer to the deployment area
+  # of the bucket does not reduce that authority.
 
   bucket @0 :Text;
   # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
@@ -139,8 +212,9 @@ struct ClusterConfig {
   advertise @4 :Text;
   # The address other instances reach this one at, which goes in its lease record in the bucket.
   # Optional: by default, the address bound, with the port it got. Required when that is a
-  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). Overridden by
-  # `--cluster-advertise`. A public IP is refused unless `unsafePublicAddress` is set.
+  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). A port of 0 is the
+  # port bound. Overridden by `--cluster-advertise`. A public IP is refused unless
+  # `unsafePublicAddress` is set.
 
   key @3 :Text;
   # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
@@ -156,6 +230,48 @@ struct ClusterConfig {
   # Allow a public IP as `address` or `advertise`. Refused by default, since traffic between
   # instances is not encrypted. Private, loopback, link-local and shared (100.64.0.0/10, as
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
+
+  stopTimeoutMs @6 :UInt32 = 8000;
+  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
+  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
+  # while it keeps serving the rest: each object takes no new requests but those that the work of
+  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
+  # its requests in flight finish, and it is released for the next request anywhere to claim.
+  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
+  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
+  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
+  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
+  # stops its containers' Docker containers.
+  #
+  # The time is spent in order: until half of it, requests in flight on an object being handed off
+  # may finish, and are then cancelled, failing as requests that may have run, which are not sent
+  # again; at three quarters, the handoff ends, and an object not yet released is stopped if it
+  # still runs, and taken over by a peer once the instance has left; at nine tenths, the instance
+  # stops waiting for its connections, whose requests end as it exits; the rest is for the
+  # containers. A call that reaches an object being handed off through a stateless worker, rather
+  # than from a Durable Object, waits like any other request, so a call from the object back to
+  # itself that way ends only with the requests in flight. Stopping an object's Docker container
+  # takes one of the few handoffs that run at once.
+  #
+  # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
+  # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
+  # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
+  # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut
+  # short. An instance with very many objects may not stop them all by 33/40 of the timeout: it
+  # then stays a member, and its peers take over every object it did not hand off once its lease
+  # expires, after it exited, as they do when the supervisor kills it first.
+  #
+  # A `fetch()` to an object that moves is sent on transparently. A JS RPC call that a peer sent
+  # through a stub to the stopping instance may fail once, as retryable; the stub's next call finds
+  # the object. WebSockets an object here accepted close as it is handed off. An alarm that comes
+  # due on a stopping instance runs where its object goes: when a request claims the object there,
+  # or else once a peer adopts the alarms of the instance that left, within five seconds of its
+  # leaving, so up to one stop and five seconds late; for an instance that stays a member with
+  # objects still running, once its lease expires, up to 20 seconds later still.
+  #
+  # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
+  # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
 }
 
 struct LoggingOptions {
@@ -287,12 +403,26 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    bucket @6 :ClusterBucket;
+    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
   #   be a list of Worker names, where each Worker must have a binding called `next`. This
   #   implicitly creates an inherited worker that wraps this service, with the `next` binding
   #   pointing to the service itself (or to the next middleware in the stack).
+}
+
+struct ClusterBucket {
+  # GET, PUT and DELETE on `/<file>` read, write and remove the object
+  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
+  # that every instance sees the same files. The cluster keeps its own state outside
+  # `services/`, where this service cannot reach it. A binding to this service grants only its
+  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 }
 
 struct ServiceDesignator {
@@ -437,6 +567,11 @@ struct Worker {
 
       obsoletePythonRequirement @9 :Text;
       # This position used to be the pythonRequirement type that has now been deprecated.
+
+      bundled @11 :Text;
+      # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
+      # Worker (see its header for the bindings it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);
@@ -544,7 +679,7 @@ struct Worker {
       # Takes the value of an environment variable from the system. The value specified here is
       # the name of a system environment variable. The value of the binding is obtained by invoking
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
-      # `null`.
+      # `null`. A deployment in a cluster's bucket cannot have this binding. See `ClusterConfig`.
 
       analyticsEngine @17 :ServiceDesignator;
       # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.

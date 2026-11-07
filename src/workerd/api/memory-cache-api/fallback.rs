@@ -167,7 +167,7 @@ struct FillSpans {
 /// its spans. It holds no JavaScript values, so sharing it is sound.
 struct SharedFill(Rc<Fill>);
 
-impl jsg::Traced for SharedFill {}
+jsg::jsg_traced!(SharedFill);
 
 impl Fill {
     /// Gives the request `permit`, so that it is dropped with the request: a fallback that never

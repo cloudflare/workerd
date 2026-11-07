@@ -117,14 +117,20 @@ jsg::Ref<DOMException> DOMException::deserialize(
 }
 
 v8::MaybeLocal<v8::Object> newDOMException(
-    v8::Isolate* isolate, kj::StringPtr name, v8::Local<v8::String> message) {
+    v8::Isolate* isolate, kj::ArrayPtr<const char> name, v8::Local<v8::String> message) {
+  // A missing context is a bug in the caller: fail loudly in debug builds, and in release builds
+  // throw an internal error rather than crash.
+  KJ_DASSERT(isolate->InContext(), "creating a DOMException requires an entered context");
+  // Creating a DOMException enters V8 with the context (DefineProperty, CaptureStackTrace), which
+  // would clear a pending termination and let the script run on.
+  if (isolate->IsExecutionTerminating() || isolate->HasPendingException()) return {};
   try {
     KJ_REQUIRE(isolate->InContext(), "creating a DOMException requires an entered context");
     auto& js = Lock::from(isolate);
     auto exception = js.domException(kj::str(name), kj::str(message));
     return KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
   } catch (JsExceptionThrown&) {
-    // Creating the DOMException threw, most likely because execution is terminating; that
+    // Creating the DOMException threw, for instance because the stack is exhausted; that
     // exception stays pending.
     return {};
   } catch (...) {

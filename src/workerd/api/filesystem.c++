@@ -2057,12 +2057,14 @@ FileFdHandle::~FileFdHandle() noexcept {
       }
     }
 
-    // If we have an active IoContext, then we'll go ahead and log a warning.
+    // If we have an active IoContext, then we'll go ahead and log a warning. Logged later: this
+    // destructor runs inside a GC callback, where logging is not allowed to touch V8.
     KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-      ioContext.logWarning("A FileHandle was destroyed without being closed. This is "
-                           "not recommended and may lead to file descriptors being held "
-                           "far longer than necessary. Please make sure to explicitly close "
-                           "the FileHandle object explicitly before it is destroyed."_kj);
+      ioContext.logWarningLater(
+          kj::str("A FileHandle was destroyed without being closed. This is "
+                  "not recommended and may lead to file descriptors being held "
+                  "far longer than necessary. Please make sure to explicitly close "
+                  "the FileHandle object explicitly before it is destroyed."));
     }
   }
 }

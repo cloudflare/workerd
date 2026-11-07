@@ -50,8 +50,8 @@ wd_rust_crate(
     ],
     proc_macro_deps = ["//src/rust/jsg-macros"],
     # The crate has hundreds of subtests and uses RUST_TEST_THREADS=1 (serial),
-    # so the default "medium" (15s) timeout is too tight under CI load.
-    test_size = "large",
+    # so in debug builds it runs close to the "large" (60s) timeout.
+    test_size = "enormous",
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",

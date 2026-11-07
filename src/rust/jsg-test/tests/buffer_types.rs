@@ -307,7 +307,7 @@ fn array_buffer_from_js_rejects_typed_array() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let res = jsg::Rc::new(AbResource);
+        let res = jsg::Rc::new(lock, AbResource);
         ctx.set_global(lock, "r", res);
 
         assert_eq!(
@@ -554,7 +554,7 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
 
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let res = jsg::Rc::new(ViewResource);
+        let res = jsg::Rc::new(lock, ViewResource);
         ctx.set_global(lock, "r", res);
 
         assert_eq!(

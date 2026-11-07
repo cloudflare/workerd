@@ -62,7 +62,8 @@ const {
   WeakRefPrototypeDeref,
 } = primordials;
 
-const { cloneMessageData, getApiSymbol, queueReaction, setPrivate } = utils;
+const { cloneMessageData, getApiSymbol, getPrivateSymbol, queueReaction } =
+  utils;
 
 const {
   EventTarget,
@@ -86,6 +87,9 @@ const kBadOptions =
 const kBadTransfer =
   "Incorrect type for the 'transfer' field on 'PostMessageOptions': the " +
   "provided value is not of type 'Array'.";
+
+// The brand C++ recognizes ports by (messageevent::MessagePort::BRAND).
+const kMessagePortBrand = getPrivateSymbol('workerd:MessagePort');
 
 // Lets MessageChannel construct the ports that `new MessagePort()` refuses.
 const kConstructPort: symbol = Symbol('kConstructPort');
@@ -153,8 +157,7 @@ class MessagePort extends EventTarget {
   constructor(token?: symbol) {
     if (token !== kConstructPort) throw new TypeError('Illegal constructor');
     super();
-    // The brand C++ recognizes ports by (messageevent::MessagePort::BRAND).
-    setPrivate(this, 'workerd:MessagePort', true);
+    (this as unknown as Record<symbol, unknown>)[kMessagePortBrand] = true;
     setListenerCountHook(this, 'message', (_type, count) => {
       this.#listenerCountChanged(count);
     });

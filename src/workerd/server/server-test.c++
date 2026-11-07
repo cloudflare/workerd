@@ -412,8 +412,20 @@ class Server: public kj::PtrTarget {
   void setDefaultCompatibilityDate(kj::String date) {
     options->defaultCompatibilityDate = kj::mv(date);
   }
+  void setTestCompatibilityDateOverride(kj::String date) {
+    options->testCompatibilityDateOverride = kj::mv(date);
+  }
   void enableDebugPort(kj::String addr) {
     debugPort = kj::str("loopback:", addr);
+  }
+  // Marks `service` in the config as defined by cluster deployment `deployment`, as
+  // `workerd serve` composes deployments into the config.
+  void addDeploymentService(kj::StringPtr deployment, kj::StringPtr service) {
+    deploymentServices.add(kj::str(deployment), kj::str(service));
+  }
+  // Marks absent `service` as defined by skipped deployment `deployment`.
+  void addSkippedDeploymentService(kj::StringPtr deployment, kj::StringPtr service) {
+    skippedDeploymentServices.add(kj::str(deployment), kj::str(service));
   }
 
   kj::Promise<void> run(jsg::V8System& v8System,
@@ -494,6 +506,8 @@ class Server: public kj::PtrTarget {
   kj::String debugPort;
   kj::Function<void(kj::String)> reportConfigError;
   kj::Function<void(kj::String)> reportConfigWarning;
+  kj::Vector<std::pair<kj::String, kj::String>> deploymentServices;
+  kj::Vector<std::pair<kj::String, kj::String>> skippedDeploymentServices;
   kj::Maybe<::rust::Box<InProcessServer>> server;
 
   InProcessServer& get() {
@@ -508,7 +522,16 @@ class Server: public kj::PtrTarget {
         fs, kj::mv(options),
         kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
             .as<kj_rs::RustCopy>());
-    return *server.emplace(new_in_process_server(kj::mv(factory)));
+    auto& started = *server.emplace(new_in_process_server(kj::mv(factory)));
+    for (auto& [deployment, service]: deploymentServices) {
+      started.add_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
+          service.asPtr().as<kj_rs::RustUncheckedUtf8>());
+    }
+    for (auto& [deployment, service]: skippedDeploymentServices) {
+      started.add_skipped_deployment_service(deployment.asPtr().as<kj_rs::RustUncheckedUtf8>(),
+          service.asPtr().as<kj_rs::RustUncheckedUtf8>());
+    }
+    return started;
   }
 
   // Hands the config errors and warnings to the test as the server reports them.
@@ -589,6 +612,14 @@ class TestServer final: private kj::EntropySource {
     KJ_EXPECT(!task.poll(ws));
     KJ_EXPECT(expectedWarnings == nullptr, "some expected warnings weren't seen");
     runTask = kj::mv(task);
+  }
+
+  // Call instead of `start()` when deployment errors are expected to leave the server serving.
+  // The parameter is the expected list of error messages, one per line.
+  void startWithErrors(kj::StringPtr expected) {
+    expectedErrors = expected;
+    start();
+    KJ_EXPECT(expectedErrors == nullptr, "some expected errors weren't seen");
   }
 
   // Call instead of `start()` when the config is expected to produce errors. The parameter is
@@ -1031,6 +1062,27 @@ KJ_TEST("Server: serve Service Worker using the new module registry") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/service-worker", "NMR: http://foo/service-worker");
+}
+
+KJ_TEST("Server: module registry enabled by date starts without experimental mode") {
+  TestServer test(singleWorker(R"((
+    modules = [
+      ( name = "worker",
+        esModule =
+          `import message from "./message.js";
+          `export default {
+          `  fetch() { return new Response(message + ":" + import.meta.main); }
+          `}
+      ),
+      ( name = "message.js", esModule = "export default 'date-default';" )
+    ]
+  ))"_kj));
+
+  test.server.setTestCompatibilityDateOverride(kj::str("2026-11-17"));
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "date-default:true");
 }
 
 // Note: Python workers ignore the new_module_registry flag entirely — they
@@ -3913,6 +3965,133 @@ KJ_TEST("Server: a failed onHibernate retirement leaves the replacement actor in
   test.connect("test-addr").httpGet200("/", "2:0");
 }
 
+KJ_TEST("Server: a tail worker gets the outcome of an onHibernate handler that runs out of time") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `export class Actor extends DurableObject {
+          `  fetch() {
+          `    return new Response("OK");
+          `  }
+          `  async [onHibernate]() {
+          `    await this.env.GATE.fetch("http://hook/");
+          `  }
+          `}
+          `export default {
+          `  fetch(request, env) {
+          `    return env.NS.getByName("test").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "Actor"),
+          (name = "GATE", service = "gate"),
+        ],
+        durableObjectNamespaces = [(className = "Actor", uniqueKey = "on-hibernate")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["tail"],
+      )),
+      (name = "tail", worker = (
+        compatibilityDate = "2026-01-01",
+        modules = [(name = "main.js", esModule =
+          `export default {
+          `  async tail(traces, env) {
+          `    for (const trace of traces.filter((trace) => trace.event.reason)) {
+          `      await env.OUT.fetch(`http://tail/${trace.event.reason}/${trace.outcome}`);
+          `    }
+          `  }
+          `};
+        )],
+        bindings = [(name = "OUT", service = "tail-out")],
+      )),
+      (name = "gate", external = (address = "hook-addr")),
+      (name = "tail-out", external = (address = "tail-addr")),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  // Never answered, so the handler runs until its budget is spent.
+  auto hook = test.receiveSubrequest("hook-addr");
+  hook.recvRegex("GET / HTTP/1.1\n[\\s\\S]*\n\n");
+  test.wait(10);
+  auto tail = test.receiveSubrequest("tail-addr");
+  tail.recvRegex("GET /inactive/exceededWallTime HTTP/1.1\n[\\s\\S]*\n\n");
+  tail.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+}
+
+KJ_TEST("Server: a stub that onHibernate restores reaches the actor's next instance") {
+  TestServer test(R"((
+    services = [
+      (name = "main", worker = (
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["experimental", "allow_irrevocable_stub_storage"],
+        modules = [(name = "main.js", esModule =
+          `import { DurableObject, RpcTarget, restore } from "cloudflare:workers";
+          `import { onHibernate } from "cloudflare:durable-objects";
+          `let nextInstance = 0;
+          `class Callback extends RpcTarget {
+          `  constructor(instance, job) { super(); this.instance = instance; this.job = job; }
+          `  done() { return `${this.instance}:${this.job}`; }
+          `}
+          `export class Actor extends DurableObject {
+          `  instance = ++nextInstance;
+          `  fetch() { return new Response("OK"); }
+          `  [restore](params) { return new Callback(this.instance, params.job); }
+          `  async [onHibernate]() {
+          `    const callback = await this.ctx.restore({ job: "report" });
+          `    await this.env.REGISTRY.getByName("registry").register(callback);
+          `  }
+          `}
+          `export class Registry extends DurableObject {
+          `  register(callback) { return this.ctx.storage.put("callback", callback); }
+          `  async call() {
+          `    const callback = await this.ctx.storage.get("callback");
+          `    return callback ? await callback.done() : "none";
+          `  }
+          `}
+          `export default {
+          `  async fetch(request, env) {
+          `    if (new URL(request.url).pathname === "/call") {
+          `      return new Response(await env.REGISTRY.getByName("registry").call());
+          `    }
+          `    return env.NS.getByName("test").fetch(request);
+          `  }
+          `};
+        )],
+        bindings = [
+          (name = "NS", durableObjectNamespace = "Actor"),
+          (name = "REGISTRY", durableObjectNamespace = "Registry"),
+        ],
+        durableObjectNamespaces = [
+          (className = "Actor", uniqueKey = "on-hibernate-restore"),
+          (className = "Registry", uniqueKey = "on-hibernate-registry"),
+        ],
+        durableObjectStorage = (localDisk = "my-disk"),
+      )),
+      (name = "my-disk", disk = (path = "../../do-storage", writable = true)),
+    ],
+    sockets = [(name = "http", address = "test-addr", service = "main")],
+  ))"_kj);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  test.connect("test-addr").httpGet200("/", "OK");
+
+  test.wait(10);
+  // Waits for the retirement, then starts the next instance.
+  test.connect("test-addr").httpGet200("/", "OK");
+  test.connect("test-addr").httpGet200("/call", "2:report");
+}
+
 KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   TestServer test(R"((
     services = [
@@ -4867,6 +5046,181 @@ KJ_TEST("Server: tail workers turned off are still looked up") {
   test.expectErrors(R"(
     Worker "hello"'s tails refers to a service "missing", but no such service is defined.
   )"_blockquote);
+}
+
+// =======================================================================================
+// Cluster deployments
+
+KJ_TEST("Server: a deployment's broken service fails its requests without stopping the instance") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(req, env) {
+                `    try {
+                `      await env.DEP.fetch("http://dep/");
+                `      return new Response("reached");
+                `    } catch (e) {
+                `      return new Response(e.message);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [ ( name = "DEP", service = "dep" ) ],
+          tails = ["dep"],
+        )
+      ),
+      ( name = "dep",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  fetch() { return new Response("dep"); },
+                `  tail() {},
+                `}
+            )
+          ],
+          bindings = [ ( name = "X", service = "nope" ) ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "dep", address = "dep-addr", service = "dep" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.server.addDeploymentService("d", "dep");
+  test.startWithErrors(R"(
+    deployment "d": Worker "dep"'s binding "X" refers to a service "nope", but no such service is defined.
+    deployment "d": service "dep" cannot handle requests because of the errors above.
+  )"_blockquote);
+
+  // The instance's service answers, without its tail, and its binding to the broken service
+  // fails.
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Service cannot handle requests because its config is invalid.");
+
+  KJ_EXPECT_LOG(ERROR, "Service cannot handle requests because its config is invalid.");
+  auto depConn = test.connect("dep-addr");
+  depConn.sendHttpGet("/");
+  depConn.recv(R"(
+    HTTP/1.1 500 Internal Server Error
+    Connection: close
+    Content-Length: 21
+
+    Internal Server Error)"_blockquote);
+}
+
+KJ_TEST("Server: undefined service references from the instance are deployment references") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(req, env) {
+                `    let results = [];
+                `    for (let binding of [env.SKIPPED, env.UNKNOWN]) {
+                `      try {
+                `        await binding.fetch("http://x/");
+                `        results.push("reached");
+                `      } catch (e) {
+                `        results.push(e.message);
+                `      }
+                `    }
+                `    return new Response(results.join(" | "));
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "SKIPPED", service = "lost" ),
+            ( name = "UNKNOWN", service = "nowhere" ),
+          ],
+          accessBindingService = (name = "dep", entrypoint = "Nope"),
+          tails = ["lost", "nowhere"],
+        )
+      ),
+      ( name = "dep",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  fetch() { return new Response("dep"); }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "other", address = "other-addr", service = "elsewhere" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.server.addDeploymentService("d", "dep");
+  test.server.addSkippedDeploymentService("gone", "lost");
+  test.startWithErrors(R"(
+    deployment "gone": Worker "hello"'s binding "SKIPPED" refers to a service "lost", but no such service is defined. "lost" is defined by this deployment, which was skipped.
+    cluster: Worker "hello"'s binding "UNKNOWN" refers to a service "nowhere", but no such service is defined. Neither the instance's config nor a deployment defines "nowhere".
+    deployment "d": Worker "hello"'s accessBindingService refers to service "dep" with a named entrypoint "Nope", but "dep" has no such named entrypoint. "dep" is defined by this deployment.
+    deployment "gone": Worker "hello"'s tails refers to a service "lost", but no such service is defined. "lost" is defined by this deployment, which was skipped.
+    cluster: Worker "hello"'s tails refers to a service "nowhere", but no such service is defined. Neither the instance's config nor a deployment defines "nowhere".
+    cluster: Socket "other" refers to a service "elsewhere", but no such service is defined. Neither the instance's config nor a deployment defines "elsewhere".
+  )"_blockquote);
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/",
+      "Service cannot handle requests because its config is invalid. | "
+      "Service cannot handle requests because its config is invalid.");
+}
+
+KJ_TEST("Server: a deployment service's warnings are attributed to its deployment") {
+  TestServer test(R"((
+    services = [
+      ( name = "dep",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["global_navigator"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  fetch() { return new Response("dep"); }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [ ( name = "main", address = "test-addr", service = "dep" ) ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.server.addDeploymentService("d", "dep");
+  test.expectWarnings(
+      "deployment \"d\": service dep: The compatibility flag global_navigator became the default "
+      "as of 2022-03-21 so does not need to be specified anymore.\n"_kj);
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "dep");
 }
 
 // =======================================================================================
