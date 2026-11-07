@@ -40,3 +40,170 @@ fn config_bytes_are_checked() {
     let bytes = bytes_from_words(&good.0);
     assert!(Config::from_message_bytes(&bytes[..bytes.len() - 8]).is_err());
 }
+
+/// A config with a cluster whose key and bucket are `key` and `bucket`, or with no cluster.
+fn cluster_config(cluster: Option<(&str, &str)>) -> Config {
+    let mut message = capnp::message::Builder::new_default();
+    let mut root = message.init_root::<config::Builder>();
+    root.reborrow().init_services(1).get(0).set_name("main");
+    if let Some((key, bucket)) = cluster {
+        let mut cluster = root.init_cluster();
+        cluster.set_key(key);
+        cluster.set_bucket(bucket);
+        cluster.set_address("127.0.0.1:0");
+    }
+    Config(words_from_bytes(&capnp::serialize::write_message_to_words(
+        &message,
+    )))
+}
+
+/// The cluster's key and bucket in `config`.
+fn cluster_of(config: &Config) -> (String, String) {
+    let message = read(config);
+    let cluster = message
+        .get_root::<config::Reader>()
+        .unwrap()
+        .get_cluster()
+        .unwrap();
+    let text = |t: capnp::text::Reader<'_>| t.to_string().unwrap();
+    (
+        text(cluster.get_key().unwrap()),
+        text(cluster.get_bucket().unwrap()),
+    )
+}
+
+/// An environment of `vars`.
+fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+    move |name| {
+        vars.iter()
+            .find(|(var, _)| *var == name)
+            .map(|(_, value)| (*value).to_owned())
+    }
+}
+
+/// A file of its own in the temporary directory, holding `contents`, removed when dropped.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn new(name: &str, contents: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+        std::fs::write(&path, contents).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &str {
+        self.0.to_str().unwrap()
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+const KEY: &str = "0123456789abcdef0123456789abcdef";
+
+#[test]
+fn cluster_environment_fills_an_empty_key_and_bucket() {
+    let vars = [(CLUSTER_KEY, KEY), (CLUSTER_BUCKET, "s3://bucket/prefix")];
+    let config = cluster_config(Some(("", "")))
+        .with_cluster_environment(env(&vars))
+        .unwrap();
+    assert_eq!(
+        cluster_of(&config),
+        (KEY.to_owned(), "s3://bucket/prefix".to_owned())
+    );
+}
+
+#[test]
+fn cluster_environment_does_not_replace_config_values() {
+    let vars = [
+        (CLUSTER_KEY, "from-the-environment"),
+        (CLUSTER_BUCKET, "s3://other/prefix"),
+    ];
+    let config = cluster_config(Some((KEY, "s3://bucket/prefix")));
+    let before = config.0.clone();
+    let config = config.with_cluster_environment(env(&vars)).unwrap();
+    assert_eq!(config.0, before);
+}
+
+#[test]
+fn cluster_environment_leaves_a_config_without_cluster_unchanged() {
+    let vars = [(CLUSTER_KEY, KEY), (CLUSTER_BUCKET, "s3://bucket/prefix")];
+    let config = cluster_config(None);
+    let before = config.0.clone();
+    let config = config.with_cluster_environment(env(&vars)).unwrap();
+    assert_eq!(config.0, before);
+}
+
+#[test]
+fn cluster_environment_reads_the_key_file_without_trailing_whitespace() {
+    let file = TempFile::new("workerd-cluster-key-test", &format!("{KEY}\n"));
+    let vars = [(CLUSTER_KEY_FILE, file.path())];
+    let config = cluster_config(Some(("", "s3://bucket/prefix")))
+        .with_cluster_environment(env(&vars))
+        .unwrap();
+    assert_eq!(cluster_of(&config).0, KEY);
+}
+
+#[test]
+fn cluster_environment_refuses_both_key_variables() {
+    let file = TempFile::new("workerd-cluster-key-both-test", KEY);
+    let vars = [(CLUSTER_KEY, KEY), (CLUSTER_KEY_FILE, file.path())];
+    let Err(error) = cluster_config(Some(("", ""))).with_cluster_environment(env(&vars)) else {
+        panic!("expected an error");
+    };
+    assert_eq!(
+        error,
+        "cluster: set only one of WORKERD_CLUSTER_KEY and WORKERD_CLUSTER_KEY_FILE."
+    );
+}
+
+#[test]
+fn cluster_environment_refuses_a_key_file_that_is_not_a_regular_file_or_too_large() {
+    let large = TempFile::new("workerd-cluster-key-large-test", &"k".repeat(4097));
+    let directory = std::env::temp_dir();
+    for (path, reason) in [
+        (directory.to_str().unwrap(), "not a regular file"),
+        (large.path(), "larger than 4096 bytes"),
+    ] {
+        let vars = [(CLUSTER_KEY_FILE, path)];
+        let Err(error) = cluster_config(Some(("", ""))).with_cluster_environment(env(&vars)) else {
+            panic!("expected an error for {path}");
+        };
+        assert_eq!(
+            error,
+            format!("cluster: WORKERD_CLUSTER_KEY_FILE={path}: {reason}")
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cluster_environment_refuses_a_fifo_as_the_key_file_without_blocking() {
+    let path =
+        std::env::temp_dir().join(format!("workerd-cluster-key-fifo-{}", std::process::id()));
+    let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    // SAFETY: `c_path` is a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    let vars = [(CLUSTER_KEY_FILE, path.to_str().unwrap())];
+    let result = cluster_config(Some(("", ""))).with_cluster_environment(env(&vars));
+    let _ = std::fs::remove_file(&path);
+    let Err(error) = result else {
+        panic!("expected an error");
+    };
+    assert!(error.ends_with(": not a regular file"), "{error}");
+}
+
+#[test]
+fn cluster_environment_reports_an_unreadable_key_file() {
+    let vars = [(CLUSTER_KEY_FILE, "/nonexistent/workerd-cluster-key")];
+    let Err(error) = cluster_config(Some(("", ""))).with_cluster_environment(env(&vars)) else {
+        panic!("expected an error");
+    };
+    assert!(
+        error.starts_with("cluster: WORKERD_CLUSTER_KEY_FILE=/nonexistent/workerd-cluster-key: "),
+        "{error}"
+    );
+}

@@ -120,3 +120,20 @@ fn a_wildcard_cluster_address_without_an_advertised_one_is_refused_before_the_bu
         other => panic!("expected a remote failure, got {:?}", other.map(|_| ())),
     }
 }
+
+#[test]
+fn an_empty_bucket_is_a_config_error_that_names_the_variable() {
+    let mut message = capnp::message::Builder::new_default();
+    let mut root = message.init_root::<config::Builder<'_>>();
+    root.reborrow().init_services(1).get(0).set_name("main");
+    root.init_cluster().set_address("127.0.0.1:0");
+    let config =
+        Config::from_message_bytes(&capnp::serialize::write_message_to_words(&message)).unwrap();
+    match add(config, None, None) {
+        Err(Failure::Config(errors)) => assert_eq!(
+            errors,
+            ["cluster.bucket is not set. Set it in the config or in WORKERD_CLUSTER_BUCKET."]
+        ),
+        other => panic!("expected a config failure, got {:?}", other.map(|_| ())),
+    }
+}

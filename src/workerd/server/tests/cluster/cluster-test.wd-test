@@ -27,6 +27,18 @@ const shortStop :Workerd.Config = (
   ),
 );
 
+# As `config`, with the key and bucket left to WORKERD_CLUSTER_KEY (or WORKERD_CLUSTER_KEY_FILE) and
+# WORKERD_CLUSTER_BUCKET.
+const fromEnvironment :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
+  cluster = (
+    bucketOptions = .bucketOptions,
+    address = "127.0.0.1:0",
+    stopTimeoutMs = 20000,
+  ),
+);
+
 const services :List(Workerd.Service) = [
   ( name = "local",
     disk = (

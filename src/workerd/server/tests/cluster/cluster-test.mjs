@@ -35,6 +35,8 @@
 //      handoff's work are not held, and a DO whose handoff outlasts its
 //      deadline moves once the node left. A rolling restart of the cluster,
 //      paced by the nodes' readiness, fails, loses and replays no request.
+//  13. Nodes can take the cluster key and bucket from the environment, a
+//      binary from `workerd compile` too, and compiling embeds neither.
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs
 // that much: one test per mechanism. The simulations in ../../cluster
@@ -46,12 +48,20 @@
 //   - a dead owner's alarms adopted with its node record gone: only the
 //     orphan scan finds them. alarms-test.rs.
 
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { env } from 'node:process';
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert';
@@ -107,6 +117,8 @@ class ClusterNode {
   #extraArgs;
   #disk;
   #configName;
+  #env;
+  #compiled;
 
   // `localPath` is the directory of the config's disk service `disk`.
   constructor({
@@ -118,8 +130,12 @@ class ClusterNode {
     s3Port,
     nodeId,
     extraArgs = [],
+    env = {},
+    compiled = false,
   }) {
     this.#extraArgs = extraArgs;
+    this.#env = env;
+    this.#compiled = compiled;
     this.#disk = disk;
     this.#configName = configName;
     this.#binary = binary;
@@ -156,10 +172,14 @@ class ClusterNode {
   async start() {
     assert.strictEqual(this.#child, null);
 
-    const args = [
+    // A binary from `workerd compile` takes no command and no config.
+    const config = [
       'serve',
       this.#config,
       ...(this.#configName === undefined ? [] : [this.#configName]),
+    ];
+    const args = [
+      ...(this.#compiled ? [] : config),
       '--experimental',
       '--verbose',
       `--control-fd=${CONTROL_FD}`,
@@ -179,6 +199,7 @@ class ClusterNode {
         KJ_CLEAN_SHUTDOWN: '1',
         NODE_ID: this.#nodeId,
         AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
+        ...this.#env,
       },
     });
     this.#child = child;
@@ -410,12 +431,16 @@ class FakeS3 {
 //              what owner records name
 // The nodes run the config constant `configName` of `config`, whose disk
 // service `disk` is a directory of each node's own, once `before` has prepared
-// the bucket.
+// the bucket. Node `i` gets the extra environment variables `nodeEnv(i, root)`,
+// where `root` is the test's temporary directory, and runs the binary that
+// `nodeBinary(i, root)` names (`compiled` when `workerd compile` built it).
 async function withCluster(
   numNodes,
   fn,
   {
     extraArgs = () => [],
+    nodeEnv = async () => ({}),
+    nodeBinary = async () => ({ binary: env.WORKERD_BINARY, compiled: false }),
     config = env.WD_TEST_CONFIG,
     configName = 'config',
     disk = 'local',
@@ -435,7 +460,7 @@ async function withCluster(
       const localPath = join(root, `node${i}`);
       await mkdir(localPath);
       const node = new ClusterNode({
-        binary: env.WORKERD_BINARY,
+        ...(await nodeBinary(i, root)),
         config,
         configName,
         localPath,
@@ -443,6 +468,7 @@ async function withCluster(
         s3Port: bucket.port,
         nodeId: `node${i}`,
         extraArgs: await extraArgs(i),
+        env: await nodeEnv(i, root),
       });
       await node.start();
       nodes.push(node);
@@ -990,6 +1016,104 @@ test('cluster: a CONNECT is refused when replayed, stale, misdirected or unsigne
     assert.match(await clusterConnect(port, elsewhere), / 403 /, 'target');
     assert.match(await clusterConnect(port), / 403 /, 'unsigned');
   });
+});
+
+test('cluster: the key and bucket can come from the environment', async () => {
+  // Node 0 reads the key from WORKERD_CLUSTER_KEY, node 1 from a file named by
+  // WORKERD_CLUSTER_KEY_FILE, ending in a newline as secret files often do.
+  const key = 'test-cluster-shared-secret-of-32-bytes';
+  const nodeEnv = async (i, root) => {
+    const env = { WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster' };
+    if (i === 0) return { ...env, WORKERD_CLUSTER_KEY: key };
+    const file = join(root, 'cluster-key');
+    await writeFile(file, `${key}\n`);
+    return { ...env, WORKERD_CLUSTER_KEY_FILE: file };
+  };
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      // Node 1 forwards to node 0, so both hold the same key.
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=env');
+      const second = await fetchJson(nodes[1].httpPort, '/increment?name=env');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.count, 2);
+      assert.strictEqual(second.body.nodeId, first.body.nodeId);
+      // And that key is the one given.
+      const port = nodes[1].clusterPort;
+      const auth = clusterAuth(`127.0.0.1:${port}`);
+      assert.match(await clusterConnect(port, auth), / 200 /);
+    },
+    { configName: 'fromEnvironment', nodeEnv }
+  );
+});
+
+// LD_LIBRARY_PATH for a copy of `binary` elsewhere: on Linux, some builds
+// (TSan) link shared libraries found relative to the binary's own directory,
+// which a copy does not have. Empty where `ldd` does not apply.
+function sharedLibraryPath(binary) {
+  if (process.platform !== 'linux') return {};
+  const libraries = execFileSync('ldd', [binary], { encoding: 'utf8' });
+  const dirs = [...libraries.matchAll(/=> (\/\S+)/g)].map((m) => dirname(m[1]));
+  return { LD_LIBRARY_PATH: [...new Set(dirs)].join(':') };
+}
+
+test('cluster: a binary from workerd compile takes the key and bucket from the environment', async () => {
+  const key = 'test-cluster-shared-secret-of-32-bytes';
+  // `workerd compile`, run with the variables set, writes the config as it is.
+  const compile = async (args, file) => {
+    const out = await open(file, 'w', 0o755);
+    try {
+      const child = spawn(
+        env.WORKERD_BINARY,
+        ['compile', ...args, env.WD_TEST_CONFIG, 'fromEnvironment'],
+        {
+          stdio: ['ignore', out.fd, 'inherit'],
+          env: {
+            ...env,
+            WORKERD_CLUSTER_KEY: key,
+            WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+          },
+        }
+      );
+      const code = await new Promise((resolve, reject) => {
+        child.once('error', reject).once('exit', resolve);
+      });
+      assert.strictEqual(code, 0, `workerd compile ${args.join(' ')} failed`);
+    } finally {
+      await out.close();
+    }
+  };
+  const nodeBinary = async (i, root) => {
+    if (i === 0) return { binary: env.WORKERD_BINARY, compiled: false };
+    const configOnly = join(root, 'config.bin');
+    await compile(['--config-only'], configOnly);
+    const bytes = await readFile(configOnly);
+    assert(!bytes.includes(key), 'the compiled config holds the key');
+    assert(!bytes.includes('s3://wdtest/cluster'), 'it holds the bucket');
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    const binary = join(root, `compiled-workerd${exe}`);
+    await compile([], binary);
+    return { binary, compiled: true };
+  };
+  const nodeEnv = async (i) => ({
+    WORKERD_CLUSTER_KEY: key,
+    WORKERD_CLUSTER_BUCKET: 's3://wdtest/cluster',
+    ...(i === 1 ? sharedLibraryPath(env.WORKERD_BINARY) : {}),
+  });
+  await withCluster(
+    2,
+    async ({ nodes }) => {
+      // The compiled node forwards to the other, so it joined with the key.
+      const first = await fetchJson(nodes[0].httpPort, '/increment?name=bin');
+      const second = await fetchJson(nodes[1].httpPort, '/increment?name=bin');
+      assert.strictEqual(first.status, 200, JSON.stringify(first.body));
+      assert.strictEqual(second.status, 200, JSON.stringify(second.body));
+      assert.strictEqual(second.body.count, 2);
+      assert.strictEqual(second.body.nodeId, first.body.nodeId);
+    },
+    { configName: 'fromEnvironment', nodeEnv, nodeBinary }
+  );
 });
 
 test('cluster: a public cluster address is refused', async () => {
