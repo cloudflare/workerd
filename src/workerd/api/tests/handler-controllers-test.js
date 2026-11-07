@@ -18,8 +18,23 @@ function assertRuntimeClass(value, name) {
   const proto = Object.getPrototypeOf(value);
   const ctor = proto.constructor;
   assert.strictEqual(typeof ctor, 'function');
-  assert.strictEqual(ctor.name, name);
-  assert.strictEqual(ctor.length, 0);
+  assert.deepStrictEqual(Reflect.ownKeys(ctor), [
+    'length',
+    'name',
+    'prototype',
+  ]);
+  assert.deepStrictEqual(Object.getOwnPropertyDescriptor(ctor, 'length'), {
+    value: 0,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
+  assert.deepStrictEqual(Object.getOwnPropertyDescriptor(ctor, 'name'), {
+    value: name,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   assert.strictEqual(Object.getPrototypeOf(ctor), Function.prototype);
   assert.strictEqual(Object.getPrototypeOf(proto), Object.prototype);
   assert.deepStrictEqual(Object.getOwnPropertyDescriptor(ctor, 'prototype'), {
@@ -65,8 +80,39 @@ function assertRuntimeClass(value, name) {
   assert.throws(() => new ctor(), illegal);
   assert.throws(() => ctor(), illegal);
   assert.throws(() => Reflect.construct(ctor, []), illegal);
+  // A subclass's super() call reaches the same constructor.
+  class Subclass extends ctor {}
+  assert.throws(() => new Subclass(), illegal);
 
   assert.ok(Object.isExtensible(value));
+}
+
+// Replaces builtins that runtime code could use to make an AlarmInvocationInfo,
+// and puts setters for its property names on Object.prototype, so that the
+// runtime is seen to use neither. Returns a function that restores them.
+function pollute() {
+  const saved = {
+    create: Object.create,
+    defineProperties: Object.defineProperties,
+    freeze: Object.freeze,
+  };
+  const poisoned = () => {
+    throw new Error('the runtime used a polluted builtin');
+  };
+  Object.create = poisoned;
+  Object.defineProperties = poisoned;
+  Object.freeze = poisoned;
+  const keys = ['scheduledTime', 'retryCount', 'isRetry'];
+  for (const key of keys) {
+    Object.defineProperty(Object.prototype, key, {
+      set: poisoned,
+      configurable: true,
+    });
+  }
+  return () => {
+    Object.assign(Object, saved);
+    for (const key of keys) Reflect.deleteProperty(Object.prototype, key);
+  };
 }
 
 export class EchoObject extends DurableObject {
@@ -120,12 +166,33 @@ export class AlarmObject extends DurableObject {
       await this.ctx.storage.setAlarm(Date.now());
       this.scheduledTime = await this.ctx.storage.getAlarm();
     });
-    await promise;
+    // The alarm cannot run before this function next awaits.
+    this.restore = pollute();
+    // An alarm that fails before reaching alarm() is retried with backoff,
+    // and would otherwise leave this waiting until the test times out.
+    const timeout = setTimeout(() => {
+      reject(new Error('alarm() did not run twice'));
+    }, 20_000);
+    try {
+      await promise;
+    } finally {
+      clearTimeout(timeout);
+      this.restore?.();
+    }
     return { scheduledTime: this.scheduledTime, infos: this.infos };
   }
 
   async alarm(info) {
+    this.restore();
+    this.restore = undefined;
+    const ctor = Object.getPrototypeOf(info).constructor;
     try {
+      if (this.replacedPrototype !== undefined) {
+        // An instance inherits from the constructor's original prototype, not
+        // the one user code has given it since.
+        assert.strictEqual(Object.getPrototypeOf(info), this.replacedPrototype);
+        ctor.prototype = this.replacedPrototype;
+      }
       assertRuntimeClass(info, 'AlarmInvocationInfo');
       const keys = ['scheduledTime', 'retryCount', 'isRetry'];
       assert.deepStrictEqual(Reflect.ownKeys(info), keys);
@@ -184,7 +251,14 @@ export class AlarmObject extends DurableObject {
       return;
     }
     // Throwing makes the alarm run again, as a retry.
-    if (this.infos.length === 1) throw new Error('retry me');
+    if (this.infos.length === 1) {
+      if (flags.immutable_api_prototypes !== true) {
+        this.replacedPrototype = ctor.prototype;
+        ctor.prototype = {};
+      }
+      this.restore = pollute();
+      throw new Error('retry me');
+    }
     this.resolve();
   }
 }
