@@ -20,7 +20,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "connect-handler-starttls-test",
@@ -28,11 +28,20 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-starttls-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
         bindings = [
           (name = "STARTTLS_TARGET", service = (
             name = "connect-handler-test-starttls-endpoint",
             entrypoint = "StartTlsEndpoint")),
+          (name = "STARTTLS_PROXY", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "StartTlsProxy")),
+          (name = "FINISHES_WITHOUT_STARTTLS", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "FinishesWithoutStartTls")),
+          (name = "CLOSES_WITHOUT_STARTTLS", service = (
+            name = "connect-handler-test-starttls-endpoint",
+            entrypoint = "ClosesWithoutStartTls")),
         ],
       )
     ),
@@ -41,7 +50,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls", "experimental"],
       )
     ),
     ( name = "connect-handler-test-proxy",
@@ -57,7 +66,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"],
@@ -84,6 +93,15 @@ const unitTests :Workerd.Config = (
         ),
       ),
       tlsMode = startTls,
-    ), service = "connect-handler-starttls-test")
+    ), service = "connect-handler-starttls-test"),
+    (name = "tcp", address = "*:8085", tcp = (
+      tlsOptions = (
+        keypair = (
+          privateKey = embed "connect-handler-server.key",
+          certificateChain = embed "connect-handler-server.pem",
+        ),
+      ),
+      tlsMode = startTls,
+    ), service = (name = "connect-handler-starttls-test", entrypoint = "StartTlsServer"))
   ]
 );

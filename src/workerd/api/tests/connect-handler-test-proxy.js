@@ -14,6 +14,17 @@ export class ConnectProxy extends WorkerEntrypoint {
   }
 }
 
+// Reached via a service binding from connect-handler-starttls-test.js. Relays to a server that
+// negotiates TLS in-band and then performs a real handshake, without knowing the protocol or where
+// in it the upgrade falls. The client's startTls() is forwarded to the upstream socket, which is
+// why that socket has to be opened with secureTransport: 'starttls'.
+export class StartTlsProxy extends WorkerEntrypoint {
+  async connect(socket) {
+    const upstream = connect('localhost:8085', { secureTransport: 'starttls' });
+    await socket.proxyTo(upstream);
+  }
+}
+
 export class ConnectEndpoint extends WorkerEntrypoint {
   async connect(socket) {
     const enc = new TextEncoder();
@@ -36,36 +47,61 @@ async function readLine(reader) {
   return line;
 }
 
-// Reached via a service binding from connect-handler-test.js. Serves a miniature line-based
-// protocol that negotiates TLS in-band, the way SMTP and Postgres do: it greets the client,
-// acknowledges the client's upgrade request, and then upgrades its own end of the socket. Neither
-// end of a service-binding tunnel can run a handshake, so startTls() here resolves once the client
-// has called startTls() too.
+// Serves the plaintext half of a miniature line-based protocol that negotiates TLS in-band, the
+// way SMTP and Postgres do: greets the client and acknowledges its upgrade request. After this,
+// the client upgrades its end, and the socket's streams are left unlocked for the handler to do
+// the same.
+async function serveUpToUpgrade(socket) {
+  // The tunnel came from another Socket, so it can carry an upgrade.
+  strictEqual(socket.secureTransport, 'starttls');
+
+  const enc = new TextEncoder();
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+  await writer.write(enc.encode('220 ready\r\n'));
+  strictEqual(await readLine(reader), 'STARTTLS\r\n');
+  await writer.write(enc.encode('220 go ahead\r\n'));
+
+  reader.releaseLock();
+  writer.releaseLock();
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Serves the protocol
+// serveUpToUpgrade() begins, and then upgrades its own end of the socket. Neither end of a
+// service-binding tunnel can run a handshake, so startTls() here resolves once the client has
+// called startTls() too.
 export class StartTlsEndpoint extends WorkerEntrypoint {
   async connect(socket) {
-    // The tunnel came from another Socket, so it can carry an upgrade.
-    strictEqual(socket.secureTransport, 'starttls');
+    await serveUpToUpgrade(socket);
 
     const enc = new TextEncoder();
-    let reader = socket.readable.getReader();
-    let writer = socket.writable.getWriter();
-    await writer.write(enc.encode('220 ready\r\n'));
-    strictEqual(await readLine(reader), 'STARTTLS\r\n');
-    await writer.write(enc.encode('220 go ahead\r\n'));
-
-    reader.releaseLock();
-    writer.releaseLock();
-
     const secure = socket.startTls();
     await secure.opened;
 
-    reader = secure.readable.getReader();
-    writer = secure.writable.getWriter();
+    const reader = secure.readable.getReader();
+    const writer = secure.writable.getWriter();
     strictEqual(await readLine(reader), 'EHLO client\r\n');
     await writer.write(enc.encode('250 secure\r\n'));
 
     reader.releaseLock();
     await writer.close();
+  }
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Acknowledges the client's
+// upgrade request, and then returns without upgrading its own end.
+export class FinishesWithoutStartTls extends WorkerEntrypoint {
+  async connect(socket) {
+    await serveUpToUpgrade(socket);
+  }
+}
+
+// Reached via a service binding from connect-handler-starttls-test.js. Acknowledges the client's
+// upgrade request, and then closes its socket instead of upgrading it.
+export class ClosesWithoutStartTls extends WorkerEntrypoint {
+  async connect(socket) {
+    await serveUpToUpgrade(socket);
+    await socket.close();
   }
 }
 

@@ -22,6 +22,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 | Headers                        | `headers.h`, `headers.c++`                            |
 | WebSocket                      | `web-socket.h`, `web-socket.c++`                      |
 | Hibernatable WS (DO)           | `hibernatable-web-socket.h`                           |
+| TCP sockets / `connect()`      | `sockets.{h,c++}`; `Socket::proxyTo()` uses `relayStreams()` in `socket-relay.h`, which forwards STARTTLS requests and orders pre-upgrade bytes before the upgrade |
 | GlobalScope / addEventListener | `global-scope.h`, `global-scope.c++`, `basics.h`      |
 | JS RPC / Fetcher               | `worker-rpc.h`, `worker-rpc.c++`                      |
 | Durable Object state           | `actor-state.h`, `actor.h`                            |
