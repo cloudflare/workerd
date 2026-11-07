@@ -9,12 +9,12 @@
 #include <cstddef>
 #include <cstdint>
 
-// The simdutf calls `ffi.rs` makes, forwarding to the same C++ functions `i18n.c++` calls.
-// simdutf's C API (`simdutf_c.h`) would avoid this shim, but the simdutf some builds link predates
-// it; the C++ functions below are present in every version we link.
+// The simdutf calls `ffi.rs` makes, forwarding to simdutf's C++ API. simdutf's C API
+// (`simdutf_c.h`) would avoid this shim, but the simdutf some builds link predates it; the C++
+// functions below are present in every version we link.
 //
 // cxx has no `char` or `char16_t`, so the bridge passes `uint8_t` and `uint16_t` pointers. The
-// UTF-16 pointers need not be aligned, exactly as in `i18n.c++`.
+// UTF-16 pointers need not be aligned; see the simdutf section of `ffi.rs`.
 
 namespace workerd::rust::i18n {
 

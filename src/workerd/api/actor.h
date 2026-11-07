@@ -246,8 +246,7 @@ class DurableObjectNamespace: public jsg::Object {
     jsg::Optional<VersionOptions> version;
 
     // Limits on how the runtime retries calls through the returned stub. Omitted fields use the
-    // runtime's defaults. Always validated, but applied only while DURABLE_OBJECT_RETRIES_USERLAND
-    // is on.
+    // runtime's defaults.
     //
     // The fields are non-coercible doubles so that the conversion can reject fractions and
     // out-of-range values itself, and non-numbers such as null throw instead of becoming 0.
