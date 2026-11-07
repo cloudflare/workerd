@@ -30,6 +30,7 @@ wd_rust_crate(
         "//src/rust/cxx/kj-hyper",
         "//src/rust/cxx/kj-rs-io",
         "//src/rust/cxx/kj-rs-tokio",
+        "//src/rust/histogram",
         "//src/rust/kj",
         "//src/rust/worker",
         "//src/workerd/io:bench_capnp_rust",

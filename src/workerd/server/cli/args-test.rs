@@ -198,6 +198,41 @@ fn bench_invocation() {
 }
 
 #[test]
+fn bench_sparklines() {
+    let bench = |args: &[&str]| {
+        let argv = [&["bench", "foo.wd-test"][..], args].concat();
+        let Command::Bench { bench, .. } = parse(&argv).command else {
+            panic!("expected bench")
+        };
+        bench
+    };
+    let none = bench(&[]);
+    assert_eq!(none.sparkline, None);
+    assert!(!none.ascii);
+    assert_eq!(none.sparkline_binning, BenchBinning::Linear);
+    assert_eq!(none.options(None).sparklines, None);
+
+    // A bare --sparkline does not take the filter as its value.
+    let bare = bench(&["--sparkline", "svc"]);
+    assert_eq!(bare.sparkline, Some(BenchSparkline::Wall));
+    assert!(bare.filter.is_some());
+
+    let both = bench(&["--sparkline=both", "--ascii", "--sparkline-binning=qrde"]);
+    assert_eq!(
+        both.options(None).sparklines,
+        Some(sparkline::Options {
+            metrics: sparkline::Metrics::Both,
+            binning: sparkline::Binning::Qrde,
+            charset: sparkline::Charset::Ascii,
+        })
+    );
+    assert_eq!(
+        bench(&["--sparkline=cpu"]).sparkline,
+        Some(BenchSparkline::Cpu)
+    );
+}
+
+#[test]
 fn bad_values_are_usage_errors() {
     for args in [
         &["serve", "c.capnp", "--socket-addr=noequals"][..],

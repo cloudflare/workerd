@@ -75,7 +75,7 @@ fn text_has_the_environment_then_a_table_for_each_group() {
     group.set_name("main:empty");
     group.set_error("bench() did not register any cases.");
 
-    let text = format_text(message.get_root_as_reader().unwrap()).unwrap();
+    let text = format_text(message.get_root_as_reader().unwrap(), None).unwrap();
     assert_eq!(
         text,
         "Results compare runs on this machine and build; they don't predict production latency.
@@ -98,6 +98,68 @@ main:empty
     );
 }
 
+#[test]
+fn sparklines_are_columns_after_the_statistics() {
+    let mut message = TypedBuilder::<bench_report::Owned>::new_default();
+    let mut report = message.init_root();
+    let mut environment = report.reborrow().init_environment();
+    environment.set_build_mode("release");
+    environment.set_v8_version("14.0.0");
+    let mut group = report.init_groups(1).get(0);
+    group.set_name("main");
+    let mut cases = group.init_cases(2);
+
+    let mut case = cases.reborrow().get(0);
+    case.set_name("encode");
+    case.set_iterations_per_sample(1);
+    let mut wall = case.reborrow().init_wall_ns();
+    let wall_samples = [0.0, 0.5, 0.9, 1.0, 8.0, 8.0, 8.0, 8.0, 16.0];
+    let mut list = wall.reborrow().init_samples(len_u32(&wall_samples));
+    for (index, sample) in (0..).zip(wall_samples) {
+        list.set(index, sample);
+    }
+    wall.set_median(8.0);
+    wall.set_median_low(1.0);
+    wall.set_median_high(8.0);
+    wall.set_mean(6.0);
+    let mut cpu = case.init_cpu_ns();
+    cpu.set_median(5.0);
+    let mut list = cpu.init_samples(2);
+    list.set(0, 5.0);
+    list.set(1, 5.0);
+
+    let mut case = cases.get(1);
+    case.set_name("later");
+    case.set_status(Status::Skipped);
+
+    let report = message.get_root_as_reader().unwrap();
+    let both = sparkline::Options {
+        metrics: sparkline::Metrics::Both,
+        binning: sparkline::Binning::Linear,
+        charset: sparkline::Charset::Unicode,
+    };
+    assert_eq!(
+        format_text(report, Some(both)).unwrap(),
+        "Results compare runs on this machine and build; they don't predict production latency.
+release build, V8 14.0.0
+
+main
+  case    median   95% CI             mean     cpu median  samples  wall histogram    cpu histogram
+  encode  8.00 ns  1.00 ns - 8.00 ns  6.00 ns  5.00 ns     9 x 1    ▆▂      █      ▂  █
+  later   skipped
+"
+    );
+
+    let cpu_in_ascii = sparkline::Options {
+        metrics: sparkline::Metrics::Cpu,
+        charset: sparkline::Charset::Ascii,
+        ..both
+    };
+    let text = format_text(report, Some(cpu_in_ascii)).unwrap();
+    assert!(text.contains("  samples  cpu histogram\n"), "{text}");
+    assert!(text.contains("  9 x 1    @\n"), "{text}");
+}
+
 fn options_with_compat_date(compat_date: Option<&str>) -> Options {
     Options {
         no_verbose: false,
@@ -106,6 +168,7 @@ fn options_with_compat_date(compat_date: Option<&str>) -> Options {
         quick: false,
         case_pattern: None,
         json: false,
+        sparklines: None,
         output: None,
         trace: false,
     }
@@ -152,7 +215,7 @@ fn text_shows_the_default_compat_date() {
     environment.set_v8_version("14.0.0");
     environment.set_default_compat_date("2026-10-08");
 
-    let text = format_text(message.get_root_as_reader().unwrap()).unwrap();
+    let text = format_text(message.get_root_as_reader().unwrap(), None).unwrap();
     assert_eq!(
         text,
         "Results compare runs on this machine and build; they don't predict production latency.
