@@ -26,6 +26,7 @@
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
+#include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/io.h>
 #include <kj/miniposix.h>
@@ -250,7 +251,13 @@ class Bootstrap {
           openWritableDirectory(kj::str(path)), "package disk cache dir must exist");
     }
     KJ_IF_SOME(path, serveOrTest.pyodide_bundle_disk_cache_dir) {
-      python.pyodideDiskCacheRoot = openWritableDirectory(kj::str(path));
+      // Resolved as kj resolves paths, so `..` is taken lexically (`file/..` names the file's
+      // directory).
+      auto dir = fs->getCurrentPath().eval(kj::str(path)).toNativeString(true);
+      // The server takes the directory as UTF-8, which the working directory need not be.
+      KJ_REQUIRE(!kj::encodeUtf16(dir).hadErrors,
+          "--pyodide-bundle-disk-cache-dir does not resolve to a UTF-8 path", dir);
+      options.pyodideBundleDiskCacheDir = kj::mv(dir);
     }
     python.createSnapshot = serveOrTest.python_save_snapshot;
     python.createBaselineSnapshot = serveOrTest.python_save_baseline_snapshot;

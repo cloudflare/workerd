@@ -5,7 +5,6 @@
 #include "basics.h"
 
 #include "abort-bootstrap.h"
-#include "actor-state.h"
 #include "global-scope.h"
 
 #include <workerd/io/features.h>
@@ -1444,42 +1443,6 @@ kj::Promise<void> Scheduler::wait(
   }
 
   return kj::mv(promise);
-}
-
-void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  JSG_REQUIRE(
-      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
-  IoContext& context = IoContext::current();
-  return context.getActor().map([&](Worker::Actor& actor) {
-    auto& lock = context.getCurrentLock();
-    auto persistent = actor.makeStorageForSwSyntax(lock);
-    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
-  });
-}
-
-CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
-    : Event(kj::mv(ownType), Event::Init(init)),
-      detail(kj::mv(init.detail)) {}
-
-jsg::Ref<CustomEvent> CustomEvent::constructor(
-    jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
-}
-
-jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
-  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.getHandle(js); });
-}
-
-CustomEvent::CustomEventInit::operator Event::Init() {
-  return {
-    .bubbles = this->bubbles.map([](auto& val) { return val; }),
-    .cancelable = this->cancelable.map([](auto& val) { return val; }),
-    .composed = this->composed.map([](auto& val) { return val; }),
-  };
 }
 
 size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {

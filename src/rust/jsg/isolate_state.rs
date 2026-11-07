@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Dropping persistent handles, and the liveness of their isolate.
+//! Dropping persistent handles and resource references, and the liveness of their isolate.
 //!
 //! A [`v8::Global`](crate::v8::Global) or [`v8::TracedGlobal`](crate::v8::TracedGlobal)
 //! outlives every scope, and is dropped wherever the Rust value owning it goes away. Two things
@@ -40,6 +40,13 @@
 //! `Realm` set, that the isolate is disposed. A `Global` is never weak, so V8 never writes
 //! into it: it holds its strong handle inline, and puts it in a slot of its own only to queue
 //! it, while a handle dropped after the state is closed needs no slot at all.
+//!
+//! A [`jsg::Rc`](crate::Rc) or [`jsg::Weak`](crate::Weak) also shares its isolate's state. Its
+//! reference counts are not atomic, so only the isolate lock keeps threads from racing on them.
+//! [`IsolateState::release`] releases a reference at once under the lock, and otherwise queues
+//! it for the next lock. After the state is closed, references are kept until the isolate is
+//! disposed, since `IsolateBase::dropWrappers` and `Dispose` still touch the counts. They are
+//! then released with [`ReleaseContext::Disposed`], one thread at a time.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -69,7 +76,8 @@ pub struct IsolateState {
 
 // SAFETY: `isolate` is a raw pointer that is only compared, or dereferenced for
 // `v8::Locker::IsLocked`, which any thread may call, while the isolate is alive (see the
-// field). The other fields synchronize themselves.
+// field). The other fields synchronize themselves; see `Released` for the references queued in
+// `drop_queues`.
 #[expect(unsafe_code, reason = "shares the raw isolate pointer between threads")]
 unsafe impl Send for IsolateState {}
 // SAFETY: as for `Send`.
@@ -85,11 +93,18 @@ struct DropQueues {
     /// Slots of `Global`s and `TracedGlobal`s that were dropped without the isolate lock,
     /// waiting for the next lock.
     awaiting_lock: Vec<Box<GlobalSlot>>,
+    /// References dropped without the isolate lock, waiting for the next lock.
+    released_awaiting_lock: Vec<Released>,
     /// Slots of `TracedGlobal`s that were dropped after the state was closed, waiting for the
     /// isolate to be disposed.
     awaiting_dispose: Vec<Box<GlobalSlot>>,
+    /// References dropped after the state was closed, waiting to be drained once the isolate is
+    /// disposed.
+    released_awaiting_dispose: Vec<Released>,
     /// Set once the isolate is disposed, after which slots are freed at once.
     disposed: bool,
+    /// Set while a thread drains `released_awaiting_dispose`.
+    draining_disposed: bool,
 }
 
 #[expect(
@@ -177,13 +192,45 @@ impl IsolateState {
         }
     }
 
-    /// Resets and frees the slots that [`drop_slot`](Self::drop_slot) and
-    /// [`drop_global`](Self::drop_global) queued. The deferred action hook calls it whenever
-    /// `IsolateBase::Lock` locks the isolate.
-    pub(crate) fn reset_awaiting_lock(&self, _isolate: &mut Isolate) {
-        // The handles are reset outside the mutex, which only guards the queues themselves.
-        let batch = std::mem::take(&mut self.lock_drop_queues().awaiting_lock);
-        batch.into_iter().for_each(reset_and_free);
+    /// Releases the parts of a dropped [`jsg::Rc`](crate::Rc) or [`jsg::Weak`](crate::Weak):
+    /// at once under the lock, otherwise on the next lock, or, once the state is closed, after
+    /// the isolate is disposed.
+    pub(crate) fn release<T: Releasable>(&self, released: T) {
+        if self.this_thread_holds_lock() {
+            released.release(ReleaseContext::Locked);
+            return;
+        }
+        let mut queues = self.lock_drop_queues();
+        // `close` sets `closed` and takes the queue under this mutex, so nothing pushed while the
+        // state is open is missed.
+        if !self.is_closed() {
+            queues.released_awaiting_lock.push(Released::new(released));
+            return;
+        }
+        queues
+            .released_awaiting_dispose
+            .push(Released::new(released));
+        if !queues.disposed || queues.draining_disposed {
+            return;
+        }
+        queues.draining_disposed = true;
+        drop(queues);
+        self.drain_disposed();
+    }
+
+    /// Releases the references and resets the handles queued without the lock. The deferred
+    /// action hook calls it whenever `IsolateBase::Lock` locks the isolate.
+    pub(crate) fn drain_awaiting_lock(&self, _isolate: &mut Isolate) {
+        // Outside the mutex, since releasing a reference can drop a resource and release more.
+        let (released, slots) = {
+            let mut queues = self.lock_drop_queues();
+            (
+                std::mem::take(&mut queues.released_awaiting_lock),
+                std::mem::take(&mut queues.awaiting_lock),
+            )
+        };
+        released.into_iter().for_each(Released::release_locked);
+        slots.into_iter().for_each(reset_and_free);
     }
 
     /// The number of handles waiting for the next lock.
@@ -191,30 +238,68 @@ impl IsolateState {
         self.lock_drop_queues().awaiting_lock.len()
     }
 
-    /// Records that the isolate is about to be disposed, and resets the queued handles while
-    /// it still can. Every handle of the isolate that is dropped from now on is left to
-    /// `Dispose`.
+    /// The number of references to resources waiting for the next lock.
+    pub(crate) fn released_awaiting_lock_count(&self) -> usize {
+        self.lock_drop_queues().released_awaiting_lock.len()
+    }
+
+    /// Records that the isolate is about to be disposed, and releases the queued references and
+    /// resets the queued handles while it still can. Handles dropped from now on are left to
+    /// `Dispose`, and references kept until the isolate is disposed.
     ///
     /// The `Isolate` reference proves that the caller holds the isolate lock; no handle of the
     /// isolate can be reset concurrently.
     pub(crate) fn close(&self, _isolate: &mut Isolate) {
-        let batch = {
+        // References first, so the handles of resources they drop are reset, not left to
+        // `Dispose`.
+        let released = std::mem::take(&mut self.lock_drop_queues().released_awaiting_lock);
+        released.into_iter().for_each(Released::release_locked);
+        let (released, slots) = {
             let mut queues = self.lock_drop_queues();
             self.closed.store(true, Ordering::Release);
-            std::mem::take(&mut queues.awaiting_lock)
+            (
+                std::mem::take(&mut queues.released_awaiting_lock),
+                std::mem::take(&mut queues.awaiting_lock),
+            )
         };
-        batch.into_iter().for_each(reset_and_free);
+        // Queued by other threads meanwhile.
+        released.into_iter().for_each(Released::release_locked);
+        slots.into_iter().for_each(reset_and_free);
     }
 
-    /// Records that the isolate has been disposed, and frees the slots kept for it, which V8
-    /// can no longer write into. Slots dropped from now on are freed at once.
+    /// Records that the isolate has been disposed, frees the slots kept for it, which V8 can no
+    /// longer write into, and releases the references kept for it.
+    ///
+    /// Like a C++ JSG object that outlives its isolate, a resource must from now on be used by
+    /// one thread at a time: releases are serialized, but clones are not.
     pub(crate) fn isolate_disposed(&self) {
         let kept = {
             let mut queues = self.lock_drop_queues();
             queues.disposed = true;
+            queues.draining_disposed = true;
             std::mem::take(&mut queues.awaiting_dispose)
         };
         drop(kept);
+        self.drain_disposed();
+    }
+
+    /// Releases `released_awaiting_dispose` until it is empty. Only the thread that set
+    /// `draining_disposed` calls this; other threads just add to the queue.
+    fn drain_disposed(&self) {
+        loop {
+            let batch = {
+                let mut queues = self.lock_drop_queues();
+                let batch = std::mem::take(&mut queues.released_awaiting_dispose);
+                queues.draining_disposed = !batch.is_empty();
+                batch
+            };
+            if batch.is_empty() {
+                return;
+            }
+            for released in batch {
+                released.release(ReleaseContext::Disposed);
+            }
+        }
     }
 
     fn lock_drop_queues(&self) -> MutexGuard<'_, DropQueues> {
@@ -225,6 +310,45 @@ impl IsolateState {
             .unwrap_or_else(PoisonError::into_inner)
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseContext {
+    /// This thread holds the isolate lock.
+    Locked,
+    /// The isolate is disposed. Only the counts may be released: an unwrapped `Wrappable` can
+    /// still point to the dead isolate.
+    Disposed,
+}
+
+/// The parts of a dropped [`jsg::Rc`](crate::Rc) or [`jsg::Weak`](crate::Weak).
+pub trait Releasable: 'static {
+    fn release(self, context: ReleaseContext);
+}
+
+struct Released(Box<dyn FnOnce(ReleaseContext)>);
+
+impl Released {
+    fn new<T: Releasable>(released: T) -> Self {
+        Self(Box::new(move |context| released.release(context)))
+    }
+
+    fn release(self, context: ReleaseContext) {
+        (self.0)(context);
+    }
+
+    fn release_locked(self) {
+        self.release(ReleaseContext::Locked);
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "queues references for the thread that next locks the isolate"
+)]
+// SAFETY: the parts are `!Send` only because their counts are not atomic. Queuing touches no
+// count, and queued parts are released either under the isolate lock or, after disposal, by the
+// one draining thread.
+unsafe impl Send for Released {}
 
 /// What a handle dropped after the state is closed needs.
 #[derive(Clone, Copy, PartialEq, Eq)]

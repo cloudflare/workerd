@@ -8,7 +8,6 @@
 
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <kj/async-io.h>
 #include <kj/test.h>
@@ -511,7 +510,6 @@ TestFixture::SetupParams makeSenderParams(kj::WaitScope& waitScope,
   return {
     .waitScope = waitScope,
     .featureFlags = flags,
-    .autogates = kj::arr("durable-object-retries-userland"_kj),
     .useRealTimers = false,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&timer](TimerChannel&) -> kj::Rc<IoChannelFactory> {
@@ -1329,33 +1327,6 @@ KJ_TEST("configured retry timeout sets the actor RPC retry deadline") {
 
   KJ_EXPECT(
       KJ_ASSERT_NONNULL(timer.getRetryDeadline()) == kj::origin<kj::TimePoint>() + RETRY_TIMEOUT);
-}
-
-KJ_TEST("configured retry policy is ignored for actor RPC with the userland gate off") {
-  auto io = kj::setupAsyncIo();
-  capnp::MallocMessageBuilder flagsMessage;
-  RetryTestState state;
-  PausingTimerChannel timer;
-  TestFixture receiver(makeReceiverParams(io.waitScope));
-  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
-  // Keeps the userland gate off in the all-autogates variant too.
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
-
-  sender.runInIoContext([&](const TestFixture::Environment& env) {
-    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
-        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxRetries = 0});
-    auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
-    auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
-    auto checked = env.js.toPromise(result).then(env.js, [](jsg::Lock& js, jsg::Value value) {
-      KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
-    });
-    return env.context.awaitJs(env.js, kj::mv(checked)).attach(kj::mv(fetcher));
-  });
-
-  KJ_EXPECT(state.metadata.size() == 2);
-  KJ_EXPECT(state.acceptedRetries == 1);
-  KJ_ASSERT(state.outcomes.size() == 1);
-  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
 }
 
 KJ_TEST("actor RPC first attempt is not cancelled by the retry timeout") {
