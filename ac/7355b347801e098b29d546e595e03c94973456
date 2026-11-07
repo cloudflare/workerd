@@ -1,0 +1,23 @@
+src/workerd/io/worker.c++
+  s_486b0b0666e6cb::t_5f6ff676bd2d36 4411-4426
+src/workerd/io/worker.h
+  s_486b0b0666e6cb::t_4dab5efcde59af 1117-1119
+src/workerd/server/server-test.c++
+  s_486b0b0666e6cb::t_c0b3dd023b6dd5 10063-10190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ac7355b347801e098b29d546e595e03c94973456",
+  "prompts": {},
+  "sessions": {
+    "s_486b0b0666e6cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b69f36b6-6468-45ed-a9fa-a668a21d7d09",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}
