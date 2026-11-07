@@ -325,6 +325,7 @@ def _wd_test_impl(ctx):
         RunEnvironmentInfo(
             environment = environment,
         ),
+        testing.ExecutionInfo(requirements = ctx.attr.execution_requirements),
         instrumented_files_info,
     ]
 
@@ -346,6 +347,7 @@ _wd_test = rule(
         ),
         # Source file
         "src": attr.label(allow_single_file = True),
+        "execution_requirements": attr.string_dict(),
         # The workerd executable is used to run all tests.
         # Using cfg = "target" instead of "exec" ensures workerd is built with coverage
         # instrumentation when running `bazel coverage`. With cfg = "exec", the binary
