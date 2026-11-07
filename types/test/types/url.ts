@@ -14,6 +14,9 @@ url.origin = 'https://example.org';
 
 expectType<boolean>(URL.canParse('https://example.com', 'https://base/'));
 expectType<URL | null>(URL.parse('https://example.com'));
+// The statics take URLs, as the constructor does.
+expectType<boolean>(URL.canParse(url));
+expectType<URL | null>(URL.parse('/p', url));
 expectType<string>(URL.createObjectURL(new Blob([])));
 URL.revokeObjectURL('blob:https://example.com/id');
 

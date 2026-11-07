@@ -5,7 +5,7 @@
 // Runtime APIs that take a URL or URLSearchParams: Response and Request
 // bodies, string-taking APIs, node:fs paths and URLPattern.
 
-import { strictEqual } from 'node:assert';
+import { strictEqual, throws } from 'node:assert';
 import fs from 'node:fs';
 
 const kFormType = 'application/x-www-form-urlencoded;charset=UTF-8';
@@ -39,6 +39,24 @@ export const searchParamsBodies = {
   },
 };
 
+// A Proxy of a URLSearchParams or an object inheriting its prototype is not
+// a URLSearchParams body; it falls through to a conversion that reaches a
+// brand-checked member.
+export const fakeSearchParamsBodies = {
+  test() {
+    for (const fake of [
+      new Proxy(new URLSearchParams('a=1'), {}),
+      Object.create(URLSearchParams.prototype),
+    ]) {
+      throws(() => new Response(fake), TypeError);
+      throws(
+        () => new Request('http://a/', { method: 'POST', body: fake }),
+        TypeError
+      );
+    }
+  },
+};
+
 export const urlsAsStrings = {
   test() {
     const url = new URL('http://a/p?q');
@@ -58,6 +76,22 @@ export const nodeFsPaths = {
     strictEqual(fs.existsSync(path), true);
     fs.unlinkSync(path);
     strictEqual(fs.existsSync(path), false);
+  },
+};
+
+// node:fs takes these for URLs (`instanceof URL` holds), and the runtime
+// then rejects them.
+export const fakeUrlFsPaths = {
+  test() {
+    const path = 'file:///tmp/url-consumers-fake.txt';
+    for (const fake of [
+      new Proxy(new URL(path), {}),
+      Object.create(URL.prototype),
+    ]) {
+      throws(() => fs.writeFileSync(fake, 'hello'), TypeError);
+      throws(() => fs.readFileSync(fake, 'utf8'), TypeError);
+    }
+    strictEqual(fs.existsSync(new URL(path)), false);
   },
 };
 

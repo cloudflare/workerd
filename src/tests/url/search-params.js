@@ -80,6 +80,55 @@ export const badSequences = {
   },
 };
 
+export const sequenceIteratorProtocol = {
+  test() {
+    // Ledger #16: the legacy C++ reads these iterables as empty dicts.
+    // The whole sequence converts before any pair's length is checked, so
+    // the iterator's own error wins over the bad pair before it.
+    const throwing = {
+      *[Symbol.iterator]() {
+        yield ['a'];
+        throw new RangeError('iterator failed');
+      },
+    };
+    if (legacyCpp) {
+      strictEqual(str(throwing), '');
+    } else {
+      throws(() => str(throwing), {
+        name: 'RangeError',
+        message: 'iterator failed',
+      });
+    }
+
+    // A truthy `done` ends the iteration. Ledger #27: the standard C++
+    // also appends the value of that final result, as it does a
+    // generator's return value.
+    const truthyDone = {
+      [Symbol.iterator]() {
+        let calls = 0;
+        return {
+          next() {
+            calls++;
+            if (calls > 2) throw new Error('iterated past done');
+            return calls === 1
+              ? { done: false, value: ['a', '1'] }
+              : { done: 1, value: ['b', '2'] };
+          },
+        };
+      },
+    };
+    const returning = {
+      *[Symbol.iterator]() {
+        yield ['a', '1'];
+        return ['b', '2'];
+      },
+    };
+    for (const init of [truthyDone, returning]) {
+      strictEqual(str(init), legacyCpp ? '' : usingTsImpl ? 'a=1' : 'a=1&b=2');
+    }
+  },
+};
+
 export const recordInitializers = {
   test() {
     strictEqual(str({ a: 1, b: 'x' }), 'a=1&b=x');
