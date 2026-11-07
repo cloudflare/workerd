@@ -14,16 +14,17 @@
 namespace workerd::api::html_rewriter::test {
 namespace {
 
-// `rewriter(ons, docs, sink, encoding)` creates a rewriter with the handlers of `on()` calls,
-// `[selector, handlers]`, and of `onDocument()` calls, `handlers`, for a document in `encoding`;
-// `sink` gets the output the dispatcher gets, as a string. `log` collects what the tests read, `error(f)` returns the
+// `rewriter(ons, docs, sink, encoding, streams)` creates a rewriter with the handlers of `on()`
+// calls, `[selector, handlers]`, and of `onDocument()` calls, `handlers`, for a document in
+// `encoding`; `sink` gets the output the dispatcher gets, as a string, and `streams[id](sink)`
+// writes the streaming content numbered `id`. `log` collects what the tests read, `error(f)` returns the
 // message of what `f` throws, and `enc` and `dec` convert between Latin-1 strings and bytes.
 constexpr kj::StringPtr PRELUDE = R"(
 const enc = (s) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const dec = (b) => (b === undefined ? '' : String.fromCharCode(...b));
 const names = ['element', 'comments', 'text', 'doctype', 'comments', 'text', 'end'];
 const log = [];
-function rewriter(ons, docs = [], sink = () => {}, encoding = 'utf-8') {
+function rewriter(ons, docs = [], sink = () => {}, encoding = 'utf-8', streams = []) {
   const element = ons.map(([selector, h]) => ({
     selector: utils.parseSelector(selector),
     element: !!h.element, comments: !!h.comments, text: !!h.text,
@@ -33,6 +34,7 @@ function rewriter(ons, docs = [], sink = () => {}, encoding = 'utf-8') {
   }));
   return utils.newRewriter(element, document, encoding, (kind, id, token, output) => {
     sink(dec(output));
+    if (kind === 8) return streams[id](token);
     return (kind < 3 ? ons[id][1] : docs[id])[names[kind]](token);
   });
 }
@@ -287,6 +289,56 @@ KJ_TEST("lol-html decodes and encodes a document on the fiber's stack") {
   )");
   fixture.pollEventLoop();
   KJ_EXPECT(evaluate(fixture, "log.join()") == "true,true");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("streaming content can be written after an await") {
+  TestFixture fixture;
+  setUp(fixture);
+  auto request = fixture.newIncomingRequest();
+  runIn(fixture, *request, R"(
+    let out = '';
+    const streams = [async (sink) => {
+      sink.write(enc('<b>'));
+      await null;
+      sink.write(enc('</b>'));
+    }];
+    var rw = rewriter([['p', { element(el) { el.replaceStream(0, true); } }]], [],
+                      (s) => { out += s; }, 'utf-8', streams);
+    rw.writeAsync(enc('<div><p>x</p></div>')).then((v) => log.push(out + dec(v)));
+  )");
+  fixture.pollEventLoop();
+  KJ_EXPECT(evaluate(fixture, "log.join()") == "<div><b></b></div>");
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("streaming content goes to its rewriter when calls interleave") {
+  TestFixture fixture;
+  setUp(fixture);
+  auto request = fixture.newIncomingRequest();
+  // A waits in a handler while B runs, then writes its content.
+  runIn(fixture, *request, R"(
+    var release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const outs = { a: '', b: '' };
+    const make = (name, wait) => rewriter([['p', { async element(el) {
+      el.replaceStream(0, false);
+      if (wait) await gate;
+    } }]], [], (s) => { outs[name] += s; }, 'utf-8', [(sink) => { sink.write(enc(name)); }]);
+    const a = make('a', true);
+    const b = make('b', false);
+    a.writeAsync(enc('<p>1</p>!')).then((v) => {
+      outs.a += dec(v);
+      log.push(`a ${outs.a}`);
+    });
+    b.writeAsync(enc('<p>2</p>!')).then((v) => {
+      outs.b += dec(v);
+      log.push(`b ${outs.b}`);
+      release();
+    });
+  )");
+  fixture.pollEventLoop();
+  KJ_EXPECT(evaluate(fixture, "log.join()") == "b b!,a a!");
   fixture.drainAndDestroy(kj::mv(request));
 }
 

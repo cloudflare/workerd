@@ -8,6 +8,7 @@ use jsg_test::Harness;
 
 use crate::HtmlRewriterUtils;
 
+/// `streams[id](sink)` writes the streaming content numbered `id`.
 /// `rewrite(chunks, ons, docs, encoding)` rewrites the document written in `chunks` (Latin-1
 /// strings) with the handlers of `on()` calls, `[selector, handlers]`, and of `onDocument()`
 /// calls, `handlers`, and returns the output, from the dispatcher and the calls together. A
@@ -17,6 +18,7 @@ const PRELUDE: &str = r"
 const enc = (s) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const dec = (b) => (b === undefined ? '' : String.fromCharCode(...b));
 const names = ['element', 'comments', 'text', 'doctype', 'comments', 'text', 'end'];
+const streams = [];
 function newRewriter(ons, docs, encoding, sink) {
   const endTags = [];
   const element = ons.map(([selector, h]) => ({
@@ -29,6 +31,7 @@ function newRewriter(ons, docs, encoding, sink) {
   return utils.newRewriter(element, document, encoding ?? 'utf-8', (kind, id, token, output) => {
     sink(dec(output));
     if (kind === 7) return endTags[id](token);
+    if (kind === 8) return streams[id](token);
     return (kind < 3 ? ons[id][1] : docs[id])[names[kind]](token, endTags);
   });
 }
@@ -303,5 +306,84 @@ fn the_esi_compatibility_flag_makes_esi_include_a_void_tag() {
         run_with(&harness, code),
         "TypeError: Parser error: esi:include can't have content \
          <esi:include src=a>x</esi:include>"
+    );
+}
+
+#[test]
+fn streaming_content_is_written_where_the_token_inserted_it() {
+    let streams = r"for (const s of ['[b]', '[p]', '[ap]', '[a]', '[i]', '[r]', '[eb]', '[ea]',
+                                     '[tb]', '[tr]', '[ta]']) {
+                      streams.push((sink) => { sink.write(enc(s)); });
+                    }";
+    assert_eq!(
+        run(&format!(
+            r"{streams}
+            rewrite('<p>x</p>', [['p', {{ element(el) {{
+              el.beforeStream(0, true);
+              el.prependStream(1, true);
+              el.appendStream(2, true);
+              el.afterStream(3, true);
+            }} }}]])"
+        )),
+        "[b]<p>[p]x[ap]</p>[a]"
+    );
+    assert_eq!(
+        run(&format!(
+            r"{streams}
+            rewrite('<p>x</p><div>y</div>', [
+              ['p', {{ element(el) {{ el.setInnerContentStream(4, true); }} }}],
+              ['div', {{ element(el) {{ el.replaceStream(5, true); }} }}],
+            ])"
+        )),
+        "<p>[i]</p>[r]"
+    );
+    assert_eq!(
+        run(&format!(
+            r"{streams}
+            rewrite('<p>x</p>', [['p', {{ element(el, endTags) {{
+              endTags.push((t) => {{ t.beforeStream(6, true); t.afterStream(7, true); }});
+              el.onEndTag(endTags.length - 1);
+            }} }}]])"
+        )),
+        "<p>x[eb]</p>[ea]"
+    );
+    assert_eq!(
+        run(&format!(
+            r"{streams}
+            rewrite('<p>x</p>', [['p', {{ text(t) {{
+              if (t.text()) {{ t.beforeStream(8, true); t.replaceStream(9, true); t.afterStream(10, true); }}
+            }} }}]])"
+        )),
+        "<p>[tb][tr][ta]</p>"
+    );
+}
+
+#[test]
+fn streaming_content_is_utf_8_text_or_html() {
+    // "é" is 0xC3 0xA9 in UTF-8, written in two chunks; the output is UTF-8 too.
+    assert_eq!(
+        run(r"streams.push((sink) => {
+                sink.write(enc('<b>'));
+                sink.write(Uint8Array.of(0xc3));
+                sink.write(Uint8Array.of(0xa9));
+              });
+              rewrite('<p>x</p><i>y</i>', [
+                ['p', { element(el) { el.replaceStream(0, true); } }],
+                ['i', { element(el) { el.replaceStream(0, false); } }],
+              ])"),
+        "<b>\u{c3}\u{a9}&lt;b&gt;\u{c3}\u{a9}"
+    );
+}
+
+#[test]
+fn invalid_streaming_content_fails_the_rewriter() {
+    assert_eq!(
+        run(r"let kept;
+              streams.push((sink) => { kept = sink; sink.write(Uint8Array.of(0xff)); });
+              [error(() => rewrite('<p>', [['p', { element(el) { el.replaceStream(0, true); } }]])),
+               error(() => kept.write(enc('x')))].join('\n')"),
+        "TypeError: Parser error: Invalid UTF-8\n\
+         TypeError: This content token is no longer valid. Content tokens are only valid during \
+         the execution of the relevant content handler."
     );
 }

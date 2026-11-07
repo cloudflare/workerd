@@ -123,6 +123,7 @@ impl FiberTask {
         };
         let mut rewriter = self.rewriter.take();
         let input = std::mem::replace(&mut self.input, Input::End);
+        call.shared.resume();
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             call.shared
                 .dispatcher

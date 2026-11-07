@@ -13,7 +13,10 @@
 //! - an [`HtmlRewriterHandle`] per `transform()`, from [`new_rewriter`], to which it writes the
 //!   document and which returns the output, from the call or, when lol-html runs on a fiber so
 //!   that handlers can return promises, from a promise;
-//! - a token handle for each handler lol-html runs ([`tokens`]), valid while the handler runs.
+//! - a token handle for each handler lol-html runs ([`tokens`]), valid while the handler runs;
+//! - for content from a stream, which the facade numbers and passes to a token's `*Stream()`
+//!   method, a sink token to write it to when lol-html asks for it
+//!   ([`HandlerKind::Stream`]).
 //!
 //! It gets them from the static methods of [`HtmlRewriterUtils`], whose constructor function C++
 //! gets with `new_utils()`. None of these is a global, and none has a constructor JavaScript can

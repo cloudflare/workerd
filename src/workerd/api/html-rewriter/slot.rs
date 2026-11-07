@@ -35,6 +35,7 @@ use lol_html::html_content::Comment;
 use lol_html::html_content::Doctype;
 use lol_html::html_content::DocumentEnd;
 use lol_html::html_content::EndTag;
+use lol_html::html_content::StreamingHandlerSink;
 use lol_html::html_content::TextChunk;
 
 use crate::rewriter::Dispatcher;
@@ -73,6 +74,10 @@ unsafe impl Lendable for Doctype<'_> {
 // SAFETY: as above.
 unsafe impl Lendable for DocumentEnd<'_> {
     type Static = DocumentEnd<'static>;
+}
+// SAFETY: as above.
+unsafe impl Lendable for StreamingHandlerSink<'_> {
+    type Static = StreamingHandlerSink<'static>;
 }
 
 /// Locks `mutex`, which is held only to read or replace what a slot holds, so is never poisoned.

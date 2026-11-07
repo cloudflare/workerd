@@ -7,11 +7,13 @@
 //! promises, on a fiber (see [`crate::fiber`]).
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
 use std::sync::TryLockError;
+use std::sync::Weak;
 
 use jsg::ToJS;
 use jsg::ToJsTypedArray;
@@ -24,9 +26,12 @@ use lol_html::HandlerResult;
 use lol_html::MemorySettings;
 use lol_html::OutputSink;
 use lol_html::html_content::Comment;
+use lol_html::html_content::ContentType;
 use lol_html::html_content::Doctype;
 use lol_html::html_content::DocumentEnd;
 use lol_html::html_content::EndTag;
+use lol_html::html_content::StreamingHandler;
+use lol_html::html_content::StreamingHandlerSink;
 use lol_html::html_content::TextChunk;
 use lol_html::send::DocumentContentHandlers;
 pub use lol_html::send::Element;
@@ -62,6 +67,9 @@ pub enum HandlerKind {
     DocumentEnd = 6,
     /// The end tag handler that `onEndTag(id)` registered.
     EndTag = 7,
+    /// The streaming content numbered `id`, which a `*Stream(id, html)` method of a token
+    /// inserted: the dispatcher writes it to the token, a sink.
+    Stream = 8,
 }
 
 /// A lol-html token that a handler is called with.
@@ -72,6 +80,8 @@ pub enum Token<'a, 'r, 'i> {
     Comment(&'a mut Comment<'i>),
     Doctype(&'a mut Doctype<'i>),
     DocumentEnd(&'a mut DocumentEnd<'i>),
+    /// Where streaming content is written, as HTML or as text.
+    Sink(&'a mut StreamingHandlerSink<'i>, ContentType),
 }
 
 /// A handler that lol-html runs.
@@ -115,14 +125,27 @@ pub struct Shared {
     output: Mutex<Vec<u8>>,
 }
 
+thread_local! {
+    /// The rewriter whose lol-html code runs on this thread: the one a [`Replacer`] belongs to,
+    /// which the token handles that create replacers don't hold. Fibers interleave, and a
+    /// handler can run another rewriter, so a rewriter sets it whenever lol-html's code resumes:
+    /// when a call starts, and when a dispatch returns.
+    static RUNNING: RefCell<Weak<Shared>> = const { RefCell::new(Weak::new()) };
+}
+
 impl Shared {
     pub(crate) fn take_output(&self) -> Vec<u8> {
         std::mem::take(&mut *lock_mutex(&self.output))
     }
 
+    /// Makes this the rewriter whose lol-html code runs on this thread.
+    pub(crate) fn resume(self: &Arc<Self>) {
+        RUNNING.with(|running| *running.borrow_mut() = Arc::downgrade(self));
+    }
+
     /// Runs a handler through the dispatcher of the running call.
     pub(crate) fn dispatch(
-        &self,
+        self: &Arc<Self>,
         kind: HandlerKind,
         id: u32,
         token: Token<'_, '_, '_>,
@@ -134,11 +157,37 @@ impl Shared {
             token,
             output,
         };
-        match self.dispatcher.with(|dispatcher| dispatcher.dispatch(call)) {
+        let result = self.dispatcher.with(|dispatcher| dispatcher.dispatch(call));
+        self.resume();
+        match result {
             Some(Ok(())) => Ok(()),
             // lol-html runs handlers only within `write()` and `end()`, which lend a dispatcher.
             Some(Err(Stopped)) | None => Err(Box::new(Stopped)),
         }
+    }
+}
+
+/// Streaming content that a token's `*Stream(id, html)` method inserted: lol-html calls it when it
+/// writes the content, and it dispatches a [`HandlerKind::Stream`] to the running rewriter.
+///
+/// lol-html drops content it never writes, as when a later handler removes the element, without
+/// a dispatch, so the dispatcher's caller keeps its streams until the rewriter ends.
+pub struct Replacer {
+    pub id: u32,
+    pub content_type: ContentType,
+}
+
+impl StreamingHandler for Replacer {
+    fn write_all(self: Box<Self>, sink: &mut StreamingHandlerSink<'_>) -> HandlerResult {
+        // lol-html writes streaming content only within the call of the rewriter it belongs to.
+        let shared = RUNNING
+            .with(|running| running.borrow().upgrade())
+            .ok_or_else(|| Box::new(Stopped))?;
+        shared.dispatch(
+            HandlerKind::Stream,
+            self.id,
+            Token::Sink(sink, self.content_type),
+        )
     }
 }
 
@@ -452,6 +501,7 @@ impl HtmlRewriterHandle {
         f: impl FnOnce() -> Result<(), lol_html::errors::RewritingError>,
     ) -> jsg::Result<()> {
         // Handlers run in the async context frame of `transform()`, as with C++ `HTMLRewriter`.
+        self.shared.resume();
         self.frame.enter(lock, |lock| {
             let function = self.dispatcher.as_local(lock);
             let mut dispatcher = SyncDispatcher {

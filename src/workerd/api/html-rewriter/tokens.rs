@@ -20,11 +20,14 @@ use lol_html::html_content::ContentType;
 use lol_html::html_content::Doctype;
 use lol_html::html_content::DocumentEnd;
 use lol_html::html_content::EndTag;
+use lol_html::html_content::StreamingHandler;
+use lol_html::html_content::StreamingHandlerSink;
 use lol_html::html_content::TextChunk;
 
 use crate::parser_error;
 use crate::rewriter::Element;
 use crate::rewriter::HandlerKind;
+use crate::rewriter::Replacer;
 use crate::rewriter::Shared;
 use crate::rewriter::Token;
 use crate::slot::TokenSlot;
@@ -40,6 +43,14 @@ const fn content_type(html: bool) -> ContentType {
     }
 }
 
+/// The streaming content numbered `id`, as HTML or as text.
+fn replacer(id: u32, html: bool) -> Box<dyn StreamingHandler + Send> {
+    Box::new(Replacer {
+        id,
+        content_type: content_type(html),
+    })
+}
+
 /// A slot of any token type, which [`lend_slot`] fills and [`handle`] makes a handle of.
 pub enum Slot {
     Element(TokenSlot<Element<'static, 'static>>),
@@ -48,6 +59,7 @@ pub enum Slot {
     Comment(TokenSlot<Comment<'static>>),
     Doctype(TokenSlot<Doctype<'static>>),
     DocumentEnd(TokenSlot<DocumentEnd<'static>>),
+    Sink(TokenSlot<StreamingHandlerSink<'static>>, ContentType),
 }
 
 /// Runs `f` with a new slot that holds `token` until `f` returns. Needs no lock, so that it can
@@ -66,6 +78,10 @@ pub fn lend_slot<R>(token: Token<'_, '_, '_>, f: impl FnOnce(Slot) -> R) -> R {
         Token::Comment(comment) => lend!(comment, Comment),
         Token::Doctype(doctype) => lend!(doctype, Doctype),
         Token::DocumentEnd(end) => lend!(end, DocumentEnd),
+        Token::Sink(sink, content_type) => {
+            let slot = TokenSlot::empty();
+            slot.lend(sink, || f(Slot::Sink(slot.clone(), content_type)))
+        }
     }
 }
 
@@ -89,6 +105,9 @@ pub fn handle<'s>(
         Slot::Comment(slot) => jsg::Rc::new(lock, CommentHandle { slot }).to_js(lock),
         Slot::Doctype(slot) => jsg::Rc::new(lock, DoctypeHandle { slot }).to_js(lock),
         Slot::DocumentEnd(slot) => jsg::Rc::new(lock, DocumentEndHandle { slot }).to_js(lock),
+        Slot::Sink(slot, content_type) => {
+            jsg::Rc::new(lock, SinkHandle { slot, content_type }).to_js(lock)
+        }
     }
 }
 
@@ -235,6 +254,38 @@ impl ElementHandle {
         self.token(Element::remove_and_keep_content)
     }
 
+    /// Inserts the streaming content numbered `id` before the element; see
+    /// [`HandlerKind::Stream`].
+    #[jsg_method]
+    pub fn before_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_before(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn after_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_after(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn prepend_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_prepend(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn append_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_append(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn replace_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_replace(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn set_inner_content_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|element| element.streaming_set_inner_content(replacer(id, html)))
+    }
+
     /// Replaces the element's end tag handler with the one numbered `id`, which the rewriter
     /// dispatches as a [`HandlerKind::EndTag`]. Fails for an element that can't have an end tag.
     #[jsg_method]
@@ -286,6 +337,16 @@ impl EndTagHandle {
     pub fn remove(&self) -> jsg::Result<()> {
         self.token(EndTag::remove)
     }
+
+    #[jsg_method]
+    pub fn before_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|end_tag| end_tag.streaming_before(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn after_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|end_tag| end_tag.streaming_after(replacer(id, html)))
+    }
 }
 
 /// The handle of a chunk of text.
@@ -331,6 +392,21 @@ impl TextHandle {
     #[jsg_method]
     pub fn remove(&self) -> jsg::Result<()> {
         self.token(TextChunk::remove)
+    }
+
+    #[jsg_method]
+    pub fn before_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|text| text.streaming_before(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn after_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|text| text.streaming_after(replacer(id, html)))
+    }
+
+    #[jsg_method]
+    pub fn replace_stream(&self, id: u32, html: bool) -> jsg::Result<()> {
+        self.token(|text| text.streaming_replace(replacer(id, html)))
     }
 }
 
@@ -420,5 +496,31 @@ impl DocumentEndHandle {
     #[jsg_method]
     pub fn append(&self, content: String, html: bool) -> jsg::Result<()> {
         self.token(|end| end.append(&content, content_type(html)))
+    }
+}
+
+/// The handle of the sink that streaming content is written to.
+#[jsg_resource(custom_trace)]
+pub struct SinkHandle {
+    slot: TokenSlot<StreamingHandlerSink<'static>>,
+    content_type: ContentType,
+}
+
+token_handle!(SinkHandle, StreamingHandlerSink<'static>);
+
+#[jsg_resource]
+impl SinkHandle {
+    /// Writes the next chunk of the content, UTF-8 that may end in an incomplete character, which
+    /// the next chunk completes. Fails with a parser error for invalid UTF-8.
+    #[jsg_method]
+    pub fn write<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        chunk: v8::Local<'s, v8::Uint8Array>,
+    ) -> jsg::Result<()> {
+        let chunk = chunk.as_slice(lock);
+        let content_type = self.content_type;
+        self.token(|sink| sink.write_utf8_chunk(chunk, content_type))?
+            .map_err(parser_error)
     }
 }
