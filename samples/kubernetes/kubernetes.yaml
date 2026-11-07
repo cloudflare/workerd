@@ -1,0 +1,182 @@
+# The sample cluster: three workerd pods that share a bucket, and the demo bucket. See README.md.
+# Before applying this, create the cluster key:
+#
+#     kubectl create secret generic workerd-cluster --from-literal=key="$(openssl rand -hex 32)"
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workerd
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: workerd
+  # Replace one pod at a time, waiting until the replacement has been ready for 10 s, longer than
+  # the 8 s a stopping pod takes to hand off its Durable Objects. So only one pod drains at a
+  # time.
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: workerd
+    spec:
+      # Above the node's stop timeout (`stopTimeoutMs`, 8 s by default).
+      terminationGracePeriodSeconds: 30
+      # Prefer spreading the pods over the nodes, so a node going away stops as few of them as
+      # possible. On a single node, or under scheduling pressure, pods may still share a node.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: workerd
+      containers:
+        - name: workerd
+          image: workerd-kubernetes-sample:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --experimental
+            - --cluster-advertise=$(POD_IP):7000
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: cluster
+              containerPort: 7000
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: WORKERD_CLUSTER_KEY_FILE
+              value: /etc/workerd-cluster/key
+            - name: WORKERD_CLUSTER_BUCKET
+              value: s3://cluster/sample
+            - name: AWS_ENDPOINT_URL
+              value: http://fake-s3:9000
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              value: sample
+            - name: AWS_SECRET_ACCESS_KEY
+              value: sample
+          # 503 while the pod is starting or stopping, so the Service sends it no new requests.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: cluster
+            periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: cluster-key
+              mountPath: /etc/workerd-cluster
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: cluster-key
+          secret:
+            secretName: workerd-cluster
+---
+# A node drain evicts the workerd pods one at a time, each after its replacement is ready, so the
+# remaining pods can take over a stopping pod's Durable Objects.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: workerd
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: workerd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workerd
+spec:
+  selector:
+    app: workerd
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Anyone who can reach a pod's cluster port with the key can call every service in the pod, and
+# the traffic is not encrypted. Only the cluster's own pods may connect to it. The kubelet's
+# readiness probes come from the node, which most network plugins allow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workerd-cluster-port
+spec:
+  podSelector:
+    matchLabels:
+      app: workerd
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: workerd
+      ports:
+        - port: 7000
+---
+# The demo bucket. It keeps its data on an emptyDir volume, so deleting its pod deletes the
+# cluster's state. Use a real bucket for anything else; see README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-s3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-s3
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: fake-s3
+    spec:
+      containers:
+        - name: fake-s3
+          image: workerd-kubernetes-sample:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/fake-s3"]
+          ports:
+            - name: http
+              containerPort: 9000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-s3
+spec:
+  selector:
+    app: fake-s3
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http
