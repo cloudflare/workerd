@@ -63,3 +63,12 @@ mod traced_global_lifetime;
 mod typed_promise;
 mod unwrap;
 mod wildcard_property;
+
+/// The message of a panic caught with `std::panic::catch_unwind`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("<non-string panic payload>")
+}

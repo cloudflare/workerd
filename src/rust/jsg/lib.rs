@@ -1164,16 +1164,19 @@ pub enum Member {
         getter_callback: RawGetterCallback,
         read_only: bool,
     },
+    /// A method of the constructor. The names of a type's static methods and static constants
+    /// must differ from each other and from `length`, `name` and `prototype`, which every
+    /// function already has; creating the type's template panics otherwise.
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
         length: u32,
     },
-    StaticConstant {
-        name: String,
-        value: ConstantValue,
-    },
+    /// A read-only number on both the constructor and the prototype. Its name follows the rules
+    /// of [`Member::StaticMethod`]. It may share its name with a prototype member, such as an
+    /// instance method or a prototype property, which then replaces it on the prototype.
+    StaticConstant { name: String, value: ConstantValue },
     /// A property of every instance with any string name that is not a defined property of the
     /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
     /// one. `query_callback` tells V8 whether a property exists, for `in`.
@@ -1184,22 +1187,16 @@ pub enum Member {
     /// The method installed as `prototype[Symbol.dispose]`, which `using` calls, like C++ JSG's
     /// `JSG_DISPOSE`. Like a [`Member::Method`], it is registered with the type's
     /// `v8::Signature`. A type has at most one, and may also have a [`Member::AsyncDispose`].
-    Dispose {
-        callback: RawFunctionCallback,
-    },
+    Dispose { callback: RawFunctionCallback },
     /// The method installed as `prototype[Symbol.asyncDispose]`, which `await using` calls and
     /// whose returned promise it awaits, like C++ JSG's `JSG_ASYNC_DISPOSE`. Like a
     /// [`Member::Method`], it is registered with the type's `v8::Signature`. A type has at most
     /// one, and may also have a [`Member::Dispose`].
-    AsyncDispose {
-        callback: RawFunctionCallback,
-    },
+    AsyncDispose { callback: RawFunctionCallback },
     /// Makes every instance callable as a function, like C++ JSG's `JSG_CALLABLE`: calling the
     /// instance, with or without `new`, runs `callback` with the instance as `this`, however the
     /// call names it. A type has at most one.
-    Callable {
-        callback: RawFunctionCallback,
-    },
+    Callable { callback: RawFunctionCallback },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
     /// are installed after every other member, whatever their position.
