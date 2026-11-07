@@ -113,6 +113,10 @@ class IsolateBase {
   // uses: looked up once per isolate, rather than once per Serializer.
   static v8::Local<v8::Private> getJsSerializeModeKey(v8::Isolate* isolate);
 
+  // The V8 private symbol named DOM_EXCEPTION_NAME_KEY, the brand of the bootstrap's
+  // DOMException, looked up once per isolate.
+  static v8::Local<v8::Private> getDomExceptionNameKey(v8::Isolate* isolate);
+
   // The template of the bootstrap's DOMException instances (see newBootstrapDomException()).
   static v8::Local<v8::FunctionTemplate> getDomExceptionTemplate(v8::Isolate* isolate);
 
@@ -679,6 +683,9 @@ class IsolateBase {
 
   // Created by getJsSerializeModeKey() on first use.
   v8::Global<v8::Private> jsSerializeModeKey;
+
+  // Created by getDomExceptionNameKey() on first use.
+  v8::Global<v8::Private> domExceptionNameKey;
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;

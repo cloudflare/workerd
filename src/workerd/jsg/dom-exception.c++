@@ -17,7 +17,8 @@
 namespace workerd::jsg {
 
 namespace {
-kj::Maybe<v8::Local<v8::Value>> tryGetOwnDataProperty(
+// Skips interceptors and the prototype chain, but calls the property's getter if it has one.
+kj::Maybe<v8::Local<v8::Value>> tryGetOwnProperty(
     Lock& js, v8::Local<v8::Object> object, kj::StringPtr name) {
   auto context = js.v8Context();
   v8::Local<v8::String> key = js.strIntern(name);
@@ -31,10 +32,10 @@ kj::Maybe<JsObject> tryGetBootstrapDomExceptionPrototype(Lock& js) {
   auto exports = KJ_UNWRAP_OR(modules.tryGetLoadedExports(js, "dom-exception"_kj), return kj::none);
   auto exportsObject = KJ_UNWRAP_OR(exports.tryCast<JsObject>(), return kj::none);
   auto ctor =
-      KJ_UNWRAP_OR(tryGetOwnDataProperty(js, exportsObject, "DOMException"_kj), return kj::none);
+      KJ_UNWRAP_OR(tryGetOwnProperty(js, exportsObject, "DOMException"_kj), return kj::none);
   if (!ctor->IsFunction()) return kj::none;
-  auto prototype = KJ_UNWRAP_OR(
-      tryGetOwnDataProperty(js, ctor.As<v8::Object>(), "prototype"_kj), return kj::none);
+  auto prototype =
+      KJ_UNWRAP_OR(tryGetOwnProperty(js, ctor.As<v8::Object>(), "prototype"_kj), return kj::none);
   if (!prototype->IsObject()) return kj::none;
   auto result = JsObject(prototype.As<v8::Object>());
   if (!result.hasPrivate(js, DOM_EXCEPTION_PROTOTYPE_KEY)) return kj::none;

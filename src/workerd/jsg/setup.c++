@@ -593,6 +593,7 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   opaqueTemplate.Reset();
   domExceptionTemplate.Reset();
   jsSerializeModeKey.Reset();
+  domExceptionNameKey.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
@@ -659,6 +660,15 @@ v8::Local<v8::Private> IsolateBase::getJsSerializeModeKey(v8::Isolate* isolate) 
   return self.jsSerializeModeKey.Get(isolate);
 }
 
+v8::Local<v8::Private> IsolateBase::getDomExceptionNameKey(v8::Isolate* isolate) {
+  auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  if (self.domExceptionNameKey.IsEmpty()) {
+    self.domExceptionNameKey.Reset(
+        isolate, v8::Private::ForApi(isolate, v8StrIntern(isolate, DOM_EXCEPTION_NAME_KEY)));
+  }
+  return self.domExceptionNameKey.Get(isolate);
+}
+
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   KJ_REQUIRE(queueState == QueueState::ACTIVE);
   queueState = QueueState::DROPPING;
@@ -687,6 +697,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(domExceptionTemplate.Reset());
     KJ_DEFER(jsSerializeModeKey.Reset());
+    KJ_DEFER(domExceptionNameKey.Reset());
     KJ_DEFER(workerEnvObj.Reset());
     KJ_DEFER(workerExportsObj.Reset());
 
@@ -782,8 +793,8 @@ void IsolateBase::constructDomException(const v8::FunctionCallbackInfo<v8::Value
 // requires of DOMException. The bootstrap's DOMException is such a wrapper, recognized by its name.
 bool IsolateBase::isJsApiWrapperNativeErrorCallback(
     v8::Isolate* isolate, v8::Local<v8::Object> object) {
-  auto key = v8::Private::ForApi(isolate, v8StrIntern(isolate, DOM_EXCEPTION_NAME_KEY));
-  return jsg::check(object->HasPrivate(isolate->GetCurrentContext(), key));
+  return object->HasPrivate(isolate->GetCurrentContext(), getDomExceptionNameKey(isolate))
+      .FromMaybe(false);
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
