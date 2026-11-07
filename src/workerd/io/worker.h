@@ -467,6 +467,20 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // worker instance.
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
 
+  // A line that a PREPARE_SNAPSHOT zygote's top-level code wrote to the console. Whether the
+  // zygote's run counts is known only once its snapshot is accepted, so under ConsoleMode::STDOUT
+  // the zygote's lines wait here instead of going to stdout/stderr: the owner flushes them when
+  // the snapshot is used, and drops them with the isolate when the Worker starts without one and
+  // evaluates the top level itself.
+  struct DeferredConsoleLine {
+    kj::String text;
+    bool toStderr;
+  };
+  void deferConsoleLine(DeferredConsoleLine line) const;
+
+  // Writes the deferred lines to stdout/stderr in order and clears them.
+  void flushDeferredConsoleOutput();
+
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
   void logErrorOnce(kj::StringPtr description);
 
@@ -557,6 +571,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void()>>> cpuLimitNearlyExceededCallback;
+  kj::MutexGuarded<kj::Vector<DeferredConsoleLine>> deferredConsoleLines;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 

@@ -174,6 +174,28 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable the WebAssembly compact import section encoding.
   v8::V8::SetFlagsFromString("--wasm-compact-imports");
 
+#ifndef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+  // Custom startup snapshots for the shared cage mode:
+  // Keep the read-only heap sealed for serializer-enabled isolates.
+  // Without multiple pointer-compression cages every isolate lives in the default IsolateGroup
+  // and so shares one read-only heap. By default V8 leaves the read-only
+  // space writable for a SnapshotCreator isolate and CreateBlob() promotes its
+  // AccessorInfo/InterceptorInfo objects (JSG getter/setter/interceptor callback addresses) into
+  // that shared space. The next zygote in the same process then has to serialize that same
+  // read-only space and encode those foreign callback addresses against its own
+  // external_references table, which only holds the callbacks it registered itself ->
+  // "Unknown external reference". With multiple cages each zygote owns its group and read-only
+  // heap, and whatever it promotes travels inside its own blob.
+  //
+  // The flag is set unconditionally rather than only when the STARTUP_SNAPSHOT autogate is on:
+  // V8 folds every non-default flag into the hash it stamps on code caches, and the embedded
+  // compile caches are produced at build time by gen-compile-cache through this same init path.
+  // A flag that depended on the autogate would make the caches match only one of the two
+  // runtime configurations and be rejected (kFlagsMismatch) in the other. V8 only consults the
+  // flag for serializer-enabled isolates, so ordinary isolates are unaffected.
+  v8::V8::SetFlagsFromString("--no-extensible-ro-snapshot");
+#endif
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -548,21 +570,126 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
+void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+    uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
-  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+  *badTagFieldsCount = 0;
+  KJ_ASSERT_NONNULL(snapshotCreator)
+      ->SetDefaultContext(defaultContext,
+          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount),
+          v8::SerializeContextDataCallback(),
+          v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
+}
+
+void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
+  auto& artifact = mutableSnapshotArtifact();
+  v8::HandleScope scope(ptr);
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+    if (slot.IsEmpty()) {
+      artifact.constructorTemplateIndices.add(SnapshotArtifact::kNoConstructorTemplate);
+      return;
+    }
+    artifact.constructorTemplateIndices.add(pinIntoIsolateSnapshot(slot.Get(ptr)));
+    slot.Reset();
+  });
+}
+
+void IsolateBase::bakeModuleRegistryIntoSnapshot(v8::Global<v8::Context>& contextHandle) {
+  KJ_REQUIRE(!usingNewModuleRegistry, "snapshot not yet supported with the new module registry");
+  auto& artifact = mutableSnapshotArtifact();
+  v8::HandleScope scope(ptr);
+  auto context = contextHandle.Get(ptr);
+  auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      context, ContextPointerSlot::MODULE_REGISTRY));
+  moduleRegistry.visitEntriesForSnapshot([&](ModuleRegistry::SnapshotHandleRef ref) {
+    bool pin = ref.kind != ModuleRegistry::SnapshotHandleKind::INTERNAL_ONLY &&
+        ref.status != v8::Module::kUninstantiated && !ref.handle.IsEmpty();
+    if (pin) {
+      artifact.moduleRecords.add(SnapshotArtifact::ModuleRecord{
+        .specifier = ref.specifier.toString(false),
+        .moduleType = static_cast<uint8_t>(ref.type),
+        .handleKind = static_cast<uint8_t>(ref.kind),
+        .dataIndex = pinIntoSnapshot(context, ref.handle.Get(ptr)),
+      });
+    }
+    ref.handle.Reset();
+  });
+}
+
+namespace {
+// The counter of the createSnapshotBlob() step 3b drain running on this thread, if any.
+thread_local uint32_t* refusedCleanupCounter = nullptr;
+
+// Message listener installed around that drain. V8 reports every cleanup callback call the
+// DisallowJavascriptExecutionScope refused as a message.
+void countRefusedCleanup(v8::Local<v8::Message> message, v8::Local<v8::Value> data) {
+  ++KJ_ASSERT_NONNULL(refusedCleanupCounter);
+}
+}  // namespace
+
+void IsolateBase::settleFinalizationRegistriesForSnapshot(Lock& js) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  v8::HandleScope scope(ptr);
+  // A round is a full GC followed by every task it made V8 post. One round is rarely enough:
+  // cppgc sweeps atomically, so the GC of a round destroys the C++ side of a collected wrapper
+  // and releases the handles it held, and the objects behind those handles die only in the next
+  // round's GC. A cleanup callback can register more doomed objects too. The pump reports
+  // whether it ran anything at all rather than cleanup tasks specifically; a task of another kind
+  // merely costs one more round.
+  constexpr uint kMaxRounds = 8;
+  for (uint round = 0;; ++round) {
+    js.runMicrotasks();
+    ptr->ClearKeptObjects();
+    ptr->LowMemoryNotification();
+    bool ranTask = false;
+    while (pumpMsgLoop()) {
+      ranTask = true;
+      if (ptr->IsExecutionTerminating()) return;
+      js.runMicrotasks();
+      ptr->ClearKeptObjects();
+    }
+    KJ_LOG(INFO, "TEMP settle round", round, ranTask);
+    if (!ranTask) return;
+    KJ_REQUIRE(round < kMaxRounds,
+        "PREPARE_SNAPSHOT: FinalizationRegistry cleanups did not settle; cleanup callbacks keep "
+        "registering objects that are collected right away",
+        kMaxRounds);
+  }
 }
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+    const uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata,
+    kj::Vector<SnapshotArtifact::ListenerRecord> listenerRecords) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
 
+  // The identity objects referenced by these records were already pinned by the caller.
+  artifact.listenerRecords = kj::mv(listenerRecords);
+
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
 
-  // 1. Destroy every live Wrappable.
+  // TODO(later): Remove the legacy-registry snapshot support once new_module_registry
+  // is the default.
+  //
+  // 1. Pin every materialized module-registry handle into the snapshot and record
+  // (specifier, type, kind) -> index so the START_FROM_SNAPSHOT worker can build its entries
+  // around the baked instances. Reset every handle in the same pass.
+  bakeModuleRegistryIntoSnapshot(defaultContextHandle);
+
+  // 2. Record the native side of every live wrapper while it still exists: a stateless type by
+  // its tag alone, a stateful one as a clone. The Wrappables themselves are destroyed in step 3,
+  // before CreateBlob() checks that no V8 handles are left; by the time the serializer callbacks
+  // run, the shim pointer V8 reports is all that remains of a wrapper's native side. No
+  // JavaScript runs from here until CreateBlob() returns: see step 3b.
+  wrappablesMetadata->recordLiveWrappables(heapTracer, artifact,
+      [this](v8::CppHeapPointerTag tag) { return snapshotRecreateFnFor(tag) != kj::none; });
+
+  // 3. Destroy every live Wrappable.
   heapTracer.destroyLiveWrappableInstances();
 
   // Destructors under the isolate lock release their handles synchronously; drain the
@@ -570,46 +697,403 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // lock, after CreateBlob().
   applyDeferredActions();
 
-  // 1b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
-  // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
-  // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
-  // runner, and the startup serializer then rejects the isolate
-  // (StartupSerializer::CheckNoDirtyFinalizationRegistries).
+  // 3b. Collect what destroying the graph released, and retire the FinalizationRegistry
+  // cleanups that makes due without running them. No JavaScript may run past step 2: a cleanup
+  // callback would find every wrapper detached (an unwrap aborts), and could allocate a shim at
+  // the address of one recorded in step 2 and swept since. The cleanups that were due before the
+  // graph was destroyed ran in settleFinalizationRegistriesForSnapshot(); the ones that become
+  // due here are for registered objects that only C++ state reached, which the snapshot does not
+  // carry.
+  //
+  // CreateBlob() runs a full GC of its own before serializing, and its startup serializer rejects
+  // an isolate with a cleared cell in any registry
+  // (StartupSerializer::CheckNoDirtyFinalizationRegistries). The GC here finds such cells first.
+  // V8 then posts its cleanup task, which pops a cleared cell before calling the callback; under
+  // DisallowJavascriptExecutionScope the call throws instead of running, so pumping the task
+  // runner drains every registry without a JavaScript frame. V8 reports each refused call as a
+  // message. A zygote with any is rejected: snapshotting it would drop those cleanups silently.
   {
     v8::HandleScope scope(ptr);
-    ptr->LowMemoryNotification();
-    while (pumpMsgLoop()) {
-      ptr->PerformMicrotaskCheckpoint();
-    }
     ptr->ClearKeptObjects();
+    ptr->LowMemoryNotification();
+    uint32_t refusedCleanups = 0;
+    refusedCleanupCounter = &refusedCleanups;
+    ptr->AddMessageListener(countRefusedCleanup);
+    KJ_DEFER({
+      ptr->RemoveMessageListeners(countRefusedCleanup);
+      refusedCleanupCounter = nullptr;
+    });
+    {
+      v8::Isolate::DisallowJavascriptExecutionScope noJs(
+          ptr, v8::Isolate::DisallowJavascriptExecutionScope::THROW_ON_FAILURE);
+      while (pumpMsgLoop()) {}
+    }
+    KJ_REQUIRE(refusedCleanups == 0,
+        "PREPARE_SNAPSHOT: FinalizationRegistry cleanups became due only once the zygote's "
+        "objects were destroyed; their targets were held by C++ state the snapshot does not carry",
+        refusedCleanups);
   }
 
-  // 2. Reset isolate level handles.
+  // 4. Reset isolate level handles.
   opaqueTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
 
-  // 2b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
+  // 4b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
   // templates such as node-internal:dns).
   for (auto& h: extraTemplateHandles) {
     h.Reset();
   }
 
-  // 3. Reset resource-type constructor templates: the memoized and context slot per
-  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
-  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+  // 5. Bake every materialized resource-type constructor template into the snapshot, resetting
+  // each slot in the same pass.
+  bakeConstructorTemplatesIntoSnapshot();
 
-  // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  // 6. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
       [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
 
-  // 5. Reset the Global holding the default context, extracted from the script's module
+  // 7. Reset the Global holding the default context, extracted from the script's module
   // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
   // consumes it.
   defaultContextHandle.Reset();
 
-  artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
-                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.blob =
+      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+
+  KJ_REQUIRE(*badTagFieldsCount == 0,
+      "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
+      "workerd wrapper markers",
+      *badTagFieldsCount);
+
+  wrappablesMetadata->dropUnreachableWrappables(artifact);
+}
+
+void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
+  if (!isStartingFromSnapshot()) return;
+  auto& indices = finalizedSnapshotArtifact().constructorTemplateIndices;
+  if (indices.size() == 0) return;
+  jsg::runInV8Stack([&](jsg::V8StackScope&) {
+    v8::Isolate::Scope isolateScope(ptr);
+    v8::HandleScope handleScope(ptr);
+    // Slots are enumerated in the same fixed order as at PREPARE_SNAPSHOT (same binary, same
+    // TypeWrapper), so each slot pairs with the next recorded index by position.
+    size_t cursor = 0;
+    iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+      KJ_REQUIRE(cursor < indices.size(),
+          "START_FROM_SNAPSHOT: more template slots than recorded at PREPARE_SNAPSHOT");
+      size_t snapshotIndex = indices[cursor++];
+      if (snapshotIndex == SnapshotArtifact::kNoConstructorTemplate) return;
+      v8::Local<v8::FunctionTemplate> functionTemplate;
+      KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(snapshotIndex)
+                     .ToLocal(&functionTemplate),
+          "START_FROM_SNAPSHOT: constructor template missing from snapshot", snapshotIndex,
+          cursor - 1);
+      slot.Reset(ptr, functionTemplate);
+    });
+    KJ_REQUIRE(cursor == indices.size(),
+        "START_FROM_SNAPSHOT: template slot enumeration drifted vs PREPARE_SNAPSHOT", cursor,
+        indices.size());
+  });
+}
+
+namespace {
+// v8_flags.stack_trace_limit's default.
+constexpr int kDefaultStackTraceLimit = 10;
+
+// Fields of a DATA_DEFAULT property's entry in the record pinned into the snapshot.
+constexpr kj::StringPtr PRESENT = "present"_kj;
+constexpr kj::StringPtr VALUE = "value"_kj;
+constexpr kj::StringPtr WRITABLE = "writable"_kj;
+constexpr kj::StringPtr ENUMERABLE = "enumerable"_kj;
+
+constexpr RestoreTimeHolder ALL_HOLDERS[] = {
+  RestoreTimeHolder::GLOBAL,
+  RestoreTimeHolder::ERROR_CTOR,
+  RestoreTimeHolder::ITERATOR_CTOR,
+  RestoreTimeHolder::ITERATOR_PROTOTYPE,
+};
+
+kj::Maybe<ContextDataSlot> slotFor(RestoreTimeHolder holder) {
+  switch (holder) {
+    case RestoreTimeHolder::GLOBAL:
+      return kj::none;
+    case RestoreTimeHolder::ERROR_CTOR:
+      return ContextDataSlot::RESTORE_TIME_ERROR_CTOR;
+    case RestoreTimeHolder::ITERATOR_CTOR:
+      return ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR;
+    case RestoreTimeHolder::ITERATOR_PROTOTYPE:
+      return ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE;
+  }
+  KJ_UNREACHABLE;
+}
+
+v8::Local<v8::Object> getHolder(v8::Local<v8::Context> context, RestoreTimeHolder holder) {
+  KJ_IF_SOME(slot, slotFor(holder)) {
+    KJ_REQUIRE(context->GetNumberOfEmbedderDataFields() > static_cast<int>(slot),
+        "the zygote never captured a restore-time holder", jsNameOf(holder));
+    auto data = getContextDataSlot(context, slot);
+    KJ_REQUIRE(!data.IsEmpty() && data->IsValue() && data.As<v8::Value>()->IsObject(),
+        "the zygote never captured a restore-time holder", jsNameOf(holder));
+    return data.As<v8::Value>().As<v8::Object>();
+  }
+  return context->Global();
+}
+
+// Captures the intrinsics before any JavaScript can rebind their global names.
+void captureHolders(Lock& js, v8::Local<v8::Context> context) {
+  auto isolate = js.v8Isolate;
+  auto get = [&](v8::Local<v8::Object> from, kj::StringPtr name) {
+    return check(from->Get(context, v8StrIntern(isolate, name))).As<v8::Object>();
+  };
+  auto global = context->Global();
+  auto errorCtor = get(global, "Error"_kj);
+  auto iteratorCtor = get(global, "Iterator"_kj);
+  auto iteratorPrototype = get(iteratorCtor, "prototype"_kj);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ERROR_CTOR, errorCtor);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_CTOR, iteratorCtor);
+  setContextDataSlot(context, ContextDataSlot::RESTORE_TIME_ITERATOR_PROTOTYPE, iteratorPrototype);
+}
+
+// The table entry a FAIL_CLOSED property's callback data names.
+const RestoreTimeGlobal& entryOf(v8::Local<v8::Data> data) {
+  auto index = data.As<v8::Value>().As<v8::Integer>()->Value();
+  KJ_ASSERT(index >= 0 && static_cast<size_t>(index) < kj::size(RESTORE_TIME_GLOBALS), index);
+  return RESTORE_TIME_GLOBALS[index];
+}
+
+// v8::Object has no IsExtensible(), and user code can replace the JavaScript Object.isExtensible.
+// Adding a property to a non-extensible object fails without throwing.
+void requireExtensible(Lock& js, v8::Local<v8::Context> context, RestoreTimeHolder which) {
+  auto holder = getHolder(context, which);
+  auto probe = v8::Symbol::New(js.v8Isolate);
+  bool added = check(holder->DefineOwnProperty(context, probe, v8::Undefined(js.v8Isolate)));
+  KJ_REQUIRE(added,
+      "snapshot PoC: top-level code made an object non-extensible that V8 adds properties to "
+      "when the snapshot is restored",
+      jsNameOf(which));
+  check(holder->Delete(context, probe));
+}
+
+// Records the final state of a DATA_DEFAULT property under its name in `record` and removes it.
+void recordAndRemove(Lock& js,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> holder,
+    const RestoreTimeGlobal& entry,
+    JsObject record) {
+  auto isolate = js.v8Isolate;
+  auto name = v8StrIntern(isolate, entry.name);
+  // Null-prototype, so that reading it back does not consult the restored Object.prototype.
+  auto state = js.objNoProto();
+  v8::Local<v8::Value> descriptor = check(holder->GetOwnPropertyDescriptor(context, name));
+  if (descriptor->IsUndefined()) {
+    // The top level deleted it: the restored context deletes V8's default too.
+    state.set(js, PRESENT, js.boolean(false));
+  } else {
+    auto desc = descriptor.As<v8::Object>();
+    auto field = [&](kj::StringPtr key) {
+      return check(desc->Get(context, v8StrIntern(isolate, key)));
+    };
+    bool configurable = field("configurable"_kj)->IsTrue();
+    bool accessor = check(desc->HasOwnProperty(context, v8StrIntern(isolate, "get"_kj)));
+    KJ_REQUIRE(configurable && !accessor,
+        "snapshot PoC: top-level code made a property non-configurable or an accessor that V8 "
+        "adds as a data property when the snapshot is restored",
+        jsNameOf(entry.holder), entry.name, configurable, accessor);
+    state.set(js, PRESENT, js.boolean(true));
+    state.set(js, VALUE, JsValue(field(VALUE)));
+    state.set(js, WRITABLE, JsValue(field(WRITABLE)));
+    state.set(js, ENUMERABLE, JsValue(field(ENUMERABLE)));
+    KJ_REQUIRE(check(holder->Delete(context, name)));
+  }
+  record.set(js, entry.name, state);
+}
+
+// Removes the zygote's FAIL_CLOSED property. A property the top level put in its place, after
+// deleting the zygote's or by defining over it, is one V8 would add a duplicate of on restore.
+void removeFailClosed(Lock& js,
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> holder,
+    const RestoreTimeGlobal& entry) {
+  auto isolate = js.v8Isolate;
+  auto name = v8StrIntern(isolate, entry.name);
+  // Deleted by the top level: V8 adds it on restore.
+  if (!check(holder->HasOwnProperty(context, name))) return;
+  // GetOwnPropertyDescriptor() reads a native data property through its getter, so the zygote's
+  // own property throws, while a JavaScript accessor comes back as {get, set} without being
+  // called and a data property as its value.
+  v8::TryCatch tryCatch(isolate);
+  v8::Local<v8::Value> descriptor;
+  bool ours = !holder->GetOwnPropertyDescriptor(context, name).ToLocal(&descriptor);
+  tryCatch.Reset();
+  KJ_REQUIRE(ours,
+      "snapshot PoC: top-level code defined a property that V8 adds when the snapshot is restored",
+      jsNameOf(entry.holder), entry.name);
+  KJ_REQUIRE(check(holder->Delete(context, name)));
+}
+
+}  // namespace
+
+kj::StringPtr jsNameOf(RestoreTimeHolder holder) {
+  switch (holder) {
+    case RestoreTimeHolder::GLOBAL:
+      return "globalThis"_kj;
+    case RestoreTimeHolder::ERROR_CTOR:
+      return "Error"_kj;
+    case RestoreTimeHolder::ITERATOR_CTOR:
+      return "Iterator"_kj;
+    case RestoreTimeHolder::ITERATOR_PROTOTYPE:
+      return "Iterator.prototype"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+void IsolateBase::failClosedGetter(
+    v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  from(info.GetIsolate()).failClosed(entryOf(info.DataV2()));
+}
+
+void IsolateBase::failClosedSetter(
+    v8::Local<v8::Name>, v8::Local<v8::Value>, const v8::PropertyCallbackInfo<v8::Boolean>& info) {
+  from(info.GetIsolate()).failClosed(entryOf(info.DataV2()));
+}
+
+void IsolateBase::failClosed(const RestoreTimeGlobal& entry) {
+  if (restoreTimeGlobalUsed == kj::none) restoreTimeGlobalUsed = entry;
+  ptr->ThrowError(v8Str(ptr,
+      kj::str("snapshot PoC: ", jsNameOf(entry.holder), ".", entry.name,
+          " cannot be used while preparing a startup snapshot")));
+}
+
+void IsolateBase::installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+    auto isolate = js.v8Isolate;
+    captureHolders(js, context);
+
+    // The callbacks live in V8 AccessorInfo objects. Those go away with the properties before
+    // CreateBlob(); registering the callbacks anyway turns one that stays reachable into an
+    // ordinary failure of the zygote rather than a fatal unknown external reference.
+    registerExternalReference(reinterpret_cast<intptr_t>(&failClosedGetter));
+    registerExternalReference(reinterpret_cast<intptr_t>(&failClosedSetter));
+
+    for (size_t index = 0; index < kj::size(RESTORE_TIME_GLOBALS); ++index) {
+      auto& entry = RESTORE_TIME_GLOBALS[index];
+      auto holder = getHolder(context, entry.holder);
+      auto name = v8StrIntern(isolate, entry.name);
+      switch (entry.kind) {
+        case RestoreTimeKind::DATA_DEFAULT:
+          // As Genesis::InstallSpecialObjects(): writable, enumerable, configurable.
+          KJ_REQUIRE(check(holder->CreateDataProperty(
+              context, name, v8::Integer::New(isolate, kDefaultStackTraceLimit))));
+          break;
+        case RestoreTimeKind::FAIL_CLOSED:
+          // Non-enumerable, as V8 installs them.
+          KJ_REQUIRE(check(holder->SetNativeDataProperty(context, name, &failClosedGetter,
+              &failClosedSetter, v8::Integer::NewFromUnsigned(isolate, index), v8::DontEnum)));
+          break;
+      }
+    }
+  });
+}
+
+void IsolateBase::removeRestoreTimeGlobalsBeforeSnapshot(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+    // Whatever became of the error the property threw: the top level ran a feature test, a
+    // polyfill or a save-and-restore against a context that lacks what the restored one has.
+    KJ_IF_SOME(entry, restoreTimeGlobalUsed) {
+      KJ_FAIL_REQUIRE(
+          "snapshot PoC: top-level code used a property that exists only once the snapshot is "
+          "restored, and went on after the error",
+          jsNameOf(entry.holder), entry.name);
+    }
+
+    for (auto holder: ALL_HOLDERS) {
+      requireExtensible(js, context, holder);
+    }
+
+    auto record = js.objNoProto();
+    for (auto& entry: RESTORE_TIME_GLOBALS) {
+      auto holder = getHolder(context, entry.holder);
+      switch (entry.kind) {
+        case RestoreTimeKind::DATA_DEFAULT:
+          recordAndRemove(js, context, holder, entry, record);
+          break;
+        case RestoreTimeKind::FAIL_CLOSED:
+          removeFailClosed(js, context, holder, entry);
+          break;
+      }
+    }
+    mutableSnapshotArtifact().restoreTimeGlobalsIndex =
+        pinIntoSnapshot(context, v8::Local<v8::Object>(record));
+  });
+}
+
+void IsolateBase::replayRestoreTimeGlobalsAfterLoad(Lock& js, v8::Local<v8::Context> context) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  KJ_IF_SOME(index, finalizedSnapshotArtifact().restoreTimeGlobalsIndex) {
+    JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](Lock& js) {
+      auto isolate = js.v8Isolate;
+      auto record = extractOnceFromSnapshot(context, index);
+      for (auto& entry: RESTORE_TIME_GLOBALS) {
+        if (entry.kind != RestoreTimeKind::DATA_DEFAULT) continue;
+        auto holder = getHolder(context, entry.holder);
+        auto name = v8StrIntern(isolate, entry.name);
+        auto state = check(record->Get(context, name)).As<v8::Object>();
+        auto field = [&](kj::StringPtr key) {
+          return check(state->Get(context, v8StrIntern(isolate, key)));
+        };
+        if (field(PRESENT)->IsTrue()) {
+          v8::PropertyDescriptor desc(field(VALUE), field(WRITABLE)->IsTrue());
+          desc.set_enumerable(field(ENUMERABLE)->IsTrue());
+          desc.set_configurable(true);
+          KJ_REQUIRE(check(holder->DefineProperty(context, name, desc)));
+        } else {
+          KJ_REQUIRE(check(holder->Delete(context, name)));
+        }
+      }
+    });
+  }
+}
+
+void IsolateBase::prepareWrappableDeserializeMetadata(
+    Lock& js, WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  auto& artifact = finalizedSnapshotArtifact();
+
+  // Resolve every slot into the object its restored wrapper is attached to: a stateless type's
+  // fresh instance (its recreate function), or a clone of a stateful type's stored clone. The
+  // artifact is shared by every worker started from it, so the instances live in this worker's
+  // own array; a dropped slot stays null. Nothing on this path catches an exception from a
+  // recreate function or a snapshotClone(): it propagates out of newContext() and the Worker
+  // fails to start, which is why the contracts on Object::jsgSnapshotStateless and
+  // Wrappable::snapshotClone() forbid throwing.
+  auto instances = kj::heapArrayBuilder<kj::Own<Wrappable>>(artifact.liveWrappables.size());
+  for (auto& stored: artifact.liveWrappables) {
+    kj::Own<Wrappable> instance;
+    if (stored.transfer != nullptr) {
+      KJ_SWITCH_ONEOF(stored.transfer) {
+        KJ_CASE_ONEOF(stateless, SnapshotArtifact::LiveWrappable::Stateless) {
+          auto recreate = KJ_ASSERT_NONNULL(snapshotRecreateFnFor(stored.tag),
+              "a stateless slot's tag has no snapshot recreate function",
+              static_cast<uint16_t>(stored.tag));
+          instance = recreate(js);
+        }
+        KJ_CASE_ONEOF(clone, kj::Own<Wrappable>) {
+          instance = KJ_ASSERT_NONNULL(clone->snapshotClone(),
+              "snapshot clone failed to clone again", clone->jsgGetMemoryName());
+        }
+      }
+    }
+    instances.add(kj::mv(instance));
+  }
+  metadata.preallocateCppgcShims(ptr, heapTracer, artifact, instances.finish());
+}
+
+void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.releaseSlotsWithChecks();
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
