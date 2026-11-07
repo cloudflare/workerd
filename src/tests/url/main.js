@@ -66,6 +66,7 @@ export {
 export {
   sequenceInitializers,
   badSequences,
+  sequenceIteratorProtocol,
   recordInitializers,
   recordReadOrder,
   stringInitializers,
@@ -110,8 +111,10 @@ export {
 
 export {
   searchParamsBodies,
+  fakeSearchParamsBodies,
   urlsAsStrings,
   nodeFsPaths,
+  fakeUrlFsPaths,
   urlPatternFromUrl,
 } from 'consumers';
 

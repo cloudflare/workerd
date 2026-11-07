@@ -17981,13 +17981,13 @@ export declare class URL {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
    */
-  static canParse(url: string, base?: string): boolean;
+  static canParse(url: string | URL, base?: string | URL): boolean;
   /**
    * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
    */
-  static parse(url: string, base?: string): URL | null;
+  static parse(url: string | URL, base?: string | URL): URL | null;
   /**
    * The **`createObjectURL()`** static method of the URL interface creates a string containing a blob URL pointing to the object given in the parameter.
    *

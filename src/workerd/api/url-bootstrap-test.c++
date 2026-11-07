@@ -113,7 +113,7 @@ KJ_TEST("urlUpdate applies each setter and reports only a rejected href") {
       [0, 'https://b.com/'], [0, 'nope'],
       [1, 'https'], [1, '1bad'],
       [2, 'us er'], [3, 'pa:ss'],
-      [4, 'b.com:99'], [5, 'c.com'],
+      [4, 'b.com:99'], [4, 'a b'], [5, 'c.com'], [5, 'a b'],
       [6, '8080'], [6, ''], [6, 'abc'],
       [7, '/a b'], [8, 'x=1'], [8, ''], [9, 'h i'], [9, ''],
     ];
@@ -130,7 +130,9 @@ KJ_TEST("urlUpdate applies each setter and reports only a rejected href") {
       "2 us er: http://us%20er:p@a.com:81/p?q=1#h\n"
       "3 pa:ss: http://u:pa%3Ass@a.com:81/p?q=1#h\n"
       "4 b.com:99: http://u:p@b.com:99/p?q=1#h\n"
+      "4 a b: http://u:p@a.com:81/p?q=1#h\n"
       "5 c.com: http://u:p@c.com:81/p?q=1#h\n"
+      "5 a b: http://u:p@a.com:81/p?q=1#h\n"
       "6 8080: http://u:p@a.com:8080/p?q=1#h\n"
       "6 : http://u:p@a.com/p?q=1#h\n"
       "6 abc: http://u:p@a.com:81/p?q=1#h\n"
@@ -150,6 +152,16 @@ KJ_TEST("urlUpdate writes the components of the result") {
       "http://a.com/?x=1 5,7,7,12,4294967295,12,13,4294967295,0"_kj);
 }
 
+KJ_TEST("The URL helpers write the components into the view's own elements") {
+  expectHelperScript(R"js(
+    const backing = new Uint32Array(11);
+    const out = backing.subarray(1, 10);
+    const href = helpers.urlParse('http://a.com/', undefined, out);
+    return `${href} ${backing.join(',')}`;
+  )js"_kj,
+      "http://a.com/ 0,5,7,7,12,4294967295,12,4294967295,4294967295,0,0"_kj);
+}
+
 KJ_TEST("urlOrigin serializes the origin, blob URLs included") {
   expectHelperScript(R"js(
     return [
@@ -163,6 +175,8 @@ KJ_TEST("urlOrigin serializes the origin, blob URLs included") {
 KJ_TEST("The URL helpers reject arguments of the wrong type") {
   expectHelperScript(R"js(
     const out = new Uint32Array(9);
+    const detached = new Uint32Array(9);
+    detached.buffer.transfer();
     const attempt = (fn) => {
       try {
         fn();
@@ -177,6 +191,7 @@ KJ_TEST("The URL helpers reject arguments of the wrong type") {
       attempt(() => helpers.urlParse('http://a/', undefined, new Uint32Array(8))),
       attempt(() => helpers.urlParse('http://a/', undefined, new Int32Array(9))),
       attempt(() => helpers.urlParse('http://a/', undefined, [])),
+      attempt(() => helpers.urlParse('http://a/', undefined, detached)),
       attempt(() => helpers.urlUpdate('nope', 0, 'http://a/', out)),
       attempt(() => helpers.urlUpdate('http://a/', 10, 'x', out)),
       attempt(() => helpers.urlUpdate('http://a/', -1, 'x', out)),
@@ -191,6 +206,7 @@ KJ_TEST("The URL helpers reject arguments of the wrong type") {
       "TypeError: out must have 9 elements\n"
       "TypeError: out must be a Uint32Array\n"
       "TypeError: out must be a Uint32Array\n"
+      "TypeError: out must have 9 elements\n"
       "TypeError: href must be a URL\n"
       "TypeError: attribute must be a URL attribute number\n"
       "TypeError: attribute must be a URL attribute number\n"

@@ -7,10 +7,14 @@
 
 import { strictEqual } from 'node:assert';
 
-async function collect() {
-  for (let i = 0; i < 5; i++) {
+// Collects until `done()` holds, or a few times when there is no condition.
+// The C++ implementations free a URL and its searchParams over successive
+// collections, so one gc() reclaims only half of the pairs; and
+// FinalizationRegistry callbacks run in a later task.
+async function collect(done = () => false) {
+  for (let i = 0; i < 10 && !done(); i++) {
     gc();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await scheduler.wait(1);
   }
 }
 
@@ -58,7 +62,7 @@ export const unreachablePairsAreCollected = {
         registry.register(params, i);
       }
     })();
-    await collect();
+    await collect(() => collected === 2 * kCount);
     strictEqual(collected, 2 * kCount);
   },
 };

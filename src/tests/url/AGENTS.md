@@ -77,6 +77,7 @@ which would run the TypeScript implementation under them.
 | 24 | Iterator result shape | `{ done, value }`; without `enable_fast_jsg_struct` the last lacks `value` | `{ value, done }` | `iteration.js` |
 | 25 | Record initializer read order | every key's descriptor, then every value | each key's descriptor, then its value | `search-params.js` |
 | 26 | Record initializer with an enumerable Symbol key | skipped | TypeError, as WPT's `headers-record.any.js` requires of records | `search-params.js` |
+| 27 | Standard sequence initializer's final iterator result | its `value` is appended, a generator's return value included | ignored | `search-params.js` |
 
 Rows the plan keeps but no test here covers: #7 and #11 (now matches), #8
 and #19 (WPT), #10 (RPC; with the TS cells) and #12 (heap snapshots).
