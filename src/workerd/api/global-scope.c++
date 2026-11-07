@@ -69,9 +69,10 @@ kj::Exception makeNeuterException(NeuterReason reason) {
 template <typename... Args>
 jsg::JsObject callHandlersExport(jsg::Lock& js, kj::StringPtr name, Args... args) {
   // main.ts requires the module unconditionally.
-  auto fn = KJ_ASSERT_NONNULL(tryGetBootstrapFunction(js, "handlers/handlers"_kj, name),
-      "the per-isolate bootstrap did not load handlers/handlers", name);
-  return KJ_ASSERT_NONNULL(fn.call(js, js.undefined(), args...).template tryCast<jsg::JsObject>());
+  auto fn = KJ_REQUIRE_NONNULL(tryGetBootstrapFunction(js, "handlers/handlers"_kj, name),
+      "missing handlers/handlers function", name);
+  return KJ_REQUIRE_NONNULL(fn.call(js, js.undefined(), args...).template tryCast<jsg::JsObject>(),
+      "handlers/handlers function did not return an object", name);
 }
 
 }  // namespace

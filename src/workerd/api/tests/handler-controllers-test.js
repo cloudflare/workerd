@@ -148,7 +148,10 @@ export class AlarmObject extends DurableObject {
         `{"scheduledTime":${info.scheduledTime},` +
           `"retryCount":${info.retryCount},"isRetry":${info.isRetry}}`
       );
+      // An object without internal fields is serialized as a plain object.
       assert.deepStrictEqual(structuredClone(info), { ...info });
+      await this.ctx.storage.put('info', info);
+      assert.deepStrictEqual(await this.ctx.storage.get('info'), { ...info });
       // Read through an object that inherits from it.
       assert.strictEqual(Object.create(info).retryCount, info.retryCount);
 

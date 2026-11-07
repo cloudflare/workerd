@@ -15,11 +15,14 @@
 //
 // DIFFERENCES FROM JSG RESOURCE TYPES
 //
-// - structuredClone() copies an instance as a plain object, as it does any
-//   object without internal fields; it throws a DataCloneError for a JSG
-//   object. JS RPC refuses both, since it serializes no class instance.
+// - V8 serialization copies an instance as a plain object, as it does any
+//   object without internal fields, where it throws a DataCloneError for a
+//   JSG object. That covers structuredClone(), Durable Object storage,
+//   Queues and MessagePort.postMessage(). JS RPC refuses both, since it
+//   serializes no class instance.
 // - Function.prototype.toString() of a constructor gives its source rather
-//   than `function Name() { [native code] }`.
+//   than `function Name() { [native code] }`, and the TypeError that calling
+//   it throws has a stack frame in this script.
 
 const {
   ObjectCreate,
@@ -92,6 +95,13 @@ function AlarmInvocationInfo(): never {
 }
 makeRuntimeClass(AlarmInvocationInfo, 'AlarmInvocationInfo');
 
+// Captured, since user code can reach the constructors and, unless
+// immutable_api_prototypes, replace their `prototype`. Instances keep
+// inheriting from these, as instances of a JSG resource type keep inheriting
+// from its original prototype.
+const kTestControllerPrototype = TestController.prototype as object;
+const kAlarmInvocationInfoPrototype = AlarmInvocationInfo.prototype as object;
+
 // A JSG readonly instance property: an own data property, enumerable and
 // configurable but not writable.
 function readonlyValue(value: unknown): PropertyDescriptor {
@@ -105,16 +115,17 @@ function readonlyValue(value: unknown): PropertyDescriptor {
 }
 
 function createTestController(): object {
-  return ObjectCreate(TestController.prototype) as object;
+  return ObjectCreate(kTestControllerPrototype) as object;
 }
 
-// `scheduledTime` is in milliseconds since the Unix epoch. The properties are
-// defined in the order JSG gave the instance template's.
+// `scheduledTime` is in milliseconds since the Unix epoch. Workers observe the
+// order of the properties through Object.keys(), JSON.stringify() and
+// util.inspect().
 function createAlarmInvocationInfo(
   scheduledTime: number,
   retryCount: number
 ): object {
-  return ObjectCreate(AlarmInvocationInfo.prototype, {
+  return ObjectCreate(kAlarmInvocationInfoPrototype, {
     scheduledTime: readonlyValue(scheduledTime),
     retryCount: readonlyValue(retryCount),
     isRetry: readonlyValue(retryCount > 0),
@@ -126,7 +137,12 @@ export type HandlersExports = {
   createAlarmInvocationInfo: typeof createAlarmInvocationInfo;
 };
 
-module.exports = {
+// C++ looks the factories up with an ordinary property get
+// (tryGetBootstrapFunction()). The table has a null prototype, so a name
+// missing from it fails the lookup instead of resolving through a polluted
+// Object.prototype, and it is frozen.
+module.exports = ObjectFreeze({
+  __proto__: null,
   createTestController,
   createAlarmInvocationInfo,
-};
+});
