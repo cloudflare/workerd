@@ -122,6 +122,12 @@ export const constructorAttributes = {
   },
 };
 
+const kMarkDescriptions = [
+  'Symbol.toStringTag',
+  'cloudflare:internal-class',
+  'kResourceTypeInspect',
+];
+
 export const runtimeClassMarks = {
   test() {
     for (const proto of [MessagePort.prototype, MessageChannel.prototype]) {
@@ -150,6 +156,12 @@ export const runtimeClassMarks = {
         proto[Symbol.for('cloudflare:internal-class')],
         Symbol.for('cloudflare:internal-class')
       );
+      // In JSG's order, as on EventTarget.prototype.
+      const marks = (obj) =>
+        Object.getOwnPropertySymbols(obj)
+          .map((symbol) => symbol.description)
+          .filter((description) => kMarkDescriptions.includes(description));
+      deepStrictEqual(marks(proto), marks(EventTarget.prototype));
     }
   },
 };

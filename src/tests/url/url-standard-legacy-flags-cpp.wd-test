@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+using UrlModules = import "url-modules.capnp";
+
+# Runs the URL suite against the C++ standard implementation
+# (api/url-standard.h), with the dated flags it honors turned off.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes, so every flag the suite branches on is
+# pinned, as are the ones its modules need: nodejs_compat (node:assert,
+# node:util, node:url), enable_nodejs_fs_module (node:fs),
+# expose_global_message_channel, enable_weak_ref (FinalizationRegistry) and
+# urlpattern_standard.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url-standard-legacy-flags-cpp",
+      worker = (
+        modules = UrlModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "enable_nodejs_fs_module",
+          "expose_global_message_channel",
+          "enable_weak_ref",
+          "urlpattern_standard",
+          "url_standard",
+          "no_urlsearchparams_delete_has_value_arg",
+          "do_not_set_tostring_tag",
+        ],
+        bindings = [(name = "USING_TS_IMPL", json = "false")],
+      )
+    ),
+  ],
+  v8Flags = ["--expose-gc"],
+);
