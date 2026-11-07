@@ -1,0 +1,114 @@
+src/workerd/api/tests/streams-pending-gc-gate-off-test.wd-test
+  s_144e1c38c83f9e::t_bd750980274855 1-15
+src/workerd/api/web-socket.c++
+  s_144e1c38c83f9e::t_1c5c2a8317ada5 273
+src/workerd/api/streams/internal.h
+  s_144e1c38c83f9e::t_2198f8701ec852 527,534,545
+src/workerd/api/tests/streams-pending-gc-test.js
+  s_144e1c38c83f9e::t_e61750b86da811 1-154
+tools/clang-tidy/traced-own-negative-test.c++
+  s_144e1c38c83f9e::t_14b68846c2fb29 146-148,153-155
+  s_144e1c38c83f9e::t_4158b90615e6b0 163-167
+  s_144e1c38c83f9e::t_6770cd522c0308 1-145,156-157,161-162,168-169
+  s_144e1c38c83f9e::t_3911b664a2e7c9 149-152
+  s_144e1c38c83f9e::t_29ffe2f00dea80 158-160
+src/workerd/api/web-socket.h
+  s_144e1c38c83f9e::t_d37d558247ea34 432-433
+  s_144e1c38c83f9e::t_0898232e374e44 434
+src/workerd/api/streams/standard-test.c++
+  s_144e1c38c83f9e::t_ef825c47fde104 205-244
+src/workerd/api/streams/README.md
+  s_144e1c38c83f9e::t_1102e870d0205b 468-473
+src/workerd/jsg/memory-test.c++
+  s_144e1c38c83f9e::t_34a258de8c4205 20-27,31-32,40-41,107-109
+src/workerd/api/crypto/crypto.h
+  s_144e1c38c83f9e::t_ec68c0a1eaa5b3 341
+src/workerd/api/streams/queue.h
+  s_144e1c38c83f9e::t_fb24c4a95e0dea 10
+  s_144e1c38c83f9e::t_f031b19ab867de 174-176,202-203
+  s_144e1c38c83f9e::t_59c56e0a68aeb0 265-275,413,573-590,611,614,657-658,763-766,952-955
+src/workerd/jsg/wrappable.c++
+  s_144e1c38c83f9e::t_4242dc71dadada 706-715,717,719,723,727
+  s_144e1c38c83f9e::t_86aadf04df5420 775-778,789,791,817-820,828-829
+  s_144e1c38c83f9e::t_31bcef83a6067d 705
+src/workerd/jsg/jsg.h
+  s_144e1c38c83f9e::t_04e2d1f6003aac 36,2228-2229,2239-2241,2269-2278,2330-2341,2345,2347,2353-2423,2426-2443
+  s_144e1c38c83f9e::t_2afac108235f93 2425
+  s_144e1c38c83f9e::t_d52accdf2180d2 16
+  s_144e1c38c83f9e::t_91c68c8e171204 2424
+src/workerd/api/streams/internal.c++
+  s_144e1c38c83f9e::t_e7dcba2af3c2de 1756-1757,1993,2022,2170,2250,2319,2868-2873,2918-2919
+src/workerd/api/basics.c++
+  s_144e1c38c83f9e::t_59b342402073d2 40,45,1378
+src/workerd/jsg/tracing-test.c++
+  s_144e1c38c83f9e::t_59cb64f9cc7558 7-8
+  s_144e1c38c83f9e::t_10565c24872d78 117-153,155-168,205-207,221-222,328-389
+tools/clang-tidy/traced-own-test.sh
+  s_144e1c38c83f9e::t_0665c16c2094a7 1-84
+src/workerd/api/streams/standard.c++
+  s_144e1c38c83f9e::t_8e2846502e616b 342,345,958-959,1914,1955,2153,2847,2851,2913,2918,2967,3065,3071,3156,3170,3249,3262,3325,3335,3365-3366,3368-3369,3391,3394,3427,3430,3460,3463,3876,3879,3919,3921,3926,3928,3969,3972,5016,5019
+src/workerd/api/trace.h
+  s_144e1c38c83f9e::t_d4342753df4e5c 322
+build/AGENTS.md
+  s_144e1c38c83f9e::t_ae7a8a7e522db6 41-44
+tools/clang-tidy/traced-own.h
+  s_144e1c38c83f9e::t_1a261a820e26b9 1-33
+tools/clang-tidy/BUILD.bazel
+  s_144e1c38c83f9e::t_3644883fb8bc42 17-19,52,70,188-203
+src/workerd/jsg/memory.h
+  s_144e1c38c83f9e::t_fea0bea58e930c 127-128,196-200,408-415
+src/workerd/api/tests/streams-pending-gc-test.wd-test
+  s_144e1c38c83f9e::t_f2e431bcda9411 1-16
+.clang-tidy
+  s_144e1c38c83f9e::t_0cbec2710f8c64 70
+tools/clang-tidy/traced-own-positive-test.c++
+  s_144e1c38c83f9e::t_058400dd0ae32e 1-154,158,162-163,172,174-175
+  s_144e1c38c83f9e::t_c9bb3c1b831310 173
+  s_144e1c38c83f9e::t_878b7da749baaa 155-157
+  s_144e1c38c83f9e::t_94ab6428a79292 164-166,169-171
+  s_144e1c38c83f9e::t_e40af4a08028c9 167-168
+  s_144e1c38c83f9e::t_851d7e92fdb2ed 159-161
+tools/clang-tidy/workerd-lint.c++
+  s_144e1c38c83f9e::t_7d94e9550553ad 25,42
+src/workerd/jsg/AGENTS.md
+  s_144e1c38c83f9e::t_56336fc771d21a 148-154
+src/workerd/api/tests/BUILD.bazel
+  s_144e1c38c83f9e::t_3dca0e6ccd90bb 25-30,32,35
+  s_144e1c38c83f9e::t_15946eee87828a 31
+  s_144e1c38c83f9e::t_f46bcfe6bb40db 33-34
+  s_144e1c38c83f9e::t_32300f9c6dfaf1 36
+src/workerd/api/basics.h
+  s_144e1c38c83f9e::t_01ff9ad1ed14af 548-550,555
+tools/clang-tidy/visit-for-gc.c++
+  s_144e1c38c83f9e::t_475aec99f24b35 49
+src/workerd/jsg/README.md
+  s_144e1c38c83f9e::t_6a9d3327e7516e 254-259
+  s_144e1c38c83f9e::t_e8d1ac20af5933 262-264
+  s_144e1c38c83f9e::t_93902b2574b762 260-261
+tools/clang-tidy/traced-own.c++
+  s_144e1c38c83f9e::t_a6c4d83f15d3e6 1-118
+src/workerd/api/crypto/crypto.c++
+  s_144e1c38c83f9e::t_66aa309fdc7de3 699
+src/workerd/util/autogate.h
+  s_144e1c38c83f9e::t_b63eddbd6b068d 138-140
+  s_144e1c38c83f9e::t_64cc4ee5eaea80 141-143
+  s_144e1c38c83f9e::t_76893aa6366098 144
+src/workerd/api/streams/queue.c++
+  s_144e1c38c83f9e::t_cb4e207d8055f7 490-492,1318-1320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "612c95ac8cb394673e10ce43e9058970b7b81a54",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

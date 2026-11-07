@@ -1,0 +1,30 @@
+src/workerd/server/server-test.c++
+  s_322adea864e0a2::t_94da4282ad001e 8401,8405,8413-8414,8418-8422,8424-8435,8437-8438,8445,8464,8472-8476,8481,8485-8487
+  s_322adea864e0a2::t_2213e0156993e4 8400,8402-8404,8406-8412,8415-8417,8423,8436,8439-8444,8446-8463,8465-8471,8477-8480,8482-8484,8488-8489
+src/workerd/io/worker.c++
+  s_322adea864e0a2::t_a3df2560cabf9d 4529-4535
+src/workerd/api/actor-state.h
+  s_322adea864e0a2::t_e1d21a6929fc94 388-389
+  s_322adea864e0a2::t_74b78308a87a04 386-387
+src/workerd/api/actor-state.c++
+  s_322adea864e0a2::t_a39be967c68d8e 902,916,932,944,946-949
+  s_322adea864e0a2::t_912c481956995c 945
+src/workerd/io/worker.h
+  s_322adea864e0a2::t_41bc9ad91dd4c9 1209-1211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "773337096defc35846ad177f91f8ffbc2684067e",
+  "prompts": {},
+  "sessions": {
+    "s_322adea864e0a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21148e11-ff14-4929-b25a-bbd43ac3cb9f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Max McDonnell <mmcdonnell@cloudflare.com>"
+    }
+  }
+}

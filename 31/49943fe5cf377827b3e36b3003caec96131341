@@ -1,0 +1,42 @@
+src/workerd/api/streams/standard-test.c++
+  s_8b080d960d1bef::t_930bd6d4d3859b 2027-2048,2050,2067,2069-2070,2073-2074,2085,2091-2094
+  s_8b080d960d1bef::t_7c9c8d22a2eb57 2049
+  s_8b080d960d1bef::t_e67b5c25866e1a 2054-2063
+  s_8b080d960d1bef::t_e7f539b15698c2 2071
+  s_8b080d960d1bef::t_4f23d9f58269b6 2068
+  s_8b080d960d1bef::t_ceb7878044f4e2 2051-2053,2064-2066
+  s_8b080d960d1bef::t_f4f42573ce8497 2072
+  s_8b080d960d1bef::t_9dc3ad4cf55860 2075-2077,2082-2084
+  s_8b080d960d1bef::t_50dc03a17df4c2 2086-2090
+  s_8b080d960d1bef::t_072ca446c6ed4a 2095
+  s_8b080d960d1bef::t_7b3234d8711f93 2078-2081
+src/workerd/api/streams/readable.c++
+  s_8b080d960d1bef::t_fc37d36a903f84 566-578,583-585
+src/workerd/api/streams/readable.h
+  s_7524bbe5163cf9::t_ebaa89823c945b 282-285
+  s_8b080d960d1bef::t_72645c687f9735 279-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3149943fe5cf377827b3e36b3003caec96131341",
+  "prompts": {},
+  "sessions": {
+    "s_7524bbe5163cf9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74032352-a58f-4b3b-9ed8-794c12f0461b",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_8b080d960d1bef": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "faeda7e2-f267-4ea7-b4b5-74cef3e03f77",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

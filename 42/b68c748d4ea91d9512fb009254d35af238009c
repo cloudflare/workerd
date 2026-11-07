@@ -1,0 +1,39 @@
+patches/v8/0051-Make-cppgc-young-generation-buildable-and-usable-in-.patch
+  s_c855efb1c295a0::t_41fab2d34428a0 1-222
+  s_c855efb1c295a0::t_fc543f3078e08a 223-225
+  s_c855efb1c295a0::t_babda63999812a 226-240
+src/workerd/jsg/tracing-test.c++
+  s_c855efb1c295a0::t_cab1bf38e1d56c 245-250,273
+src/workerd/jsg/setup.c++
+  s_c855efb1c295a0::t_c1ad15c99e7571 179-184,230-240
+  s_c855efb1c295a0::t_4f4d0a50ca4d45 14-15,566-572
+.bazelrc
+  s_c855efb1c295a0::t_a38b969b3e150e 106-110
+src/workerd/jsg/jsg-test.c++
+  s_c855efb1c295a0::t_a58d04d4884d4b 210-213
+src/workerd/util/autogate.h
+  s_c855efb1c295a0::t_3b12bfdff08089 139-143
+src/workerd/jsg/wrappable.h
+  s_c855efb1c295a0::t_3ac996c189f202 482-485
+src/workerd/jsg/wrappable.c++
+  s_c855efb1c295a0::t_10d2c00962d728 266-270
+  s_c855efb1c295a0::t_7a73ab4824495a 604-613
+build/deps/v8.MODULE.bazel
+  s_c855efb1c295a0::t_3a4a7a99745a6e 76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "42b68c748d4ea91d9512fb009254d35af238009c",
+  "prompts": {},
+  "sessions": {
+    "s_c855efb1c295a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad125e721c08aa65a",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

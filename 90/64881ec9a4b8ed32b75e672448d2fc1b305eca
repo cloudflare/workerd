@@ -1,0 +1,27 @@
+src/workerd/server/server.c++
+  s_0f868da28cf400::t_ba4fdf7512b084 1107-1109,1119-1123
+  s_0f868da28cf400::t_b7ef67360cb387 1110-1114
+  s_0f868da28cf400::t_9d7d9f375b7e24 1179-1186
+  s_0f868da28cf400::t_ec264a4295b4b0 852-855
+  s_0f868da28cf400::t_af232f71612908 1153-1158
+src/workerd/io/worker.h
+  s_0f868da28cf400::t_07c5efb438cf78 1087-1088
+src/workerd/api/global-scope.c++
+  s_0f868da28cf400::t_9f392589607d20 831-842
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9064881ec9a4b8ed32b75e672448d2fc1b305eca",
+  "prompts": {},
+  "sessions": {
+    "s_0f868da28cf400": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012591357ffeA7cXF67TJsjeKU",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Alex Robinson <arobinson@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_2db61388bc6b35::t_a822560382931f 1-362
+src/workerd/api/worker-rpc.h
+  s_29743b6b20a528::t_d8e2ad068ea862 306-312,453-454
+  s_29743b6b20a528::t_4277700e15b3dd 313-314
+src/workerd/api/worker-rpc.c++
+  s_29743b6b20a528::t_1202186caf0d74 652-655
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_29743b6b20a528::t_e83a2f7206deec 48-49,402-403
+src/workerd/tests/test-fixture.h
+  s_2db61388bc6b35::t_8c5fa127c15b03 66
+src/workerd/api/BUILD.bazel
+  s_29743b6b20a528::t_c9149366f9c257 844-851
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "afca3bfcfbdec67c8aa29da1bec75acd7c789eac",
+  "prompts": {},
+  "sessions": {
+    "s_29743b6b20a528": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f60d29d7affe9cTTo7zk9geRdo",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_2db61388bc6b35": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5ba74c5fffeo0nh5OZQmoGZCa",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

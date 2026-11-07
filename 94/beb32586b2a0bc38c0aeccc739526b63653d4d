@@ -1,0 +1,77 @@
+src/rust/api/inspector.rs
+  s_144e1c38c83f9e::t_19561f7394b1c5 54-57
+src/rust/jsg-bench/lib.rs
+  s_144e1c38c83f9e::t_0ba1e3ce9d8859 70,79,94-95
+src/rust/jsg-compile-tests/gc-reference-in-std-rc-is-not-traced.rs
+  s_144e1c38c83f9e::t_d1f4adb5d4be2e 1-32
+src/rust/jsg-compile-tests/ok-async-context-frame.rs
+  s_144e1c38c83f9e::t_699012e25654fc 17,29
+src/rust/jsg-compile-tests/ok-promise.rs
+  s_144e1c38c83f9e::t_bedd3d23a47da5 13,25
+src/rust/jsg-cpp/ffi.c++
+  s_144e1c38c83f9e::t_fa1fd54a1cb901 22-25
+src/rust/jsg-cpp/ffi.rs
+  s_144e1c38c83f9e::t_97f589a118ce28 50-52,162-163,217-220
+src/rust/jsg-cpp/jsg-cpp.h
+  s_144e1c38c83f9e::t_9d6d27bc6b148f 71-77,95
+src/rust/jsg-macros/oneof.rs
+  s_144e1c38c83f9e::t_fe4827c922e025 283-288
+src/rust/jsg-test/cpp_interop.rs
+  s_144e1c38c83f9e::t_bcea6f1201e99e 249,310-311,329
+src/rust/jsg-test/tests/async_context.rs
+  s_144e1c38c83f9e::t_8458cd0a3cd22a 42,54,112,348,373,381
+src/rust/jsg-test/tests/cell.rs
+  s_144e1c38c83f9e::t_2e7d83ab6346c8 90,92,116
+src/rust/jsg-test/tests/cpp_interop.rs
+  s_144e1c38c83f9e::t_9eac6085354775 36
+src/rust/jsg-test/tests/function_new.rs
+  s_144e1c38c83f9e::t_a49cb3b56a6d63 165-167,330,337-340,349,352,404,412-416,430,433
+src/rust/jsg-test/tests/gc.rs
+  s_144e1c38c83f9e::t_847b80817adcb6 913-914
+src/rust/jsg-test/tests/promise.rs
+  s_144e1c38c83f9e::t_1c8224dffa7242 395-397,488-491,595-599,663-667,860,868,894,905,931,939,950,977-978,1003-1006,1054,1057,1069,1076,1088,1099-1100
+src/rust/jsg-test/tests/to_js_errors.rs
+  s_144e1c38c83f9e::t_5cd731f4735f69 94,107,127
+src/rust/jsg-test/tests/traceable_gc.rs
+  s_144e1c38c83f9e::t_cbe4b1766900b7 211,226,249,252
+src/rust/jsg-test/tests/wildcard_property.rs
+  s_144e1c38c83f9e::t_d014570eb7187f 66,79,411
+src/rust/jsg/README.md
+  s_144e1c38c83f9e::t_15b79e266fd3ed 176-177,205,213-216,463
+src/rust/jsg/async_context.rs
+  s_144e1c38c83f9e::t_ba740f65af6ffd 177-180
+src/rust/jsg/null_or_undefined-test.rs
+  s_144e1c38c83f9e::t_095ccd7213ec7d 77-78
+src/rust/jsg/promise.rs
+  s_144e1c38c83f9e::t_01b04bcf52c2c6 177,187-190,217,377
+src/rust/jsg/resource-test.rs
+  s_144e1c38c83f9e::t_6866543fabdf91 61-63,101-103
+src/rust/jsg/rtti-test.rs
+  s_144e1c38c83f9e::t_a2d6378816c622 161-163,278-280
+src/rust/jsg/v8.rs
+  s_144e1c38c83f9e::t_862936aed91995 1850-1853
+src/rust/jsg/wrappable-test.rs
+  s_144e1c38c83f9e::t_a503dbdd72da6a 41
+src/rust/jsg/wrappable.rs
+  s_144e1c38c83f9e::t_d680bf44795527 520-524
+src/workerd/io/io-context/lib.rs
+  s_144e1c38c83f9e::t_16d2934e09c6f7 309-310,313-314,391-395
+src/workerd/io/io-context/trace.rs
+  s_144e1c38c83f9e::t_e0b30ff14b7568 168-172,175-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "94beb32586b2a0bc38c0aeccc739526b63653d4d",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+src/workerd/io/io-context.c++
+  s_8d3ff6b9908116::t_5e3af1518fa39d 321-355,368,404-407
+  s_06bf04b8ac0a33::t_41286c4c378f6e 320
+src/workerd/io/incoming-request-test.c++
+  s_ab4e43acd62623::t_96ca52a0443248 166
+  s_ab4e43acd62623::t_5543051590d9d9 154-161
+  s_ab4e43acd62623::t_2831a78e5b568b 186-187
+  s_ab4e43acd62623::t_2a789e9e3eb7e7 90-152,162-165,167-170,172-178,181-183,185,188-190,193,200-203
+  s_ab4e43acd62623::t_9984dc1bc86f88 153
+  s_ab4e43acd62623::t_8b974ead7f8ad3 171
+  s_ab4e43acd62623::t_9930fe1eab3626 179-180
+  s_ab4e43acd62623::t_801d07614695f7 184
+  s_911c1b96880cf6::t_e8b6d69c6ad8f8 191-192
+  s_ab4e43acd62623::t_e4c9dbea46b667 194-199
+  s_ab4e43acd62623::t_2f3d68f5780ff4 204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "08b5779a9bc90a7a4496a68e68f9341ae5d3a1eb",
+  "prompts": {},
+  "sessions": {
+    "s_06bf04b8ac0a33": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f997416c7ffeRiz2aKxiXe26mm",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_8d3ff6b9908116": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fc63bb043ffeWOJMRbxvOXrGJK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_911c1b96880cf6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9dccfd53ffeUiYfRF13H7YfEu",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_ab4e43acd62623": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dd95e56cffeOLXlCNwX9ixaK3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

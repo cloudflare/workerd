@@ -1,0 +1,22 @@
+src/node/diagnostics_channel.ts
+  s_0ebf0579e570e2::t_ff8e87dc405888 281,308,333-334,338
+src/workerd/api/node/tests/diagnostics-channel-test.js
+  s_0ebf0579e570e2::t_715c2c8440ea05 128,136,139,143,149,157,159,168
+  s_0ebf0579e570e2::t_16aae8f211fac6 127,129-135,137-138,141-142,144,150-156,158,161-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8b12a000afd7cd1aa09e0f3091018830c7513354",
+  "prompts": {},
+  "sessions": {
+    "s_0ebf0579e570e2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019fb36d-4c27-767f-a148-b2f11589d15a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Thomas Ankcorn <tankcorn@cloudflare.com>"
+    }
+  }
+}

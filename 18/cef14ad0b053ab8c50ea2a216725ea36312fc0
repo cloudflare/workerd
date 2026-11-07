@@ -1,0 +1,33 @@
+src/workerd/server/AGENTS.md
+  s_051e638f82228b::t_2ac7bf599e5d28 36-39
+src/workerd/server/server-test.c++
+  s_051e638f82228b::t_356def801f02c7 330-341,369,390-391,504,3694-3725
+src/workerd/server/server.c++
+  s_3ff1d6352d268b::t_57684f464d263c 246-247,251,3506,3525,3568-3571,3592,4352,4722,6452
+src/workerd/server/server.h
+  s_3ff1d6352d268b::t_00c54a99493a04 45-46,152-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "18cef14ad0b053ab8c50ea2a216725ea36312fc0",
+  "prompts": {},
+  "sessions": {
+    "s_051e638f82228b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "995e3c21-1df8-4982-8f4b-3b7861afe044",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_3ff1d6352d268b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a132a5-aa2c-75e0-8e3a-80308b389535",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

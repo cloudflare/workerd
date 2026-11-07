@@ -1,0 +1,172 @@
+src/rust/jsg/resource.rs
+  s_6ad09dba80f31b::t_ad777347e6f7f1 5-6
+src/rust/jsg/feature_flags.rs
+  s_6ad09dba80f31b::t_71b52a845d0b5a 50
+src/rust/cxx/kj-rs-io/stream.rs
+  s_6ad09dba80f31b::t_803f29634b46ef 384
+src/rust/worker/cxx_worker.rs
+  s_6ad09dba80f31b::t_277b5838ca3fb2 11-12
+src/rust/transpiler/lib.rs
+  s_6ad09dba80f31b::t_39ecc356333fad 14
+src/rust/cxx/kj-rs-tokio/tests/BUILD.bazel
+  s_6ad09dba80f31b::t_37144e8829b40a 12
+src/workerd/tools/BUILD.bazel
+  s_6ad09dba80f31b::t_ac5936102ede7b 45
+src/rust/worker/kill_switch.rs
+  s_6ad09dba80f31b::t_48c6cfcdbc327b 5-6
+src/rust/asan/heap_buffer_overflow.rs
+  s_6ad09dba80f31b::t_21534717cf5b91 13
+src/rust/jsg/v8.rs
+  s_6ad09dba80f31b::t_dc9bb1ac0fd5a5 32-33,1008,2457
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_6ad09dba80f31b::t_5fa0c488d34289 2
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_6ad09dba80f31b::t_7798843d9a1847 31
+src/rust/tsan/race.rs
+  s_6ad09dba80f31b::t_2d15c8ff0679b0 16,18,21,29,36
+src/rust/AGENTS.md
+  s_6ad09dba80f31b::t_d64d6a76869ac2 41-46
+src/rust/cxx-integration-test/lib.rs
+  s_6ad09dba80f31b::t_99bca8df834624 15,124,131
+src/rust/jsg/nullable.rs
+  s_6ad09dba80f31b::t_2eda024f4c9ce4 173,195
+src/rust/cxx/kj-rs-io/tests/lib.rs
+  s_6ad09dba80f31b::t_5f72b298a2a86f 11
+src/rust/cxx/kj-rs/BUILD.bazel
+  s_6ad09dba80f31b::t_48b5a03685a83f 28
+src/rust/jsg-test/tests/arrays.rs
+  s_6ad09dba80f31b::t_4015fdb0eb4d2f 5-6
+src/rust/worker/ok.rs
+  s_6ad09dba80f31b::t_77f168f0c8b651 5-6
+src/rust/cxx/kj-rs/tests/test_own.rs
+  s_6ad09dba80f31b::t_f517832d153ff1 1-2
+src/rust/cxx/tests/BUILD.bazel
+  s_6ad09dba80f31b::t_07405b61db8eae 11,23
+src/rust/zlib-rs/ffi.rs
+  s_6ad09dba80f31b::t_9a534d5a70910b 5-198
+  s_6ad09dba80f31b::t_a98465806f02e5 1-4
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_6ad09dba80f31b::t_96ba2d7b576614 31
+src/rust/gen-compile-cache/main.rs
+  s_6ad09dba80f31b::t_801ac03f6430f8 36-39,65
+src/rust/jsg-test/tests/local_cast.rs
+  s_6ad09dba80f31b::t_16266211b89bde 8-9
+src/rust/cxx/kj-rs/waker.rs
+  s_6ad09dba80f31b::t_949bd2590ccede 1-2
+src/rust/cxx/kj-rs/tests/test_maybe.rs
+  s_6ad09dba80f31b::t_f6b46d73c36f60 1-2
+src/rust/encoding/lib.rs
+  s_6ad09dba80f31b::t_221255cbdcf328 16
+src/rust/cxx-integration-test/BUILD.bazel
+  s_6ad09dba80f31b::t_7804bc4df4062d 6
+src/rust/worker/ffi.rs
+  s_6ad09dba80f31b::t_e5d07491bf284f 5-6
+build/AGENTS.md
+  s_6ad09dba80f31b::t_c23dd28cb7e89a 21
+src/rust/zlib-rs/lib.rs
+  s_6ad09dba80f31b::t_70d341017568fb 7
+src/rust/jsg-test/BUILD.bazel
+  s_6ad09dba80f31b::t_642ee699bc32dc 32
+src/rust/cxx/kj-rs/promise.rs
+  s_6ad09dba80f31b::t_b17bad8af20af1 1-2
+src/rust/worker/error.rs
+  s_6ad09dba80f31b::t_8e345370a7ecc2 5-6
+src/rust/python-parser/lib.rs
+  s_6ad09dba80f31b::t_0eca261e794b74 8
+build/wd_rust_proc_macro.bzl
+  s_6ad09dba80f31b::t_8c28e186dceddb 32,50
+build/wd_rust_crate.bzl
+  s_6ad09dba80f31b::t_5f47daeed483d5 80,106-107,175-176,200
+src/rust/jsg-test/lib.rs
+  s_6ad09dba80f31b::t_5b2763aef3c52c 15,104,192
+src/workerd/server/cli/bridge.rs
+  s_6ad09dba80f31b::t_df43b6be41e088 7
+src/rust/cxx/kj-rs-tokio/lib.rs
+  s_6ad09dba80f31b::t_9f9c24e4e2cdc5 12-15
+src/rust/cxx-integration/lib.rs
+  s_6ad09dba80f31b::t_4294a579c7cdce 2
+src/rust/tsan/clone_fd.rs
+  s_6ad09dba80f31b::t_cc5fada5d458d1 23,77,93
+src/rust/jsg/lib.rs
+  s_6ad09dba80f31b::t_7a1a2584ef3166 45,213,707,830,1050,1062
+src/rust/kj/tests/BUILD.bazel
+  s_6ad09dba80f31b::t_69d6012270dc0a 6
+src/rust/cxx/kj-rs/tests/BUILD.bazel
+  s_6ad09dba80f31b::t_0cf4a19ef183a7 29
+src/rust/cxx/kj-rs-io/tests/BUILD.bazel
+  s_6ad09dba80f31b::t_553ae75d82b95a 12
+src/rust/cxx/kj-rs/own.rs
+  s_6ad09dba80f31b::t_9a8fcb12b66482 3-4
+src/rust/node-exceptions/lib.rs
+  s_6ad09dba80f31b::t_849757ef40a4bd 16,294,311
+src/rust/kj/tests/lib.rs
+  s_6ad09dba80f31b::t_931564ab4fe6fb 19,112,132
+src/rust/jsg-macros/resource.rs
+  s_6ad09dba80f31b::t_e9935a2c4f69f7 536
+src/workerd/server/cli/socket_fd/windows.rs
+  s_6ad09dba80f31b::t_716fb8fa0fb549 26
+src/rust/cxx/kj-rs/maybe.rs
+  s_6ad09dba80f31b::t_404155854b6500 1-2
+src/rust/cxx/kj-rs/tests/test_date.rs
+  s_6ad09dba80f31b::t_9e8308b61a51a7 1-2
+src/rust/cxx/kj-rs/future.rs
+  s_6ad09dba80f31b::t_23d49848f3cafc 3-4
+build/rust/BUILD.bazel
+  s_6ad09dba80f31b::t_47772ec0390930 1,6-45
+build/wd_rust_test.bzl
+  s_6ad09dba80f31b::t_18e3b4414669b5 9,13
+src/workerd/tools/param-extractor.rs
+  s_6ad09dba80f31b::t_b2ac0d35158826 137-140
+src/rust/cxx/kj-rs/refcount.rs
+  s_6ad09dba80f31b::t_cb98890c8c2f8f 3-4
+build/wd_rust_binary.bzl
+  s_6ad09dba80f31b::t_9be69c89b24867 129,171
+src/rust/cxx/kj-rs/lib.rs
+  s_6ad09dba80f31b::t_943cdcf7453250 42
+src/rust/api/lib.rs
+  s_6ad09dba80f31b::t_d24aff8148e89f 16,29
+src/rust/cxx/BUILD.bazel
+  s_6ad09dba80f31b::t_12a1eff774c7e4 5-8,34
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_6ad09dba80f31b::t_5280dc8e98f256 8
+src/rust/jsg/wrappable.rs
+  s_6ad09dba80f31b::t_8aa457c5ed79f1 5
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_6ad09dba80f31b::t_7cafd6ca4d4509 58,362,365
+src/rust/kj/io.rs
+  s_6ad09dba80f31b::t_bd192c894584a6 1-2
+src/rust/jsg-test/tests/unwrap.rs
+  s_6ad09dba80f31b::t_fd434c27c78e12 5-6
+src/rust/cxx/kj-rs-io/lib.rs
+  s_6ad09dba80f31b::t_2900267e4e60f1 99-100
+src/rust/jsg-test/tests/buffer_types.rs
+  s_6ad09dba80f31b::t_1c3f626f092322 7-8
+src/rust/kj/own.rs
+  s_6ad09dba80f31b::t_5152bd59feee2d 12-13
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_6ad09dba80f31b::t_e489bea4994346 58
+src/rust/memory-cache/ffi/lib.rs
+  s_6ad09dba80f31b::t_bda0be2837932e 14
+src/rust/jsg/modules.rs
+  s_6ad09dba80f31b::t_5764c31e82bf40 5-6
+src/rust/cxx/kj-rs/awaiter.rs
+  s_6ad09dba80f31b::t_21665114a439cf 1-2,39
+src/rust/kj/http.rs
+  s_6ad09dba80f31b::t_c651aa3d6105c1 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f3da499a744dbc4dde6a2dbe3d1303ac437c9a8f",
+  "prompts": {},
+  "sessions": {
+    "s_6ad09dba80f31b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b813443c-9a0f-406a-944d-b33153967d72",
+        "model": "claude-odango-eap"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

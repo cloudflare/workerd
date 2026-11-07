@@ -1,0 +1,21 @@
+types/generated-snapshot/experimental/index.ts
+  s_f332e176eb9835::t_82aa80b3a7ebff 711-713
+types/generated-snapshot/experimental/index.d.ts
+  s_f332e176eb9835::t_216a740b74b741 708-713
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a6eaed5c840e6d9ee0ecc48c5b43ce1445facabe",
+  "prompts": {},
+  "sessions": {
+    "s_f332e176eb9835": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec654b52dffe5R4MDhsJqmPWkg",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

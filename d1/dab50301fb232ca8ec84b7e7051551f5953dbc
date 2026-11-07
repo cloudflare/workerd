@@ -1,0 +1,23 @@
+src/workerd/api/basics.c++
+  s_e95e1bb2046887::t_071c7de492fe25 1203-1206
+src/workerd/api/basics.h
+  s_e95e1bb2046887::t_fc16d89c85761a 652,655,760-764,886-887
+src/workerd/api/tests/abortsignal-test.js
+  s_e95e1bb2046887::t_b9ad774aee17e2 26-29,1062,1067,1069-1072,1074-1079,1083-1085
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1dab50301fb232ca8ec84b7e7051551f5953dbc",
+  "prompts": {},
+  "sessions": {
+    "s_e95e1bb2046887": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f473fa69-9e99-4e5c-8303-d6091b836901",
+        "model": "unknown"
+      },
+      "human_author": "Nicholas Paun <npaun@cloudflare.com>"
+    }
+  }
+}

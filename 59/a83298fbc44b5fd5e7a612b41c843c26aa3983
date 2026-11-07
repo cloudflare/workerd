@@ -1,0 +1,28 @@
+src/workerd/api/tests/cf-cache-control-test.wd-test
+  s_b7a4dc82398834::t_6258cf806293b1 23-24,26-42
+src/workerd/api/http.c++
+  s_b7a4dc82398834::t_d4566b7a1e54f7 698
+  s_b7a4dc82398834::t_f8fc10724f9a18 692-697,699-704
+src/workerd/io/compatibility-date.capnp
+  s_b7a4dc82398834::t_52bad3c0645e29 1708-1717
+  s_b7a4dc82398834::t_b104ec08359c55 1718
+  s_b7a4dc82398834::t_675f3a2e601f47 1719
+src/workerd/api/tests/cf-cache-control-test.js
+  s_b7a4dc82398834::t_17b75f59ca157d 9-15,213-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "59a83298fbc44b5fd5e7a612b41c843c26aa3983",
+  "prompts": {},
+  "sessions": {
+    "s_b7a4dc82398834": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "417b6db9-5d20-4cea-8fa3-5ca0d0cab001",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

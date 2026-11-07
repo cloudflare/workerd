@@ -1,0 +1,19 @@
+src/workerd/api/container.c++
+  s_07ee96660158b7::t_4a96d4ef16915e 373-374,385
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c34bf6a9119dae550fd9b5a2ba5e8840323f33d9",
+  "prompts": {},
+  "sessions": {
+    "s_07ee96660158b7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02cf6ca2affezXv8UuTdVPo29D",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Andrew Martinez <amartinez@cloudflare.com>"
+    }
+  }
+}

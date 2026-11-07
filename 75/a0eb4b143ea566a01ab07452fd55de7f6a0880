@@ -1,0 +1,19 @@
+src/workerd/server/factory/worker-factory-otlp.c++
+  s_7806464098a098::t_5cd1ca05cb9d3a 7-9,16-18,20-21,27,33-42,46-51,54-56,59-89,120-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "75a0eb4b143ea566a01ab07452fd55de7f6a0880",
+  "prompts": {},
+  "sessions": {
+    "s_7806464098a098": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e635a6272ffesZONmQr8olWBas",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "William Perron <wperron@cloudflare.com>"
+    }
+  }
+}

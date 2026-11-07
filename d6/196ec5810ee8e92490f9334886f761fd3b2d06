@@ -1,0 +1,83 @@
+build/deps/v8.MODULE.bazel
+  s_7bd60b65ab037d::t_f56fe23566eb08 21,23,66
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_7bd60b65ab037d::t_f558b5b7e799cc 40
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_7bd60b65ab037d::t_84b5921471e67e 26,41
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_7bd60b65ab037d::t_6371fd52f622b4 9,12,91,119
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_7bd60b65ab037d::t_ed11909dde44a7 13,24,53,62,65,81,90,109
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_7bd60b65ab037d::t_7ff453bd29f5d0 27,30,40,61,64,208,250,270,312,315,331,344,370,373,457
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_7bd60b65ab037d::t_f6ea13a85b4e37 33,48
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_7bd60b65ab037d::t_c8b5885c0d2564 11,14
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_7bd60b65ab037d::t_cf2a948d657b72 17,20,30
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_7bd60b65ab037d::t_4d2875d8890c8b 39,42,52,55,169,181,206,217,244,398,401
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_7bd60b65ab037d::t_0302576ec8882e 9
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_7bd60b65ab037d::t_addde94aa36d88 33,48,76
+patches/v8/0016-Disable-memory-leak-assert-when-shutting-down-V8.patch
+  s_7bd60b65ab037d::t_03766cc6cf19bf 9,12
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_7bd60b65ab037d::t_f728cbe134ef9f 9,28,36,45,53,64,73,76,84,92
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_7bd60b65ab037d::t_c348af0c1e4f89 15,18,49
+patches/v8/0019-Remove-unneded-latomic-linker-flag.patch
+  s_7bd60b65ab037d::t_976909b711dd98 9,12
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_7bd60b65ab037d::t_3d40d2735e16ed 11,14,32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_7bd60b65ab037d::t_a3ace16a61cdd2 9,12,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_7bd60b65ab037d::t_f41cc7fa9ceeb1 9,12,24,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_7bd60b65ab037d::t_738b952bfe8873 8,11
+patches/v8/0024-Disable-slow-handle-check.patch
+  s_7bd60b65ab037d::t_41f045520864fa 9
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_7bd60b65ab037d::t_5b900f39d5838c 28,31
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_7bd60b65ab037d::t_a2474083a1c7eb 8,11,20
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_7bd60b65ab037d::t_08307ef6e1f39c 27,30
+patches/v8/0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch
+  s_7bd60b65ab037d::t_409378048df7b0 17,20,35
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_7bd60b65ab037d::t_9681bd6a15437f 8,11
+patches/v8/0032-Change-lamba-signature-to-get-around-windows-build-f.patch
+  s_7bd60b65ab037d::t_311a9ba91188b1 8
+patches/v8/0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_7bd60b65ab037d::t_1d909c382cc2ce 8
+patches/v8/0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch
+  s_7bd60b65ab037d::t_c3e73d90a657f0 10,13,113,184,187,222,227-228,294
+patches/v8/0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch
+  s_7bd60b65ab037d::t_1d60e3eaad94c8 14
+patches/v8/0038-Properly-depend-on-llvm-libc.patch
+  s_7bd60b65ab037d::t_138659943f6461 9,12,26
+patches/v8/0039-Fix-TSan-build-without-the-V8-sandbox.patch
+  s_7bd60b65ab037d::t_635c1ab2fa14e9 12
+patches/v8/0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch
+  s_7bd60b65ab037d::t_c262ae6af9b6f9 14,17,26,63,71,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6196ec5810ee8e92490f9334886f761fd3b2d06",
+  "prompts": {},
+  "sessions": {
+    "s_7bd60b65ab037d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f55e3b698fferfg8wcbq81IMp7",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Dominik Picheta <dominik@cloudflare.com>"
+    }
+  }
+}

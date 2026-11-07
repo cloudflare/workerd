@@ -1,0 +1,35 @@
+docs/virtual-time.md
+  s_beec2eef2fbbe5::t_f6f1d425ae720e 27-31,44,70-77,87-91,438-439
+src/workerd/api/unsafe.h
+  s_beec2eef2fbbe5::t_19618f6626b3ac 434
+src/workerd/io/compatibility-date.capnp
+  s_beec2eef2fbbe5::t_adea88f7f5eeb0 1695-1700
+src/workerd/server/server.c++
+  s_beec2eef2fbbe5::t_279dbd8731b20c 465-489,491,500,504
+src/workerd/server/tests/virtual-time/BUILD.bazel
+  s_beec2eef2fbbe5::t_2e7da337f7b2c8 42-47
+src/workerd/server/tests/virtual-time/virtual-time-crypto-test.js
+  s_beec2eef2fbbe5::t_a9fece4c3faf2d 1-94
+src/workerd/server/tests/virtual-time/virtual-time-crypto-test.wd-test
+  s_beec2eef2fbbe5::t_9c7e4b758edf8c 1-24
+src/workerd/util/virtual-time.c++
+  s_beec2eef2fbbe5::t_86da4462171f54 10-11,310,412,498-510
+src/workerd/util/virtual-time.h
+  s_beec2eef2fbbe5::t_63d84672c10619 218-221,355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7382460bfe7680f46664f9997f0e42e9381d29fa",
+  "prompts": {},
+  "sessions": {
+    "s_beec2eef2fbbe5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18413-def0-7572-bc53-801bb289b395",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Caio Nogueira <caio@cloudflare.com>"
+    }
+  }
+}

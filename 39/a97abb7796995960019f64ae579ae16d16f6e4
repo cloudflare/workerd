@@ -1,0 +1,147 @@
+.github/bonk/specialists/rust-first.md
+  s_f1110a86c4688e::t_a76780382582d0 46-47
+build/wd_rust_binary.bzl
+  s_f1110a86c4688e::t_71273c06961722 4,79,159
+build/wd_rust_crate.bzl
+  s_f1110a86c4688e::t_ff89d8d5e4c60d 4,86-87,109,183
+build/wd_rust_proc_macro.bzl
+  s_f1110a86c4688e::t_60ae8ba3b934f4 2,23,41
+build/wd_rust_test.bzl
+  s_f1110a86c4688e::t_02eeedf7fb6bd0 3-13
+src/rust/AGENTS.md
+  s_f1110a86c4688e::t_a81faaf28f4fa6 41,49-65
+src/rust/api/dns-test.rs
+  s_f1110a86c4688e::t_bd661a6fcea9e1 1-349
+src/rust/api/dns.rs
+  s_f1110a86c4688e::t_ea3cb86a9064ab 413-414
+src/rust/api/lib-test.rs
+  s_f1110a86c4688e::t_61f0a29e60b123 1-21
+src/rust/api/lib.rs
+  s_f1110a86c4688e::t_f6654f3c6ad5ec 58-59
+src/rust/api/url-test.rs
+  s_f1110a86c4688e::t_120afe7df4cee7 1-159
+src/rust/api/url.rs
+  s_f1110a86c4688e::t_26595943c1d6f2 158-159
+src/rust/cxx/BUILD.bazel
+  s_f1110a86c4688e::t_3d89ec8ce5eae7 7-10,32,60-63,82-85,141-144
+src/rust/cxx/gen/build/src/out-test.rs
+  s_f1110a86c4688e::t_41bb3c18f33196 1-39
+src/rust/cxx/gen/build/src/out.rs
+  s_f1110a86c4688e::t_e330338ddf9351 263-264
+src/rust/cxx/gen/cmd/src/app.rs
+  s_f1110a86c4688e::t_b031f7ca6c660c 232-235
+src/rust/cxx/gen/src/nested-test.rs
+  s_f1110a86c4688e::t_70f348e00be6c3 1-109
+src/rust/cxx/gen/src/nested.rs
+  s_f1110a86c4688e::t_6002696762d4d6 54-55
+src/rust/cxx/kj-rs-io/error-test.rs
+  s_f1110a86c4688e::t_b9be79fa305339 1-157
+src/rust/cxx/kj-rs-io/error.rs
+  s_f1110a86c4688e::t_c2eeb5aa045c67 236-237
+src/rust/cxx/kj-rs-io/ffi-test.rs
+  s_f1110a86c4688e::t_096118121d530a 1-113
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_f1110a86c4688e::t_3ba6a77f6c4335 563-564
+src/rust/cxx/kj-rs-io/lib-test.rs
+  s_f1110a86c4688e::t_f83e5b749ae4d5 1-36
+src/rust/cxx/kj-rs-io/lib.rs
+  s_f1110a86c4688e::t_1752d455d21174 206-207
+src/rust/cxx/kj-rs-io/net-test.rs
+  s_f1110a86c4688e::t_9c66a52ba4a7a9 1-561
+src/rust/cxx/kj-rs-io/net.rs
+  s_f1110a86c4688e::t_13c644e952b72e 1180-1181
+src/rust/cxx/kj-rs-io/stream-test.rs
+  s_f1110a86c4688e::t_aa3e5d4a58a087 1-195
+src/rust/cxx/kj-rs-io/stream.rs
+  s_f1110a86c4688e::t_2bd673f6aaa8f3 576-577
+src/rust/cxx/kj-rs-io/watcher-test.rs
+  s_f1110a86c4688e::t_4b175bdc5b895b 1-233
+src/rust/cxx/kj-rs-io/watcher.rs
+  s_f1110a86c4688e::t_8cbb4aa2d16581 354-355
+src/rust/cxx/kj-rs-tokio/port-test.rs
+  s_f1110a86c4688e::t_72d0532dd04fb5 1-302
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_f1110a86c4688e::t_b051938f30ddf6 338-339
+src/rust/cxx/kj-rs/date-test.rs
+  s_f1110a86c4688e::t_01a87615699a2e 1-34
+src/rust/cxx/kj-rs/date.rs
+  s_f1110a86c4688e::t_13d6c798113de1 92-93
+src/rust/cxx/src/exception-test.rs
+  s_f1110a86c4688e::t_c7495f8a0582eb 1-317
+src/rust/cxx/src/exception.rs
+  s_f1110a86c4688e::t_ab8c35b37f5a13 371-372
+src/rust/encoding/lib-test.rs
+  s_f1110a86c4688e::t_7bd1a6bcc7b3cf 1-22
+src/rust/encoding/lib.rs
+  s_f1110a86c4688e::t_e01ea3af9de868 223-224
+src/rust/jsg-macros/resource-test.rs
+  s_f1110a86c4688e::t_9e06cec0bb4b40 1-70
+src/rust/jsg-macros/resource.rs
+  s_f1110a86c4688e::t_983b7d0e527b95 687-688
+src/rust/jsg-macros/utils-test.rs
+  s_f1110a86c4688e::t_76916b55e9fd29 1-51
+src/rust/jsg-macros/utils.rs
+  s_f1110a86c4688e::t_9299196273d746 149-150
+src/rust/jsg/feature_flags-test.rs
+  s_f1110a86c4688e::t_a63520ec54865a 1-64
+src/rust/jsg/feature_flags.rs
+  s_f1110a86c4688e::t_80072a98d4d833 58-59
+src/rust/jsg/lib-test.rs
+  s_f1110a86c4688e::t_f809f668519ab5 1-110
+src/rust/jsg/lib.rs
+  s_f1110a86c4688e::t_5561be586d1e4b 986-989
+src/rust/memory-cache/lib-test.rs
+  s_f1110a86c4688e::t_432df02c4de5cc 1-750
+src/rust/memory-cache/lib.rs
+  s_f1110a86c4688e::t_97cfdd4b584c88 1004-1005
+src/rust/node-exceptions/lib-test.rs
+  s_f1110a86c4688e::t_fdeae3049f3cd0 1-151
+src/rust/node-exceptions/lib.rs
+  s_f1110a86c4688e::t_3771cd4386ebc4 333-334
+src/rust/transpiler/lib-test.rs
+  s_f1110a86c4688e::t_3b4a97b5f9d826 1-58
+src/rust/transpiler/lib.rs
+  s_f1110a86c4688e::t_f367e69e1e9c0e 109-110
+src/rust/worker/lib-test.rs
+  s_f1110a86c4688e::t_52b426bd209c69 1-38
+src/rust/worker/lib.rs
+  s_f1110a86c4688e::t_742cf665312e67 166-167
+src/workerd/server/cli/args-test.rs
+  s_f1110a86c4688e::t_4450bc5b7f42d4 1-166
+src/workerd/server/cli/args.rs
+  s_f1110a86c4688e::t_c0da964fe105dd 451-452
+src/workerd/server/cli/config-test.rs
+  s_f1110a86c4688e::t_255b192981507c 1-42
+src/workerd/server/cli/config.rs
+  s_f1110a86c4688e::t_06c2c96e8e7a49 167-168
+src/workerd/server/cli/process-test.rs
+  s_f1110a86c4688e::t_740a2b3fa2bee3 1-79
+src/workerd/server/cli/process.rs
+  s_f1110a86c4688e::t_4baf1520cd4b3d 263-264
+src/workerd/server/cli/socket_fd/unix-test.rs
+  s_f1110a86c4688e::t_dfb750d0c46ff7 1-40
+src/workerd/server/cli/socket_fd/unix.rs
+  s_f1110a86c4688e::t_6198d80f9cc819 74-75
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_f1110a86c4688e::t_f4c64d5cce1a5d 51-54,84
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_f1110a86c4688e::t_09468e915c95b4 24-27,47
+src/rust/cxx/kj-rs/BUILD.bazel
+  s_f1110a86c4688e::t_2b9d40ae7db451 21-24,44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "39a97abb7796995960019f64ae579ae16d16f6e4",
+  "prompts": {},
+  "sessions": {
+    "s_f1110a86c4688e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f6d638-d1d1-4068-a7a6-e5f600722252",
+        "model": "claude-odango-eap"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

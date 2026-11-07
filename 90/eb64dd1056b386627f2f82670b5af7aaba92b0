@@ -1,0 +1,23 @@
+src/workerd/api/actor-call-retry-test.c++
+  s_f332e176eb9835::t_7e9520062e55a9 265-292
+src/workerd/api/actor-call-retry.c++
+  s_f332e176eb9835::t_fac6b0705ac110 30-44,195-197
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_f332e176eb9835::t_c54d68c8c94299 125,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "90eb64dd1056b386627f2f82670b5af7aaba92b0",
+  "prompts": {},
+  "sessions": {
+    "s_f332e176eb9835": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec654b52dffe5R4MDhsJqmPWkg",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
