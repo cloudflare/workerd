@@ -235,6 +235,30 @@ fn kj_exception_from_cpp_becomes_its_js_error() {
     assert_eq!(message, "thrown by C++ as a kj::Exception");
 }
 
+/// Describes what `call` throws: its class, name, message and legacy code.
+fn describe_thrown(call: &str) -> String {
+    eval::<String>(&format!(
+        "let e; try {{ {call}; }} catch (thrown) {{ e = thrown; }}
+         `${{e.constructor.name}} ${{e.name}}: ${{e.message}} (${{e.code}})`"
+    ))
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_a_dom_exception_name_of_its_own() {
+    assert_eq!(
+        describe_thrown("h.failWithQuotaExceededError(greeter)"),
+        "DOMException QuotaExceededError: thrown by C++ as a kj::Exception (22)",
+    );
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_dom_syntax_error_a_dom_exception() {
+    assert_eq!(
+        describe_thrown("h.failWithDomSyntaxError(greeter)"),
+        "DOMException SyntaxError: thrown by C++ as a kj::Exception (12)",
+    );
+}
+
 #[test]
 fn js_exception_from_cpp_passes_through() {
     let (name, message) = eval_error("h.failWithJsError(greeter)");

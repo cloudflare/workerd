@@ -920,11 +920,17 @@ match lock.try_catch(|lock| {
 
 ## Errors thrown from Rust
 
-An `Error` is thrown as the JavaScript error class its `ExceptionType` names (`TypeError`,
-`RangeError`, `ReferenceError`, `SyntaxError`, `Error`), or, for the DOMException names
-(`OperationError`, `DataCloneError`, `AbortError` and the rest, for which
-`ExceptionType::is_dom_exception()` is true), as a `DOMException` with that name, as C++
-`JSG_REQUIRE(..., DOMAbortError, ...)` throws. `Lock::dom_exception` creates a `DOMException` with
+An `Error`'s `name` is an `ErrorName`: a JavaScript error class (`TypeError`, `RangeError`,
+`ReferenceError`, `SyntaxError`, `Error`), or a `DOMException` with any name, as C++
+`JSG_REQUIRE(..., DOMAbortError, ...)` throws. The two are separate because `SyntaxError` is both.
+The `ExceptionType`s named after a DOMException (`OperationError`, `DataCloneError`, `AbortError`
+and the rest, for which `ExceptionType::is_dom_exception()` is true) are shorthands for that
+`DOMException`, as in `jsg_require!(..., AbortError, ...)`; `Error::new_dom_exception` takes any
+name, including `SyntaxError` and names that are no `ExceptionType`, such as `QuotaExceededError`.
+A C++ error that reaches Rust as a `kj::Exception` keeps its DOMException name, whatever it is, and
+`FromJS` for `Error` reads a JavaScript error as its class, even one whose `name` is a DOMException
+name. An `ErrorName` compares equal to the `ExceptionType` that is thrown the same way, so
+`err.name == ExceptionType::TypeError` works. `Lock::dom_exception` creates a `DOMException` with
 any name, as C++ `jsg::Lock::domException()` does. Both create it through `jsg::newDOMException()`
 (Safety rules, rule 3), which needs the current context: while an exception or a termination is
 pending, or if creating it throws, `Lock::dom_exception` and `Lock::exception` fail with a pending

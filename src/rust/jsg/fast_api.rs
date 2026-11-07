@@ -314,7 +314,7 @@ unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Err
         } else {
             ffi::fast_api_throw_exception(
                 options,
-                err.name,
+                err.name.class().unwrap_or(crate::ExceptionType::Error),
                 crate::error_message_for_v8(err.message.as_bytes()),
             );
         }

@@ -192,9 +192,105 @@ impl From<&str> for ExceptionType {
     }
 }
 
+/// What an [`Error`] is thrown as: an instance of a JavaScript error class, or a `DOMException`
+/// with a name.
+///
+/// The two are separate because their names overlap: `SyntaxError` is both a JavaScript class
+/// and a `DOMException` name, and C++ throws either. An [`ExceptionType`] converts to the
+/// variant it is thrown as, so its `DOMException` names become [`ErrorName::DomException`], and
+/// the variants compare equal to the `ExceptionType`s they are thrown as.
+#[derive(Debug, Clone)]
+pub enum ErrorName {
+    /// An instance of the JavaScript error class: `Error`, `TypeError`, `RangeError`,
+    /// `ReferenceError` or `SyntaxError`. A `DOMException` name here (see
+    /// [`ExceptionType::is_dom_exception`]) is thrown as that `DOMException`, as
+    /// [`ErrorName::from`] would make it.
+    Class(ExceptionType),
+    /// A `DOMException` with this name, which may be any string, as for C++
+    /// `jsg::Lock::domException()`.
+    DomException(std::borrow::Cow<'static, str>),
+}
+
+impl ErrorName {
+    /// The `name` of the exception thrown.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Class(class) => class.as_str(),
+            Self::DomException(name) => name,
+        }
+    }
+
+    /// Whether this is thrown as a `DOMException`.
+    #[must_use]
+    pub fn is_dom_exception(&self) -> bool {
+        match self {
+            Self::Class(class) => class.is_dom_exception(),
+            Self::DomException(_) => true,
+        }
+    }
+
+    /// The JavaScript error class thrown, or `None` for a `DOMException`.
+    #[must_use]
+    pub fn class(&self) -> Option<ExceptionType> {
+        match *self {
+            Self::Class(class) if !class.is_dom_exception() => Some(class),
+            _ => None,
+        }
+    }
+
+    /// The JavaScript error class named `name`, or `Error` for any other name. Unlike
+    /// [`ExceptionType::from`], this never gives a `DOMException`: it is for the `name` of a
+    /// JavaScript error object, which is a class even when its name is a `DOMException` name.
+    fn class_named(name: &str) -> Self {
+        match ExceptionType::from(name) {
+            class if class.is_dom_exception() => Self::Class(ExceptionType::Error),
+            class => Self::Class(class),
+        }
+    }
+}
+
+impl From<ExceptionType> for ErrorName {
+    fn from(value: ExceptionType) -> Self {
+        if value.is_dom_exception() {
+            Self::DomException(std::borrow::Cow::Borrowed(value.as_str()))
+        } else {
+            Self::Class(value)
+        }
+    }
+}
+
+impl PartialEq for ErrorName {
+    /// Whether the two are thrown as the same exception: both as a `DOMException`, or both as
+    /// a JavaScript class, with the same name.
+    fn eq(&self, other: &Self) -> bool {
+        self.is_dom_exception() == other.is_dom_exception() && self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for ErrorName {}
+
+impl PartialEq<ExceptionType> for ErrorName {
+    fn eq(&self, other: &ExceptionType) -> bool {
+        self.is_dom_exception() == other.is_dom_exception() && self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<ErrorName> for ExceptionType {
+    fn eq(&self, other: &ErrorName) -> bool {
+        other == self
+    }
+}
+
+impl std::fmt::Display for ErrorName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Error {
-    pub name: ExceptionType,
+    pub name: ErrorName,
     pub message: String,
     /// If `true`, `message` must never reach guest JS verbatim: it may contain
     /// implementation details (a raw KJ exception description, a C++ source
@@ -226,7 +322,7 @@ macro_rules! impl_error_constructors {
             $(
                 pub fn $fn_name(message: impl Into<String>) -> Self {
                     Self {
-                        name: ExceptionType::$variant,
+                        name: ExceptionType::$variant.into(),
                         message: message.into(),
                         is_internal: false,
                         pending: false,
@@ -289,7 +385,10 @@ impl<'s> FromJS<'s> for Error {
             };
 
             Ok(Self {
-                name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
+                // A `DOMException` is not a native error, so `name` names a class.
+                name: name.map_or(ErrorName::Class(ExceptionType::Error), |n| {
+                    ErrorName::class_named(&n)
+                }),
                 message,
                 is_internal: false,
                 pending: false,
@@ -301,9 +400,11 @@ impl<'s> FromJS<'s> for Error {
 }
 
 impl Error {
+    /// An error of the [`ExceptionType`] named `name`, or `Error` for any other name. For a
+    /// `DOMException` with a name of its own, use [`Error::new_dom_exception`].
     pub fn new(name: &str, message: &str) -> Self {
         Self {
-            name: ExceptionType::from(name),
+            name: ExceptionType::from(name).into(),
             message: message.to_owned(),
             is_internal: false,
             pending: false,
@@ -320,7 +421,22 @@ impl Error {
     #[doc(hidden)]
     pub fn from_type(name: ExceptionType, message: impl Into<String>) -> Self {
         Self {
-            name,
+            name: name.into(),
+            message: message.into(),
+            is_internal: false,
+            pending: false,
+        }
+    }
+
+    /// An error thrown as a `DOMException` named `name`, which may be any name, as C++
+    /// `JSG_REQUIRE(..., DOMQuotaExceededError, ...)` throws one. This is the way to throw
+    /// `DOMException(SyntaxError)`, which [`ExceptionType::SyntaxError`] is not.
+    pub fn new_dom_exception(
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: ErrorName::DomException(name.into()),
             message: message.into(),
             is_internal: false,
             pending: false,
@@ -363,9 +479,9 @@ impl Error {
         self.pending
     }
 
-    /// Creates a V8 exception from this error: a `DOMException` for a type for which
-    /// [`ExceptionType::is_dom_exception`] is true, as [`Lock::dom_exception`] creates it, and
-    /// otherwise an instance of the JavaScript error class.
+    /// Creates a V8 exception from this error: a `DOMException` if [`ErrorName::is_dom_exception`]
+    /// is true, as [`Lock::dom_exception`] creates it, and otherwise an instance of the
+    /// JavaScript error class.
     ///
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
@@ -376,14 +492,14 @@ impl Error {
     ///
     /// Only creating a `DOMException` can fail; see [`Lock::dom_exception`].
     pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
-        if self.name.is_dom_exception() {
-            return lock
+        match self.name.class() {
+            Some(class) => Ok(lock
+                .create_error_from_bytes(class, self.message.as_bytes())
+                .into()),
+            None => lock
                 .create_dom_exception_from_bytes(self.name.as_str(), self.message.as_bytes())
-                .map(Into::into);
+                .map(Into::into),
         }
-        Ok(lock
-            .create_error_from_bytes(self.name, self.message.as_bytes())
-            .into())
     }
 }
 
@@ -484,8 +600,10 @@ impl Error {
         if let Some(rest) = body.strip_prefix("DOMException(")
             && let Some((name, message)) = rest.split_once("): ")
         {
+            // Any name, as C++ `decodeTunneledException()` accepts: `SyntaxError` here is
+            // `DOMException(SyntaxError)`, and `QuotaExceededError` is not an `ExceptionType`.
             return Some(Self {
-                name: ExceptionType::from(name),
+                name: ErrorName::DomException(name.to_owned().into()),
                 message: message.to_owned(),
                 is_internal,
                 pending: false,
@@ -494,7 +612,7 @@ impl Error {
 
         let (ty, message) = body.split_once(": ")?;
         Some(Self {
-            name: ExceptionType::from(ty),
+            name: ExceptionType::from(ty).into(),
             message: message.to_owned(),
             is_internal,
             pending: false,
@@ -508,7 +626,7 @@ impl Error {
     /// `makeInternalError()`).
     pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
-            name: ExceptionType::Error,
+            name: ErrorName::Class(ExceptionType::Error),
             message: message.into(),
             is_internal: true,
             pending: false,
@@ -725,9 +843,9 @@ impl<'s> Lock<'s> {
 
     /// Creates a `DOMException` with the given name and message.
     ///
-    /// Mirrors C++ `jsg::Lock::domException()`, and accepts any name, as it does. Errors with
-    /// the `DOMException` names of [`ExceptionType`] are thrown as `DOMException`s already (see
-    /// [`Error::to_local`]); use this for another name, or to attach properties before throwing.
+    /// Mirrors C++ `jsg::Lock::domException()`, and accepts any name, as it does. It creates
+    /// what [`Error::to_local`] creates for [`Error::new_dom_exception`]; returning that error
+    /// throws the same `DOMException`, so use this only to attach properties before throwing.
     /// A message longer than V8's string limit is cut to fit; see [`Lock::error`].
     ///
     /// # Errors

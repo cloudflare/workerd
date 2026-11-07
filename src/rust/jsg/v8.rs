@@ -116,7 +116,9 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
-    /// A JavaScript error class or a `DOMException` name. A new variant must also be added to
+    /// A JavaScript error class or a `DOMException` name. A `jsg::Error` holds a
+    /// `jsg::ErrorName`, which can also be a `DOMException` with a name that is not here, so a
+    /// variant is only worth adding for a name Rust code throws often. One must also be added to
     /// `ExceptionType::as_str()` and, if it is a `DOMException` name, to
     /// `ExceptionType::is_dom_exception()` and `DOM_EXCEPTION_TYPES` in
     /// `jsg-test/tests/dom_exception.rs`: a cxx shared enum needs a `_` arm, so a missing one is

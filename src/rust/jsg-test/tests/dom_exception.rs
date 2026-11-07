@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! An `Error` of a `DOMException` type is thrown as a `DOMException`, and `Lock::dom_exception`
-//! creates one with any name. Creating one while an exception or a termination is pending is
+//! An `Error` of a `DOMException` type is thrown as a `DOMException`, and
+//! `Error::new_dom_exception` and `Lock::dom_exception` create one with any name. Creating one while an exception or a termination is pending is
 //! tested in `pending_exception.rs` and `termination.rs`.
 
 use jsg::v8;
@@ -19,6 +19,18 @@ impl Errors {
     #[jsg_method]
     fn fail(name: String, message: String) -> jsg::Result<()> {
         Err(jsg::Error::new(&name, &message))
+    }
+
+    /// Fails with a `DOMException` named `name`.
+    #[jsg_method]
+    fn fail_dom(name: String, message: String) -> jsg::Result<()> {
+        Err(jsg::Error::new_dom_exception(name, message))
+    }
+
+    /// Fails with `error`, read as an `Error`.
+    #[jsg_method]
+    fn rethrow(error: jsg::Error) -> jsg::Result<()> {
+        Err(error)
     }
 
     /// Returns the exception that `Lock::exception` creates for an `Error` of the type `name`
@@ -147,5 +159,33 @@ fn dom_exception_has_a_stack() {
              String(typeof e.stack === 'string' && e.stack.startsWith('AbortError: aborted'))"
         ),
         "true",
+    );
+}
+
+#[test]
+fn new_dom_exception_accepts_any_name() {
+    assert_eq!(
+        describe("Errors.failDom('QuotaExceededError', 'full')"),
+        "true DOMException QuotaExceededError: full (22)",
+    );
+    assert_eq!(
+        describe("Errors.failDom('SyntaxError', 'bad syntax')"),
+        "true DOMException SyntaxError: bad syntax (12)",
+    );
+    assert_eq!(
+        describe("Errors.failDom('DataError', 'bad data')"),
+        describe("Errors.fail('DataError', 'bad data')"),
+    );
+}
+
+#[test]
+fn javascript_error_named_like_a_dom_exception_stays_a_class() {
+    assert_eq!(
+        describe("Errors.rethrow(Object.assign(new Error('x'), { name: 'DataError' }))"),
+        "true Error Error: x (undefined)",
+    );
+    assert_eq!(
+        describe("Errors.rethrow(new SyntaxError('s'))"),
+        "true SyntaxError SyntaxError: s (undefined)",
     );
 }
