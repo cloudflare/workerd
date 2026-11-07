@@ -7,6 +7,13 @@ The in-tree fork contains these major behavioral changes:
   C++, while an `extern "C++"` function that throws reports the exception to Rust. Infallible Rust
   signatures panic when C++ throws. Return values travel through out parameters so no bridge shim
   is treated as truly `noexcept`.
+- **`#[nothrow]` extern C++ functions.** An `extern "C++"` function marked `#[nothrow]` is called
+  without catching exceptions: its bridge shim calls the C++ function with no `try`/`catch` and
+  returns its value through an out parameter as other shims do, and Rust declares the shim
+  `extern "C-unwind"`. The shim then has no exception-handling personality, so cross-language LTO
+  can inline it, and the C++ function, into Rust; LLVM doesn't inline a function into one with a
+  different personality, and a C++ `noexcept` function that calls anything not known not to throw
+  has one. A C++ exception that escapes anyway unwinds into Rust, which aborts the process.
 - **Required lifetime annotations on returned references.** This supports the exception-safe bridge
   ABI.
 - **KJ interoperability.** Bridge generation and `kj-rs` support KJ ownership, refcounting,

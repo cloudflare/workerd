@@ -168,6 +168,10 @@ pub mod ffi {
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
     }
 
+    // `#[nothrow]` marks a shim that can't throw a C++ exception, which the bridge then calls
+    // directly instead of catching what it throws (see src/rust/cxx/README.md). V8 never throws
+    // one, not even from a call that runs JavaScript. Shims that can throw (KJ_REQUIRE, building a
+    // rust::String or Vec, allocating a KJ object) don't have it.
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
@@ -193,10 +197,15 @@ pub mod ffi {
 
         // Local<T>
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
+        #[nothrow]
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
+        #[nothrow]
         pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_array(isolate: *mut Isolate, length: usize) -> Local;
         pub unsafe fn local_new_uint8_array(
@@ -265,7 +274,9 @@ pub mod ffi {
         ) -> MaybeLocal;
         pub unsafe fn array_buffer_from_backing_store(isolate: *mut Isolate, store: usize)
         -> Local;
+        #[nothrow]
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_array_buffer_data(buffer: &Local) -> *mut u8;
         pub unsafe fn local_array_buffer_get_backing_store(buffer: &Local) -> usize;
 
@@ -280,6 +291,7 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_element_size(view: &Local) -> usize;
         pub unsafe fn local_array_buffer_view_is_integer_type(view: &Local) -> bool;
 
+        #[nothrow]
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         /// Whether `value` can be used in `isolate`: Smis in any isolate, values in read-only or
         /// writable shared space in any isolate of their isolate group, and other values only in
@@ -288,48 +300,83 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: &Local,
         ) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_string(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_number(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int32(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint32(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_null(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_undefined(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_object(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_native_error(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint8_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int8_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_int32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float32_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_bigint64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_float16_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_uint8clamped_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_typed_array(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_promise(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_name(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
+        #[nothrow]
         pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
         // Coerce with ToInt32, ToUint32 and ToInteger (`v8::Value::Int32Value()` and the like):
         // store the result in `result` and return true, or return false if the coercion threw,
         // leaving the exception pending; see `call_into_js()`.
+        #[nothrow]
         pub unsafe fn local_value_int32_value(
             isolate: *mut Isolate,
             value: Local,
             result: &mut i32,
         ) -> bool;
+        #[nothrow]
         pub unsafe fn local_value_uint32_value(
             isolate: *mut Isolate,
             value: Local,
@@ -412,16 +459,23 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<Boolean>
+        #[nothrow]
         pub unsafe fn local_boolean_value(value: &Local) -> bool;
 
         // Local<Number>
+        #[nothrow]
         pub unsafe fn local_number_value(value: &Local) -> f64;
 
         // Local<Integer>
+        #[nothrow]
         pub unsafe fn integer_new(isolate: *mut Isolate, value: i32) -> Local;
+        #[nothrow]
         pub unsafe fn integer_new_from_unsigned(isolate: *mut Isolate, value: u32) -> Local;
+        #[nothrow]
         pub unsafe fn local_integer_value(value: &Local) -> i64;
+        #[nothrow]
         pub unsafe fn local_int32_value(value: &Local) -> i32;
+        #[nothrow]
         pub unsafe fn local_uint32_value(value: &Local) -> u32;
 
         // Local<BigInt>
@@ -539,9 +593,13 @@ pub mod ffi {
             byte_offset: usize,
             length: usize,
         ) -> Result<Local>;
+        #[nothrow]
         pub unsafe fn local_typed_array_length(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_buffer_data(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_byte_offset(array: &Local) -> usize;
+        #[nothrow]
         pub unsafe fn local_typed_array_byte_length(array: &Local) -> usize;
         pub unsafe fn local_uint8_array_get(array: &Local, index: usize) -> u8;
         pub unsafe fn local_uint16_array_get(array: &Local, index: usize) -> u16;
@@ -558,9 +616,11 @@ pub mod ffi {
         // Global<T>
         pub unsafe fn global_reset(value: Pin<&mut Global>);
         pub unsafe fn global_clone(isolate: *mut Isolate, value: &Global) -> Global;
+        #[nothrow]
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
         // Wrappable - data access
+        #[nothrow]
         pub unsafe fn wrappable_get_trait_object<'a>(
             wrappable: &'a Wrappable,
         ) -> &'a TraitObjectPtr;
@@ -605,7 +665,7 @@ pub mod ffi {
         // Shims that can throw a C++ exception (building rust::String/Vec from V8
         // data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then catches the
         // throw in C++ instead of aborting across the nounwind FFI frame. Shims that
-        // provably can't throw stay bare (see unwrap_boolean, unwrap_number).
+        // provably can't throw are #[nothrow] (see unwrap_boolean, unwrap_number).
         //
         // unwrap_string and unwrap_number leave what a coercion throws pending; see
         // `call_into_js()`.
@@ -615,8 +675,10 @@ pub mod ffi {
             result: &mut String,
         ) -> Result<bool>;
         // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
+        #[nothrow]
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
         // Infallible: NumberValue reports what JavaScript threw in its result.
+        #[nothrow]
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
 
         // ArrayBuffer detach/detachable/was-detached
@@ -628,25 +690,38 @@ pub mod ffi {
         pub fn local_array_buffer_is_shared(value: &Local) -> bool;
 
         // FunctionCallbackInfo
+        #[nothrow]
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn fci_get_this(args: *mut FunctionCallbackInfo) -> Local;
+        #[nothrow]
         pub unsafe fn fci_get_length(args: *mut FunctionCallbackInfo) -> usize;
+        #[nothrow]
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
+        #[nothrow]
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
+        #[nothrow]
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
         pub unsafe fn fci_get_data_wrappable(
             args: *mut FunctionCallbackInfo,
         ) -> KjMaybe<KjRc<Wrappable>>;
 
         // PropertyCallbackInfo, for native data properties
+        #[nothrow]
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn pci_get_this(info: *mut PropertyCallbackInfo) -> Local;
+        #[nothrow]
         pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
+        #[nothrow]
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
         // PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+        #[nothrow]
         pub unsafe fn pqci_get_isolate(info: *mut PropertyQueryCallbackInfo) -> *mut Isolate;
+        #[nothrow]
         pub unsafe fn pqci_get_this(info: *mut PropertyQueryCallbackInfo) -> Local;
 
         // FastApiCallbackOptions
@@ -721,7 +796,9 @@ pub mod ffi {
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_terminate_execution_now(isolate: *mut Isolate) -> bool;
+        #[nothrow]
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
+        #[nothrow]
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_captures_throws_as_rejections(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_get_continuation_preserved_embedder_data(
@@ -876,17 +953,20 @@ pub mod ffi {
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
+        #[nothrow]
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> KjMaybe<KjRc<Wrappable>>;
         // Like `unwrap_resource`, but borrows: the pointer is into the Wrappable of `value`'s
         // wrapper, or null when `value` is not a Rust resource.
+        #[nothrow]
         pub unsafe fn unwrap_resource_trait_object(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> *const TraitObjectPtr;
         // For the receiver of a method registered with a `v8::Signature`, which V8 has checked.
+        #[nothrow]
         pub unsafe fn unwrap_method_receiver(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalObject */

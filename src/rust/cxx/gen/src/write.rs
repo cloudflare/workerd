@@ -761,12 +761,20 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
     out.set_namespace(&efn.name.namespace);
     out.begin_block(Block::ExternC);
     begin_function_definition(out);
-    // C++ functions always return a Result: an exception must never be allowed to
-    // escape through the extern "C" boundary (that would terminate the process), so
-    // the shim catches everything and hands the exception to Rust, which turns it
-    // into an `Err` for fallible signatures and a panic for infallible ones.
-    out.builtin.ptr_len = true;
-    write!(out, "::rust::repr::Result ");
+    // C++ functions return a Result: an exception must never be allowed to escape
+    // through the extern "C" boundary (that would terminate the process), so the shim
+    // catches everything and hands the exception to Rust, which turns it into an `Err`
+    // for fallible signatures and a panic for infallible ones.
+    //
+    // A #[nothrow] function's shim calls it without catching, so that it is a few
+    // instructions with no exception handling, which LTO can inline into Rust. Rust
+    // declares it extern "C-unwind", so an exception it throws anyway is defined behavior.
+    if efn.nothrow {
+        write!(out, "void ");
+    } else {
+        out.builtin.ptr_len = true;
+        write!(out, "::rust::repr::Result ");
+    }
     let mangled = mangle::extern_fn(efn, out.types);
     write!(out, "{}(", mangled);
     if let Some(receiver) = &efn.receiver {
@@ -794,11 +802,22 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
         write_indirect_return_type_space(out, ret);
         write!(out, "*return$");
     }
-    writeln!(out, ") noexcept {{");
+    if efn.nothrow {
+        writeln!(out, ") {{");
+    } else {
+        writeln!(out, ") noexcept {{");
+    }
+    // Converting the function to a pointer of the declared type checks, at compile time, that the
+    // C++ signature matches the bridge's exactly. A free function is converted only in an
+    // unevaluated operand and then called by name: under -fsanitize=cfi-icall its address is its
+    // CFI jump table entry, and a call through that can't be inlined.
     write!(out, "  ");
+    if efn.receiver.is_none() {
+        write!(out, "static_assert(sizeof(static_cast<");
+    }
     write_return_type(out, &efn.ret);
     match &efn.receiver {
-        None => write!(out, "(*{}$)(", efn.name.rust),
+        None => write!(out, "(*)("),
         Some(receiver) => write!(
             out,
             "({}::*{}$)(",
@@ -818,21 +837,22 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
     {
         write!(out, " const");
     }
-    write!(out, " = ");
     match &efn.receiver {
-        None => write!(out, "{}", efn.name.to_fully_qualified()),
+        None => write!(out, ">(&{})) != 0)", efn.name.to_fully_qualified()),
         Some(receiver) => write!(
             out,
-            "&{}::{}",
+            " = &{}::{}",
             out.types.resolve(&receiver.ty).name.to_fully_qualified(),
             efn.name.cxx,
         ),
     }
     writeln!(out, ";");
     write!(out, "  ");
-    out.builtin.trycatch = true;
-    writeln!(out, "return ::rust::repr::Result::run([&] {{");
-    write!(out, "        ");
+    if !efn.nothrow {
+        out.builtin.trycatch = true;
+        writeln!(out, "return ::rust::repr::Result::run([&] {{");
+        write!(out, "        ");
+    }
     if indirect_return && let Some(ret) = &efn.ret {
         out.include.new = true;
         write!(out, "new (return$) ");
@@ -847,7 +867,7 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
         _ => {}
     }
     match &efn.receiver {
-        None => write!(out, "{}$(", efn.name.rust),
+        None => write!(out, "{}(", efn.name.to_fully_qualified()),
         Some(_) => write!(out, "(self.*{}$)(", efn.name.rust),
     }
     for (i, arg) in efn.args.iter().enumerate() {
@@ -867,7 +887,9 @@ fn write_cxx_function_shim<'a>(out: &mut OutFile<'a>, efn: &'a ExternFn) {
         write!(out, ")");
     }
     writeln!(out, ";");
-    writeln!(out, "  }});");
+    if !efn.nothrow {
+        writeln!(out, "  }});");
+    }
     writeln!(out, "}}");
     for arg in &efn.args {
         if let Type::Fn(f) = &arg.ty {

@@ -579,6 +579,19 @@ fn check_api_fn(cx: &mut Check, efn: &ExternFn) {
 
     check_generics(cx, &efn.sig.generics);
 
+    if efn.nothrow {
+        // These would let C++ report a failure, which a #[nothrow] function has no way to do.
+        if efn.throws {
+            cx.error(efn, "#[nothrow] function cannot return Result");
+        }
+        if efn.asyncness.is_some() {
+            cx.error(efn, "#[nothrow] function cannot be async");
+        }
+        if efn.args.iter().any(|arg| matches!(arg.ty, Type::Fn(_))) {
+            cx.error(efn, "#[nothrow] function cannot take a function pointer");
+        }
+    }
+
     if let Some(receiver) = &efn.receiver {
         let ref span = span_for_receiver_error(receiver);
 

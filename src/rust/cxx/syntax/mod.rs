@@ -180,6 +180,8 @@ pub struct ExternFn {
     pub sig: Signature,
     pub semi_token: Token![;],
     pub trusted: bool,
+    // `#[nothrow]` on an extern C++ function: the bridge calls it without catching exceptions.
+    pub nothrow: bool,
 }
 
 pub struct TypeAlias {
