@@ -1036,6 +1036,22 @@ struct TailEvent final {
 
 kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event);
 
+// Accounts for the memory that streaming tail sessions hold in events they have queued, or sent
+// but not yet had acknowledged by the tail worker. An embedder implements it to bound that memory
+// across all of the sessions that share one budget. See TailStreamWriter in trace-stream.h.
+class TailStreamBudget: public kj::Refcounted {
+ public:
+  // Returns whether `bytes` more may be held. If not, the event is dropped.
+  virtual bool tryReserve(size_t bytes) = 0;
+
+  // Holds `bytes` more unconditionally, for the events that are never dropped: the onset, return,
+  // and outcome events, and the diagnostics event that reports drops.
+  virtual void reserve(size_t bytes) = 0;
+
+  // Gives back `bytes` that tryReserve() or reserve() took.
+  virtual void release(size_t bytes) = 0;
+};
+
 }  // namespace tracing
 
 enum class PipelineLogLevel {
