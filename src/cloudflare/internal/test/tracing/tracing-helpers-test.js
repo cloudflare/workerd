@@ -226,6 +226,78 @@ export const setAttributes = {
   },
 };
 
+export const setAttributesConversion = {
+  async test(ctrl, env, ctx) {
+    const checkConversion = (span) => {
+      let value = 'before';
+      const array = ['before'];
+      const order = [];
+      assert.strictEqual(
+        span.setAttributes({
+          'ordered.scalar': {
+            toString() {
+              order.push('coerce-first');
+              return value;
+            },
+          },
+          'ordered.array': array,
+          get 'ordered.later'() {
+            order.push('get-later');
+            value = 'after';
+            array[0] = 'after';
+            return value;
+          },
+        }),
+        span
+      );
+      assert.deepStrictEqual(order, ['coerce-first', 'get-later']);
+
+      const failure = new Error('attribute conversion failed');
+      let readAfterFailure = false;
+      assert.throws(
+        () =>
+          span.setAttributes({
+            'failed.scalar': 'not recorded',
+            'failed.array': ['not recorded'],
+            'failed.coercion': {
+              toString() {
+                throw failure;
+              },
+            },
+            get 'failed.later'() {
+              readAfterFailure = true;
+              return true;
+            },
+          }),
+        (error) => error === failure
+      );
+      assert.strictEqual(readAfterFailure, false);
+
+      assert.throws(
+        () =>
+          span.setAttributes({
+            'failed.beforeGetter': 'not recorded',
+            get 'failed.getter'() {
+              throw failure;
+            },
+          }),
+        (error) => error === failure
+      );
+
+      for (const input of [undefined, null, false, 42, 'string', []]) {
+        assert.throws(() => span.setAttributes(input), TypeError);
+      }
+      assert.strictEqual(span.setAttributes(Object.create(null)), span);
+    };
+
+    env.tracingTest.withSpan('set-attributes-conversion-op', (span) => {
+      span.setAttribute('test', 'setAttributesConversion');
+      checkConversion(span);
+    });
+    checkConversion(spanCreatedOutsideInvocationContext);
+  },
+};
+
 export const setStatus = {
   async test(ctrl, env, ctx) {
     const errorSpan = publicTracing.startSpan('status-error-op');
@@ -298,6 +370,123 @@ export const spanContext = {
 
     context.traceId = 'mutated';
     assert.notStrictEqual(span.spanContext().traceId, context.traceId);
+  },
+};
+
+// Array attribute values follow OpenTelemetry semantics: homogeneous primitive arrays are
+// recorded as arrays (including one-element and empty arrays), null/undefined positions are
+// retained, and heterogeneous or nested arrays are ignored. The received values are checked in
+// tracing-helpers-instrumentation-test.js.
+export const arrayAttributes = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('array-attrs-op', (span) => {
+      span.setAttribute('test', 'arrayAttributes');
+
+      // Attribute setters keep returning the span for chaining.
+      assert.strictEqual(span.setAttribute('strings', ['a', 'b', 'c']), span);
+      span.setAttribute('numbers', [1, 2.5, -3, 0]);
+      span.setAttribute('booleans', [true, false, true]);
+
+      // One-element arrays must stay arrays (e.g. gen_ai.response.finish_reasons: ["stop"]).
+      span.setAttribute('single.string', ['stop']);
+      span.setAttribute('single.number', [42]);
+      span.setAttribute('single.boolean', [false]);
+
+      // Empty arrays are recorded as empty arrays.
+      span.setAttribute('empty', []);
+
+      // null/undefined elements retain their positions and are normalized to null downstream.
+      span.setAttribute('nullish.strings', [null, 'a', undefined, 'b', null]);
+      span.setAttribute('nullish.numbers', [undefined, 1, null, 2]);
+      span.setAttribute('nullish.booleans', [null, true]);
+      span.setAttribute('nullish.only', [null, undefined]);
+
+      // Invalid arrays are ignored entirely.
+      span.setAttribute('invalid.mixed', ['a', 1]);
+      span.setAttribute('invalid.mixedBoolNumber', [true, 1]);
+      span.setAttribute('invalid.mixedAfterNull', [null, 'a', null, false]);
+      span.setAttribute('invalid.nested', [['a']]);
+      span.setAttribute('invalid.objects', [{ a: 1 }]);
+      span.setAttribute('invalid.bigint', [1n]);
+      span.setAttribute('invalid.tooLong', new Array(513).fill('x'));
+      const sparse = new Array(0xffffffff);
+      Object.defineProperty(sparse, 0, {
+        get() {
+          throw new Error(
+            'oversized arrays must be rejected before reading elements'
+          );
+        },
+      });
+      span.setAttribute('invalid.sparse', sparse);
+
+      // setAttributes() applies the same rules per key.
+      assert.strictEqual(
+        span.setAttributes({
+          'set.strings': ['x', 'y'],
+          'set.numbers': [7],
+          'set.booleans': [true, null, false],
+          'set.empty': [],
+          'set.skipped': undefined,
+          'set.invalid': [1, 'a'],
+        }),
+        span
+      );
+
+      // Later writes replace earlier ones, in both directions between scalars and arrays.
+      span.setAttribute('overwrite.toArray', 'scalar');
+      span.setAttribute('overwrite.toArray', ['a', 'b']);
+      span.setAttribute('overwrite.toScalar', ['a']);
+      span.setAttribute('overwrite.toScalar', 'scalar');
+      span.setAttribute('overwrite.arrayType', [1, 2]);
+      span.setAttribute('overwrite.arrayType', ['one', 'two']);
+    });
+  },
+};
+
+// Array attributes on the invocation span take the BaseTracer::addSpanAttribute() path rather
+// than the SpanBuilder path used by user-created spans; verify both preserve arrays.
+export const invocationSpanArrayAttributes = {
+  async test(ctrl, env, ctx) {
+    const span = publicTracing.getActiveSpan();
+    assert.ok(span);
+    assert.strictEqual(span.isTraced, true);
+    span.setAttribute('invocation.test', 'invocationSpanArrayAttributes');
+    span.setAttribute('invocation.strings', ['a', 'b']);
+    span.setAttribute('invocation.numbers', [1.5, 2]);
+    span.setAttribute('invocation.booleans', [false]);
+    span.setAttribute('invocation.single', ['stop']);
+    span.setAttribute('invocation.empty', []);
+    span.setAttribute('invocation.nullish', [null, 'a', undefined]);
+    span.setAttribute('invocation.invalid', ['a', 1]);
+    span.setAttributes({
+      'invocation.set.numbers': [3, null, 4],
+      'invocation.set.invalid': [[1]],
+    });
+  },
+};
+
+// Array elements count toward the per-span data limit exactly like scalar values. Each span
+// gets a single oversized attribute because the first violation stops further recording.
+export const arrayAttributeByteLimit = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('array-limit-strings-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      // 512 * 4 bytes fits comfortably under the 64 KiB limit.
+      span.setAttribute('fits', new Array(512).fill('abcd'));
+      // 512 * 140 bytes exceed the limit and must be dropped with a warning.
+      span.setAttribute('big.strings', new Array(512).fill('x'.repeat(140)));
+    });
+
+    withSpan('array-limit-nullish-op', (span) => {
+      span.setAttribute('test', 'arrayAttributeByteLimit');
+      for (let i = 0; i < 16; i++) {
+        span.setAttribute(`nulls.${i}`, new Array(512).fill(null));
+      }
+    });
   },
 };
 

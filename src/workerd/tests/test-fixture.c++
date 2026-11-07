@@ -625,6 +625,15 @@ class SpanRecorder final: public SpanObserver {
     records->spans[index].name = kj::str(operationName);
   }
   void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
+    auto arrayToText = [](const auto& array) {
+      auto elements = KJ_MAP(element, array) -> kj::String {
+        KJ_IF_SOME(value, element) {
+          return kj::str(value);
+        }
+        return kj::str("null");
+      };
+      return kj::str("[", kj::strArray(elements, ", "), "]");
+    };
     auto entries = KJ_MAP(entry, tags) {
       KJ_SWITCH_ONEOF(entry.value) {
         KJ_CASE_ONEOF(str, kj::ConstString) {
@@ -638,6 +647,15 @@ class SpanRecorder final: public SpanObserver {
         }
         KJ_CASE_ONEOF(i, int64_t) {
           return kj::str(entry.key, "=int:", i);
+        }
+        KJ_CASE_ONEOF(array, tracing::AttributeStringArray) {
+          return kj::str(entry.key, "=str[]:", arrayToText(array));
+        }
+        KJ_CASE_ONEOF(array, tracing::AttributeBoolArray) {
+          return kj::str(entry.key, "=bool[]:", arrayToText(array));
+        }
+        KJ_CASE_ONEOF(array, tracing::AttributeDoubleArray) {
+          return kj::str(entry.key, "=float[]:", arrayToText(array));
         }
       }
       KJ_UNREACHABLE;
