@@ -7,44 +7,23 @@
     reason = "reports to the C++ `jsg::MemoryTracker` through the FFI"
 )]
 
-//! Heap snapshot support: what Rust values report to C++ `jsg::MemoryTracker`
-//! (`workerd/jsg/memory.h`), which adds them to the graph of embedder objects in a V8 heap
-//! snapshot.
+//! Heap snapshots: what Rust values report to C++ `jsg::MemoryTracker` (`workerd/jsg/memory.h`).
 //!
-//! - [`MemoryTracker`] is the tracker, as C++ code receives it in `jsgGetMemoryInfo`.
-//! - [`MemoryInfo`] says how a value is reported when it is a field of a tracked object, as the
-//!   overloads of C++ `MemoryTracker::trackField` do.
-//! - [`MemoryRetainer`] makes a type a node of its own, as C++ `JSG_MEMORY_INFO` does;
-//!   [`jsg_memory_retainer!`](crate::jsg_memory_retainer) gives it its `MemoryInfo` impl.
-//! - [`VisitForMemoryInfo`] reports the fields of a resource, as C++ `visitForMemoryInfo` does.
-//!   `#[jsg_resource(memory_info)]` on the struct opts the resource in and generates it from the
-//!   named fields; `#[jsg_resource(custom_memory_info)]` opts in with a hand-written impl.
+//! - [`MemoryInfo`]: how a value is reported as a field (C++ `MemoryTracker::trackField`).
+//! - [`MemoryRetainer`]: a type that is a node of its own (C++ `JSG_MEMORY_INFO`).
+//! - [`VisitForMemoryInfo`]: a resource's fields (C++ `visitForMemoryInfo`).
 //!
-//! Every resource is a node, named after its type and sized as the resource plus its C++
-//! `Wrappable`, with an edge to its JavaScript wrapper if it has one, whether it reports its
-//! fields or not.
-//!
-//! Names are `&'static CStr`, written as `c"..."` literals: V8 reads the names of nodes and
-//! edges after the tracker's callback returns.
-//!
-//! The code that reports values follows the rules in
-//! [`MemoryInfo`](MemoryInfo#rules-for-reporting-code).
+//! Every resource is a node sized as the resource plus its `Wrappable`, with an edge to its
+//! wrapper, whether it reports fields or not. Names are `&'static CStr`: V8 reads them after the
+//! tracker's callback returns.
 //!
 //! # Sizes
 //!
-//! A node's size is the bytes it accounts for. A resource or retainer counts its own bytes
-//! (`size_of_val`), which include its fields' inline bytes, and a string or collection counts the
-//! memory it allocates. A retainer held inline in another, as a field, is therefore counted in
-//! both nodes, as a C++ member with `JSG_MEMORY_INFO` is. A collection leaves the bytes of the
-//! retainers it holds inline, directly or in an `Option`, `jsg::Cell` or other inline wrapper, to their
-//! own nodes (see [`MemoryInfo::self_bytes_reported`]). An allocation that several
-//! `std::rc::Rc`s or `std::sync::Arc`s share is one node, as a retainer is. Nodes nest at most
-//! [`MemoryTracker::MAX_DEPTH`] deep.
-//!
-//! The size of a collection is that of its elements' slots: `capacity` slots for `Vec`,
-//! `VecDeque`, `HashMap`, `HashSet` and `Dict`, `len` for `BTreeMap`, `BTreeSet` and boxed
-//! slices. It leaves out the allocator's and the collection's own bookkeeping, such as a hash
-//! table's control bytes and a B-tree's nodes, so it is an estimate, and a low one.
+//! A resource or retainer counts `size_of_val(self)`, its fields' inline bytes included, so a
+//! retainer held inline in another is counted in both, as in C++. Strings and collections count
+//! what they allocate; a collection counts its element slots only, a low estimate. A collection or
+//! `Box` leaves the bytes of retainers it holds inline to their nodes
+//! ([`MemoryInfo::self_bytes_reported`]).
 
 use std::any::TypeId;
 use std::ffi::CStr;
@@ -76,10 +55,8 @@ fn name_ptr(name: Option<&'static CStr>) -> *const c_char {
     name.map_or(std::ptr::null(), CStr::as_ptr)
 }
 
-/// The tag that tells retainers of type `R` from those of other types at the same address: a
-/// hash of its `TypeId`, which is the same wherever `R` is reported from. Two types share a tag
-/// only by a hash collision, which would make the retainer reported second an edge to the node of
-/// the first.
+/// Tells values of type `R` from others at the same address: a hash of its `TypeId`. A collision
+/// between two types at one address would merge their nodes.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "a tag needs no more bits than a pointer has"
@@ -90,8 +67,7 @@ fn type_tag<R: ?Sized + 'static>() -> usize {
     hasher.finish() as usize
 }
 
-/// Pops the node that a push made when it is dropped, so that the tracker's stack of nodes stays
-/// balanced however the reporting in between ends.
+/// Pops the pushed node on drop, so the node stack stays balanced however reporting ends.
 struct PushedNode<'t, 'a> {
     tracker: &'t mut MemoryTracker<'a>,
 }
@@ -118,11 +94,9 @@ impl Drop for PushedNode<'_, '_> {
 }
 
 impl<'a> MemoryTracker<'a> {
-    /// How deep reporting nests nodes. A retainer, container, shared allocation or resource
-    /// that would be this deep is a leaf: a node of its own size, with nothing inside it, which
-    /// is not deduplicated, so that a shallower path to the same value still reports it in full.
-    /// A resource with a JavaScript wrapper is an edge to the wrapper instead. It bounds the stack
-    /// that reporting a long chain uses, such as a linked list of retainers or of resources.
+    /// How deep nodes nest, which bounds the stack a long chain uses. A node that would be this
+    /// deep is a leaf with nothing inside it (a resource with a wrapper: an edge to the wrapper),
+    /// and is not deduplicated, so a shallower path still reports the value in full.
     pub const MAX_DEPTH: usize = 128;
 
     pub(crate) fn from_ffi(mut inner: Pin<&'a mut ffi::MemoryTracker>) -> Self {
@@ -170,14 +144,11 @@ impl<'a> MemoryTracker<'a> {
         }
     }
 
-    /// Reports `retainer` as a node of its own, the first time; later reports of the same
-    /// retainer, which its address and type identify, only add an edge to that node, as for a C++
-    /// retainer. A zero-sized retainer has no address of its own, so each report is a new node.
+    /// Reports `retainer` as a node of its own the first time; later reports of the same address
+    /// and type add only an edge. A zero-sized retainer is a new node each time.
     ///
-    /// Report the fields of the object being tracked, not values computed from them: two
-    /// temporaries of the same type in the same stack slot would be taken for one retainer.
-    ///
-    /// A retainer that would be [`Self::MAX_DEPTH`] nodes deep is a leaf.
+    /// Report fields, not values computed from them: two temporaries in one stack slot would be
+    /// taken for one retainer.
     pub fn track_retainer<R: MemoryRetainer + ?Sized + 'static>(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -197,10 +168,8 @@ impl<'a> MemoryTracker<'a> {
         );
     }
 
-    /// Adds a node of `size` bytes named `name`, identified by `key`, an address and a type tag
-    /// (an address of 0 identifies nothing), with an edge to it from the object being tracked,
-    /// and has `contents` report what it holds to it; only the edge if the node was added before.
-    /// A node that would be [`Self::MAX_DEPTH`] deep is a leaf.
+    /// Pushes a node keyed by `key`, an address and a type tag (address 0 is never deduplicated),
+    /// and has `contents` report into it, or adds only an edge if the key was seen.
     fn track_deduplicated(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -230,8 +199,7 @@ impl<'a> MemoryTracker<'a> {
         }
     }
 
-    /// Adds a node of `size` bytes named `name`, with nothing inside it, with an edge to it from
-    /// the object being tracked. Unlike [`Self::track_field_with_size`], it adds one of size 0.
+    /// Adds a node with nothing inside it; unlike [`Self::track_field_with_size`], also of size 0.
     fn track_leaf(&mut self, edge_name: Option<&'static CStr>, name: &'static CStr, size: usize) {
         // SAFETY: the names are literals or null.
         unsafe {
@@ -245,10 +213,7 @@ impl<'a> MemoryTracker<'a> {
         drop(PushedNode { tracker: self });
     }
 
-    /// Adds a node of `size` bytes named `name` for a container, with an edge to it from the
-    /// object being tracked, and has `elements` report the container's elements to it, with
-    /// `None` as their edge names. A container that would be [`Self::MAX_DEPTH`] nodes deep is
-    /// a leaf.
+    /// Pushes a node for a container and has `elements` report into it, with `None` edge names.
     pub fn track_container(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -272,9 +237,7 @@ impl<'a> MemoryTracker<'a> {
         elements(&mut PushedNode { tracker: self });
     }
 
-    /// Reports a Rust resource's Wrappable, a resource of the snapshot's isolate, as C++ reports
-    /// a `jsg::Ref` field. One that would be [`Self::MAX_DEPTH`] deep is an edge to its wrapper,
-    /// or a leaf if it has none.
+    /// Reports a resource of the snapshot's isolate, as C++ reports a `jsg::Ref` field.
     pub(crate) fn track_wrappable(
         &mut self,
         edge_name: Option<&'static CStr>,
@@ -301,9 +264,8 @@ impl<'a> MemoryTracker<'a> {
         }
     }
 
-    /// Whether a handle or resource of the isolate of `state` can be reported: it belongs to the
-    /// snapshot's isolate, which is not being disposed. One of another isolate, which Rust code
-    /// can store in a resource, is left out.
+    /// Whether a handle or resource of `state`'s isolate can be reported: it is the snapshot's
+    /// isolate, and not being disposed.
     pub(crate) fn can_track_object_of(&self, state: &IsolateState) -> bool {
         state.belongs_to(self.isolate) && !state.is_closed()
     }
@@ -326,84 +288,53 @@ impl<'a> MemoryTracker<'a> {
     }
 }
 
-/// How a value is reported to a heap snapshot when it is a field of a tracked object.
-///
-/// It is the counterpart of the overloads of C++ `MemoryTracker::trackField`.
-/// [`MemoryTracker::track_field`] takes any type that implements it. A type that is a node of its
-/// own implements [`MemoryRetainer`] and gets this impl from
-/// [`jsg_memory_retainer!`](crate::jsg_memory_retainer).
+/// How a value is reported when it is a field of a tracked object (C++ `trackField`).
 ///
 /// # Rules for reporting code
 ///
-/// The code that reports a value, [`VisitForMemoryInfo::visit_for_memory_info`],
-/// [`MemoryRetainer::memory_info`] and every impl of this trait:
+/// [`VisitForMemoryInfo::visit_for_memory_info`], [`MemoryRetainer::memory_info`] and every impl
+/// of this trait:
 ///
-/// - must not panic: the tracker is called from C++, and a panic there aborts the process, as an
-///   exception thrown while C++ builds the graph does;
-/// - must not write into anything it can reach: a snapshot reports what it finds as it is. A
-///   [`crate::Cell`] reports its value in place and panics on a write meanwhile, and a `RefCell`
-///   is borrowed while it reports its value, so a `borrow_mut` panics; either aborts the process;
+/// - must not panic: it runs in a callback from C++, where a panic aborts the process;
+/// - must not write into anything it can reach. A [`crate::Cell`] is reported in place, and
+///   writes into any `jsg::Cell` on the thread panic meanwhile; a `RefCell` is borrowed, so
+///   `borrow_mut` panics;
 /// - must not call into JavaScript, and should allocate nothing.
 ///
 /// # Built-in implementations
 ///
-/// - **Primitives** (`bool`, `char`, integers, floats, `()`, `SystemTime`, `Duration`, `&str`)
-///   report nothing: they are part of the size of the object that holds them.
-/// - **`String`** and **`Box<str>`** are a node of the memory they allocate, and
-///   **`v8::BackingStore`** one of its byte length.
-/// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`**, **`Lenient<T>`**,
-///   **`NonCoercible<T>`**, **`jsg::Cell<T>`**, **`RefCell<T>`**, **`jsg::RefCell<T>`**,
-///   **`jsg::Arguments<T>`** and **`[T; N]`** report what they hold, if anything. A mutably
-///   borrowed `RefCell` reports nothing. A `jsg::Cell<T>` reports the `T` in place; see the rules
-///   for reporting code above. A **`std::cell::Cell<T>`** exists only for `T: Copy`, and is plain
-///   data, which reports nothing; hold a retainer in a `jsg::Cell`.
-/// - **`Box<T>`**, **`std::rc::Rc<T>`** and **`std::sync::Arc<T>`** report a retainer as its node,
-///   plain data as a node of its size, and anything else as a node of the bytes that what they
-///   hold leaves uncounted, which what they hold reports to. The node of an allocation that
-///   several `Rc`s or `Arc`s share is one node, which the first report adds and later ones only
-///   have an edge to, so that the work is linear in the number of pointers and a cycle of them
-///   ends.
-/// - **Collections** (`Vec<T>`, `Box<[T]>`, `VecDeque<T>`, `Dict<V>`, `HashMap<K, V>`,
-///   `BTreeMap<K, V>`, `HashSet<T>`, `BTreeSet<T>`) are a node of the memory they allocate, less
-///   the bytes their elements' nodes count, which their elements report to; maps report their
-///   entries under the edges `key` and `value`. A collection of plain data (see
-///   [`Self::PLAIN_DATA`]) is one node, as C++ reports a `kj::Array` of numbers. An empty
-///   collection reports nothing. A size counts the elements' slots, and leaves out bookkeeping
-///   such as a hash table's control bytes or a B-tree's nodes, so it is a low estimate.
-/// - **`jsg::Rc<R>`** reports the resource's node, as C++ reports a `jsg::Ref`; one of another
-///   isolate reports nothing.
-/// - **`jsg::Weak<R>`** reports nothing.
-/// - **`v8::Global<T>`** and **`v8::TracedGlobal<T>`** are an edge to the value in the V8 heap,
-///   as C++ reports a `jsg::V8Ref`, and so are **`jsg::TracedPromise<T>`**,
-///   **`jsg::TracedPromiseResolver<T>`**, **`jsg::AsyncContextFrame`** and
-///   **`jsg::TracedAsyncContextFrame`**, of which the root frame reports nothing. A handle of
-///   another isolate reports nothing.
+/// Primitives report nothing; strings, buffers and collections a node of what they allocate;
+/// wrappers (`Option`, `RefCell`, `jsg::Cell`, ...) what they hold; handles, promises and frames
+/// an edge into the V8 heap; `jsg::Rc` the resource's node. Less obviously:
+///
+/// - A collection of [plain data](Self::PLAIN_DATA) is one node; an empty collection is none.
+/// - `Box`, `Rc` and `Arc` report a retainer as its node, plain data as a node of its size, and
+///   anything else as a node of its uncounted bytes. An allocation shared by several `Rc`s or
+///   `Arc`s is one node, which keeps the work linear and ends cycles.
+/// - A mutably borrowed `RefCell` reports nothing.
+/// - `std::cell::Cell<T>` exists only for `T: Copy` and reports nothing; hold a retainer in a
+///   `jsg::Cell`.
+/// - `jsg::Weak`, the root async context frame, and a handle or `jsg::Rc` of another isolate
+///   report nothing.
 pub trait MemoryInfo {
-    /// Whether a value of this type retains no memory beyond its own bytes, so that a
-    /// collection of such values is reported as one node of the collection's size.
+    /// Whether the type retains nothing beyond its own bytes, so a collection of it is one node.
     const PLAIN_DATA: bool = false;
 
-    /// How many of the bytes of `self` itself, out of its `size_of_val`, the nodes that `self`
-    /// reports count, so that the collection or `Box` that holds `self` leaves them to those
-    /// nodes. A [`MemoryRetainer`], whose node counts its own bytes, returns them; a wrapper that
-    /// holds its value inline, such as `Option` or `Cell`, returns what the value returns; a
-    /// value that holds what it reports out of line, such as a `Box` or `std::rc::Rc`, returns
-    /// 0, the default. It follows the [rules for reporting code](Self#rules-for-reporting-code).
+    /// How many of `self`'s own bytes the nodes it reports already count, which the collection or
+    /// `Box` holding it leaves out. A [`MemoryRetainer`] returns its own bytes; an inline wrapper
+    /// (`Option`, `Cell`, ...) forwards its value's; anything else returns 0.
     fn self_bytes_reported(&self) -> usize {
         0
     }
 
-    /// Reports `self` to `tracker`, under the edge `edge_name` from the object being tracked;
-    /// `None` is the empty name of a collection's element. It follows the
-    /// [rules for reporting code](Self#rules-for-reporting-code).
+    /// Reports `self` under the edge `edge_name`; `None` is a collection element's empty name.
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>);
 }
 
 /// A type that is a node of its own in a heap snapshot.
 ///
-/// It is the Rust counterpart of a C++ type with `JSG_MEMORY_INFO`. A retainer is reported with
-/// [`MemoryTracker::track_retainer`]; [`jsg_memory_retainer!`](crate::jsg_memory_retainer)
-/// implements [`MemoryInfo`] that way, so that [`MemoryTracker::track_field`] takes the type.
+/// C++ `JSG_MEMORY_INFO`. [`jsg_memory_retainer!`](crate::jsg_memory_retainer) gives it its
+/// [`MemoryInfo`] impl.
 ///
 /// ```ignore
 /// struct Cache {
@@ -431,23 +362,12 @@ pub trait MemoryRetainer {
         std::mem::size_of_val(self)
     }
 
-    /// Reports the fields that retain memory, with [`MemoryTracker::track_field`]. It follows the
-    /// [rules for reporting code](MemoryInfo#rules-for-reporting-code): it must not panic, must
-    /// not write into anything it can reach, a `Cell` above all, and must not call into
-    /// JavaScript.
+    /// Reports the fields, following the [rules](MemoryInfo#rules-for-reporting-code).
     fn memory_info(&self, tracker: &mut MemoryTracker<'_>);
 }
 
-/// Implements [`MemoryInfo`] for [`MemoryRetainer`] types, so that each value is a node of its
-/// own: `jsg::jsg_memory_retainer!(Cache, Entry);`.
-///
-/// A retainer is `'static`, since its type tells it from a retainer of another type at the same
-/// address.
-///
-/// A generic type writes the same impl itself: `track_as_field` calls
-/// [`MemoryTracker::track_retainer`], and
-/// [`self_bytes_reported`](MemoryInfo::self_bytes_reported) returns the bytes of `self` that its
-/// node counts, the lesser of `size_of_val(self)` and `memory_self_size()`.
+/// Implements [`MemoryInfo`] for `'static` [`MemoryRetainer`] types:
+/// `jsg::jsg_memory_retainer!(Cache, Entry);`. A generic type writes the same impl by hand.
 #[macro_export]
 macro_rules! jsg_memory_retainer {
     ($($t:ty),* $(,)?) => {
@@ -470,32 +390,13 @@ macro_rules! jsg_memory_retainer {
     };
 }
 
-/// The fields that a resource reports to heap snapshots.
+/// The fields a resource reports (C++ `visitForMemoryInfo`).
 ///
-/// It is the Rust counterpart of C++ `visitForMemoryInfo`. `#[jsg_resource(memory_info)]` on the
-/// resource's struct generates it, reporting each named field under its name, as the generated
-/// `Traced` traces each field, so that a field added later is reported too, or fails to compile
-/// if its type has no [`MemoryInfo`]. `#[jsg_memory_info(skip)]` on a field leaves it out:
-///
-/// ```ignore
-/// #[jsg_resource(memory_info)]
-/// struct Foo {
-///     name: String,
-///     child: Option<jsg::Rc<Bar>>,
-///     #[jsg_memory_info(skip)]
-///     handle: SomeHandleWithoutMemoryInfo,
-/// }
-/// ```
-///
-/// `#[jsg_resource(custom_memory_info)]` instead leaves the impl to the author, as for C++, to
-/// report under other names or report values that are not fields:
+/// `#[jsg_resource(memory_info)]` generates it from the named fields, so a new field is reported,
+/// or fails to compile without [`MemoryInfo`]; `#[jsg_memory_info(skip)]` leaves one out.
+/// `#[jsg_resource(custom_memory_info)]` takes a hand-written impl:
 ///
 /// ```ignore
-/// #[jsg_resource(custom_memory_info)]
-/// struct Foo {
-///     name: String,
-/// }
-///
 /// impl jsg::VisitForMemoryInfo for Foo {
 ///     fn visit_for_memory_info(&self, tracker: &mut jsg::MemoryTracker<'_>) {
 ///         tracker.track_field(c"name", &self.name);
@@ -505,10 +406,7 @@ macro_rules! jsg_memory_retainer {
 ///
 /// Without either flag a resource reports no fields.
 pub trait VisitForMemoryInfo {
-    /// Reports the fields that retain memory, with [`MemoryTracker::track_field`]. It follows the
-    /// [rules for reporting code](MemoryInfo#rules-for-reporting-code): it must not panic, must
-    /// not write into anything it can reach, a `Cell` above all, and must not call into
-    /// JavaScript.
+    /// Reports the fields, following the [rules](MemoryInfo#rules-for-reporting-code).
     fn visit_for_memory_info(&self, tracker: &mut MemoryTracker<'_>);
 }
 
@@ -616,6 +514,7 @@ impl<T: MemoryInfo> MemoryInfo for NullOrUndefined<T> {
     }
 }
 
+// Not plain data even when `T` is: `Unconvertable` holds a `TracedGlobal`, an edge into V8.
 impl<T: MemoryInfo> MemoryInfo for Lenient<T> {
     fn self_bytes_reported(&self) -> usize {
         match self {
@@ -646,10 +545,8 @@ impl<T: MemoryInfo> MemoryInfo for NonCoercible<T> {
     }
 }
 
-/// Plain data, only for `T: Copy`, which owns nothing outside its bytes. Reporting the `T` in
-/// place would let reporting code that wrote into the cell drop the `T` under it, and reporting
-/// a copy would report a retainer at the copy's address, so a retainer belongs in a
-/// [`crate::Cell`], which reports any `T` in place.
+/// Plain data. Reporting the `T` in place would be unsound (a write could drop it), and a copy
+/// would put a retainer at the copy's address.
 impl<T: Copy> MemoryInfo for std::cell::Cell<T> {
     const PLAIN_DATA: bool = true;
 
@@ -673,9 +570,6 @@ impl<T: MemoryInfo> MemoryInfo for std::cell::RefCell<T> {
     }
 }
 
-/// Reports `inner`, which a `Box` named `name` holds in an allocation of its own: plain data as a
-/// node of its size, a retainer as its node, which counts the whole value, and anything else as a
-/// node of the bytes that `inner` leaves uncounted, to which `inner` reports.
 impl<T: MemoryInfo> MemoryInfo for Box<T> {
     fn track_as_field(&self, tracker: &mut MemoryTracker<'_>, edge_name: Option<&'static CStr>) {
         let inner = &**self;
@@ -694,13 +588,8 @@ impl<T: MemoryInfo> MemoryInfo for Box<T> {
     }
 }
 
-/// Reports `inner`, which an `std::rc::Rc` or `std::sync::Arc` named `name`, whose kind `K`
-/// tells its allocations from other values at the same address, shares from the allocation at
-/// `address`, as a `Box` reports what it holds, except that a node for the
-/// allocation is one node however many pointers share it, as a retainer is: the first report adds
-/// it, and later ones only an edge to it. That keeps the work linear in the number of pointers,
-/// and ends a cycle of pointers. A retainer is its own node, which deduplicates itself. A
-/// reference count is bookkeeping, which sizes leave out.
+/// Reports what an `Rc` or `Arc` shares as a `Box` would, except that the allocation's node is
+/// deduplicated by `address` and the pointer kind `K`. A retainer deduplicates itself.
 fn track_shared<K: 'static, T: MemoryInfo>(
     tracker: &mut MemoryTracker<'_>,
     edge_name: Option<&'static CStr>,

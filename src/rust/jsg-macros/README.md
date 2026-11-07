@@ -783,8 +783,8 @@ The reporting code (`visit_for_memory_info`, `memory_info` and any `MemoryInfo` 
 rules in `jsg::MemoryInfo`'s docs:
 
 - It must not panic. It runs in a callback from C++, where a panic aborts the process.
-- It must not write into anything it can reach. A `jsg::Cell<T>` is reported in place and its
-  `set`, `replace` and `take` panic while it is, and a `RefCell` is borrowed while its value is
+- It must not write into anything it can reach. A `jsg::Cell<T>` is reported in place, and the
+  `set`, `replace` and `take` of any `jsg::Cell` on the thread panic while it is, and a `RefCell` is borrowed while its value is
   reported, so a `borrow_mut` panics; either aborts the process. A `std::cell::Cell<T>` exists
   only for `T: Copy` and reports nothing, as plain data does; hold a retainer in a `jsg::Cell`
   instead.
