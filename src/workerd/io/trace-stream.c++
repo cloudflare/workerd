@@ -660,8 +660,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
   obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(onset, Onset) {
-      obj.set(js, EVENT_STR, ToJs(js, onset, cache));
+    KJ_CASE_ONEOF(onset, kj::Own<Onset>) {
+      obj.set(js, EVENT_STR, ToJs(js, *onset, cache));
     }
     KJ_CASE_ONEOF(outcome, Outcome) {
       obj.set(js, EVENT_STR, ToJs(js, outcome, cache));
@@ -701,7 +701,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
 // Returns the name of the handler function for this type of event.
 kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(_, Onset) {
+    KJ_CASE_ONEOF(_, kj::Own<Onset>) {
       KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
       // return ONSET_STR;
     }
@@ -876,8 +876,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
       kj::Array<TailEvent> events,
       kj::Rc<SharedResults> results) {
     // There should be only a single onset event in this batch.
-    KJ_ASSERT(
-        events.size() == 1 && events[0].event.is<Onset>(), "Expected only a single onset event");
+    KJ_ASSERT(events.size() == 1 && events[0].event.is<kj::Own<Onset>>(),
+        "Expected only a single onset event");
     auto& event = events[0];
 
     auto handler =
@@ -1385,7 +1385,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
     return;
   }
   // The onset event must be first and must only happen once.
-  if (event.is<Onset>()) {
+  if (event.is<kj::Own<Onset>>()) {
     KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
     onsetSeen = true;
   } else {
