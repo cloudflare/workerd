@@ -851,8 +851,6 @@ void restoreBootstrapState(jsg::Lock& js, BootstrapState* state, jsg::JsObject b
 
 // Bootstraps a context built from scratch: creates require(), loads primordials and runs main.
 void bootstrapFromScripts(jsg::Lock& js, BootstrapState* state, CompatibilityFlags::Reader flags) {
-  auto context = js.v8Context();
-
   // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
   state->autogatesObj = buildAutogatesObject(js);

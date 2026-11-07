@@ -549,9 +549,11 @@ kj::Own<SnapshotArtifact> bakeSnapshot(kj::StringPtr topLevel) {
   auto zygote = kj::heap<SnapshotTransferIsolate>(v8System, newIsolateGroup(), nullptr,
       kj::heap<IsolateObserver>(), defaultExternalStringAllocator(), v8::Isolate::CreateParams{},
       true, SnapshotConfig(MutableSnapshot{.artifact = kj::atomicRefcounted<SnapshotArtifact>()}));
-  uint32_t badTagFieldsCount = 0;
-  WrappablesSerializeMetadata metadata;
   zygote->runInLockScope([&](SnapshotTransferIsolate::Lock& lock) {
+    uint32_t badTagFieldsCount = 0;
+    // Under the lock, as in Worker::Worker: the metadata roots the shims it records with
+    // cppgc::Persistents, which must be freed on the thread that holds the isolate.
+    WrappablesSerializeMetadata metadata;
     auto& isolateBase = IsolateBase::from(lock.v8Isolate);
     v8::Global<v8::Context> contextHandle;
     lock.withinHandleScope([&] {
@@ -750,17 +752,17 @@ KJ_TEST("a cleanup callback that throws does not fail the zygote") {
       *restored, [&](Lock& js) { KJ_EXPECT(eval(js, "fromCleanup.getValue()"_kj) == "3"_kj); });
 }
 
-KJ_TEST("verify() raises what the serializer callback could only record") {
+KJ_TEST("dropUnreachableWrappables() raises what the serializer callback could only record") {
   auto artifact = kj::atomicRefcounted<SnapshotArtifact>();
   {
     WrappablesSerializeMetadata metadata;
     metadata.unknownWrappersCount = 1;
-    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.verify(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("were not recorded", metadata.dropUnreachableWrappables(*artifact));
   }
   {
     WrappablesSerializeMetadata metadata;
     metadata.unclonable.add(kj::str("SomeType"));
-    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.verify(*artifact));
+    KJ_EXPECT_THROW_MESSAGE("SomeType", metadata.dropUnreachableWrappables(*artifact));
   }
 }
 
