@@ -43,3 +43,18 @@ diff -u5 -r sqlite-src-pristine sqlite-src-modified \
 ```
 
 Repeat for each patch.
+
+Finally, switch the build to the new version. In
+`build/deps/shared_deps.jsonc`, set `freeze_version` and `freeze_year`
+of `sqlite3` to the new release, remove its `freeze_sha256`, and
+update its `patches` if any were added or removed. Then regenerate the
+Bazel definition:
+
+```bash
+just update-deps sqlite3
+```
+
+This downloads the new release and, if it is the newest one, checks it
+against the hash on SQLite's download page. Copy the `sha256` that it
+writes to `build/deps/gen/shared_deps.MODULE.bazel` into
+`freeze_sha256`.

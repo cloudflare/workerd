@@ -2,34 +2,6 @@
 
 module(name = "workerd")
 
-# sqlite3 is downloaded from sqlite.org (not GitHub), so it remains manual.
-# We have some patches that aren't included in BCR:
-# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.53.3/patches
-bazel_dep(name = "sqlite3")
-archive_override(
-    module_name = "sqlite3",
-    build_file = "//:build/BUILD.sqlite3",
-    patch_args = ["-p1"],
-    patch_tool = "patch",
-    patches = [
-        "//:patches/sqlite/0001-row-counts-plain.patch",
-        "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
-        "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
-        "//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
-        "//:patches/sqlite/0005-legacy-subquery-subtypes.patch",
-    ],
-    remote_file_integrity = {
-        "MODULE.bazel": "sha256-y8b6x7BNbvOuFQxzh1vbyJ/1F/RP67Ho3gJUJU3wZeE=",
-    },
-    # Using build file from more recent version since it imports rules_cc properly
-    remote_file_urls = {
-        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.53.3/MODULE.bazel"],
-    },
-    sha256 = "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
-    strip_prefix = "sqlite-src-3540100",
-    url = "https://sqlite.org/2026/sqlite-src-3540100.zip",
-)
-
 # rules_android/rules_go are not used by ourselves, but protobuf pulls in outdated versions that are
 # missing rules_cc symbols – can be dropped once protobuf uses more recent versions. At least we can
 # use repo_name = None so that these are not visible to workerd itself and won't be pulled in if not

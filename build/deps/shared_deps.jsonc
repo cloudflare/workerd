@@ -117,6 +117,27 @@
       "patches": [
         "@workerd//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch"
       ]
+    },
+    //sqlite
+    // Version and hash are frozen because SQLite releases can change behavior that Workers depend
+    // on, and the patches usually need rebasing. See patches/sqlite/README.md for how to upgrade.
+    {
+      "name": "sqlite3",
+      "type": "sqlite",
+      "build_file": "@workerd//:build/BUILD.sqlite3",
+      "freeze_version": "3.54.1",
+      "freeze_year": "2026",
+      "freeze_sha256": "387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b",
+      "patches": [
+        "@workerd//:patches/sqlite/0001-row-counts-plain.patch",
+        "@workerd//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+        "@workerd//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "@workerd//:patches/sqlite/0004-authorizer-rename-to-destination-name.patch",
+        "@workerd//:patches/sqlite/0005-legacy-subquery-subtypes.patch"
+      ],
+      // Before Bazel 9.4.0, Bazel's built-in patcher can't apply multi-file patches that have no
+      // `diff` line before each file, such as 0003 and 0004.
+      "patch_tool": "patch"
     }
   ]
 }
