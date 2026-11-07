@@ -49,8 +49,9 @@ The new module registry was designed to address several limitations of the legac
    modules use the store when a cache key is available. Both registries share
    the store. Embedded builtin bytecode takes precedence. Otherwise, compilation
    uses the per-module slot if the store or cache key is unavailable; see
-   [Code cache store](#code-cache-store). Modules compiled with `PRODUCE_COMPILE_HINTS`
-   bypass both caches; see [Compile hint production](#compile-hint-production).
+   [Code cache store](#code-cache-store). Bundle ES modules in an isolate with
+   compile hint collection enabled bypass bytecode caches; see
+   [Compile hint production](#compile-hint-production).
 
 5. **Separation of definition from instantiation.** `Module` objects are
    isolate-independent definitions. `IsolateModuleRegistry` holds the per-isolate
@@ -143,7 +144,6 @@ map to multiple rows, so a unique URL index would collide.
 | `ESM`                   | 0x02 | ECMAScript module (vs synthetic)                                   |
 | `EVAL`                  | 0x04 | Requires evaluation outside IoContext (deferred to `EvalCallback`) |
 | `WASM`                  | 0x08 | WebAssembly module                                                 |
-| `PRODUCE_COMPILE_HINTS` | 0x10 | Record function positions for bundle ES modules                    |
 
 ### `Module::ContentType` enum
 
@@ -184,18 +184,22 @@ EsModule extends Module {
 
 #### Compile hint production
 
-Bundle ES modules with `Module::Flags::PRODUCE_COMPILE_HINTS` compile with
-V8's `kProduceCompileHints`. This bypasses both code caches and does not
-populate the shared bytecode cache. `newWorkerModuleRegistry()` sets this flag
-when given `ModuleRegistry::Builder::Options::PRODUCE_COMPILE_HINTS`.
+`IsolateBase::enableCompileHints()` enables collection before a Worker's modules
+are compiled. Both registries pass each bundle ES module's original name to the
+common compilation boundary, which selects V8's `kProduceCompileHints` and records
+successful compilations in the isolate's `IsolateCompileHints` session. Producing
+hints bypasses embedded bytecode, the process-wide store, compile hints to consume,
+and the definition-local shared cache. Builtins, fallback modules, and synthetic
+modules do not participate.
 
-`ModuleRegistry::getProducedCompileHints(js)` reads positions from the current
-context's compiled modules. It returns one entry per resolved bundle ES module
-definition, merging and deduplicating positions across query/fragment instances.
-The shared registry does not retain hints between isolates. Positions accumulate
-as functions compile, including during evaluation and subsequent requests.
-`ModuleRegistry::resolveModuleName(js, name)` uses the bundle builder's
-normalization to match a report entry's URL to an original bundle name.
+`jsg::getProducedCompileHints(js)` snapshots the session. It returns one entry per
+compiled bundle ES module name, merging and deduplicating positions across
+query/fragment instances. Names preserve the spelling supplied to the bundle
+builder, including dot segments. The shared registry does not retain hint state
+or production policy between isolates. An enabled isolate hosts one Worker bundle.
+Positions accumulate as functions compile during evaluation and subsequent
+requests; taking a snapshot does not end collection. The session retains module
+handles and releases them under the isolate lock before disposal.
 
 #### Source Encoding (`EncodedSource`)
 
@@ -878,8 +882,8 @@ returning a rejected promise with the cached exception.
    Runtime cache production is deferred until startup evaluation completes;
    modules first compiled during a request can consume entries but do not produce
    them. CommonJS evaluation functions use the same store, with distinct keys for
-   their compilation shape. Modules compiled with `PRODUCE_COMPILE_HINTS` bypass
-   all ESM caches.
+   their compilation shape. Bundle ES modules compiled in a hint-producing
+   isolate bypass all ESM caches.
 
 5. **Compile cache is transparent.** `EsModule::getDescriptor()` delegates
    V8 bytecode caching to the common `jsg::compileModule` compilation layer.

@@ -22,6 +22,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/rust/kj/ffi.h>
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/server/channel-token.h>
@@ -58,6 +59,7 @@ struct Committer;
 struct ResultTask;
 struct AbortReason;
 struct KeepAlive;
+struct MovedHook;
 struct WorkerInterfaceList;
 struct WorkerStub;
 struct UdpFlow;
@@ -125,6 +127,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool tailWorkers = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
+    // The directory Pyodide bundles are cached in (--pyodide-bundle-disk-cache-dir), an absolute
+    // path.
+    kj::Maybe<kj::String> pyodideBundleDiskCacheDir;
     // When set, async activity in every worker is traced to this file (--async-trace), which must
     // outlive the factory.
     kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
@@ -316,6 +321,9 @@ kj::Maybe<uint32_t> actor_storage_facet_id(const ActorStorage& storage,
 void actor_storage_clear(const ActorStorage& storage, ::rust::Str rootKey);
 
 kj::Promise<void> factory_shutdown_containers(const WorkerFactory& factory);
+kj::Promise<void> factory_stop_container(
+    const WorkerFactory& factory, ::rust::Str uniqueKey, ::rust::Str actor);
+void stamp_current_actor_cause(RequestMetadata& metadata);
 
 // =======================================================================================
 
@@ -323,6 +331,12 @@ kj::Own<RequestMetadata> new_request_metadata(
     kj::Maybe<::rust::Str> cfBlobJson, kj::Maybe<::rust::Str> clientAddress);
 kj::Maybe<::rust::String> request_metadata_cf_blob_json(const RequestMetadata& metadata);
 void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool persistent);
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata);
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node);
+bool request_metadata_from_handoff(const RequestMetadata& metadata);
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata);
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy);
 void request_metadata_set_actor_self_token(const WorkerFactory& factory,
     RequestMetadata& metadata,
     ::rust::Str uniqueKey,
@@ -410,6 +424,17 @@ kj::Promise<rust::worker::CustomEventResult> rpc_client_custom_event(const RpcCl
 kj::Promise<void> rpc_client_on_disconnect(const RpcClient& client);
 kj::Own<WorkerInterface> rpc_client_start_request(
     const RpcClient& client, kj::Own<RequestMetadata> metadata);
+kj::Own<WorkerInterface> worker_interface_watch_moved(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+kj::Own<WorkerInterface> worker_interface_watch_peer(
+    kj::Own<WorkerInterface> inner, ::rust::Box<MovedHook> hook);
+
+inline uint64_t request_not_delivered_detail_id() {
+  return jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID;
+}
+inline uint64_t actor_predecessor_rejected_detail_id() {
+  return jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID;
+}
 
 uint16_t factory_start_inspector(const WorkerFactory& factory, ::rust::Str address);
 

@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use serde::Deserialize;
@@ -71,6 +72,9 @@ pub enum Claim {
         address: String,
         stale: bool,
     },
+    /// This instance owns it at this epoch but drains: it hands the object
+    /// off (`release`), and the request goes on to whoever claims it.
+    Releasing(u64),
 }
 
 /// Claims, routes and releases Durable Objects through their owner records.
@@ -81,11 +85,19 @@ pub struct Ownership {
     pub may_claim: Cell<bool>,
     /// Where each routed object's owner was, and when that was read.
     routes: RefCell<HashMap<String, Route>>,
+    /// The peer each object's last route led to, which answered that it
+    /// does not serve the object (`forget_route`): until a claim of the
+    /// object succeeds, a route there is not used, and the claim reads that
+    /// peer's own record, not the listing.
+    refused: RefCell<HashMap<String, String>>,
     /// The record each claim wrote, and the guard that it is still the
     /// current one, so `open` changes it without reading it back. A claim
     /// of an object with no record writes nothing: `open` creates the
     /// record, open, in one conditional write, as celld claims a new cell.
     claimed: RefCell<HashMap<String, (OwnerRecord, Guard)>>,
+    /// Objects this draining instance owns but failed to release: like the
+    /// rest once it left, they go to whoever claims them.
+    abandoned: RefCell<HashSet<String>>,
 }
 
 struct Route {
@@ -106,7 +118,7 @@ const ROUTE_REFRESH_MS: u64 = 5_000;
 const ATTEMPTS: usize = 8;
 
 fn draining(key: &str) -> Error {
-    Error::Replica(format!("{key}: this node is draining"))
+    Error::NotHere(format!("{key}: this node is draining"))
 }
 
 fn owner_key(namespace: &str, actor: &str) -> String {
@@ -120,8 +132,23 @@ impl Ownership {
             registry,
             may_claim: Cell::new(true),
             routes: RefCell::new(HashMap::new()),
+            refused: RefCell::new(HashMap::new()),
             claimed: RefCell::new(HashMap::new()),
+            abandoned: RefCell::new(HashSet::new()),
         }
+    }
+
+    /// Forgets that `node` serves the object, after it answered that it does
+    /// not. The route there goes, and the next claim reads the owner record
+    /// and, if that still names `node`, `node`'s own record: the listing may
+    /// predate its drain.
+    pub fn forget_route(&self, namespace: &str, actor: &str, node: &str) {
+        let key = owner_key(namespace, actor);
+        let mut routes = self.routes.borrow_mut();
+        if routes.get(&key).is_some_and(|route| route.node == node) {
+            routes.remove(&key);
+        }
+        self.refused.borrow_mut().insert(key, node.to_owned());
     }
 
     /// Own the object, or learn which live peer does. A record with no owner,
@@ -134,6 +161,22 @@ impl Ownership {
         now_ms: u64,
     ) -> Result<Claim> {
         let key = owner_key(namespace, actor);
+        let refused = self.refused.borrow().get(&key).cloned();
+        if let Some(node) = &refused {
+            // Put back since by a concurrent claim or a refresh.
+            let mut routes = self.routes.borrow_mut();
+            if routes.get(&key).is_some_and(|route| &route.node == node) {
+                routes.remove(&key);
+            }
+        }
+        let claim = self.claim(key.clone(), refused.as_deref(), now_ms).await;
+        if claim.is_ok() && self.refused.borrow().get(&key) == refused.as_ref() {
+            self.refused.borrow_mut().remove(&key);
+        }
+        claim
+    }
+
+    async fn claim(&self, key: String, refused: Option<&str>, now_ms: u64) -> Result<Claim> {
         let me = self.registry.node();
         // A route whose node a stale listing no longer shows: its own record
         // decides, not the object's.
@@ -162,21 +205,29 @@ impl Ownership {
                 None => (OwnerRecord::default(), Guard::Absent),
                 Some((body, version)) => {
                     let record: OwnerRecord = serde_json::from_slice(&body)?;
-                    if record.node == me {
-                        // A draining node lets its objects go, its own too.
-                        if !self.may_claim.get() {
-                            return Err(draining(&key));
-                        }
+                    if record.node == me && self.may_claim.get() {
                         return Ok(Claim::Owned(record.owned()));
                     }
-                    if !record.node.is_empty()
-                        && let Some(peer) = self.registry.live(&record.node, now_ms).await?
-                    {
+                    // A draining node lets its objects go, its own too. One
+                    // it failed to let go, or any once it left, it serves no
+                    // more: whoever claims it next takes it over.
+                    let let_go = self.registry.left() || self.abandoned.borrow().contains(&key);
+                    if record.node == me && !let_go {
+                        return Ok(Claim::Releasing(record.epoch));
+                    }
+                    let peer = if record.node.is_empty() || record.node == me {
+                        None
+                    } else if refused == Some(record.node.as_str()) {
+                        self.registry.live_now(&record.node, now_ms).await?
+                    } else {
+                        self.registry.live(&record.node, now_ms).await?
+                    };
+                    if let Some(peer) = peer {
                         // An earlier process at our address, restarted
                         // before its lease ran out: a route there loops back
                         // here. Its lease, not a route, ends this.
                         if peer.address == self.registry.advertise() {
-                            return Err(Error::Replica(format!(
+                            return Err(Error::NotHere(format!(
                                 "{key}: owned by this address's previous instance"
                             )));
                         }
@@ -185,8 +236,10 @@ impl Ownership {
                     (record, Guard::Match(version))
                 }
             };
+            // No live instance owns it, and a draining one claims nothing:
+            // a peer does.
             if !self.may_claim.get() {
-                return Err(draining(&key));
+                return self.successor(&key, refused, now_ms).await;
             }
             let record = previous.successor(me);
             // A new object opens at its claim, where a loser still routes
@@ -199,6 +252,11 @@ impl Ownership {
                 let version = self.bucket.put_if(&key, body, guard).await?;
                 version.map(Guard::Match)
             };
+            // Draining may have started during the write: the object it
+            // claimed is let go like the others this node owns.
+            if !self.may_claim.get() && written.is_some() {
+                return Ok(Claim::Releasing(record.epoch));
+            }
             if let Some(guard) = written {
                 self.claimed
                     .borrow_mut()
@@ -207,6 +265,82 @@ impl Ownership {
             }
         }
         Err(Error::Contended(key))
+    }
+
+    /// Where a draining instance sends a request for an object no live
+    /// instance owns: the serving peer that `handoff::successor` picks,
+    /// which claims it. Not cached: the peer may lose the claim to another.
+    /// A peer that `refused` it, or could not be reached, is passed over
+    /// while there is another, and its own record read, which drops it from
+    /// the listing if it died. A listing that names no peer is read again,
+    /// as it may predate them.
+    async fn successor(&self, key: &str, refused: Option<&str>, now_ms: u64) -> Result<Claim> {
+        if let Some(node) = refused {
+            self.registry.live_now(node, now_ms).await?;
+        }
+        let mut pick = self.pick_successor(key, refused, now_ms);
+        if pick.is_none() {
+            self.registry.peers(now_ms).await?;
+            pick = self.pick_successor(key, refused, now_ms);
+        }
+        // The only peer left may have refused for what it knew then.
+        let pick = pick.or_else(|| self.pick_successor(key, None, now_ms));
+        let (node, address) = pick.ok_or_else(|| draining(key))?;
+        Ok(Claim::Route {
+            node,
+            address,
+            stale: false,
+        })
+    }
+
+    fn pick_successor(
+        &self,
+        key: &str,
+        refused: Option<&str>,
+        now_ms: u64,
+    ) -> Option<(String, String)> {
+        let me = self.registry.node();
+        let serving = self.registry.serving_nodes(now_ms);
+        let peers = serving
+            .iter()
+            .map(String::as_str)
+            .filter(|node| *node != me && Some(*node) != refused);
+        let node = cluster_logic::handoff::successor(key, peers)?;
+        Some((node.to_owned(), self.registry.address(node)?))
+    }
+
+    /// Gives up on releasing an object this draining instance owns: requests
+    /// for it go to whoever claims it, as once this instance left.
+    pub fn abandon(&self, namespace: &str, actor: &str) {
+        self.abandoned
+            .borrow_mut()
+            .insert(owner_key(namespace, actor));
+    }
+
+    /// Hand off an object this instance owns at `epoch` and no longer
+    /// writes: the record keeps its epochs and names no owner, so the next
+    /// claim anywhere takes the object over, recovering this epoch's log
+    /// at the next. Answers whether the record still named this owner.
+    pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> Result<bool> {
+        let key = owner_key(namespace, actor);
+        self.claimed.borrow_mut().remove(&key);
+        let Some((body, version)) = self.bucket.get(&key).await? else {
+            return Ok(false);
+        };
+        let record: OwnerRecord = serde_json::from_slice(&body)?;
+        if record.node != self.registry.node() || record.epoch != epoch {
+            return Ok(false);
+        }
+        let released = OwnerRecord {
+            node: String::new(),
+            ..record
+        };
+        let body = serde_json::to_vec(&released)?;
+        let written = self
+            .bucket
+            .put_if(&key, body, Guard::Match(version))
+            .await?;
+        Ok(written.is_some())
     }
 
     fn route(&self, key: String, peer: NodeRecord, now_ms: u64) -> Claim {
@@ -306,328 +440,5 @@ impl Ownership {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use std::rc::Rc;
-
-    use futures::executor::block_on;
-
-    use crate::Bucket;
-    use crate::Claim;
-    use crate::Error;
-    use crate::Ownership;
-    use crate::Registry;
-    use crate::ownership::OwnerRecord;
-    use crate::ownership::owner_key;
-
-    const TTL: u64 = 10_000;
-
-    /// Matches any `Owned` claim at `epoch`.
-    fn owned(epoch: u64) -> EpochOf {
-        EpochOf(epoch)
-    }
-
-    #[derive(Debug)]
-    struct EpochOf(u64);
-
-    impl PartialEq<EpochOf> for Claim {
-        fn eq(&self, other: &EpochOf) -> bool {
-            matches!(self, Self::Owned(o) if o.epoch == other.0)
-        }
-    }
-
-    fn node(store: &Bucket, name: &str) -> (Rc<Registry>, Ownership) {
-        let bucket = store.at("cluster");
-        let registry = Rc::new(Registry::new(
-            bucket.clone(),
-            name,
-            &format!("{name}:1"),
-            TTL,
-        ));
-        (registry.clone(), Ownership::new(bucket, registry))
-    }
-
-    /// `own` claims and opens a new object `x` at epoch 1: a new object's
-    /// record appears when its epoch opens.
-    async fn open_x(own: &Ownership) {
-        let claim = own.acquire_or_route("ns", "x", 0).await;
-        assert_eq!(claim.unwrap(), owned(1));
-        assert!(own.open("ns", "x", 1).await.unwrap());
-    }
-
-    #[test]
-    fn peers_are_the_live_registrations() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, _) = node(&store, "a");
-            let (b, _) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(5_000).await.unwrap();
-            let names = |peers: Vec<crate::NodeRecord>| {
-                peers.into_iter().map(|peer| peer.node).collect::<Vec<_>>()
-            };
-            assert_eq!(names(a.peers(1_000).await.unwrap()), ["a", "b"]);
-            // a's lease ran out at 10s; b's holds until 15s.
-            assert_eq!(names(a.peers(12_000).await.unwrap()), ["b"]);
-            b.deregister().await.unwrap();
-            assert!(a.peers(12_000).await.unwrap().is_empty());
-        });
-    }
-
-    #[test]
-    fn a_restart_never_routes_to_its_previous_instance() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            a.renew(0).await.unwrap();
-            open_x(&a_own).await;
-            // The process restarts at a's address with a fresh node id while
-            // a's record is still live: routing there would reach itself.
-            let bucket = store.at("cluster");
-            let a_ = Rc::new(Registry::new(bucket.clone(), "a_", "a:1", TTL));
-            a_.renew(1_000).await.unwrap();
-            let a_own_ = Ownership::new(bucket, a_);
-            let claim = a_own_.acquire_or_route("ns", "x", 1_000).await;
-            assert!(matches!(claim, Err(Error::Replica(_))), "{claim:?}");
-            // Once a's lease ends, the restart takes it over.
-            let claim = a_own_.acquire_or_route("ns", "x", 11_000).await;
-            assert_eq!(claim.unwrap(), owned(2));
-        });
-    }
-
-    #[test]
-    fn a_rewritten_node_record_fences_its_instance() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, _) = node(&store, "a");
-            let (impostor, _) = node(&store, "a");
-            a.renew(0).await.unwrap();
-            // A second process with the same identity cannot publish over it.
-            assert!(matches!(impostor.renew(0).await, Err(Error::Fenced(_))));
-            a.renew(1_000).await.unwrap();
-        });
-    }
-
-    #[test]
-    fn a_claim_owns_an_unowned_object_and_routes_to_a_live_owner() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(0).await.unwrap();
-            open_x(&a_own).await;
-            // Asking again keeps it, at the same epoch.
-            assert_eq!(
-                a_own.acquire_or_route("ns", "x", 1).await.unwrap(),
-                owned(1)
-            );
-            assert_eq!(
-                b_own.acquire_or_route("ns", "x", 1).await.unwrap(),
-                Claim::Route {
-                    node: "a".into(),
-                    address: "a:1".into(),
-                    stale: false,
-                }
-            );
-        });
-    }
-
-    #[test]
-    fn a_stale_listing_keeps_a_route_to_a_live_owner() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(0).await.unwrap();
-            open_x(&a_own).await;
-            let route = b_own.acquire_or_route("ns", "x", 1).await;
-            assert!(matches!(route.unwrap(), Claim::Route { .. }));
-            // a renews, but b lists nothing more: what b knows of a expires.
-            a.renew(8_000).await.unwrap();
-            // With the record gone a reread would claim x, so a route shows
-            // that only a's own record was read.
-            store.delete("cluster/do/ns/x/own.json").await.unwrap();
-            assert_eq!(
-                b_own.acquire_or_route("ns", "x", 12_000).await.unwrap(),
-                Claim::Route {
-                    node: "a".into(),
-                    address: "a:1".into(),
-                    stale: true,
-                }
-            );
-        });
-    }
-
-    #[test]
-    fn a_dead_owners_object_is_taken_over_at_the_next_epoch() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(0).await.unwrap();
-            open_x(&a_own).await;
-            // a stops renewing; b renews past a's expiry and takes x over.
-            b.renew(9_000).await.unwrap();
-            assert_eq!(
-                b_own.acquire_or_route("ns", "x", 11_000).await.unwrap(),
-                owned(2)
-            );
-            assert_eq!(
-                a_own.acquire_or_route("ns", "x", 11_000).await.unwrap(),
-                Claim::Route {
-                    node: "b".into(),
-                    address: "b:1".into(),
-                    stale: false,
-                }
-            );
-        });
-    }
-
-    #[test]
-    fn an_owner_advances_only_its_open_epoch() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            a.renew(0).await.unwrap();
-            open_x(&a_own).await;
-            // The next epoch recovers the one it left, and does not advance
-            // until it opens.
-            let next = a_own.advance("ns", "x", 1).await.unwrap().unwrap();
-            assert_eq!((next.epoch, next.recover), (2, Some(1)));
-            assert!(a_own.advance("ns", "x", 2).await.unwrap().is_none());
-            assert!(a_own.open("ns", "x", 2).await.unwrap());
-            // A record changed since is not advanced over.
-            vacate(&store).await;
-            assert!(a_own.advance("ns", "x", 2).await.unwrap().is_none());
-        });
-    }
-
-    /// Clear the owner of `x`, as another writer might, under a cached read.
-    async fn vacate(store: &Bucket) {
-        let bucket = store.at("cluster");
-        let key = owner_key("ns", "x");
-        let (body, _) = bucket.get(&key).await.unwrap().unwrap();
-        let mut record: OwnerRecord = serde_json::from_slice(&body).unwrap();
-        record.node = String::new();
-        bucket
-            .put(&key, serde_json::to_vec(&record).unwrap(), &[])
-            .await
-            .unwrap();
-    }
-
-    #[test]
-    fn concurrent_claims_open_exactly_one_epoch() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let nodes: Vec<_> = (0..8).map(|i| node(&store, &format!("n{i}"))).collect();
-            for (registry, _) in &nodes {
-                registry.renew(0).await.unwrap();
-            }
-            let claims = futures::future::join_all(
-                nodes
-                    .iter()
-                    .map(|(_, own)| own.acquire_or_route("ns", "x", 0)),
-            )
-            .await;
-            // A new object's claims all succeed; the conditional write that
-            // opens the epoch has exactly one winner.
-            assert!(claims.iter().all(|c| matches!(c, Ok(Claim::Owned(_)))));
-            let opens =
-                futures::future::join_all(nodes.iter().map(|(_, own)| own.open("ns", "x", 1)))
-                    .await;
-            let owners = opens.iter().filter(|o| matches!(o, Ok(true))).count();
-            assert_eq!(owners, 1);
-        });
-    }
-
-    #[test]
-    fn a_takeover_recovers_the_last_epoch_that_opened() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            let (c, c_own) = node(&store, "c");
-            for r in [&a, &b, &c] {
-                r.renew(0).await.unwrap();
-            }
-            let Claim::Owned(first) = a_own.acquire_or_route("ns", "x", 0).await.unwrap() else {
-                panic!("a should own x")
-            };
-            assert_eq!(first.recover, Some(0));
-            assert!(a_own.open("ns", "x", 1).await.unwrap());
-            // Only the claimant, at its epoch, opens.
-            assert!(!b_own.open("ns", "x", 1).await.unwrap());
-
-            // a's lease runs out; b claims epoch 2 and dies before opening.
-            b.renew(9_000).await.unwrap();
-            c.renew(9_000).await.unwrap();
-            let Claim::Owned(second) = b_own.acquire_or_route("ns", "x", 11_000).await.unwrap()
-            else {
-                panic!("b should own x")
-            };
-            assert_eq!(second.recover, Some(1));
-
-            // c takes over from b's unopened epoch: it still recovers epoch 1.
-            c.renew(20_000).await.unwrap();
-            let Claim::Owned(third) = c_own.acquire_or_route("ns", "x", 21_000).await.unwrap()
-            else {
-                panic!("c should own x")
-            };
-            assert_eq!(third.epoch, 3);
-            assert_eq!(third.recover, Some(1));
-        });
-    }
-
-    #[test]
-    fn a_listed_owners_route_is_used_and_refreshed_in_the_background() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(0).await.unwrap();
-            b.peers(0).await.unwrap();
-            open_x(&a_own).await;
-            let to_a = |stale| Claim::Route {
-                node: "a".into(),
-                address: "a:1".into(),
-                stale,
-            };
-            let route = async |now| b_own.acquire_or_route("ns", "x", now).await.unwrap();
-            assert_eq!(route(1_000).await, to_a(false));
-            // x loses its owner; b still routes to a until it refreshes.
-            vacate(&store).await;
-            assert_eq!(route(5_000).await, to_a(false));
-            // The first use past the interval is stale, and only the first.
-            assert_eq!(route(6_000).await, to_a(true));
-            assert_eq!(route(6_001).await, to_a(false));
-            // The refresh finds no owner, so b claims x.
-            b_own.refresh_route("ns", "x", 6_002).await.unwrap();
-            assert_eq!(route(6_003).await, owned(2));
-        });
-    }
-
-    #[test]
-    fn a_route_ends_with_its_owners_listed_lease() {
-        block_on(async {
-            let store = Bucket::memory("");
-            let (a, a_own) = node(&store, "a");
-            let (b, b_own) = node(&store, "b");
-            a.renew(0).await.unwrap();
-            b.renew(0).await.unwrap();
-            b.peers(0).await.unwrap();
-            open_x(&a_own).await;
-            b_own.acquire_or_route("ns", "x", 1).await.unwrap();
-            // a dies; b's route goes when a's listed lease ends.
-            b.renew(9_000).await.unwrap();
-            assert_eq!(
-                b_own.acquire_or_route("ns", "x", 11_000).await.unwrap(),
-                owned(2)
-            );
-        });
-    }
-}
+#[path = "ownership-test.rs"]
+mod tests;

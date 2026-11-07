@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <ecorry@cloudflare.com>
+Date: Thu, 5 Nov 2026 13:30:17 +0100
+Subject: Add DisallowHeapAllocation to the API
+
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -421,6 +421,24 @@ class V8_EXPORT Isolate {
+     bool was_execution_allowed_;
+   };
+ 
++  /**
++   * Assert that nothing is allocated on the V8 heap by the current thread.
++   * Enforced in release builds: an allocation inside the scope is a fatal
++   * CHECK failure in the allocator, so the stack names the allocation site.
++   */
++  class V8_EXPORT V8_NODISCARD DisallowHeapAllocationScope {
++   public:
++    DisallowHeapAllocationScope();
++    ~DisallowHeapAllocationScope();
++
++    DisallowHeapAllocationScope(const DisallowHeapAllocationScope&) = delete;
++    DisallowHeapAllocationScope& operator=(const DisallowHeapAllocationScope&) =
++        delete;
++
++   private:
++    void* internal_;
++  };
++
+   /**
+    * Introduce exception to DisallowJavascriptExecutionScope.
+    */
+diff --git a/src/api/api.cc b/src/api/api.cc
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -10576,6 +10576,15 @@ Isolate::DisallowJavascriptExecutionScope::~DisallowJavascriptExecutionScope() {
+   }
+ }
+ 
++Isolate::DisallowHeapAllocationScope::DisallowHeapAllocationScope()
++    : internal_(
++          new i::PerThreadAssertScope<false, i::HEAP_ALLOCATION_ASSERT>()) {}
++
++Isolate::DisallowHeapAllocationScope::~DisallowHeapAllocationScope() {
++  delete static_cast<
++      i::PerThreadAssertScope<false, i::HEAP_ALLOCATION_ASSERT>*>(internal_);
++}
++
+ Isolate::AllowJavascriptExecutionScope::AllowJavascriptExecutionScope(
+     Isolate* v8_isolate)
+     : v8_isolate_(v8_isolate) {

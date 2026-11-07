@@ -87,13 +87,13 @@ class Wrappable: public ::workerd::jsg::Wrappable {
 struct ResourceDescriptor;
 
 // Wrappable lifecycle — returns KjRc<Wrappable> to Rust for reference-counted ownership.
-// Ref::clone calls wrappable_add_strong_ref; Ref::drop calls wrappable_remove_strong_ref.
-// wrappable_remove_strong_ref does addRef(+1) + maybeDeferDestruction(-1) = net 0 on kj::Rc;
-// the actual kj::Rc decrement happens when WrappableRc (KjRc<Wrappable>) is dropped.
+// Rc::clone calls wrappable_add_strong_ref. A dropped strong Rc calls
+// wrappable_remove_strong_ref under the isolate lock (Rust's IsolateState defers it until the
+// lock otherwise), then drops its KjRc<Wrappable>, which decrements the kj::Rc refcount.
 kj::Rc<Wrappable> wrappable_new(TraitObjectPtr ptr);
 kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable);
 void wrappable_add_strong_ref(Wrappable& wrappable);
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong);
+void wrappable_remove_strong_ref(Wrappable& wrappable);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
 
@@ -615,6 +615,9 @@ void isolate_terminate_execution(Isolate* isolate);
 bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// Whether a method that returns a promise rejects it with what it throws
+// (jsg::getCaptureThrowsAsRejections()).
+bool isolate_captures_throws_as_rejections(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context
 // frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
 // workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.

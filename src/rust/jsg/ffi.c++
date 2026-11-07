@@ -1123,20 +1123,8 @@ void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
 }
 
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong) {
-  // maybeDeferDestruction() requires a kj::Own<Wrappable> to take ownership of.
-  // We must temporarily increment the refcount via addRef() to create that handle.
-  //
-  // Refcount accounting:
-  //   addRef(wrappable)      → +1 (creates `own`)
-  //   maybeDeferDestruction  → internally stores `own` in RefToDelete
-  //   ~RefToDelete           → if is_strong: calls removeStrongRef(), then drops `own` → -1
-  // Net effect: 0 (the actual kj::Rc decrement happens later when Rust drops the KjRc).
-  //
-  // is_strong must match the Ref's current strong flag. If GC tracing already transitioned
-  // the ref to weak (strong=false), passing true here would double-decrement strongRefcount.
-  auto own = kj::addRef(wrappable);
-  wrappable.maybeDeferDestruction(is_strong, kj::mv(own), &wrappable);
+void wrappable_remove_strong_ref(Wrappable& wrappable) {
+  wrappable.removeStrongRef();
 }
 
 void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced) {
@@ -1638,8 +1626,8 @@ Realm* realm_from_isolate(Isolate* isolate) {
 
 namespace {
 // The IsolateBase deferred action hook of an isolate with a Rust Realm.
-void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
-  realm_reset_globals_awaiting_lock(isolate);
+void drainAwaitingLock(v8::Isolate* isolate) {
+  realm_drain_awaiting_lock(isolate);
 }
 
 // The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
@@ -1656,7 +1644,7 @@ bool realm_can_attach(Isolate* isolate) {
 
 void realm_attach(Isolate* isolate, Realm& realm) {
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
-  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&drainAwaitingLock);
 }
 
 void realm_detach(Isolate* isolate, const IsolateState* state) {
@@ -1828,6 +1816,10 @@ bool isolate_is_execution_terminating(Isolate* isolate) {
 
 bool isolate_has_pending_exception(Isolate* isolate) {
   return isolate->HasPendingException();
+}
+
+bool isolate_captures_throws_as_rejections(Isolate* isolate) {
+  return workerd::jsg::getCaptureThrowsAsRejections(isolate);
 }
 
 Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {

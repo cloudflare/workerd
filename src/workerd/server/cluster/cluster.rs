@@ -69,6 +69,9 @@ pub enum Route {
         address: String,
         stale: bool,
     },
+    /// Here at this epoch, but this instance drains: `release_actor`, then
+    /// route the request again, to whoever claims the object.
+    Releasing(u64),
 }
 
 pub struct Cluster {
@@ -85,17 +88,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub fn new(setup: Setup) -> Result<Rc<Self>> {
-        let options: Vec<_> = setup
-            .options
-            .iter()
-            .filter_map(|option| option.split_once('='))
-            .map(|(key, value)| (key.to_owned(), value.to_owned()))
-            .collect();
-        let (s3, prefix) = S3::new(&setup.url, &options)?;
-        Ok(Self::over(
-            Bucket::new(s3, &format!("{prefix}/{FORMAT}")),
-            setup,
-        ))
+        Ok(Self::over(open_bucket(&setup.url, &setup.options)?, setup))
     }
 
     /// Over `bucket`, not the one `setup` names.
@@ -123,6 +116,13 @@ impl Cluster {
         })
     }
 
+    /// The bucket below `<prefix>services/<path>/`, apart from the cluster's
+    /// own state (`ClusterBucket` in workerd.capnp).
+    pub fn services(&self, path: &str) -> Bucket {
+        self.bucket
+            .at(&format!("{}services/{path}", self.bucket.prefix()))
+    }
+
     pub fn node(&self) -> &str {
         self.registry.node()
     }
@@ -137,7 +137,10 @@ impl Cluster {
         self.bucket.clock_skew_ms().unwrap_or(0)
     }
 
+    /// Expires this instance's membership: it renews its lease no more,
+    /// and peers take over what it still owns and adopt its alarms.
     pub async fn deregister(&self) -> Result<()> {
+        self.lease.borrow_mut().left = true;
         self.registry.deregister().await
     }
 
@@ -178,6 +181,11 @@ impl Cluster {
             }
             claim = self.ownership.acquire_or_route(ns, actor, now_ms).await?;
         }
+        if matches!(claim, Claim::Owned(_)) && self.is_draining() {
+            return Err(crate::Error::NotHere(format!(
+                "{ns}/{actor}: this node is draining"
+            )));
+        }
         Ok(match claim {
             Claim::Owned(owned) => {
                 let epoch = owned.epoch;
@@ -194,7 +202,41 @@ impl Cluster {
                 address,
                 stale,
             },
+            Claim::Releasing(epoch) => Route::Releasing(epoch),
         })
+    }
+
+    /// Hand off an object this draining instance stopped, whose capture
+    /// `close_actor` closed: upload what the bucket lacks, then write the
+    /// owner record as unowned (`Ownership::release`). Nothing writes the
+    /// object here any more, so no write can follow the release; the next
+    /// owner's epoch fences anything else. Answers whether it was released.
+    pub async fn hand_off_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        self.owners.retire(ns, actor);
+        self.owners.evict(ns, actor, epoch).await;
+        self.release_actor(ns, actor, epoch).await
+    }
+
+    /// Hand off an object this draining instance owns but does not serve,
+    /// once no capture, eviction or compaction of it is in flight here: the
+    /// next owner reads the files a compaction deletes. The caller bounds
+    /// the wait.
+    pub async fn release_actor(&self, ns: &str, actor: &str, epoch: u64) -> Result<bool> {
+        while self.owners.busy(ns, actor) {
+            tokio::time::sleep(BUSY_POLL).await;
+        }
+        let released = self.ownership.release(ns, actor, epoch).await?;
+        if released {
+            self.owners.forget(ns, actor);
+            tracing::info!("cluster: {ns}/{actor} epoch {epoch} handed off");
+        }
+        Ok(released)
+    }
+
+    /// Gives up on handing off an object this draining instance failed to
+    /// release (`Ownership::abandon`).
+    pub fn abandon_actor(&self, ns: &str, actor: &str) {
+        self.ownership.abandon(ns, actor);
     }
 
     /// Take a claimed object over: recover what earlier epochs committed
@@ -326,6 +368,11 @@ impl Cluster {
         self.ownership.refresh_route(ns, actor, now_ms).await
     }
 
+    /// `node` answered that it does not serve the object (`Ownership::forget_route`).
+    pub fn forget_route(&self, ns: &str, actor: &str, node: &str) {
+        self.ownership.forget_route(ns, actor, node);
+    }
+
     /// The MAC a peer call carries. The cluster key is used only through
     /// labelled derivations, so no two uses share a key: this, with each
     /// message labelled, and the channel token key.
@@ -339,7 +386,7 @@ impl Cluster {
     /// serving: answers why. Runs for the life of the process.
     pub async fn maintain(&self) -> String {
         loop {
-            if self.lease.borrow().draining {
+            if self.lease.borrow().left {
                 std::future::pending::<()>().await;
             }
             let observed = lease::Observed {
@@ -354,9 +401,9 @@ impl Cluster {
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err("renewal timed out".into()),
                 };
-                // A drain began meanwhile, and its deregistration may have
-                // failed this renewal: what it found no longer matters.
-                if self.lease.borrow().draining {
+                // The instance left meanwhile, which may have failed this
+                // renewal: what it found no longer matters.
+                if self.lease.borrow().left {
                     continue;
                 }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
@@ -388,16 +435,34 @@ impl Cluster {
         }
     }
 
-    /// Stops claiming before the claim reaches the bucket, and parks the
-    /// lease loop; then `deregister`.
+    /// Stops claiming before the claim reaches the bucket. The lease is
+    /// still renewed, so that the objects this instance owns stay where
+    /// they are until it hands them off; then `deregister`.
     pub fn start_draining(&self) {
-        self.lease.borrow_mut().draining = true;
         self.ownership.may_claim.set(false);
+        self.registry.start_draining();
+    }
+
+    /// Publishes that this instance drains, so that peers choose it for no
+    /// object or alarm, and lists the peers, so that it chooses none that
+    /// drains too. Peers that list it before learn of it from its answers.
+    pub async fn announce_draining(&self) {
+        let renew = timeout(ms(lease::RENEW_TIMEOUT_MS), self.renew(now_ms()));
+        if !matches!(renew.await, Ok(Ok(_))) {
+            tracing::warn!("cluster: publishing the drain failed");
+        }
+        let _ = timeout(ms(lease::LIST_TIMEOUT_MS), self.peers(now_ms())).await;
+    }
+
+    /// Whether `start_draining` ran: this node claims nothing more.
+    pub fn is_draining(&self) -> bool {
+        !self.ownership.may_claim.get()
     }
 
     /// The first renewal, before the node serves.
     pub async fn join(&self) -> Result<()> {
-        check_conditional_writes(&self.bucket, self.node()).await?;
+        let probe = format!("nodes/{}.probe", self.node());
+        check_conditional_writes(&self.bucket, &probe).await?;
         let until = self.renew(now_ms()).await?;
         self.lease.borrow_mut().renewed(now_ms(), Ok(until));
         Ok(())
@@ -412,6 +477,21 @@ impl Cluster {
 
 /// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
+/// How often a release checks whether an object's eviction ended.
+const BUSY_POLL: Duration = Duration::from_millis(10);
+
+/// The cluster's part of the bucket `url` names, `s3://<bucket>/<prefix>`,
+/// under the layout's version: what every key of the layout is relative to.
+/// `options` are `name=value` (see `S3::new`).
+pub fn open_bucket(url: &str, options: &[String]) -> Result<Bucket> {
+    let options: Vec<_> = options
+        .iter()
+        .filter_map(|option| option.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    let (s3, prefix) = S3::new(url, &options)?;
+    Ok(Bucket::new(s3, &format!("{prefix}/{FORMAT}")))
+}
 
 const fn ms(ms: u64) -> Duration {
     Duration::from_millis(ms)
@@ -431,15 +511,15 @@ pub fn now_ms() -> u64 {
     u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Refuse a store that ignores write preconditions: fencing rests on
-/// them. GCS's S3 API, for one, ignores `If-Match` on a PUT.
-async fn check_conditional_writes(bucket: &Bucket, node: &str) -> Result<()> {
-    let key = format!("nodes/{node}.probe");
+/// Refuse a store that ignores write preconditions: fencing and the
+/// deployment catalog rest on them. GCS's S3 API, for one, ignores
+/// `If-Match` on a PUT. `key` is an object only this check writes.
+pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
     let stale = Guard::Match(Version("\"0\"".into()));
-    let created = bucket.put_if(&key, vec![], Guard::Absent).await?;
-    let again = bucket.put_if(&key, vec![], Guard::Absent).await?;
-    let replaced = bucket.put_if(&key, vec![], stale).await?;
-    bucket.delete(&key).await?;
+    let created = bucket.put_if(key, vec![], Guard::Absent).await?;
+    let again = bucket.put_if(key, vec![], Guard::Absent).await?;
+    let replaced = bucket.put_if(key, vec![], stale).await?;
+    bucket.delete(key).await?;
     if created.is_none() || again.is_some() || replaced.is_some() {
         return Err(Error::Config(
             "the bucket ignores conditional writes (If-None-Match, If-Match)".into(),
@@ -460,14 +540,14 @@ mod tests {
     fn a_bucket_that_ignores_preconditions_is_refused() {
         block_on(async {
             assert!(
-                check_conditional_writes(&Bucket::memory(""), "n")
+                check_conditional_writes(&Bucket::memory(""), "n.probe")
                     .await
                     .is_ok()
             );
             let lax = Memory::default();
             lax.ignores_guards.set(true);
             let lax = Bucket::new(lax, "");
-            assert!(check_conditional_writes(&lax, "n").await.is_err());
+            assert!(check_conditional_writes(&lax, "n.probe").await.is_err());
         });
     }
 }

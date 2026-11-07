@@ -58,3 +58,12 @@ const reconnectServer = net.createServer((s) => {
   });
 });
 listenAndReport(reconnectServer, 'RECONNECT_SERVER_PORT');
+
+// Resets the connection once the client has sent something.
+const resetServer = net.createServer((s) => {
+  s.on('error', () => {
+    // Do nothing
+  });
+  s.once('data', () => s.resetAndDestroy());
+});
+listenAndReport(resetServer, 'RESET_SERVER_PORT');

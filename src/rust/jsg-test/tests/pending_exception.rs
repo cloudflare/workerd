@@ -70,7 +70,7 @@ impl Thrower {
         lock: &mut jsg::Lock<'s>,
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        self.throw_then(lock, first, |lock| jsg::Rc::new(Fresh).to_js(lock))
+        self.throw_then(lock, first, |lock| jsg::Rc::new(lock, Fresh).to_js(lock))
     }
 
     /// Wraps its own resource, whose wrapper already exists, so that wrapping it only reads the
@@ -189,9 +189,12 @@ impl Thrower {
 /// error and the caught exception are what tell a guarded shim from one that isn't.
 fn exception_survives(call: &str) {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let thrower = jsg::Rc::new(Thrower {
-            saw_pending: Cell::new(None),
-        });
+        let thrower = jsg::Rc::new(
+            lock,
+            Thrower {
+                saw_pending: Cell::new(None),
+            },
+        );
         ctx.set_global(lock, "obj", thrower.clone());
         let caught = ctx
             .eval::<String>(
@@ -294,9 +297,12 @@ impl Callee {
 #[test]
 fn callback_entered_while_try_catch_holds_exception_panics() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let callee = jsg::Rc::new(Callee {
-            ran: Cell::new(false),
-        });
+        let callee = jsg::Rc::new(
+            lock,
+            Callee {
+                ran: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "callee", callee.clone());
         match ctx.eval_with_caught_exception(lock, "callee.run()") {
             Err(crate::EvalError::EvalFailed) => {}

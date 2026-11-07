@@ -97,6 +97,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - The return value converts with `jsg::ToJS::to_js_with_creator`, with the resource's wrapper
   as the creator for an instance method and `None` for a static one, as C++ JSG passes
   `creator` to `wrap()`: a returned `jsg::Promise` keeps the resource alive until it settles.
+- A method, property or call handler that returns a promise (`jsg::Promise<T>` or
+  `v8::Local<v8::Promise>`, alone or in a `Result`) rejects it with what it throws, an argument
+  conversion error included, when the isolate captures throws as rejections (the
+  `capture_async_api_throws` compatibility flag), as C++ JSG does; otherwise it throws. A
+  termination still propagates.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
@@ -138,7 +143,7 @@ impl DnsUtil {
 
     // Static — DnsUtil.create(…)
     #[jsg_method]
-    pub fn create(name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
+    pub fn create(lock: &mut Lock, name: String) -> Result<jsg::Rc<Self>, jsg::Error> { … }
 }
 ```
 

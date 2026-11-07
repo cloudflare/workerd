@@ -11,8 +11,10 @@ use std::io::Write;
 use std::rc::Rc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Either;
+use futures::future::FusedFuture;
 use futures::future::LocalBoxFuture;
 use futures::stream::FuturesUnordered;
 use kj_rs::KjMaybe;
@@ -24,6 +26,7 @@ use workerd_capnp::service;
 use workerd_capnp::socket;
 
 use crate::Result;
+use crate::actor;
 use crate::bench;
 use crate::bindings::Designator;
 use crate::bindings::len_u32;
@@ -31,6 +34,7 @@ use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::cluster;
 use crate::cluster::ClusterNode;
+use crate::config::Deployments;
 use crate::config::Factory;
 use crate::config::Overrides;
 use crate::config::Reporter;
@@ -66,6 +70,9 @@ pub struct RunOptions {
     /// `--cluster-addr` and `--cluster-advertise`.
     pub cluster_address: Option<String>,
     pub cluster_advertise: Option<String>,
+    /// The source deployment of each appended service and of each service left absent because its
+    /// deployment was skipped.
+    pub deployments: Deployments,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -93,6 +100,17 @@ impl Control {
         self.write(&format!(
             "{{\"event\":\"listen-inspector\",\"port\":{port}}}\n"
         ));
+    }
+
+    fn listen_cluster(&mut self, listener: &tokio::net::TcpListener) -> Result<()> {
+        let port = listener
+            .local_addr()
+            .map_err(|e| kj::failed!("{e}"))?
+            .port();
+        self.write(&format!(
+            "{{\"event\":\"listen-cluster\",\"port\":{port}}}\n"
+        ));
+        Ok(())
     }
 }
 
@@ -199,11 +217,14 @@ async fn start(
     if server.report().refuses() {
         return Ok(None);
     }
+    // The cluster's event goes before the sockets', so a consumer that stops reading at a
+    // socket's has it.
+    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        control.listen_cluster(&listener)?;
+        start_cluster(&factory, node, listener);
+    }
     for (name, port) in ports {
         control.listen(&name, port);
-    }
-    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
-        start_cluster(&factory, node, listener);
     }
 
     if let Some(address) = &options.debug_port {
@@ -346,6 +367,11 @@ fn report_unmatched_overrides(
     let mut directories: Vec<&str> = overrides.directories.keys().map(String::as_str).collect();
     for conf in config.get_services().map_err(capnp_error)? {
         let name = text(conf.get_name())?;
+        // The overrides are for the node's own services, so whether one matches does not depend
+        // on the bucket's deployments.
+        if server.report().from_deployment(&name) {
+            continue;
+        }
         match conf.which() {
             Ok(service::Which::External(_)) => externals.retain(|n| *n != name),
             Ok(service::Which::Disk(_)) => directories.retain(|n| *n != name),
@@ -386,6 +412,10 @@ async fn serve_listeners(
 /// `workerd serve`: serves until `drain` resolves, then stops accepting connections, lets the
 /// open ones finish, and stops the actors' containers. A listener failing is fatal and is the
 /// error returned.
+///
+/// In a cluster, the instance first hands its Durable Objects off while it keeps serving, then
+/// leaves the cluster, and accepts requests for a grace period at least; the cluster's
+/// `stopTimeoutMs` bounds all of it.
 pub async fn run(
     factory: Rc<Factory>,
     options: RunOptions,
@@ -401,31 +431,87 @@ pub async fn run(
         return Ok(());
     };
 
+    // Whatever way this returns, the cluster port answers that this instance is not ready.
+    let _serving = server.cluster().map(ClusterNode::serving);
     let drain = std::pin::pin!(drain);
-    let serving = std::pin::pin!(serve_listeners(&mut listeners));
+    let mut serving = std::pin::pin!(serve_listeners(&mut listeners).fuse());
+    let mut stop = None;
     // Draining stops the accept loops; the listeners then end once their connections have.
-    match futures::future::select(serving, drain).await {
+    match futures::future::select(serving.as_mut(), drain).await {
         Either::Left((result, _)) => result?,
-        Either::Right(((), serving)) => {
-            // A draining instance claims nothing more, lets its clustered objects go,
-            // `preventEviction` or not, and leaves the cluster, so peers take them over at their
-            // next listing while its connections finish. A request in flight on one could not
-            // commit anyway once a peer owns the object.
+        Either::Right(((), _)) => {
+            // A draining instance claims nothing more and hands its clustered objects off,
+            // `preventEviction` or not, while it serves on: a request for one waits for it and
+            // then goes where it runs next. Then it leaves the cluster, so peers take over what
+            // it did not hand off, accepts requests until the grace period ends, as load
+            // balancers may still send some, and lets its connections, peers' among them, finish.
             if let Some(node) = server.cluster() {
-                node.cluster.start_draining();
+                let deadlines = node.start_draining();
                 let workers = server
                     .services()
                     .filter_map(|(_, service)| service.as_worker());
-                let namespaces = workers.flat_map(|worker| worker.namespaces());
-                for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
-                    namespace.abort_all(None);
+                let namespaces: Vec<_> = workers
+                    .flat_map(|worker| worker.namespaces())
+                    .map(|(_, ns)| ns)
+                    .filter(|ns| ns.cluster().is_some())
+                    .collect();
+                let handoff = std::pin::pin!(actor::hand_off_all(&namespaces, deadlines));
+                let stopped = match futures::future::select(serving.as_mut(), handoff).await {
+                    Either::Left((result, handoff)) => {
+                        result?;
+                        handoff.await
+                    }
+                    Either::Right((stopped, _)) => stopped,
+                };
+                // Released before the lease goes, so nothing is served after it. Until the
+                // deregistration lands (milliseconds, or the lease's 20 s if it fails), a peer
+                // that reads this node's record still finds it live and routes here again. With
+                // objects still running, which stopping very many can leave, it stays a member:
+                // peers take over every object it did not hand off once its lease expires, after
+                // this process exited.
+                if stopped {
+                    let deregister = node.cluster.deregister();
+                    match tokio::time::timeout_at(deadlines.connections, deregister).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => tracing::warn!("leaving the cluster: {e}"),
+                        Err(_) => tracing::warn!("leaving the cluster timed out"),
+                    }
+                } else {
+                    tracing::warn!(
+                        "Durable Objects still run at the release deadline: staying a cluster \
+                         member, so that peers take over its objects once this node's lease \
+                         expires"
+                    );
                 }
-                if let Err(e) = node.cluster.deregister().await {
-                    tracing::warn!("leaving the cluster: {e}");
+                let grace = std::pin::pin!(tokio::time::sleep_until(deadlines.grace));
+                if let Either::Left((result, _)) =
+                    futures::future::select(serving.as_mut(), grace).await
+                {
+                    result?;
                 }
+                stop = Some((Rc::clone(node), deadlines));
             }
             draining.send_replace(true);
-            serving.await?;
+            if let Some((node, deadlines)) = &stop {
+                let finished = async {
+                    if !serving.is_terminated() {
+                        serving.as_mut().await?;
+                    }
+                    node.peer_requests_done().await;
+                    Ok::<_, crate::Error>(())
+                };
+                let finished = tokio::time::timeout_at(deadlines.connections, finished);
+                if let Ok(result) = finished.await {
+                    result?;
+                } else {
+                    tracing::warn!(
+                        "stopping with requests in flight at the connections deadline: they end \
+                         as the process exits"
+                    );
+                }
+            } else {
+                serving.await?;
+            }
         }
     }
 
@@ -434,10 +520,19 @@ pub async fn run(
     let workers = server
         .services()
         .filter_map(|(_, service)| service.as_worker());
+    let until = stop.as_ref().map(|(_, deadlines)| deadlines.stop);
     for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
-        namespace.begin_container_cleanup();
+        namespace.begin_container_cleanup(until).await;
     }
-    Ok(ffi::factory_shutdown_containers(server.factory().raw()).await?)
+    let cleanup = ffi::factory_shutdown_containers(server.factory().raw());
+    let Some((_, deadlines)) = stop else {
+        return Ok(cleanup.await?);
+    };
+    if let Ok(result) = tokio::time::timeout_at(deadlines.stop, cleanup).await {
+        return Ok(result?);
+    }
+    tracing::warn!("leaving containers behind at the stop deadline");
+    Ok(())
 }
 
 /// The entrypoints `workerd test` or `workerd bench` runs a handler of: the channel of each,

@@ -15,6 +15,7 @@
     reason = "holds the cxx bridge, which expands to unsafe FFI glue, and `rewriting_response`, the safe wrapper over the bridge's `unsafe fn new_rewriting_response`"
 )]
 
+pub use crate::actor::MovedHook;
 pub use crate::channels::AbortReason;
 pub use crate::channels::ActorClassChannel;
 pub use crate::channels::ActorHooks;
@@ -34,6 +35,7 @@ pub use crate::in_process::InProcessServer;
 pub use crate::in_process::close_in_process_server;
 pub use crate::in_process::new_in_process_server;
 pub use crate::listen::udp::UdpFlow;
+pub use crate::pyodide::pyodide_bundle_fetch;
 pub use crate::tasks::SpawnedTask;
 pub use crate::tasks::task_run;
 
@@ -526,6 +528,16 @@ pub mod ffi {
         /// Shuts down the Docker client of every actor's container and resolves once Docker has
         /// removed the containers. No actor can start a container afterwards.
         async fn factory_shutdown_containers(factory: &WorkerFactory) -> Result<()>;
+        /// Shuts down the Docker client of root actor `actor`'s container, in the namespace
+        /// `unique_key`, and resolves once Docker has removed the container.
+        async fn factory_stop_container(
+            factory: &WorkerFactory,
+            unique_key: &str,
+            actor: &str,
+        ) -> Result<()>;
+        /// Gives `metadata` what made it when an actor's work makes it: the actor's
+        /// `ActorHooks::stamp_cause`.
+        fn stamp_current_actor_cause(metadata: Pin<&mut RequestMetadata>);
 
         /// The source of a dynamic worker, as the worker that loads it supplies it; handed
         /// straight to `factory_new_worker`.
@@ -544,6 +556,20 @@ pub mod ffi {
         fn request_metadata_set_from_persistent_stub(
             metadata: Pin<&mut RequestMetadata>,
             persistent: bool,
+        );
+        /// The draining cluster node that sent the request on.
+        fn request_metadata_forwarded_by(metadata: &RequestMetadata) -> KjMaybe<String>;
+        /// Names this draining node as the one that sent the request on.
+        fn request_metadata_set_forwarded_by(metadata: Pin<&mut RequestMetadata>, node: &str);
+        /// Whether the work of an object being handed off made the request, as its maker said.
+        fn request_metadata_from_handoff(metadata: &RequestMetadata) -> bool;
+        /// The objects whose work made the request, as its maker said.
+        fn request_metadata_caused_by(metadata: &RequestMetadata) -> Vec<String>;
+        /// Sets what made the request, also for a peer it is sent to.
+        fn request_metadata_set_cause(
+            metadata: Pin<&mut RequestMetadata>,
+            from_handoff: bool,
+            caused_by: Vec<String>,
         );
         /// Makes stubs the request creates for the actor itself restorable: they encode the
         /// actor's namespace and id.
@@ -624,6 +650,24 @@ pub mod ffi {
             client: &RpcClient,
             metadata: KjOwn<RequestMetadata>,
         ) -> KjOwn<WorkerInterface>;
+        /// `inner`, calling `hook.moved()` on each of its events that fails with a `moved`
+        /// answer (`cluster::moved`).
+        fn worker_interface_watch_moved(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+        /// `worker_interface_watch_moved` for an interface on a peer. A failure neither side
+        /// marked as before or after delivery is marked as after it, and one that is a
+        /// disconnect calls `hook.lost()`.
+        fn worker_interface_watch_peer(
+            inner: KjOwn<WorkerInterface>,
+            hook: Box<MovedHook>,
+        ) -> KjOwn<WorkerInterface>;
+
+        /// The detail ids (`jsg/exception.h`) that mark a request refused before anything ran:
+        /// `REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID` and `ACTOR_PREDECESSOR_REJECTED_DETAIL_ID`.
+        fn request_not_delivered_detail_id() -> u64;
+        fn actor_predecessor_rejected_detail_id() -> u64;
 
         /// Starts the inspector on `address` on its own thread; every isolate the factory
         /// creates afterwards registers with it. Returns the bound port.
@@ -728,6 +772,8 @@ pub mod ffi {
             params: &'a [u64],
         ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
+        fn add_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
+        fn add_skipped_deployment_service(self: &InProcessServer, deployment: &str, service: &str);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
         async unsafe fn accept<'a>(
@@ -742,6 +788,18 @@ pub mod ffi {
         /// `task_run` is the promise the task set holds.
         type SpawnedTask;
         async fn task_run(task: Box<SpawnedTask>) -> Result<()>;
+
+        /// The bytes of Pyodide bundle `version` (pyodide.rs): read from the disk cache in
+        /// `cache_dir`, else downloaded and written to the cache. Empty when there is no bundle
+        /// to be had; a bundle is never empty.
+        // TODO(cleanup): Return `KjMaybe<Vec<u8>>` rather than an empty `Vec` for no bundle, once
+        // the cxx fork's `KjMaybe` supports `Vec` (`check_type_kj_maybe` in
+        // src/rust/cxx/syntax/check.rs).
+        async unsafe fn pyodide_bundle_fetch<'a>(
+            cache_dir: KjMaybe<&'a str>,
+            version: &'a str,
+            integrity: &'a str,
+        ) -> Result<Vec<u8>>;
 
         /// The server, for the factory's callbacks: resolving channel tokens and debug-port
         /// requests to channels. A weak handle: the server owns the factory, and every call
@@ -931,6 +989,8 @@ pub mod ffi {
         fn inactive(self: &ActorHooks);
         /// What makes the actor's commits durable, when the cluster replicates it.
         fn committer(self: &ActorHooks) -> Result<Box<Committer>>;
+        /// Gives a request the actor's work makes what made it (`Cause`).
+        fn stamp_cause(self: &ActorHooks, metadata: Pin<&mut RequestMetadata>);
 
         type Committer;
         /// Makes the commits captured so far durable.
@@ -946,6 +1006,12 @@ pub mod ffi {
 
         /// What a request's interface keeps alive (`worker_interface_attach`).
         type KeepAlive;
+
+        /// What a stub forgets when the instance it reached answers that the object moved
+        /// (`worker_interface_watch_moved`).
+        type MovedHook;
+        fn moved(self: &MovedHook);
+        fn lost(self: &MovedHook);
 
         /// One UDP flow (every datagram to and from one peer, until idle), as the
         /// `workerd::DatagramChannel` of a `UdpConnectCustomEvent`.

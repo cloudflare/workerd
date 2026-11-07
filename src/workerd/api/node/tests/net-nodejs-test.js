@@ -1631,6 +1631,66 @@ export const testNetConnectRefusedHostname = {
   },
 };
 
+// A connection the peer resets is reported as Node's read ECONNRESET rather
+// than a generic failure or a clean end.
+export const testNetConnectionReset = {
+  async test(_, env) {
+    const socket = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.RESET_SERVER_PORT,
+    });
+    await once(socket, 'connect');
+    const events = [];
+    const { promise, resolve } = Promise.withResolvers();
+    socket.on('end', () => events.push(['end']));
+    socket.on('error', (err) => events.push(['error', err]));
+    socket.on('close', (hadError) => {
+      events.push(['close', hadError]);
+      resolve();
+    });
+    socket.resume();
+    socket.write('x');
+    await promise;
+    deepStrictEqual(
+      events.map((e) => e[0]),
+      ['error', 'close']
+    );
+    const err = events[0][1];
+    ok(err instanceof Error);
+    strictEqual(String(err), 'Error: read ECONNRESET');
+    strictEqual(err.code, 'ECONNRESET');
+    strictEqual(err.errno, -104);
+    strictEqual(err.syscall, 'read');
+    deepStrictEqual(events[1], ['close', true]);
+  },
+};
+
+// A write to a connection the peer has reset fails as Node's write error.
+export const testNetConnectionResetWrite = {
+  async test(_, env) {
+    const socket = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.RESET_SERVER_PORT,
+      allowHalfOpen: true,
+    });
+    // Paused before it connects, the socket never starts reading, so only the
+    // write can observe the reset.
+    socket.pause();
+    await once(socket, 'connect');
+    let err;
+    socket.on('error', (e) => (err ??= e));
+    // Keep writing until one observes the reset, however long it takes to
+    // arrive.
+    while (err === undefined) {
+      socket.write('x');
+      await scheduler.wait(10);
+    }
+    ok(['ECONNRESET', 'EPIPE'].includes(err.code), String(err));
+    strictEqual(String(err), `Error: write ${err.code}`);
+    strictEqual(err.syscall, 'write');
+  },
+};
+
 // A host that does not resolve is reported as Node's getaddrinfo error:
 // ENOTFOUND from a resolver, EAI_AGAIN where the sandbox has no resolver.
 export const testNetConnectNotFound = {

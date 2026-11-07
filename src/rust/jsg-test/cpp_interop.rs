@@ -367,10 +367,13 @@ unsafe fn host_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::MaybeLocal {
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            jsg::Rc::new(Host {
-                label: label.to_owned(),
-                held: jsg::RefCell::new(None),
-            })
+            jsg::Rc::new(
+                lock,
+                Host {
+                    label: label.to_owned(),
+                    held: jsg::RefCell::new(None),
+                },
+            )
             .to_js(lock)
         })
     }

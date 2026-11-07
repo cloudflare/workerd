@@ -27,7 +27,7 @@ fn register(mut registry: Pin<&mut v8::ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "test:exports",
-        |_lock| Ok(jsg::Rc::new(Exports)),
+        |lock| Ok(jsg::Rc::new(lock, Exports)),
         ModuleType::Internal,
     );
     jsg::modules::add_builtin(
