@@ -48,7 +48,7 @@ kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, const Url& spec) {
   auto normalized =
       spec.clone(Url::EquivalenceOption::IGNORE_SEARCH | Url::EquivalenceOption::IGNORE_FRAGMENTS);
   if (normalized.getHref() == "node:process"_kjb.asChars()) {
-    static const auto publicProcess = "node-internal:public_process"_url;
+    static const auto publicProcess = "node-internal:process_exports"_url;
     static const auto legacyProcess = "node-internal:legacy_process"_url;
     return isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess;
   }

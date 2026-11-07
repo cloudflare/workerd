@@ -882,7 +882,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
   // Handle process module redirection based on enable_nodejs_process_v2 flag
   if (spec == "node:process") {
-    auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+    auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:process_exports"_kj
                                                     : "node-internal:legacy_process"_kj;
     try {
       // Use resolveInternalImport for internal modules

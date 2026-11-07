@@ -696,12 +696,12 @@ export const createRequireFromEval = {
 };
 
 // Regression test: `node:process` (and bare `process`) is redirected to an
-// internal module (node-internal:public_process / legacy_process) that only
+// internal module (node-internal:process_exports / legacy_process) that only
 // resolves in the builtin bucket. The static-import and require() paths force a
 // BUILTIN_ONLY resolve context for the redirect, but the dynamic-import path
 // previously derived its resolve context type from the *referrer* (a bundle
 // module), so `await import('node:process')` failed with
-// "Module not found: node-internal:public_process". This pins all three routes
+// "Module not found: node-internal:process_exports". This pins all three routes
 // to the same instance so the dynamic path can't silently regress again.
 // See maybeRedirectNodeProcess + dynamicResolve in jsg/modules-new.c++.
 export const processRedirectAcrossResolutionRoutes = {
@@ -713,7 +713,7 @@ export const processRedirectAcrossResolutionRoutes = {
     strictEqual(typeof processStatic.nextTick, 'function');
 
     // Dynamic import, both prefixed and bare. This is the branch that used to
-    // throw "Module not found: node-internal:public_process".
+    // throw "Module not found: node-internal:process_exports".
     const viaNode = await import('node:process');
     const viaBare = await import('process');
     strictEqual(typeof viaNode.default.nextTick, 'function');
