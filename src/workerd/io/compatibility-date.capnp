@@ -1800,4 +1800,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  webSocketCloseAfterError @204 :Bool
+      $compatEnableFlag("web_socket_close_after_error")
+      $compatDisableFlag("no_web_socket_close_after_error")
+      $compatEnableDate("2027-01-15");
+  # When a WebSocket's read loop ends with an error other than a plain disconnect, for example a
+  # protocol violation by the peer or a message listener that threw, a close event with code 1006
+  # and wasClean false follows the error event, as the WebSocket standard requires. Without the
+  # flag only the error event fires and no close event ever arrives for that WebSocket.
 }
