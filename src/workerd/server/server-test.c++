@@ -4653,6 +4653,95 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   KJ_EXPECT(wsConn.isEof());
 }
 
+KJ_TEST("Server: Durable Objects websocket close() persists across hibernations") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2023-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName("closed-across-hibernation");
+                `    return await env.ns.get(id).fetch(request);
+                `  }
+                `}
+                `
+                `export class MyActorClass {
+                `  constructor(state) {
+                `    this.state = state;
+                `    // Counts requests served by this instance. A count of 1 on a later request
+                `    // shows the actor was evicted and constructed again in between.
+                `    this.reqCount = 0;
+                `  }
+                `
+                `  async fetch(request) {
+                `    this.reqCount += 1;
+                `    if (request.url.endsWith("/")) {
+                `      let pair = new WebSocketPair();
+                `      this.state.acceptWebSocket(pair[1]);
+                `      return new Response(null, {status: 101, webSocket: pair[0]});
+                `    }
+                `
+                `    let [ws] = this.state.getWebSockets();
+                `    if (request.url.endsWith("/close")) {
+                `      ws.close(1000, "closed by DO");
+                `    }
+                `    let sendThrew = false;
+                `    try { ws.send("sent after close"); } catch (e) { sendThrew = true; }
+                `    return new Response(
+                `        `readyState=${ws.readyState} sendThrew=${sendThrew} reqCount=${this.reqCount}`);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // The actor closes the WebSocket. The client reads the Close frame but never sends one back, so
+  // the WebSocket stays CLOSING.
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/close", "readyState=2 sendThrew=true reqCount=2");
+  }
+  wsConn.recvWebSocketClose(1000);
+
+  // Force hibernation by waiting 10 seconds.
+  test.wait(10);
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/state", "readyState=2 sendThrew=true reqCount=1");
+  }
+
+  // Force hibernation again. This one saves the state that the previous wake-up restored.
+  test.wait(10);
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/state", "readyState=2 sendThrew=true reqCount=1");
+  }
+}
+
 KJ_TEST("Server: Durable Objects websocket constructor throws after send") {
   // This is a regression test for https://jira.cfdata.org/browse/VULN-146323,
   // It should be run under ASAN.
