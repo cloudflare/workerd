@@ -1211,9 +1211,59 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
   }
 }
 
-TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
+TailStreamWriter::TailStreamWriter(
+    Pending pending, kj::TaskSet& waitUntilTasks, kj::Maybe<kj::Rc<TailStreamBudget>> budget)
     : inner(kj::mv(pending)),
-      waitUntilTasks(waitUntilTasks) {}
+      waitUntilTasks(waitUntilTasks),
+      budget(kj::mv(budget)) {}
+
+TailStreamWriter::Active::~Active() noexcept(false) {
+  stop();
+}
+
+bool TailStreamWriter::Active::tryHold(size_t bytes) {
+  if (queuedBytes + sentBytes + bytes > MAX_SESSION_BYTES) {
+    return false;
+  }
+  KJ_IF_SOME(b, budget) {
+    if (!b->tryReserve(bytes)) {
+      return false;
+    }
+  }
+  queuedBytes += bytes;
+  return true;
+}
+
+void TailStreamWriter::Active::hold(size_t bytes) {
+  KJ_IF_SOME(b, budget) {
+    b->reserve(bytes);
+  }
+  queuedBytes += bytes;
+}
+
+void TailStreamWriter::Active::markSent(size_t bytes) {
+  KJ_ASSERT(bytes <= queuedBytes);
+  queuedBytes -= bytes;
+  sentBytes += bytes;
+}
+
+void TailStreamWriter::Active::releaseSent(size_t bytes) {
+  KJ_ASSERT(bytes <= sentBytes);
+  sentBytes -= bytes;
+  KJ_IF_SOME(b, budget) {
+    b->release(bytes);
+  }
+}
+
+void TailStreamWriter::Active::stop() {
+  queue.clear();
+  capability = kj::none;
+  KJ_IF_SOME(b, budget) {
+    b->release(queuedBytes + sentBytes);
+  }
+  queuedBytes = 0;
+  sentBytes = 0;
+}
 
 bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
@@ -1239,11 +1289,23 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
 
   // We do not expect any events after the outcome.
   bool isClosing = event.event.is<Outcome>();
+  // The onset, return and outcome events are each provided once and are never dropped.
+  bool isRequired =
+      event.event.is<kj::Own<Onset>>() || event.event.is<Outcome>() || event.event.is<Return>();
+  size_t bytes = queuedEventSize(sizeHint);
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: actives) {
-    // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
-    // events are only provided once and thus won't be dropped.
-    if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
+    bool held = true;
+    if (isRequired) {
+      active->hold(bytes);
+    } else {
+      held = active->tryHold(bytes);
+    }
+    if (held) {
+      if (event.event.is<kj::Own<Onset>>()) {  // NOLINT(workerd-use-after-move)
+        active->onsetBytes = bytes;
+      }
+
       // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
       // event indicating how many events were dropped if applicable.
       //
@@ -1254,6 +1316,7 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
         StreamDiagnosticsEvent diag(active->droppedEvents);
         TailEvent diagTailEvent(SpanContext::clone(event.spanContext), event.invocationId,
             event.timestamp, event.sequence, kj::mv(diag));
+        active->hold(queuedEventSize(0));
         active->queue.push(kj::mv(diagTailEvent));
         // Increment the outcome sequence number to keep things consistent.
         event.sequence++;
@@ -1266,10 +1329,6 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
       } else {
         active->queue.push(event.clone());
       }
-      // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
-      // overhead. As long as this estimate is reasonably accurate, we won't need to check the
-      // size again when serializing the message.
-      active->queueSize += tailSerializationOverhead + sizeHint;
     } else {
       active->droppedEvents++;
     }
@@ -1309,12 +1368,14 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       // other events in the bundle. So here we'll separate it out and deliver
       // just the one event...
       onsetEvent.copyTo(eventsBuilder[0]);
+      auto onsetBytes = current->onsetBytes;
+      current->markSent(onsetBytes);
       auto result = co_await builder.send();
+      current->releaseSent(onsetBytes);
       if (result.getStop()) {
         // If our call to send returns a stop signal, then we'll clear
         // the capability and be done.
-        current->queue.clear();
-        current->capability = kj::none;
+        current->stop();
         co_return;
       }
     }
@@ -1326,11 +1387,14 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       auto eventsBuilder = builder.initEvents(current->queue.size());
       size_t n = 0;
 
-      // We're synchronously draining the queue – reset its size.
-      current->queueSize = 0;
+      // We're synchronously draining the queue. The batch holds its memory until it is
+      // acknowledged.
+      auto batchBytes = current->queuedBytes;
+      current->markSent(batchBytes);
       current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
       auto result = co_await builder.send();
+      current->releaseSent(batchBytes);
 
       // Note that although we cleared the current.queue above, it is
       // possible/likely that additional events were added to the queue
@@ -1342,8 +1406,7 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       // been added to the queue or exit this loop if there are no additional
       // events waiting to be sent.
       if (result.getStop()) {
-        current->queue.clear();
-        current->capability = kj::none;
+        current->stop();
         co_return;
       }
     }
@@ -1351,8 +1414,7 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
     // If any RPC throws an exception, we should treat it as a stop signal, as this suggests
     // the connection to the STW itself has been lost. (An excpetion thrown within the STW
     // itself would have resulted in a `stop` return value instead of an exception over RPC.)
-    current->queue.clear();
-    current->capability = kj::none;
+    current->stop();
     throw;
   }
 }
@@ -1360,12 +1422,14 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Rc<TailStreamBudget>> budget) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
   }
 
-  return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
+  return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks, kj::mv(budget));
 }
 
 void TailStreamWriter::report(const InvocationSpanContext& context,
@@ -1416,7 +1480,8 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
       inner = kj::Vector<kj::Own<Active>>( KJ_MAP(wi, pending) {
         auto customEvent = kj::heap<TailStreamCustomEvent>();
         auto result = customEvent->getCap();
-        auto active = kj::refcounted<Active>(kj::mv(result));
+        auto active = kj::refcounted<Active>(
+            kj::mv(result), budget.map([](kj::Rc<TailStreamBudget>& b) { return b.addRef(); }));
 
         // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay alive
         // until tail worker operations including JS execution are complete, including returning the
