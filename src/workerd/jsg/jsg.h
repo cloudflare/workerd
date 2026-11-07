@@ -920,12 +920,12 @@ class Data {
   }
 
   // Get the raw underlying v8 handle.
-  v8::Local<v8::Data> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<v8::Data> getHandle(Lock& js) const;
 
   Data addRef(v8::Isolate* isolate) {
     return Data(isolate, getHandle(isolate));
   }
-  Data addRef(Lock& js);
+  JSG_NO_JS Data addRef(Lock& js);
 
   // Call fn with the underlying v8::Global<v8::Data> handle.
   // Also resets tracedHandle, which V8 would otherwise report as an unserialized eternal handle
@@ -1025,12 +1025,12 @@ class V8Ref: private Data {
       return Data::getHandle(isolate).template As<T>();
     }
   }
-  v8::Local<T> getHandle(jsg::Lock& js) const;
+  JSG_NO_JS v8::Local<T> getHandle(jsg::Lock& js) const;
 
   V8Ref addRef(v8::Isolate* isolate) {
     return V8Ref(isolate, getHandle(isolate));
   }
-  V8Ref addRef(jsg::Lock& js);
+  JSG_NO_JS V8Ref addRef(jsg::Lock& js);
 
   V8Ref deepClone(jsg::Lock& js);
 
@@ -1082,7 +1082,7 @@ class HashableV8Ref: public V8Ref<T> {
   HashableV8Ref addRef(v8::Isolate* isolate) {
     return HashableV8Ref(isolate, this->getHandle(isolate), identityHash);
   }
-  HashableV8Ref addRef(jsg::Lock& js);
+  JSG_NO_JS HashableV8Ref addRef(jsg::Lock& js);
 
   int hashCode() const {
     return identityHash;
@@ -1174,7 +1174,7 @@ class WeakV8Ref final {
     return KJ_ASSERT_NONNULL(
         tryGetHandle(isolate), "attempt to access collected jsg::WeakV8Ref target");
   }
-  v8::Local<T> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<T> getHandle(Lock& js) const;
 
   // Try to promote to a strong V8Ref<T>. Returns kj::none if collected.
   kj::Maybe<V8Ref<T>> tryAddRef(v8::Isolate* isolate) const {
@@ -1847,7 +1847,7 @@ class WeakRef {
   kj::Maybe<Ref<T>> tryAddRef(Lock&) const;
 
   // Create another weak ref to the same target.
-  WeakRef addRef(jsg::Lock& js) &;
+  JSG_NO_JS WeakRef addRef(jsg::Lock& js) &;
   WeakRef addRef(jsg::Lock& js) && = delete;  // Redundant, just move.
 
  private:
@@ -2186,7 +2186,7 @@ class JsContext {
   v8::Local<v8::Context> getHandle(v8::Isolate* isolate) const {
     return handle.Get(isolate);
   }
-  v8::Local<v8::Context> getHandle(Lock& js) const;
+  JSG_NO_JS v8::Local<v8::Context> getHandle(Lock& js) const;
 
   // Moves out the underlying Global<Context> handle so snapshot preparation can reset it
   // ahead of CreateBlob. Leaves this JsContext with an empty handle, so this is only valid
@@ -3162,14 +3162,14 @@ class Lock {
   // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
   // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
   // implementation in setup.c++. Use responsibly.
-  void requestGcForTesting() const;
+  JSG_MAY_RUN_JS void requestGcForTesting() const;
 
   // Like requestGcForTesting(), but sweeps cppgc the way an allocation-triggered GC would: a
   // forced GC always sweeps atomically, whereas this uses the sweeping type newCppHeap()
   // configured. It is the only way a test can observe the finalization timing production
   // actually gets, and so notice if the configuration stops being honoured. Test-only, same as
   // requestGcForTesting().
-  void requestGcWithDefaultSweepForTesting() const;
+  JSG_MAY_RUN_JS void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
@@ -3303,7 +3303,7 @@ class Lock {
   JS_V8_SYMBOLS(V)
 #undef V
 
-  void runMicrotasks();
+  JSG_MAY_RUN_JS void runMicrotasks();
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();

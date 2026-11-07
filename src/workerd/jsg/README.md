@@ -260,6 +260,45 @@ signal that weak references should not be traced. Do not include them in `visitF
 from two owners is strong or traced depending on which visited last. The `jsg-shared-visit`
 clang-tidy check flags such visits.
 
+## Calls That Run JavaScript
+
+A call that runs JavaScript (calling a `jsg::Function` or `v8::Function`, resolving a promise,
+reading or writing a property, converting a value to a string or number, running microtasks,
+forcing a GC) can free anything a script can reach: user code can drop the last reference to
+an object, transition its state, or change a container the caller is iterating. Do not hold a
+local reference, pointer, iterator, or view (`kj::ArrayPtr`, `kj::StringPtr`, `kj::Ptr`) into
+JSG-owned state across such a call, and do not make such a call on one.
+
+```cpp
+// Bad: triggerAbort() runs listeners, which can drop the last reference to `follower`.
+auto& follower = KJ_ASSERT_NONNULL(weakFollower.tryGet());
+follower.triggerAbort(js, reason);
+
+// Good: the strong reference keeps it alive for the whole call.
+KJ_IF_SOME(follower, weakFollower.tryAddRef(js)) {
+  follower->triggerAbort(js, reason);
+}
+```
+
+Running JavaScript requires the lock, so treat any call you pass `js` to as able to run it. The
+`jsg-js-reentry` clang-tidy check does the same: a callee that takes a `jsg::Lock&`, one marked
+`JSG_MAY_RUN_JS`, a V8 entry point that runs script, or a function whose body in the translation
+unit calls one of those can run JavaScript, and the check reports borrows used after, or as the
+receiver of, such a call. A virtual call or an out-of-line definition needs no annotation, because
+the lock in its signature is enough. A lambda is judged by its body instead, which is always
+visible, and a call named only in an unevaluated operand such as `decltype` doesn't count. Both
+markers live in `util.h`:
+
+- `JSG_NO_JS` marks a primitive that takes the lock but never runs JavaScript, such as
+  `getHandle()`, `addRef()` or `jsg::Promise::then()`. Calls to it, and to its overrides, don't
+  count.
+- `JSG_MAY_RUN_JS` marks a function that runs JavaScript without taking the lock, such as one that
+  finds the lock itself.
+
+A `jsg::Function` keeps itself alive while it is called, and a `kj::Function` is held in C++
+state, so calling either through a borrow is not reported. Suppress a known-safe site with
+`// NOLINT(jsg-js-reentry)` and the reason.
+
 ## Weak References
 
 `jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference
