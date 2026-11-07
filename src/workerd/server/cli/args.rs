@@ -60,8 +60,10 @@ pub enum Command {
             S3-compatible bucket serve Durable Objects together. Each `cluster.bucketOptions` \
             setting falls back to an environment variable: AWS_ENDPOINT_URL, AWS_REGION, \
             AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, or \
-            AWS_CREDENTIALS_FILE. The cluster port must stay on a private network; see \
-            --cluster-addr."
+            AWS_CREDENTIALS_FILE. An empty `cluster.bucket` falls back to \
+            WORKERD_CLUSTER_BUCKET, and an empty `cluster.key` to WORKERD_CLUSTER_KEY or the \
+            file named by WORKERD_CLUSTER_KEY_FILE. The cluster port must stay on a private \
+            network; see --cluster-addr."
     )]
     Serve {
         #[command(flatten)]

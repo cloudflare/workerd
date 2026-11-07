@@ -15,6 +15,7 @@ use workerd_capnp::config;
 use workerd_server::config::DeploymentLog;
 use workerd_server::config::Deployments;
 
+use crate::config::CLUSTER_BUCKET;
 use crate::config::Config;
 
 /// Why the deployments could not be added, each error a line to print.
@@ -162,6 +163,11 @@ fn cluster_bucket(
             .collect::<Vec<_>>()
     })?;
     let url = text(cluster.get_bucket()).map_err(config_error)?;
+    if url.is_empty() {
+        return Err(vec![format!(
+            "cluster.bucket is not set. Set it in the config or in {CLUSTER_BUCKET}."
+        )]);
+    }
     let options = cluster
         .get_bucket_options()
         .and_then(|options| options.iter().map(text).collect())

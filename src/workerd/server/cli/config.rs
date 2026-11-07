@@ -99,6 +99,57 @@ impl Config {
         bytes_from_words(&self.0)
     }
 
+    /// Fills `cluster.key` and `cluster.bucket` from the environment where the config leaves them
+    /// empty. See `ClusterConfig` in workerd.capnp. `var` reads an environment variable and
+    /// returns `None` when it is unset or empty. A config without `cluster` is unchanged.
+    pub fn with_cluster_environment(
+        self,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        let bytes = self.to_bytes();
+        let message = capnp::serialize::read_message(bytes.as_slice(), reader_options())
+            .map_err(|error| error.to_string())?;
+        let root = message
+            .get_root::<config::Reader>()
+            .map_err(|error| error.to_string())?;
+        if !root.has_cluster() {
+            return Ok(self);
+        }
+        let cluster = root.get_cluster().map_err(|error| error.to_string())?;
+        let empty = |text: capnp::Result<capnp::text::Reader<'_>>| -> Result<bool, String> {
+            let text = text.and_then(|text| Ok(text.to_string()?));
+            Ok(text.map_err(|error| error.to_string())?.is_empty())
+        };
+        let key = if empty(cluster.get_key())? {
+            cluster_key(&var)?
+        } else {
+            None
+        };
+        let bucket = if empty(cluster.get_bucket())? {
+            var(CLUSTER_BUCKET)
+        } else {
+            None
+        };
+        if key.is_none() && bucket.is_none() {
+            return Ok(self);
+        }
+        let mut message = capnp::message::Builder::new_default();
+        message.set_root(root).map_err(|error| error.to_string())?;
+        let mut cluster = message
+            .get_root::<config::Builder>()
+            .and_then(config::Builder::get_cluster)
+            .map_err(|error| error.to_string())?;
+        if let Some(key) = key {
+            cluster.set_key(key.as_str());
+        }
+        if let Some(bucket) = bucket {
+            cluster.set_bucket(bucket.as_str());
+        }
+        Ok(Self(words_from_bytes(
+            &capnp::serialize::write_message_to_words(&message),
+        )))
+    }
+
     /// Writes the encoded config to stdout (`compile --config-only`).
     pub fn write_to_stdout(&self) -> io::Result<()> {
         let mut out = io::stdout().lock();
@@ -107,6 +158,53 @@ impl Config {
         }
         out.flush()
     }
+}
+
+/// The environment variable that holds the cluster key when the config leaves it empty.
+pub const CLUSTER_KEY: &str = "WORKERD_CLUSTER_KEY";
+/// The environment variable that names a file holding the cluster key, such as a mounted secret.
+pub const CLUSTER_KEY_FILE: &str = "WORKERD_CLUSTER_KEY_FILE";
+/// The environment variable that holds the cluster bucket when the config leaves it empty.
+pub const CLUSTER_BUCKET: &str = "WORKERD_CLUSTER_BUCKET";
+
+/// The cluster key from `CLUSTER_KEY` or the file `CLUSTER_KEY_FILE` names, without the file's
+/// trailing whitespace, such as a final newline.
+fn cluster_key(var: impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+    match (var(CLUSTER_KEY), var(CLUSTER_KEY_FILE)) {
+        (Some(_), Some(_)) => Err(format!(
+            "cluster: set only one of {CLUSTER_KEY} and {CLUSTER_KEY_FILE}."
+        )),
+        (Some(key), None) => Ok(Some(key)),
+        (None, Some(path)) => read_key_file(&path)
+            .map(Some)
+            .map_err(|error| format!("cluster: {CLUSTER_KEY_FILE}={path}: {error}")),
+        (None, None) => Ok(None),
+    }
+}
+
+/// The largest key file read. A key is a few dozen bytes; the limit keeps a mistaken path, such
+/// as a device, from being read without end.
+const MAX_KEY_FILE: u64 = 4096;
+
+/// The key in the regular file at `path`, without trailing whitespace.
+fn read_key_file(path: &str) -> Result<String, String> {
+    // Checked before opening: opening a FIFO blocks, and a device may never end. The check
+    // follows symlinks, as Kubernetes mounts a Secret's files through them.
+    if !std::fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("not a regular file".to_owned());
+    }
+    let file = File::open(path).map_err(|error| error.to_string())?;
+    let mut key = String::new();
+    file.take(MAX_KEY_FILE + 1)
+        .read_to_string(&mut key)
+        .map_err(|error| error.to_string())?;
+    if key.len() as u64 > MAX_KEY_FILE {
+        return Err(format!("larger than {MAX_KEY_FILE} bytes"));
+    }
+    Ok(key.trim_end().to_owned())
 }
 
 /// Configs can legitimately be very large and are not malicious, so use an effectively-infinite

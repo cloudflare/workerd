@@ -1128,7 +1128,7 @@ KJ_TEST("Server: a short cluster key is refused") {
   TestServer test(clusterConfig("0123456789abcdef"));
   test.server.allowExperimental();
   test.expectErrors(R"(
-    cluster.key must be at least 32 bytes.
+    cluster.key must be at least 32 bytes. Set it in the config, or for `workerd serve`, in WORKERD_CLUSTER_KEY or in a file named by WORKERD_CLUSTER_KEY_FILE.
   )"_blockquote);
 }
 

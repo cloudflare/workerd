@@ -190,7 +190,8 @@ struct ClusterConfig {
   # of the bucket does not reduce that authority.
 
   bucket @0 :Text;
-  # The bucket that holds the cluster's shared state: `s3://bucket/prefix`.
+  # The bucket that holds the cluster's shared state: `s3://bucket/prefix`. When empty, `serve`
+  # takes it from the environment variable `WORKERD_CLUSTER_BUCKET`.
 
   bucketOptions @1 :List(Text);
   # `key=value` settings for `bucket`: `aws_endpoint=https://...`, `aws_region=auto`,
@@ -223,6 +224,11 @@ struct ClusterConfig {
   # cannot be replayed; the instances' clocks must agree within 30 seconds. It also keys channel
   # tokens, which pass service and Durable Object stubs over RPC. Traffic is not encrypted: run
   # the cluster on a private network (a VPC, WireGuard, Tailscale).
+  #
+  # When empty, `serve` takes the key from the environment variable `WORKERD_CLUSTER_KEY`, or reads
+  # it at startup from the file that `WORKERD_CLUSTER_KEY_FILE` names, such as a mounted secret,
+  # ignoring trailing whitespace. Set only one of the two. A config, or a binary that
+  # `workerd compile` builds, then holds no key.
   #
   # TODO(someday): Support some way to gradually roll out a rotated key.
 
