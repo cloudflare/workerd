@@ -19,8 +19,8 @@ WD_STRONG_BOOL(ActorCallRetriesAllowed);
 WD_STRONG_BOOL(IsFirstActorCallAttempt);
 
 // Retry behavior set by the `retry` option of `DurableObjectNamespace.get()` and carried by the
-// returned stub. Applied when DURABLE_OBJECT_RETRIES_USERLAND is enabled. A stub without a retry
-// policy runs under ActorRetryPolicy::systemDefault() instead.
+// returned stub. A stub without a retry policy runs under ActorRetryPolicy::systemDefault()
+// instead.
 struct UserDefinedRetryPolicy {
   // Matches the runtime's default of five attempts in total.
   static constexpr uint DEFAULT_MAX_RETRIES = 4;

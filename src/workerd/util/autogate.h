@@ -82,8 +82,6 @@ namespace workerd::util {
      related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by           \
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
-  /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
-  V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Route all zlib usage in the process to zlib-rs (libz-rs-sys), the memory-safe Rust            \
      implementation, instead of chromium zlib. The unprefixed zlib symbols are owned by the        \
      routing layer in util/zlib-router.c++, so this covers every consumer: node:zlib, web          \

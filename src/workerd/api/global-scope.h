@@ -625,7 +625,7 @@ struct ExportedHandler {
 
   ExportedHandler clone(jsg::Lock& js);
 
-  // YES if `fetch` was marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  // YES if `fetch` was marked with retryable().
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
 
