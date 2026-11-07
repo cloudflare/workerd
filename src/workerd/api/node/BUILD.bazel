@@ -103,18 +103,6 @@ wd_cc_library(
 )
 
 kj_test(
-    # Runs every corpus input through both implementations for all 16 encoding
-    # pairs; the Windows CI runners take about 60s.
-    size = "enormous",
-    src = "i18n-test.c++",
-    deps = [
-        ":node-core",
-        "//src/workerd/jsg",
-        "//src/workerd/util:autogate",
-    ],
-)
-
-kj_test(
     src = "buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )

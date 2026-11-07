@@ -5,9 +5,8 @@
 //! The FFI island of the crate, and the only module that needs `unsafe`. It
 //! holds the `#[cxx::bridge]`; the entry point that turns C++'s raw
 //! `v8::Isolate*` into a [`jsg::Lock`]; and safe wrappers around the ICU
-//! converter calls and simdutf calls `i18n.c++` makes, through `rust_icu_sys`
-//! and `ffi.h`. Both run in the libraries workerd links, so every conversion is
-//! the same code the C++ path runs.
+//! converter API, through `rust_icu_sys`, and simdutf, through `ffi.h`. Both
+//! call into the ICU and simdutf that workerd links.
 #![allow(
     unsafe_code,
     reason = "the crate's FFI island: the cxx bridge, the raw-isolate entry point, and the ICU and simdutf calls"
@@ -72,7 +71,7 @@ mod bridge {
     }
 
     extern "Rust" {
-        /// Transcodes `source` from `from_encoding` to `to_encoding`, matching
+        /// Transcodes `source` from `from_encoding` to `to_encoding`, for
         /// `workerd::api::node::i18n::transcode`. Returns a `MaybeLocal`
         /// naming a `Uint8Array`, or an empty `MaybeLocal` with a JS exception
         /// already scheduled on `isolate` if transcoding fails.
@@ -120,15 +119,14 @@ fn is_failure(error: sys::UErrorCode) -> bool {
     error > sys::UErrorCode::U_ZERO_ERROR
 }
 
-/// The ICU converter name for `encoding`, matching `getEncodingName()` in
-/// `i18n.c++`.
+/// The ICU converter name for `encoding`.
 ///
 /// The bridge `Encoding` is a `cxx` shared enum, and so a `u8` newtype rather
-/// than a real Rust enum. As in `i18n.c++`, whose `getEncodingName` ends in
-/// `default: KJ_UNREACHABLE`, an unknown encoding is unreachable here:
-/// `dispatch` rejects an unknown source encoding up front, the C++ `fromImpl`
-/// conversion rejects anything but the four transcodable encodings before
-/// Rust is entered, and a panic in Rust reaches C++ as a `kj::Exception`.
+/// than a real Rust enum, which needs a catch-all arm. An unknown encoding is
+/// unreachable there: `dispatch` rejects an unknown source encoding up front,
+/// the C++ `fromImpl` conversion rejects anything but the four transcodable
+/// encodings before Rust is entered, and a panic in Rust reaches C++ as a
+/// `kj::Exception`.
 fn icu_name(encoding: Encoding) -> &'static CStr {
     match encoding {
         Encoding::Ascii => c"us-ascii",
@@ -139,7 +137,7 @@ fn icu_name(encoding: Encoding) -> &'static CStr {
     }
 }
 
-/// An open ICU converter, mirroring `i18n::Converter` in `i18n.c++`.
+/// An open ICU converter.
 ///
 /// Owns its `UConverter` and closes it on drop, including while unwinding.
 /// Holding a raw pointer makes the type neither `Send` nor `Sync`, which is
@@ -183,7 +181,7 @@ impl Converter {
 
     /// Sets the converter's substitute character sequence, used in place of
     /// unmappable characters during conversion. An empty `substitute` leaves
-    /// ICU's default in place, as in `i18n.c++`.
+    /// ICU's default in place.
     pub fn set_subst_chars(&self, substitute: &str) -> Result<(), TranscodeError> {
         if substitute.is_empty() {
             return Ok(());
@@ -222,8 +220,8 @@ impl Drop for Converter {
 }
 
 /// Converts `source` from `from`'s encoding to `to`'s via ICU's
-/// `ucnv_convertEx`, as `TranscodeDefault` in `i18n.c++` does. Returns the
-/// number of bytes written to `target`, or `None` if ICU reports failure.
+/// `ucnv_convertEx`. Returns the number of bytes written to `target`, or
+/// `None` if ICU reports failure.
 #[must_use]
 pub fn convert_ex(
     to: &Converter,
@@ -266,9 +264,8 @@ pub fn convert_ex(
 }
 
 /// Converts UTF-16LE `source` (as raw bytes) to `to`'s encoding via ICU's
-/// `ucnv_fromUChars`, as `TranscodeFromUTF16` in `i18n.c++` does. A trailing
-/// odd byte is ignored. Returns the number of bytes written to `target`, or
-/// `None` if ICU reports failure.
+/// `ucnv_fromUChars`. A trailing odd byte is ignored. Returns the number of
+/// bytes written to `target`, or `None` if ICU reports failure.
 #[must_use]
 pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
     let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
@@ -278,9 +275,9 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
     // SAFETY: the pointers and lengths describe the two live slices. `source`
     // need not be `u16`-aligned -- it is caller-supplied buffer contents, which
     // a Uint8Array can expose at an odd byteOffset -- and is reinterpreted as
-    // `UChar*` exactly as `i18n.c++` does with the same bytes. Casting a raw
-    // pointer is well-defined in Rust regardless of alignment; no reference to
-    // the misaligned data is ever formed on this side.
+    // `UChar*` in place. Casting a raw pointer is well-defined in Rust
+    // regardless of alignment; no reference to the misaligned data is ever
+    // formed on this side.
     let len = unsafe {
         versioned_function!(ucnv_fromUChars)(
             to.cnv,
@@ -299,27 +296,25 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
 
 // simdutf
 //
-// The simdutf C++ functions `i18n.c++` calls, through the inline forwarders in
-// `ffi.h`, declared in the bridge above.
+// simdutf's C++ functions, called through the inline forwarders in `ffi.h`,
+// declared in the bridge above.
 //
 // simdutf does not bound its writes by a destination length. Its conversions
 // write at most the length its own estimate reports for the same input, valid
 // or not: its SIMD kernels stop short of the end of the input by a margin
 // that keeps their wide stores inside an estimate-sized buffer ("to avoid
 // overruns", in `utf8_to_utf16::validating_transcoder::convert` and
-// `avx2_convert_utf16_to_utf8`), and report errors only after converting. The
-// C++ path relies on this too. [`Utf8Source`] and [`Utf16LeSource`] hold each
-// source together with the estimate taken from it, so a conversion can check
-// its destination against that estimate.
+// `avx2_convert_utf16_to_utf8`), and report errors only after converting.
+// [`Utf8Source`] and [`Utf16LeSource`] hold each source together with the
+// estimate taken from it, so a conversion can check its destination against
+// that estimate.
 //
-// UTF-16 is passed to simdutf as raw bytes reinterpreted as `char16_t*`,
-// exactly as `i18n.c++` passes the same bytes, and so need not be
-// `u16`-aligned; see [`from_uchars`].
+// UTF-16 is passed to simdutf as raw bytes reinterpreted as `char16_t*`, and
+// so need not be `u16`-aligned; see [`from_uchars`].
 
 /// Widens Latin-1 `source` into UTF-16LE (written to `target` as raw bytes)
-/// via `simdutf::convert_latin1_to_utf16`, as `TranscodeLatin1ToUTF16` in
-/// `i18n.c++` does. Returns the number of UTF-16 code units written, or `None`
-/// if `target` cannot hold two bytes per source byte.
+/// via `simdutf::convert_latin1_to_utf16`. Returns the number of UTF-16 code
+/// units written, or `None` if `target` cannot hold two bytes per source byte.
 #[must_use]
 pub fn convert_latin1_to_utf16(source: &[u8], target: &mut [u8]) -> Option<usize> {
     if target.len() / size_of::<u16>() < source.len() {
@@ -357,10 +352,9 @@ impl<'a> Utf8Source<'a> {
     }
 
     /// Converts to UTF-16LE (written to `target` as raw bytes) via
-    /// `simdutf::convert_utf8_to_utf16le`, as `TranscodeUTF16FromUTF8` in
-    /// `i18n.c++` does. Returns the number of code units written, which is `0`
-    /// for invalid UTF-8, or `None` if `target` cannot hold
-    /// [`Utf8Source::utf16_len`] code units.
+    /// `simdutf::convert_utf8_to_utf16le`. Returns the number of code units
+    /// written, which is `0` for invalid UTF-8, or `None` if `target` cannot
+    /// hold [`Utf8Source::utf16_len`] code units.
     pub fn convert_to_utf16le(&self, target: &mut [u8]) -> Option<usize> {
         if target.len() / 2 < self.utf16_len {
             return None;
@@ -407,10 +401,9 @@ impl<'a> Utf16LeSource<'a> {
         self.utf8_len
     }
 
-    /// Converts to UTF-8 via `simdutf::convert_utf16le_to_utf8`, as
-    /// `TranscodeUTF8FromUTF16` in `i18n.c++` does. Returns the number of
-    /// bytes written, which is `0` if the source contains an unpaired
-    /// surrogate, or `None` if `target` cannot hold
+    /// Converts to UTF-8 via `simdutf::convert_utf16le_to_utf8`. Returns the
+    /// number of bytes written, which is `0` if the source contains an
+    /// unpaired surrogate, or `None` if `target` cannot hold
     /// [`Utf16LeSource::utf8_len`] bytes.
     pub fn convert_to_utf8(&self, target: &mut [u8]) -> Option<usize> {
         if target.len() < self.utf8_len {
