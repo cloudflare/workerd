@@ -22,6 +22,18 @@
 
 #include <typeinfo>
 
+#ifdef __clang__
+// Marks a function that can run JavaScript, or force a GC, before it returns. JavaScript run in the
+// middle of a C++ method can free the state the method borrowed, so the jsg-js-reentry clang-tidy
+// check reports borrows used after a call to a marked function. The check also treats V8's script
+// entry points, and functions whose body in the same translation unit calls a marked function, as
+// running JavaScript, so this is needed only where it can't see the body: out-of-line definitions
+// and type-erased calls.
+#define JSG_MAY_RUN_JS __attribute__((annotate("jsg_may_run_js")))
+#else
+#define JSG_MAY_RUN_JS
+#endif
+
 namespace v8 {
 class Isolate;
 }

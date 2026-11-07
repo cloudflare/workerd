@@ -256,6 +256,32 @@ This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
 
+## Calls That Run JavaScript
+
+A call that runs JavaScript (calling a `jsg::Function` or `v8::Function`, resolving a promise,
+reading or writing a property, converting a value to a string or number, running microtasks,
+forcing a GC) can free anything a script can reach: user code can drop the last reference to
+an object, transition its state, or change a container the caller is iterating. Do not hold a
+local reference, pointer, iterator, or view (`kj::ArrayPtr`, `kj::StringPtr`, `kj::Ptr`) into
+JSG-owned state across such a call, and do not make such a call on one.
+
+```cpp
+// Bad: triggerAbort() runs listeners, which can drop the last reference to `follower`.
+auto& follower = *weakFollower;
+follower.triggerAbort(js, reason);
+
+// Good: the strong reference keeps it alive for the whole call.
+auto follower = weakFollower->addRef();
+follower->triggerAbort(js, reason);
+```
+
+Mark a function that can run JavaScript or trigger GC with `JSG_MAY_RUN_JS` (`util.h`) when
+callers cannot see it from its body, for example behind type erasure. The `jsg-js-reentry`
+clang-tidy check treats annotated functions, the V8 entry points that run script, and any
+function whose body in the translation unit calls one of them as able to run JavaScript, and
+reports borrows used after, or as the receiver of, such a call. Suppress a known-safe site with
+`// NOLINT(jsg-js-reentry)` and the reason.
+
 ## Weak References
 
 `jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference

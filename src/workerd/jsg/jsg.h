@@ -3087,14 +3087,14 @@ class Lock {
   // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
   // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
   // implementation in setup.c++. Use responsibly.
-  void requestGcForTesting() const;
+  JSG_MAY_RUN_JS void requestGcForTesting() const;
 
   // Like requestGcForTesting(), but sweeps cppgc the way an allocation-triggered GC would: a
   // forced GC always sweeps atomically, whereas this uses the sweeping type newCppHeap()
   // configured. It is the only way a test can observe the finalization timing production
   // actually gets, and so notice if the configuration stops being honoured. Test-only, same as
   // requestGcForTesting().
-  void requestGcWithDefaultSweepForTesting() const;
+  JSG_MAY_RUN_JS void requestGcWithDefaultSweepForTesting() const;
 
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
@@ -3228,7 +3228,7 @@ class Lock {
   JS_V8_SYMBOLS(V)
 #undef V
 
-  void runMicrotasks();
+  JSG_MAY_RUN_JS void runMicrotasks();
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();

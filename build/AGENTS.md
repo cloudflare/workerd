@@ -34,6 +34,12 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 `//tools/clang-tidy:workerd-lint` builds a shared-object clang-tidy plugin
 that adds workerd-specific static checks:
 
+- `jsg-js-reentry`: flags a local reference, pointer, iterator, or view into
+  JSG-owned state that is used after, or is the receiver of, a call that can run
+  JavaScript. A call can run JavaScript when its callee is marked
+  `JSG_MAY_RUN_JS`, is a V8 entry point that runs script, or has a body in the
+  translation unit that makes such a call. Path-filtered to run nowhere yet; run
+  it with `--config=clang-tidy-js-reentry`.
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
   `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/

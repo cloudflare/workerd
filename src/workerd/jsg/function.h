@@ -198,7 +198,7 @@ class Function<Ret(Args...)> {
   Function& operator=(Function&&) = default;
   KJ_DISALLOW_COPY(Function);
 
-  Ret operator()(jsg::Lock& jsl, Args... args) {
+  JSG_MAY_RUN_JS Ret operator()(jsg::Lock& jsl, Args... args) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         // Hold our own reference for the duration of the call. A native function can run
