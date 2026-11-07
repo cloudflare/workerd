@@ -943,3 +943,141 @@ fn second_callable_is_rejected_only_with_automatic_registration() {
     assert_eq!(registrations.len(), 2);
     assert!(error.is_none());
 }
+
+#[test]
+fn iterable_factory_registers_and_describes_the_iterator_method() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_iterable]
+            #[jsg_method]
+            fn entries_of(&self) -> jsg::Rc<Entries> { todo!() }
+        }
+    };
+    let (registrations, error) =
+        collect_iterable_registrations(&input, RegistrationMode::Automatic);
+    assert!(error.is_none());
+    let [registration] = registrations.as_slice() else {
+        panic!("expected one registration");
+    };
+    assert_eq!(registration.factory_name, "entries_of_iterable_member");
+    let factory = registration.factory().to_string();
+    assert!(
+        factory.contains(
+            "jsg :: Member :: Iterable { callback : Self :: entries_of_iterable_callback () }"
+        ),
+        "{factory}"
+    );
+    assert!(
+        factory.contains("jsg :: rtti :: Member :: Iterator { name : \"entriesOf\""),
+        "{factory}"
+    );
+    // The method is registered both ways.
+    let expanded = expand_resource_impl(quote!(), &input).to_string();
+    assert!(
+        expanded.contains("Self :: entries_of_member ()"),
+        "{expanded}"
+    );
+    assert!(
+        expanded.contains("Self :: entries_of_iterable_member ()"),
+        "{expanded}"
+    );
+}
+
+#[test]
+fn second_iterable_is_rejected_only_with_automatic_registration() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_iterable]
+            fn first(&self) {}
+            #[jsg_iterable]
+            fn second(&self) {}
+        }
+    };
+    let (registrations, error) =
+        collect_iterable_registrations(&input, RegistrationMode::Automatic);
+    assert_eq!(registrations.len(), 2);
+    let error = error.unwrap().to_string();
+    assert!(
+        error.contains("a resource type has at most one #[jsg_iterable]"),
+        "{error}"
+    );
+    let (registrations, error) = collect_iterable_registrations(&input, RegistrationMode::Custom);
+    assert_eq!(registrations.len(), 2);
+    assert!(error.is_none());
+}
+
+fn parse_inherit_intrinsic(attr: proc_macro2::TokenStream) -> syn::Result<Option<String>> {
+    parse_impl_args(attr).map(|args| args.inherit_intrinsic.map(|variant| variant.to_string()))
+}
+
+fn inherit_intrinsic_error(attr: proc_macro2::TokenStream) -> String {
+    parse_inherit_intrinsic(attr).unwrap_err().to_string()
+}
+
+#[test]
+fn parse_inherit_intrinsic_accepts_a_variant() {
+    assert_eq!(parse_inherit_intrinsic(quote! {}).unwrap(), None);
+    assert_eq!(
+        parse_inherit_intrinsic(quote! { inherit_intrinsic = IteratorPrototype }).unwrap(),
+        Some("IteratorPrototype".to_owned())
+    );
+    assert_eq!(
+        parse_inherit_intrinsic(
+            quote! { nested_types(Foo), inherit_intrinsic = IteratorPrototype }
+        )
+        .unwrap(),
+        Some("IteratorPrototype".to_owned())
+    );
+}
+
+#[test]
+fn parse_inherit_intrinsic_rejects_invalid_values() {
+    assert!(
+        inherit_intrinsic_error(quote! { inherit_intrinsic = "IteratorPrototype" })
+            .starts_with("expected a `jsg::Intrinsic` variant"),
+    );
+    assert!(
+        inherit_intrinsic_error(quote! { inherit_intrinsic = jsg::Intrinsic::IteratorPrototype })
+            .starts_with("expected a `jsg::Intrinsic` variant without a path"),
+    );
+    assert!(
+        inherit_intrinsic_error(
+            quote! { inherit_intrinsic = IteratorPrototype, inherit_intrinsic = IteratorPrototype }
+        )
+        .starts_with("duplicate `inherit_intrinsic`"),
+    );
+    // Only the name-value form is recognized.
+    assert!(inherit_intrinsic_error(quote! { inherit_intrinsic }).starts_with("expected"));
+}
+
+#[test]
+fn inherit_intrinsic_and_custom_members_together_are_rejected() {
+    for attr in [
+        quote! { custom_members, inherit_intrinsic = IteratorPrototype },
+        quote! { inherit_intrinsic = IteratorPrototype, custom_members },
+    ] {
+        assert!(
+            inherit_intrinsic_error(attr).starts_with("`inherit_intrinsic` cannot be combined"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn inherit_intrinsic_is_registered() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn next(&self) {}
+        }
+    };
+    let expanded =
+        expand_resource_impl(quote! { inherit_intrinsic = IteratorPrototype }, &input).to_string();
+    assert!(
+        expanded.contains(
+            "registry . add (jsg :: inherit_intrinsic (jsg :: Intrinsic :: IteratorPrototype))"
+        ),
+        "{expanded}"
+    );
+    assert!(expanded.contains("Self :: next_member ()"), "{expanded}");
+}

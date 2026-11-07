@@ -16,6 +16,7 @@
 //! | `#[jsg_inspect_property]` | fn inside impl  | Register a debug-inspect-only symbol property                  |
 //! | `#[jsg_wildcard_property]` | fn inside impl | Answer reads of any property the object does not have          |
 //! | `#[jsg_callable]`        | fn inside impl   | Make instances callable as functions                           |
+//! | `#[jsg_iterable]`        | fn inside impl   | Make instances iterable (`[Symbol.iterator]()`)                |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
 //!
@@ -906,7 +907,8 @@ fn reject(
 ///
 /// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
-/// `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, `#[jsg_constructor]`, and
+/// `#[jsg_dispose]`, `#[jsg_async_dispose]`, `#[jsg_callable]`, `#[jsg_iterable]`,
+/// `#[jsg_constructor]`, and
 /// `#[jsg_static_constant]` item, plus member factories, which also describe their members for
 /// RTTI.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
@@ -917,6 +919,10 @@ fn reject(
 /// `JSG_NESTED_TYPE(Foo)` and `JSG_NESTED_TYPE_NAMED(Bar, Name)`. A nested type
 /// without a name is named after its JavaScript class name. See
 /// `src/rust/jsg/README.md` for how nested types behave.
+///
+/// Use `#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` on the impl block to make an
+/// intrinsic (a `jsg::Intrinsic` variant) the [[Prototype]] of the type's prototype, like C++
+/// JSG's `JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype)`.
 ///
 /// Use `#[jsg_resource(name = "JSName")]` on the struct to override the default
 /// JavaScript class name.
@@ -1147,37 +1153,63 @@ const CALLED_AS_FUNCTION: &str = "(called as function)";
 #[proc_macro_attribute]
 pub fn jsg_callable(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Registration as Member::Callable is handled by #[jsg_resource] on the enclosing impl block.
+    // A call handler has no `v8::Signature`. V8 passes the instance that is called as `this`,
+    // but the callback still checks the receiver, as an accessor's does.
+    instance_function_attribute(
+        attr,
+        item,
+        "jsg_callable",
+        "it runs on the instance that is called",
+        callable_callback_name,
+        |_| CALLED_AS_FUNCTION.to_owned(),
+        ReceiverCheck::Marker,
+    )
+}
+
+/// Expands `#[attr_name]`, an attribute without arguments on a method that takes `&self` or
+/// `this: jsg::Rc<Self>` (`why` says why it needs one), into the method and a function callback
+/// named by `callback_name`, which checks its receiver as `receiver_check` says. Argument errors
+/// name the method `method_name`. The method keeps its other attributes, so that a
+/// `#[jsg_method]` after this one expands.
+fn instance_function_attribute(
+    attr: TokenStream,
+    item: TokenStream,
+    attr_name: &str,
+    why: &str,
+    callback_name: fn(&syn::Ident) -> syn::Ident,
+    method_name: fn(&syn::Ident) -> String,
+    receiver_check: ReceiverCheck,
+) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
-    let callback_names = std::iter::once((Callback::Function, callable_callback_name(fn_name)));
+    let callback_names = std::iter::once((Callback::Function, callback_name(fn_name)));
     let error = if attr.is_empty() {
         let has_receiver =
             input_fn.sig.receiver().is_some() || input_fn.sig.inputs.iter().any(is_named_this);
         (!has_receiver).then(|| {
             syn::Error::new_spanned(
                 fn_name,
-                "a #[jsg_callable] method takes `&self`, or `this: jsg::Rc<Self>` in its place: \
-                 it runs on the instance that is called",
+                format!(
+                    "a #[{attr_name}] method takes `&self`, or `this: jsg::Rc<Self>` in its \
+                     place: {why}"
+                ),
             )
         })
     } else {
         Some(syn::Error::new_spanned(
             proc_macro2::TokenStream::from(attr),
-            "#[jsg_callable] takes no arguments",
+            format!("#[{attr_name}] takes no arguments"),
         ))
     };
     if let Some(error) = error {
         return reject(&input_fn, callback_names, &error).into();
     }
-    // A call handler has no `v8::Signature`. V8 passes the instance that is called as `this`,
-    // but the callback still checks the receiver, as an accessor's does.
     let callbacks = generate_callbacks(
         &input_fn,
         callback_names,
-        Some(CALLED_AS_FUNCTION),
-        ReceiverCheck::Marker,
+        Some(&method_name(fn_name)),
+        receiver_check,
     );
-    // The method keeps its other attributes, so that a `#[jsg_method]` after this one expands.
     match callbacks {
         Ok(callbacks) => {
             let method = reemit_method(&input_fn);
@@ -1195,6 +1227,43 @@ pub fn jsg_callable(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// callback of a `#[jsg_method]`, so that a method can be both.
 fn callable_callback_name(fn_name: &syn::Ident) -> syn::Ident {
     syn::Ident::new(&format!("{fn_name}_callable_callback"), fn_name.span())
+}
+
+// =============================================================================
+// #[jsg_iterable]
+// =============================================================================
+
+/// Makes the instances of a `#[jsg_resource]` type iterable, with the method as their
+/// `[Symbol.iterator]()`.
+///
+/// Equivalent to C++ JSG's `JSG_ITERABLE`. The method takes `&self`, or `this: jsg::Rc<Self>`
+/// as its first parameter in place of it, and otherwise has the shape of a `#[jsg_method]`. It
+/// returns the iterator: an object with a `next()` method that returns `{ done, value }`
+/// objects, usually another resource. An iterator is itself iterable when its
+/// `[Symbol.iterator]()` returns `this`: take `this: jsg::Rc<Self>` and return it, or inherit
+/// from `Iterator.prototype` with `#[jsg_resource(inherit_intrinsic = IteratorPrototype)]` on
+/// the impl block, which provides one. A type has at most one `#[jsg_iterable]`. The method may
+/// also be a `#[jsg_method]`, as `entries()` often is.
+/// See `src/rust/jsg/README.md` for how iterable resources behave.
+#[proc_macro_attribute]
+pub fn jsg_iterable(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as Member::Iterable is handled by #[jsg_resource] on the enclosing impl
+    // block, with the type's `v8::Signature`.
+    instance_function_attribute(
+        attr,
+        item,
+        "jsg_iterable",
+        "it runs on the instance that is iterated",
+        iterable_callback_name,
+        |fn_name| snake_to_camel(&fn_name.to_string()),
+        ReceiverCheck::Signature,
+    )
+}
+
+/// The name of the callback that `#[jsg_iterable]` generates for `fn_name`. It differs from the
+/// callback of a `#[jsg_method]`, so that a method can be both.
+fn iterable_callback_name(fn_name: &syn::Ident) -> syn::Ident {
+    syn::Ident::new(&format!("{fn_name}_iterable_callback"), fn_name.span())
 }
 
 // =============================================================================

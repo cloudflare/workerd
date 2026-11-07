@@ -25,6 +25,7 @@ use crate::Error;
 use crate::FeatureFlags;
 use crate::FromJS;
 use crate::GarbageCollected;
+use crate::Intrinsic;
 use crate::Lock;
 use crate::Member;
 use crate::ToJS;
@@ -608,6 +609,8 @@ fn get_resource_descriptor<R: Resource>(
         dispose: KjMaybe::None,
         async_dispose: KjMaybe::None,
         callable: KjMaybe::None,
+        iterable: KjMaybe::None,
+        inherit_intrinsic: KjMaybe::None,
     };
 
     let mut members = TemplateMembers(Vec::new());
@@ -738,6 +741,22 @@ fn get_resource_descriptor<R: Resource>(
                     R::class_name()
                 );
                 descriptor.callable = KjMaybe::Some(callback as usize);
+            }
+            Member::Iterable { callback } => {
+                assert!(
+                    descriptor.iterable.is_none(),
+                    "{} has more than one iterator method",
+                    R::class_name()
+                );
+                descriptor.iterable = KjMaybe::Some(callback as usize);
+            }
+            Member::InheritIntrinsic { intrinsic } => {
+                assert!(
+                    descriptor.inherit_intrinsic.is_none(),
+                    "{} inherits from more than one intrinsic",
+                    R::class_name()
+                );
+                descriptor.inherit_intrinsic = KjMaybe::Some(intrinsic);
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
@@ -989,6 +1008,28 @@ impl MemberDefinition for NestedTypeMember {
             name: self.name,
             identity: (self.nested_type.describe)(cx),
         })
+    }
+}
+
+/// The intrinsic a resource type inherits from, which describes itself; see
+/// [`inherit_intrinsic`].
+pub struct InheritIntrinsicMember(Intrinsic);
+
+/// Makes `intrinsic` the [[Prototype]] of the type's prototype, like C++ `JSG_INHERIT_INTRINSIC`.
+///
+/// Builds a [`Member::InheritIntrinsic`] and describes it for RTTI.
+/// `#[jsg_resource(inherit_intrinsic = ...)]` registers it with automatic registration.
+pub fn inherit_intrinsic(intrinsic: Intrinsic) -> InheritIntrinsicMember {
+    InheritIntrinsicMember(intrinsic)
+}
+
+impl MemberDefinition for InheritIntrinsicMember {
+    fn into_member(self) -> Member {
+        Member::InheritIntrinsic { intrinsic: self.0 }
+    }
+
+    fn describe(self, _cx: &mut rtti::Context) -> Option<rtti::Member> {
+        Some(rtti::Member::InheritIntrinsic(self.0))
     }
 }
 

@@ -827,6 +827,18 @@ pub mod ffi {
         pub async_dispose: KjMaybe<usize>,
         /// The `v8::FunctionCallback` that runs when an instance is called as a function.
         pub callable: KjMaybe<usize>,
+        /// The `FunctionCallback` installed as `prototype[Symbol.iterator]`.
+        pub iterable: KjMaybe<usize>,
+        /// The intrinsic that is the [[Prototype]] of the type's prototype.
+        pub inherit_intrinsic: KjMaybe<Intrinsic>,
+    }
+
+    /// An object built into every context that a resource type's prototype can inherit from
+    /// (`jsg::Intrinsic`, a `v8::Intrinsic`).
+    #[derive(Debug)]
+    enum Intrinsic {
+        /// `%IteratorPrototype%` (`v8::kIteratorPrototype`), which `Iterator.prototype` is.
+        IteratorPrototype = 0,
     }
 
     // Resources

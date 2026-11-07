@@ -484,6 +484,102 @@ fn structure_without_callable_has_none() {
     assert!(!structure.has_callable());
 }
 
+struct IteratorNode;
+
+impl TypeInfo for IteratorNode {
+    fn describe(cx: &mut Context) -> Type {
+        cx.structure::<Self>("IteratorNode", true, |_| {
+            vec![
+                Member::InheritIntrinsic(crate::Intrinsic::IteratorPrototype),
+                Member::Iterator {
+                    name: "entries",
+                    args: Vec::new(),
+                    result: Type::Object,
+                },
+                Member::Constant {
+                    name: "LIMIT",
+                    value: crate::ConstantValue::Number(1.0),
+                },
+            ]
+        })
+    }
+}
+
+fn only_structure(
+    message: &capnp::message::Reader<capnp::serialize::OwnedSegments>,
+) -> rtti_capnp::structure::Reader<'_> {
+    message
+        .get_root::<rtti_capnp::structure_groups::Reader>()
+        .unwrap()
+        .get_groups()
+        .unwrap()
+        .get(0)
+        .get_structures()
+        .unwrap()
+        .get(0)
+}
+
+// As C++ RTTI writes `JSG_ITERABLE` and `JSG_INHERIT_INTRINSIC`, the iterator method is the
+// structure's `iterator`, with `iterable` set, and the intrinsic is its `extends`, named as the
+// TypeScript generator expects; neither is one of its members.
+#[test]
+fn iterator_and_intrinsic_are_fields_of_the_structure() {
+    let mut cx = Context::default();
+    IteratorNode::describe(&mut cx);
+    let message = read_context(&cx);
+    let structure = only_structure(&message);
+    assert!(structure.get_iterable());
+    assert!(!structure.get_async_iterable());
+    let iterator = structure.get_iterator().unwrap();
+    assert_eq!(iterator.get_name().unwrap(), "entries");
+    assert!(matches!(
+        iterator.get_return_type().unwrap().which().unwrap(),
+        rtti_capnp::type_::Object(())
+    ));
+    assert_eq!(iterator.get_args().unwrap().len(), 0);
+    let rtti_capnp::type_::Intrinsic(intrinsic) = structure.get_extends().unwrap().which().unwrap()
+    else {
+        panic!("expected an intrinsic");
+    };
+    assert_eq!(
+        intrinsic.unwrap().get_name().unwrap(),
+        "v8::kIteratorPrototype"
+    );
+    let members = structure.get_members().unwrap();
+    assert_eq!(members.len(), 1);
+    assert!(matches!(
+        members.get(0).which().unwrap(),
+        rtti_capnp::member::Constant(_)
+    ));
+}
+
+#[test]
+fn structure_without_iterator_or_intrinsic_has_neither() {
+    let mut cx = Context::default();
+    Node::describe(&mut cx);
+    let message = read_context(&cx);
+    let structure = only_structure(&message);
+    assert!(!structure.get_iterable());
+    assert!(!structure.has_iterator());
+    assert!(!structure.has_extends());
+}
+
+// `jsg::inherit_intrinsic` describes itself, so custom registration keeps it in the RTTI.
+#[test]
+fn inherit_intrinsic_member_describes_itself() {
+    let mut cx = Context::default();
+    let described = crate::MemberDefinition::describe(
+        crate::inherit_intrinsic(crate::Intrinsic::IteratorPrototype),
+        &mut cx,
+    );
+    assert!(matches!(
+        described,
+        Some(Member::InheritIntrinsic(
+            crate::Intrinsic::IteratorPrototype
+        ))
+    ));
+}
+
 #[test]
 fn handles_are_described_as_their_values() {
     let mut cx = Context::default();
