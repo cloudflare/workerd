@@ -312,8 +312,8 @@ impl<'a> MemoryTracker<'a> {
 ///   anything else as a node of its uncounted bytes. An allocation shared by several `Rc`s or
 ///   `Arc`s is one node, which keeps the work linear and ends cycles.
 /// - A mutably borrowed `RefCell` reports nothing.
-/// - `std::cell::Cell<T>` exists only for `T: Copy` and reports nothing; hold a retainer in a
-///   `jsg::Cell`.
+/// - The impl for `std::cell::Cell<T>` exists only for `T: Copy` and reports nothing; hold a
+///   retainer in a `jsg::Cell`.
 /// - `jsg::Weak`, the root async context frame, and a handle or `jsg::Rc` of another isolate
 ///   report nothing.
 pub trait MemoryInfo {

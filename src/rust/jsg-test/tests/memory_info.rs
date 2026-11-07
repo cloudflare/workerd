@@ -511,7 +511,7 @@ impl jsg::MemoryRetainer for Empty {
 /// A retainer in a cycle through `std::rc::Rc`, which only its deduplication ends.
 struct Link {
     name: String,
-    next: RefCell<Option<std::rc::Rc<Link>>>,
+    next: RefCell<Option<std::rc::Rc<Self>>>,
 }
 
 impl jsg::MemoryRetainer for Link {
@@ -1082,8 +1082,8 @@ fn shared_pointers_count_their_allocations() {
 /// A value that is not a retainer, two of whose pointers share each allocation: a ladder that
 /// reporting each pointer in full would visit `2^RUNGS` times.
 struct Rung {
-    left: Option<std::rc::Rc<Rung>>,
-    right: Option<std::rc::Rc<Rung>>,
+    left: Option<std::rc::Rc<Self>>,
+    right: Option<std::rc::Rc<Self>>,
 }
 
 impl jsg::MemoryInfo for Rung {
@@ -1158,7 +1158,7 @@ fn allocation_shared_through_rc_is_one_node() {
 
 /// A retainer in a linked list, which reporting follows link by link.
 struct ListNode {
-    next: Option<Box<ListNode>>,
+    next: Option<Box<Self>>,
 }
 
 impl jsg::MemoryRetainer for ListNode {
@@ -1195,7 +1195,7 @@ fn new_list(len: usize) -> ListNode {
 
 /// A list of retainers, of which the last holds `payload`.
 struct Tail {
-    next: Option<Box<Tail>>,
+    next: Option<Box<Self>>,
     payload: Option<std::rc::Rc<Inner>>,
 }
 
@@ -1224,7 +1224,7 @@ impl Drop for Tail {
 
 /// A value that is not a retainer, in a cycle through `std::rc::Rc`.
 struct Loop {
-    next: RefCell<Option<std::rc::Rc<Loop>>>,
+    next: RefCell<Option<std::rc::Rc<Self>>>,
 }
 
 impl jsg::MemoryInfo for Loop {
@@ -1342,7 +1342,7 @@ fn retainer_reached_past_max_depth_is_reported_in_full_from_closer() {
 
 #[jsg_resource(memory_info)]
 struct Chain {
-    pub next: Option<jsg::Rc<Chain>>,
+    pub next: Option<jsg::Rc<Self>>,
 }
 
 #[jsg_resource]
