@@ -500,5 +500,37 @@ export const tests = {
       controller.abort();
       await assert.rejects(promise, { name: 'AbortError' });
     }
+
+    {
+      // Test that concurrent runs each honor their own options, even when the
+      // raw-response run starts first and finishes last
+      const rawPromise = env.ai.run(
+        'delayedModel',
+        { prompt: 'test' },
+        { returnRawResponse: true }
+      );
+      // Wait a moment for the request to start.
+      await scheduler.wait(10);
+      const plainResp = await env.ai.run('testModel', { prompt: 'test' });
+      assert.deepStrictEqual(plainResp, { response: 'model response' });
+      const rawResp = await rawPromise;
+      assert.ok(rawResp instanceof Response);
+    }
+
+    {
+      // Test that concurrent runs each honor their own options, even when the
+      // raw-response run starts last and finishes first
+      const plainPromise = env.ai.run('delayedModel', { prompt: 'test' });
+      // Wait a moment for the request to start.
+      await scheduler.wait(10);
+      const rawResp = await env.ai.run(
+        'testModel',
+        { prompt: 'test' },
+        { returnRawResponse: true }
+      );
+      assert.ok(rawResp instanceof Response);
+      const plainResp = await plainPromise;
+      assert.deepStrictEqual(plainResp, { response: 'model response' });
+    }
   },
 };
