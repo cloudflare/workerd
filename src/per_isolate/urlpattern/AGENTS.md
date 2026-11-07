@@ -34,7 +34,10 @@ together.
   components are always RegExps. A string input needs no native call beyond
   `utils.urlParse`.
 - Matching uses `RegExpPrototypeExec`, the builtin, so a patched
-  `RegExp.prototype.exec` is never called.
+  `RegExp.prototype.exec` is never called while matching. Compiling is
+  native: ada's regex provider (`api/urlpattern-regex.h`) reaches the
+  current `exec` when it checks a protocol RegExp against the special
+  schemes, as the C++ does (see Core semantics in the suite's AGENTS.md).
 - Nothing matching makes runs a setter user code put on `Object.prototype`
   or `Array.prototype`. Results and groups are object literals (computed
   keys for groups; `ObjectDefineProperty` past three groups, and for init

@@ -54,6 +54,7 @@ export {
 export {
   resultShape,
   groups,
+  namedFullWildcard,
   unmatchedOptionalGroups,
   stringInputsAreInputs,
   initInputsAreCopied,
@@ -61,6 +62,7 @@ export {
 
 export {
   regExpExecIsNotCalled,
+  constructionCallsPatchedExecForProtocol,
   groupsIgnoreObjectPrototypeSetters,
   resultsIgnoreObjectPrototypeSetters,
   inputsIgnoreArrayPrototypeSetters,

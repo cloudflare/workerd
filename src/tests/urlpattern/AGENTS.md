@@ -37,6 +37,13 @@ which would run the TypeScript implementation under them.
   the legacy parser's messages say what failed.
 - **RegExp flags:** `v` (standard) and `u` (legacy), plus `i` under
   `ignoreCase`.
+- **Construction and `RegExp.prototype.exec`:** the standard parser asks a
+  protocol pattern that compiles to a RegExp (not `*` or an exact protocol)
+  whether it matches each special scheme, through the current
+  `RegExp.prototype.exec`, in both implementations. What a patched `exec`
+  returns decides whether the pathname compiles as an opaque path's, and
+  what it throws escapes the constructor (`pollution.js`). The legacy
+  parser calls nothing while it compiles.
 - **Inputs:** an object, `null` or `undefined` is a `URLPatternInit`
   (a URL included, read through its getters); anything else a string. A
   string input is parsed as a URL; one that does not parse, or a baseURL
@@ -60,7 +67,7 @@ which would run the TypeScript implementation under them.
 | 2 | Standard group order | ada's `std::unordered_map` order | the pattern's | `results.js` |
 | 3 | `URLPatternInit` read order | declared (`protocol` … `hash`, `baseURL`) | lexicographic | `conversions.js` |
 | 4 | Result and `inputs` copy member order | declared (`inputs`, `protocol` …; `input`, `groups`) | lexicographic | `results.js` |
-| 5 | Patched `RegExp.prototype.exec` | called for each component ada's fast paths do not cover; legacy all eight | not called | `pollution.js` |
+| 5 | Patched `RegExp.prototype.exec` while matching | called for each component ada's fast paths do not cover; legacy all eight | not called | `pollution.js` |
 | 6 | Legacy lone surrogates | WTF-8 | U+FFFD | `conversions.js` |
 | 7 | Three arguments | an object or `undefined` second argument is the options (`undefined`: no baseURL); the third is read and ignored | the second is the baseURL (`ToUSVString`) | `construction.js`, `conversions.js` |
 | 8 | Accessor names, constructor `prototype`, `Symbol.toStringTag`, global | JSG: anonymous, writable, writable, on the global's prototype (WebIDL under the opt-ins but the tag) | WebIDL | `api-surface.js` |

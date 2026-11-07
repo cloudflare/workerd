@@ -18060,7 +18060,7 @@ export interface URLPatternInit {
 }
 export interface URLPatternComponentResult {
   input: string;
-  groups: Record<string, string>;
+  groups: Record<string, string | undefined>;
 }
 export interface URLPatternResult {
   inputs: (string | URLPatternInit)[];
