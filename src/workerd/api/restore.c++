@@ -123,6 +123,8 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
       req.setCfBlobJson(cf);
     }
     req.setFromPersistentStub(metadata.fromPersistentStub.toBool());
+    // `metadata.restoredSelfTokenFactory` is not sent. The channel on the far side supplies an
+    // equivalent one: see `RestoreServiceCustomEvent::run()`.
     auto dispatcher = req.sendForPipeline().getDispatcher();
 
     return kj::heap<RpcWorkerInterface>(
@@ -245,6 +247,8 @@ class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server 
     // `[restore]()` params came from storage, so the target worker's opt-in to stub storage must
     // be re-verified.
     metadata.fromPersistentStub = fromPersistentStub;
+    // `service` sets `metadata.restoredSelfTokenFactory` itself: it is the channel that
+    // `RestoreServiceCustomEvent::run()` returned.
     auto worker = movedService->startRequest(kj::mv(metadata));
 
     return worker.attach(kj::mv(movedService));
@@ -318,6 +322,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
         });
       }
 
+      // The channel returned below names itself by these params (see there).
+      auto tokenParams = restoreParams.clone();
+
       auto params = restoreParams.toJs(lock);
       auto handler = JSG_REQUIRE_NONNULL(
           lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
@@ -329,11 +336,29 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 
       return ioctx.awaitJs(lock,
           invokeRestoreAndCoerce(lock, target, params)
-              .then(lock, [weakIoctx = ioctx.getWeakRef()](jsg::Lock& js, RestoreResult result) {
+              .then(lock,
+                  [weakIoctx = ioctx.getWeakRef(), tokenParams = kj::mv(tokenParams)](jsg::Lock& js,
+                      RestoreResult result) mutable -> kj::Rc<IoChannelFactory::SubrequestChannel> {
         KJ_SWITCH_ONEOF(result) {
           KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
-            return fetcher->getSubrequestChannel(KJ_REQUIRE_NONNULL(
-                weakIoctx->tryGet(), "IoContext destroyed before [restore]() returned"));
+            auto& ioctx = KJ_REQUIRE_NONNULL(
+                weakIoctx->tryGet(), "IoContext destroyed before [restore]() returned");
+            auto channel = fetcher->getSubrequestChannel(ioctx);
+
+            // Return the channel `ctx.restore()` would have returned for the same params: one
+            // that gives each request it starts a self-token factory naming this restoration, so
+            // that a Dynamic Worker or facet behind it can call `ctx.restore()` in turn.
+            //
+            // The caller cannot be relied on for that. A caller in this process sets
+            // `SubrequestMetadata::restoredSelfTokenFactory` itself, but one that reached us over
+            // RPC starts its requests through `RestoredServiceBootstrap`, which has no token to
+            // give.
+            KJ_IF_SOME(selfTokenFactory, ioctx.getSelfTokenFactory()) {
+              return ioctx.getIoChannelFactory().makeRestoredSubrequestChannel(
+                  kj::mv(selfTokenFactory), kj::mv(tokenParams), kj::mv(channel),
+                  Persistent(FeatureFlags::get(js).getAllowIrrevocableStubStorage()));
+            }
+            return channel;
           }
           KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
             // TODO(someday): Arguably we could allow this case and let people "upgrade" an RpcStub
