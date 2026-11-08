@@ -1026,6 +1026,15 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "js-rpc-dispose-cancels-test.js",
+        "js-rpc-dispose-cancels-test-tail.js",
+    ],
+)
+
+wd_test(
     src = "rpc-stub-gc-foreign-span-test.wd-test",
     args = ["--experimental"],
     data = [
