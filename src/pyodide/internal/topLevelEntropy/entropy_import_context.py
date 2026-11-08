@@ -48,7 +48,7 @@ RANDOM_STATE = None
 @register_exec_patch("random")
 @contextmanager
 def random_exec(random):
-    """Importing random calls getentropy() 10 times it seems"""
+    """Importing random calls random.seed(None), and it calls getentropy() 10 times it seems"""
     with allow_bad_entropy_calls(10):
         yield
 
@@ -59,7 +59,21 @@ def random_exec(random):
     # getentropy() and fail.
     global RANDOM_STATE
     RANDOM_STATE = random.getstate()
-    block_calls(random, allowlist=("Random", "SystemRandom"))
+    block_calls(
+        random,
+        allowlist=("Random", "SystemRandom"),
+        checkpoint=lambda: _checkpoint_random_state(random),
+    )
+
+
+def _checkpoint_random_state(random):
+    """
+    Overwrite the global RANDOM_STATE with the current state of the random module.
+    This is used to update the expected state when the random module is used
+    within a blocked call context.
+    """
+    global RANDOM_STATE
+    RANDOM_STATE = random.getstate()
 
 
 @register_after_snapshot("random")
