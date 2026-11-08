@@ -13,4 +13,5 @@
     clippy::unwrap_used
 )]
 
+pub mod handoff;
 pub mod lease;

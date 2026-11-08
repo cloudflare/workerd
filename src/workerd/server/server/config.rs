@@ -681,6 +681,29 @@ pub fn collect_actor_configs(
     Ok(actor_configs)
 }
 
+/// Bundled modules (`Worker.Module.bundled`) need `--experimental`.
+fn check_bundled(
+    name: &str,
+    worker: worker::Reader<'_>,
+    experimental: bool,
+    report: &Reporter,
+) -> capnp::Result<()> {
+    let bundled = match worker.which() {
+        Ok(worker::Which::Modules(modules)) => modules?
+            .iter()
+            .any(|m| matches!(m.which(), Ok(worker::module::Which::Bundled(_)))),
+        _ => false,
+    };
+    if bundled && !experimental {
+        report.error_in(
+            name,
+            "Bundled modules are an experimental feature which may change or go away in the \
+             future. You must run workerd with `--experimental` to use this feature.",
+        );
+    }
+    Ok(())
+}
+
 /// [`collect_actor_configs`] for the service `name`, whose config is `service_conf`.
 fn collect_service_actor_configs(
     name: &str,
@@ -696,6 +719,7 @@ fn collect_service_actor_configs(
         return Ok(configs);
     };
     let worker_conf = worker_conf?;
+    check_bundled(name, worker_conf, experimental, report)?;
     let mut had_durable = false;
     for (namespace_index, ns) in (0..).zip(worker_conf.get_durable_object_namespaces()?) {
         let class_name = ns.get_class_name()?.to_string()?;
@@ -777,6 +801,8 @@ fn collect_service_actor_configs(
     }
 
     // Meant for parameterized workers; nothing implements it, so nothing may set it.
+    // TODO(someday): implement it, so that a Worker with Durable Objects can be
+    // `inherit`ed, as a bundled Worker's config constant would be.
     if worker_conf.has_durable_object_unique_key_modifier() {
         report.service_error(
             name,
@@ -1456,6 +1482,7 @@ impl Server {
                 namespace.set_cluster(Rc::clone(cluster));
             }
         }
+        make_bucket_services(config, &mut services, cluster.as_ref(), &factory, &report)?;
 
         let server = Rc::new(Self {
             report,
@@ -1769,6 +1796,8 @@ async fn make_service(
                     .map(Service::Disk),
             ))
         }
+        // Made once the cluster is joined (`make_bucket_services`).
+        Ok(service::Which::Bucket(_)) => Ok(Service::Leaf(Rc::new(InvalidConfigChannel))),
         Err(capnp::NotInSchema(_)) => {
             report.error_in(name, format!(
                 "Service named \"{name}\" has unrecognized type. Was the config compiled with a \
@@ -1897,7 +1926,7 @@ impl ServerHandle {
             )
         })?;
         Ok(SubrequestChannel::new(match namespace.unique_key() {
-            Some(_) => namespace.channel(ffi::actor_id_from_hex(actor_id)?, false),
+            Some(_) => namespace.peer_channel(ffi::actor_id_from_hex(actor_id)?),
             None => namespace.channel_by_name(actor_id, false),
         }))
     }
@@ -1926,6 +1955,38 @@ impl Server {
 #[cfg(test)]
 #[path = "config-test.rs"]
 mod tests;
+
+/// Replaces each `bucket` service's stand-in with the directory of the
+/// cluster's bucket it names.
+fn make_bucket_services(
+    config: config::Reader<'_>,
+    services: &mut Services,
+    cluster: Option<&Rc<ClusterNode>>,
+    factory: &Rc<Factory>,
+    report: &Reporter,
+) -> Result<()> {
+    for conf in config.get_services().map_err(capnp_error)? {
+        let Ok(service::Which::Bucket(bucket)) = conf.which() else {
+            continue;
+        };
+        let name = text(conf.get_name())?;
+        let Some(node) = cluster else {
+            report.service_error(&name, "A bucket service requires Config.cluster.");
+            continue;
+        };
+        let bucket = bucket.map_err(capnp_error)?;
+        let made = crate::services::bucket::make_bucket_service(bucket, node, factory);
+        let channel: Rc<dyn Channel> = match made {
+            Ok(service) => Rc::new(service),
+            Err(error) => {
+                report.service_error(&name, error.description());
+                continue;
+            }
+        };
+        services.0.insert(name, Service::Leaf(channel));
+    }
+    Ok(())
+}
 
 /// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.
 fn make_cluster(

@@ -212,8 +212,9 @@ struct ClusterConfig {
   advertise @4 :Text;
   # The address other instances reach this one at, which goes in its lease record in the bucket.
   # Optional: by default, the address bound, with the port it got. Required when that is a
-  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). Overridden by
-  # `--cluster-advertise`. A public IP is refused unless `unsafePublicAddress` is set.
+  # wildcard (`0.0.0.0:7000`) or not what peers can reach (NAT, a container). A port of 0 is the
+  # port bound. Overridden by `--cluster-advertise`. A public IP is refused unless
+  # `unsafePublicAddress` is set.
 
   key @3 :Text;
   # A secret known only to members of the cluster, at least 32 bytes: random, such as the output
@@ -229,6 +230,48 @@ struct ClusterConfig {
   # Allow a public IP as `address` or `advertise`. Refused by default, since traffic between
   # instances is not encrypted. Private, loopback, link-local and shared (100.64.0.0/10, as
   # Tailscale uses) addresses, wildcards and hostnames are allowed.
+
+  stopTimeoutMs @6 :UInt32 = 8000;
+  # How long an instance takes to stop, from SIGTERM to exit. Rather than leave its Durable Objects
+  # to wait for its lease to expire, a stopping instance hands them to its peers, busiest first,
+  # while it keeps serving the rest: each object takes no new requests but those that the work of
+  # an object being handed off makes, here or on a peer, directly or through other Durable Objects,
+  # its requests in flight finish, and it is released for the next request anywhere to claim.
+  # Requests that arrive meanwhile, other Durable Objects' calls included, wait for the object and
+  # then go where it runs next. While a Durable Object serves a call of a handoff's work, all the
+  # calls it makes count as that work. Then the instance leaves the cluster, keeps accepting
+  # requests until at least five seconds after SIGTERM (or until the handoff deadline, if that comes
+  # sooner), as load balancers take a while to stop sending them, lets its connections finish, and
+  # stops its containers' Docker containers.
+  #
+  # The time is spent in order: until half of it, requests in flight on an object being handed off
+  # may finish, and are then cancelled, failing as requests that may have run, which are not sent
+  # again; at three quarters, the handoff ends, and an object not yet released is stopped if it
+  # still runs, and taken over by a peer once the instance has left; at nine tenths, the instance
+  # stops waiting for its connections, whose requests end as it exits; the rest is for the
+  # containers. A call that reaches an object being handed off through a stateless worker, rather
+  # than from a Durable Object, waits like any other request, so a call from the object back to
+  # itself that way ends only with the requests in flight. Stopping an object's Docker container
+  # takes one of the few handoffs that run at once.
+  #
+  # The default fits within the 10 seconds that `docker stop` and Docker Compose give a container,
+  # and the 30 seconds that Kubernetes gives a pod (`terminationGracePeriodSeconds`). Raising this,
+  # raise the supervisor's grace period too (`docker stop -t`, `stop_grace_period`,
+  # `terminationGracePeriodSeconds`); below about 6700 the five seconds of accepting are cut
+  # short. An instance with very many objects may not stop them all by 33/40 of the timeout: it
+  # then stays a member, and its peers take over every object it did not hand off once its lease
+  # expires, after it exited, as they do when the supervisor kills it first.
+  #
+  # A `fetch()` to an object that moves is sent on transparently. A JS RPC call that a peer sent
+  # through a stub to the stopping instance may fail once, as retryable; the stub's next call finds
+  # the object. WebSockets an object here accepted close as it is handed off. An alarm that comes
+  # due on a stopping instance runs where its object goes: when a request claims the object there,
+  # or else once a peer adopts the alarms of the instance that left, within five seconds of its
+  # leaving, so up to one stop and five seconds late; for an instance that stays a member with
+  # objects still running, once its lease expires, up to 20 seconds later still.
+  #
+  # `GET /ready` on the cluster port answers 200 while the instance serves, holds its lease and is
+  # not stopping, and 503 otherwise: a readiness probe for a rolling restart.
 }
 
 struct LoggingOptions {
@@ -360,12 +403,26 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    bucket @6 :ClusterBucket;
+    # A directory in the cluster's bucket, served over HTTP. Requires `Config.cluster`.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
   #   be a list of Worker names, where each Worker must have a binding called `next`. This
   #   implicitly creates an inherited worker that wraps this service, with the `next` binding
   #   pointing to the service itself (or to the next middleware in the stack).
+}
+
+struct ClusterBucket {
+  # GET, PUT and DELETE on `/<file>` read, write and remove the object
+  # `<cluster prefix>services/<path>/<file>` in the cluster's bucket (`Config.cluster`), so
+  # that every instance sees the same files. The cluster keeps its own state outside
+  # `services/`, where this service cannot reach it. A binding to this service grants only its
+  # directory, as a writable `disk` does. Experimental: requires `--experimental`.
+
+  path @0 :Text;
+  # The directory below `services/`: one or more `/`-separated names, none `.` or `..`.
 }
 
 struct ServiceDesignator {
@@ -510,6 +567,11 @@ struct Worker {
 
       obsoletePythonRequirement @9 :Text;
       # This position used to be the pythonRequirement type that has now been deprecated.
+
+      bundled @11 :Text;
+      # An ES module whose source is bundled with workerd, by name: `/workerd/kv.js`, the KV
+      # Worker (see its header for the bindings it takes). Unlike built-in modules such as
+      # `node:` ones, user code cannot import it; it is a Worker's source. Experimental.
     }
 
     namedExports @10 :List(Text);

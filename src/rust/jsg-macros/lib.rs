@@ -51,6 +51,7 @@ use utils::is_lock_ref;
 use utils::is_named_this;
 use utils::is_null_or_undefined_type;
 use utils::is_option_type;
+use utils::is_promise_type;
 use utils::is_rc_self;
 use utils::is_result_type;
 use utils::snake_to_camel;
@@ -527,6 +528,27 @@ fn generate_callbacks(
     } else {
         quote! {}
     };
+    let body = quote! {
+        #(#unwraps)*
+        #invocation
+        #result_handling
+    };
+    // Like C++ JSG, a callback that returns a promise rejects it with what it throws, argument
+    // conversion errors included, under `capture_async_api_throws`.
+    let returns_promise =
+        matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_promise_type(ty));
+    let body = if returns_promise {
+        quote! {
+            jsg::capture_throws_as_rejection(
+                lock,
+                args,
+                |lock, args| { #body },
+                |args, promise| args.set_return_value(promise),
+            );
+        }
+    } else {
+        body
+    };
     let callbacks = callback_kinds.map(|(kind, callback_name)| {
         let (raw_callback, make_callback) = callback_constructor(kind);
         quote! {
@@ -534,9 +556,7 @@ fn generate_callbacks(
             #lint_attr
             fn #callback_name() -> #raw_callback {
                 #make_callback(|lock, args| {
-                    #(#unwraps)*
-                    #invocation
-                    #result_handling
+                    #body
                 })
             }
         }

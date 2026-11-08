@@ -16,6 +16,7 @@ mod cpp_interop;
 mod date_bigint;
 mod dict;
 mod dispose;
+mod dom_exception;
 mod eval;
 mod fast_api;
 mod function;

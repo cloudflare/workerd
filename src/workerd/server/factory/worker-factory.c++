@@ -1258,6 +1258,31 @@ void request_metadata_set_from_persistent_stub(RequestMetadata& metadata, bool p
   if (persistent) metadata.fromPersistentStub = Persistent::YES;
 }
 
+kj::Maybe<::rust::String> request_metadata_forwarded_by(const RequestMetadata& metadata) {
+  return metadata.forwardedBy.map([](const kj::String& s) { return toRustString(s); });
+}
+
+void request_metadata_set_forwarded_by(RequestMetadata& metadata, ::rust::Str node) {
+  metadata.forwardedBy = kj::str(node);
+}
+
+bool request_metadata_from_handoff(const RequestMetadata& metadata) {
+  return metadata.fromHandoff.toBool();
+}
+
+::rust::Vec<::rust::String> request_metadata_caused_by(const RequestMetadata& metadata) {
+  ::rust::Vec<::rust::String> result;
+  result.reserve(metadata.causedBy.size());
+  for (auto& object: metadata.causedBy) result.push_back(toRustString(object));
+  return result;
+}
+
+void request_metadata_set_cause(
+    RequestMetadata& metadata, bool fromHandoff, ::rust::Vec<::rust::String> causedBy) {
+  metadata.fromHandoff = FromHandoff(fromHandoff);
+  metadata.causedBy = KJ_MAP(object, causedBy) { return kj::str(object); };
+}
+
 namespace {
 
 // The self-token of a root actor, for `ctx.restore()`: only the namespace and id, so that
@@ -1606,13 +1631,14 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   // The file system roots use their defaults; the config does not expose mount points.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource));
 
+  KJ_REQUIRE(experimental || moduleFallback == kj::none,
+      "The module fallback service is an experimental feature. "
+      "You must run workerd with `--experimental` to use the module fallback service.");
+
   // Python workers never use the new module registry, whatever their flags say.
   bool usingNewModuleRegistry = isNewModuleRegistryEnabled(featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (usingNewModuleRegistry) {
-    KJ_REQUIRE(experimental,
-        "The new ModuleRegistry implementation is an experimental feature. "
-        "You must run workerd with `--experimental` to use this feature.");
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
@@ -1709,9 +1735,6 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
 
   if (!usingNewModuleRegistry) {
     KJ_IF_SOME(fallback, moduleFallback) {
-      KJ_REQUIRE(experimental,
-          "The module fallback service is an experimental feature. "
-          "You must run workerd with `--experimental` to use the module fallback service.");
       auto& apiIsolate = isolate->getApi();
       apiIsolate.setModuleFallbackCallback(
           [client = kj::heap<fallback::FallbackServiceClient>(kj::str(fallback)),

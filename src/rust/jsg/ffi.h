@@ -621,6 +621,12 @@ bool local_json_stringify(
 // A message longer than V8's string limit is cut to fit, so this never fails.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
+// Builds a DOMException named `name`, with a message read from raw bytes as
+// exception_create_from_bytes() reads it, through jsg::newDOMException(). Requires an entered
+// context. Returns none, leaving it pending, if an exception or a termination already was, or if
+// creating the DOMException threw.
+MaybeLocal dom_exception_create_from_bytes(
+    Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -648,6 +654,9 @@ void isolate_terminate_execution(Isolate* isolate);
 bool isolate_terminate_execution_now(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// Whether a method that returns a promise rejects it with what it throws
+// (jsg::getCaptureThrowsAsRejections()).
+bool isolate_captures_throws_as_rejections(Isolate* isolate);
 // The isolate's continuation-preserved embedder data, which holds the current async context
 // frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
 // workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.

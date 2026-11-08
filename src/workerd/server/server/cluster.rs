@@ -9,8 +9,10 @@
 //! one capnp session an instance keeps to each peer: the tunnel carries `WorkerdDebugPort`,
 //! whose `getActor` gives a `WorkerdBootstrap` for one Durable Object, so HTTP, WebSockets and
 //! JS RPC to the object cross unchanged. A request for an object this instance
-//! does not own routes on through its own channel to the owner.
+//! does not own routes on through its own channel to the owner. `GET /ready` answers whether
+//! the instance takes traffic: it serves, holds its lease, and is not stopping.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
@@ -22,6 +24,7 @@ use std::time::Duration;
 use cluster::Cluster;
 use cluster::Layout;
 use cluster::Route;
+use cluster_logic::handoff::Budget;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::LocalBoxFuture;
@@ -40,6 +43,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
+use tokio::time::Instant;
 use workerd_capnp::cluster_config;
 
 use crate::Result;
@@ -68,12 +73,64 @@ pub struct ClusterNode {
     nonces: RefCell<HashMap<String, u64>>,
     /// The clustered namespaces, by their part of the bucket's keys.
     namespaces: RefCell<HashMap<String, Weak<ActorNamespace>>>,
+    /// How a stop's time is spent (`stopTimeoutMs`).
+    budget: Budget,
+    /// Set once this instance drains.
+    deadlines: Cell<Option<Deadlines>>,
+    /// The requests peers have in flight here.
+    peer_requests: Rc<PeerRequests>,
+    /// Whether the application's listeners are being served (`Serving`).
+    serving: Cell<bool>,
+}
+
+/// When the phases of this instance's stop end (`cluster_logic::handoff::Budget`).
+#[derive(Clone, Copy)]
+pub struct Deadlines {
+    pub in_flight: Instant,
+    pub handoff: Instant,
+    pub release: Instant,
+    pub grace: Instant,
+    pub connections: Instant,
+    pub stop: Instant,
+}
+
+/// A count of requests, and its waiters for it to reach zero.
+#[derive(Default)]
+struct PeerRequests {
+    count: Cell<usize>,
+    none: Notify,
+}
+
+/// The application's listeners are being served, until this is dropped.
+pub struct Serving(Rc<ClusterNode>);
+
+impl Drop for Serving {
+    fn drop(&mut self) {
+        self.0.serving.set(false);
+    }
+}
+
+/// A request a peer has in flight here, from its start until its interface is dropped.
+pub struct PeerRequest(Rc<PeerRequests>);
+
+impl Drop for PeerRequest {
+    fn drop(&mut self) {
+        let count = self.0.count.get() - 1;
+        self.0.count.set(count);
+        if count == 0 {
+            self.0.none.notify_waiters();
+        }
+    }
 }
 
 /// How often an instance tidies its alarm index and adopts dead peers' alarms.
 const ALARMS_INTERVAL: Duration = Duration::from_secs(5);
 
-pub struct RpcConnection(KjOwn<ffi::RpcClient>);
+pub struct RpcConnection {
+    client: KjOwn<ffi::RpcClient>,
+    /// Set once the session it runs over disconnected: nothing sent on it arrives.
+    down: Rc<Cell<bool>>,
+}
 
 type Dial<V> = LocalBoxFuture<'static, std::result::Result<V, String>>;
 
@@ -175,7 +232,7 @@ pub async fn bind(
         .map_err(|e| kj::failed!("cluster address {address}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| kj::failed!("{e}"))?;
     let advertise = match advertise {
-        Some(advertise) => advertise,
+        Some(advertise) => with_bound_port(&advertise, bound.port()),
         // A host name that resolved to a wildcard.
         None if bound.ip().is_unspecified() => return Err(wildcard(&address)),
         None => {
@@ -185,6 +242,14 @@ pub async fn bind(
         }
     };
     Ok((listener, advertise))
+}
+
+/// `advertise` with a port of 0 replaced by `port`, the one bound; any other address as it is.
+fn with_bound_port(advertise: &str, port: u16) -> String {
+    match advertise.rsplit_once(':') {
+        Some((host, "0")) => format!("{host}:{port}"),
+        _ => advertise.to_owned(),
+    }
 }
 
 /// Whether `address` is a wildcard IP address, `0.0.0.0` or `[::]` with a port.
@@ -263,7 +328,79 @@ impl ClusterNode {
             advertise: address,
             nonces: RefCell::default(),
             namespaces: RefCell::default(),
+            budget: Budget {
+                stop_ms: conf.get_stop_timeout_ms().into(),
+            },
+            deadlines: Cell::new(None),
+            peer_requests: Rc::default(),
+            serving: Cell::new(false),
         }))
+    }
+
+    /// Marks the application's listeners as served until the guard is dropped.
+    pub fn serving(self: &Rc<Self>) -> Serving {
+        self.serving.set(true);
+        Serving(Rc::clone(self))
+    }
+
+    /// Starts draining: this instance claims nothing more, and its stop's deadlines run from now.
+    pub fn start_draining(&self) -> Deadlines {
+        let now = Instant::now();
+        let at = |ms| now + Duration::from_millis(ms);
+        let deadlines = Deadlines {
+            in_flight: at(self.budget.in_flight_ms()),
+            handoff: at(self.budget.handoff_ms()),
+            release: at(self.budget.release_ms()),
+            grace: at(self.budget.grace_ms()),
+            connections: at(self.budget.connections_ms()),
+            stop: at(self.budget.stop_ms),
+        };
+        self.deadlines.set(Some(deadlines));
+        self.cluster.start_draining();
+        let cluster = Rc::clone(&self.cluster);
+        self.factory
+            .spawn_detached(async move { cluster.announce_draining().await });
+        deadlines
+    }
+
+    /// Hands off an object this draining instance owns at `epoch` but does not run, once it is
+    /// at rest here, unless the handoff's deadline passes first. Answers whether it was released;
+    /// one that was not is abandoned (`Cluster::abandon_actor`).
+    pub async fn release(&self, namespace: &str, actor: &str, epoch: u64) -> bool {
+        let Some(deadlines) = self.deadlines.get() else {
+            return false;
+        };
+        let release = self.cluster.release_actor(namespace, actor, epoch);
+        let released = match tokio::time::timeout_at(deadlines.handoff, release).await {
+            Ok(Ok(released)) => released,
+            Ok(Err(e)) => {
+                tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                false
+            }
+            Err(_) => false,
+        };
+        if !released {
+            self.cluster.abandon_actor(namespace, actor);
+        }
+        released
+    }
+
+    /// Counts a request a peer makes here until the guard is dropped.
+    pub fn peer_request(&self) -> PeerRequest {
+        let requests = Rc::clone(&self.peer_requests);
+        requests.count.set(requests.count.get() + 1);
+        PeerRequest(requests)
+    }
+
+    /// Resolves once no peer has a request in flight here.
+    pub async fn peer_requests_done(&self) {
+        loop {
+            let none = self.peer_requests.none.notified();
+            if self.peer_requests.count.get() == 0 {
+                return;
+            }
+            none.await;
+        }
     }
 
     pub fn add_namespace(&self, unique_key: &str, namespace: Weak<ActorNamespace>) {
@@ -271,11 +408,24 @@ impl ClusterNode {
         self.namespaces.borrow_mut().insert(hash, namespace);
     }
 
+    /// Whether this instance is handing off `object`, named `<namespace hash>/<root key>`.
+    pub fn hands_off(&self, object: &str) -> bool {
+        let Some((hash, key)) = object.split_once('/') else {
+            return false;
+        };
+        let namespace = self.namespaces.borrow().get(hash).and_then(Weak::upgrade);
+        namespace.is_some_and(|namespace| namespace.hands_off(key))
+    }
+
     /// Keeps this instance's alarm index tidy and schedules its share of dead peers' alarms.
     /// Never returns.
     pub async fn alarms_loop(&self) {
         loop {
             tokio::time::sleep(ALARMS_INTERVAL).await;
+            // A draining instance takes on no alarms; its own go to its peers as it leaves.
+            if self.cluster.is_draining() {
+                continue;
+            }
             let schedule = |alarm: cluster::Adopted| {
                 let namespace = self.namespaces.borrow().get(&alarm.namespace).cloned();
                 let Some(namespace) = namespace.and_then(|ns| ns.upgrade()) else {
@@ -309,9 +459,13 @@ impl ClusterNode {
             .cluster
             .acquire_or_route(namespace, actor, now)
             .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor}: {e}"))?;
+            .map_err(|e| match e {
+                cluster::Error::NotHere(_) => moved(&format!("{namespace}/{actor}: {e}")),
+                e => kj::disconnected!("{namespace}/{actor}: {e}"),
+            })?;
         let (node, address, stale) = match route {
             Route::Owned(epoch) => return Ok(Owner::Here(epoch)),
+            Route::Releasing(epoch) => return Ok(Owner::Releasing(epoch)),
             Route::Remote {
                 node,
                 address,
@@ -325,14 +479,17 @@ impl ClusterNode {
                 let _ = cluster.refresh_route(&namespace, &actor, now).await;
             });
         }
-        let session = self
-            .session(&address)
-            .await
-            .map_err(|e| kj::disconnected!("{namespace}/{actor} on {node}: {e}"))?;
+        let session = self.session(&address).await.map_err(|e| {
+            // Unreachable: its own record, not the listing, tells whether it still owns the
+            // object (`forget_route`).
+            self.cluster.forget_route(namespace, actor, &node);
+            kj::disconnected!("{namespace}/{actor} on {node}: {e}")
+        })?;
         // A channel per stub, so a stub stays with the instance it reached.
-        let connection = RpcConnection(ffi::rpc_client_debug_actor(
-            &session.0, service, class, actor,
-        ));
+        let connection = RpcConnection {
+            client: ffi::rpc_client_debug_actor(&session.client, service, class, actor),
+            down: Rc::clone(&session.down),
+        };
         Ok(Owner::Remote(Rc::new(connection), node))
     }
 
@@ -356,13 +513,14 @@ impl ClusterNode {
                 .await
                 .map_err(|_| "no answer to CONNECT".to_owned())?
                 .map_err(|e| e.to_string())?;
-            let session = Rc::new(RpcConnection(ffi::new_rpc_client(
-                factory.raw(),
-                Dialed::from(stream).into_kj(),
-            )));
+            let session = Rc::new(RpcConnection {
+                client: ffi::new_rpc_client(factory.raw(), Dialed::from(stream).into_kj()),
+                down: Rc::default(),
+            });
             let watched = Rc::clone(&session);
             factory.spawn_detached(async move {
-                let _ = ffi::rpc_client_on_disconnect(&watched.0).await;
+                let _ = ffi::rpc_client_on_disconnect(&watched.client).await;
+                watched.down.set(true);
                 sessions.forget(&address, |s| Rc::ptr_eq(s, &watched));
             });
             Ok(session)
@@ -400,15 +558,58 @@ async fn tunnel(node: &Cluster, address: &str) -> std::io::Result<TcpStream> {
 pub enum Owner {
     Here(u64),
     Remote(Rc<RpcConnection>, String),
+    /// Here at the epoch, as this instance drains: it is handed off (`ClusterNode::release`),
+    /// not served.
+    Releasing(u64),
+}
+
+/// "Moved, not started": the answer of an instance that does not serve a Durable Object.
+///
+/// It is given before anything runs. It is a disconnect, which the application sees as
+/// retryable, and its details tell it from one: the caller may send the request again to
+/// whichever instance serves the object now.
+pub fn moved(description: &str) -> crate::Error {
+    kj::disconnected!("{description}").with_details(vec![
+        (ffi::request_not_delivered_detail_id(), vec![]),
+        (ffi::actor_predecessor_rejected_detail_id(), vec![]),
+    ])
+}
+
+/// `error`, marked as a failure before the request reached the object: it may be sent again.
+pub fn not_delivered(error: crate::Error) -> crate::Error {
+    let mut details = error.details().cloned().unwrap_or_default();
+    if details
+        .iter()
+        .any(|(id, _)| *id == ffi::request_not_delivered_detail_id())
+    {
+        return error;
+    }
+    details.push((ffi::request_not_delivered_detail_id(), vec![]));
+    error.with_details(details)
+}
+
+/// Whether `error` is a `moved` answer.
+pub fn is_moved(error: &crate::Error) -> bool {
+    let has = |id| {
+        error
+            .details()
+            .is_some_and(|d| d.iter().any(|(k, _)| *k == id))
+    };
+    has(ffi::request_not_delivered_detail_id()) && has(ffi::actor_predecessor_rejected_detail_id())
 }
 
 impl RpcConnection {
+    /// Whether its session disconnected.
+    pub fn is_down(&self) -> bool {
+        self.down.get()
+    }
+
     /// Starts a request on the remote owner; the caller keeps the session alive with it.
     pub fn start_request(
         &self,
         metadata: KjOwn<ffi::RequestMetadata>,
     ) -> KjOwn<ffi::WorkerInterface> {
-        ffi::rpc_client_start_request(&self.0, metadata)
+        ffi::rpc_client_start_request(&self.client, metadata)
     }
 }
 
@@ -488,14 +689,23 @@ impl PeerConnection {
 impl Handler for PeerConnection {
     async fn request<'a>(
         &'a self,
-        _method: Method,
-        _url: &'a [u8],
+        method: Method,
+        url: &'a [u8],
         _headers: HeadersRef<'a>,
         _body: Pin<&'a mut kj::io::AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
-        let table = header_table(&self.node.factory);
-        send_error(response, 404, "Not Found", &Headers::new(table)).await
+        let headers = Headers::new(header_table(&self.node.factory));
+        if method != Method::GET || url != b"/ready" {
+            return send_error(response, 404, "Not Found", &headers).await;
+        }
+        // Ready to take traffic: serving, a member of the cluster, not stopping.
+        let cluster = &self.node.cluster;
+        if self.node.serving.get() && cluster.lease_holds() && !cluster.is_draining() {
+            send_error(response, 200, "OK", &headers).await
+        } else {
+            send_error(response, 503, "Service Unavailable", &headers).await
+        }
     }
 
     async fn connect<'a>(
@@ -571,6 +781,8 @@ pub struct Owned {
     namespace: String,
     actor: String,
     epoch: u64,
+    /// Whether dropping it keeps the object dormant here; not once it is handed off.
+    evict: Cell<bool>,
     /// The takeover, shared by the requests that wait for it.
     restore: RefCell<Option<futures::future::Shared<LocalBoxFuture<'static, Result<()>>>>>,
 }
@@ -582,7 +794,26 @@ impl Owned {
             namespace: namespace.to_owned(),
             actor: actor.to_owned(),
             epoch,
+            evict: Cell::new(true),
             restore: RefCell::new(None),
+        }
+    }
+
+    /// Hands the object off as this instance drains, once it stopped: uploads what the bucket
+    /// lacks, then releases it to the next claim. Answers whether it was released.
+    pub fn hand_off(self) -> impl Future<Output = bool> + use<> {
+        self.evict.set(false);
+        let cluster = Rc::clone(&self.node.cluster);
+        let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
+        drop(self);
+        async move {
+            match cluster.hand_off_actor(&namespace, &actor, epoch).await {
+                Ok(released) => released,
+                Err(e) => {
+                    tracing::warn!("cluster: handing off {namespace}/{actor}: {e}");
+                    false
+                }
+            }
         }
     }
 
@@ -611,11 +842,41 @@ impl Owned {
     }
 }
 
+impl Owned {
+    /// What dropping this does, to run again for an object a restore opened after the drop.
+    pub fn retire(&self) -> Retire {
+        Retire {
+            node: Rc::clone(&self.node),
+            namespace: self.namespace.clone(),
+            actor: self.actor.clone(),
+            epoch: self.epoch,
+        }
+    }
+}
+
 impl Drop for Owned {
     fn drop(&mut self) {
+        if self.evict.get() {
+            self.retire().run();
+        } else {
+            self.node.cluster.close_actor(&self.namespace, &self.actor);
+        }
+    }
+}
+
+/// Stops capturing an object that left this node, and evicts it (`Owned::retire`).
+pub struct Retire {
+    node: Rc<ClusterNode>,
+    namespace: String,
+    actor: String,
+    epoch: u64,
+}
+
+impl Retire {
+    pub fn run(self) {
         let cluster = Rc::clone(&self.node.cluster);
         cluster.close_actor(&self.namespace, &self.actor);
-        let (namespace, actor, epoch) = (self.namespace.clone(), self.actor.clone(), self.epoch);
+        let (namespace, actor, epoch) = (self.namespace, self.actor, self.epoch);
         self.node.factory.spawn_detached(async move {
             cluster.evict_actor(&namespace, &actor, epoch).await;
         });

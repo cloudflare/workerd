@@ -127,6 +127,39 @@ pub fn is_result_type(ty: &syn::Type) -> bool {
     false
 }
 
+/// Returns true if `ty` is a promise: a `jsg::Promise<T>`, or a `v8::Local` of a `v8::Promise`,
+/// alone or as the `T` of a `Result<T, E>` or `jsg::Result<T>`. C++ JSG rejects the promise of a
+/// method or property of such a type with what it throws, under `capture_async_api_throws`
+/// (`LiftKj_<v8::Local<v8::Promise>>` in `src/workerd/jsg/util.h`).
+pub fn is_promise_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+    let first_type_argument = || match &segment.arguments {
+        syn::PathArguments::AngleBracketed(args) => args.args.iter().find_map(|arg| match arg {
+            syn::GenericArgument::Type(ty) => Some(ty),
+            _ => None,
+        }),
+        _ => None,
+    };
+    if segment.ident == "Promise" {
+        return true;
+    }
+    if segment.ident == "Local" {
+        return first_type_argument().is_some_and(|inner| {
+            matches!(inner, syn::Type::Path(path)
+                if path.path.segments.last().is_some_and(|s| s.ident == "Promise"))
+        });
+    }
+    if segment.ident == "Result" {
+        return first_type_argument().is_some_and(is_promise_type);
+    }
+    false
+}
+
 /// Returns true if the type is `&mut Lock` or `&mut jsg::Lock`.
 ///
 /// When a method's first typed parameter matches this pattern, the macro passes the

@@ -9,64 +9,112 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  services = [
-    ( name = "local",
-      disk = (
-        writable = true,
-        allowDotfiles = true,
-      )
-    ),
+  services = .services,
+  sockets = .sockets,
+  cluster = .cluster,
+);
 
-    ( name = "main",
-      worker = (
-        modules = [
-          ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
-        ],
-        compatibilityDate = "2026-01-01",
-        compatibilityFlags = ["nodejs_compat", "allow_irrevocable_stub_storage"],
-        bindings = [
-          ( name = "COUNTER", durableObjectNamespace = "Counter" ),
-          ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
-          ( name = "ON_HIBERNATE", service = "on-hibernate" ),
-        ],
-        durableObjectNamespaces = [
-          ( className = "Counter", uniqueKey = "counter-test-namespace" ),
-        ],
-        durableObjectStorage = ( localDisk = "local" ),
-      )
-    ),
-
-    ( name = "on-hibernate",
-      worker = (
-        modules = [
-          ( name = "cluster-on-hibernate-worker.js",
-            esModule = embed "cluster-on-hibernate-worker.js" ),
-        ],
-        compatibilityDate = "2026-01-01",
-        compatibilityFlags = ["experimental", "unsafe_module"],
-        bindings = [
-          ( name = "SLEEPER", durableObjectNamespace = "Sleeper" ),
-        ],
-        durableObjectNamespaces = [
-          ( className = "Sleeper", uniqueKey = "on-hibernate-test-namespace" ),
-        ],
-        durableObjectStorage = ( localDisk = "local" ),
-      )
-    ),
-  ],
-
-  sockets = [
-    ( name = "http", address = "*:0", http = (), service = "main" ),
-  ],
-
+# As `config`, with a stop timeout short enough for a test to wait out.
+const shortStop :Workerd.Config = (
+  services = .services,
+  sockets = .sockets,
   cluster = (
     bucket = "s3://wdtest/cluster",
-    bucketOptions = [
-      "aws_region=us-east-1",
-      "aws_access_key_id=wdtest",
-      "aws_secret_access_key=wdtest-secret",
-    ],
+    bucketOptions = .bucketOptions,
     address = "127.0.0.1:0",
     key = "test-cluster-shared-secret-of-32-bytes",
+    stopTimeoutMs = 6000,
   ),
+);
+
+const services :List(Workerd.Service) = [
+  ( name = "local",
+    disk = (
+      writable = true,
+      allowDotfiles = true,
+    )
+  ),
+
+  ( name = "main",
+    worker = (
+      modules = [
+        ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
+      ],
+      compatibilityDate = "2026-01-01",
+      compatibilityFlags = ["nodejs_compat", "allow_irrevocable_stub_storage"],
+      bindings = [
+        ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+        ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+        ( name = "ON_HIBERNATE", service = "on-hibernate" ),
+        ( name = "KV",
+          kvNamespace = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+        ( name = "KV_WORKER",
+          service = (
+            name = "kv", props = ( json = "{\"namespace\": \"cluster-kv\"}" ) ) ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+    )
+  ),
+
+  # KV, whose large values are in the bucket at `services/kv/`, cached on
+  # each instance's disk.
+  ( name = "kv",
+    worker = (
+      modules = [ ( name = "kv.js", bundled = "/workerd/kv.js" ) ],
+      compatibilityDate = "2026-01-01",
+      bindings = [
+        ( name = "SHARD", durableObjectNamespace = "KVNamespace" ),
+        ( name = "BLOBS", service = "kv-blobs" ),
+        ( name = "BLOB_CACHE", service = "local" ),
+        ( name = "CLUSTERED", json = "true" ),
+        ( name = "TEST_CLOCK", json = "true" ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "KVNamespace", uniqueKey = "kv", enableSql = true ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+    )
+  ),
+  ( name = "kv-blobs", bucket = ( path = "kv" ) ),
+
+  ( name = "on-hibernate",
+    worker = (
+      modules = [
+        ( name = "cluster-on-hibernate-worker.js",
+          esModule = embed "cluster-on-hibernate-worker.js" ),
+      ],
+      compatibilityDate = "2026-01-01",
+      compatibilityFlags = ["experimental", "unsafe_module"],
+      bindings = [
+        ( name = "SLEEPER", durableObjectNamespace = "Sleeper" ),
+      ],
+      durableObjectNamespaces = [
+        ( className = "Sleeper", uniqueKey = "on-hibernate-test-namespace" ),
+      ],
+      durableObjectStorage = ( localDisk = "local" ),
+    )
+  ),
+];
+
+const sockets :List(Workerd.Socket) = [
+  ( name = "http", address = "*:0", http = (), service = "main" ),
+];
+
+const bucketOptions :List(Text) = [
+  "aws_region=us-east-1",
+  "aws_access_key_id=wdtest",
+  "aws_secret_access_key=wdtest-secret",
+];
+
+# The drain tests hold requests in flight for up to 8 s, within half of this stop timeout.
+const cluster :Workerd.ClusterConfig = (
+  bucket = "s3://wdtest/cluster",
+  bucketOptions = .bucketOptions,
+  address = "127.0.0.1:0",
+  key = "test-cluster-shared-secret-of-32-bytes",
+  stopTimeoutMs = 20000,
 );

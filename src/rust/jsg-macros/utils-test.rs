@@ -105,6 +105,22 @@ fn is_result_type_cases() {
 }
 
 #[test]
+fn is_promise_type_cases() {
+    assert!(is_promise_type(&parse_quote!(v8::Local<'s, v8::Promise>)));
+    assert!(is_promise_type(&parse_quote!(jsg::Promise<'s, String>)));
+    assert!(is_promise_type(&parse_quote!(
+        jsg::Result<v8::Local<'s, v8::Promise>>
+    )));
+    assert!(is_promise_type(&parse_quote!(
+        Result<jsg::Promise<'s, String>, jsg::Error>
+    )));
+    assert!(!is_promise_type(&parse_quote!(v8::Local<'s, v8::Value>)));
+    assert!(!is_promise_type(&parse_quote!(jsg::Result<()>)));
+    assert!(!is_promise_type(&parse_quote!(v8::VoidPromise<'s>)));
+    assert!(!is_promise_type(&parse_quote!(String)));
+}
+
+#[test]
 fn is_lock_ref_cases() {
     assert!(is_lock_ref(&parse_quote!(&mut Lock)));
     assert!(is_lock_ref(&parse_quote!(&mut jsg::Lock)));
