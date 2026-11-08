@@ -33,7 +33,7 @@ const config = (
 ) => `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
-    ( name = "store", disk = ( path = "${join(dir, 'store')}", writable = true ) ),
+    ( name = "store", disk = ( path = ${JSON.stringify(join(dir, 'store'))}, writable = true ) ),
     ( name = "app",
       worker = (
         modules = [ ( name = "app.js", esModule = embed "app.js" ) ],
