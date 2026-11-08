@@ -93,6 +93,11 @@ class LocalOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable::YES;
   }
+  Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
+      ActorCallRetryState::Attempt,
+      MakeUserSpanParent makeUserSpanParent) override {
+    return newSingleUseClient(kj::mv(cfStr), kj::mv(makeUserSpanParent));
+  }
 
  private:
   TestFixture& receiver;
