@@ -1270,6 +1270,15 @@ export declare abstract class Crypto {
   randomUUID(): string;
   DigestStream: typeof DigestStream;
 }
+export interface SubtleCryptoCShakeParams extends SubtleCryptoHashAlgorithm {
+  outputLength: number;
+  functionName?: ArrayBuffer | ArrayBufferView;
+  customization?: ArrayBuffer | ArrayBufferView;
+}
+export interface SubtleCryptoTurboShakeParams extends SubtleCryptoHashAlgorithm {
+  outputLength: number;
+  domainSeparation?: number;
+}
 /**
  * The **`SubtleCrypto`** interface of the Web Crypto API provides a number of low-level cryptographic functions.
  * Available only in secure contexts.
@@ -1324,7 +1333,11 @@ export declare abstract class SubtleCrypto {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
    */
   digest(
-    algorithm: string | SubtleCryptoHashAlgorithm,
+    algorithm:
+      | string
+      | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
   /**
@@ -1410,6 +1423,8 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
       | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     length?: number | null,
@@ -1422,6 +1437,8 @@ export declare abstract class SubtleCrypto {
       | SubtleCryptoImportKeyAlgorithm
       | SubtleCryptoDeriveKeyAlgorithm
       | SubtleCryptoHashAlgorithm
+      | SubtleCryptoCShakeParams
+      | SubtleCryptoTurboShakeParams
       | SubtleCryptoEncryptAlgorithm
       | SubtleCryptoSignAlgorithm,
     additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
