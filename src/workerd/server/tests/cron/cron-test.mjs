@@ -77,17 +77,22 @@ function serve(dir, args) {
   );
   const calls = [];
   let output = '';
-  const read = (d) => {
-    process.stderr.write(d);
-    output += d;
-    for (const m of output.matchAll(/SCHEDULED (\{.*\})/g)) {
-      if (m.index >= calls.consumed) calls.push(JSON.parse(m[1]));
-    }
-    calls.consumed = output.length;
+  // Each stream is parsed by whole lines: a chunk can end mid-line.
+  const read = (stream) => {
+    let line = '';
+    stream.setEncoding('utf8').on('data', (d) => {
+      process.stderr.write(d);
+      output += d;
+      const lines = (line + d).split('\n');
+      line = lines.pop();
+      for (const l of lines) {
+        const m = l.match(/SCHEDULED (\{.*\})/);
+        if (m) calls.push(JSON.parse(m[1]));
+      }
+    });
   };
-  calls.consumed = 0;
-  child.stdout.on('data', read);
-  child.stderr.on('data', read);
+  read(child.stdout);
+  read(child.stderr);
   const exited = new Promise((resolve) => child.once('exit', resolve));
   return {
     calls,
