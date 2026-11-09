@@ -95,6 +95,39 @@ fn preserves_utf16_and_exposes_string_operations() {
 }
 
 #[test]
+fn utf8_uninitialized_storage_exposes_only_written_bytes() {
+    use std::mem::MaybeUninit;
+
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        for units in [
+            vec![],
+            vec![0x61, 0, 0x62],
+            vec![0x20ac, 0xd800, 0xdc00, 0xdfff],
+        ] {
+            let string = v8::String::new_from_two_byte(lock, &units).unwrap();
+            for flags in [
+                v8::WriteFlags::None,
+                v8::WriteFlags::ReplaceInvalidUtf8,
+                v8::WriteFlags::NullTerminate,
+                v8::WriteFlags::NullTerminateAndReplaceInvalidUtf8,
+            ] {
+                for capacity in 0..20 {
+                    let mut initialized = vec![0xee; capacity];
+                    let written = string.write_utf8(lock, &mut initialized, flags);
+                    let mut uninitialized = vec![MaybeUninit::uninit(); capacity];
+                    assert_eq!(
+                        string.write_utf8_uninit(lock, &mut uninitialized, flags),
+                        &initialized[..written],
+                        "units={units:?}, flags={flags:?}, capacity={capacity}",
+                    );
+                }
+            }
+        }
+        Ok(())
+    });
+}
+
+#[test]
 fn to_string_replaces_lone_surrogates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {

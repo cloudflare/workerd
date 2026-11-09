@@ -3429,6 +3429,29 @@ impl<'s> Local<'s, String> {
         }
     }
 
+    /// Writes UTF-8 into uninitialized storage and returns only the initialized bytes.
+    /// Flags have the same meaning as in [`Self::write_utf8`].
+    pub fn write_utf8_uninit<'b>(
+        &self,
+        lock: &mut crate::Lock,
+        buffer: &'b mut [std::mem::MaybeUninit<u8>],
+        flags: WriteFlags,
+    ) -> &'b mut [u8] {
+        // SAFETY: the isolate is locked, the handle is a String, and `buffer` is writable for
+        // its full capacity. V8 initializes exactly the prefix it reports, whose length does
+        // not exceed that capacity; only that prefix becomes an initialized slice.
+        unsafe {
+            let written = ffi::local_string_write_utf8_v2(
+                lock.isolate().as_ffi(),
+                self.raw(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                flags.bits(),
+            );
+            std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), written)
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Convenience helpers
     // -------------------------------------------------------------------------
