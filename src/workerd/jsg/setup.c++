@@ -1146,6 +1146,7 @@ void IsolateBase::prepareWrappableDeserializeMetadata(
 
 void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
   KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.relinkReferences(finalizedSnapshotArtifact());
   metadata.releaseSlotsWithChecks();
 }
 
