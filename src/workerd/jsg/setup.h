@@ -137,9 +137,18 @@ class V8System {
 //   instead of baking a wrong feature test in, the zygote fails and the Worker starts without a
 //   snapshot. Catching the error, letting it reject a promise, or reading the property from C++
 //   under a v8::TryCatch changes nothing: the recorded use fails the zygote before CreateBlob().
-//   The property is removed before CreateBlob().
+//   The property is removed before CreateBlob(). Deleting it is not a use: the deletion is
+//   recorded, and the restored context deletes what V8 added.
 // Either way, a property the top level (re)defined so that V8 cannot re-add it, and a
 // non-extensible holder, fail the zygote.
+//
+// Temporal is installed differently: InitializeGlobal_harmony_temporal() (part of
+// InitializeExperimentalGlobal()) defines it with JSObject::SetAccessor(), which replaces a
+// property of the same name instead of tripping a CHECK, so a top-level polyfill would be silently
+// overwritten on restore. In a context that has Temporal its names are FAIL_CLOSED. In one that
+// does not (NewContextOptions::enableTemporal is false, and newContext() deletes what V8
+// installed), they are absent in the zygote as in a normal context, and a property the top level
+// defines under one of them fails the zygote.
 
 // The intrinsic a restore-time property lives on. The zygote captures each one except the global
 // object in a ContextDataSlot before any JavaScript runs, so that user code rebinding the global
@@ -149,6 +158,8 @@ enum class RestoreTimeHolder {
   ERROR_CTOR,
   ITERATOR_CTOR,
   ITERATOR_PROTOTYPE,
+  // Not captured: read as the prototype of a new v8::Date, which is the realm's intrinsic.
+  DATE_PROTOTYPE,
 };
 
 enum class RestoreTimeKind {
@@ -158,6 +169,9 @@ enum class RestoreTimeKind {
   // Installed in the zygote as a native data property whose getter and setter throw and record
   // the use; a recorded use fails the zygote before the snapshot.
   FAIL_CLOSED,
+  // FAIL_CLOSED in a context that has Temporal; absent, and required to stay so, in one that does
+  // not.
+  TEMPORAL,
 };
 
 struct RestoreTimeGlobal {
@@ -179,6 +193,9 @@ constexpr RestoreTimeGlobal RESTORE_TIME_GLOBALS[] = {
   {RestoreTimeHolder::ITERATOR_CTOR, "zipKeyed"_kj, RestoreTimeKind::FAIL_CLOSED},
   {RestoreTimeHolder::ITERATOR_PROTOTYPE, "join"_kj, RestoreTimeKind::FAIL_CLOSED},
   {RestoreTimeHolder::ITERATOR_PROTOTYPE, "includes"_kj, RestoreTimeKind::FAIL_CLOSED},
+  // Genesis::InitializeGlobal_harmony_temporal(), from InitializeExperimentalGlobal()
+  {RestoreTimeHolder::GLOBAL, "Temporal"_kj, RestoreTimeKind::TEMPORAL},
+  {RestoreTimeHolder::DATE_PROTOTYPE, "toTemporalInstant"_kj, RestoreTimeKind::TEMPORAL},
 };
 
 // The holder's JavaScript name ("globalThis", "Error", "Iterator.prototype", ...).
@@ -616,8 +633,10 @@ class IsolateBase {
   }
 
   // Zygote, right after `context` is created and before any JavaScript runs in it: captures the
-  // holders and installs the properties.
-  void installRestoreTimeGlobalsForZygote(Lock& js, v8::Local<v8::Context> context);
+  // holders and installs the properties. `hasTemporal` is the context's
+  // NewContextOptions::enableTemporal.
+  void installRestoreTimeGlobalsForZygote(
+      Lock& js, v8::Local<v8::Context> context, bool hasTemporal);
 
   // Zygote, after its top level has run and before CreateBlob(): records what the top level left
   // of Error.stackTraceLimit into the snapshot, and removes every property so that V8 can add them
@@ -824,6 +843,10 @@ class IsolateBase {
   // The first FAIL_CLOSED restore-time property the zygote's top level used, if any. Set by the
   // property's getter or setter; removeRestoreTimeGlobalsBeforeSnapshot() fails the zygote on it.
   kj::Maybe<const RestoreTimeGlobal&> restoreTimeGlobalUsed;
+
+  // Whether the zygote's context has Temporal, which decides how the RestoreTimeKind::TEMPORAL
+  // entries are handled. Set by installRestoreTimeGlobalsForZygote().
+  bool zygoteHasTemporal = false;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -1434,7 +1457,8 @@ class Isolate: public IsolateBase {
       // adds them to a context restored from the snapshot, see
       // IsolateBase::installRestoreTimeGlobalsForZygote().
       if (jsgIsolate.isPreparingSnapshot()) {
-        jsgIsolate.installRestoreTimeGlobalsForZygote(*this, context.getHandle(v8Isolate));
+        jsgIsolate.installRestoreTimeGlobalsForZygote(
+            *this, context.getHandle(v8Isolate), options.enableTemporal);
       } else if (jsgIsolate.isStartingFromSnapshot()) {
         jsgIsolate.replayRestoreTimeGlobalsAfterLoad(*this, context.getHandle(v8Isolate));
       }
