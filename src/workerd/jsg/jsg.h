@@ -1470,6 +1470,21 @@ class Object: private Wrappable {
     return kj::addRef(wrappable);
   }
 
+  // For a snapshotReferences() override: `obj` as the Wrappable the snapshot knows it by.
+  static const Wrappable* snapshotReferenceTo(const Object& obj) {
+    return &obj;
+  }
+
+  // For a snapshotRelink() override: a restored reference as a Ref<T>, or none when the snapshot
+  // carried none or the object is not a T.
+  template <typename T>
+  static kj::Maybe<Ref<T>> snapshotRelinkedRef(Wrappable* restored) {
+    if (restored == nullptr) return kj::none;
+    T* obj = dynamic_cast<T*>(static_cast<Object*>(restored));
+    if (obj == nullptr) return kj::none;
+    return _jsgThis(obj);
+  }
+
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}

@@ -85,6 +85,9 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     using Transfer = kj::OneOf<Stateless, kj::Own<Wrappable>>;
     Transfer transfer;
     v8::CppHeapPointerTag tag;
+    // The slots of the objects the original's snapshotReferences() named, in its order; none for
+    // one the snapshot carries no slot for.
+    kj::Array<kj::Maybe<size_t>> references;
   };
   kj::Vector<LiveWrappable> liveWrappables;
 
@@ -210,6 +213,8 @@ struct WrappableDeserializeMetadata {
 
   // Parallel to SnapshotArtifact::liveWrappables.
   kj::Array<Slot> slots;
+  // Each slot's instance, owned by its shim; null for a dropped slot. Valid for a linked slot.
+  kj::Array<Wrappable*> instances;
 
   // Findings the callback cannot raise itself.
   uint32_t badPayloadsCount = 0;     // API-wrapper payload with a bad size, index or slot
@@ -223,6 +228,10 @@ struct WrappableDeserializeMetadata {
       HeapTracer& tracer,
       const SnapshotArtifact& artifact,
       kj::Array<kj::Own<Wrappable>> instances);
+
+  // After creating a context, before releaseSlotsWithChecks(): hands each linked instance whose
+  // original named references (Wrappable::snapshotReferences()) the linked instances of those.
+  void relinkReferences(const SnapshotArtifact& artifact);
 
   // After creating a context: verifies that every serialized slot was linked exactly once and that
   // the callback reported nothing else, then releases the roots that kept unlinked shims alive.
