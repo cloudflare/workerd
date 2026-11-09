@@ -56,6 +56,7 @@ use utils::is_rc_self;
 use utils::is_result_type;
 use utils::snake_to_camel;
 use utils::this_param;
+use utils::typescript_options;
 
 // =============================================================================
 // #[jsg_struct]
@@ -84,13 +85,13 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(fields) => fields,
         Err(err) => return err,
     };
-    let rtti = describe_struct(name, &class_name, has_flag(&attr, "ts_root"), &named_fields);
+    let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
+    let rtti = describe_struct(name, &class_name, &typescript_options(attr), &named_fields);
 
     let mut to_js_fields = Vec::new();
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
-    let custom_marker = has_flag(&attr, "custom_holds_no_gc_references");
     let traced_impl = struct_traced_impl(name, &named_fields, custom_marker);
 
     for field in &named_fields {
@@ -296,7 +297,7 @@ fn to_js_fn_body(
 fn describe_struct(
     name: &syn::Ident,
     class_name: &str,
-    ts_root: bool,
+    typescript: &proc_macro2::TokenStream,
     fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
 ) -> proc_macro2::TokenStream {
     let members = fields.iter().filter_map(|field| {
@@ -319,7 +320,7 @@ fn describe_struct(
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, |cx| {
+                cx.structure::<Self>(#class_name, #typescript, |cx, _| {
                     let _ = &cx;
                     vec![#(#members),*]
                 })

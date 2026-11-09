@@ -12,6 +12,10 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - If checked out as a submodule, be aware that there is additional documentation and context in the
   root of that repository that is not present here. Look for the `../../README.md`, `../../AGENTS.md`,
   and other markdown files in the root of the parent repository.
+- Custom tools (`next-capnp-ordinal`, `compat-date-at`) are defined in `.opencode/lib/`. opencode
+  loads them natively; Claude Code reaches them through the `workerd` MCP server registered in
+  `.mcp.json`, which needs Node 22.18 or later on `PATH` (for TypeScript type stripping). With an
+  older Node, the server fails to start and the tools are missing.
 
 ## Project Overview
 

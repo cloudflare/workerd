@@ -12,7 +12,6 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
-#include <workerd/util/autogate.h>
 
 #include <kj-rs/convert.h>
 
@@ -1726,12 +1725,6 @@ void realm_detach(Isolate* isolate, const IsolateState* state) {
   isolateBase.setDeferredActionHook(nullptr);
   isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
-}
-
-// Autogates
-bool integer_enforce_range_autogate_enabled() {
-  return ::workerd::util::Autogate::isEnabled(
-      ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
 }
 
 // JSON

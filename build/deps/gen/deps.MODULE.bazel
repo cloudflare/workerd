@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "218355340f67452cdc340a290f20ccf77c2c1638148fe28997c4f80568d836f4",
-    strip_prefix = "google-boringssl-6b482f5",
+    sha256 = "b301de6e58c730c36cf64781306c1b576be49f8b2197cb533279667e021e2598",
+    strip_prefix = "google-boringssl-5e7f779",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261020.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261105.0",
 )
 
 # brotli
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "661a847ae18b099424d0ebc51456c75e369543484caf743769f81648a386484d",
-    strip_prefix = "capnproto-capnproto-9cdd0a4/c++",
+    sha256 = "98b457765a7b99c0002732dc7984d42bfcb20f38ce975ae7db6bf1f9b3488dfd",
+    strip_prefix = "capnproto-capnproto-ad77201/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/9cdd0a4313fa85420ca071f058cb1a6a73eb5f28",
+    url = "https://github.com/capnproto/capnproto/tarball/ad772016362aa6a1fad91c038fc702d778a134ba",
 )
 use_repo(http, "capnp-cpp")
 
@@ -149,7 +149,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "9f9f52c60a14e8e772fb561029ae0a121fef7609",
+    commit = "ec453dc9abac1ddf39ced752e72a7a80dcda1d91",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
