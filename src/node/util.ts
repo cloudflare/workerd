@@ -45,6 +45,7 @@ import {
 } from 'node-internal:internal_inspect';
 
 import { callbackify, parseEnv } from 'node-internal:internal_utils';
+import { diff } from 'node-internal:internal_util_diff';
 import {
   isReadableStream,
   isWritableStream,
@@ -110,6 +111,7 @@ export function isArray(val: unknown): boolean {
   return Array.isArray(val);
 }
 export { callbackify, parseEnv } from 'node-internal:internal_utils';
+export { diff };
 export const types = internalTypes;
 
 export { MIMEParams, MIMEType };
@@ -470,6 +472,7 @@ export default {
   isDeepStrictEqual,
   convertProcessSignalToExitCode,
   setTraceSigInt,
+  diff,
   _errnoException,
   _exceptionWithHostPort,
 
