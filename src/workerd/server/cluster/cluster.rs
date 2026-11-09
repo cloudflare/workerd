@@ -26,7 +26,6 @@ use crate::Guard;
 use crate::Ownership;
 use crate::Registry;
 use crate::Result;
-use crate::Version;
 use crate::alarms::Adopted;
 use crate::alarms::Index;
 use crate::hmac_sha256;
@@ -517,16 +516,34 @@ pub fn now_ms() -> u64 {
 
 /// Refuse a store that ignores write preconditions: fencing and the
 /// deployment catalog rest on them. GCS's S3 API, for one, ignores
-/// `If-Match` on a PUT. `key` is an object only this check writes.
+/// `If-Match` on a PUT. `key` is an object only this check writes. Each
+/// write's body differs, so that no two writes could share an S3 `ETag`.
 pub(crate) async fn check_conditional_writes(bucket: &Bucket, key: &str) -> Result<()> {
-    let stale = Guard::Match(Version("\"0\"".into()));
-    let created = bucket.put_if(key, vec![], Guard::Absent).await?;
-    let again = bucket.put_if(key, vec![], Guard::Absent).await?;
-    let replaced = bucket.put_if(key, vec![], stale).await?;
+    let created = bucket.put_if(key, b"1".to_vec(), Guard::Absent).await?;
+    let again = bucket.put_if(key, b"2".to_vec(), Guard::Absent).await?;
+    let (replaced, stale) = match &created {
+        Some(first) => {
+            let replaced = bucket.put_if(key, b"3".to_vec(), Guard::Match(first.clone()));
+            let replaced = replaced.await?;
+            let stale = bucket.put_if(key, b"4".to_vec(), Guard::Match(first.clone()));
+            (replaced, stale.await?)
+        }
+        None => (None, None),
+    };
     bucket.delete(key).await?;
-    if created.is_none() || again.is_some() || replaced.is_some() {
+    if again.is_some() || stale.is_some() {
         return Err(Error::Config(
             "the bucket ignores conditional writes (If-None-Match, If-Match)".into(),
+        ));
+    }
+    // A store that compares versions as it should, but answers ones that
+    // never match: a weak `ETag` (`W/"..."`) fails `If-Match`'s strong
+    // comparison.
+    if created.is_none() || replaced.is_none() {
+        return Err(Error::Config(
+            "the bucket refused a conditional write whose condition held: creating an absent \
+             object, or replacing the version the bucket had just answered for it"
+                .into(),
         ));
     }
     Ok(())
@@ -538,6 +555,7 @@ mod tests {
 
     use super::check_conditional_writes;
     use crate::Bucket;
+    use crate::Error;
     use crate::bucket::memory::Memory;
 
     #[test]
@@ -548,10 +566,27 @@ mod tests {
                     .await
                     .is_ok()
             );
+            let message = |store: Memory| async {
+                let bucket = Bucket::new(store, "");
+                match check_conditional_writes(&bucket, "n.probe").await {
+                    Err(Error::Config(message)) => message,
+                    other => panic!("expected a config error, not {other:?}"),
+                }
+            };
             let lax = Memory::default();
             lax.ignores_guards.set(true);
-            let lax = Bucket::new(lax, "");
-            assert!(check_conditional_writes(&lax, "n.probe").await.is_err());
+            assert!(
+                message(lax)
+                    .await
+                    .starts_with("the bucket ignores conditional writes")
+            );
+            let weak = Memory::default();
+            weak.never_matches.set(true);
+            assert!(
+                message(weak)
+                    .await
+                    .starts_with("the bucket refused a conditional write whose condition held")
+            );
         });
     }
 }

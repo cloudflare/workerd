@@ -199,6 +199,8 @@ pub mod memory {
         writes: Cell<u64>,
         /// As GCS's S3 API treats `If-Match` on a PUT.
         pub ignores_guards: Cell<bool>,
+        /// As a store whose `ETag`s are weak treats `If-Match`.
+        pub never_matches: Cell<bool>,
     }
 
     #[async_trait::async_trait(?Send)]
@@ -230,7 +232,9 @@ pub mod memory {
             let holds = match guard {
                 None => true,
                 Some(Guard::Absent) => current.is_none(),
-                Some(Guard::Match(version)) => current == Some(&version),
+                Some(Guard::Match(version)) => {
+                    current == Some(&version) && !self.never_matches.get()
+                }
             };
             if !holds && !self.ignores_guards.get() {
                 return Ok(None);
