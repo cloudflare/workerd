@@ -23,7 +23,9 @@ constexpr kj::StringPtr JS_CLONEABLE_KEY = "workerd:cloneable"_kj;
 
 // The runtime's internal JavaScript modules loaded in a context (the per-isolate bootstrap's, see
 // api/per-isolate-bootstrap.h), which the deserializer looks up classes implemented in JavaScript
-// among. Stored in the context's ContextPointerSlot::BOOTSTRAP_STATE slot.
+// among. Stored in the context's ContextPointerSlot::BOOTSTRAP_STATE slot, which, in a context
+// that runs the per-isolate bootstrap, nothing else may set: the bootstrap reads the slot back as
+// its own implementation.
 class BootstrapModules {
  public:
   // Returns the exports of the module named `specifier` if it has been loaded, or kj::none. Must
@@ -109,14 +111,15 @@ kj::Maybe<BootstrapModules&> tryGetBootstrapModules(Lock& js);
 //   whatever its prototype is now. Any other mark makes serializing it throw DataCloneError,
 //   unless the ExternalHandler serializes it (trySerializeClassInstance()). An object whose
 //   prototype is Object.prototype or null is not checked for the property, which keeps plain
-//   objects cheap, so it is never an instance.
+//   objects cheap, so it is never an instance. Nor is an instance of a built-in that V8
+//   serializes itself, such as a Map, even of a subclass: V8 never offers it to the Serializer.
 //
 // An instance is written as SERIALIZATION_TAG_JS_SERIALIZABLE, its `deserializeInfo`, and a uint32
-// of flags, followed, if it is a native error, by its `message` if that is a string (flag 4) and
-// its own `stack` if it has one (flag 1). Flag 2 says that the writer was not using enhanced error
-// serialization. A reader rejects flags
-// it doesn't know, so that later versions can add fields. The instance's `data` follows the
-// top-level value (as in Node.js), so that it can refer back to the instance.
+// of flags, followed, if it is a native error, by its `message` (flag 4) and its own `stack` (flag
+// 1), each if it is a string. Flag 2 says that the writer was not using enhanced error
+// serialization. A reader rejects flags it doesn't know, so that later versions can add fields.
+// The instance's `data` follows the top-level value (as in Node.js), so that it can refer back to
+// the instance.
 // V8 runs no JavaScript while it reads a value, so the deserializer creates each instance from its
 // constructor's `prototype` without calling the constructor (as a native error if the prototype
 // inherits from Error.prototype), marks it with the descriptor, and calls `deserialize`, in the
@@ -165,14 +168,14 @@ class Serializer final: v8::ValueSerializer::Delegate {
     virtual void serializeProxy(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy);
 
-    // Offers the handler a class instance (an object whose prototype is not Object.prototype and
-    // which is not a JSG-wrapped host object, or an instance of a class implemented in JavaScript,
-    // whatever its mark) to serialize as an external. Returns true if the handler
-    // recognized the object and serialized it; false to fall through to the default behavior
-    // (DataCloneError, or the object's own serialization if it is cloneable). This is how objects
+    // Offers the handler an instance of a class implemented in JavaScript (an object with a
+    // JS_SERIALIZE_MODE_KEY mark, whatever the mark is) to serialize as an external. Returns true
+    // if the handler recognized the object and serialized it; false to fall through to the
+    // object's own serialization if it is cloneable, or else DataCloneError. This is how objects
     // implemented in JavaScript (e.g. the TypeScript-implemented stream classes, which have no JSG
     // wrapper for the serializer to find) participate in external serialization: the handler
-    // recognizes them by brand check.
+    // recognizes them by brand check. Only a marked object is offered, so a class whose instances
+    // a handler takes must mark each one, as the streams do with markUncloneable().
     virtual bool trySerializeClassInstance(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Object> object) {
       return false;

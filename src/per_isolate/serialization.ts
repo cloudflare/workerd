@@ -8,10 +8,11 @@
 // which main.ts loads whatever the compatibility flags.
 //
 // An instance markUncloneable() marks throws DataCloneError when serialized,
-// unless the serialization takes it as an external (a stream over RPC). One
-// markCloneable() marks with its class's Cloneable, which makeCloneable()
-// returns, is serialized as makeCloneable() says, whatever its prototype is
-// by then:
+// unless the serialization takes it as an external (a stream over RPC). Only
+// a marked instance is offered as an external, so a class whose instances
+// are externals must mark each one. One markCloneable() marks with its
+// class's Cloneable, which makeCloneable() returns, is serialized as
+// makeCloneable() says, whatever its prototype is by then:
 //
 // - deserializeInfo names the class's constructor as 'module:Export', an
 //   export of a module the bootstrap loads. Serialized data, including
@@ -39,6 +40,11 @@
 // Either mark is ignored on an object whose prototype is Object.prototype or
 // null: to keep plain objects cheap, the serializer does not check them for
 // one. Mark instances of a class, or of a prototype of the runtime's own.
+// Either is ignored, too, on an instance of a built-in that V8 serializes
+// itself, even of a subclass: an Array, ArrayBuffer, SharedArrayBuffer,
+// typed array, DataView, Date, Map, Set, RegExp, or Boolean, Number or String
+// object is cloned as the built-in. makeCloneable() rejects a class that
+// inherits from one.
 //
 // The deserializer makes the instance from Export.prototype WITHOUT calling
 // the constructor (making a native error if the prototype inherits from
@@ -61,17 +67,31 @@
 // - Don't use other objects in the data: their deserialize() may not have
 //   run yet.
 // - Leave an error's `stack` out of the data, and don't set it in
-//   deserialize(). The serializer writes it, and the deserializer restores
-//   it, as it does a native error's, or else keeps the stack it captured,
-//   which begins with the error's name and the writer's message. Still set
-//   `message` in deserialize(): the serializer writes the message only for
-//   the stack.
+//   deserialize(). The serializer writes it if it is a string, and the
+//   deserializer restores it, as it does a native error's, or else keeps the
+//   stack it captured, which begins with the error's name and the writer's
+//   message. Still set `message` in deserialize(): the serializer writes the
+//   message only for the stack.
 
 const {
+  Array,
+  ArrayBuffer,
+  ArrayPrototypeIncludes,
+  Boolean,
+  DataView,
+  Date,
+  Map,
+  Number,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
+  ObjectGetPrototypeOf,
   ObjectHasOwn,
   ObjectSetPrototypeOf,
+  RegExp,
+  Set,
+  String,
+  TypedArrayPrototype,
+  TypeError,
 } = primordials;
 const { getPrivateSymbol } = utils;
 
@@ -80,6 +100,27 @@ const kCloneable = getPrivateSymbol('workerd:cloneable');
 
 // The mark of an uncloneable instance. Any mark but a Cloneable would do.
 const kUncloneable = 0;
+
+// The prototypes of the built-ins that V8 serializes itself, never offering
+// an instance to the serializer, which would read its mark. SharedArrayBuffer
+// is not defined in every context the bootstrap runs in (not while it makes a
+// startup snapshot), and a class here can inherit from it only where it is.
+const kNativelySerializedPrototypes: readonly object[] = [
+  Array.prototype,
+  ArrayBuffer.prototype,
+  ...(typeof SharedArrayBuffer === 'function'
+    ? [SharedArrayBuffer.prototype]
+    : []),
+  TypedArrayPrototype,
+  DataView.prototype,
+  Date.prototype,
+  Map.prototype,
+  Set.prototype,
+  RegExp.prototype,
+  Boolean.prototype,
+  Number.prototype,
+  String.prototype,
+];
 
 // How the instances of a class are serialized: the class's descriptor in
 // jsg/ser.h, whose own properties C++ reads. A null-prototype record, so that
@@ -117,13 +158,26 @@ function markCloneable<T extends object>(
 
 // Returns the Cloneable with which the constructor of `ctor` marks each
 // instance: see the top of this file. An instance of a subclass is
-// serialized as one of `ctor`.
+// serialized as one of `ctor`. Throws if `ctor` inherits from a built-in that
+// V8 serializes itself.
 function makeCloneable<T extends object>(
   ctor: abstract new (...args: never[]) => T,
   deserializeInfo: string,
   clone: (instance: T) => unknown,
   deserialize: (instance: T, data: unknown) => void
 ): Cloneable<T> {
+  for (
+    let proto: object | null = ctor.prototype;
+    proto !== null;
+    proto = ObjectGetPrototypeOf(proto)
+  ) {
+    if (ArrayPrototypeIncludes(kNativelySerializedPrototypes, proto)) {
+      throw new TypeError(
+        `${deserializeInfo} inherits from a built-in that V8 serializes ` +
+          'itself, so it cannot be cloneable.'
+      );
+    }
+  }
   const cloneable = ObjectFreeze(
     new Cloneable(deserializeInfo, clone, deserialize)
   );

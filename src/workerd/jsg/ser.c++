@@ -353,9 +353,6 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
       } else if (object->IsFunction()) {
         eh.serializeFunction(js, *this, object.As<v8::Function>());
         return;
-      } else if (eh.trySerializeClassInstance(js, *this, object)) {
-        // The handler recognized this class instance (e.g. by brand check) and serialized it.
-        return;
       }
     }
 
@@ -363,7 +360,9 @@ void Serializer::writeApiObject(Lock& js, v8::Local<v8::Object> object) {
     // object doesn't appear to match the internal fields expected on a JSG object.
     //
     // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
-    // application-defined class. We don't currently support serializing class instances.
+    // application-defined class. We don't currently support serializing class instances. An
+    // instance of a class implemented in JavaScript never gets here: WriteHostObject() hands it to
+    // writeJsSerializable(), which offers it to the ExternalHandler.
     throwDataCloneErrorForObject(js, object);
   }
 
@@ -426,7 +425,9 @@ void Serializer::writeJsSerializable(
   // rather than the class, decides whether to keep the stack, and a stack it captures begins with
   // the message. Without enhanced error serialization, a native error is written in V8's own
   // format, which keeps its stack whatever the deserializer's options, so the flags say that this
-  // one keeps its stack too.
+  // one keeps its stack too. As in V8's format, each is written only if it is a string: anything
+  // else could refer back to the instance, which a reader cannot resolve while it is still reading
+  // the instance's record.
   uint32_t flags = 0;
   kj::Maybe<JsValue> message;
   kj::Maybe<JsValue> stack;
@@ -438,9 +439,12 @@ void Serializer::writeJsSerializable(
     }
     v8::Local<v8::String> stackKey = js.strIntern("stack"_kj);
     if (check(object->HasOwnProperty(context, stackKey))) {
-      flags |= JS_SERIALIZABLE_HAS_STACK;
-      if (!treatErrorsAsHostObjects) flags |= JS_SERIALIZABLE_KEEP_STACK;
-      stack = JsValue(check(object->Get(context, stackKey)));
+      auto value = check(object->Get(context, stackKey));
+      if (value->IsString()) {
+        flags |= JS_SERIALIZABLE_HAS_STACK;
+        if (!treatErrorsAsHostObjects) flags |= JS_SERIALIZABLE_KEEP_STACK;
+        stack = JsValue(value);
+      }
     }
   }
 
@@ -800,9 +804,14 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
     });
     message = v8::Local<v8::String>(value);
   }
-  kj::Maybe<JsValue> stack;
+  kj::Maybe<v8::Local<v8::String>> stack;
   if (flags & JS_SERIALIZABLE_HAS_STACK) {
-    stack = readValue(js);
+    auto value = KJ_UNWRAP_OR(readValue(js).tryCast<JsString>(), {
+      JSG_FAIL_REQUIRE(DOMDataCloneError,
+          "Deserialization failed: stack of an object implemented in JavaScript is not a "
+          "string.");
+    });
+    stack = v8::Local<v8::String>(value);
   }
   auto unknownClass = [&]() -> v8::Local<v8::Object> {
     JSG_FAIL_REQUIRE(
@@ -824,15 +833,12 @@ v8::Local<v8::Object> Deserializer::readJsSerializable(Lock& js) {
   if (!prototype->IsObject()) return unknownClass();
 
   auto context = js.v8Context();
-  auto cloneableKey =
-      v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, JS_CLONEABLE_KEY));
-  if (!check(prototype.As<v8::Object>()->HasPrivate(context, cloneableKey))) {
-    return unknownClass();
-  }
-  auto descriptor = check(prototype.As<v8::Object>()->GetPrivate(context, cloneableKey));
-  if (!descriptor->IsObject()) return unknownClass();
-  auto deserialize = KJ_UNWRAP_OR(
-      tryGetOwnProperty(js, descriptor.As<v8::Object>(), "deserialize"_kj), return unknownClass());
+  // Undefined if the class did not opt in.
+  auto descriptor = KJ_UNWRAP_OR(
+      JsObject(prototype.As<v8::Object>()).getPrivate(js, JS_CLONEABLE_KEY).tryCast<JsObject>(),
+      return unknownClass());
+  auto deserialize =
+      KJ_UNWRAP_OR(tryGetOwnProperty(js, descriptor, "deserialize"_kj), return unknownClass());
   if (!deserialize->IsFunction()) return unknownClass();
 
   // The instance is what calling the constructor would make, minus whatever the constructor does:

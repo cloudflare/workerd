@@ -21,10 +21,17 @@ export default defineConfig([
       // TypeScript compiles a value export to a getter on `module.exports`,
       // and the deserializer can't call a getter to find a cloneable class:
       // V8 runs no JavaScript while it reads a value (see serialization.ts).
+      // A type export compiles to nothing, whether `export type` marks the
+      // whole statement or `type` marks each name.
       'no-restricted-syntax': [
         'error',
         {
-          selector: "ExportNamedDeclaration[exportKind='value']",
+          selector: "ExportNamedDeclaration[exportKind='value'][declaration]",
+          message: commonJsOnly,
+        },
+        {
+          selector:
+            "ExportNamedDeclaration[exportKind='value'] > ExportSpecifier[exportKind='value']",
           message: commonJsOnly,
         },
         {

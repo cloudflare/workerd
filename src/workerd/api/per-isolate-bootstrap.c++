@@ -589,7 +589,10 @@ v8::LocalVector<v8::Value> pseudoGlobalValues(jsg::Lock& js,
   return values;
 }
 
-// Retrieve the BootstrapState from the given context's embedder data, if it has one.
+// Retrieve the BootstrapState from the given context's embedder data, if it has one. Only
+// runPerIsolateBootstrap() stores a jsg::BootstrapModules in the slot of a context it runs in,
+// since this downcasts what the slot holds; a test supplies modules of its own with
+// setBootstrapExportForTest().
 kj::Maybe<BootstrapState&> tryGetBootstrapState(v8::Local<v8::Context> context) {
   KJ_IF_SOME(modules,
       jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
@@ -936,6 +939,13 @@ kj::Maybe<jsg::JsFunction> tryGetBootstrapFunction(
     }
   }
   return kj::none;
+}
+
+void setBootstrapExportForTest(jsg::Lock& js, kj::StringPtr specifier, jsg::JsValue exports) {
+  auto& state = getBootstrapState(js);
+  auto normalized = normalizeSpecifier(specifier);
+  state.functionCache.erase(normalized);
+  state.cache.upsert(kj::str(normalized), exports.addRef(js));
 }
 
 }  // namespace workerd

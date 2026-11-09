@@ -23,30 +23,13 @@ namespace {
 
 using Callback = jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>&)>;
 
-// The bootstrap's modules, plus a module "test" whose exports the script sets, so that the classes
-// the script defines can be found by their deserializeInfo.
-struct TestModules final: public jsg::BootstrapModules {
-  explicit TestModules(jsg::BootstrapModules& bootstrap): bootstrap(bootstrap) {}
-
-  kj::Maybe<jsg::JsValue> tryGetLoadedExports(jsg::Lock& js, kj::StringPtr specifier) override {
-    if (specifier == "test"_kj) {
-      KJ_IF_SOME(e, exports) {
-        return e.getHandle(js);
-      }
-      return kj::none;
-    }
-    return bootstrap.tryGetLoadedExports(js, specifier);
-  }
-
-  jsg::BootstrapModules& bootstrap;
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> exports;
-};
-
 // Runs `body` as the body of a function of `helpers` (the exports of the bootstrap's serialization
 // module), `setTestExports`, `roundTrip(value, preserveStackInErrors)`, `serialize(value)`, which
 // returns the serialized value in hex, and `deserialize(hex, preserveStackInErrors)`, returning
-// its result as a string. A script can pass what serialize() returns to another, so that one
-// isolate reads what another, with other compatibility flags, wrote.
+// its result as a string. setTestExports() makes its argument the exports of a bootstrap module
+// "test", so that the deserializer finds the classes the script defines by their
+// deserializeInfo. A script can pass what serialize() returns to another, so that one isolate
+// reads what another, with other compatibility flags, wrote.
 kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErrorSerialization) {
   // The bootstrap loads the serialization module whatever the compatibility flags are.
   capnp::MallocMessageBuilder message;
@@ -64,19 +47,10 @@ kj::String runScript(kj::StringPtr body, EnhancedErrorSerialization enhancedErro
     auto helpers = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "serialization"_kj),
         "the bootstrap did not load the serialization module");
 
-    auto& bootstrap =
-        KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<jsg::BootstrapModules>(
-            context, jsg::ContextPointerSlot::BOOTSTRAP_STATE));
-    TestModules modules(bootstrap);
-    jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE,
-        static_cast<jsg::BootstrapModules*>(&modules));
-    KJ_DEFER(jsg::setAlignedPointerInEmbedderData(
-        context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, &bootstrap));
-
     auto setTestExports = js.wrapReturningFunction(context,
-        Callback([&modules](jsg::Lock& js,
+        Callback([](jsg::Lock& js,
                      const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
-      modules.exports = jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(info[0]));
+      setBootstrapExportForTest(js, "test"_kj, jsg::JsValue(info[0]));
       return js.undefined();
     }));
 
@@ -269,6 +243,33 @@ KJ_TEST("An uncloneable instance throws DataCloneError") {
   )js"_kj,
       "DataCloneError: Could not serialize object of type \"Opaque\". This type does not support "
       "serialization."_kj);
+}
+
+KJ_TEST("A class inheriting from a built-in that V8 serializes itself cannot be cloneable") {
+  // V8 serializes the instances itself, whatever their marks: an uncloneable Map is cloned as a
+  // Map, so makeCloneable() rejects such a class rather than have it cloned as the built-in.
+  expectScript(R"js(
+    class UncloneableMap extends Map {
+      constructor() { super([[1, 2]]); markUncloneable(this); }
+    }
+    const copy = structuredClone(new UncloneableMap());
+    const results = [`${Object.getPrototypeOf(copy) === Map.prototype} ${copy.get(1)}`];
+    for (const base of [Array, ArrayBuffer, SharedArrayBuffer, Uint8Array, Float64Array, DataView,
+        Date, Map, Set, RegExp, Boolean, Number, String]) {
+      class Derived extends base {}
+      class Further extends Derived {}
+      try {
+        makeCloneable(Further, 'test:Further', () => 0, () => {});
+        results.push(`${base.name} accepted`);
+      } catch (e) {
+        if (!(e instanceof TypeError)) throw e;
+      }
+    }
+    class DerivedError extends TypeError {}
+    makeCloneable(DerivedError, 'test:DerivedError', () => 0, () => {});
+    return results.join();
+  )js"_kj,
+      "true 2"_kj);
 }
 
 }  // namespace

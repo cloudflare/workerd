@@ -797,13 +797,19 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "const { enumerable } = Object.getOwnPropertyDescriptor(copy, 'stack');\n"
              "`${copy.stack.split('\\n')[0]} ${enumerable}`",
       "string", "TestError: boom false");
+  // A stack that is not a string is not written, so one that refers back to the error, which a
+  // reader could not resolve, does not make the error unreadable.
+  expectEval("const e = new TestError('boom');\n"
+             "e.stack = { e };\n"
+             "roundTrip(e).stack.split('\\n')[0]",
+      "string", "TestError: boom");
 
   // The record's flags say whether a stack follows (1), whether the writer was not using enhanced
   // error serialization (2), and whether a message follows (4). Without preserveStackInErrors, the
   // reader keeps the stack only with flag 2, whatever its own setting (off, here); otherwise the
   // stack it captured begins with the record's message, not the one deserialize() sets. A stack
-  // or message of a class that doesn't inherit from Error is ignored, a message that isn't a
-  // string is rejected, and so are flags this version doesn't know.
+  // or message of a class that doesn't inherit from Error is ignored, a stack or message that
+  // isn't a string is rejected, and so are flags this version doesn't know.
   expectEval("const e = roundTripWithData(\n"
              "    new RawJsSerializable('test:TestError', 1, 'forged stack'), 'm');\n"
              "`${e.stack} ${e.message}`",
@@ -832,6 +838,14 @@ KJ_TEST("serialization of classes implemented in JavaScript") {
              "}",
       "string",
       "DataCloneError: Deserialization failed: message of an object implemented in JavaScript is "
+      "not a string.");
+  expectEval("try {\n"
+             "  roundTripWithData(new RawJsSerializable('test:TestError', 1, {}), 'm');\n"
+             "} catch (e) {\n"
+             "  `${e.name}: ${e.message}`\n"
+             "}",
+      "string",
+      "DataCloneError: Deserialization failed: stack of an object implemented in JavaScript is "
       "not a string.");
   expectEval("try { roundTripWithData(new RawJsSerializable('test:Point', 8), 1); } catch (e) {\n"
              "  `${e.name}: ${e.message}`\n"
