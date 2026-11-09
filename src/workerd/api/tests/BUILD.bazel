@@ -238,12 +238,13 @@ wd_test(
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
-# them from running concurrently with each other while still allowing other tests to run alongside,
-# and gives each its own executor under remote execution (see build/bazelflare/exec_properties.bzl).
-SOCKET_TEST_TAGS = [
-    "resources:socket:1",
-]
+# The TCP sockets of connect-handler-test and tail-worker-test, each listening on a port assigned
+# when the test runs (see listen_port_bindings in build/wd_test.bzl).
+CONNECT_HANDLER_PORT_BINDINGS = {
+    "connect-endpoint": "CONNECT_ENDPOINT_PORT",
+    "connect-handler": "CONNECT_HANDLER_PORT",
+    "connect-proxy": "CONNECT_PROXY_PORT",
+}
 
 wd_test(
     src = "connect-handler-test.wd-test",
@@ -255,7 +256,10 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    tags = SOCKET_TEST_TAGS,
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS | {"connect-starttls": "STARTTLS_PORT"},
+    # The STARTTLS listener's certificate names 127.0.0.1, not the random loopback address the
+    # supervisor would otherwise pick.
+    sidecar_randomize_ip = False,
 )
 
 # Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
@@ -344,7 +348,7 @@ wd_test(
         "connect-handler-test-proxy.js",
         "stw-large-log-subject.js",
     ],
-    tags = SOCKET_TEST_TAGS,
+    listen_port_bindings = CONNECT_HANDLER_PORT_BINDINGS,
 )
 
 wd_test(
@@ -950,7 +954,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -962,7 +965,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -1023,6 +1025,15 @@ wd_test(
     src = "js-rpc-params-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-ownership-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "js-rpc-dispose-cancels-test.js",
+        "js-rpc-dispose-cancels-test-tail.js",
+    ],
 )
 
 wd_test(
@@ -1390,7 +1401,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(
@@ -1401,7 +1411,6 @@ wd_test(
         "js-rpc-test",
     ],
     data = ["js-rpc-test.js"],
-    tags = SOCKET_TEST_TAGS,
 )
 
 wd_test(

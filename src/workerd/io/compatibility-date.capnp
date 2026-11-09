@@ -1800,4 +1800,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # corresponding native R2 API types; createMultipartUpload returns an object
   # containing uploadId. The expected TypeScript interface is type-checked in
   # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  rpcDisposeCancelsCall @204 :Bool
+      $compatEnableFlag("rpc_dispose_cancels_call")
+      $experimental;
+  # Disposing the promise returned by a JSRPC call while the call is still in flight cancels the
+  # call, and the promise rejects with an `AbortError`. Without the flag, disposing a pending
+  # promise only disposes its result once the call completes.
+  #
+  # The flag only affects the caller. Any callee handles a canceled call by releasing the caller's
+  # capabilities right away, disposing the stubs it received as arguments, so the session can end,
+  # and with it the request, unless the callee holds other stubs or `waitUntil()` tasks. The
+  # method's JavaScript is not interrupted, but a stateless Worker's pending I/O is canceled when
+  # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
+  # like a fetch handler whose client went away.
 }

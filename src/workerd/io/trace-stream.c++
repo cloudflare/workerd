@@ -779,8 +779,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
 
     auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
     // We need to be able to access the results builder from both the promise below and its
-    // exception handler.
-    auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
+    // exception handler. The results message lives until the handler finishes, so size it to
+    // fit rather than taking the default 8 KiB first segment.
+    auto sharedResults = kj::rc<SharedResults>(reportContext.initResults(capnp::MessageSize{4, 0}));
 
     auto promise =
         ioContext.run([self = addRefToThis(), sharedResults = sharedResults.addRef(), reportContext,
@@ -1341,6 +1342,18 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   return isClosing;
 }
 
+namespace {
+// Sizes a report() request for events whose estimated size is `bytes`, so that it doesn't take
+// the default 8 KiB first segment. The request is held until the tail worker returns.
+capnp::MessageSize reportSizeHint(size_t bytes) {
+  return {
+    .wordCount = capnp::sizeInWords<rpc::TailStreamTarget::TailStreamParams>() +
+        (bytes + sizeof(capnp::word) - 1) / sizeof(capnp::word),
+    .capCount = 0,
+  };
+}
+}  // namespace
+
 // Delivers the queued tail events to a streaming tail worker.
 //
 // Note: An invocation of pump() may outlive the TailStreamWriter, as it is placed in
@@ -1361,7 +1374,8 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       // events should be made for this stream.
       current->onsetSeen = true;
       auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
-      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto builder =
+          KJ_ASSERT_NONNULL(current->capability).reportRequest(reportSizeHint(current->onsetBytes));
       auto eventsBuilder = builder.initEvents(1);
       // When sending the onset event to the tail worker, the receiving end
       // requires that the onset event be delivered separately, without any
@@ -1383,7 +1397,8 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
     // If we got this far then we have a handler for all of our events.
     // Deliver remaining streaming tail events in batches if possible.
     while (!current->queue.empty()) {
-      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto builder = KJ_ASSERT_NONNULL(current->capability)
+                         .reportRequest(reportSizeHint(current->queuedBytes));
       auto eventsBuilder = builder.initEvents(current->queue.size());
       size_t n = 0;
 
