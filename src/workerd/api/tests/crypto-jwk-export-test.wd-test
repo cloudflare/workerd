@@ -7,7 +7,8 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "crypto-jwk-export-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "enable_fast_jsg_struct"],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "enable_fast_jsg_struct", "nodejs_compat_jwk_export"],
+        bindings = [(name = "NODE_JWK_EXPORT", json = "true")],
       )
     ),
     ( name = "crypto-jwk-export-slow-struct",
@@ -15,7 +16,26 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "crypto-jwk-export-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "disable_fast_jsg_struct"],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "disable_fast_jsg_struct", "nodejs_compat_jwk_export"],
+        bindings = [(name = "NODE_JWK_EXPORT", json = "true")],
+      )
+    ),
+    ( name = "crypto-jwk-export-legacy-fast-struct",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-jwk-export-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "enable_fast_jsg_struct", "no_nodejs_compat_jwk_export"],
+        bindings = [(name = "NODE_JWK_EXPORT", json = "false")],
+      )
+    ),
+    ( name = "crypto-jwk-export-legacy-slow-struct",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-jwk-export-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "disable_fast_jsg_struct", "no_nodejs_compat_jwk_export"],
+        bindings = [(name = "NODE_JWK_EXPORT", json = "false")],
       )
     ),
   ],

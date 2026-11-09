@@ -533,7 +533,10 @@ export const chacha20Poly1305KeyObject = {
       if (extractable) {
         strictEqual(key.export().toString('hex'), '07'.repeat(32));
         strictEqual(key.export({ format: 'buffer' }).byteLength, 32);
-        strictEqual(key.export({ format: 'jwk' }).alg, 'C20P');
+        strictEqual(
+          key.export({ format: 'jwk' }).k,
+          key.export().toString('base64url')
+        );
       } else {
         throws(() => key.export(), { name: 'TypeError' });
       }
