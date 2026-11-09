@@ -375,21 +375,21 @@ int getCurveFromName(kj::StringPtr name) {
 }
 }  // namespace
 
-kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
-    jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
+kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::NodeExportedJsonWebKey> CryptoImpl::
+    exportKey(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
   JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
   auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
 
   kj::StringPtr format = JSG_REQUIRE_NONNULL(opts.format, TypeError, "Missing format option");
 
   auto convertExportKeyData = [&](SubtleCrypto::ExportKeyData&& exportData)
-      -> kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> {
+      -> kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::NodeExportedJsonWebKey> {
     KJ_SWITCH_ONEOF(exportData) {
       KJ_CASE_ONEOF(buf, jsg::JsRef<jsg::JsArrayBuffer>) {
         return buf.getHandle(js);
       }
       KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
-        return kj::mv(jwk);
+        return SubtleCrypto::NodeExportedJsonWebKey{kj::mv(jwk)};
       }
     }
     KJ_UNREACHABLE;
