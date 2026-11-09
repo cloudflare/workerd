@@ -1028,6 +1028,12 @@ wd_test(
 )
 
 wd_test(
+    src = "service-binding-dispose-cancels-test.wd-test",
+    args = ["--experimental"],
+    data = ["service-binding-dispose-cancels-test.js"],
+)
+
+wd_test(
     src = "js-rpc-dispose-cancels-test.wd-test",
     args = ["--experimental"],
     data = [
