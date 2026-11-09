@@ -308,9 +308,10 @@ build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
 build:tsan-common --test_timeout=30,150,600,2400
-# Enable V8's TSan-specific generated code and synchronization annotations. V8's Bazel build does
-# not currently derive these defines from the compiler's sanitizer flags.
-build:tsan-common --copt="-DV8_IS_TSAN"
+# Enable V8's TSan synchronization annotations. V8's Bazel build does not currently derive this
+# define from the compiler's sanitizer flags. V8_IS_TSAN, which would also make V8's generated code
+# call into TSan on every load and store, is left off: that costs V8-heavy tests about 20x the time
+# they take under ASan, to check races with V8's background compilers and marker.
 build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
 # Perfetto also requires this define to enable its shared-memory scraping annotations.
 build:tsan-common --per_file_copt='external/.*perfetto@-DTHREAD_SANITIZER'
