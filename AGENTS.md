@@ -178,6 +178,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
+- **`src/opentelemetry/`** - OTLP schemas vendored from opentelemetry-proto, for tests that decode the spans and logs workerd exports; see `src/opentelemetry/AGENTS.md` for how they are updated
 
 ### Configuration System
 

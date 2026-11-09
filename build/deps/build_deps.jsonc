@@ -16,6 +16,11 @@
       "name": "rules_shell",
       "type": "bazel_dep"
     },
+    // protobuf builds the OTLP schemas in src/opentelemetry for tests. Perfetto depends on it too.
+    {
+      "name": "protobuf",
+      "type": "bazel_dep"
+    },
     // abseil is used by protobuf and tcmalloc.
     {
       "name": "abseil-cpp",
