@@ -21,6 +21,15 @@ const temporalCompatibilityFlags :List(Text) = [
   "temporal",
 ];
 
+const nodeCompatV2Flags :List(Text) = [
+  "nodejs_compat",
+  "nodejs_compat_v2",
+  "enable_nodejs_process_v2",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+];
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "runner",
@@ -50,6 +59,9 @@ const unitTests :Workerd.Config = (
           (name = "date-frozen", service = "date-frozen"),
           (name = "temporal-on-control", service = "temporal-on-control"),
           (name = "temporal-on-probe", service = "temporal-on-probe"),
+          (name = "process-assign", service = "process-assign"),
+          (name = "buffer-assign", service = "buffer-assign"),
+          (name = "process-env", service = "process-env"),
         ],
       )
     ),
@@ -239,6 +251,33 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .temporalCompatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"temporal-on-probe\""),
+        ],
+      )
+    ),
+    ( name = "process-assign",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .nodeCompatV2Flags,
+        bindings = [
+          (name = "MODE", json = "\"process-assign\""),
+        ],
+      )
+    ),
+    ( name = "buffer-assign",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .nodeCompatV2Flags,
+        bindings = [
+          (name = "MODE", json = "\"buffer-assign\""),
+        ],
+      )
+    ),
+    ( name = "process-env",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .nodeCompatV2Flags,
+        bindings = [
+          (name = "MODE", json = "\"process-env\""),
         ],
       )
     ),
