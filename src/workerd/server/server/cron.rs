@@ -28,8 +28,9 @@ use crate::config::capnp_error;
 use crate::listen::ListenContext;
 
 const MODULE: &str = "/workerd/cron.js";
-/// Attempts, and the delay before the first retry, which doubles each time.
-const ATTEMPTS: u32 = 5;
+/// Attempts, and the delay before the first retry, which doubles each time:
+/// about 31 s in all, longer than a cluster's lease takes to expire.
+const ATTEMPTS: u32 = 6;
 const BACKOFF: Duration = Duration::from_secs(1);
 
 /// The Workers whose main (first) module is the module.
@@ -85,7 +86,8 @@ pub fn start(
                     Err(e) if attempt == ATTEMPTS => {
                         tracing::error!("cron \"{name}\" not armed: {}", e.description());
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::warn!("cron \"{name}\" not armed, retrying: {}", e.description());
                         factory_.sleep(delay).await;
                         delay *= 2;
                     }

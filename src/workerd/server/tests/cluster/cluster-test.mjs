@@ -2823,9 +2823,12 @@ test('cluster: a cron trigger runs once a minute, and survives its owner', async
     await nodes[ownerIndex].stop({ signal: 'SIGKILL', timeoutMs: 2000 });
     const survivor = nodes[(ownerIndex + 1) % nodes.length];
 
-    // The next minute once, though the schedule's owner died.
-    const seen = await waitFor(survivor.httpPort, 2, 90_000);
-    assert.strictEqual(seen[0] % 60_000, 0, JSON.stringify(seen));
-    assert.deepStrictEqual(seen, [seen[0], seen[0] + 60_000]);
+    // The next minute once, though the schedule's owner died: a duplicate
+    // would follow within seconds.
+    const [tick] = await waitFor(survivor.httpPort, 2, 90_000);
+    await sleep(5000);
+    const seen = await ticks(survivor.httpPort);
+    assert.strictEqual(tick % 60_000, 0, JSON.stringify(seen));
+    assert.deepStrictEqual(seen, [tick, tick + 60_000]);
   });
 });

@@ -10,12 +10,13 @@ $ mkdir -p cron-storage
 $ ./workerd serve --experimental config.capnp
 ```
 
-To run using bazel
+To run using bazel, which runs workerd in another directory, so the disk's
+path is given in full:
 
 ```sh
 $ mkdir -p cron-storage
 $ bazel run //src/workerd/server:workerd -- serve --experimental \
-    ~/cloudflare/workerd/samples/cron/config.capnp
+    -d cron-storage=$PWD/cron-storage $PWD/config.capnp
 ```
 
 At the top of each minute:

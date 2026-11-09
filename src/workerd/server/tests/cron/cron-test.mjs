@@ -4,7 +4,8 @@
 //
 // `workerd serve` of the cron module (`/workerd/cron.js`): armed at startup
 // with no request or socket, each occurrence once, a failed one retried with
-// the same scheduledTime; a bad expression, or no --experimental, refused.
+// the same scheduledTime; a pending retry and a missed occurrence run after a
+// restart; a bad expression, or no --experimental, refused.
 
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -98,15 +99,17 @@ function serve(dir, args) {
     calls,
     exited,
     output: () => output,
-    stop: () => (child.kill(), exited),
+    stop: (signal) => (child.kill(signal), exited),
   };
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function until(f, ms) {
   const deadline = Date.now() + ms;
   while (!f()) {
     assert(Date.now() < deadline, 'timed out');
-    await new Promise((r) => setTimeout(r, 100));
+    await sleep(100);
   }
 }
 
@@ -126,6 +129,43 @@ test('each occurrence runs once, a failure is retried', async () => {
       [
         [0, 1],
         [0, 2],
+        [60_000, 1],
+        [60_000, 2],
+      ]
+    );
+  } finally {
+    await server.stop();
+    await rm(dir, { recursive: true });
+  }
+});
+
+test('a pending retry, and a missed occurrence, survive a restart', async () => {
+  const dir = await project();
+  let server = serve(dir, ['--experimental']);
+  const restart = async (ms) => {
+    await server.stop('SIGKILL');
+    await sleep(ms);
+    server = serve(dir, ['--experimental']);
+  };
+  const retried = () => server.calls.some(({ n }) => n === 2);
+  try {
+    // Killed as the first attempt fails, and started again at once.
+    await until(() => server.calls.length >= 1, 75_000);
+    const [{ at }] = server.calls;
+    await restart(0);
+    await until(retried, 30_000);
+    assert.deepStrictEqual(
+      server.calls.map((c) => c.at - at),
+      server.calls.map(() => 0)
+    );
+    // Killed, once the next alarm is stored, until the next occurrence has
+    // passed: it runs once, late.
+    await sleep(1000);
+    await restart(at + 65_000 - Date.now());
+    await until(retried, 30_000);
+    assert.deepStrictEqual(
+      server.calls.map((c) => [c.at - at, c.n]),
+      [
         [60_000, 1],
         [60_000, 2],
       ]

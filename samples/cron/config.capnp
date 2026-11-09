@@ -29,7 +29,7 @@ const config :Workerd.Config = (
         durableObjectStorage = ( localDisk = "cron-storage" ),
       )
     ),
-    # Where each schedule keeps the retries it owes; it must exist.
+    # Each schedule's name, next alarm and owed retries; it must exist.
     ( name = "cron-storage", disk = ( path = "cron-storage", writable = true ) ),
   ],
 );

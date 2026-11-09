@@ -478,6 +478,22 @@ fn triggers_crons_require_experimental() {
 }
 
 #[test]
+fn triggers_crons_refuse_a_worker_named_like_their_bindings() {
+    let dir = project(&[
+        (
+            "wrangler.jsonc",
+            r#"{ "name": "CRONS", "main": "index.js", "compatibility_date": "2026-01-01",
+                 "no_bundle": true, "triggers": { "crons": ["* * * * *"] } }"#,
+        ),
+        ("index.js", ""),
+    ]);
+    let process = Process::new(None, None, Vec::new());
+    let path = dir.join("wrangler.jsonc");
+    let error = load(path.to_str().unwrap(), &process, true).err().unwrap();
+    assert!(error.contains("named CRONS"), "{error}");
+}
+
+#[test]
 fn triggers_crons_run_on_the_cron_worker() {
     let dir = project(&[
         (

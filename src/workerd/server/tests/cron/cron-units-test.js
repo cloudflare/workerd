@@ -69,8 +69,11 @@ export const anOccurrenceNeverReturnsItself = test(() => {
 export const stepsListsAndRanges = test(() => {
   const from = at(2026, 8, 15, 12, 46);
   assert.strictEqual(after('*/15 * * * *', from), at(2026, 8, 15, 13));
-  // `30/15` runs from 30 to the end of the field.
+  // `30/15` runs from 30 to the end of the field, and `5/1` from 5.
   assert.strictEqual(after('30/15 * * * *', from), at(2026, 8, 15, 13, 30));
+  const half = at(2026, 8, 15, 12, 31);
+  assert.strictEqual(after('30/15 * * * *', half), at(2026, 8, 15, 12, 45));
+  assert.strictEqual(after('5/1 * * * *', from), at(2026, 8, 15, 12, 47));
   assert.strictEqual(
     after('0 9-11,17 * * *', at(2026, 8, 15, 11)),
     at(2026, 8, 15, 17)
@@ -116,14 +119,24 @@ export const theLWAndHashForms = test(() => {
   // `L-7W` is Saturday the 24th, so Friday the 23rd and not the Monday too.
   assert.strictEqual(after('0 0 L-7W * *', at(2026, 10, 1)), at(2026, 10, 23));
   assert.strictEqual(after('0 0 L-7W * *', at(2026, 10, 23)), at(2026, 11, 23));
-  // September 2026 has no 31st, so `31W` waits for October's.
-  assert.strictEqual(after('0 0 31W * *', at(2026, 9, 1)), at(2026, 10, 30));
+  // April 2027 ends on Friday the 30th but has no 31st, so `31W` waits for
+  // May's, a Monday; January 2027's 31st is a Sunday, so it runs on Friday.
+  assert.strictEqual(after('0 0 31W * *', at(2027, 4, 1)), at(2027, 5, 31));
+  assert.strictEqual(after('0 0 31W * *', at(2027, 1, 1)), at(2027, 1, 29));
+  // `L-1W` is Sunday the 29th of November 2026, so Monday the 30th; `L-30W`
+  // is Saturday the 1st of August 2026, so Monday the 3rd.
+  assert.strictEqual(after('0 0 L-1W * *', at(2026, 11, 1)), at(2026, 11, 30));
+  assert.strictEqual(after('0 0 L-30W * *', at(2026, 7, 20)), at(2026, 8, 3));
+  // A target before the 1st matches nothing: February 2028 has a 29th.
+  assert.strictEqual(after('0 0 L-28W 2 *', at(2027, 1, 1)), at(2028, 2, 1));
   // The 15th of November 2026 is a Sunday.
   assert.strictEqual(after('0 0 15W * *', at(2026, 11, 1)), at(2026, 11, 16));
   // The 1st of August 2026 is a Saturday: `1W` stays in August.
   assert.strictEqual(after('0 0 1W * *', at(2026, 7, 20)), at(2026, 8, 3));
   // September 2026: Mondays are the 7th, 14th, 21st and 28th.
   assert.strictEqual(after('0 0 * * MONL', at(2026, 9, 1)), at(2026, 9, 28));
+  // August 2026 ends on a Monday, a week after the one before.
+  assert.strictEqual(after('0 0 * * MONL', at(2026, 8, 1)), at(2026, 8, 31));
   assert.strictEqual(after('0 0 * * MON#2', at(2026, 9, 1)), at(2026, 9, 14));
   assert.strictEqual(after('0 0 * * MON#5', at(2026, 9, 1)), at(2026, 11, 30));
   // A bare `L` in the weekday field is Saturday.
@@ -152,10 +165,12 @@ export const whatCloudflareRefusesIsRefused = test(() => {
     '0 0 * * MON#6',
     '0 0 * * 1#2#3',
     '0 0 L-31 * *',
-    // Saffron accepts these two, with readings refused here.
-    '30-10 * * * *',
-    '*,5 * * * *',
+    '0 0 L-29W 2 *',
     '0 0 30 2 *',
+    // Saffron accepts these, with readings refused here.
+    '30-10 * * * *',
+    '0,30-10 * * * *',
+    '5,* * * * *',
   ]) {
     assert.throws(
       () => parse(expression),

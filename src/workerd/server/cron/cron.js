@@ -46,6 +46,9 @@ const LOOKAHEAD_DAYS = 146_097;
 // BACKOFF_MS * 2 ** (n - 1) after the attempt before it failed.
 const RETRIES = 6;
 const BACKOFF_MS = 2_000;
+// How long one run may take, well under workerd's 15-minute alarm limit; a
+// run that takes longer counts as failed.
+const RUN_MS = 10 * 60_000;
 
 const field = (name, min, max, names = []) => ({ name, min, max, names });
 const MINUTE = field('minute', 0, 59);
@@ -106,7 +109,7 @@ function list(text, f) {
       const [from, to, more] = spec.split('-');
       if (more !== undefined) throw new Error(`${f.name} field has ${spec}`);
       first = value(from, f);
-      last = to !== undefined ? value(to, f) : step > 1 ? f.max : first;
+      last = to !== undefined ? value(to, f) : stepText ? f.max : first;
     }
     if (first > last) {
       throw new Error(`${f.name} field has a descending range in ${item}`);
@@ -118,7 +121,8 @@ function list(text, f) {
 
 // The day fields, as predicates of (day, weekday with Sunday 0, last day of
 // the month), or null for `*`. `W` moves off a weekend to the nearest
-// weekday without leaving the month; each arm is saffron's.
+// weekday without leaving the month. Each arm follows saffron's next-time
+// search, not its `contains`.
 function dayOfMonth(text) {
   if (text === '*') return null;
   if (text === 'L') return (d, w, last) => d === last;
@@ -131,11 +135,13 @@ function dayOfMonth(text) {
     const n = Number(offset[1]);
     if (n < 1 || n > 30) throw new Error(`day of month field has ${text}`);
     if (offset[2] === '') return (d, w, last) => d + n === last;
+    // A target before the 1st matches nothing in that month.
     return (d, w, last) =>
-      (!weekend(w) && d + n === last) ||
-      (w === 1 && d + n === last + 1) ||
-      (w === 1 && d === 3 && last - n === 1) ||
-      (w === 5 && d + n + 1 === last);
+      last - n >= 1 &&
+      ((!weekend(w) && d + n === last) ||
+        (w === 1 && d + n === last + 1) ||
+        (w === 1 && d === 3 && last - n === 1) ||
+        (w === 5 && d + n + 1 === last));
   }
   if (text.endsWith('W')) {
     const t = value(text.slice(0, -1), DAY_OF_MONTH);
@@ -262,41 +268,45 @@ const schedules = Object.fromEntries(
         `cron triggers of "${name}": no service binding "${name}"`
       );
     }
-    return [name, expressions.map(parse)];
+    if (!Array.isArray(expressions)) {
+      throw new Error(`cron triggers of "${name}": not a list`);
+    }
+    return [name, [...new Set(expressions)].map(parse)];
   })
 );
 const crons = (name) => schedules[name] ?? [];
 
 export default {
   async scheduled(controller, env) {
-    await Promise.all(
+    // Each arms on its own: one failing never cancels another.
+    const results = await Promise.allSettled(
       Object.keys(schedules).map((name) =>
         env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name)
       )
     );
+    const errors = results.flatMap((r) => r.reason ?? []);
+    if (errors.length > 0) throw new AggregateError(errors, 'not armed');
   },
 };
 
+// What a schedule stores: its `name`; `at`, its alarm's time; and `owed`,
+// what a retry runs, `{occurrence, due, retry}`, null when the alarm is an
+// occurrence. A retry survives an eviction and a restart.
 export class Schedule extends DurableObject {
-  // What a retry owes, in memory: an eviction costs a retry, never a run.
-  #owed = null;
-  #retry = 0;
-
   // Arms the plan's deadline, or retires the object when nothing matches.
-  async #arm(name, p) {
+  async #arm(name, p, owed = null) {
     const storage = this.ctx.storage;
-    if (!p.armIsRetry) this.#owed = null;
     if (p.armAt === null) {
       await storage.deleteAlarm();
-      await storage.delete(['name', 'at', 'retry']);
+      await storage.delete(['name', 'at', 'owed']);
       return;
     }
-    await storage.put({ name, at: p.armAt, retry: p.armIsRetry });
+    await storage.put({ name, at: p.armAt, owed: p.armIsRetry ? owed : null });
     await storage.setAlarm(p.armAt);
   }
 
   async arm(name) {
-    const p = plan(crons(name), undefined, Date.now(), this.#retry, false);
+    const p = plan(crons(name), undefined, Date.now(), 0, false);
     // An alarm no later than the plan's, a retry or a missed occurrence, is
     // kept.
     const alarm = await this.ctx.storage.getAlarm();
@@ -304,44 +314,48 @@ export class Schedule extends DurableObject {
     await this.#arm(name, p);
   }
 
+  // The expressions due run at once, and the next alarm is armed when they
+  // all finish: one schedule's runs never overlap, and an occurrence that
+  // comes due during a run is skipped.
   async alarm() {
-    const stored = await this.ctx.storage.get(['name', 'at', 'retry']);
+    const stored = await this.ctx.storage.get(['name', 'at', 'owed']);
     const name = stored.get('name');
     if (name === undefined) return;
     const schedule = crons(name);
-    let { occurrence, due } = this.#owed ?? {};
-    if (!stored.get('retry')) {
-      occurrence = stored.get('at');
-      this.#retry = 0;
-      due = plan(schedule, occurrence, Date.now(), 0, false).crons;
-    }
-    const failed = [];
-    for (const cron of due ?? []) {
-      try {
-        const { outcome, noRetry } = await this.env[name].scheduled({
-          scheduledTime: new Date(occurrence),
-          cron,
-        });
-        if (outcome !== 'ok' && !noRetry) failed.push(cron);
-      } catch (e) {
-        console.error(`cron "${cron}" of "${name}": ${e}`);
-        failed.push(cron);
-      }
-    }
-    // A schedule no longer in the config has no expressions, and retires.
-    const p = plan(
-      schedule,
-      undefined,
-      Date.now(),
-      this.#retry,
-      failed.length > 0
+    const at = stored.get('at');
+    const { occurrence, due, retry } = stored.get('owed') ?? {
+      occurrence: at,
+      due: plan(schedule, at, at, 0, false).crons,
+      retry: 0,
+    };
+    const ok = await Promise.all(
+      due.map((cron) => this.#run(name, occurrence, cron))
     );
-    if (failed.length > 0) {
-      this.#owed = { occurrence, due: failed };
-      this.#retry++;
-    } else {
-      this.#retry = 0;
+    const failed = due.filter((_, i) => !ok[i]);
+    // A schedule no longer in the config has no expressions, and retires.
+    // A clock stepped back never brings the occurrence round again.
+    const now = Math.max(Date.now(), occurrence);
+    const p = plan(schedule, undefined, now, retry, failed.length > 0);
+    await this.#arm(name, p, { occurrence, due: failed, retry: retry + 1 });
+  }
+
+  // Runs one expression's occurrence: whether it needs no retry.
+  async #run(name, occurrence, cron) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out')), RUN_MS);
+    });
+    try {
+      const { outcome, noRetry } = await Promise.race([
+        this.env[name].scheduled({ scheduledTime: new Date(occurrence), cron }),
+        timeout,
+      ]);
+      return outcome === 'ok' || noRetry;
+    } catch (e) {
+      console.error(`cron "${cron}" of "${name}": ${e}`);
+      return false;
+    } finally {
+      clearTimeout(timer);
     }
-    await this.#arm(name, p);
   }
 }

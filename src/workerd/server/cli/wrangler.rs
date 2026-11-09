@@ -445,6 +445,10 @@ fn cron_services(
     dir: &Path,
     crons: &[String],
 ) -> Result<(), String> {
+    // The target's binding sits beside these two.
+    if matches!(target, "SCHEDULE" | "CRONS") {
+        return Err(format!("A Worker named {target} cannot have triggers.crons."));
+    }
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = format!("{target}-cron");
     let mut disk_service = services.reborrow().get(at + 1);
