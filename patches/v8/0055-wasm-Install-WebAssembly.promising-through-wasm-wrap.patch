@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hood Chatham <robert.hood.chatham@gmail.com>
+Date: Thu, 5 Nov 2026 11:30:06 -0800
+Subject: [wasm] Install WebAssembly.promising through wasm:: wrapper
+
+Add WebAssembly.promising to external reference list and install it through the
+wasm:: wrapper, like the rest of the WebAssembly API functions.
+
+Change-Id: Ifdb196431a2666f7815ba9b51ca70b0277be5064
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/8748423
+Reviewed-by: Matthias Liedtke <mliedtke@chromium.org>
+Commit-Queue: Matthias Liedtke <mliedtke@chromium.org>
+Reviewed-by: Thibaud Michaud <thibaudm@chromium.org>
+Reviewed-by: Victor Gomes <victorgomes@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#111872}
+(cherry picked from commit ce4718aa6338e3d2a204c78abbd9a7385612ca0a)
+
+diff --git a/src/codegen/external-reference.h b/src/codegen/external-reference.h
+--- a/src/codegen/external-reference.h
++++ b/src/codegen/external-reference.h
+@@ -396,6 +396,7 @@ enum class IsolateFieldId : uint8_t;
+           "wasm::WebAssemblyModuleCustomSections")                             \
+   IF_WASM(V, wasm_WebAssemblyModuleExports, "wasm::WebAssemblyModuleExports")  \
+   IF_WASM(V, wasm_WebAssemblyModuleImports, "wasm::WebAssemblyModuleImports")  \
++  IF_WASM(V, wasm_WebAssemblyPromising, "wasm::WebAssemblyPromising")          \
+   IF_WASM(V, wasm_WebAssemblySuspending, "wasm::WebAssemblySuspending")        \
+   IF_WASM(V, wasm_WebAssemblyTable, "wasm::WebAssemblyTable")                  \
+   IF_WASM(V, wasm_WebAssemblyTableGet, "wasm::WebAssemblyTableGet")            \
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -2320,7 +2320,7 @@ i::DirectHandle<i::JSFunction> NewPromisingWasmExportedFunction(
+ }
+ 
+ // WebAssembly.promising(Function) -> Function
+-void WebAssemblyPromising(const v8::FunctionCallbackInfo<v8::Value>& info) {
++void WebAssemblyPromisingImpl(const v8::FunctionCallbackInfo<v8::Value>& info) {
+   WasmJSApiScope js_api_scope{info, "WebAssembly.promising()"};
+   auto [isolate, i_isolate, thrower] = js_api_scope.isolates_and_thrower();
+   i_isolate->CountUsage(v8::Isolate::kWasmJavaScriptPromiseIntegration);
+@@ -3546,7 +3546,7 @@ bool WasmJs::InstallJSPromiseIntegration(Isolate* isolate,
+   context->set_wasm_suspending_constructor(*suspending_constructor);
+   SetupConstructor(isolate, suspending_constructor, WASM_SUSPENDING_OBJECT_TYPE,
+                    WasmSuspendingObject::kHeaderSize, "WebAssembly.Suspending");
+-  InstallFunc(isolate, webassembly, "promising", WebAssemblyPromising, 1);
++  InstallFunc(isolate, webassembly, "promising", wasm::WebAssemblyPromising, 1);
+   InstallError(isolate, webassembly, isolate->factory()->SuspendError_string(),
+                Context::WASM_SUSPEND_ERROR_FUNCTION_INDEX);
+   return true;
+diff --git a/src/wasm/wasm-js.h b/src/wasm/wasm-js.h
+--- a/src/wasm/wasm-js.h
++++ b/src/wasm/wasm-js.h
+@@ -59,6 +59,7 @@ CompileTimeImportsFromOptions(const v8::WasmModuleObject::CompileOptions&);
+   V(WebAssemblyModuleCustomSections)       \
+   V(WebAssemblyModuleExports)              \
+   V(WebAssemblyModuleImports)              \
++  V(WebAssemblyPromising)                  \
+   V(WebAssemblyTable)                      \
+   V(WebAssemblyTableGet)                   \
+   V(WebAssemblyTableGetLength)             \

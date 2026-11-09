@@ -77,6 +77,8 @@ PATCHES = [
     "0052-Keep-functions-created-by-v8-Function-New-in-the-context-snapshot.patch",
     "0053-Leave-the-SharedFunctionInfo-id-out-of-the-read-only-heap-checksum.patch",
     "0054-Add-SnapshotCreator-HasSuspendedGenerators.patch",
+    "0055-wasm-Install-WebAssembly.promising-through-wasm-wrap.patch",
+    "0056-Expose-WebAssembly-in-SnapshotCreator-contexts-on-re.patch",
 ]
 
 http_archive(

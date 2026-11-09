@@ -1,0 +1,204 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenCode <opencode@cloudflare.com>
+Date: Fri, 6 Nov 2026 12:00:00 -0800
+Subject: Expose WebAssembly in SnapshotCreator contexts on request
+
+Bootstrapper::InstallExtensions() is skipped while a snapshot is being
+built, so a context created inside a SnapshotCreator isolate never gets
+the WebAssembly namespace on its global object and there is no public
+API to instantiate a module. Embedders that need to run WebAssembly
+while building a context snapshot can now call
+v8::Isolate::InstallConditionalFeatures() on the context, which exposes
+the API, including JSPI. The context is marked so that when it is later
+deserialized in a regular isolate, Install() redoes the per-isolate and
+per-process parts (JSTag canonical type index, streaming functions, the
+JSPI isolate state, and the %AbstractModuleSource%-based Module
+reinstallation for --js-source-phase-imports) without re-adding
+properties that the snapshot already carries.
+
+WebAssembly.Suspending is installed through its wasm:: wrapper, like
+WebAssembly.promising already is, so that the serializer can encode the
+JSPI callback addresses like those of the rest of the WebAssembly API.
+
+Isolate::InstallConditionalFeatures() also installs SharedArrayBuffer on
+the global object; InitializeGlobal_sharedarraybuffer() now tolerates the
+property already existing so that such a context can be deserialized.
+
+diff --git a/src/init/bootstrapper.cc b/src/init/bootstrapper.cc
+--- a/src/init/bootstrapper.cc
++++ b/src/init/bootstrapper.cc
+@@ -5850,7 +5850,14 @@ void Genesis::InitializeGlobal_sharedarraybuffer() {
+   DirectHandle<JSGlobalObject> global(native_context()->global_object(),
+                                       isolate());
+ 
+-  JSObject::AddProperty(isolate_, global, "SharedArrayBuffer",
++  // The constructor may already be present when deserializing an embedder
++  // snapshot whose context had Isolate::InstallConditionalFeatures() applied
++  // while it was being built.
++  DirectHandle<String> name = factory()->SharedArrayBuffer_string();
++  if (JSObject::HasRealNamedProperty(isolate(), global, name).FromMaybe(true)) {
++    return;
++  }
++  JSObject::AddProperty(isolate_, global, name,
+                         isolate()->shared_array_buffer_fun(), DONT_ENUM);
+ }
+ 
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -3405,13 +3405,28 @@ void WasmJs::InstallModule(Isolate* isolate,
+               SideEffectType::kHasNoSideEffect);
+ }
+ 
++namespace {
++// Values of NativeContext::is_wasm_js_installed.
++constexpr int kWasmJsNotInstalled = 0;
++constexpr int kWasmJsInstalled = 1;
++// The API surface was exposed on the global object while the context was being
++// built by a SnapshotCreator (see WasmJs::InstallConditionalFeatures). The
++// per-isolate and per-process parts of Install() still have to run when the
++// context is deserialized in a regular isolate.
++constexpr int kWasmJsInstalledInSnapshot = 2;
++}  // namespace
++
+ // static
+ void WasmJs::Install(Isolate* isolate) {
+   DirectHandle<JSGlobalObject> global = isolate->global_object();
+   DirectHandle<NativeContext> native_context(global->native_context(), isolate);
+ 
+-  if (native_context->is_wasm_js_installed() != Smi::zero()) return;
+-  native_context->set_is_wasm_js_installed(Smi::FromInt(1));
++  int installed = Smi::ToInt(native_context->is_wasm_js_installed());
++  if (installed == kWasmJsInstalled) return;
++  const bool expose_api = installed == kWasmJsNotInstalled;
++  native_context->set_is_wasm_js_installed(Smi::FromInt(
++      isolate->serializer_enabled() ? kWasmJsInstalledInSnapshot
++                                    : kWasmJsInstalled));
+ 
+   // We always use the WebAssembly object from the native context; as this code
+   // is executed before any user code, this is expected to be the same as the
+@@ -3420,9 +3435,30 @@ void WasmJs::Install(Isolate* isolate) {
+   // installed as "WebAssembly" property.
+   DirectHandle<JSObject> webassembly(native_context->wasm_webassembly_object(),
+                                      isolate);
+-  if (v8_flags.js_source_phase_imports) {
+-    // Reinstall the Module object with the experimental interface.
+-    InstallModule(isolate, webassembly);
++  // The reinstallation needs %AbstractModuleSource%, which
++  // InitializeExperimentalGlobal() sets up only in regular isolates. In a
++  // serializer isolate the snapshot-prepared Module object is kept; when the
++  // context is deserialized, the existing constructor (which embedder code in
++  // the snapshot may hold references to) is linked into the
++  // %AbstractModuleSource% hierarchy in place.
++  if (v8_flags.js_source_phase_imports && !isolate->serializer_enabled()) {
++    if (expose_api) {
++      // Reinstall the Module object with the experimental interface.
++      InstallModule(isolate, webassembly);
++    } else {
++      DirectHandle<JSFunction> module_constructor(
++          native_context->wasm_module_constructor(), isolate);
++      JSObject::ForceSetPrototype(
++          isolate, module_constructor,
++          direct_handle(native_context->abstract_module_source_function(),
++                        isolate));
++      DirectHandle<JSObject> module_prototype(
++          Cast<JSObject>(module_constructor->instance_prototype()), isolate);
++      JSObject::ForceSetPrototype(
++          isolate, module_prototype,
++          direct_handle(native_context->abstract_module_source_prototype(),
++                        isolate));
++    }
+   }
+ 
+   // Expose the API on the global object if not in jitless mode (with more
+@@ -3439,7 +3475,7 @@ void WasmJs::Install(Isolate* isolate) {
+   bool expose_wasm = !i::v8_flags.jitless ||
+                      i::v8_flags.correctness_fuzzer_suppressions ||
+                      i::v8_flags.wasm_jitless;
+-  if (expose_wasm) {
++  if (expose_api && expose_wasm) {
+     DirectHandle<String> WebAssembly_string = v8_str(isolate, "WebAssembly");
+     JSObject::AddProperty(isolate, global, WebAssembly_string, webassembly,
+                           DONT_ENUM);
+@@ -3461,7 +3497,10 @@ void WasmJs::Install(Isolate* isolate) {
+     isolate->set_wasm_streaming_callback(WasmStreamingCallbackForTesting);
+   }
+ 
+-  if (isolate->wasm_streaming_callback() != nullptr) {
++  if (isolate->wasm_streaming_callback() != nullptr &&
++      !JSObject::HasRealNamedProperty(isolate, webassembly,
++                                      v8_str(isolate, "compileStreaming"))
++           .FromMaybe(true)) {
+     InstallFunc(isolate, webassembly, "compileStreaming",
+                 WebAssemblyCompileStreaming, 1);
+     InstallFunc(isolate, webassembly, "instantiateStreaming",
+@@ -3473,14 +3512,18 @@ void WasmJs::Install(Isolate* isolate) {
+   // {WasmEnabledFeatures::FromFlags} instead.
+   const auto enabled_features = wasm::WasmEnabledFeatures::FromFlags();
+ 
+-  if (enabled_features.has_memory_control()) {
++  if (expose_api && enabled_features.has_memory_control()) {
+     InstallMemoryControl(isolate, native_context, webassembly);
+   }
+ 
+   // Initialize and install JSPI feature.
+   // JSPI is not supported by Wasm interpreter.
++  // A context deserialized from an embedder snapshot may already carry the
++  // JSPI API objects; the isolate-level initialization is still needed, and
++  // InstallJSPromiseIntegration() leaves existing properties alone.
+   if (!v8_flags.wasm_jitless) {
+-    CHECK(native_context->is_wasm_jspi_installed() == Smi::zero());
++    CHECK_IMPLIES(expose_api,
++                  native_context->is_wasm_jspi_installed() == Smi::zero());
+     isolate->WasmInitJSPIFeature();
+     InstallJSPromiseIntegration(isolate, native_context, webassembly);
+     native_context->set_is_wasm_jspi_installed(Smi::FromInt(1));
+@@ -3490,6 +3533,17 @@ void WasmJs::Install(Isolate* isolate) {
+ // static
+ void WasmJs::InstallConditionalFeatures(Isolate* isolate,
+                                         DirectHandle<NativeContext> context) {
++  if (Smi::ToInt(context->is_wasm_js_installed()) == kWasmJsNotInstalled) {
++    // Contexts created while a snapshot is being built skip
++    // Bootstrapper::InstallExtensions() and therefore never expose the
++    // WebAssembly API. An embedder that needs to run WebAssembly inside a
++    // SnapshotCreator isolate exposes it by calling
++    // v8::Isolate::InstallConditionalFeatures() on the context.
++    DCHECK(isolate->serializer_enabled());
++    DCHECK(*context == isolate->raw_native_context());
++    Install(isolate);
++  }
++
+   DirectHandle<JSObject> webassembly{context->wasm_webassembly_object(),
+                                      isolate};
+   if (!webassembly->map()->is_extensible()) return;
+@@ -3541,8 +3595,10 @@ bool WasmJs::InstallJSPromiseIntegration(Isolate* isolate,
+           .FromMaybe(true)) {
+     return false;
+   }
++  // Install the wasm:: wrappers, which are registered as external references,
++  // so that contexts with JSPI installed can be serialized.
+   DirectHandle<JSFunction> suspending_constructor = InstallConstructorFunc(
+-      isolate, webassembly, "Suspending", WebAssemblySuspendingImpl);
++      isolate, webassembly, "Suspending", wasm::WebAssemblySuspending);
+   context->set_wasm_suspending_constructor(*suspending_constructor);
+   SetupConstructor(isolate, suspending_constructor, WASM_SUSPENDING_OBJECT_TYPE,
+                    WasmSuspendingObject::kHeaderSize, "WebAssembly.Suspending");
+diff --git a/src/wasm/wasm-js.h b/src/wasm/wasm-js.h
+--- a/src/wasm/wasm-js.h
++++ b/src/wasm/wasm-js.h
+@@ -85,9 +85,15 @@ class WasmJs {
+   // - installs the WebAssembly object on the global object (depending on
+   //   flags), and
+   // - creates API objects and properties that depend on runtime-enabled flags.
++  // For a context that was deserialized from an embedder snapshot in which the
++  // API had already been exposed (see InstallConditionalFeatures), only the
++  // per-isolate initialization is performed.
+   V8_EXPORT_PRIVATE static void Install(Isolate* isolate);
+ 
+   // Extend the API based on late-enabled features, mostly from origin trial.
++  // Additionally, in a SnapshotCreator isolate, exposes the WebAssembly API on
++  // the context's global object, which Bootstrapper::InstallExtensions() skips
++  // while a snapshot is being built.
+   V8_EXPORT_PRIVATE static void InstallConditionalFeatures(
+       Isolate* isolate, DirectHandle<NativeContext> context);
+ 
