@@ -257,7 +257,7 @@ fn check_two_byte(haystack: &[u16], needle: &[u16]) {
 }
 
 #[test]
-fn search_two_byte_falls_back_to_memmem() {
+fn search_two_byte_falls_back_to_linear_search() {
     let a = u16::from(b'a');
     let b = u16::from(b'b');
     // A long needle whose first and last code units match almost everywhere uses up the search
@@ -288,6 +288,67 @@ fn search_two_byte_falls_back_to_memmem() {
         check_two_byte(&haystack, &[unit, a]);
         check_two_byte(&haystack, &[a, unit]);
         check_two_byte(&haystack, &[unit, a, a, a, a, a, a, unit]);
+    }
+}
+
+#[test]
+fn linear_search_matches_reference() {
+    let mut bytes = Bytes(0xcafe_dead_beef_f00d);
+    let choices = [[0, 0], [1, 1], [1, 2], [2, 1]];
+    for _ in 0..2000 {
+        let haystack_len = usize::from(bytes.next()) % 80;
+        let needle_len = 1 + usize::from(bytes.next()) % 20;
+        let mut make_units = |len| {
+            (0..len)
+                .map(|_| choices[usize::from(bytes.next()) % choices.len()])
+                .collect::<Vec<_>>()
+        };
+        let haystack = make_units(haystack_len);
+        let needle = make_units(needle_len);
+        let matches: Vec<_> = haystack
+            .windows(needle.len())
+            .enumerate()
+            .filter_map(|(at, window)| (window == needle).then_some(at))
+            .collect();
+        assert_eq!(
+            search_units_linear(&haystack, &needle, true),
+            matches.first().copied(),
+        );
+        assert_eq!(
+            search_units_linear(&haystack, &needle, false),
+            matches.last().copied(),
+        );
+    }
+}
+
+#[test]
+fn search_two_byte_with_repeated_odd_byte_matches() {
+    let needle_len = 20_001;
+    let haystack_len = 400_001;
+    let mut needle: Vec<u8> = (0..needle_len * 2)
+        .map(|i| if i % 4 == 3 { b'b' } else { b'a' })
+        .collect();
+    // The prefix exhausts the Horspool budget. The remaining bytes match the needle at
+    // many odd offsets, none of which is a match of UTF-16 code units.
+    let mut haystack: Vec<u8> = (0..haystack_len * 2)
+        .map(|i| {
+            if i >= needle_len * 2 + 100 && i % 4 == 2 {
+                b'b'
+            } else {
+                b'a'
+            }
+        })
+        .collect();
+    for _ in 0..2 {
+        for is_forward in [true, false] {
+            let start = if is_forward { 0 } else { haystack_len };
+            assert_eq!(
+                search_two_byte(&haystack, &needle, start, is_forward),
+                haystack_len,
+            );
+        }
+        haystack.reverse();
+        needle.reverse();
     }
 }
 

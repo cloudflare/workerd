@@ -380,7 +380,7 @@ fn find_units(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
     let found = if needle.len() >= LONG_NEEDLE {
         find_units_horspool(rest, needle)
     } else {
-        find_units_memmem(rest, needle)
+        search_units_linear(rest, needle, true)
     };
     found.map(|position| position + unit)
 }
@@ -412,7 +412,7 @@ fn rfind_units(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
     if needle.len() >= LONG_NEEDLE {
         rfind_units_horspool(rest, needle)
     } else {
-        rfind_units_memmem(rest, needle)
+        search_units_linear(rest, needle, false)
     }
 }
 
@@ -424,7 +424,7 @@ fn unit_key(unit: [u8; 2]) -> usize {
 /// Boyer-Moore-Horspool over code units, which skips most of a haystack of text. A needle that
 /// matches the haystack in many places can make it compare most of the needle at most
 /// positions, so once it has compared about as many code units as the haystack holds, it
-/// finishes with [`find_units_memmem`], which takes linear time.
+/// finishes with [`search_units_linear`], which takes linear time.
 fn find_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
     let (&last, prefix) = needle.split_last()?;
     let mut shift = [needle.len(); 256];
@@ -440,7 +440,8 @@ fn find_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize
                 return Some(at);
             }
             let Some(rest) = budget.checked_sub(needle.len()) else {
-                return find_units_memmem(&haystack[at..], needle).map(|position| position + at);
+                return search_units_linear(&haystack[at..], needle, true)
+                    .map(|position| position + at);
             };
             budget = rest;
         }
@@ -465,7 +466,7 @@ fn rfind_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usiz
                 return Some(at);
             }
             let Some(rest) = budget.checked_sub(needle.len()) else {
-                return rfind_units_memmem(&haystack[..at + needle.len()], needle);
+                return search_units_linear(&haystack[..at + needle.len()], needle, false);
             };
             budget = rest;
         }
@@ -473,35 +474,45 @@ fn rfind_units_horspool(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usiz
     }
 }
 
-/// Searches the bytes with `memmem` and skips matches at odd offsets, which are not matches of
-/// code units.
-fn find_units_memmem(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
-    let bytes = haystack.as_flattened();
-    let finder = memmem::Finder::new(needle.as_flattened());
-    let mut from = 0;
-    while let Some(position) = finder.find(&bytes[from..]) {
-        let position = from + position;
-        if position.is_multiple_of(2) {
-            return Some(position / 2);
+/// Finds the first or last match of a non-empty `needle` with Knuth-Morris-Pratt search over
+/// code units. The prefix table preserves partial matches without examining odd byte offsets,
+/// so repeated byte matches at those offsets cannot increase the work beyond linear time.
+fn search_units_linear(
+    haystack: &[[u8; 2]],
+    needle: &[[u8; 2]],
+    is_forward: bool,
+) -> Option<usize> {
+    let mut prefix = vec![0; needle.len()];
+    let mut matched = 0;
+    for i in 1..needle.len() {
+        while matched > 0 && needle[i] != needle[matched] {
+            matched = prefix[matched - 1];
         }
-        from = position + 1;
+        if needle[i] == needle[matched] {
+            matched += 1;
+        }
+        prefix[i] = matched;
     }
-    None
-}
 
-/// [`find_units_memmem`] from the end.
-fn rfind_units_memmem(haystack: &[[u8; 2]], needle: &[[u8; 2]]) -> Option<usize> {
-    let bytes = haystack.as_flattened();
-    let needle = needle.as_flattened();
-    let finder = memmem::FinderRev::new(needle);
-    let mut end = bytes.len();
-    while let Some(position) = finder.rfind(&bytes[..end]) {
-        if position.is_multiple_of(2) {
-            return Some(position / 2);
+    let mut found = None;
+    matched = 0;
+    for (i, unit) in haystack.iter().enumerate() {
+        while matched > 0 && *unit != needle[matched] {
+            matched = prefix[matched - 1];
         }
-        end = position - 1 + needle.len();
+        if *unit == needle[matched] {
+            matched += 1;
+        }
+        if matched == needle.len() {
+            let position = i + 1 - needle.len();
+            if is_forward {
+                return Some(position);
+            }
+            found = Some(position);
+            matched = prefix[matched - 1];
+        }
     }
-    None
+    found
 }
 
 // =================================================================================================
@@ -944,12 +955,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { self::bytes(bytes) };
-        let range = range(data.len(), start, end)?;
-        let data = &data[range];
-        with_scratch(STANDARD.encoded_length(data.len()), |out| {
-            let encoded = STANDARD.encode(data, Out::from_uninit_slice(out));
+        let range = range(bytes.len(), start, end)?;
+        with_scratch(STANDARD.encoded_length(range.len()), |out| {
+            let data = bytes.as_slice(lock);
+            let encoded = STANDARD.encode(&data[range], Out::from_uninit_slice(out));
             new_one_byte_string(lock, encoded)
         })
     }
@@ -963,12 +972,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { self::bytes(bytes) };
-        let range = range(data.len(), start, end)?;
-        let data = &data[range];
-        with_scratch(URL_SAFE_NO_PAD.encoded_length(data.len()), |out| {
-            let encoded = URL_SAFE_NO_PAD.encode(data, Out::from_uninit_slice(out));
+        let range = range(bytes.len(), start, end)?;
+        with_scratch(URL_SAFE_NO_PAD.encoded_length(range.len()), |out| {
+            let data = bytes.as_slice(lock);
+            let encoded = URL_SAFE_NO_PAD.encode(&data[range], Out::from_uninit_slice(out));
             new_one_byte_string(lock, encoded)
         })
     }
@@ -1014,12 +1021,10 @@ impl BufferNative {
         start: f64,
         end: f64,
     ) -> jsg::Result<JsString<'s>> {
-        // SAFETY: creating a string runs no JavaScript.
-        let data = unsafe { self::bytes(bytes) };
-        let range = range(data.len(), start, end)?;
-        let data = &data[range];
-        with_zeroed_scratch(data.len() * 2, |out| {
-            for (digits, &byte) in out.chunks_exact_mut(2).zip(data) {
+        let range = range(bytes.len(), start, end)?;
+        with_zeroed_scratch(range.len() * 2, |out| {
+            let data = bytes.as_slice(lock);
+            for (digits, &byte) in out.chunks_exact_mut(2).zip(&data[range]) {
                 digits.copy_from_slice(&HEX_PAIRS[usize::from(byte)]);
             }
             new_one_byte_string(lock, out)

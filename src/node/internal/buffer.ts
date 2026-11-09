@@ -72,11 +72,29 @@ const kResourceName = 'BufferUtil';
 // Like the module's other uses of built-ins, this relies on the getter being
 // the original when the module loads. The getter is called with .call, so it
 // is left unbound.
+const typedArrayPrototype = Object.getPrototypeOf(
+  Uint8Array.prototype
+) as object;
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const getTypedArrayName = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  typedArrayPrototype,
   Symbol.toStringTag
 )!.get as (this: unknown) => string | undefined;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const getTypedArrayLength = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  'length'
+)!.get as (this: Uint8Array) => number;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const getTypedArrayBuffer = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  'buffer'
+)!.get as (this: Uint8Array) => ArrayBufferLike;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const getTypedArrayByteOffset = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  'byteOffset'
+)!.get as (this: Uint8Array) => number;
 function isUint8Array(value: unknown): value is Uint8Array {
   return getTypedArrayName.call(value) === 'Uint8Array';
 }
@@ -212,8 +230,9 @@ function unwrapUint8ArrayList(
     );
   }
   const list = value as unknown[];
+  const length = list.length;
   const result: Uint8Array[] = [];
-  for (let i = 0; i < list.length; i++) {
+  for (let i = 0; i < length; i++) {
     const element = list[i];
     if (!isUint8Array(element)) {
       throw new TypeError(
@@ -241,10 +260,14 @@ function createUint8Array(length: number): Uint8Array {
 // jsg::JsUint8Array::slice(js, newLength): a view of the first `newLength`
 // bytes, sharing the same backing store.
 function sliceUint8Array(array: Uint8Array, newLength: number): Uint8Array {
-  if (newLength > array.length) {
+  if (newLength > getTypedArrayLength.call(array)) {
     throw new RangeError('New length exceeds array length');
   }
-  return array.subarray(0, newLength);
+  return new Uint8Array(
+    getTypedArrayBuffer.call(array),
+    getTypedArrayByteOffset.call(array),
+    newLength
+  );
 }
 
 // Returns true if `a[aStart, aEnd)` and `b` share any bytes.
@@ -556,14 +579,14 @@ export function concat(list: Uint8Array[], length: number): Uint8Array {
     let offset = 0;
 
     for (const src of list) {
-      // The length of a Uint8Array is not cached, so we don't need to worry
-      // about whether the underlying ArrayBuffer is detached or resized, etc.
-      if (src.length === 0) continue;
+      // Read the current view length from its internal slot, ignoring own properties.
+      const srcLength = getTypedArrayLength.call(src);
+      if (srcLength === 0) continue;
       // The amount to copy is the lesser of the remaining space in the destination or
       // the size of the chunk we're copying.
-      const amountToCopy = Math.min(src.length, dest.length - offset);
+      const amountToCopy = Math.min(srcLength, dest.length - offset);
       dest.set(
-        amountToCopy === src.length ? src : src.subarray(0, amountToCopy),
+        amountToCopy === srcLength ? src : sliceUint8Array(src, amountToCopy),
         offset
       );
       offset += amountToCopy;
@@ -1285,13 +1308,11 @@ export function flush(state: Uint8Array): string {
 
 export function isAscii(bytes: ArrayBufferView): boolean {
   const buffer = unwrapUint8Array(bytes, 'isAscii', 0);
-  if (buffer.length === 0) return true;
   return native.validateAscii(buffer);
 }
 
 export function isUtf8(bytes: ArrayBufferView): boolean {
   const buffer = unwrapUint8Array(bytes, 'isUtf8', 0);
-  if (buffer.length === 0) return true;
   return native.validateUtf8(buffer);
 }
 

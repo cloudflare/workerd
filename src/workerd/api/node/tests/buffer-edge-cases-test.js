@@ -196,6 +196,61 @@ export const uint8ArrayArguments = {
   },
 };
 
+export const shadowedTypedArrayProperties = {
+  test() {
+    const invalid = Uint8Array.of(0xff);
+    Object.defineProperty(invalid, 'length', { value: 0 });
+    strictEqual(isAscii(invalid), false);
+    strictEqual(isUtf8(invalid), false);
+
+    class Source extends Uint8Array {
+      subarray() {
+        throw new Error('subarray must not be called');
+      }
+      static get [Symbol.species]() {
+        throw new Error('species must not be read');
+      }
+    }
+    const source = new Source([1, 2]);
+    deepStrictEqual([...Buffer.concat([source], 1)], [1]);
+
+    const nullProto = Uint8Array.of(3, 4);
+    Object.setPrototypeOf(nullProto, null);
+    deepStrictEqual([...Buffer.concat([nullProto], 1)], [3]);
+
+    const view = new Uint8Array(new Uint8Array([9, 5, 6]).buffer, 1, 2);
+    Object.defineProperties(view, {
+      length: { value: 0 },
+      buffer: {
+        get() {
+          throw new Error('buffer must not be read');
+        },
+      },
+      byteOffset: {
+        get() {
+          throw new Error('byteOffset must not be read');
+        },
+      },
+    });
+    deepStrictEqual([...Buffer.concat([view], 1)], [5]);
+    deepStrictEqual([...Buffer.concat([view], 3)], [5, 6, 0]);
+  },
+};
+
+export const concatCapturesListLength = {
+  test() {
+    const list = [null];
+    Object.defineProperty(list, 0, {
+      get() {
+        list.push(Uint8Array.of(2));
+        return Uint8Array.of(1);
+      },
+    });
+    deepStrictEqual([...Buffer.concat(list, 2)], [1, 0]);
+    strictEqual(list.length, 2);
+  },
+};
+
 export const loneSurrogates = {
   test() {
     // [input, { encoding: encoded }, utf8 byteLength]
