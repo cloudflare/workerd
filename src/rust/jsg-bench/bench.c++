@@ -153,6 +153,15 @@ class Target final: public Object {
   uint32_t bytesLen(v8::Local<v8::Uint8Array> a) {
     return static_cast<uint32_t>(a->ByteLength());
   }
+  uint32_t bytesSliceLen(v8::Local<v8::Uint8Array> a) {
+    return static_cast<uint32_t>(a->ByteLength());
+  }
+  uint32_t bufferSliceLen(v8::Local<v8::ArrayBuffer> a) {
+    return static_cast<uint32_t>(a->ByteLength());
+  }
+  uint32_t viewSliceLen(v8::Local<v8::ArrayBufferView> a) {
+    return static_cast<uint32_t>(a->ByteLength());
+  }
   uint32_t bytesCopy(v8::Local<v8::Uint8Array> a) {
     auto bytes = kj::heapArray(a->ByteLength() == 0
             ? kj::ArrayPtr<const kj::byte>()
@@ -209,6 +218,9 @@ class Target final: public Object {
     JSG_METHOD(octetSum);
     JSG_METHOD(octetMake);
     JSG_METHOD(bytesLen);
+    JSG_METHOD(bytesSliceLen);
+    JSG_METHOD(bufferSliceLen);
+    JSG_METHOD(viewSliceLen);
     JSG_METHOD(bytesCopy);
     JSG_METHOD(bytesSum);
     JSG_METHOD(newNode);
@@ -607,6 +619,16 @@ int registerCases() {
     if (size == 16 || size == (smokeTesting() ? 32 : 1024)) {
       add(kj::str("buffer/length/", size), setup, "t.bytesLen(x)",
           kj::str("t.bytesLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/typed-array/", size), setup, "t.bytesSliceLen(x)",
+          kj::str("t.bytesSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/array-buffer/", size),
+          kj::str("const x=new ArrayBuffer(", size, ");"), "t.bufferSliceLen(x)",
+          kj::str("t.bufferSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/typed-view/", size), setup, "t.viewSliceLen(x)",
+          kj::str("t.viewSliceLen(x)===", size), kj::str(size));
+      add(kj::str("buffer/borrow-length/data-view/", size),
+          kj::str("const x=new DataView(new ArrayBuffer(", size + 8, "),3,", size, ");"),
+          "t.viewSliceLen(x)", kj::str("t.viewSliceLen(x)===", size), kj::str(size));
     }
     add(kj::str("buffer/copy-in/", size), setup, "t.bytesCopy(x)",
         kj::str("t.bytesCopy(x)===", size), kj::str(size), size >= 65536 ? 16 : 256);
