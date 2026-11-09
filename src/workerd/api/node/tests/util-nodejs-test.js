@@ -33,6 +33,8 @@ import util, {
   stripVTControlCharacters,
   styleText,
   parseEnv,
+  convertProcessSignalToExitCode as namedConvertProcessSignalToExitCode,
+  setTraceSigInt as namedSetTraceSigInt,
 } from 'node:util';
 
 const remainingMustCallErrors = new Set();
@@ -6010,5 +6012,47 @@ export const testEndOfLife = {
     assert.strictEqual(typeof util.isUndefined, 'function');
 
     assert.strictEqual(util.isBuffer(true), false);
+  },
+};
+
+// Ported from test/parallel/test-util-convert-signal-to-exit-code.mjs
+export const convertProcessSignalToExitCode = {
+  async test() {
+    assert.strictEqual(
+      namedConvertProcessSignalToExitCode,
+      util.convertProcessSignalToExitCode
+    );
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGTERM'), 143);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGKILL'), 137);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGINT'), 130);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGHUP'), 129);
+    assert.strictEqual(util.convertProcessSignalToExitCode('SIGABRT'), 134);
+
+    for (const value of [
+      'INVALID',
+      '',
+      'SIG',
+      undefined,
+      null,
+      123,
+      true,
+      false,
+      {},
+      [],
+      Symbol('test'),
+      () => {},
+    ]) {
+      assert.throws(() => util.convertProcessSignalToExitCode(value), {
+        code: 'ERR_INVALID_ARG_VALUE',
+        name: 'TypeError',
+      });
+    }
+  },
+};
+
+export const setTraceSigInt = {
+  async test() {
+    assert.strictEqual(namedSetTraceSigInt, util.setTraceSigInt);
+    assert.strictEqual(util.setTraceSigInt(true), undefined);
   },
 };
