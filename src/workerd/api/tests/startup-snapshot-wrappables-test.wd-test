@@ -35,6 +35,7 @@ const unitTests :Workerd.Config = (
           (name = "bindings", service = "bindings"),
           (name = "unclonable", service = "unclonable"),
           (name = "searchparams", service = "searchparams"),
+          (name = "midstream-decoder", service = "midstream-decoder"),
           (name = "no-ts-streams", service = "no-ts-streams"),
         ],
       )
@@ -175,6 +176,18 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"searchparams\""),
+          (name = "TEXT", text = "hello"),
+          (name = "JSON", json = "{\"answer\": 42}"),
+          (name = "DATA", data = "abc"),
+        ],
+      )
+    ),
+    ( name = "midstream-decoder",
+      worker = (
+        modules = .modules,
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"midstream-decoder\""),
           (name = "TEXT", text = "hello"),
           (name = "JSON", json = "{\"answer\": 42}"),
           (name = "DATA", data = "abc"),

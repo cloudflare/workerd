@@ -20,12 +20,15 @@ import unsafe from 'workerd:unsafe';
 const MODE = env.MODE;
 
 // Top-level state every case creates. Each object is a JSG resource whose C++ side the snapshot
-// carries either as a snapshotClone() (Headers, URL) or by recreating a stateless type
-// (TextEncoder, Crypto, SubtleCrypto, Navigator).
+// carries either as a snapshotClone() (Headers, URL, TextDecoder) or by recreating a stateless
+// type (TextEncoder, Crypto, SubtleCrypto, Navigator).
 const headers = new Headers({ 'x-a': '1', 'content-type': 'text/plain' });
 headers.append('x-a', '2');
 const url = new URL('https://example.com/p/a/t/h?query=string&x=1#hash');
 const encoder = new TextEncoder();
+// An ICU decoder, and a windows-1252 one (a LegacyDecoder).
+const decoder = new TextDecoder('utf-8', { fatal: true });
+const legacyDecoder = new TextDecoder('windows-1252');
 const cryptoAtTopLevel = crypto;
 const subtle = crypto.subtle;
 const navigatorAtTopLevel = navigator;
@@ -46,6 +49,11 @@ switch (MODE) {
   case 'unclonable':
     // Neither stateless nor clonable: the zygote rejects the snapshot.
     controller = new AbortController();
+    break;
+  case 'midstream-decoder':
+    // A decoder with the first byte of a two-byte character pending.
+    kept = new TextDecoder();
+    kept.decode(new Uint8Array([0xc3]), { stream: true });
     break;
   case 'searchparams':
     // URLSearchParams is not transferable either. URL::snapshotClone() drops the one it
@@ -113,6 +121,11 @@ async function checks() {
     urlMutable:
       url.href === 'https://example.com/p/a/t/h?query=string&x=1#other',
     encoder: encoder.encode('héllo').length === 6,
+    decoder:
+      decoder.fatal && decoder.decode(encoder.encode('héllo')) === 'héllo',
+    legacyDecoder:
+      legacyDecoder.encoding === 'windows-1252' &&
+      legacyDecoder.decode(new Uint8Array([0x80])) === '€',
     randomUUID: /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(
       cryptoAtTopLevel.randomUUID()
     ),
@@ -133,6 +146,9 @@ async function checks() {
       break;
     case 'searchparams':
       result.params = params.get('query') === 'string';
+      break;
+    case 'midstream-decoder':
+      result.midStreamDecoder = kept.decode(new Uint8Array([0xa9])) === 'é';
       break;
     case 'gc':
       collect();
@@ -211,7 +227,13 @@ async function test(ctrl, env) {
   // Cases that fail the zygote, or do not qualify for the pipeline: always plain Workers. The
   // module scope of node:fs reaches UrlUtil, a Rust JSG resource (src/rust/api/url.rs); Rust
   // resource types have no snapshot transfer, so the fs case falls back until they do.
-  const fallback = ['fs', 'unclonable', 'searchparams', 'no-ts-streams'];
+  const fallback = [
+    'fs',
+    'unclonable',
+    'searchparams',
+    'midstream-decoder',
+    'no-ts-streams',
+  ];
 
   const run = async (name, expectedSnapshotUsed) => {
     const response = await env[name].fetch('http://case/');
