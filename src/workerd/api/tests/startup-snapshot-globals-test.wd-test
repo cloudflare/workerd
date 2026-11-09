@@ -13,6 +13,14 @@ const compatibilityFlags :List(Text) = [
   "unsafe_module",
 ];
 
+const temporalCompatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+  "unsafe_module",
+  "temporal",
+];
+
 const unitTests :Workerd.Config = (
   services = [
     ( name = "runner",
@@ -36,6 +44,12 @@ const unitTests :Workerd.Config = (
           (name = "iter-polyfill-caught", service = "iter-polyfill-caught"),
           (name = "wasm-use", service = "wasm-use"),
           (name = "sab-probe", service = "sab-probe"),
+          (name = "wasm-delete", service = "wasm-delete"),
+          (name = "temporal-probe", service = "temporal-probe"),
+          (name = "temporal-polyfill", service = "temporal-polyfill"),
+          (name = "date-frozen", service = "date-frozen"),
+          (name = "temporal-on-control", service = "temporal-on-control"),
+          (name = "temporal-on-probe", service = "temporal-on-probe"),
         ],
       )
     ),
@@ -171,6 +185,60 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"sab-probe\""),
+        ],
+      )
+    ),
+    ( name = "wasm-delete",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"wasm-delete\""),
+        ],
+      )
+    ),
+    ( name = "temporal-probe",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"temporal-probe\""),
+        ],
+      )
+    ),
+    ( name = "temporal-polyfill",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"temporal-polyfill\""),
+        ],
+      )
+    ),
+    ( name = "date-frozen",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"date-frozen\""),
+        ],
+      )
+    ),
+    ( name = "temporal-on-control",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .temporalCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"temporal-on-control\""),
+        ],
+      )
+    ),
+    ( name = "temporal-on-probe",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-globals-test.js")],
+        compatibilityFlags = .temporalCompatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"temporal-on-probe\""),
         ],
       )
     ),
