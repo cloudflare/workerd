@@ -256,6 +256,11 @@ This is intentionally weak and does NOT keep its target alive during GC.
 Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
 signal that weak references should not be traced. Do not include them in `visitForGc()`.
 
+**Visit only what this object owns alone.** An object behind a `kj::Rc`, `kj::Arc`, or a
+`kj::Own` of a refcounted type can have other owners that visit it too, and a handle visited
+from two owners is strong or traced depending on which visited last. The `jsg-shared-visit`
+clang-tidy check flags such visits.
+
 ## Weak References
 
 `jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference
