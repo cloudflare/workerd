@@ -82,7 +82,10 @@ pub fn start(
             let mut delay = BACKOFF;
             for attempt in 1..=ATTEMPTS {
                 match arm(&*channel).await {
-                    Ok(()) => break,
+                    Ok(()) => {
+                        tracing::info!("cron \"{name}\" armed");
+                        break;
+                    }
                     Err(e) if attempt == ATTEMPTS => {
                         tracing::error!("cron \"{name}\" not armed: {}", e.description());
                     }

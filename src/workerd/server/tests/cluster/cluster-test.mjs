@@ -2819,36 +2819,40 @@ test('cluster: `workerd deploy` publishes a wrangler project', async () => {
 
 test('cluster: a cron trigger runs once a minute, and survives its owner', async () => {
   await withCluster(3, async ({ nodes }) => {
-    // Moves each node's cron clock alike; resolves to the last one's time,
-    // once each node's schedule is re-armed and any run has finished.
-    const clock = async (ns, ms) => {
+    // Once each node's cron Worker has armed, moves each node's cron clock
+    // alike; resolves to the last one's time, once each node's schedule is
+    // re-armed and any run has finished.
+    await Promise.all(
+      nodes.map((n) => n.waitForStderr(/cron "cron" armed/, 40_000))
+    );
+    const clock = async (ms) => {
       let now;
-      for (const n of ns) {
+      for (const n of nodes) {
         now = (await fetchJson(n.httpPort, `/cron-clock?advance=${ms}`)).body
           .now;
       }
       return now;
     };
-    // To a second before minute `at`, and the node that then runs it, the
-    // schedule's owner. A real minute may run first, before the move.
-    const tick = async (ns, at) => {
-      await clock(ns, at - 1000 - (await clock(ns, 0)));
-      const re = new RegExp(`TICK ${at}`);
-      return Promise.any(
-        ns.map((n) => n.waitForStderr(re, 10_000).then(() => n))
+    const to = async (t) => clock(t - (await clock(0)));
+    // The node that runs minute `t`: a real minute may run first.
+    const ran = (ns, t, ms) =>
+      Promise.any(
+        ns.map((n) =>
+          n.waitForStderr(new RegExp(`TICK ${t}`), ms).then(() => n)
+        )
       );
-    };
-    const now = await clock(nodes, 0);
-    const at = now - (now % 60_000) + 60_000;
-    const owner = await tick(nodes, at);
-    await clock(nodes, 0);
-    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
 
-    // The next minute once, on a survivor, though the owner died.
-    await tick(
-      nodes.filter((n) => n !== owner),
-      at + 60_000
-    );
+    const now = await clock(0);
+    const at = now - (now % 60_000) + 60_000;
+    await to(at - 1000);
+    const owner = await ran(nodes, at, 10_000);
+
+    // Killed 5 s before the next minute, which a survivor runs once it
+    // adopts the owner's alarm, after the owner's lease runs out.
+    await to(at + 55_000);
+    await owner.stop({ signal: 'SIGKILL', timeoutMs: 2000 });
+    const survivors = nodes.filter((n) => n !== owner);
+    await ran(survivors, at + 60_000, 60_000);
     const seen = nodes
       .flatMap((n) => [...n.stderr.matchAll(/TICK (\d+)/g)])
       .map((m) => Number(m[1]))
