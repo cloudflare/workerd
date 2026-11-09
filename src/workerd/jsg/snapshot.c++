@@ -10,6 +10,11 @@
 
 namespace workerd::jsg {
 
+SnapshotArtifact::~SnapshotArtifact() noexcept(false) {
+  // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
+  delete[] blob.data;
+}
+
 constexpr size_t internalFieldTagSizeInBytes = sizeof(Wrappable::WORKERD_WRAPPABLE_TAG);
 
 // The zygote's half of the live-wrappable transfer, under the isolate lock and before
