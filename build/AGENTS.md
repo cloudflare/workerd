@@ -34,6 +34,12 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 `//tools/clang-tidy:workerd-lint` builds a shared-object clang-tidy plugin
 that adds workerd-specific static checks:
 
+- `jsg-shared-visit`: flags visiting through a shared owner (`kj::Rc`,
+  `kj::Arc`, or a `kj::Own` of a refcounted type) from a function handed the
+  `jsg::GcVisitor`. A handle visited from two owners is strong or traced
+  depending on which visited last. Suppress a deliberate shared visit with
+  `// NOLINT(jsg-shared-visit)` plus the reason. Test:
+  `//tools/clang-tidy:shared-visit-test`.
 - `jsg-visit-for-gc`: flags JSG resource types whose visitable fields
   (`jsg::Ref`, `jsg::JsRef`, `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`,
   `jsg::Value`, etc., plus `kj::Maybe`/`Array`/`Vector`/

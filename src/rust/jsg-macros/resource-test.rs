@@ -704,10 +704,48 @@ fn parse_nested_types_allows_type_under_several_names() {
 }
 
 #[test]
-fn reject_nested_types_on_struct_only_rejects_nested_types() {
-    assert!(reject_nested_types_on_struct(quote! { name = "Foo", custom_trace }).is_none());
-    assert!(reject_nested_types_on_struct(quote! {}).is_none());
-    assert!(reject_nested_types_on_struct(quote! { nested_types(Foo) }).is_some());
+fn struct_args_accept_the_struct_flags() {
+    assert!(validate_struct_args(quote! {}).is_none());
+    assert!(validate_struct_args(quote! { name = "Foo", custom_trace }).is_none());
+    assert!(validate_struct_args(quote! { memory_info, ts_root, name = "Foo" }).is_none());
+    assert!(validate_struct_args(quote! { custom_memory_info }).is_none());
+}
+
+#[test]
+fn struct_args_reject_impl_block_args() {
+    for attr in [quote! { nested_types(Foo) }, quote! { custom_members }] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(
+            err.contains("belongs on the #[jsg_resource] impl block"),
+            "{err}"
+        );
+    }
+}
+
+#[test]
+fn struct_args_reject_unknown_flags() {
+    for attr in [
+        quote! { memroy_info },
+        quote! { custom_trace, memroy_info },
+        quote! { name = Foo },
+        quote! { memory_info = true },
+        quote! { ts_root(yes) },
+    ] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(err.contains("expected `name = \"...\"`"), "{err}");
+    }
+}
+
+#[test]
+fn struct_args_reject_repeated_flags() {
+    for attr in [
+        quote! { memory_info, memory_info },
+        quote! { custom_trace, ts_root, custom_trace },
+        quote! { name = "Foo", name = "Bar" },
+    ] {
+        let err = validate_struct_args(attr).expect("rejected").to_string();
+        assert!(err.contains("can be given once"), "{err}");
+    }
 }
 
 #[test]

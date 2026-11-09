@@ -127,7 +127,9 @@ Two things break this:
   termination with the new exception, which JavaScript can catch. The Worker then keeps running.
 
 Creating strings, numbers, BigInts, symbols, plain objects and arrays, typed arrays, error objects
-and templates takes no context. It is fine at any time, also while execution is terminating.
+and templates takes no context. It is fine at any time, also while execution is terminating. A
+`DOMException` is not an error object in this sense: creating one instantiates a template in the
+current context.
 
 How the code keeps the rule:
 
@@ -246,7 +248,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
 `workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG.
+workerd's API objects serialize, since their serializers are written against C++ JSG, and
+`newDOMException` in `workerd/jsg/dom-exception.h`, through which Rust creates DOMExceptions
+without depending on how DOMException is implemented. These hooks take and return only V8 and KJ types.
 
 The one exception is `src/rust/jsg-cpp`, the interop between Rust JSG and C++ JSG resources,
 which exists because C++ APIs and Rust APIs have to take, return and hold each other's resources
@@ -487,6 +491,7 @@ cell; see [Safety rules](#safety-rules), rule 2, for the exceptions.
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls, which `jsg::jsg_traced!` generates; `trace` has no default, so a hand-written impl can't leave it out. Wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
+- **Heap snapshots**: every resource is a node of its own, linked to its JavaScript wrapper, as a C++ resource is. `#[jsg_resource(memory_info)]` has it also report its fields through a `jsg::VisitForMemoryInfo` impl generated from the named fields (`#[jsg_memory_info(skip)]` leaves one out), the counterpart of C++ `visitForMemoryInfo`; `#[jsg_resource(custom_memory_info)]` takes a hand-written impl instead, which reports with `tracker.track_field(c"name", &self.field)` for any `jsg::MemoryInfo`; a helper type implements `jsg::MemoryRetainer`, the counterpart of `JSG_MEMORY_INFO`, and registers it with `jsg::jsg_memory_retainer!`. See `memory.rs` and [`jsg-macros/README.md`](../jsg-macros/README.md#heap-snapshots).
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
@@ -937,6 +942,25 @@ match lock.try_catch(|lock| {
     Err(exception) => { /* handle what the callback threw */ }
 }
 ```
+
+## Errors thrown from Rust
+
+An `Error`'s `name` is an `ErrorName`: a JavaScript error class (`TypeError`, `RangeError`,
+`ReferenceError`, `SyntaxError`, `Error`), or a `DOMException` with any name, as C++
+`JSG_REQUIRE(..., DOMAbortError, ...)` throws. The two are separate because `SyntaxError` is both.
+The `ExceptionType`s named after a DOMException (`OperationError`, `DataCloneError`, `AbortError`
+and the rest, for which `ExceptionType::is_dom_exception()` is true) are shorthands for that
+`DOMException`, as in `jsg_require!(..., AbortError, ...)`; `Error::new_dom_exception` takes any
+name, including `SyntaxError` and names that are no `ExceptionType`, such as `QuotaExceededError`.
+A C++ error that reaches Rust as a `kj::Exception` keeps its DOMException name, whatever it is, and
+`FromJS` for `Error` reads a JavaScript error as its class, even one whose `name` is a DOMException
+name. An `ErrorName` compares equal to the `ExceptionType` that is thrown the same way, so
+`err.name == ExceptionType::TypeError` works. `Lock::dom_exception` creates a `DOMException` with
+any name, as C++ `jsg::Lock::domException()` does. Both create it through `jsg::newDOMException()`
+(Safety rules, rule 3), which needs the current context: while an exception or a termination is
+pending, or if creating it throws, `Lock::dom_exception` and `Lock::exception` fail with a pending
+error, and `Lock::throw_exception` throws nothing, so the pending exception propagates. A fast
+callback never throws a `DOMException`, since only a method that returns no `Result` has one.
 
 ## Serialization
 

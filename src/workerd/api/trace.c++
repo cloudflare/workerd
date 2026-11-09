@@ -799,7 +799,20 @@ auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory
     capnp::ByteStreamFactory& byteStreamFactory,
     FrankenvalueHandler& frankenvalueHandler,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
-  auto req = dispatcher.sendTracesRequest();
+  // Size the request from each trace's recorded content, so that it doesn't take the default 8 KiB
+  // first segment. The request is held until it is written, which can take a while when the tail
+  // worker's connection is backed up. `bytesUsed` doesn't count the trace's fixed fields, so add
+  // an allowance for those; if the hint is short, the message grows another segment.
+  static constexpr size_t FIXED_TRACE_FIELDS_WORDS = 64;
+  capnp::MessageSize sizeHint{
+    .wordCount = capnp::sizeInWords<workerd::rpc::EventDispatcher::SendTracesParams>(),
+    .capCount = 1,
+  };
+  for (auto& trace: traces) {
+    sizeHint.wordCount += capnp::sizeInWords<workerd::rpc::Trace>() + FIXED_TRACE_FIELDS_WORDS +
+        (trace->bytesUsed + sizeof(capnp::word) - 1) / sizeof(capnp::word);
+  }
+  auto req = dispatcher.sendTracesRequest(sizeHint);
   auto out = req.initTraces(traces.size());
   for (auto i: kj::indices(traces)) {
     traces[i]->copyTo(out[i]);

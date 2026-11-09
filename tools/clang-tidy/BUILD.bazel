@@ -2,6 +2,8 @@
 
 `workerd-lint` is a clang-tidy module providing workerd-specific static checks:
 
+  - `jsg-shared-visit`: flags visitForGc() bodies that visit through a shared
+    owner (kj::Rc, kj::Arc, or a kj::Own of a refcounted type).
   - `jsg-visit-for-gc`: validates JSG resource types correctly visit their
     GC roots.
   - `workerd-angled-includes` - requires includes of workers/capnproto code from
@@ -49,6 +51,7 @@ filegroup(
         "coroutine-hostile-raii.c++",
         "legacy-stream-alloc.c++",
         "promise-ignore-result.c++",
+        "shared-visit.c++",
         "traced-own.c++",
         "unsafe-continuation-capture.c++",
         "use-after-move.c++",
@@ -67,6 +70,7 @@ filegroup(
         "coroutine-hostile-raii.h",
         "legacy-stream-alloc.h",
         "promise-ignore-result.h",
+        "shared-visit.h",
         "traced-own.h",
         "unsafe-continuation-capture.h",
         "use-after-move.h",
@@ -175,6 +179,22 @@ sh_test(
     data = [
         ":legacy-stream-alloc-negative-test.c++",
         ":legacy-stream-alloc-positive-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+sh_test(
+    name = "shared-visit-test",
+    srcs = ["shared-visit-test.sh"],
+    data = [
+        ":shared-visit-negative-test.c++",
+        ":shared-visit-positive-test.c++",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],
