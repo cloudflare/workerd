@@ -102,8 +102,8 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
 }
 
-void EventTarget::forEachSnapshotListener(jsg::Lock& js,
-    kj::FunctionParam<void(kj::StringPtr type, v8::Local<v8::Object> identity, bool once)> cb) {
+void EventTarget::forEachSnapshotListener(
+    jsg::Lock& js, kj::FunctionParam<void(const SnapshotListener& listener)> cb) {
   for (auto& entry: typeMap) {
     // The on<type> attribute trampoline (if activated for this type) occupies a regular
     // listener slot under a synthesized identity. It is owned by the C++ attribute state and
@@ -123,8 +123,38 @@ void EventTarget::forEachSnapshotListener(jsg::Lock& js,
       KJ_REQUIRE(handler->abortHandler == kj::none,
           "startup snapshot: top-level addEventListener with a `signal` option is not supported",
           entry.key);
-      cb(entry.key, identity, handler->once);
+      auto callback = KJ_REQUIRE_NONNULL(handler->callback.tryGetHandle(js.v8Isolate),
+          "startup snapshot: a listener backed by a native function cannot be transferred",
+          entry.key);
+      auto receiver = KJ_ASSERT_NONNULL(handler->callback.tryGetReceiver(js.v8Isolate));
+      cb(SnapshotListener{
+        .type = entry.key,
+        .identity = identity,
+        .callback = callback,
+        .receiver = receiver,
+        .once = handler->once,
+        .passive = handler->passive,
+      });
     }
+  }
+}
+
+void EventTarget::restoreSnapshotListener(jsg::Lock& js,
+    kj::StringPtr type,
+    v8::Local<v8::Object> identity,
+    HandlerFunction callback,
+    SnapshotListenerOptions options) {
+  auto& handlerSet = getOrCreate(type);
+  auto sizeBefore = handlerSet.handlers.size();
+  handlerSet.handlers.upsert(kj::heap<EventHandler>(EventHandler{
+                               .identity = jsg::HashableV8Ref<v8::Object>(js.v8Isolate, identity),
+                               .callback = kj::mv(callback),
+                               .once = options.once,
+                               .passive = options.passive,
+                             }),
+      [&](auto&&...) {});
+  if (handlerSet.handlers.size() != sizeBefore) {
+    notifyListenerCountChanged(js, type, handlerSet.handlers.size());
   }
 }
 

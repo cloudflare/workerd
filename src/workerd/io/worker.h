@@ -44,6 +44,7 @@ WD_STRONG_BOOL(StructuredLogging);
 WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
+class Event;
 class DurableObjectState;
 class DurableObjectStorage;
 class ServiceWorkerGlobalScope;
@@ -707,6 +708,17 @@ class Worker::Api {
   // Only `workerd bench` delivers the bench event, so the default implementation throws.
   virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const;
+
+  // An event listener's callback (api::EventTarget::HandlerFunction).
+  using EventListenerCallback = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<api::Event>)>;
+
+  // Unwraps the callbacks of the top-level event listeners a Worker started from a startup
+  // snapshot re-registers. An Api without it (the default) keeps a zygote whose top level
+  // registered a global listener from producing a snapshot.
+  virtual kj::Maybe<const jsg::TypeHandler<EventListenerCallback>&>
+  tryGetEventListenerCallbackTypeHandler(jsg::Lock& lock) const {
+    return kj::none;
+  }
 
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.
