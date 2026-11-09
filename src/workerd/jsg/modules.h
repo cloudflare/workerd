@@ -689,13 +689,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           auto module = info.module.getHandle(js);
           KJ_IF_SOME(pending,
               instantiateModule(js, module, InstantiateModuleOptions::ALLOW_PENDING_EVALUATION)) {
-            // Evaluation is suspended on a top-level await and we are nested inside another
-            // module's evaluation, so we must not drain the microtask queue here. Hand back a
-            // promise for the namespace instead; it settles once we unwind to depth 0 and the
-            // outer instantiation drains.
-            auto ns = js.v8Ref<v8::Value>(module->GetModuleNamespace());
+            // We are nested inside another module's evaluation, and this module's evaluation is
+            // suspended on a top-level await or deferred until it can be linked, so we must not
+            // drain the microtask queue here. Hand back a promise for the namespace instead; it
+            // settles once we unwind to depth 0 and the outer instantiation drains. The namespace
+            // is read when it settles, as a module that is not linked yet has none.
             return js.v8Ref<v8::Value>(js.wrapSimplePromise(js.toPromise(pending).then(
-                js, [ns = kj::mv(ns)](Lock& js, Value) mutable { return kj::mv(ns); })));
+                js, [module = js.v8Ref(module)](Lock& js, Value) mutable {
+              return js.v8Ref<v8::Value>(module.getHandle(js)->GetModuleNamespace());
+            })));
           }
           return js.v8Ref(module->GetModuleNamespace());
         };
