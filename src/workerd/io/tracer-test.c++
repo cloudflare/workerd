@@ -9,6 +9,8 @@
 #include <workerd/io/tracer.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <opentelemetry/proto/collector/logs/v1/logs_service.pb.h>
+
 #include <kj/test.h>
 
 namespace workerd {
@@ -56,14 +58,38 @@ class TestEntropySource final: public kj::EntropySource {
   kj::byte next = 1;
 };
 
+namespace otlp = ::opentelemetry::proto;
+
 class RecordingExporter final: public OtlpSpanExporter {
  public:
   uint spanCount = 0;
+  uint logCount = 0;
+  kj::Vector<otlp::collector::logs::v1::ExportLogsServiceRequest> logRequests;
 
   void exportSpans(kj::Array<const kj::byte> request, uint count) override {
     spanCount += count;
   }
+  void exportLogs(kj::Array<const kj::byte> request, uint count) override {
+    logCount += count;
+    KJ_ASSERT(logRequests.add().ParseFromArray(request.begin(), request.size()));
+  }
 };
+
+// The records of a request that holds one resource's logs.
+const google::protobuf::RepeatedPtrField<otlp::logs::v1::LogRecord>& records(
+    const otlp::collector::logs::v1::ExportLogsServiceRequest& request) {
+  KJ_ASSERT(request.resource_logs_size() == 1);
+  KJ_ASSERT(request.resource_logs(0).scope_logs_size() == 1);
+  return request.resource_logs(0).scope_logs(0).log_records();
+}
+
+const otlp::common::v1::AnyValue& attribute(
+    const otlp::logs::v1::LogRecord& record, kj::StringPtr key) {
+  for (auto& kv: record.attributes()) {
+    if (kv.key() == key.cStr()) return kv.value();
+  }
+  KJ_FAIL_ASSERT("missing attribute", key);
+}
 
 void expectPreciseTime(SpanObserver& observer) {
   auto before = kj::systemPreciseCalendarClock().now();
@@ -190,6 +216,138 @@ KJ_TEST("native invocation exceptions reach streaming tails with I/O timestamps"
   KJ_EXPECT(response.statusCode == 200);
   KJ_EXPECT(response.body == "[123]");
   KJ_EXPECT(exporter->spanCount == 1);
+}
+
+// Runs an invocation that logs and throws while its span is open, and logs again after it closed.
+kj::Rc<RecordingExporter> exportInvocation(ExportLogs exportLogs,
+    ExportSpans exportSpans = ExportSpans::YES,
+    ExportInvocationLog exportInvocationLog = ExportInvocationLog::NO) {
+  TestFixture fixture;
+  TestEntropySource entropy;
+  auto exporter = kj::rc<RecordingExporter>();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  tracer->setStartInvocationSpanFunc([&](tracing::InvocationSpanContext& context) {
+    return startExportedInvocationSpan(entropy, exporter.addRef(),
+        tracing::SpanContext(context.getTraceId(), kj::none, context.getTraceFlags()),
+        {
+          .serviceName = "log-test",
+          .exportLogs = exportLogs,
+          .exportSpans = exportSpans,
+          .exportInvocationLog = exportInvocationLog,
+        },
+        context.getSpanId());
+  });
+  auto context = fixture.newIoContext();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, tracer.addRef());
+  tracer->setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+  // Other spans go under the invocation's only when its spans are exported.
+  KJ_EXPECT(tracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none).isObserved() ==
+      bool(exportSpans));
+  kj::Maybe<tracing::InvocationSpanContext> spanContext;
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& c = spanContext.emplace(env.context.getInvocationSpanContext());
+    // The second argument was an Error, which the JSON message does not describe.
+    auto errorInfo = kj::heapArrayBuilder<kj::Maybe<tracing::ErrorInfo>>(2);
+    errorInfo.add(kj::none);
+    errorInfo.add(tracing::ErrorInfo(kj::str("TypeError"), kj::str("bad"), kj::str("at f")));
+    tracer->addLog(
+        c, env.context.now(), LogLevel::LOG, kj::str("[\"in-invocation\",{}]"), errorInfo.finish());
+    tracer->addException(c, env.context.now(), kj::str("Error"), kj::str("boom"), kj::none);
+  });
+  // The invocation's logs wait for its span.
+  KJ_EXPECT(exporter->logCount == 0);
+  tracer->setOutcome(EventOutcome::OK, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS);
+  // Like the streaming tail, the export takes logs until the tracer goes away.
+  tracer->addLog(KJ_ASSERT_NONNULL(spanContext), kj::UNIX_EPOCH, LogLevel::WARN,
+      kj::str("[\"after-outcome\"]"));
+  fixture.drainAndDestroy(kj::mv(request));
+  tracer = nullptr;
+  KJ_EXPECT(exporter->spanCount == (exportSpans ? 1 : 0));
+  return exporter;
+}
+
+KJ_TEST("an exported invocation exports its logs and exceptions") {
+  auto exporter = exportInvocation(ExportLogs::YES);
+  KJ_ASSERT(exporter->logRequests.size() == 2);
+  KJ_EXPECT(exporter->logCount == 3);
+  auto& resource = exporter->logRequests[0].resource_logs(0).resource();
+  KJ_EXPECT(resource.attributes(0).key() == "service.name");
+  KJ_EXPECT(resource.attributes(0).value().string_value() == "log-test");
+
+  auto& first = records(exporter->logRequests[0]);
+  KJ_ASSERT(first.size() == 2);
+  auto& log = first[0];
+  KJ_EXPECT(log.severity_text() == "log");
+  KJ_EXPECT(log.body().array_value().values(0).string_value() == "in-invocation");
+  auto& arguments = attribute(log, "cloudflare.log.error_info").array_value();
+  KJ_ASSERT(arguments.values_size() == 2);
+  KJ_EXPECT(arguments.values(0).value_case() == otlp::common::v1::AnyValue::VALUE_NOT_SET);
+  auto& error = arguments.values(1).kvlist_value();
+  KJ_ASSERT(error.values_size() == 3);
+  KJ_EXPECT(error.values(0).key() == "name");
+  KJ_EXPECT(error.values(0).value().string_value() == "TypeError");
+  KJ_EXPECT(error.values(1).key() == "message");
+  KJ_EXPECT(error.values(1).value().string_value() == "bad");
+  KJ_EXPECT(error.values(2).key() == "stack");
+  KJ_EXPECT(error.values(2).value().string_value() == "at f");
+
+  auto& exception = first[1];
+  KJ_EXPECT(exception.event_name() == "exception");
+  KJ_EXPECT(exception.body().string_value() == "boom");
+  KJ_EXPECT(attribute(exception, "exception.type").string_value() == "Error");
+
+  auto& late = records(exporter->logRequests[1]);
+  KJ_ASSERT(late.size() == 1);
+  KJ_EXPECT(late[0].severity_text() == "warn");
+  KJ_EXPECT(late[0].body().array_value().values(0).string_value() == "after-outcome");
+  // Without Error arguments a record has no error info.
+  for (auto& kv: late[0].attributes()) KJ_EXPECT(kv.key() != "cloudflare.log.error_info");
+}
+
+KJ_TEST("an invocation whose spans are not exported still exports its logs and its record") {
+  auto exporter = exportInvocation(ExportLogs::YES, ExportSpans::NO, ExportInvocationLog::YES);
+  KJ_ASSERT(exporter->logRequests.size() == 2);
+  KJ_EXPECT(exporter->logCount == 4);
+  auto& first = records(exporter->logRequests[0]);
+  KJ_ASSERT(first.size() == 3);
+  KJ_EXPECT(first[0].body().array_value().values(0).string_value() == "in-invocation");
+  KJ_EXPECT(first[1].event_name() == "exception");
+  // The invocation's record comes when its span closes, made from the span.
+  auto& invocation = first[2];
+  KJ_EXPECT(invocation.event_name() == "cloudflare.invocation");
+  KJ_EXPECT(invocation.severity_number() == otlp::logs::v1::SEVERITY_NUMBER_UNSPECIFIED);
+  KJ_EXPECT(invocation.span_id() == first[0].span_id());
+  KJ_EXPECT(invocation.body().string_value() == "custom");
+  KJ_EXPECT(attribute(invocation, "cloudflare.outcome").string_value() == "ok");
+  KJ_EXPECT(attribute(invocation, "faas.trigger").string_value() == "other");
+  KJ_EXPECT(attribute(invocation, "cpu_time_ms").int_value() == 0);
+  // The root span's attributes, the ones it gets at close included.
+  KJ_EXPECT(attribute(invocation, "cloudflare.invocation.sequence.number").int_value() == 1);
+  KJ_EXPECT(records(exporter->logRequests[1])[0].body().array_value().values(0).string_value() ==
+      "after-outcome");
+}
+
+KJ_TEST("an invocation that exports neither spans nor logs does not take its other spans") {
+  // exportInvocation() checks that the invocation's other spans don't go under its span, and
+  // that nothing is exported.
+  auto exporter = exportInvocation(ExportLogs::NO, ExportSpans::NO);
+  KJ_EXPECT(exporter->logRequests.size() == 0);
+}
+
+KJ_TEST("an exported invocation has no record of its own unless asked to") {
+  auto exporter = exportInvocation(ExportLogs::YES);
+  for (auto& request: exporter->logRequests) {
+    for (auto& record: records(request)) KJ_EXPECT(record.event_name() != "cloudflare.invocation");
+  }
+}
+
+KJ_TEST("an exported invocation exports no logs unless asked to") {
+  auto exporter = exportInvocation(ExportLogs::NO);
+  KJ_EXPECT(exporter->logCount == 0);
 }
 
 }  // namespace
