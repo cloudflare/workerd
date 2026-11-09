@@ -87,10 +87,10 @@ impl Counter {
 }
 
 // A rejected method is still emitted, so its callers add no errors of their own.
-fn _calls(counter: jsg::Rc<Counter>, other: jsg::Rc<Other>) {
-    counter.with_self(counter.clone());
-    Counter::after_argument(1, counter.clone());
+fn _calls(lock: &jsg::Lock<'_>, counter: jsg::Rc<Counter>, other: jsg::Rc<Other>) {
+    counter.get(lock).with_self(counter.clone(lock));
+    Counter::after_argument(1, counter.clone(lock));
     Counter::of_another_type(other);
-    Counter::weak(counter.downgrade());
-    let _ = counter.get_total(counter.clone());
+    Counter::weak(counter.downgrade(lock));
+    let _ = counter.get(lock).get_total(counter.clone(lock));
 }

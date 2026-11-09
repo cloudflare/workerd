@@ -44,9 +44,15 @@
 //! A [`jsg::Rc`](crate::Rc) or [`jsg::Weak`](crate::Weak) also shares its isolate's state. Its
 //! reference counts are not atomic, so only the isolate lock keeps threads from racing on them.
 //! [`IsolateState::release`] releases a reference at once under the lock, and otherwise queues
-//! it for the next lock. After the state is closed, references are kept until the isolate is
-//! disposed, since `IsolateBase::dropWrappers` and `Dispose` still touch the counts. They are
-//! then released with [`ReleaseContext::Disposed`], one thread at a time.
+//! it for the next lock. A [`jsg::LockGuarded`](crate::LockGuarded) value is released the same
+//! way. After the state is closed, the thread holding the lock still releases at once, so that
+//! what `IsolateBase::dropWrappers` drops is destroyed under the lock, as C++ JSG objects are,
+//! along with the resources it alone holds. `~IsolateBase` reports through the `Realm`'s hook
+//! just before it disposes the isolate, after which no thread asks whether it holds the lock.
+//! A reference dropped without the lock after the state is closed is kept until the isolate is
+//! disposed, since `dropWrappers` and `Dispose` still touch the counts on the thread holding
+//! it. Such references are then released with [`ReleaseContext::Disposed`], one thread at a
+//! time.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -101,6 +107,8 @@ struct DropQueues {
     /// References dropped after the state was closed, waiting to be drained once the isolate is
     /// disposed.
     released_awaiting_dispose: Vec<Released>,
+    /// Set just before the isolate is disposed, after which its pointer is not used.
+    disposing: bool,
     /// Set once the isolate is disposed, after which slots are freed at once.
     disposed: bool,
     /// Set while a thread drains `released_awaiting_dispose`.
@@ -121,6 +129,7 @@ impl IsolateState {
     }
 
     /// Whether `isolate` is the isolate of this state. Only compares the pointers.
+    #[inline]
     pub(crate) fn belongs_to(&self, isolate: *mut ffi::Isolate) -> bool {
         self.isolate == isolate
     }
@@ -144,6 +153,7 @@ impl IsolateState {
 
     /// Whether the isolate is about to be disposed, or already has been. Its handles are then
     /// freed with it, and must not be touched.
+    #[inline]
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
@@ -192,11 +202,19 @@ impl IsolateState {
         }
     }
 
-    /// Releases the parts of a dropped [`jsg::Rc`](crate::Rc) or [`jsg::Weak`](crate::Weak):
-    /// at once under the lock, otherwise on the next lock, or, once the state is closed, after
-    /// the isolate is disposed.
+    /// Releases the parts of a dropped [`jsg::Rc`](crate::Rc), [`jsg::Weak`](crate::Weak) or
+    /// [`LockGuarded`](crate::LockGuarded): at once under the lock, even after the state is
+    /// closed, until the isolate is about to be disposed; otherwise on the next lock, or, once
+    /// the state is closed, after the isolate is disposed.
     pub(crate) fn release<T: Releasable>(&self, released: T) {
-        if self.this_thread_holds_lock() {
+        // Only a holder of the lock closes the state, so a thread holding it sees it closed or not
+        // for as long as it holds it.
+        let locked = if self.is_closed() {
+            self.this_thread_holds_lock_until_disposing()
+        } else {
+            self.this_thread_holds_lock()
+        };
+        if locked {
             released.release(ReleaseContext::Locked);
             return;
         }
@@ -216,6 +234,25 @@ impl IsolateState {
         queues.draining_disposed = true;
         drop(queues);
         self.drain_disposed();
+    }
+
+    /// Whether this thread holds the isolate lock. Unlike
+    /// [`this_thread_holds_lock`](Self::this_thread_holds_lock), it asks V8 after the state is
+    /// closed, until the isolate is about to be disposed. While this thread holds the lock, the
+    /// isolate is not disposed.
+    fn this_thread_holds_lock_until_disposing(&self) -> bool {
+        let queues = self.lock_drop_queues();
+        // `isolate_disposing` takes the mutex before it sets `disposing`, so the isolate is alive
+        // until the guard is dropped.
+        // SAFETY: the isolate is alive (see above), and `v8::Locker::IsLocked`, which tells
+        // whether this thread holds the lock, may be called from any thread.
+        !queues.disposing && unsafe { ffi::isolate_is_locked(self.isolate) }
+    }
+
+    /// Records that the isolate is about to be disposed, after which no thread asks whether it
+    /// holds its lock.
+    pub(crate) fn isolate_disposing(&self) {
+        self.lock_drop_queues().disposing = true;
     }
 
     /// Releases the references and resets the handles queued without the lock. The deferred
@@ -245,7 +282,7 @@ impl IsolateState {
 
     /// Records that the isolate is about to be disposed, and releases the queued references and
     /// resets the queued handles while it still can. Handles dropped from now on are left to
-    /// `Dispose`, and references kept until the isolate is disposed.
+    /// `Dispose`, and references dropped without the lock kept until the isolate is disposed.
     ///
     /// The `Isolate` reference proves that the caller holds the isolate lock; no handle of the
     /// isolate can be reset concurrently.
@@ -315,8 +352,8 @@ impl IsolateState {
 pub enum ReleaseContext {
     /// This thread holds the isolate lock.
     Locked,
-    /// The isolate is disposed. Only the counts may be released: an unwrapped `Wrappable` can
-    /// still point to the dead isolate.
+    /// The isolate is disposed. Only the counts may be released: there is no wrapper left to
+    /// update.
     Disposed,
 }
 

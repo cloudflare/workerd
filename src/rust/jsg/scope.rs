@@ -67,6 +67,7 @@ impl Lock<'_> {
     /// Returns the raw pointer of the isolate associated with this lock. The pointer proves
     /// nothing about the lock; code that needs a locked isolate borrows the lock's [`Isolate`]
     /// through `Deref` instead.
+    #[inline]
     pub fn isolate(&self) -> v8::IsolatePtr {
         self.isolate
     }

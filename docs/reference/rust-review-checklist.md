@@ -86,7 +86,7 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `TracedGlobal`, in `jsg::Cell` or `jsg::RefCell` fields (`src/rust/jsg/README.md` §Cells). A
   method or accessor can take `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its
   resource, for example to hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
-  the callback should hold `this` (or `this.downgrade()`) instead. Flag a
+  the callback should hold `this` (or `this.downgrade(lock)`) instead. Flag a
   `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it

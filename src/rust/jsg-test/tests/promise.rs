@@ -582,9 +582,7 @@ impl Drop for DropCounter {
     }
 }
 
-impl jsg::Traced for DropCounter {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(DropCounter);
 
 static SETTLED_DATA_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -744,7 +742,7 @@ fn then_or_catch_data_holds_a_resource() {
             .then_or_catch(
                 lock,
                 leaf,
-                |lock, leaf, _| leaf.clone().to_js(lock),
+                |lock, leaf, _| leaf.clone(lock).to_js(lock),
                 |lock, _, _| Ok(lock.undefined()),
             )
             .unwrap();
@@ -861,12 +859,12 @@ impl Watcher {
         let callback = v8::Local::<v8::Function>::try_from(callback)
             .map_err(|_| jsg::Error::new_type_error("callback must be a function"))?;
         let watch = Watch {
-            state: self.state.clone(),
+            state: self.state.clone(lock),
             callback: callback.to_traced_global(lock),
         };
         promise.then(lock, watch, |lock, watch, value| {
             let seen = String::from_js(lock, value)?;
-            watch.state.seen.borrow_mut().push(seen);
+            watch.state.get(lock).seen.borrow_mut().push(seen);
             // No borrow is held across the call, whose JavaScript calls back into the watcher.
             let callback = watch.callback.as_local(lock);
             callback.call(lock, None, &[value])
@@ -874,8 +872,8 @@ impl Watcher {
     }
 
     #[jsg_method]
-    fn seen(&self) -> String {
-        self.state.seen.borrow().join(",")
+    fn seen(&self, lock: &mut jsg::Lock<'_>) -> String {
+        self.state.get(lock).seen.borrow().join(",")
     }
 }
 
@@ -1005,7 +1003,7 @@ fn promise_operations_while_terminating_keep_the_termination() {
                 still_pending: Cell::new(false),
             },
         );
-        ctx.set_global(lock, "promises", promises.clone());
+        ctx.set_global(lock, "promises", promises.clone(lock));
         let result = ctx.eval_raw(
             lock,
             "globalThis.caught = false; globalThis.after = false;
@@ -1015,7 +1013,7 @@ fn promise_operations_while_terminating_keep_the_termination() {
         );
         assert!(result.is_err(), "the script was not terminated");
         assert_eq!(
-            *promises.pending.borrow(),
+            *promises.get(lock).pending.borrow(),
             [
                 "PromiseResolver::new: true",
                 "then: true",
@@ -1029,7 +1027,7 @@ fn promise_operations_while_terminating_keep_the_termination() {
                 "Promise::rejected_with_error(TypeError): true",
             ]
         );
-        assert!(promises.still_pending.get());
+        assert!(promises.get(lock).still_pending.get());
         assert!(!ctx.eval::<bool>(lock, "globalThis.caught").unwrap());
         assert!(!ctx.eval::<bool>(lock, "globalThis.after").unwrap());
         Ok(())
@@ -1206,6 +1204,7 @@ impl ReadThroughCache {
     ) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
         let cached = self
             .store
+            .get(lock)
             .entries
             .borrow()
             .get(&key)
@@ -1215,6 +1214,7 @@ impl ReadThroughCache {
         }
         let in_flight = self
             .store
+            .get(lock)
             .in_flight
             .borrow()
             .get(&key)
@@ -1235,13 +1235,18 @@ impl ReadThroughCache {
         let filled = produced.then(
             lock,
             Fill {
-                store: self.store.clone(),
+                store: self.store.clone(lock),
                 key: key.clone(),
             },
             |lock, fill, value| {
                 let entry = value.to_traced_global(lock);
-                fill.store.in_flight.borrow_mut(lock).remove(&fill.key);
                 fill.store
+                    .get(lock)
+                    .in_flight
+                    .borrow_mut(lock)
+                    .remove(&fill.key);
+                fill.store
+                    .get(lock)
                     .entries
                     .borrow_mut(lock)
                     .insert(fill.key.clone(), entry);
@@ -1251,16 +1256,21 @@ impl ReadThroughCache {
         produced.catch(
             lock,
             Fill {
-                store: self.store.clone(),
+                store: self.store.clone(lock),
                 key: key.clone(),
             },
             |lock, fill, _reason| {
-                fill.store.in_flight.borrow_mut(lock).remove(&fill.key);
+                fill.store
+                    .get(lock)
+                    .in_flight
+                    .borrow_mut(lock)
+                    .remove(&fill.key);
                 Ok(lock.undefined())
             },
         )?;
         let in_flight = filled.to_traced_global(lock);
         self.store
+            .get(lock)
             .in_flight
             .borrow_mut(lock)
             .insert(key.clone(), in_flight);
@@ -1274,7 +1284,7 @@ impl ReadThroughCache {
             Ok(Err(exception)) => resolver.reject(lock, exception)?,
             Err(err) => {
                 // Execution is terminating, so nothing will settle the fill.
-                self.store.in_flight.borrow_mut(lock).remove(&key);
+                self.store.get(lock).in_flight.borrow_mut(lock).remove(&key);
                 return Err(err);
             }
         }

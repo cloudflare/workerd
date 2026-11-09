@@ -69,11 +69,11 @@ Provides access to V8 operations within an isolate lock. Passed to resource meth
 
 ### `Rc<R>`
 
-Strong reference to a Rust resource managed by GC. Derefs to `&R`. Cloning and dropping a `Rc` tracks strong references for the garbage collector. `Rc::new` takes a `Lock`: the resource belongs to that lock's isolate, and wrapping it in another panics. See [Dropping references](#dropping-references) for drops without the isolate lock.
+Strong reference to a Rust resource managed by GC. Cloning and dropping a `Rc` tracks strong references for the garbage collector. `Rc::new` takes a `Lock`: the resource belongs to that lock's isolate, and wrapping it in another panics. Every other operation that reaches the resource or its counts takes a `Lock` of that isolate too, and panics for another's: `get(lock)` borrows the resource for no longer than the lock's scope, and `clone(lock)` and `downgrade(lock)` change the counts. Dropping needs no lock, and neither do equality, ordering, hashing and `Debug`, which use only the address or the type. See [Safety rules](#safety-rules), rule 5, and [Dropping references](#dropping-references) for drops without the isolate lock.
 
 ### `Weak<R>`
 
-Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<R>` if the resource is still alive. It is dropped like an `Rc`.
+Weak reference that doesn't prevent GC collection. Use `upgrade(lock)` to get a `Rc<R>` if the resource is still alive. Like an `Rc`, it takes a `Lock` for everything but dropping, and is dropped like one.
 
 ### `Realm`
 
@@ -110,7 +110,7 @@ Errors from nested conversions or JavaScript execution still propagate.
 
 ## Safety rules
 
-Every change to Rust JSG, and to the C++ shims under it, must follow these four rules. Each rule
+Every change to Rust JSG, and to the C++ shims under it, must follow these five rules. Each rule
 lists the tests that check it. Reviewers check the rest.
 
 ### 1. Don't enter V8 while an exception or a termination is pending
@@ -308,6 +308,74 @@ Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*
 (`await-io-and-run-*`), and the drop tests in `src/rust/jsg-test/tests/global.rs`,
 `traced_global_lifetime.rs` and `gc.rs`.
 
+### 5. Only the isolate lock's holder reaches the state it guards
+
+This rule prevents data races: two threads using the same non-`Sync` state at once, at least one
+of them writing. Rust JSG shares state with no synchronization of its own: the reference counts
+of a `jsg::Rc` and of its `Wrappable`, and the `Cell`s and `RefCell`s of resources. Only the
+isolate lock keeps two threads from using that state at once.
+
+The isolate lock is a mutex over what the isolate's references reach: resources, the data of
+functions created with `Function::new`, and reaction data, including the values of typed
+promises. As with a `std::sync::Mutex`, one thread uses the state at a time. Code reaches it only
+through a `&Lock` of its isolate, and holding one proves that this thread holds that isolate's
+lock:
+
+- `Lock` is neither `Send` nor `Sync`, so no other thread can have it.
+- Every operation that reaches the state checks, in every build, that the lock is of the state's
+  isolate, and panics otherwise. Holding one isolate's lock excludes no thread from another's, so
+  this check is what makes the lock the right one, not a debugging aid.
+- Nothing in workerd releases the isolate lock while a `Lock` exists; there is no `v8::Unlocker`.
+- GC, which reads the state through `Traced::trace`, runs on the thread that holds the lock
+  (`--single-threaded-gc` in `src/workerd/jsg/setup.c++`).
+
+The references themselves must not reach the state without the lock. If a `jsg::Rc` could be
+dereferenced or cloned without one, a thread that holds the `Rc` but not the lock could read the
+resource or change its counts while the lock's holder does.
+
+How the code keeps the rule:
+
+- `jsg::Rc`, `jsg::Weak` and `jsg_cpp::Ref` touch their counts and their resource only under the
+  lock of its isolate:
+  - Every operation but dropping that reaches the resource or a count takes a `&Lock` (`get`,
+    `clone`, `downgrade`, `upgrade`, `is_alive`, `to_js`, `attach_to_this`, and `as_cpp` for a
+    `jsg_cpp::Ref`), and panics for another isolate's, or once the isolate's `Realm` is dropped.
+  - GC and detaching visits change a reference only under its isolate's lock. A detaching visit
+    (`jsg::Cell::take`, for example) under another isolate's lock panics. A GC visit on behalf of
+    another isolate leaves the reference as it is, so a reference that one isolate's resource
+    holds to another's leaks rather than racing; debug builds assert against it. See
+    `GcVisitor::visit_rc` and `LockGuarded::get_for_visit`.
+  - A heap snapshot, which runs under its isolate's lock, reports a reference only when it is of
+    that isolate (`MemoryTracker::can_track_object_of`, `LockGuarded::get_for_memory_info`).
+  - A drop under the lock releases at once, even while the isolate is torn down. A drop
+    without it queues the release, under a mutex and without touching a count, for the next
+    lock; once the isolate is disposed, one thread at a time releases what is queued. See
+    [Dropping references](#dropping-references).
+  - Equality, ordering and hashing use only the address, and `Debug` only the type.
+  - Nothing else reaches the counts: `v8::WrappableRc`, whose `Clone` and `Drop` change the
+    `Wrappable`'s count, is private to `jsg`, and so is the `jsg_cpp` bridge.
+
+  So they are `Send` when the resource is, though their counts aren't atomic: a thread that holds
+  one without the lock can only drop it. The resource must be `Send`, since it is dropped by
+  whichever thread releases its last reference.
+- A crate outside `jsg` that holds a value only the isolate lock guards, such as the C++
+  `jsg::Ref` in a `jsg_cpp::Ref`, keeps it in a `jsg::LockGuarded`. It lends the value only under
+  a lock of its isolate, checked as for a `jsg::Rc`, and drops it as a `jsg::Rc` drops its parts,
+  rather than as C++ would: C++ destroys an object that has no wrapper at once, with or without
+  the lock.
+  Its constructor is `unsafe`: the value must be bound to no thread but through the lock.
+
+Bad: a `jsg::Rc` method that reaches the resource or changes a count without a `&Lock`, or
+without checking that the lock is of the resource's isolate. Fix: take a `&Lock` and check its
+isolate, as `get` does.
+
+Tested by: the `rc-needs-the-lock`, `lock-is-not-send`, `lock-is-not-sync` and
+`ok-send-resource-state` compile tests in `src/rust/jsg-compile-tests`;
+`await-io-future-cannot-borrow-a-resource` in `src/workerd/io/io-context/compile-tests`; the
+`wrappable-rc-is-private` and `cpp-ref-bridge-is-private` compile tests; and the tests of
+operations in another isolate, and of drops without the lock, in
+`src/rust/jsg-test/tests/isolates.rs` and `cpp_interop.rs`.
+
 ## Resources
 
 Rust resources integrate with V8's garbage collector through the existing C++ `Wrappable` infrastructure — the same GC system that C++ `jsg::Rc<T>` and `jsg::Object` use.
@@ -363,7 +431,8 @@ A method's `&self` is only valid during the call. Code that runs later, such as 
 reaction or a function the method creates, needs its own reference to the resource. For that,
 write `this: jsg::Rc<Self>` as the first parameter instead of `&self`. It is a `jsg::Rc` of the
 resource the method was called on, like `JSG_THIS` in C++ JSG. Clone it into whatever runs
-later.
+later. Like any `jsg::Rc`, it lends the resource only with a lock (`this.get(lock)`), so a method
+that reads the resource takes the lock after `this`.
 
 ```rust
 #[jsg_resource]
@@ -376,9 +445,8 @@ impl Task {
     /// Runs the task later: `scheduler` keeps a `jsg::Rc` of it until then.
     #[jsg_method]
     fn schedule(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, scheduler: jsg::Rc<Scheduler>) {
-        // `this` dereferences to the resource, like `&self`.
-        this.scheduled.set(true);
-        scheduler.tasks.borrow_mut(lock).push(this);
+        this.get(lock).scheduled.set(true);
+        scheduler.get(lock).tasks.borrow_mut(lock).push(this);
     }
 }
 ```
@@ -395,7 +463,7 @@ The callback's `jsg::Rc` keeps the resource alive, even after JavaScript drops t
 Cycles are fine if they go through a `TracedGlobal`: if the resource holds the callback in a
 `TracedGlobal`, GC collects both once JavaScript drops them. A cycle through a
 `jsg::v8::Global` is never collected. If the callback shouldn't keep the resource alive, give
-it a `jsg::Weak<Self>` (`this.downgrade()`) instead.
+it a `jsg::Weak<Self>` (`this.downgrade(lock)`) instead.
 
 Calling the method on something that isn't a resource of this type throws a `TypeError`, as it
 does for `&self` methods. A method that takes `this` has no Fast API callback.
@@ -433,13 +501,13 @@ impl Scheduler {
     #[jsg_method]
     fn run(&self, lock: &mut jsg::Lock<'_>) {
         if let Some(task) = self.pending.take(lock) {
-            task.run(lock); // `task` is strong, whatever ran in between
+            task.get(lock).run(lock); // `task` is strong, whatever ran in between
         }
         // Moved out of the borrow first, so that `run`, which can run JavaScript, doesn't find
         // the queue borrowed.
         let tasks = std::mem::take(&mut *self.queue.borrow_mut(lock));
         for task in tasks {
-            task.run(lock);
+            task.get(lock).run(lock);
         }
     }
 }
@@ -510,18 +578,20 @@ wrapper. Yet an `Rc` or a `Weak` can be dropped without the lock, for example by
 owns the Rust object holding it. So each one keeps the state of the isolate its resource was
 created in, which the `Realm` shares with every persistent handle of it, and a drop:
 
-- under the isolate lock, releases the reference at once;
+- under the isolate lock, releases the reference at once, even while the isolate is torn down,
+  until it is about to be disposed. So what teardown drops is destroyed under the lock, as C++
+  JSG objects are, along with any resource it alone holds through a `jsg::Rc`;
 - without the lock, on any thread, moves its parts into a queue without touching any count, and
   the next `IsolateBase::Lock` releases them, before it resets the queued handles of `Global`s and
   `TracedGlobal`s. Until then the reference keeps the resource alive, as a C++ `jsg::Ref` in the
   deferred destruction queue does;
-- once the `Realm` is dropped, on any thread, keeps the reference until the isolate is disposed.
-  Until then the isolate still detaches wrappers and destroys the `CppgcShim`s that own
-  `Wrappable`s, and no thread can ask whether it holds the lock of an isolate that may already be
-  gone. Once the isolate is disposed, the kept references are released, and so are later drops.
-  Those releases only give back the counts, with no wrapper left to update. No lock serializes
-  them, so they go through the queue, which one thread at a time drains; a clone is not
-  serialized, so a resource that outlives its isolate must be used by one thread at a time.
+- once the `Realm` is dropped, without the lock, keeps the reference until the isolate is
+  disposed. Until then the thread holding the lock still detaches wrappers and destroys the
+  `CppgcShim`s that own `Wrappable`s. Once the isolate is disposed, the kept references are
+  released, and so are later drops. Those releases only give back the counts, with no wrapper
+  left to update. No lock serializes them, so they go through the queue, which one thread at a
+  time drains. Nothing else touches the counts by then: every other operation takes a lock of
+  the isolate, and panics once its `Realm` is dropped.
 
 ### Creating resources from C++
 

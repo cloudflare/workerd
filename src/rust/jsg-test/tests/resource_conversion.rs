@@ -123,7 +123,7 @@ fn from_js_unwraps_resource() {
         // Get the JS value back and use FromJS to unwrap it.
         let js_val = ctx.eval_raw(lock, "greeter").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed");
-        assert_eq!(r.greeting, "Howdy");
+        assert_eq!(r.get(lock).greeting, "Howdy");
         Ok(())
     });
 }
@@ -161,12 +161,12 @@ fn from_js_ref_keeps_resource_alive() {
 
         let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let r = Tracked::from_js(lock, js_val).expect("FromJS should succeed");
-        assert_eq!(r.tag, "alive");
+        assert_eq!(r.get(lock).tag, "alive");
 
         // The Ref from FromJS keeps the resource alive even after GC.
         crate::Harness::request_gc(lock);
         assert_eq!(DROPS.load(Ordering::SeqCst), 0);
-        assert_eq!(r.tag, "alive");
+        assert_eq!(r.get(lock).tag, "alive");
 
         std::mem::drop(r);
         Ok(())
@@ -255,7 +255,7 @@ fn round_trip_preserves_data() {
 
         let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let unwrapped = Greeter::from_js(lock, js_val).expect("round-trip should succeed");
-        assert_eq!(unwrapped.greeting, "Bonjour");
+        assert_eq!(unwrapped.get(lock).greeting, "Bonjour");
         Ok(())
     });
 }
@@ -273,7 +273,7 @@ fn round_trip_through_js_identity_function() {
         // Pass through a JS identity function.
         let js_val = ctx.eval_raw(lock, "(x => x)(greeter)").unwrap();
         let unwrapped = Greeter::from_js(lock, js_val).expect("identity round-trip should work");
-        assert_eq!(unwrapped.greeting, "Hola");
+        assert_eq!(unwrapped.get(lock).greeting, "Hola");
         Ok(())
     });
 }
@@ -313,7 +313,7 @@ fn eval_raw_returns_ref_via_from_js() {
 
         let js_val = ctx.eval_raw(lock, "g").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed");
-        assert_eq!(r.greeting, "Salut");
+        assert_eq!(r.get(lock).greeting, "Salut");
         Ok(())
     });
 }
@@ -347,11 +347,11 @@ fn resource_stored_in_js_array_and_retrieved() {
 
         let js_val = ctx.eval_raw(lock, "([g1, g2])[0]").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed for index 0");
-        assert_eq!(r.greeting, "One");
+        assert_eq!(r.get(lock).greeting, "One");
 
         let js_val = ctx.eval_raw(lock, "([g1, g2])[1]").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed for index 1");
-        assert_eq!(r.greeting, "Two");
+        assert_eq!(r.get(lock).greeting, "Two");
         Ok(())
     });
 }

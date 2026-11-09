@@ -380,11 +380,13 @@ class IsolateBase {
     deferredActionHook = hook;
   }
 
-  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
-  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
-  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
-  // destructor may do it.
-  using DisposeHook = void (*)(void* data);
+  // A function that ~IsolateBase() calls with `data` twice: with DISPOSING just before the
+  // isolate is disposed, so that another layer stops using the isolate pointer, and with DISPOSED
+  // once it is, so that the layer can free memory that V8 may write into until then. The Rust JSG
+  // Realm, of which an isolate has at most one, sets it when it is dropped. Setting it does not
+  // allocate, so a destructor may do it.
+  enum class DisposeStage { DISPOSING, DISPOSED };
+  using DisposeHook = void (*)(void* data, DisposeStage stage);
   void setDisposeHook(DisposeHook hook, void* data) {
     disposeHook = hook;
     disposeHookData = data;

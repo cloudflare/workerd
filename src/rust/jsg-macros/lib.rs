@@ -612,10 +612,10 @@ fn invocation(
     // `resolve_method_receiver` is sound only for callbacks registered with a signature.
     let resolve = match receiver_check {
         ReceiverCheck::Signature => {
-            quote! { unsafe { jsg::v8::WrappableRc::resolve_method_receiver::<Self>(lock, this) } }
+            quote! { unsafe { jsg::v8::resolve_method_receiver::<Self>(lock, this) } }
         }
         ReceiverCheck::Marker => {
-            quote! { jsg::v8::WrappableRc::resolve_receiver::<Self>(lock, this) }
+            quote! { jsg::v8::resolve_receiver::<Self>(lock, this) }
         }
     };
     match receiver {

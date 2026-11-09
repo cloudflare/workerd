@@ -35,9 +35,7 @@ struct Token {
     name: String,
 }
 
-impl jsg::Traced for Token {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(Token);
 
 // =============================================================================
 // Carrying Rust values
@@ -189,9 +187,7 @@ impl Drop for Carried {
     }
 }
 
-impl jsg::Traced for Carried {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(Carried);
 
 /// The reaction takes the value out of its wrapper, so the value is dropped when the callback is
 /// done with it, and the wrapper, which the garbage collector frees later, holds nothing.
@@ -227,9 +223,7 @@ impl Drop for Untaken {
     }
 }
 
-impl jsg::Traced for Untaken {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(Untaken);
 
 /// A value that no reaction takes is dropped with its wrapper, by the garbage collector.
 #[test]
@@ -269,7 +263,7 @@ impl Keeper {
             .kept
             .borrow()
             .as_ref()
-            .map(|holder| holder.object.as_local(lock));
+            .map(|holder| holder.get(lock).object.as_local(lock));
         let object = object.ok_or_else(|| jsg::Error::new_type_error("nothing kept"))?;
         let state = object.get(lock, "state")?;
         String::from_js(lock, state)
@@ -288,7 +282,7 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
                 kept: jsg::RefCell::new(None),
             },
         );
-        ctx.set_global(lock, "keeper", keeper.clone());
+        ctx.set_global(lock, "keeper", keeper.clone(lock));
         let object = lock.new_object();
         let alive = "alive".to_js(lock)?;
         object.set(lock, "state", alive)?;
@@ -296,7 +290,7 @@ fn carried_resource_can_be_kept_after_garbage_collection() {
         let holder = jsg::Rc::new(lock, Holder { object });
         let (promise, resolver) = jsg::Promise::<jsg::Rc<Holder>>::new_with_resolver(lock)?;
         let kept: jsg::Promise<()> = promise.then(lock, keeper, |lock, keeper, holder| {
-            *keeper.kept.borrow_mut(lock) = Some(holder);
+            *keeper.get(lock).kept.borrow_mut(lock) = Some(holder);
             // Traces the keeper, and through it the `jsg::Rc`, from its new owner.
             crate::Harness::request_gc(lock);
             Ok(())
@@ -426,9 +420,7 @@ fn try_consume_resolved_returns_pending_and_rejected_promises() {
 /// A value whose conversion to JavaScript fails.
 struct Unconvertible;
 
-impl jsg::Traced for Unconvertible {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(Unconvertible);
 
 impl<'s> ToJS<'s> for Unconvertible {
     fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, jsg::Error> {
@@ -580,7 +572,7 @@ impl Doubler {
         lock: &mut jsg::Lock<'s>,
         promise: jsg::Promise<'s, jsg::Rc<Leaf>>,
     ) -> Result<jsg::Promise<'s, String>, jsg::Error> {
-        promise.then(lock, (), |_lock, (), leaf| Ok(leaf.name.clone()))
+        promise.then(lock, (), |lock, (), leaf| Ok(leaf.get(lock).name.clone()))
     }
 
     #[jsg_method]
@@ -854,7 +846,7 @@ fn carried_resource_survives_garbage_collection() {
         );
         let promise = jsg::Promise::<jsg::Rc<Leaf>>::resolved(lock, leaf)?;
         let name: jsg::Promise<String> =
-            promise.then(lock, (), |_lock, (), leaf| Ok(leaf.name.clone()))?;
+            promise.then(lock, (), |lock, (), leaf| Ok(leaf.get(lock).name.clone()))?;
         ctx.set_global(lock, "name", name);
         crate::Harness::request_gc(lock);
         assert_eq!(
@@ -1063,7 +1055,7 @@ fn install_later(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) -> jsg:
             resolver: jsg::RefCell::new(None),
         },
     );
-    ctx.set_global(lock, "later", later.clone());
+    ctx.set_global(lock, "later", later.clone(lock));
     later
 }
 
@@ -1075,7 +1067,7 @@ fn then_promise_follows_the_callback_promise() {
         let later = install_later(lock, ctx);
         let start = jsg::Promise::<u32>::resolved(lock, 1)?;
         let waited: jsg::Promise<Token> =
-            start.then_promise(lock, later, |lock, later, _n| later.wait(lock))?;
+            start.then_promise(lock, later, |lock, later, _n| later.get(lock).wait(lock))?;
         let name: jsg::Promise<String> =
             waited.then(lock, (), |_lock, (), token| Ok(token.name))?;
         ctx.set_global(lock, "name", name);
@@ -1100,7 +1092,7 @@ fn then_promise_passes_on_the_callback_promise_rejection() {
         let later = install_later(lock, ctx);
         let start = jsg::Promise::<u32>::resolved(lock, 1)?;
         let waited: jsg::Promise<Token> =
-            start.then_promise(lock, later, |lock, later, _n| later.wait(lock))?;
+            start.then_promise(lock, later, |lock, later, _n| later.get(lock).wait(lock))?;
         let waited: jsg::Promise<String> =
             waited.then(lock, (), |_lock, (), token| Ok(token.name))?;
         ctx.set_global(lock, "waited", waited);
@@ -1125,8 +1117,9 @@ fn catch_promise_recovers_with_a_promise() {
         let later = install_later(lock, ctx);
         let failed =
             jsg::Promise::<Token>::rejected_with_error(lock, &jsg::Error::new_type_error("no"))?;
-        let recovered =
-            failed.catch_promise(lock, later, |lock, later, _reason| later.wait(lock))?;
+        let recovered = failed.catch_promise(lock, later, |lock, later, _reason| {
+            later.get(lock).wait(lock)
+        })?;
         let name: jsg::Promise<String> =
             recovered.then(lock, (), |_lock, (), token| Ok(token.name))?;
         ctx.set_global(lock, "name", name);
@@ -1209,9 +1202,7 @@ impl Drop for WaiterDrops {
     }
 }
 
-impl jsg::Traced for WaiterDrops {
-    fn trace(&self, _visitor: &mut jsg::GcVisitor) {}
-}
+jsg::jsg_traced!(WaiterDrops);
 
 /// Returns promises that a `Source` settles.
 #[jsg_resource]
@@ -1228,7 +1219,7 @@ impl Waiter {
         source: jsg::Rc<Source>,
     ) -> Result<jsg::Promise<'s, u32>, jsg::Error> {
         let (promise, resolver) = jsg::Promise::<u32>::new_with_resolver(lock)?;
-        *source.resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
+        *source.get(lock).resolver.borrow_mut(lock) = Some(resolver.into_traced(lock));
         Ok(promise)
     }
 

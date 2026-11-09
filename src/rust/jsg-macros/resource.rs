@@ -1168,7 +1168,7 @@ fn generate_constructor_registration(
 
                 #construct
                 let rc = jsg::Rc::new(lock, resource);
-                rc.attach_to_this(args);
+                rc.attach_to_this(lock, args);
             }),
             length: #length,
         }

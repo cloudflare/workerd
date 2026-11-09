@@ -58,7 +58,10 @@ impl HolderParent {
     /// so no `Local` keeps the value alive.
     #[jsg_method]
     fn set_child_value<'s>(&self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) {
-        self.child.handle.set(Some(value.to_traced_global(lock)));
+        self.child
+            .get(lock)
+            .handle
+            .set(Some(value.to_traced_global(lock)));
     }
 }
 
@@ -131,11 +134,12 @@ fn wrapped_resource_dropped_after_its_isolate_is_disposed() {
             },
         );
         resource
+            .get(lock)
             .handle
             .set(Some("held".to_js(lock).unwrap().to_traced_global(lock)));
         // Wrapping the resource ties its `Wrappable` to the isolate, which the isolate undoes
         // when it is torn down.
-        ctx.set_global(lock, "holder", resource.clone());
+        ctx.set_global(lock, "holder", resource.clone(lock));
         holder = Some(resource);
         Ok(())
     });
@@ -161,9 +165,12 @@ fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
                 handle: jsg::Cell::new(None),
             },
         );
-        let wrapper = resource.clone().to_js(lock)?;
+        let wrapper = resource.clone(lock).to_js(lock)?;
         // The resource holds its own wrapper, and JavaScript holds it too.
-        resource.handle.set(Some(wrapper.to_traced_global(lock)));
+        resource
+            .get(lock)
+            .handle
+            .set(Some(wrapper.to_traced_global(lock)));
         ctx.set_global(lock, "holder", wrapper);
         drop(resource);
 
@@ -193,7 +200,7 @@ fn holder_in_traced_mode(
             handle: jsg::Cell::new(None),
         },
     );
-    ctx.set_global(lock, "holder", resource.clone());
+    ctx.set_global(lock, "holder", resource.clone(lock));
     // No `Local` of the value outlives the scripts, so that once `globalThis.value` lets go of
     // it, only the `TracedGlobal` can keep it alive.
     ctx.eval_raw(lock, "globalThis.value = {}; undefined")
@@ -215,7 +222,7 @@ fn traced_global_dropped_frees_its_traced_node_at_the_next_gc() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
-        resource.handle.set(None);
+        resource.get(lock).handle.set(None);
         assert!(
             crate::Harness::used_global_handles_size(lock) > baseline,
             "dropping leaves the traced node for the next full GC",
@@ -237,7 +244,7 @@ fn global_taken_out_of_a_traced_resource_outlives_its_traced_node() {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
         let with_global = crate::Harness::used_global_handles_size(lock);
 
-        let taken = resource.handle.take(lock).expect("set above");
+        let taken = resource.get(lock).handle.take(lock).expect("set above");
         // Nothing traces the node now; the value stays reachable through the global object.
         crate::Harness::request_gc(lock);
         let without_node = crate::Harness::used_global_handles_size(lock);
@@ -262,9 +269,9 @@ fn global_put_back_after_its_traced_node_was_freed_is_traced_again() {
         let (resource, baseline) = holder_in_traced_mode(lock, ctx);
         let with_global = crate::Harness::used_global_handles_size(lock);
 
-        let taken = resource.handle.take(lock).expect("set above");
+        let taken = resource.get(lock).handle.take(lock).expect("set above");
         crate::Harness::request_gc(lock);
-        resource.handle.set(Some(taken));
+        resource.get(lock).handle.set(Some(taken));
         crate::Harness::request_gc(lock);
         assert_eq!(
             crate::Harness::used_global_handles_size(lock),
@@ -276,7 +283,7 @@ fn global_put_back_after_its_traced_node_was_freed_is_traced_again() {
         ctx.eval_raw(lock, "globalThis.value = undefined")
             .expect("should evaluate");
         crate::Harness::request_gc(lock);
-        let taken = resource.handle.take(lock).expect("set above");
+        let taken = resource.get(lock).handle.take(lock).expect("set above");
         assert!(taken.as_local(lock).is_object());
 
         drop(taken);
@@ -300,7 +307,7 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
             },
         );
         let parent = jsg::Rc::new(lock, HolderParent { child });
-        ctx.set_global(lock, "parent", parent.clone());
+        ctx.set_global(lock, "parent", parent.clone(lock));
         ctx.eval_raw(
             lock,
             "parent.setChildValue(globalThis.value = {}); undefined",
@@ -311,13 +318,13 @@ fn global_in_a_resource_that_gains_a_strong_reference_is_made_strong() {
         crate::Harness::request_gc(lock);
 
         // The child's first strong reference visits the `TracedGlobal`.
-        let child = parent.child.clone();
+        let child = parent.get(lock).child.clone(lock);
 
         // The `TracedGlobal` alone keeps the value alive now.
         ctx.eval_raw(lock, "globalThis.value = undefined; undefined")
             .expect("should evaluate");
         crate::Harness::request_gc(lock);
-        let taken = child.handle.take(lock).expect("set above");
+        let taken = child.get(lock).handle.take(lock).expect("set above");
         assert!(taken.as_local(lock).is_object());
         Ok(())
     });
@@ -338,7 +345,13 @@ fn unlocked_drop_is_deferred_until_the_next_lock() {
         baseline = crate::Harness::used_global_handles_size(lock);
 
         let resource = jsg::Rc::new(lock, Counted);
-        wrapper = Some(resource.clone().to_js(lock).unwrap().to_traced_global(lock));
+        wrapper = Some(
+            resource
+                .clone(lock)
+                .to_js(lock)
+                .unwrap()
+                .to_traced_global(lock),
+        );
         // Only the `TracedGlobal` keeps the wrapper, and with it the resource, alive now.
         drop(resource);
         Ok(())
@@ -411,7 +424,7 @@ fn traced_global_dropped_without_the_lock_is_released_at_the_next_lock() {
         let (resource, b) = holder_in_traced_mode(lock, ctx);
         baseline = b;
         let with_global = crate::Harness::used_global_handles_size(lock);
-        let taken = resource.handle.take(lock).expect("set above");
+        let taken = resource.get(lock).handle.take(lock).expect("set above");
         crate::Harness::with_isolate_unlocked(lock, || drop(taken));
         assert_eq!(lock.globals_awaiting_lock(), 1);
         crate::Harness::request_gc(lock);
@@ -524,11 +537,17 @@ fn drop_on_another_thread_is_deferred_until_the_next_lock() {
     let mut holder = None;
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(lock, Counted);
-        wrapper = Some(resource.clone().to_js(lock).unwrap().to_traced_global(lock));
+        wrapper = Some(
+            resource
+                .clone(lock)
+                .to_js(lock)
+                .unwrap()
+                .to_traced_global(lock),
+        );
         drop(resource);
 
         let (resource, _) = holder_in_traced_mode(lock, ctx);
-        visited = resource.handle.take(lock);
+        visited = resource.get(lock).handle.take(lock);
         holder = Some(resource);
         Ok(())
     });
@@ -584,7 +603,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
                 handle: jsg::Cell::new(None),
             },
         );
-        ctx.set_global(lock, "holder", resource.clone());
+        ctx.set_global(lock, "holder", resource.clone(lock));
         ctx.eval_raw(
             lock,
             "holder.set(globalThis.value = holder.newCounted()); undefined",
@@ -593,7 +612,7 @@ fn visit_on_another_thread_leaves_a_global_alone() {
         // Tracing the wrapper puts the `TracedGlobal` in traced mode; taking it out makes it
         // strong.
         crate::Harness::request_gc(lock);
-        let taken = resource.handle.take(lock).expect("set above");
+        let taken = resource.get(lock).handle.take(lock).expect("set above");
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let mover = std::thread::spawn({
