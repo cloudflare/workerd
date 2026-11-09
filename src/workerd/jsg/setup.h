@@ -1188,7 +1188,6 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
-      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
@@ -1211,7 +1210,6 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
-      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
@@ -1233,6 +1231,10 @@ class Isolate: public IsolateBase {
     wrapper->initTypeWrapper();
     fastApiEnabled = wrapper->isFastApiEnabled();
     wrappers[0] = kj::mv(wrapper);
+    // Whichever way the default wrapper is instantiated, an isolate started from a snapshot takes
+    // its constructor templates from the snapshot, or the baked wrappers fail every instanceof and
+    // receiver check against fresh ones.
+    restoreConstructorTemplatesFromSnapshot();
   }
 
   // Populates the IsolateBase type handler registry (see Lock::tryGetTypeHandler()) with
