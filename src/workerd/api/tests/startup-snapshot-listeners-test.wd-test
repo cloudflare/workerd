@@ -25,6 +25,9 @@ const unitTests :Workerd.Config = (
           (name = "rejections", service = "rejections"),
           (name = "listeners", service = "listeners"),
           (name = "signal", service = "signal"),
+          (name = "passive", service = "passive"),
+          (name = "replaced", service = "replaced"),
+          (name = "handleEvent", service = "handleEvent"),
         ],
       )
     ),
@@ -70,6 +73,33 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = .compatibilityFlags,
         bindings = [
           (name = "MODE", json = "\"signal\""),
+        ],
+      )
+    ),
+    ( name = "passive",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"passive\""),
+        ],
+      )
+    ),
+    ( name = "replaced",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"replaced\""),
+        ],
+      )
+    ),
+    ( name = "handleEvent",
+      worker = (
+        modules = [(name = "worker", esModule = embed "startup-snapshot-listeners-test.js")],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"handleEvent\""),
         ],
       )
     ),
