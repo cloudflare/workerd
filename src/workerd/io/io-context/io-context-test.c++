@@ -92,6 +92,20 @@ KJ_TEST("inside a request, current() finds it, and now() is its clock") {
   });
 }
 
+KJ_TEST("now_in_current_request() is the request's clock, without a lock") {
+  // A request clock that the system clock never reads.
+  constexpr int64_t fixedNanos = 1'000'000'000'000;
+  TestFixture fixture({.fixedNow = kj::UNIX_EPOCH + fixedNanos * kj::NANOSECONDS});
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_ASSERT(nanosNow(env.context) == fixedNanos);
+    KJ_EXPECT(now_in_current_request_nanos() == fixedNanos);
+  });
+}
+
+KJ_TEST("now_in_current_request() is none outside a request") {
+  KJ_EXPECT_THROW_MESSAGE("not in a request", now_in_current_request_nanos());
+}
+
 KJ_TEST("write_logfwdr() writes the message to the channel") {
   LogfwdrLog log;
   TestFixture fixture(recordingParams(log));

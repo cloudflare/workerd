@@ -58,9 +58,14 @@ class DummyErrorHandler final: public kj::TaskSet::ErrorHandler {
 };
 
 struct MockTimerChannel final: public TimerChannel {
+  explicit MockTimerChannel(kj::Maybe<kj::Date> fixedNow): fixedNow(fixedNow) {}
+
   void syncTime() override {}
 
   kj::Date now(kj::Maybe<kj::Date>) override {
+    KJ_IF_SOME(date, fixedNow) {
+      return date;
+    }
     return kj::systemPreciseCalendarClock().now();
   }
 
@@ -71,6 +76,8 @@ struct MockTimerChannel final: public TimerChannel {
   kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
     return kj::NEVER_DONE;
   }
+
+  kj::Maybe<kj::Date> fixedNow;
 };
 
 // A TimerChannel implementation that uses real timers from the KJ event loop.
@@ -362,7 +369,7 @@ TestFixture::TestFixture(SetupParams&& params)
       timerChannel(params.useRealTimers && io != kj::none
               ? kj::Own<TimerChannel>(
                     kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
-              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
+              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>(params.fixedNow))),
       entropySource(kj::heap<MockEntropySource>()),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,

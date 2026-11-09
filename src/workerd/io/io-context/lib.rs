@@ -75,13 +75,19 @@ impl<'s> IoContext<'s> {
     /// Fails with an internal error if this `IoContext` is no longer the current one, or is
     /// handling no request, which only happens while it is not running JavaScript.
     pub fn now(&self) -> jsg::Result<SystemTime> {
-        let nanos = bridge::io_context_now(self.id)?;
-        let offset = Duration::from_nanos(nanos.unsigned_abs());
-        Ok(if nanos < 0 {
-            UNIX_EPOCH - offset
-        } else {
-            UNIX_EPOCH + offset
-        })
+        Ok(time_from_unix_nanos(bridge::io_context_now(self.id)?))
+    }
+
+    /// The current request's clock, as [`IoContext::now`] reads it, or `None` outside a request,
+    /// as C++ `dateNow()` reads it.
+    ///
+    /// It needs no lock, for code that holds none, such as a `Drop` impl: the current request
+    /// belongs to the thread, as for C++ `IoContext::tryCurrent()`. Where a lock is at hand, use
+    /// [`IoContext::now`], which reports the errors that this turns into `None`.
+    #[must_use]
+    pub fn now_in_current_request() -> Option<SystemTime> {
+        let id = Option::from(bridge::io_context_try_current_id())?;
+        bridge::io_context_now(id).ok().map(time_from_unix_nanos)
     }
 
     /// Sends `message`, one serialized Cap'n Proto message (as `capnp::serialize::write_message()`
@@ -480,6 +486,16 @@ impl<T> Drop for SlotRef<T> {
 fn lock_slot<T>(slot: &Mutex<Option<T>>) -> MutexGuard<'_, Option<T>> {
     // Nothing panics while holding the lock: the value is taken out of it and dropped after.
     slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The time `nanos` nanoseconds from the Unix epoch, before it if negative.
+fn time_from_unix_nanos(nanos: i64) -> SystemTime {
+    let offset = Duration::from_nanos(nanos.unsigned_abs());
+    if nanos < 0 {
+        UNIX_EPOCH - offset
+    } else {
+        UNIX_EPOCH + offset
+    }
 }
 
 #[cfg(test)]

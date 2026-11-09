@@ -227,12 +227,11 @@ jsg::jsg_traced!(CacheBinding);
 
 impl Drop for CacheBinding {
     fn drop(&mut self) {
-        // memory-cache.c++ uses the request's clock if a request is current, and the system
-        // clock otherwise. A drop has no lock to find the request with, so this always uses the
-        // system clock. The clock matters only if releasing the binding shrinks the cache, to
-        // tell which entries have expired, and a request's clock trails the system clock only
-        // by the time since the request last waited for I/O.
-        self.0.release(system_now_ms());
+        // As memory-cache.c++'s cacheNow(): the request's clock if a request is current, and the
+        // system clock otherwise. The clock tells which entries have expired if releasing the
+        // binding shrinks the cache.
+        let now = IoContext::now_in_current_request().unwrap_or_else(SystemTime::now);
+        self.0.release(millis_since_epoch(now));
     }
 }
 
@@ -258,11 +257,6 @@ fn key_bytes<'s>(
 /// The request's clock in whole milliseconds since the Unix epoch, as C++ `dateNow()`.
 fn now_ms(io_context: &IoContext<'_>) -> jsg::Result<f64> {
     Ok(millis_since_epoch(io_context.now()?))
-}
-
-/// The system clock, as memory-cache.c++ uses outside a request.
-fn system_now_ms() -> f64 {
-    millis_since_epoch(SystemTime::now())
 }
 
 #[expect(

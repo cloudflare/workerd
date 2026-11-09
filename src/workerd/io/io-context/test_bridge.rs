@@ -147,6 +147,7 @@ mod ffi {
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
+        fn now_in_current_request_nanos() -> Result<i64>;
         unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<()>;
     }
 }
@@ -197,6 +198,18 @@ unsafe fn now_nanos(isolate: usize) -> Result<i64> {
     let now = IoContext::current(lock)
         .and_then(|context| context.now())
         .map_err(|err| to_io(&err))?;
+    let nanos = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(std::io::Error::other)?
+        .as_nanos();
+    i64::try_from(nanos).map_err(std::io::Error::other)
+}
+
+/// `IoContext::now_in_current_request()`, in nanoseconds since the Unix epoch, failing outside a
+/// request. Takes no isolate, since it needs no lock.
+fn now_in_current_request_nanos() -> Result<i64> {
+    let now = IoContext::now_in_current_request()
+        .ok_or_else(|| std::io::Error::other("not in a request"))?;
     let nanos = now
         .duration_since(UNIX_EPOCH)
         .map_err(std::io::Error::other)?

@@ -447,10 +447,12 @@ export const fallbackSettledFromAnotherRequest = {
       env.CACHE.delete('cross');
     } else {
       // They run in the request that resolved it, where the read's fallback is out of reach,
-      // so the read fails, and caches nothing.
+      // so the read fails, and caches nothing. C++ appends the type its IoOwn holds, as
+      // jsg::typeName() names it on each platform; the Rust MemoryCache has no such type.
       await rejects(read, {
         name: 'Error',
-        message: /^Cannot perform I\/O on behalf of a different request\./,
+        message:
+          /^Cannot perform I\/O on behalf of a different request\. I\/O objects \(such as streams, request\/response bodies, and others\) created in the context of one request handler cannot be accessed from a different request's handler\. This is a limitation of Cloudflare Workers which allows us to improve overall performance\.( \(I\/O type: .*SpanBuilder.*\))?$/,
       });
       strictEqual(await env.CACHE.read('cross'), undefined);
     }
