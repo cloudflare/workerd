@@ -253,6 +253,12 @@ build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-f
 build:sanitizer-common --@rules_rust//rust/toolchain/channel:channel=nightly
 # Rust and C++ share Clang's sanitizer runtime, linked by the C++ driver.
 build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
+# Optimize Rust like the C++ above. --copt does not reach rustc, which otherwise compiles at
+# opt-level 0: every local lives in memory, so the sanitizer checks every access to it, and under
+# TSan every call, however trivial, also calls into the runtime on entry and exit. rustc enables
+# debug assertions and overflow checks by default only at opt-level 0, so keep them on.
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Copt-level=1
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=on
 
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 #
