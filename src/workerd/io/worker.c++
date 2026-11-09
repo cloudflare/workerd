@@ -1745,17 +1745,11 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   isolate->getApi().compileModules(
                       lock, modulesSource, *isolate, kj::mv(artifacts), parentSpan.addRef());
                   if (lock.isStartingFromSnapshot()) {
-                    const bool hasFallback =
-                        jsg::IsolateBase::from(lock.v8Isolate).tryGetModuleFallback() != kj::none;
+                    // Every pinned module has an entry by now: only modules of a fallback service
+                    // are registered lazily, and a Worker with one never gets a snapshot.
                     registry.applySnapshotSeeds(js, [&](kj::StringPtr specifier) {
-                      // Only fallback-service modules are registered lazily at resolve time
-                      // and can legitimately be absent after compileModules().
-                      KJ_REQUIRE(hasFallback,
+                      KJ_FAIL_REQUIRE(
                           "START_FROM_SNAPSHOT: pinned module has no registry entry", specifier);
-                      KJ_LOG(WARNING,
-                          "module fallback entry not restored from snapshot; identity with "
-                          "the baked graph is broken for it",
-                          specifier);
                     });
                   }
                 }

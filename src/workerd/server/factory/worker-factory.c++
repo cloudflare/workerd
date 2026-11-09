@@ -1732,7 +1732,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   kj::Maybe<kj::ArrayPtr<const uint64_t>> envGlobals;
   if (!impl->isDynamic) envGlobals = kj::from<Rust>(spec.globals);
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
+  // Not with a module fallback service either: the zygote has none, so a top level that tolerates
+  // a failed import (`try { await import(x) } catch {}`) would bake the failure in.
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) && !inspectorConfigured &&
+      moduleFallback == kj::none &&
       supportsStartupSnapshot(impl->name, featureFlags, workerSource, envGlobals)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
