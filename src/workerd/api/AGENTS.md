@@ -9,7 +9,7 @@ All JavaScript APIs exposed to Workers: HTTP, crypto, streams, WebSocket, Cache,
 crypto/              # WebCrypto + Node crypto: AES, RSA, EC, DH, HKDF, PBKDF2, X.509, JWK
 streams/             # ReadableStream/WritableStream/TransformStream (internal + standard); has README.md
 node/                # Node.js compat C++ layer; register new modules in NODEJS_MODULES macro in node.h
-pyodide/             # Python Workers Pyodide/Emscripten bridge (7 files)
+pyodide/             # Python Workers Pyodide/Emscripten bridge (8 files, incl. snapshot-harness: V8 heap snapshots of a loaded Pyodide)
 tests/               # JS integration tests (238 entries); each test = .js + .wd-test pair
 ```
 

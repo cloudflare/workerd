@@ -258,82 +258,99 @@ function compileModuleFromReadOnlyFS(
   return UnsafeEval.newWasmModule(buffer);
 }
 
+/**
+ * Loads Pyodide up to the baseline: the interpreter is initialized and the baseline modules are
+ * imported, but nothing specific to this worker (its files, its signal handling) has happened
+ * yet. This is the state the Python memory snapshots and the V8 heap snapshots capture.
+ */
+export async function loadPyodideBaseline(
+  customSerializedObjects: CustomSerializedObjects
+): Promise<Module> {
+  const Module = await enterJaegerSpan('instantiate_emscripten', () =>
+    instantiateEmscriptenModule(pyodideAsmWasm)
+  );
+  Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
+  if (Module.API.version === PyodideVersion.V0_28_2) {
+    Module.API.config.jsglobals = createImportProxy('global this', globalThis);
+  } else {
+    Module.API.config.jsglobals = globalThis;
+  }
+  Module.setGetRandomValues(getRandomValues);
+  Module.setSetTimeout(
+    makeSetTimeout(Module),
+    clearTimeout,
+    setInterval,
+    clearInterval
+  );
+
+  mountCloudflarePackage(Module);
+  enterJaegerSpan('load_packages', () => {
+    // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
+    // preloadDynamicLibs.
+    loadPackages(Module);
+  });
+
+  enterJaegerSpan('prepare_wasm_linear_memory', () => {
+    prepareWasmLinearMemory(Module, customSerializedObjects);
+  });
+
+  maybeCollectBaselineSnapshot(Module, customSerializedObjects);
+  return Module;
+}
+
 export async function loadPyodide(
   customSerializedObjects: CustomSerializedObjects
 ): Promise<Pyodide> {
   try {
-    const Module = await enterJaegerSpan('instantiate_emscripten', () =>
-      instantiateEmscriptenModule(pyodideAsmWasm)
-    );
-    Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
-    if (Module.API.version === PyodideVersion.V0_28_2) {
-      Module.API.config.jsglobals = createImportProxy(
-        'global this',
-        globalThis
-      );
-    } else {
-      Module.API.config.jsglobals = globalThis;
-    }
-    Module.setGetRandomValues(getRandomValues);
-    Module.setSetTimeout(
-      makeSetTimeout(Module),
-      clearTimeout,
-      setInterval,
-      clearInterval
-    );
-
-    mountCloudflarePackage(Module);
-    enterJaegerSpan('load_packages', () => {
-      // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
-      // preloadDynamicLibs.
-      loadPackages(Module);
-    });
-
-    enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module, customSerializedObjects);
-    });
-
-    return enterJaegerSpan('finish_python_bootstrap', () => {
-      maybeCollectBaselineSnapshot(Module, customSerializedObjects);
-      // Mount worker files after doing snapshot upload so we ensure that data from the files is never
-      // present in snapshot memory.
-      enterJaegerSpan('mount_worker_files', () => {
-        mountWorkerFiles(Module);
-      });
-
-      if (Module.API.version === PyodideVersion.V0_26_0a2) {
-        // Finish setting up Pyodide's ffi so we can use the nice Python interface
-        // In newer versions we already did this in prepareWasmLinearMemory.
-        finalizeBootstrap(Module, customSerializedObjects);
-      }
-      const pyodide = Module.API.public_api;
-
-      validatePyodideVersion(pyodide);
-      // A dedicated snapshot is collected after this has run, so sys.path is already set
-      // up.
-      if (LOADED_SNAPSHOT_TYPE !== 'dedicated') {
-        enterJaegerSpan('setup_python_search_path', () => {
-          setupPythonSearchPath(pyodide);
-        });
-      }
-      setupRuntimeSignalHandling(Module);
-      Module.API.on_fatal = (error: unknown): void => {
-        try {
-          FatalReporter.reportFatal(String(error));
-        } catch (_e) {
-          FatalReporter.reportFatal('Internal error reporting fatal error');
-        }
-        cloudflareWorkers.abortIsolate(
-          `Python worker fatal error: ${String(error)}`
-        );
-      };
-      return pyodide;
-    });
+    const Module = await loadPyodideBaseline(customSerializedObjects);
+    return finishPythonBootstrap(Module, customSerializedObjects);
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
     // but no traceback. This gives us a full traceback.
     reportError(e as Error);
   }
+}
+
+// The part of loading that depends on this worker rather than on Pyodide alone.
+function finishPythonBootstrap(
+  Module: Module,
+  customSerializedObjects: CustomSerializedObjects
+): Pyodide {
+  return enterJaegerSpan('finish_python_bootstrap', () => {
+    // Mount worker files after doing snapshot upload so we ensure that data from the files is never
+    // present in snapshot memory.
+    enterJaegerSpan('mount_worker_files', () => {
+      mountWorkerFiles(Module);
+    });
+
+    if (Module.API.version === PyodideVersion.V0_26_0a2) {
+      // Finish setting up Pyodide's ffi so we can use the nice Python interface
+      // In newer versions we already did this in prepareWasmLinearMemory.
+      finalizeBootstrap(Module, customSerializedObjects);
+    }
+    const pyodide = Module.API.public_api;
+
+    validatePyodideVersion(pyodide);
+    // A dedicated snapshot is collected after this has run, so sys.path is already set
+    // up.
+    if (LOADED_SNAPSHOT_TYPE !== 'dedicated') {
+      enterJaegerSpan('setup_python_search_path', () => {
+        setupPythonSearchPath(pyodide);
+      });
+    }
+    setupRuntimeSignalHandling(Module);
+    Module.API.on_fatal = (error: unknown): void => {
+      try {
+        FatalReporter.reportFatal(String(error));
+      } catch (_e) {
+        FatalReporter.reportFatal('Internal error reporting fatal error');
+      }
+      cloudflareWorkers.abortIsolate(
+        `Python worker fatal error: ${String(error)}`
+      );
+    };
+    return pyodide;
+  });
 }
 
 export function beforeRequest(Module: Module): void {

@@ -1,6 +1,7 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -466,6 +467,52 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_embed(
+    name = "pyodide-snapshot-harness-shims",
+    src = "pyodide/snapshot-harness-shims.js",
+    base_name = "snapshot-harness-shims",
+)
+
+# Builds and restores V8 context snapshots of a baseline Pyodide load in a bare V8 context.
+# Independent of jsg's type system (everything in the context must be serializable); jsg is only
+# used for the snapshot artifact type that isolates are created from.
+wd_cc_library(
+    name = "pyodide-snapshot-harness",
+    srcs = ["pyodide/snapshot-harness.c++"],
+    hdrs = ["pyodide/snapshot-harness.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pyodide-snapshot-harness-shims",
+        "//src/workerd/jsg",
+        "//src/workerd/jsg:modules_capnp",
+        "//src/workerd/jsg:wasm-snapshot",
+        "//src/workerd/util:entropy",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+# The Pyodide runtime bundle for the development Pyodide version, embedded for the harness test.
+wd_cc_embed(
+    name = "pyodide-runtime-bundle",
+    testonly = True,
+    src = "//src/pyodide:314.0.6/generated/pyodide.capnp.bin",
+    base_name = "pyodide-runtime-bundle",
+)
+
+kj_test(
+    # Loads Pyodide from scratch and deserializes an ~80 MB heap.
+    size = "large",
+    src = "pyodide/snapshot-harness-test.c++",
+    deps = [
+        ":pyodide-runtime-bundle",
+        ":pyodide-snapshot-harness",
+        "//src/pyodide:pyodide_static",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp",
     ],
 )
 
