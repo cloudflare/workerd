@@ -5,9 +5,10 @@ wd_rust_crate(
     cxx_bridge_src = "ffi.rs",
     test_compile_data = ["testdata/node-golden.json"],
     test_deps = ["@crates_vendor//:serde_json"],
-    # The Node.js parity tests check every query on every dataset and layout: about 10 seconds in
-    # an unoptimized build.
-    test_size = "large",
+    # The Node.js parity tests check every query on every dataset and layout. Unoptimized, that
+    # takes about 15 seconds, and over a minute under TSan, which instruments every function call
+    # and memory access.
+    test_rustc_flags = ["-Copt-level=1"],
     visibility = ["//visibility:public"],
     deps = [
         "@crates_vendor//:libm",

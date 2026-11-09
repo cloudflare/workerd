@@ -66,6 +66,7 @@ def wd_rust_crate(
         test_proc_macro_deps = [],
         test_compile_data = [],
         test_size = "medium",
+        test_rustc_flags = [],
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
@@ -98,6 +99,8 @@ def wd_rust_crate(
             such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
         test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
             crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
+        test_rustc_flags: extra rustc flags for <name>_test, which compiles the crate's sources
+            again along with its unit tests, such as -Copt-level for compute-heavy tests.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
@@ -189,6 +192,7 @@ def wd_rust_crate(
         tags = test_tags,
         crate_features = crate_features,
         rustc_env = rustc_env,
+        rustc_flags = test_rustc_flags,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
     )
