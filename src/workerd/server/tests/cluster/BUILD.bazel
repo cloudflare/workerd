@@ -1,9 +1,11 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
-# One suite, split by test name: cluster-test, sharded, as two takeovers wait
-# out a dead owner's 20 s lease and the drain tests stop deadlines; and
-# cluster-cron-test, which waits real minutes. Downstream caps "eternal" at
-# 240 s; add takeovers to the simulations instead.
+# One suite, split by test name: cluster-test, and cluster-cron-test, which
+# waits real minutes. cluster-test runs in shards, each of which should stay
+# under 60 s: each test starts a cluster of its own, which takes seconds
+# under TSan, the takeovers wait out a dead owner's lease, a quarter of the
+# default in cluster-test.wd-test, and the drain tests wait out stop
+# deadlines. Add takeovers to the simulations instead.
 [js_test(
     name = name,
     size = "large",
@@ -36,6 +38,6 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
     shard_count = shards,
     tags = ["js-test"],
 ) for name, tests, config, shards in [
-    ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 3),
+    ("cluster-test", "^(?!cluster: a cron)", "cluster-test.wd-test", 6),
     ("cluster-cron-test", "^cluster: a cron", "cluster-cron.wd-test", 1),
 ]]

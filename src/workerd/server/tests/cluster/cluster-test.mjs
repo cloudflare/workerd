@@ -41,8 +41,8 @@
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one), on
 //      a test clock moved to each minute.
 //
-// A takeover waits out a dead owner's 20 s lease, so each one here costs
-// that much: one test per mechanism. The simulations in ../../cluster
+// A takeover waits out a dead owner's lease (`LEASE_MS`), so each one here
+// costs that much: one test per mechanism. The simulations in ../../cluster
 // (alarms-test.rs, capture-test.rs, owner-test.rs) search the cases.
 // These run there, not here, so not through a real binary and SQLite
 // (`git log -S'facet clones survive'` has the tests that did):
@@ -95,6 +95,14 @@ const CONTROL_FD = 3;
 const SIGTERM_DRAINS = {
   skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
 };
+
+// cluster-test.wd-test divides the times that takeovers and stops wait out by
+// this (`unsafeTimeDivisor`).
+const TIME_DIVISOR = 4;
+// How long a node's lease lasts: a dead owner's DOs wait this long.
+const LEASE_MS = 20_000 / TIME_DIVISOR;
+// How long a stopping node accepts requests at least.
+const GRACE_MS = 5_000 / TIME_DIVISOR;
 
 // A minimal harness specialized for the cluster test. Unlike server-harness.mjs
 // it:
@@ -784,7 +792,7 @@ test(
       // would take to expire.
       const holding = fetchJson(
         owner.httpPort,
-        '/increment?name=hold&delay=12000',
+        `/increment?name=hold&delay=${LEASE_MS + 1_000}`,
         { timeoutMs: 20_000 }
       );
       await sleep(250);
@@ -801,7 +809,7 @@ test(
       assert.strictEqual(response.status, 200, JSON.stringify(response.body));
       assert.strictEqual(response.body.nodeId, peer.nodeId);
       assert.strictEqual(response.body.count, 2);
-      assert(Date.now() - drainedAt < 5_000);
+      assert(Date.now() - drainedAt < LEASE_MS);
       await holding.catch(() => {});
       assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
     });
@@ -2152,7 +2160,7 @@ test(
         nodes[i].stop({ signal: 'SIGTERM', timeoutMs: 20_000 })
       );
       // The stopping nodes keep accepting requests for a while.
-      await sleep(1000);
+      await sleep(GRACE_MS / 5);
       serving = [2];
       for (const exit of exits) {
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
@@ -2296,7 +2304,7 @@ test(
         assert(status === 503 || status === undefined, `status ${status}`);
         // As a load balancer would, a while after the node is not ready;
         // meanwhile it serves the requests it still gets.
-        await sleep(1000);
+        await sleep(GRACE_MS / 5);
         serving = serving.filter((n) => n !== i);
         assert.deepStrictEqual(await exit, { code: 0, signal: null });
         await node.start();
