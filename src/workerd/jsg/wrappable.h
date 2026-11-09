@@ -445,6 +445,22 @@ class Wrappable: public kj::Refcounted {
     return kj::none;
   }
 
+  // The other JSG objects this one holds a jsg::Ref to whose identity JavaScript can observe, such
+  // as Crypto's `subtle`. Called in the zygote on the live original, with every wrapper still
+  // attached. A restored instance is built afresh (by its type's constructor or snapshotClone()),
+  // so on its own it would refer to new objects rather than to the ones behind the restored
+  // wrappers; a Worker started from the snapshot passes snapshotRelink() those instead. Must not
+  // throw or allocate on the V8 or cppgc heap.
+  virtual kj::Array<const Wrappable*> snapshotReferences() const {
+    return nullptr;
+  }
+
+  // In a Worker started from a snapshot, once every restored wrapper is linked: one entry per
+  // entry snapshotReferences() returned in the zygote, the restored instance behind that object's
+  // wrapper, or nullptr when the snapshot carried no wrapper for it (keep what this instance has).
+  // Must not throw.
+  virtual void snapshotRelink(kj::ArrayPtr<Wrappable* const> restored) {}
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 

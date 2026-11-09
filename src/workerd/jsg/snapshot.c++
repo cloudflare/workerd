@@ -20,7 +20,15 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
     SnapshotArtifact& artifact,
     kj::FunctionParam<bool(v8::CppHeapPointerTag)> isStateless) {
   using LiveWrappable = SnapshotArtifact::LiveWrappable;
-  tracer.forEachLiveWrapper([&artifact, &isStateless, this](Wrappable& wrappable,
+  // The slot of each recorded object, and what each one references, resolved once every live
+  // wrapper is recorded.
+  kj::HashMap<const Wrappable*, size_t> slotOf;
+  struct PendingReferences {
+    size_t slot;
+    kj::Array<const Wrappable*> references;
+  };
+  kj::Vector<PendingReferences> pending;
+  tracer.forEachLiveWrapper([&artifact, &isStateless, &slotOf, &pending, this](Wrappable& wrappable,
                                 v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag) {
     kj::Maybe<size_t> index;
     if (static_cast<uint16_t>(tag) != kContextGlobalWrappableTag) {
@@ -40,8 +48,14 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
         transfer = kj::mv(clone);
       }
       if (transfer != nullptr) {
-        index = artifact.liveWrappables.size();
-        artifact.liveWrappables.add(LiveWrappable{kj::mv(transfer), tag});
+        auto slot = artifact.liveWrappables.size();
+        index = slot;
+        artifact.liveWrappables.add(LiveWrappable{kj::mv(transfer), tag, nullptr});
+        slotOf.insert(&wrappable, slot);
+        auto references = wrappable.snapshotReferences();
+        if (references.size() > 0) {
+          pending.add(PendingReferences{slot, kj::mv(references)});
+        }
       }
     }
     entries.insert(&shim,
@@ -50,6 +64,17 @@ void WrappablesSerializeMetadata::recordLiveWrappables(HeapTracer& tracer,
           .typeName = kj::str(wrappable.jsgGetMemoryName()),
           .shim = cppgc::Persistent<v8::Object::Wrappable>(&shim)});
   });
+  for (auto& owner: pending) {
+    auto slots = kj::heapArrayBuilder<kj::Maybe<size_t>>(owner.references.size());
+    for (auto reference: owner.references) {
+      kj::Maybe<size_t> slot;
+      KJ_IF_SOME(found, slotOf.find(reference)) {
+        slot = found;
+      }
+      slots.add(slot);
+    }
+    artifact.liveWrappables[owner.slot].references = slots.finish();
+  }
 }
 
 void WrappablesSerializeMetadata::dropUnreachableWrappables(SnapshotArtifact& artifact) {
@@ -83,10 +108,27 @@ void WrappableDeserializeMetadata::preallocateCppgcShims(v8::Isolate* v8Isolate,
   KJ_REQUIRE(instances.size() == artifact.liveWrappables.size());
   isolate = v8Isolate;
   slots = kj::heapArray<Slot>(instances.size());
+  this->instances = KJ_MAP(instance, instances) { return instance.get(); };
   for (auto i: kj::indices(instances)) {
     if (instances[i].get() == nullptr) continue;
     slots[i].shim =
         tracer.allocateShimForSnapshotRestore(kj::mv(instances[i]), artifact.liveWrappables[i].tag);
+  }
+}
+
+void WrappableDeserializeMetadata::relinkReferences(const SnapshotArtifact& artifact) {
+  for (auto i: kj::indices(slots)) {
+    auto& references = artifact.liveWrappables[i].references;
+    if (references.size() == 0 || !slots[i].linked) continue;
+    auto restored = kj::heapArrayBuilder<Wrappable*>(references.size());
+    for (auto& reference: references) {
+      Wrappable* target = nullptr;
+      KJ_IF_SOME(slot, reference) {
+        if (slots[slot].linked) target = instances[slot];
+      }
+      restored.add(target);
+    }
+    instances[i]->snapshotRelink(restored.finish());
   }
 }
 
