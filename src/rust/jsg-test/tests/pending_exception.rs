@@ -70,7 +70,7 @@ impl Thrower {
         lock: &mut jsg::Lock<'s>,
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
-        self.throw_then(lock, first, |lock| jsg::Rc::new(Fresh).to_js(lock))
+        self.throw_then(lock, first, |lock| jsg::Rc::new(lock, Fresh).to_js(lock))
     }
 
     /// Wraps its own resource, whose wrapper already exists, so that wrapping it only reads the
@@ -92,6 +92,46 @@ impl Thrower {
         first: v8::Local<'s, v8::Value>,
     ) -> jsg::Result<()> {
         self.throw_then(lock, first, jsg::resource::function_template_of::<Fresh>)
+    }
+
+    /// Creates a `DOMException`, which instantiates a template.
+    #[jsg_method]
+    fn throw_then_create_dom_exception<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        })
+    }
+
+    /// Creates the exception for an `Error` of a `DOMException` type.
+    #[jsg_method]
+    fn throw_then_create_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| {
+            lock.exception(&jsg::Error::new_abort_error("second"))
+        })
+    }
+
+    /// Fails with an `Error` of a `DOMException` type in place of the pending error, as code that
+    /// breaks the rule does. Throwing it creates nothing, so the exception `first` threw
+    /// propagates.
+    #[jsg_method]
+    fn throw_then_fail_with_dom_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        let pending = self.throw_then(lock, first, |lock| {
+            lock.dom_exception("AbortError", "second")
+        });
+        assert!(pending.is_err_and(|err| err.is_pending()));
+        Err(jsg::Error::new_abort_error("second"))
     }
 
     /// Detaches a new `ArrayBuffer`, which leaves it attached.
@@ -119,18 +159,42 @@ impl Thrower {
     ) -> jsg::Result<()> {
         self.throw_then(lock, first, |lock| v8::Utf8Value::new(lock, &value))
     }
+
+    /// Parses JSON (`JSON::Parse`).
+    #[jsg_method]
+    fn throw_then_json_parse<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| jsg::json::parse(lock, "[1]"))
+    }
+
+    /// Stringifies `value` (`JSON::Stringify`), whose `toJSON` must not run.
+    #[jsg_method]
+    fn throw_then_json_stringify<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> jsg::Result<()> {
+        self.throw_then(lock, first, |lock| jsg::json::stringify(lock, value))
+    }
 }
 
 /// Evaluates `obj.{call}`, where `obj` is a `Thrower` and the call's first argument is
 /// `first`, a function that throws. Checks that the operation failed with a pending error, that
 /// JavaScript catches the exception `first` threw, and that no other JavaScript ran. Only the
-/// `Utf8Value` case passes JavaScript that would set `secondRan`; for the others, the pending
+/// `Utf8Value` and JSON stringify cases pass JavaScript that would set `secondRan`; for the others, the pending
 /// error and the caught exception are what tell a guarded shim from one that isn't.
 fn exception_survives(call: &str) {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let thrower = jsg::Rc::new(Thrower {
-            saw_pending: Cell::new(None),
-        });
+        let thrower = jsg::Rc::new(
+            lock,
+            Thrower {
+                saw_pending: Cell::new(None),
+            },
+        );
         ctx.set_global(lock, "obj", thrower.clone());
         let caught = ctx
             .eval::<String>(
@@ -173,6 +237,21 @@ fn getting_a_constructor_while_exception_pending_fails() {
 }
 
 #[test]
+fn creating_a_dom_exception_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomException(first)");
+}
+
+#[test]
+fn creating_a_dom_error_while_exception_pending_fails() {
+    exception_survives("throwThenCreateDomError(first)");
+}
+
+#[test]
+fn throwing_a_dom_error_while_exception_pending_keeps_the_exception() {
+    exception_survives("throwThenFailWithDomError(first)");
+}
+
+#[test]
 fn detaching_while_exception_pending_fails() {
     exception_survives("throwThenDetach(first)");
 }
@@ -181,6 +260,18 @@ fn detaching_while_exception_pending_fails() {
 fn utf8_value_while_exception_pending_runs_nothing() {
     exception_survives(
         "throwThenUtf8Value(first, { toString() { globalThis.secondRan = true; return 'x'; } })",
+    );
+}
+
+#[test]
+fn json_parse_while_exception_pending_fails() {
+    exception_survives("throwThenJsonParse(first)");
+}
+
+#[test]
+fn json_stringify_while_exception_pending_runs_nothing() {
+    exception_survives(
+        "throwThenJsonStringify(first, { toJSON() { globalThis.secondRan = true; return 1; } })",
     );
 }
 
@@ -206,9 +297,12 @@ impl Callee {
 #[test]
 fn callback_entered_while_try_catch_holds_exception_panics() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        let callee = jsg::Rc::new(Callee {
-            ran: Cell::new(false),
-        });
+        let callee = jsg::Rc::new(
+            lock,
+            Callee {
+                ran: Cell::new(false),
+            },
+        );
         ctx.set_global(lock, "callee", callee.clone());
         match ctx.eval_with_caught_exception(lock, "callee.run()") {
             Err(crate::EvalError::EvalFailed) => {}

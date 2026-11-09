@@ -48,7 +48,8 @@ fn caught(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, call: &str, ch
 #[test]
 fn throw_error_throws_an_error_with_the_message() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
         assert!(caught(
             lock,
             ctx,
@@ -69,7 +70,8 @@ fn throw_error_throws_an_error_with_the_message() {
 #[test]
 fn invalid_string_length_is_v8s_range_error() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
         assert!(caught(
             lock,
             ctx,
@@ -90,7 +92,8 @@ fn invalid_string_length_is_v8s_range_error() {
 #[test]
 fn range_error_is_a_range_error_object() {
     crate::Harness::new().run_in_context(|lock, ctx| {
-        ctx.set_global(lock, "thrower", jsg::Rc::new(Thrower));
+        let thrower = jsg::Rc::new(lock, Thrower);
+        ctx.set_global(lock, "thrower", thrower);
         assert!(
             ctx.eval::<bool>(
                 lock,

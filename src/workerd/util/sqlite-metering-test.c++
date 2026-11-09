@@ -4,6 +4,8 @@
 
 #include "sqlite-metering.h"
 
+#include <sqlite3.h>
+
 #include <kj/test.h>
 #include <kj/thread.h>
 
@@ -187,6 +189,20 @@ KJ_TEST("SqliteMemoryScope is idempotent and handles nested scopes") {
   sqliteMemFree(p1);
   sqliteMemFree(p3);
   KJ_EXPECT(memoryBytes == 0);
+}
+
+KJ_TEST("getSqliteProcessMemoryUsed() counts SQLite's allocations") {
+  installSqliteCustomAllocator();
+  size_t memoryBytes = 0;
+  SqliteMemoryScope scope(memoryBytes, kj::maxValue);
+  size_t before = getSqliteProcessMemoryUsed();
+
+  void* ptr = sqlite3_malloc(4096);
+  KJ_ASSERT(ptr != nullptr);
+  KJ_EXPECT(getSqliteProcessMemoryUsed() >= before + 4096);
+
+  sqlite3_free(ptr);
+  KJ_EXPECT(getSqliteProcessMemoryUsed() == before);
 }
 
 }  // namespace

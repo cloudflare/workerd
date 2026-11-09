@@ -25,8 +25,11 @@ async function readLine(reader) {
 // ends run a real handshake: startTls() on the the handler side serves it and this side's
 // startTls() verifies the certificate.
 export const startTlsViaTcpListener = {
-  async test() {
-    const socket = connect('localhost:8084', { secureTransport: 'starttls' });
+  async test(ctrl, env) {
+    // The listener's certificate names 127.0.0.1, so BUILD.bazel keeps the test on that address.
+    const socket = connect(`${env.SIDECAR_HOSTNAME}:${env.STARTTLS_PORT}`, {
+      secureTransport: 'starttls',
+    });
     await socket.opened;
 
     const tlsSock = socket.startTls();
@@ -83,7 +86,7 @@ export const startTlsViaServiceBinding = {
   },
 };
 
-// Serves the TCP listener on port 8084 for startTlsViaTcpListener.
+// Serves the connect-starttls TCP listener for startTlsViaTcpListener.
 export default {
   async connect(socket) {
     // The listener offers the upgrade because its socket is configured with a keypair.

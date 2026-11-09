@@ -6,7 +6,6 @@
 //! resources that take, return and hold it (`crate::cpp_interop`).
 
 use std::cell::Cell;
-use std::cell::RefCell;
 
 use jsg::v8;
 
@@ -31,11 +30,14 @@ impl Drop for InRequest {
     }
 }
 
-fn new_host() -> jsg::Rc<Host> {
-    jsg::Rc::new(Host {
-        label: "test".to_owned(),
-        held: RefCell::new(None),
-    })
+fn new_host(lock: &mut jsg::Lock<'_>) -> jsg::Rc<Host> {
+    jsg::Rc::new(
+        lock,
+        Host {
+            label: "test".to_owned(),
+            held: jsg::RefCell::new(None),
+        },
+    )
 }
 
 /// Runs a C++ constructor and returns the wrapper it made.
@@ -72,7 +74,8 @@ where
 {
     let mut out = T::default();
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
     });
@@ -83,7 +86,8 @@ where
 fn eval_error(code: &str) -> (String, String) {
     let mut out = (String::new(), String::new());
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let error = ctx
             .eval::<String>(lock, code)
             .unwrap_err()
@@ -108,6 +112,29 @@ fn rust_method_rejects_another_type() {
         let (name, message) = eval_error(&format!("h.greetWith({argument}, 'x')"));
         assert_eq!(name, "TypeError", "{argument}: {message}");
     }
+}
+
+#[test]
+fn rust_method_describes_a_cpp_resource_by_its_cpp_name() {
+    let mut cx = jsg::rtti::Context::default();
+    let greet_with = jsg::rtti::resource_members::<Host>(&mut cx)
+        .into_iter()
+        .find_map(|member| match member {
+            jsg::rtti::Member::Method {
+                name: "greetWith",
+                args,
+                ..
+            } => Some(args),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        greet_with[0].ty,
+        jsg::rtti::Type::CppStructure {
+            name: "TestCppGreeter",
+            fully_qualified_name: "workerd::cpp_interop_test::TestCppGreeter",
+        }
+    ));
 }
 
 #[test]
@@ -138,7 +165,8 @@ fn lazy_property_keeps_the_first_value_once_the_request_ends() {
     // An `ExecutionContext` can outlive the request that created it, so a ported one has to
     // decide whether `lazy_instance` memoization is right for each property.
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let request = InRequest::enter();
         assert!(
             ctx.eval::<bool>(lock, "globalThis.first = h.current; first !== undefined")
@@ -213,6 +241,30 @@ fn kj_exception_from_cpp_becomes_its_js_error() {
     assert_eq!(message, "thrown by C++ as a kj::Exception");
 }
 
+/// Describes what `call` throws: its class, name, message and legacy code.
+fn describe_thrown(call: &str) -> String {
+    eval::<String>(&format!(
+        "let e; try {{ {call}; }} catch (thrown) {{ e = thrown; }}
+         `${{e.constructor.name}} ${{e.name}}: ${{e.message}} (${{e.code}})`"
+    ))
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_a_dom_exception_name_of_its_own() {
+    assert_eq!(
+        describe_thrown("h.failWithQuotaExceededError(greeter)"),
+        "DOMException QuotaExceededError: thrown by C++ as a kj::Exception (22)",
+    );
+}
+
+#[test]
+fn kj_exception_from_cpp_keeps_dom_syntax_error_a_dom_exception() {
+    assert_eq!(
+        describe_thrown("h.failWithDomSyntaxError(greeter)"),
+        "DOMException SyntaxError: thrown by C++ as a kj::Exception (12)",
+    );
+}
+
 #[test]
 fn js_exception_from_cpp_passes_through() {
     let (name, message) = eval_error("h.failWithJsError(greeter)");
@@ -223,7 +275,8 @@ fn js_exception_from_cpp_passes_through() {
 #[test]
 fn cpp_is_not_called_while_an_exception_is_pending() {
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         let greeter = ctx.eval_raw(lock, "greeter").unwrap();
         let greeter = <jsg_cpp::Ref<ffi::TestCppGreeter> as jsg::FromJS>::from_js(lock, greeter)?;
         let caught = lock
@@ -254,7 +307,8 @@ fn cross_heap_cycle_is_collected() {
     let destroyed = ffi::test_cpp_holders_destroyed();
     let harness = Harness::new();
     harness.run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         // A Rust resource and a C++ resource that hold each other, and nothing else holds.
         ctx.eval_raw(
             lock,
@@ -275,7 +329,8 @@ fn cross_heap_cycle_is_collected() {
 #[test]
 fn held_resources_survive_gc() {
     Harness::new().run_in_context(|lock, ctx| {
-        set_globals(lock, ctx, new_host());
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
         ctx.eval_raw(
             lock,
             "h.hold(holder); holder.hold(h); globalThis.keep = h; globalThis.h = undefined; \
@@ -290,6 +345,82 @@ fn held_resources_survive_gc() {
             )
             .unwrap(),
             "Host(test)"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn heap_snapshot_follows_a_held_cpp_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
+        ctx.eval_raw(lock, "h.hold(holder)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let host = snapshot.find("Host");
+        let held = snapshot.target(host, "held");
+        assert_eq!(snapshot.nodes[held].name, "workerd / TestCppHolder");
+        // The C++ resource has a wrapper, so the snapshot also reaches it through the isolate's
+        // list of wrapped objects, and that is the same node.
+        assert_eq!(snapshot.find_all("TestCppHolder"), [held]);
+        Ok(())
+    });
+}
+
+#[test]
+fn heap_snapshot_follows_a_held_rust_resource() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host(lock);
+        set_globals(lock, ctx, host);
+        ctx.eval_raw(lock, "holder.hold(h)").unwrap();
+
+        let snapshot = crate::tests::memory_info::Snapshot::take(lock);
+        let holder = snapshot.find("TestCppHolder");
+        let host = snapshot.find("Host");
+        // C++ holds a Rust resource by its wrapper, so the edge is to the wrapper, which leads on
+        // to the resource's node.
+        let wrapper = snapshot.target(holder, "held");
+        // V8 shows the wrapper as one node with the cppgc object it holds.
+        assert!(!snapshot.nodes[wrapper].name.starts_with("workerd /"));
+        assert!(
+            snapshot
+                .targets(wrapper, "javascript_to_native")
+                .contains(&host)
+        );
+        Ok(())
+    });
+}
+
+/// A C++ resource carried by a typed promise is detached from the promise's wrapper when a
+/// reaction takes it, as a moved `jsg::Ref` is, so it can go in a Rust resource and be traced
+/// there after a collection that the wrapper traced it in.
+#[test]
+fn cpp_resource_carried_by_a_typed_promise_can_be_kept() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let host = new_host(lock);
+        set_globals(lock, ctx, host.clone());
+        let holder = ctx.eval_raw(lock, "holder").unwrap();
+        let holder = <jsg_cpp::Ref<ffi::TestCppHolder> as jsg::FromJS>::from_js(lock, holder)?;
+        ctx.eval_raw(lock, "globalThis.holder = undefined;")
+            .unwrap();
+        let (promise, resolver) =
+            jsg::Promise::<jsg_cpp::Ref<ffi::TestCppHolder>>::new_with_resolver(lock)?;
+        let kept: jsg::Promise<()> = promise.then(lock, host, |lock, host, holder| {
+            host.hold(lock, holder);
+            // Traces the host, and through it the reference, from its new owner.
+            Harness::request_gc(lock);
+            Ok(())
+        })?;
+        resolver.resolve(lock, holder)?;
+        // Only the opaque wrapper holds the reference now, and the collection makes it weak.
+        Harness::request_gc(lock);
+        Harness::run_microtasks(lock);
+        assert!(kept.try_consume_resolved(lock).is_ok());
+        Harness::request_gc(lock);
+        assert_eq!(
+            ctx.eval::<String>(lock, "h.held().which(greeter)").unwrap(),
+            "TestCppGreeter"
         );
         Ok(())
     });

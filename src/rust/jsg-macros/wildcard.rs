@@ -75,7 +75,11 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #lookup
                 // An error from converting the value is thrown as one the method returns.
                 let converted = match result {
-                    Ok(Some(value)) => jsg::ToJS::to_js(value, lock).map(Some),
+                    // Like a property getter, passes the receiver as the value's creator.
+                    Ok(Some(value)) => {
+                        let creator = jsg::v8::Local::<jsg::v8::Object>::try_from(args.this()).ok();
+                        jsg::ToJS::to_js_with_creator(value, lock, creator).map(Some)
+                    }
                     Ok(None) => Ok(None),
                     Err(err) => Err(err),
                 };

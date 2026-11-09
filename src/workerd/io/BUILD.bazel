@@ -444,6 +444,17 @@ wd_cc_library(
     ],
 )
 
+kj_test(
+    src = "worker-interface-test.c++",
+    deps = [":worker-interface"],
+)
+
+wd_cc_benchmark(
+    name = "bench-revocable-worker-interface",
+    srcs = ["bench-revocable-worker-interface.c++"],
+    deps = [":worker-interface"],
+)
+
 wd_cc_library(
     name = "actor-id",
     hdrs = ["actor-id.h"],
@@ -626,6 +637,13 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-stream-test.c++",
+    deps = [
+        ":io",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
         ":trace",
@@ -769,9 +787,18 @@ kj_test(
 )
 
 kj_test(
+    src = "io-context-await-js-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "worker-code-cache-test.c++",
     deps = [
         ":io",
+        "//src/workerd/server:workerd-api",
         "//src/workerd/tests:test-fixture",
     ],
 )

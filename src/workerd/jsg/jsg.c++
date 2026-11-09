@@ -452,18 +452,6 @@ bool Lock::pumpMsgLoop() {
   return IsolateBase::from(v8Isolate).pumpMsgLoop();
 }
 
-Name Lock::newSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
-Name Lock::newSharedSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::For(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
-Name Lock::newApiSymbol(kj::StringPtr symbol) {
-  return Name(*this, v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, symbol)));
-}
-
 kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
@@ -509,11 +497,38 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requ
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
+namespace {
+
+// Bound on the magnitude of external memory passed to V8 in one call, matching the bound V8 itself
+// enforces in AdjustAmountOfExternalAllocatedMemoryImpl() (--external-memory-max-reasonable-size,
+// 32 GiB). V8 only sees the values that reach it, and a deferred update reaches it as the sum of
+// every adjustment made since the isolate was last locked, so a V8 failure cannot be attributed to
+// the adjustment responsible. These checks run where the adjustment is made, so the failure's stack
+// trace identifies it. Like V8's check, a failure aborts the process.
+constexpr int64_t MAX_REASONABLE_EXTERNAL_MEMORY = int64_t(32) << 30;
+
+void checkReasonableExternalMemoryDelta(int64_t amount) {
+  if (amount > -MAX_REASONABLE_EXTERNAL_MEMORY && amount < MAX_REASONABLE_EXTERNAL_MEMORY) return;
+  KJ_LOG(FATAL, "unreasonable external memory adjustment", amount);
+  abort();
+}
+
+// An adjustment object's whole amount is released in a single call when it is destroyed, so its
+// running total is subject to the same bound as a single delta.
+void checkReasonableExternalMemoryTotal(size_t amount) {
+  if (amount < static_cast<size_t>(MAX_REASONABLE_EXTERNAL_MEMORY)) return;
+  KJ_LOG(FATAL, "unreasonable total external memory attributed to one adjustment", amount);
+  abort();
+}
+
+}  // namespace
+
 void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   // Carefully check whether `isolate` is locked by the current thread. Note that there's a
   // possibility that the isolate is being torn down in a different thread, which means we cannot
   // safely call `v8::Locekr::IsLocked()` on it.
   if (amount == 0) return;
+  checkReasonableExternalMemoryDelta(amount);
   v8::Isolate* current = v8::Isolate::TryGetCurrent();
   v8::Isolate* target = isolate.load(std::memory_order_relaxed);  // could be null!
 
@@ -544,6 +559,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
+  checkReasonableExternalMemoryDelta(amount);
   js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
@@ -576,6 +592,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
   if (amount == 0) return;
+  checkReasonableExternalMemoryTotal(this->amount + amount);
   this->amount += amount;
   externalMemory->maybeDeferAdjustment(amount);
 }
@@ -619,6 +636,7 @@ void ExternalMemoryAdjustment::adjustNow(Lock& js, ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
 
+  checkReasonableExternalMemoryTotal(this->amount + amount);
   this->amount += amount;
   externalMemory->adjustNow(js, amount);
 }
@@ -629,59 +647,6 @@ void ExternalMemoryAdjustment::set(size_t amount) {
 
 void ExternalMemoryAdjustment::setNow(Lock& js, size_t amount) {
   adjustNow(js, amount - this->amount);
-}
-
-Name::Name(kj::String string): hash(kj::hashCode(string)), inner(kj::mv(string)) {}
-
-Name::Name(kj::StringPtr string): hash(kj::hashCode(string)), inner(kj::str(string)) {}
-
-Name::Name(Lock& js, v8::Local<v8::Symbol> symbol)
-    : hash(kj::hashCode(symbol->GetIdentityHash())),
-      inner(js.v8Ref(symbol)) {}
-
-kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* isolate) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return str.asPtr();
-    }
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      return symbol.getHandle(isolate);
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-void Name::visitForGc(GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(string, kj::String) {}
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      visitor.visit(symbol);
-    }
-  }
-}
-
-Name Name::clone(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return Name(kj::str(str));
-    }
-    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
-      return Name(js, symbol.getHandle(js));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::String Name::toString(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
-    }
-    KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
-      return kj::str("Symbol(", sym.getHandle(js)->Description(js.v8Isolate), ")");
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 bool isInGcDestructor() {

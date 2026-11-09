@@ -169,6 +169,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(alarm, tracing::AlarmEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::AlarmEventInfo>(trace, alarm));
       }
+      KJ_CASE_ONEOF(onHibernate, tracing::OnHibernateEventInfo) {
+        return kj::Maybe(js.alloc<TraceItem::OnHibernateEventInfo>(trace, onHibernate));
+      }
       KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::QueueEventInfo>(trace, queue));
       }
@@ -236,6 +239,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        return info.addRef();
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<OnHibernateEventInfo>) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
@@ -446,6 +452,14 @@ TraceItem::AlarmEventInfo::AlarmEventInfo(
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
   return scheduledTime;
+}
+
+TraceItem::OnHibernateEventInfo::OnHibernateEventInfo(
+    const Trace& trace, const tracing::OnHibernateEventInfo& eventInfo)
+    : reason(kj::str(eventInfo.reason)) {}
+
+kj::StringPtr TraceItem::OnHibernateEventInfo::getReason() {
+  return reason;
 }
 
 TraceItem::QueueEventInfo::QueueEventInfo(
@@ -785,7 +799,20 @@ auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory
     capnp::ByteStreamFactory& byteStreamFactory,
     FrankenvalueHandler& frankenvalueHandler,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
-  auto req = dispatcher.sendTracesRequest();
+  // Size the request from each trace's recorded content, so that it doesn't take the default 8 KiB
+  // first segment. The request is held until it is written, which can take a while when the tail
+  // worker's connection is backed up. `bytesUsed` doesn't count the trace's fixed fields, so add
+  // an allowance for those; if the hint is short, the message grows another segment.
+  static constexpr size_t FIXED_TRACE_FIELDS_WORDS = 64;
+  capnp::MessageSize sizeHint{
+    .wordCount = capnp::sizeInWords<workerd::rpc::EventDispatcher::SendTracesParams>(),
+    .capCount = 1,
+  };
+  for (auto& trace: traces) {
+    sizeHint.wordCount += capnp::sizeInWords<workerd::rpc::Trace>() + FIXED_TRACE_FIELDS_WORDS +
+        (trace->bytesUsed + sizeof(capnp::word) - 1) / sizeof(capnp::word);
+  }
+  auto req = dispatcher.sendTracesRequest(sizeHint);
   auto out = req.initTraces(traces.size());
   for (auto i: kj::indices(traces)) {
     traces[i]->copyTo(out[i]);
@@ -820,6 +847,9 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<OnHibernateEventInfo>) {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {

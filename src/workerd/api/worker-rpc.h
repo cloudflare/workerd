@@ -391,7 +391,8 @@ class JsRpcPromise: public JsRpcClientProvider {
       kj::Maybe<TraceContextParent> originatingCall,
       kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
       kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker,
-      kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver);
+      kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver,
+      kj::Maybe<IoOwn<kj::Canceler>> callCanceler);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
@@ -454,6 +455,11 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   struct Pending {
     PendingPipeline pipeline;
+
+    // Cancels the call when the promise is disposed. Present only with the
+    // `rpc_dispose_cancels_call` compatibility flag. The call holds its own reference, so
+    // collecting this promise doesn't cancel the call.
+    kj::Maybe<IoOwn<kj::Canceler>> callCanceler;
   };
   struct Resolved {
     jsg::Value result;

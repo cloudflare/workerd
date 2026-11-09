@@ -4,6 +4,7 @@
 
 #include "modules-new.h"
 
+#include <workerd/jsg/compilation.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
@@ -15,6 +16,7 @@
 #include <kj/mutex.h>
 #include <kj/table.h>
 
+#include <algorithm>
 #include <span>
 
 namespace workerd::jsg::modules {
@@ -186,16 +188,26 @@ class EsModule final: public Module {
  public:
   // Source borrowed from static process-lifetime storage, such as a
   // compiled-in builtin source.
-  explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
+  explicit EsModule(Url id,
+      Type type,
+      Flags flags,
+      kj::ArrayPtr<const char> source,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr,
+      kj::Maybe<kj::String> bundleModuleName = kj::none)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
-        cachedData(kj::none) {
+        staticCompileCache(compileCache),
+        bundleModuleName(kj::mv(bundleModuleName)) {
     KJ_DASSERT(isEsm());
   }
-  explicit EsModule(Url id, Type type, Flags flags, StaticExternalStringSource source)
+  explicit EsModule(Url id,
+      Type type,
+      Flags flags,
+      StaticExternalStringSource source,
+      kj::ArrayPtr<const kj::byte> compileCache = nullptr)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(source)),
-        cachedData(kj::none) {
+        staticCompileCache(compileCache) {
     KJ_DASSERT(isEsm());
   }
   // Source owned by this module (e.g. transpiled TypeScript or fallback-service
@@ -205,11 +217,12 @@ class EsModule final: public Module {
       Type type,
       Flags flags,
       kj::Arc<OwnedAscii> code,
-      kj::Maybe<CodeCacheKey> codeCacheKey)
+      kj::Maybe<CodeCacheKey> codeCacheKey,
+      kj::Maybe<kj::String> bundleModuleName = kj::none)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(code)),
         codeCacheKey(codeCacheKey),
-        cachedData(kj::none) {
+        bundleModuleName(kj::mv(bundleModuleName)) {
     KJ_DASSERT(isEsm());
   }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
@@ -229,116 +242,18 @@ class EsModule final: public Module {
     v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
-    // A module with a code cache key uses the isolate's code cache if there is one, else the slot
-    // below.
-    KJ_IF_SOME(key, codeCacheKey) {
-      KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-        return codeCache.compileModule(
-            js.v8Isolate, key, newExternalString(js, getEncodedSource().repr), origin, observer);
-      }
-    }
-
-    auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
-    bool cacheWasRejected = false;
-
-    v8::Local<v8::Module> module;
-    {
-      v8::ScriptCompiler::CachedData* data = nullptr;
-
-      // Check to see if we have cached compilation data for this module.
-      // Importantly, we want to allow multiple threads to be capable of
-      // reading and using the cached data without blocking each other
-      // (which is fine since using the cache does not modify it).
-      auto lock = cachedData.lockShared();
-      KJ_IF_SOME(c, *lock) {
-        // We new new here because v8 will take ownership of the CachedData instance,
-        // even tho we are maintaining ownership of the underlying buffer.
-        data = new v8::ScriptCompiler::CachedData(
-            c->data, c->length, v8::ScriptCompiler::CachedData::BufferPolicy::BufferNotOwned);
-        auto check = data->CompatibilityCheck(js.v8Isolate);
-        if (check != v8::ScriptCompiler::CachedData::kSuccess) {
-          // The cached data is not compatible with the current isolate. Treat
-          // this like a rejection: don't consume it, and flag it so that the
-          // stale entry is cleared and regenerated below. Without the flag the
-          // stale entry would sit in the slot forever, failing the
-          // compatibility check again on every future compile of this module.
-          delete data;
-          data = nullptr;
-          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module failed its compatibility check");
-          observer.onCompileCacheRejected(js.v8Isolate);
-          cacheWasRejected = true;
-        } else {
-          observer.onCompileCacheFound(js.v8Isolate);
-        }
-      }
-
-      auto contentStr = newExternalString(js, getEncodedSource().repr);
-
-      // Note that the Source takes ownership of the CachedData pointer that we pass in.
-      // (but not the actual buffer it holds). Do not use data after this point.
-      v8::ScriptCompiler::Source source(contentStr, origin, data);
-
-      auto maybeCached = source.GetCachedData();
-      if (maybeCached != nullptr) {
-        if (!maybeCached->rejected) {
-          // We found valid cached data and set the option to consume it to avoid
-          // compiling again below...
-          options = v8::ScriptCompiler::CompileOptions::kConsumeCodeCache;
-        } else {
-          // In this case we'll just log a warning and continue on. This is potentially
-          // a signal that something with the compile cache is not working correctly but
-          // it is not a fatal error. If we spot this in the wild, it warrants some
-          // investigation but is not critical.
-          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
-          observer.onCompileCacheRejected(js.v8Isolate);
-          cacheWasRejected = true;
-        }
-      }
-
-      // Let's just double check that our options are valid. They should be
-      // since we're either consuming cached data or not using any options at all.
-      KJ_ASSERT(v8::ScriptCompiler::CompileOptionsIsValid(options));
-      if (!v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options).ToLocal(&module)) {
-        return {};
-      }
-    }
-
-    // If the cached data was rejected, clear it so subsequent isolates don't
-    // repeatedly check stale data. We then fall through to regenerate the cache
-    // below. In practice this is exceedingly unlikely since V8 version changes
-    // are the primary cause of cache rejection and we don't change V8 versions
-    // within a single binary, but we handle it for correctness.
-    if (cacheWasRejected) {
-      auto lock = cachedData.lockExclusive();
-      *lock = kj::none;
-    }
-
-    // If options is still kNoCompileOptions at this point, it means that we did not
-    // find any cached data for this module, or the cached data was rejected. In
-    // either case, we try generating it and store it. Multiple threads can end up
-    // lining up here to acquire the lock and generate the cache. We'll test to see
-    // if the cached data is still empty once the lock is acquired, and if it is
-    // not, we'll skip generation. A startup-snapshot zygote never generates one: V8 forbids
-    // creating a code cache while a snapshot is being created, and the compiled code goes into
-    // the blob itself.
-    if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions &&
-        !js.isPreparingSnapshot()) {
-      auto lock = cachedData.lockExclusive();
-      if (*lock == kj::none) {
-        if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
-          // Using the technically private kj::_::HeapDisposer to wrap the V8-allocated
-          // CachedData in a kj::Own. This pattern has precedent in io-own.h.
-          kj::Own<v8::ScriptCompiler::CachedData> cached(
-              ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
-          *lock = kj::mv(cached);
-          observer.onCompileCacheGenerated(js.v8Isolate);
-        } else {
-          observer.onCompileCacheGenerationFailed(js.v8Isolate);
-        }
-      }
-    }
-
-    return module;
+    return compileModule(js, newExternalString(js, getEncodedSource().repr), origin, observer,
+        [&](IsolateCodeCache&) -> kj::Maybe<CodeCacheKey> {
+      if (type() == Type::BUNDLE) return codeCacheKey;
+      // Memoize the encoded source's key with the definition, independently of cache policy.
+      return builtinCodeCacheKey.get([this](kj::SpaceFor<CodeCacheKey>& space) {
+        return space.construct(codeCacheKeyForModule(getEncodedSource().repr));
+      });
+    },
+        {.embeddedCache = staticCompileCache,
+          .bundleModuleName =
+              bundleModuleName.map([](const kj::String& name) -> kj::StringPtr { return name; }),
+          .sharedCache = sharedCompileCache});
   }
 
  private:
@@ -414,10 +329,17 @@ class EsModule final: public Module {
   // ModuleRegistry::Builder::newCodeCacheKey().
   kj::Maybe<CodeCacheKey> codeCacheKey;
 
-  // The cachedData holds the cached compilation data for this module, if any. It is
-  // generated on-demand the first time the module is compiled, if possible. Modules with a
-  // code cache key do not use it in an isolate with a code cache; see getDescriptor().
-  kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
+  // Lazily hashed from the encoded source for builtin and fallback modules.
+  kj::Lazy<CodeCacheKey> builtinCodeCacheKey;
+
+  // Borrowed with the same lifetime as compiled-in builtin source.
+  kj::ArrayPtr<const kj::byte> staticCompileCache;
+
+  // Kept separately from the normalized URL so reports preserve the uploaded bundle name.
+  kj::Maybe<kj::String> bundleModuleName;
+
+  // Replica-local compilation uses this slot when no process-wide store applies.
+  SharedModuleCompilationCache sharedCompileCache;
 };
 
 // A SyntheticModule is essentially any type of module that is not backed by an ESM
@@ -1914,7 +1836,7 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, module.getSrc().asChars());
+    builder.addEsm(id, module.getSrc().asChars(), module.getCompileCache().asBytes());
   });
 }
 
@@ -1924,7 +1846,7 @@ void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
     kj::FunctionParam<StaticExternalStringSource(workerd::jsg::Module::Reader)> getSource) {
   addBuiltInBundleFromCapnp(
       builder, bundle, kj::mv(filter), [&](const Url& id, workerd::jsg::Module::Reader module) {
-    builder.addEsm(id, getSource(module));
+    builder.addEsm(id, getSource(module), module.getCompileCache().asBytes());
   });
 }
 
@@ -2085,9 +2007,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
+      [url = url.clone(), name = kj::str(name), source, flags, type = type()](
+          const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = kj::heap<EsModule>(kj::mv(url), type, flags, source);
+    kj::Own<Module> mod =
+        kj::heap<EsModule>(kj::mv(url), type, flags, source, nullptr, kj::mv(name));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2099,10 +2023,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(kj::Strin
     kj::Maybe<CodeCacheKey> codeCacheKey) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), source = kj::mv(source), flags, type = type(), codeCacheKey](
-          const ResolveContext& context) mutable
+      [url = url.clone(), name = kj::str(name), source = kj::mv(source), flags, type = type(),
+          codeCacheKey](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source), flags, codeCacheKey);
+    kj::Own<Module> mod =
+        kj::heap<EsModule>(kj::mv(url), type, flags, kj::mv(source), codeCacheKey, kj::mv(name));
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2151,12 +2076,12 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& id, kj::ArrayPtr<const char> source) {
+    const Url& id, kj::ArrayPtr<const char> source, kj::ArrayPtr<const kj::byte> compileCache) {
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
-      [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
+      [url = id.clone(), source, compileCache, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source, compileCache);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2176,13 +2101,13 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& id, StaticExternalStringSource source) {
+    const Url& id, StaticExternalStringSource source, kj::ArrayPtr<const kj::byte> compileCache) {
   ensureIsNotBundleSpecifier(id);
   Builder::add(id,
-      [url = id.clone(), source = kj::mv(source), type = type()](
+      [url = id.clone(), source = kj::mv(source), compileCache, type = type()](
           const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source, compileCache);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2517,12 +2442,14 @@ kj::Own<Module> Module::newEsm(Url id,
   return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code), codeCacheKey);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
-  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
+kj::Own<Module> Module::newEsm(
+    Url id, Type type, kj::ArrayPtr<const char> code, kj::ArrayPtr<const kj::byte> compileCache) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code, compileCache);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, StaticExternalStringSource code) {
-  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code));
+kj::Own<Module> Module::newEsm(
+    Url id, Type type, StaticExternalStringSource code, kj::ArrayPtr<const kj::byte> compileCache) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, kj::mv(code), compileCache);
 }
 
 Module::ModuleNamespace::ModuleNamespace(
@@ -2652,17 +2579,8 @@ Function<void()> Module::compileEvalFunction(Lock& js,
     const CompilationObserver& observer) {
   auto metrics = observer.onScriptCompilationStart(js.v8Isolate, name);
   v8::ScriptOrigin origin(js.str(name));
-  v8::ScriptCompiler::Source source(js.str(code), origin);
-  auto fn = ([&] {
-    KJ_IF_SOME(ext, compileExtensions) {
-      v8::Local<v8::Object> obj = ext;
-      return check(
-          v8::ScriptCompiler::CompileFunction(js.v8Context(), &source, 0, nullptr, 1, &obj));
-    } else {
-      return check(
-          v8::ScriptCompiler::CompileFunction(js.v8Context(), &source, 0, nullptr, 0, nullptr));
-    }
-  })();
+  auto fn = check(compileFunction(js, code, origin,
+      compileExtensions.map([](JsObject ext) -> v8::Local<v8::Object> { return ext; }), observer));
 
   return [ref = js.v8Ref(fn)](Lock& js) mutable {
     js.withinHandleScope([&] {

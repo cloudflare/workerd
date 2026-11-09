@@ -16,7 +16,9 @@ impl Type for Bad {
     }
 }
 
-impl crate::Traced for Bad {}
+impl crate::Traced for Bad {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for Bad {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -27,13 +29,13 @@ impl GarbageCollected for Bad {
 extern "C" fn getter(_args: *mut v8::ffi::FunctionCallbackInfo) {}
 
 impl Resource for Bad {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(crate::undescribed(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::Instance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        }));
     }
 }
 
@@ -56,7 +58,9 @@ impl Type for BadLazy {
     }
 }
 
-impl crate::Traced for BadLazy {}
+impl crate::Traced for BadLazy {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for BadLazy {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -65,13 +69,13 @@ impl GarbageCollected for BadLazy {
 }
 
 impl Resource for BadLazy {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(crate::undescribed(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::LazyInstance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        }));
     }
 }
 
@@ -94,7 +98,9 @@ impl Type for BadLazyReadonly {
     }
 }
 
-impl crate::Traced for BadLazyReadonly {}
+impl crate::Traced for BadLazyReadonly {
+    fn trace(&self, _visitor: &mut crate::GcVisitor) {}
+}
 
 impl GarbageCollected for BadLazyReadonly {
     fn memory_name(&self) -> &'static std::ffi::CStr {
@@ -103,13 +109,13 @@ impl GarbageCollected for BadLazyReadonly {
 }
 
 impl Resource for BadLazyReadonly {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(crate::undescribed(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::LazyReadonlyInstance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        }));
     }
 }
 

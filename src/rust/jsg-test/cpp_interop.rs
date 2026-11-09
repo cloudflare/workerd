@@ -11,7 +11,6 @@
 //! lazy property that depends on the current request, and is held by a C++ resource.
 
 use std::cell::Cell;
-use std::cell::RefCell;
 
 use jsg::ToJS;
 use jsg::v8;
@@ -82,6 +81,14 @@ pub mod ffi {
             isolate: *mut Isolate,
             greeter: &TestCppGreeter,
         ) -> bool;
+        unsafe fn test_cpp_greeter_fail_with_quota_exceeded_error(
+            isolate: *mut Isolate,
+            greeter: &TestCppGreeter,
+        ) -> bool;
+        unsafe fn test_cpp_greeter_fail_with_dom_syntax_error(
+            isolate: *mut Isolate,
+            greeter: &TestCppGreeter,
+        ) -> bool;
         unsafe fn test_cpp_greeter_fail_with_js_error(
             isolate: *mut Isolate,
             greeter: &TestCppGreeter,
@@ -123,6 +130,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppGreeter {
     fn class_name() -> &'static str {
         "TestCppGreeter"
     }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppGreeter"
+    }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
         value: v8::ffi::Local,
@@ -144,6 +154,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppBase {
     fn class_name() -> &'static str {
         "TestCppBase"
     }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppBase"
+    }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
         value: v8::ffi::Local,
@@ -164,6 +177,9 @@ unsafe impl jsg_cpp::CppResource for ffi::TestCppBase {
 unsafe impl jsg_cpp::CppResource for ffi::TestCppHolder {
     fn class_name() -> &'static str {
         "TestCppHolder"
+    }
+    fn fully_qualified_name() -> &'static str {
+        "workerd::cpp_interop_test::TestCppHolder"
     }
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
@@ -196,6 +212,23 @@ impl ffi::TestCppGreeter {
         // SAFETY: as in `greet`.
         jsg_cpp::call_cpp(lock, |isolate| unsafe {
             ffi::test_cpp_greeter_fail_with_type_error(isolate, self)
+        })
+    }
+
+    pub fn fail_with_quota_exceeded_error(
+        &self,
+        lock: &mut jsg::Lock<'_>,
+    ) -> Result<(), jsg::Error> {
+        // SAFETY: as in `greet`.
+        jsg_cpp::call_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_fail_with_quota_exceeded_error(isolate, self)
+        })
+    }
+
+    pub fn fail_with_dom_syntax_error(&self, lock: &mut jsg::Lock<'_>) -> Result<(), jsg::Error> {
+        // SAFETY: as in `greet`.
+        jsg_cpp::call_cpp(lock, |isolate| unsafe {
+            ffi::test_cpp_greeter_fail_with_dom_syntax_error(isolate, self)
         })
     }
 
@@ -234,11 +267,11 @@ thread_local! {
 }
 
 /// A Rust resource that uses C++ resources, as a ported `ExecutionContext` would.
-#[jsg_resource]
+#[jsg_resource(memory_info)]
 pub struct Host {
     pub label: String,
     /// A C++ resource, traced as a `jsg::Ref` field of a C++ resource is.
-    pub held: RefCell<Option<jsg_cpp::Ref<ffi::TestCppHolder>>>,
+    pub held: jsg::RefCell<Option<jsg_cpp::Ref<ffi::TestCppHolder>>>,
 }
 
 impl Drop for Host {
@@ -289,6 +322,24 @@ impl Host {
     }
 
     #[jsg_method]
+    pub fn fail_with_quota_exceeded_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        greeter: jsg_cpp::Ref<ffi::TestCppGreeter>,
+    ) -> Result<(), jsg::Error> {
+        greeter.fail_with_quota_exceeded_error(lock)
+    }
+
+    #[jsg_method]
+    pub fn fail_with_dom_syntax_error<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        greeter: jsg_cpp::Ref<ffi::TestCppGreeter>,
+    ) -> Result<(), jsg::Error> {
+        greeter.fail_with_dom_syntax_error(lock)
+    }
+
+    #[jsg_method]
     pub fn fail_with_js_error<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -299,8 +350,8 @@ impl Host {
 
     /// Keeps a C++ resource in a traced field.
     #[jsg_method]
-    pub fn hold(&self, holder: jsg_cpp::Ref<ffi::TestCppHolder>) {
-        *self.held.borrow_mut() = Some(holder);
+    pub fn hold(&self, lock: &mut jsg::Lock<'_>, holder: jsg_cpp::Ref<ffi::TestCppHolder>) {
+        *self.held.borrow_mut(lock) = Some(holder);
     }
 
     /// The held C++ resource, the same JavaScript object `hold()` was given.
@@ -316,10 +367,13 @@ unsafe fn host_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::MaybeLocal {
     // SAFETY: forwarded from the caller.
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
-            jsg::Rc::new(Host {
-                label: label.to_owned(),
-                held: RefCell::new(None),
-            })
+            jsg::Rc::new(
+                lock,
+                Host {
+                    label: label.to_owned(),
+                    held: jsg::RefCell::new(None),
+                },
+            )
             .to_js(lock)
         })
     }

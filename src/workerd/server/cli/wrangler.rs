@@ -9,12 +9,21 @@
 //! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`,
 //! `main` must be an ES module and the modules it imports are found by scanning its directory with
 //! wrangler's default module rules. Supported fields: `name`, `main`, `compatibility_date`,
-//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `no_bundle` and
-//! `$schema`. Any other field is an error rather than silently ignored.
+//! `compatibility_flags`, `vars`, `durable_objects`, `exports`, `migrations`, `kv_namespaces`,
+//! `no_bundle` and `$schema`. Any other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
-//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
-//! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]).
+//! `kv_namespaces` need `--experimental`. Each is a binding to the Worker `<name>-kv`
+//! (the bundled module `/workerd/kv.js`), with the namespace's `id` (else its binding name) in
+//! its props; `preview_id` and `remote` are ignored. Its objects are in
+//! `.wrangler/state/workerd/kv/`, and its large values in `kv/blobs/` there. The server listens
+//! on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//!
+//! For `workerd deploy`, [`load_deployment`] translates the same fields into a cluster deployment
+//! (`cluster::compose`), which holds only services: the worker, named after the deployment, with
+//! no socket, and its Durable Objects stored on the disk service [`DEPLOYMENT_STORAGE`], which
+//! each node's own config defines. A deployment cannot have `kv_namespaces` yet.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -24,12 +33,19 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde_json::Value;
 use workerd_capnp::config;
+use workerd_capnp::service;
+use workerd_capnp::worker;
 
 use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
 const DEFAULT_ADDRESS: &str = "localhost:8787";
+
+/// The disk service a deployment's Durable Objects are stored on: a node's, since a deployment
+/// may define no disk. Each class's objects are in a directory of their own on it, named by the
+/// class's storage key, which names the deployment.
+pub const DEPLOYMENT_STORAGE: &str = "do-storage";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,7 +65,20 @@ struct Wrangler {
     #[serde(default)]
     migrations: Vec<Migration>,
     #[serde(default)]
+    kv_namespaces: Vec<KvNamespace>,
+    #[serde(default)]
     no_bundle: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KvNamespace {
+    binding: String,
+    id: Option<String>,
+    #[serde(rename = "preview_id")]
+    _preview_id: Option<String>,
+    #[serde(rename = "remote")]
+    _remote: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -146,18 +175,77 @@ pub fn is_wrangler_config(path: &str) -> bool {
     ext.eq_ignore_ascii_case("json") || ext.eq_ignore_ascii_case("jsonc")
 }
 
-pub fn load(path: &str, process: &Process) -> Result<Config, String> {
+/// The wrangler config of the project in `dir`, in the order wrangler looks for one: its
+/// `wrangler.json`, else its `wrangler.jsonc`; a `wrangler.toml` is not supported.
+pub fn project_config(dir: &Path) -> Result<PathBuf, String> {
+    for candidate in ["wrangler.json", "wrangler.jsonc"] {
+        let path = dir.join(candidate);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    if dir.join("wrangler.toml").exists() {
+        return Err(format!(
+            "{}: wrangler.toml is not supported. Convert it to wrangler.jsonc.",
+            dir.display()
+        ));
+    }
+    Err(format!(
+        "{} does not contain wrangler.json or wrangler.jsonc.",
+        dir.display()
+    ))
+}
+
+/// What a wrangler config is translated into.
+enum Target<'a> {
+    /// A config to serve: the worker named after the config's `name`, else `main`, a socket, and
+    /// a disk service for its Durable Objects under `.wrangler/state/workerd`.
+    Serve { experimental: bool },
+    /// A cluster deployment, services only: the worker named `name`, else after the config's
+    /// `name`, and its Durable Objects stored on the node's [`DEPLOYMENT_STORAGE`].
+    Deployment { name: Option<&'a str> },
+}
+
+/// The config `workerd serve` runs for the wrangler config at `path`.
+pub fn load(path: &str, process: &Process, experimental: bool) -> Result<Config, String> {
+    translate(path, process, &Target::Serve { experimental }).map(|(_, config)| config)
+}
+
+/// The deployment `workerd deploy` publishes for the wrangler config at `path`, and its name:
+/// `name`, else the config's `name`.
+pub fn load_deployment(
+    path: &str,
+    name: Option<&str>,
+    process: &Process,
+) -> Result<(String, Config), String> {
+    translate(path, process, &Target::Deployment { name })
+}
+
+fn translate(path: &str, process: &Process, target: &Target) -> Result<(String, Config), String> {
     let watch = |p: &Path| {
         process
             .watch_file(p.as_os_str().as_encoded_bytes())
             .map_err(|e| e.description().to_owned())
     };
-    let file = fs::canonicalize(path).map_err(|e| e.to_string())?;
+    // Not `canonicalize`, whose `\\?\` paths on Windows kj cannot parse.
+    let file = std::path::absolute(path).map_err(|e| e.to_string())?;
     watch(&file)?;
     let source = fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let wrangler: Wrangler =
         serde_json::from_str(&strip_jsonc(&source)).map_err(|e| e.to_string())?;
+    check_kv(&wrangler, target)?;
     let root = file.parent().unwrap_or(&file);
+
+    let name = match target {
+        Target::Serve { .. } => wrangler.name.clone().unwrap_or_else(|| "main".to_owned()),
+        Target::Deployment { name } => name
+            .map(str::to_owned)
+            .or_else(|| wrangler.name.clone())
+            .ok_or(
+                "This deployment needs a name. Set \"name\" in the wrangler config or pass --name.",
+            )?,
+    };
+    let classes = do_classes(&wrangler)?;
 
     let sources = if wrangler.no_bundle {
         unbundled(root, &wrangler.main, &watch)?
@@ -165,18 +253,29 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         bundle(&esbuild(root), root, &wrangler.main, &watch)?
     };
 
-    let classes = do_classes(&wrangler)?;
-    let name = wrangler.name.clone().unwrap_or_else(|| "main".to_owned());
+    let serving = matches!(target, Target::Serve { .. });
     let storage = root.join(".wrangler/state/workerd");
-    if !classes.is_empty() {
+    if serving && !classes.is_empty() {
         fs::create_dir_all(&storage).map_err(|e| format!("{}: {e}", storage.display()))?;
     }
+    let kv = !wrangler.kv_namespaces.is_empty();
 
     let mut message = capnp::message::Builder::new_default();
     let mut conf = message.init_root::<config::Builder>();
+    let do_storage = u32::from(serving && !classes.is_empty());
     let mut services = conf
         .reborrow()
-        .init_services(if classes.is_empty() { 1 } else { 2 });
+        .init_services(1 + do_storage + 3 * u32::from(kv));
+    // Named after the worker, so they cannot collide with it.
+    let kv_service = format!("{name}-kv");
+    if kv {
+        kv_services(
+            &mut services,
+            1 + do_storage,
+            &kv_service,
+            &storage.join("kv"),
+        )?;
+    }
 
     let mut service = services.reborrow().get(0);
     service.set_name(&name);
@@ -186,7 +285,54 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         .set_compatibility_flags(&wrangler.compatibility_flags[..])
         .map_err(|e| e.to_string())?;
 
-    let mut ms = worker.reborrow().init_modules(sources.len() as u32);
+    set_modules(worker.reborrow(), &sources)?;
+    set_bindings(worker.reborrow(), &wrangler, &kv_service);
+
+    if !classes.is_empty() {
+        let mut ns = worker
+            .reborrow()
+            .init_durable_object_namespaces(classes.len() as u32);
+        for (i, (class, key, sql)) in classes.iter().enumerate() {
+            let mut n = ns.reborrow().get(i as u32);
+            n.set_class_name(class);
+            n.set_unique_key(format!("{name}-{key}"));
+            n.set_enable_sql(*sql);
+        }
+        if serving {
+            // Named after the worker, so it cannot collide with it.
+            let storage_service = format!("{name}-do-storage");
+            worker
+                .init_durable_object_storage()
+                .set_local_disk(&storage_service);
+            let mut disk_service = services.get(1);
+            disk_service.set_name(&storage_service);
+            let mut disk = disk_service.init_disk();
+            disk.set_path(storage.to_string_lossy());
+            disk.set_writable(true);
+        } else {
+            worker
+                .init_durable_object_storage()
+                .set_local_disk(DEPLOYMENT_STORAGE);
+        }
+    }
+
+    if serving {
+        let mut socket = conf.init_sockets(1).get(0);
+        socket.set_name("http");
+        socket.set_address(DEFAULT_ADDRESS);
+        socket.reborrow().init_http();
+        socket.init_service().set_name(&name);
+    }
+
+    let config = Config::from_words(&words_from_bytes(
+        &capnp::serialize::write_message_to_words(&message),
+    ))
+    .map_err(|e| e.to_string())?;
+    Ok((name, config))
+}
+
+fn set_modules(worker: worker::Builder<'_>, sources: &[Source]) -> Result<(), String> {
+    let mut ms = worker.init_modules(sources.len() as u32);
     for (i, (module_name, kind, bytes)) in sources.iter().enumerate() {
         let mut m = ms.reborrow().get(i as u32);
         m.set_name(module_name);
@@ -199,14 +345,75 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
             Kind::Data => m.set_data(bytes),
         }
     }
+    Ok(())
+}
 
+/// `kv_namespaces` need `--experimental`, and a deployment cannot have them yet.
+fn check_kv(wrangler: &Wrangler, target: &Target) -> Result<(), String> {
+    match target {
+        _ if wrangler.kv_namespaces.is_empty() => Ok(()),
+        Target::Serve { experimental: true } => Ok(()),
+        Target::Serve { .. } => Err("kv_namespaces is an experimental feature which may change \
+                                     or go away in the future. You must run workerd with \
+                                     `--experimental` to use it."
+            .to_owned()),
+        Target::Deployment { .. } => Err("A deployment cannot have kv_namespaces yet.".to_owned()),
+    }
+}
+
+/// The KV Worker `name` at `services[at]`, then its disks under `dir`.
+fn kv_services(
+    services: &mut capnp::struct_list::Builder<'_, service::Owned>,
+    at: u32,
+    name: &str,
+    dir: &Path,
+) -> Result<(), String> {
+    let blobs = dir.join("blobs");
+    fs::create_dir_all(&blobs).map_err(|e| format!("{}: {e}", blobs.display()))?;
+    for (i, what, path) in [(at + 1, "storage", dir), (at + 2, "blobs", &blobs)] {
+        let mut disk_service = services.reborrow().get(i);
+        disk_service.set_name(format!("{name}-{what}"));
+        let mut disk = disk_service.init_disk();
+        disk.set_path(path.to_string_lossy());
+        disk.set_writable(true);
+    }
+    kv_worker(services.reborrow().get(at), name);
+    Ok(())
+}
+
+/// The KV Worker `name`, over the disks `<name>-storage` and `<name>-blobs`.
+fn kv_worker(mut service: service::Builder<'_>, name: &str) {
+    service.set_name(name);
+    let mut w = service.init_worker();
+    let mut module = w.reborrow().init_modules(1).get(0);
+    module.set_name("kv.js");
+    module.set_bundled("/workerd/kv.js");
+    w.set_compatibility_date("2026-01-01");
+    let mut class = w.reborrow().init_durable_object_namespaces(1).get(0);
+    class.set_class_name("KVNamespace");
+    class.set_unique_key("KVNamespace");
+    class.set_enable_sql(true);
+    w.reborrow()
+        .init_durable_object_storage()
+        .set_local_disk(format!("{name}-storage"));
+    let mut bindings = w.init_bindings(2);
+    let mut shard = bindings.reborrow().get(0);
+    shard.set_name("SHARD");
+    shard
+        .init_durable_object_namespace()
+        .set_class_name("KVNamespace");
+    let mut blobs = bindings.get(1);
+    blobs.set_name("BLOBS");
+    blobs.init_service().set_name(format!("{name}-blobs"));
+}
+
+fn set_bindings(worker: worker::Builder<'_>, wrangler: &Wrangler, kv_service: &str) {
+    let kv = &wrangler.kv_namespaces;
     let do_bindings = wrangler
         .durable_objects
         .as_ref()
         .map_or(&[][..], |d| &d.bindings);
-    let mut bs = worker
-        .reborrow()
-        .init_bindings((wrangler.vars.len() + do_bindings.len()) as u32);
+    let mut bs = worker.init_bindings((wrangler.vars.len() + do_bindings.len() + kv.len()) as u32);
     for (i, (k, v)) in wrangler.vars.iter().enumerate() {
         let mut b = bs.reborrow().get(i as u32);
         b.set_name(k);
@@ -221,39 +428,17 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         b.init_durable_object_namespace()
             .set_class_name(&d.class_name);
     }
-
-    if !classes.is_empty() {
-        let mut ns = worker
+    for (i, k) in kv.iter().enumerate() {
+        let mut b = bs
             .reborrow()
-            .init_durable_object_namespaces(classes.len() as u32);
-        for (i, (class, key, sql)) in classes.iter().enumerate() {
-            let mut n = ns.reborrow().get(i as u32);
-            n.set_class_name(class);
-            n.set_unique_key(format!("{name}-{key}"));
-            n.set_enable_sql(*sql);
-        }
-        // Named after the worker, so it cannot collide with it.
-        let storage_service = format!("{name}-do-storage");
-        worker
-            .init_durable_object_storage()
-            .set_local_disk(&storage_service);
-        let mut disk_service = services.get(1);
-        disk_service.set_name(&storage_service);
-        let mut disk = disk_service.init_disk();
-        disk.set_path(storage.to_string_lossy());
-        disk.set_writable(true);
+            .get((wrangler.vars.len() + do_bindings.len() + i) as u32);
+        b.set_name(&k.binding);
+        let id = k.id.as_ref().unwrap_or(&k.binding);
+        let mut designator = b.init_kv_namespace();
+        designator.set_name(kv_service);
+        let props = serde_json::json!({ "namespace": id });
+        designator.init_props().set_json(props.to_string());
     }
-
-    let mut socket = conf.init_sockets(1).get(0);
-    socket.set_name("http");
-    socket.set_address(DEFAULT_ADDRESS);
-    socket.reborrow().init_http();
-    socket.init_service().set_name(&name);
-
-    Config::from_words(&words_from_bytes(
-        &capnp::serialize::write_message_to_words(&message),
-    ))
-    .map_err(|e| e.to_string())
 }
 
 type Source = (String, Kind, Vec<u8>);

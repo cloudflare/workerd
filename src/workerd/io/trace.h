@@ -496,6 +496,23 @@ struct AlarmEventInfo final {
   kj::String toString() const;
 };
 
+// Describes a Durable Object onHibernate handler invocation
+struct OnHibernateEventInfo final {
+  using Reason = rpc::Trace::OnHibernateEventInfo::Reason;
+
+  explicit OnHibernateEventInfo(Reason reason);
+  OnHibernateEventInfo(rpc::Trace::OnHibernateEventInfo::Reader reader);
+  OnHibernateEventInfo(OnHibernateEventInfo&&) noexcept = default;
+  OnHibernateEventInfo& operator=(OnHibernateEventInfo&&) = default;
+  KJ_DISALLOW_COPY(OnHibernateEventInfo);
+
+  Reason reason;
+
+  void copyTo(rpc::Trace::OnHibernateEventInfo::Builder builder) const;
+  OnHibernateEventInfo clone() const;
+  kj::String toString() const;
+};
+
 // Describes a queue worker request
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
@@ -747,6 +764,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
     ConnectEventInfo,
+    OnHibernateEventInfo,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
@@ -972,7 +990,9 @@ struct Outcome final {
 // SpanClose unless the stream was abruptly terminated.
 // A future version may add support for Link events again.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset,
+  // Onset is boxed because it is several times larger than any other event, and an unboxed OneOf
+  // would make every queued event, mostly logs and spans, that large too.
+  using Event = kj::OneOf<kj::Own<Onset>,
       Outcome,
       SpanOpen,
       SpanClose,
@@ -1015,6 +1035,22 @@ struct TailEvent final {
 };
 
 kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event);
+
+// Accounts for the memory that streaming tail sessions hold in events they have queued, or sent
+// but not yet had acknowledged by the tail worker. An embedder implements it to bound that memory
+// across all of the sessions that share one budget. See TailStreamWriter in trace-stream.h.
+class TailStreamBudget: public kj::Refcounted {
+ public:
+  // Returns whether `bytes` more may be held. If not, the event is dropped.
+  virtual bool tryReserve(size_t bytes) = 0;
+
+  // Holds `bytes` more unconditionally, for the events that are never dropped: the onset, return,
+  // and outcome events, and the diagnostics event that reports drops.
+  virtual void reserve(size_t bytes) = 0;
+
+  // Gives back `bytes` that tryReserve() or reserve() took.
+  virtual void release(size_t bytes) = 0;
+};
 
 }  // namespace tracing
 

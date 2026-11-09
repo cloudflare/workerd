@@ -513,7 +513,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   newModuleRegistry @52 :Bool
       $compatEnableFlag("new_module_registry")
-      $compatDisableFlag("legacy_module_registry");
+      $compatDisableFlag("legacy_module_registry")
+      $compatEnableDate("2026-11-17");
   # Enables the new module registry implementation, which handles module
   # specifiers as URLs, implements import.meta (url/main/resolve), supports
   # import attributes, and allows a registry to be shared across isolate
@@ -793,9 +794,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   enableRequestSignal @90 :Bool
     $compatEnableFlag("enable_request_signal")
-    $compatDisableFlag("disable_request_signal");
+    $compatDisableFlag("disable_request_signal")
+    $compatEnableDate("2026-11-17");
   # Enables Request.signal for incoming requests.
-  # This feature is still experimental and the compat flag has no default enable date.
 
   connectPassThrough @91 :Bool
     $compatEnableFlag("connect_pass_through")
@@ -1745,7 +1746,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # unsupported.
 
   pythonSharedStandardLibrary @198 :Bool
-      $compatEnableFlag("python_shared_standard_library");
+      $compatEnableFlag("python_shared_standard_library")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2026-11-19");
   # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
   # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
   # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
@@ -1775,4 +1777,41 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_zstd_snapshot")
       $experimental;
   # Compresses the memory snapshot of a Python Worker with zstd.
+
+  nodeJsProcessVersion24 @202 :Bool
+      $compatEnableFlag("nodejs_process_version_24")
+      $compatDisableFlag("no_nodejs_process_version_24")
+      $compatEnableDate("2026-11-24");
+  # Reports the latest Node.js 24 release, instead of Node.js 22, as `process.version` and
+  # `process.versions.node`. Libraries feature-sniff on these values, so a Worker that enables the
+  # flag may take code paths written for Node.js 24, even where the Node.js compatibility layer
+  # does not match Node.js 24 behavior. Requires `nodejs_compat` and `enable_nodejs_process_v2`.
+
+  r2BindingsJsrpc @203 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
+  #
+  # The binding must specify a named entrypoint implementing the R2 backend
+  # methods: head, get, put, delete, list, createMultipartUpload, uploadPart,
+  # abortMultipartUpload, and completeMultipartUpload. Object results use the
+  # corresponding native R2 API types; createMultipartUpload returns an object
+  # containing uploadId. The expected TypeScript interface is type-checked in
+  # src/workerd/api/tests/r2-binding-service/r2-binding-service.ts.
+
+  rpcDisposeCancelsCall @204 :Bool
+      $compatEnableFlag("rpc_dispose_cancels_call")
+      $experimental;
+  # Disposing the promise returned by a JSRPC call while the call is still in flight cancels the
+  # call, and the promise rejects with an `AbortError`. Without the flag, disposing a pending
+  # promise only disposes its result once the call completes.
+  #
+  # The flag only affects the caller. Any callee handles a canceled call by releasing the caller's
+  # capabilities right away, disposing the stubs it received as arguments, so the session can end,
+  # and with it the request, unless the callee holds other stubs or `waitUntil()` tasks. The
+  # method's JavaScript is not interrupted, but a stateless Worker's pending I/O is canceled when
+  # its request ends. A session whose top-level call was canceled reports a `canceled` outcome,
+  # like a fetch handler whose client went away.
 }

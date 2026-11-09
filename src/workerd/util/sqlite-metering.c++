@@ -213,4 +213,8 @@ void installSqliteCustomAllocator() {
   }();
 }
 
+size_t getSqliteProcessMemoryUsed() {
+  return static_cast<size_t>(sqlite3_memory_used());
+}
+
 }  // namespace workerd

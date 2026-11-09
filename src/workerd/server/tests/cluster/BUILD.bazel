@@ -1,12 +1,20 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
-# Takeover waits out a dead owner's 20 s lease, several times over.
-# TODO(cluster): under the 60 s "long" timeout.
+# Two takeovers wait out a dead owner's 20 s lease. Downstream caps
+# "eternal" at 240 s; add takeovers to the simulations instead. The drain
+# tests wait out stop deadlines, so the tests run in shards that each stay
+# well under that.
 js_test(
     name = "cluster-test",
     size = "large",
     timeout = "eternal",
     data = [
+        ":cluster-broken-deployments.wd-test",
+        ":cluster-broken-node.wd-test",
+        ":cluster-deployment.wd-test",
+        ":cluster-node.wd-test",
+        ":cluster-on-hibernate-worker.js",
+        ":cluster-router.js",
         ":cluster-test.wd-test",
         ":cluster-worker.js",
         ":fake-s3.js",
@@ -18,6 +26,11 @@ js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WD_TEST_CONFIG": "$(rootpath :cluster-test.wd-test)",
         "FAKE_S3_CONFIG": "$(rootpath :fake-s3.wd-test)",
+        "NODE_CONFIG": "$(rootpath :cluster-node.wd-test)",
+        "DEPLOYMENT_CONFIG": "$(rootpath :cluster-deployment.wd-test)",
+        "BROKEN_NODE_CONFIG": "$(rootpath :cluster-broken-node.wd-test)",
+        "BROKEN_DEPLOYMENTS_CONFIG": "$(rootpath :cluster-broken-deployments.wd-test)",
     },
+    shard_count = 3,
     tags = ["js-test"],
 )

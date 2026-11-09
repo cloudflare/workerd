@@ -92,6 +92,10 @@ unsafe impl jsg_cpp::CppResource for Socket {
         "Socket"
     }
 
+    fn fully_qualified_name() -> &'static str {
+        "workerd::api::Socket"
+    }
+
     unsafe fn try_unwrap(
         isolate: *mut v8::ffi::Isolate,
         value: v8::ffi::Local,
@@ -170,7 +174,7 @@ unsafe fn hyperdrive_new(
     unsafe {
         v8::run_ffi_callback(isolate, |lock| {
             let hyperdrive = crate::Hyperdrive::new(channel, database, user, password, scheme)?;
-            jsg::Rc::new(hyperdrive).to_js(lock)
+            jsg::Rc::new(lock, hyperdrive).to_js(lock)
         })
     }
 }

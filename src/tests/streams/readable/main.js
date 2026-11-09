@@ -51,6 +51,7 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  proxyArgumentsSeeOnlyMemberReads,
   strategyArgumentShapes,
   conversionErrorPrecedence,
   byteMembersOnDefaultSource,
@@ -229,6 +230,8 @@ export {
   chunksCollectibleDuringConsumption,
   oddChunkSizesAssembleIntact,
   chunkWiderThanABlockAssemblesIntact,
+  mixedChunkSizesAssembleIntact,
+  largeViewsIntoLargerBuffersAssembleIntact,
   declaredLengthBodyIsExact,
 } from 'integration-body-memory';
 
@@ -255,6 +258,7 @@ export {
   teeBranchesCollected,
   teeBranchesCollectedReleaseBacklog,
   teeSurvivorBranchCollected,
+  teeCollectedBranchReleasesWhatSiblingRead,
   teeBranchesCollectedPullStops,
   sourceReleasedOnceEnded,
 } from 'gc';

@@ -569,21 +569,24 @@ kj::String readEvents(TestFixture& fixture) {
   return events;
 }
 
-// Records the outcome that runOnHibernate() reports.
+// Records the outcome that runOnHibernate() reports, and how many times it reports one.
 struct OnHibernateObserver final: public RequestObserver {
   kj::Maybe<EventOutcome> outcome;
+  uint reportCount = 0;
   void reportOnHibernateOutcome(EventOutcome reported) override {
     outcome = reported;
+    ++reportCount;
   }
 };
 
 kj::Promise<void> runOnHibernate(TestFixture& fixture,
     Worker::Actor& actor,
     kj::Own<RequestObserver> observer,
-    kj::Maybe<TimerChannel&> timer = kj::none) {
+    kj::Maybe<TimerChannel&> timer = kj::none,
+    kj::Maybe<kj::Rc<BaseTracer>> tracer = kj::none) {
   return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
       kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
-      kj::mv(observer), kj::none);
+      kj::mv(observer), kj::mv(tracer), kj::none /* selfTokenFactory */);
 }
 
 // An actor whose onHibernate handler never settles, leaving a timer behind.
@@ -601,17 +604,22 @@ constexpr kj::StringPtr PENDING_ON_HIBERNATE_SOURCE = R"SCRIPT(
 )SCRIPT"_kj;
 
 // Starts the onHibernate handler of an actor running PENDING_ON_HIBERNATE_SOURCE, then calls
-// `body` while the handler is pending.
+// `body` while the handler is pending. Checks that the call reports CANCELED, once, by the time
+// `body` returns.
 void withPendingOnHibernate(kj::StringPtr actorId,
     kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&, kj::Promise<void>&)> body) {
   withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, actorId,
       [&](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
-    auto promise = runOnHibernate(fixture, actor, kj::refcounted<RequestObserver>());
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
     KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
     auto events = readEvents(fixture);
     KJ_ASSERT(events == "onHibernate;", events);
 
     body(fixture, context, actor, promise);
+
+    KJ_EXPECT(observer->outcome == EventOutcome::CANCELED);
+    KJ_EXPECT(observer->reportCount == 1, observer->reportCount);
   });
 }
 
@@ -633,6 +641,85 @@ KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it 
 
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
     KJ_EXPECT(readEvents(fixture) == "onHibernate:inactive:true;");
+  });
+}
+
+// Records, in order, the onset and return events reported to it.
+class RecordingTracer final: public BaseTracer {
+ public:
+  kj::String events;
+
+  void setEventInfo(IoContext::IncomingRequest&, tracing::EventInfo&& info) override {
+    KJ_IF_SOME(onHibernate, info.tryGet<tracing::OnHibernateEventInfo>()) {
+      events = kj::str(events, "onHibernateOnset:", onHibernate.reason, ";");
+    } else {
+      events = kj::str(events, "onset;");
+    }
+  }
+  void setReturn(kj::Maybe<kj::Date>, kj::Maybe<tracing::FetchResponseInfo>) override {
+    events = kj::str(events, "return;");
+  }
+
+  void addLog(const tracing::InvocationSpanContext&,
+      kj::Date,
+      LogLevel,
+      kj::String,
+      tracing::LogErrorInfo) override {}
+  void addSpanOpen(tracing::SpanId, tracing::SpanId, kj::ConstString, kj::Date) override {}
+  void addSpanClose(tracing::SpanEndData&&, kj::Maybe<kj::Date>) override {}
+  void addSpanUpdate(tracing::SpanId, tracing::SpanUpdate&&) override {}
+  void addSpanAttribute(
+      const tracing::InvocationSpanContext&, kj::ConstString, tracing::Attribute::Value) override {}
+  void addException(const tracing::InvocationSpanContext&,
+      kj::Date,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  void addSpanException(tracing::SpanId,
+      kj::Date,
+      kj::Maybe<tracing::Exception::Code>,
+      kj::String,
+      kj::String,
+      kj::Maybe<kj::String>) override {}
+  void addDiagnosticChannelEvent(
+      const tracing::InvocationSpanContext&, kj::Date, kj::String, kj::Array<kj::byte>) override {}
+  void setOutcome(EventOutcome, kj::Duration, kj::Duration) override {}
+  void recordTimestamp(kj::Date) override {}
+  void setJsRpcInfo(
+      const tracing::InvocationSpanContext&, kj::Date, const kj::ConstString&) override {}
+  void markUnused() override {}
+};
+
+KJ_TEST("runOnHibernate() reports the handler to the tracer as an onHibernate event") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    export default class extends DurableObject {
+      async [onHibernate]() {}
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-trace-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto tracer = kj::rc<RecordingTracer>();
+    runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()))
+        .wait(fixture.getWaitScope());
+
+    KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;return;", tracer->events);
+  });
+}
+
+KJ_TEST("canceling runOnHibernate() reports the handler's onset but no return") {
+  withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, "on-hibernate-trace-cancel-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto tracer = kj::rc<RecordingTracer>();
+    auto promise = runOnHibernate(fixture, actor, kj::refcounted<OnHibernateObserver>(), kj::none,
+        kj::Rc<BaseTracer>(tracer.addRef()));
+    KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
+
+    promise = nullptr;
+
+    KJ_EXPECT(tracer->events == "onHibernateOnset:inactive;", tracer->events);
   });
 }
 
@@ -707,6 +794,7 @@ KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
     KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
     KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(observer->reportCount == 1, observer->reportCount);
   }, {.flushActorStorage = true});
 }
 

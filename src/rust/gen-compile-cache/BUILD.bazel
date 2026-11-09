@@ -7,12 +7,25 @@ wd_rust_binary(
     cxx_bridge_src = "main.rs",
     link_deps = [
         ":cxx-bridge",
+        ":strip-debug",
     ],
     test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
         "@crates_vendor//:clap",
     ],
+)
+
+# Links gen-compile-cache without debug info, which is most of the binary and of the link's work,
+# and which every compile cache action would fetch. A build tool has little use for it: symbol
+# names still identify the frames of a crash's stack trace.
+wd_cc_library(
+    name = "strip-debug",
+    linkopts = select({
+        "@platforms//os:linux": ["-Wl,--strip-debug"],
+        "@platforms//os:macos": ["-Wl,-S"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(

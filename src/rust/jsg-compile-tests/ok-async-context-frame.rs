@@ -5,7 +5,6 @@
 // An `AsyncContextFrame` is `'static`, `Send` and `Sync`, so a future passed to async I/O can hold
 // it, and a `TracedAsyncContextFrame` is `Send` and can be a resource field. `enter` opens no
 // scope, so a handle created in the frame stays valid after it.
-use std::cell::Cell;
 
 use jsg::v8;
 use jsg_macros::jsg_resource;
@@ -15,7 +14,7 @@ fn assert_static_send<T: Send + 'static>() {}
 
 #[jsg_resource]
 struct Holder {
-    frame: Cell<Option<jsg::TracedAsyncContextFrame>>,
+    frame: jsg::Cell<Option<jsg::TracedAsyncContextFrame>>,
 }
 
 #[jsg_resource]
@@ -27,7 +26,7 @@ pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Object> {
     let frame = jsg::AsyncContextFrame::current(lock);
     let object = frame.enter(lock, |lock| lock.new_object());
     let holder = Holder {
-        frame: Cell::new(Some(frame.into())),
+        frame: jsg::Cell::new(Some(frame.into())),
     };
     drop(holder);
     object

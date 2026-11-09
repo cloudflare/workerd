@@ -68,6 +68,19 @@ class CppRef final {
     visitor.visit(ref);
   }
 
+  void trackField(::workerd::jsg::MemoryTracker& tracker, kj::StringPtr edgeName) const {
+    tracker.trackField(edgeName, ref);
+  }
+
+  // Makes the reference strong again and forgets its parent, as moving a `jsg::Ref` out of its
+  // field does: for a value that its GC owner, which may have made the reference weak, no longer
+  // holds. A moved `jsg::Ref` keeps the parent of its old location, so it is rebuilt in place.
+  void detach() const {
+    auto fresh = ref.addRef();
+    kj::dtor(ref);
+    kj::ctor(ref, kj::mv(fresh));
+  }
+
   // For clone(): only CppRef can make the badge, so no one else can pair an object with a
   // reference to a different one. Public only so that kj::heap can call it.
   CppRef(kj::Badge<CppRef>, void* object, ::workerd::jsg::Ref<::workerd::jsg::Object> ref)
@@ -85,6 +98,10 @@ class CppRef final {
 kj::Own<CppRef> cpp_ref_clone(const CppRef& ref);
 size_t cpp_ref_object(const CppRef& ref);
 void cpp_ref_visit(GcVisitor* visitor, const CppRef& ref);
+// A null `edge_name` is the empty name C++ gives the elements of a container.
+void cpp_ref_track(
+    ::workerd::rust::jsg::MemoryTracker& tracker, const char* edge_name, const CppRef& ref);
+void cpp_ref_detach(const CppRef& ref);
 
 // Runs `func(jsg::Lock&)` the way a JSG method callback runs C++ API code (jsg::liftKj()), and
 // returns whether it completed. A `jsg::JsExceptionThrown` leaves its exception pending. A
@@ -226,6 +243,12 @@ class RustRef {
 
   void visitForGc(::workerd::jsg::GcVisitor& visitor) {
     visitor.visit(wrapper);
+  }
+
+  // Reports the reference to a heap snapshot as an edge to the wrapper, whose
+  // `javascript_to_native` edge leads to the Rust resource's node.
+  void trackField(::workerd::jsg::MemoryTracker& tracker, kj::StringPtr edgeName) const {
+    tracker.trackField(edgeName, wrapper);
   }
 
  private:

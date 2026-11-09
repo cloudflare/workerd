@@ -341,14 +341,12 @@ v8::Local<v8::Value> compileJsonGlobal(
 
 // Compiles a module for the legacy module registry, returning kj::none if the module
 // is a Python module or Python requirement, which are handled elsewhere.
-// `produceCompileHints` applies to ES modules; see jsg::ProduceCompileHints.
 template <typename JsgIsolate>
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     kj::StringPtr name,
     const Worker::Script::ModuleContent& moduleContent,
     const jsg::CompilationObserver& observer,
-    CompatibilityFlags::Reader featureFlags,
-    jsg::ProduceCompileHints produceCompileHints = jsg::ProduceCompileHints::NO) {
+    CompatibilityFlags::Reader featureFlags) {
   auto& lock = kj::downcast<typename JsgIsolate::Lock>(js);
   KJ_SWITCH_ONEOF(moduleContent) {
     KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -384,7 +382,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
       return jsg::ModuleRegistry::ModuleInfo(
-          js, name, content.body, observer, content.compileHints, produceCompileHints);
+          js, name, content.body, observer, content.compileHints);
     }
     KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,

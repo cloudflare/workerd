@@ -125,6 +125,40 @@ export const argumentConversionOrder = {
   },
 };
 
+// A source, sink or strategy that is a Proxy sees only the reads of its
+// dictionary members, by name (parity): recognizing a native source or
+// sink reads a V8-private property, which reaches no trap.
+export const proxyArgumentsSeeOnlyMemberReads = {
+  test() {
+    const keys = [];
+    const trapped = () =>
+      new Proxy(
+        {},
+        {
+          get(target, key, receiver) {
+            keys.push(key);
+            return Reflect.get(target, key, receiver);
+          },
+          has(target, key) {
+            keys.push(key);
+            return Reflect.has(target, key);
+          },
+          getOwnPropertyDescriptor(target, key) {
+            keys.push(key);
+            return Reflect.getOwnPropertyDescriptor(target, key);
+          },
+        }
+      );
+    new ReadableStream(trapped(), trapped());
+    new WritableStream(trapped(), trapped());
+    new ReadableStream(new Proxy({ type: 'bytes' }, {}), trapped());
+    for (const key of keys) strictEqual(typeof key, 'string', String(key));
+    for (const name of ['start', 'pull', 'write', 'highWaterMark']) {
+      strictEqual(keys.includes(name), true, name);
+    }
+  },
+};
+
 // The strategy argument converts as a WebIDL dictionary in both (spec):
 // null means no strategy, a function's members are read, and every other
 // primitive throws TypeError (messages differ).

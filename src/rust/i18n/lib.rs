@@ -2,15 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Rust port of `workerd::api::node::i18n::transcode`
-//! (`src/workerd/api/node/i18n.c++`), the engine behind `node:buffer`'s
-//! `transcode()`. Selected at runtime by the `NODEJS_I18N_RUST` autogate; when
-//! the gate is off, the C++ implementation is used instead. The two paths are
-//! byte-for-byte and error-message identical: [`dispatch`] ports the C++
-//! dispatch/sizing/truncation logic to Rust, and [`ffi`] calls the same ICU
-//! and simdutf functions the C++ path does.
-//! `src/workerd/api/node/i18n-test.c++` checks the two paths against each
-//! other.
+//! The engine behind `node:buffer`'s `transcode()`, called from
+//! `workerd::api::node::i18n::transcode` (`src/workerd/api/node/i18n.c++`)
+//! through the cxx bridge in [`ffi`]. [`dispatch`] picks the conversion for
+//! each encoding pair, sizes the destination, and checks the result; [`ffi`]
+//! wraps the ICU and simdutf functions that perform the conversions.
 
 use jsg::Lock;
 use jsg::v8;

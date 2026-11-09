@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -24,13 +25,6 @@
 
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/lsan_interface.h>
-#endif
-
-#if V8_MAJOR_VERSION >= 15
-#define Utf8LengthV2 Utf8Length
-#define WriteV2 Write
-#define WriteOneByteV2 WriteOneByte
-#define WriteUtf8V2 WriteUtf8
 #endif
 
 using namespace kj_rs;
@@ -76,6 +70,16 @@ static v8::MaybeLocal<v8::String> newUtf8String(
   return v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()));
 }
 
+// Copies a V8 string into a Rust one. Lone surrogates become U+FFFD (rust::String::lossy), since
+// a rust::String must be valid UTF-8. Throws a KJ exception if the allocation fails.
+static ::rust::String toRustString(v8::Isolate* isolate, v8::Local<v8::String> str) {
+  v8::String::ValueView view(isolate, str);
+  if (view.is_one_byte()) {
+    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+  }
+  return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+}
+
 // Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
 // overlong name throws. The property shims, which take a key from arbitrary Rust text, are
 // declared fallible in v8.rs for that reason. The names a resource template interns come from
@@ -108,7 +112,12 @@ kj::StringPtr Wrappable::jsgGetMemoryName() const {
 }
 
 size_t Wrappable::jsgGetMemorySelfSize() const {
-  return sizeof(Wrappable);
+  return sizeof(Wrappable) + wrappable_invoke_get_memory_self_size(*this);
+}
+
+void Wrappable::jsgGetMemoryInfo(::workerd::jsg::MemoryTracker& tracker) const {
+  ::workerd::jsg::Wrappable::jsgGetMemoryInfo(tracker);
+  wrappable_invoke_get_memory_info(*this, tracker);
 }
 
 // Local<T>
@@ -368,7 +377,7 @@ bool local_string_contains_only_one_byte(const Local& value) {
 }
 
 size_t local_string_utf8_length(Isolate* isolate, const Local& value) {
-  return local_as_ref_from_ffi<v8::String>(value)->Utf8LengthV2(isolate);
+  return local_as_ref_from_ffi<v8::String>(value)->Utf8Length(isolate);
 }
 
 void local_string_write_v2(Isolate* isolate,
@@ -377,7 +386,7 @@ void local_string_write_v2(Isolate* isolate,
     uint32_t length,
     uint16_t* buffer,
     int32_t flags) {
-  local_as_ref_from_ffi<v8::String>(value)->WriteV2(isolate, offset, length, buffer, flags);
+  local_as_ref_from_ffi<v8::String>(value)->Write(isolate, offset, length, buffer, flags);
 }
 
 void local_string_write_one_byte_v2(Isolate* isolate,
@@ -386,12 +395,12 @@ void local_string_write_one_byte_v2(Isolate* isolate,
     uint32_t length,
     uint8_t* buffer,
     int32_t flags) {
-  local_as_ref_from_ffi<v8::String>(value)->WriteOneByteV2(isolate, offset, length, buffer, flags);
+  local_as_ref_from_ffi<v8::String>(value)->WriteOneByte(isolate, offset, length, buffer, flags);
 }
 
 size_t local_string_write_utf8_v2(
     Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags) {
-  return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8V2(
+  return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8(
       isolate, reinterpret_cast<char*>(buffer), capacity, flags);
 }
 
@@ -638,6 +647,10 @@ Local local_promise_result(const Local& promise) {
 
 void local_promise_mark_as_handled(const Local& promise) {
   local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
+}
+
+bool local_promise_has_handler(const Local& promise) {
+  return local_as_ref_from_ffi<v8::Promise>(promise)->HasHandler();
 }
 
 MaybeLocal local_promise_then_or_catch(
@@ -889,9 +902,31 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
   if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
-  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
+  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h), and
+  // the values wrapOpaque() carries through promises.
   return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
-      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true)));
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), /*needsGcTracing=*/true)));
+}
+
+namespace {
+// The Rust Wrappable that `wrappable` is, if it is one. C++ JSG has opaque wrappers of its own,
+// so the type is checked, as ::workerd::jsg::downcastWrappable() does.
+kj::Maybe<kj::Rc<Wrappable>> asRustWrappable(::workerd::jsg::Wrappable& wrappable) {
+  const auto& actualType = typeid(wrappable);
+  if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+    return kj::downcast<Wrappable>(wrappable).toRc();
+  }
+  return kj::none;
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<Wrappable>> wrappable_try_unwrap_opaque(Isolate* isolate, const Local& value) {
+  KJ_IF_SOME(wrappable,
+      ::workerd::jsg::Wrappable::tryUnwrapOpaque(
+          isolate, local_as_ref_from_ffi<v8::Value>(value))) {
+    return asRustWrappable(wrappable);
+  }
+  return kj::none;
 }
 
 // Unwrappers
@@ -907,13 +942,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
     return false;
   }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  } else {
-    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-  }
+  result = toRustString(isolate, v8Str);
   return true;
 }
 
@@ -1099,20 +1128,8 @@ void wrappable_add_strong_ref(Wrappable& wrappable) {
   wrappable.addStrongRef();
 }
 
-void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong) {
-  // maybeDeferDestruction() requires a kj::Own<Wrappable> to take ownership of.
-  // We must temporarily increment the refcount via addRef() to create that handle.
-  //
-  // Refcount accounting:
-  //   addRef(wrappable)      → +1 (creates `own`)
-  //   maybeDeferDestruction  → internally stores `own` in RefToDelete
-  //   ~RefToDelete           → if is_strong: calls removeStrongRef(), then drops `own` → -1
-  // Net effect: 0 (the actual kj::Rc decrement happens later when Rust drops the KjRc).
-  //
-  // is_strong must match the Ref's current strong flag. If GC tracing already transitioned
-  // the ref to weak (strong=false), passing true here would double-decrement strongRefcount.
-  auto own = kj::addRef(wrappable);
-  wrappable.maybeDeferDestruction(is_strong, kj::mv(own), &wrappable);
+void wrappable_remove_strong_ref(Wrappable& wrappable) {
+  wrappable.removeStrongRef();
 }
 
 void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced) {
@@ -1131,6 +1148,75 @@ void global_clear_weak(uintptr_t* global) {
   if (!handle.IsEmpty()) {
     handle.ClearWeak<void>();
   }
+}
+
+// MemoryTracker
+Isolate* memory_tracker_isolate(MemoryTracker& tracker) {
+  return tracker.isolate();
+}
+
+void memory_tracker_track_field_with_size(
+    MemoryTracker& tracker, const char* edge_name, size_t size, const char* node_name) {
+  if (node_name == nullptr) {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size);
+  } else {
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), size, kj::StringPtr(node_name));
+  }
+}
+
+void memory_tracker_track_wrappable(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  // As the base class, so that the node is the one HeapTracer adds for the same Wrappable.
+  tracker.trackField(
+      memoryTrackerEdgeName(edge_name), static_cast<const ::workerd::jsg::Wrappable*>(&wrappable));
+}
+
+void memory_tracker_track_wrappable_leaf(
+    MemoryTracker& tracker, const char* edge_name, const Wrappable& wrappable) {
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  // Reading the wrapper changes nothing, but tryGetHandle() is not const.
+  auto& base = const_cast<::workerd::jsg::Wrappable&>(
+      static_cast<const ::workerd::jsg::Wrappable&>(wrappable));
+  KJ_IF_SOME(handle, base.tryGetHandle(isolate)) {
+    tracker.trackField(memoryTrackerEdgeName(edge_name), handle);
+  } else {
+    // The name is a literal, as `jsgGetMemoryName()` says.
+    tracker.trackFieldWithSize(memoryTrackerEdgeName(edge_name), wrappable.jsgGetMemorySelfSize(),
+        wrappable.jsgGetMemoryName());
+  }
+}
+
+void memory_tracker_track_global(
+    MemoryTracker& tracker, const char* edge_name, const Global& global) {
+  if (global.ptr == 0) return;
+  auto* isolate = tracker.isolate();
+  v8::HandleScope scope(isolate);
+  tracker.trackField(memoryTrackerEdgeName(edge_name),
+      v8::Local<v8::Value>::New(isolate, global_as_ref_from_ffi<v8::Value>(global)));
+}
+
+bool memory_tracker_push_retainer(MemoryTracker& tracker,
+    size_t address,
+    size_t type,
+    const char* name,
+    size_t size,
+    const char* edge_name) {
+  return tracker.pushRetainer(reinterpret_cast<const void*>(address),
+      reinterpret_cast<const void*>(type), name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_push_container(
+    MemoryTracker& tracker, const char* name, size_t size, const char* edge_name) {
+  tracker.pushContainer(name, size, memoryTrackerEdgeName(edge_name));
+}
+
+void memory_tracker_pop_node(MemoryTracker& tracker) {
+  tracker.popNode();
+}
+
+size_t memory_tracker_depth(const MemoryTracker& tracker) {
+  return tracker.depth();
 }
 
 void wrappable_visit_ref(
@@ -1181,12 +1267,8 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
 kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
   auto data = args->DataV2().As<v8::Value>();
   KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
-    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
-    // as ::workerd::jsg::downcastWrappable() does.
-    const auto& actualType = typeid(wrappable);
-    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
-      return kj::downcast<Wrappable>(wrappable).toRc();
-    }
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data.
+    return asRustWrappable(wrappable);
   }
   return kj::none;
 }
@@ -1434,6 +1516,22 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, functionTemplate);
   }
 
+  // Mirrors ResourceTypeBuilder::registerDispose and registerAsyncDispose in resource.h.
+  auto setDisposer = [&](v8::Local<v8::Symbol> symbol, size_t callback) {
+    registerExternalRef(callback);
+    prototype->Set(symbol,
+        v8::FunctionTemplate::New(isolate,
+            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::PropertyAttribute::DontEnum);
+  };
+  KJ_IF_SOME(callback, descriptor.dispose) {
+    setDisposer(v8::Symbol::GetDispose(isolate), callback);
+  }
+  KJ_IF_SOME(callback, descriptor.async_dispose) {
+    setDisposer(v8::Symbol::GetAsyncDispose(isolate), callback);
+  }
+
   // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
   // the inspectProperties ObjectTemplate under the kResourceTypeInspect API symbol.  node:util's
   // inspect() checks for this symbol on the prototype to identify JSG resource types and uses
@@ -1560,6 +1658,14 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     setWildcardProperty(instance, wildcard, registerExternalRef);
   }
 
+  // Mirrors registerCallable() (resource.h): the call handler goes on the instance, not the
+  // prototype, and V8 runs it with the instance as `this`.
+  KJ_IF_SOME(callable, descriptor.callable) {
+    instance->SetCallAsFunctionHandler(
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callable)));
+    registerExternalRef(callable);
+  }
+
   auto result = scope.Escape(constructor);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
@@ -1594,8 +1700,8 @@ Realm* realm_from_isolate(Isolate* isolate) {
 
 namespace {
 // The IsolateBase deferred action hook of an isolate with a Rust Realm.
-void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
-  realm_reset_globals_awaiting_lock(isolate);
+void drainAwaitingLock(v8::Isolate* isolate) {
+  realm_drain_awaiting_lock(isolate);
 }
 
 // The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
@@ -1612,7 +1718,7 @@ bool realm_can_attach(Isolate* isolate) {
 
 void realm_attach(Isolate* isolate, Realm& realm) {
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
-  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&drainAwaitingLock);
 }
 
 void realm_detach(Isolate* isolate, const IsolateState* state) {
@@ -1628,6 +1734,26 @@ bool integer_enforce_range_autogate_enabled() {
       ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
 }
 
+// JSON
+MaybeLocal value_json_parse(Isolate* isolate, const Local& text) {
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(
+      v8::JSON::Parse(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::String>(text)));
+}
+
+bool local_json_stringify(
+    Isolate* isolate, const Local& value, const Local& gap, ::rust::String& result) {
+  if (exceptionPending(isolate)) return false;
+  v8::Local<v8::String> json;
+  if (!v8::JSON::Stringify(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value),
+          local_as_ref_from_ffi<v8::String>(gap))
+           .ToLocal(&json)) {
+    return false;
+  }
+  result = toRustString(isolate, json);
+  return true;
+}
+
 // Errors
 namespace {
 Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::String> message) {
@@ -1641,15 +1767,15 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
     default:
-      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
-      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      // Error, and the DOMException names, which Rust creates with
+      // dom_exception_create_from_bytes() instead. Only a fast callback could pass one here, and
+      // it throws only TypeErrors.
       return to_ffi(v8::Exception::Error(message));
   }
 }
-}  // namespace
 
-Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+v8::Local<v8::String> errorMessageFromBytes(
+    Isolate* isolate, ::rust::Slice<const uint8_t> message) {
   // kNormal (not kInternalized): error messages are arbitrary, potentially
   // non-UTF-8 byte strings (e.g. filesystem paths) and should not pollute the
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
@@ -1661,10 +1787,23 @@ Local exception_create_from_bytes(
   // `error_message_for_v8` in lib.rs); the cut here keeps the shim total for any caller, and
   // after it NewFromUtf8 cannot refuse the string.
   auto utf8 = kj::arrayPtr(reinterpret_cast<const char*>(message.data()), message.size());
-  auto v8Message = newUtf8String(
+  return newUtf8String(
       isolate, utf8.first(kj::min(utf8.size(), MAX_UTF8_STRING_SIZE)), v8::NewStringType::kNormal)
-                       .ToLocalChecked();
-  return exceptionCreateFromMessage(exception_type, v8Message);
+      .ToLocalChecked();
+}
+}  // namespace
+
+Local exception_create_from_bytes(
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message) {
+  return exceptionCreateFromMessage(exception_type, errorMessageFromBytes(isolate, message));
+}
+
+MaybeLocal dom_exception_create_from_bytes(
+    Isolate* isolate, ::rust::Str name, ::rust::Slice<const uint8_t> message) {
+  // Creating a DOMException instantiates a template in the current context.
+  if (exceptionPending(isolate)) return {};
+  return maybe_local_to_ffi(::workerd::jsg::newDOMException(
+      isolate, kj::arrayPtr(name.data(), name.size()), errorMessageFromBytes(isolate, message)));
 }
 
 namespace {
@@ -1725,12 +1864,36 @@ void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
+bool isolate_terminate_execution_now(Isolate* isolate) {
+  // Already terminating: the termination is pending, and entering V8 again would run code with it
+  // pending, which V8 forbids.
+  if (isolate->IsExecutionTerminating()) return true;
+  isolate_terminate_execution(isolate);
+  // TerminateExecution() only requests the termination; V8 delivers it at its next interrupt
+  // check. Running V8 code makes it check at once, as in jsg::Lock::terminateExecutionNow(). The
+  // result is empty once the termination is pending; no TryCatch here, so it stays pending.
+  //
+  // This skips the exceptionPending() check of the shim rules (ffi.h) for an ordinary exception:
+  // JSON::Stringify enters through PrepareForExecutionScope, which clears a pending exception, and
+  // the termination then takes its place. Replacing the exception is the point here, as it is in
+  // jsg::Lock::terminateExecutionNow(), and not entering V8 would leave the termination
+  // undelivered, so that JavaScript could catch the exception and run on.
+  auto context = isolate->GetCurrentContext();
+  KJ_ASSERT(!context.IsEmpty(), "terminating execution now requires an entered context");
+  (void)v8::JSON::Stringify(context, v8::String::Empty(isolate));
+  return isolate->IsExecutionTerminating();
+}
+
 bool isolate_is_execution_terminating(Isolate* isolate) {
   return isolate->IsExecutionTerminating();
 }
 
 bool isolate_has_pending_exception(Isolate* isolate) {
   return isolate->HasPendingException();
+}
+
+bool isolate_captures_throws_as_rejections(Isolate* isolate) {
+  return workerd::jsg::getCaptureThrowsAsRejections(isolate);
 }
 
 Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {

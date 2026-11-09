@@ -6,7 +6,6 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/stored-value.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
@@ -27,7 +26,7 @@ bool isIntegerInRange(double value, double min, double max) {
 }
 
 UserDefinedRetryPolicy toUserDefinedRetryPolicy(
-    const DurableObjectNamespace::GetDurableObjectOptionsWithRetry::RetryOptions& options) {
+    const DurableObjectNamespace::GetDurableObjectOptions::RetryOptions& options) {
   using Policy = UserDefinedRetryPolicy;
   constexpr auto MIN_TIMEOUT_MS = Policy::MIN_CONFIGURABLE_TIMEOUT / kj::MILLISECONDS;
   constexpr auto MAX_TIMEOUT_MS = Policy::MAX_CONFIGURABLE_TIMEOUT / kj::MILLISECONDS;
@@ -256,68 +255,31 @@ jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(jsg::Lock& js, kj
 jsg::Ref<DurableObject> DurableObjectNamespace::getByName(
     jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptions> options) {
   auto id = js.alloc<DurableObjectId>(idFactory->idFromName(kj::mv(name)));
-  return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options), kj::none);
-}
-
-jsg::Ref<DurableObject> DurableObjectNamespace::getByNameWithRetry(
-    jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptionsWithRetry> options) {
-  auto id = js.alloc<DurableObjectId>(idFactory->idFromName(kj::mv(name)));
   return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
     jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options) {
-  return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options), kj::none);
-}
-
-jsg::Ref<DurableObject> DurableObjectNamespace::getWithRetry(jsg::Lock& js,
-    jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptionsWithRetry> options) {
   return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::getExisting(
     jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options) {
-  return getImpl(js, ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options), kj::none);
-}
-
-jsg::Ref<DurableObject> DurableObjectNamespace::getExistingWithRetry(jsg::Lock& js,
-    jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptionsWithRetry> options) {
   return getImpl(js, ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
     ActorGetMode mode,
     jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptionsWithRetry> options) {
-  kj::Maybe<UserDefinedRetryPolicy> retryPolicy;
-  kj::Maybe<GetDurableObjectOptions> plainOptions;
-  KJ_IF_SOME(o, options) {
-    KJ_IF_SOME(r, o.retry) {
-      auto policy = toUserDefinedRetryPolicy(r);
-      if (util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
-        retryPolicy = policy;
-      }
-    }
-    plainOptions = GetDurableObjectOptions{
-      .locationHint = kj::mv(o.locationHint),
-      .routingMode = kj::mv(o.routingMode),
-      .version = kj::mv(o.version),
-    };
-  }
-  return getImpl(js, mode, kj::mv(id), kj::mv(plainOptions), retryPolicy);
-}
-
-jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
-    ActorGetMode mode,
-    jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options,
-    kj::Maybe<UserDefinedRetryPolicy> retryPolicy) {
+    jsg::Optional<GetDurableObjectOptions> options) {
   JSG_REQUIRE(idFactory->matchesJurisdiction(id->getInner()), TypeError,
       "get called on jurisdictional subnamespace with an ID from a different jurisdiction");
+  kj::Maybe<UserDefinedRetryPolicy> retryPolicy;
   ActorRoutingMode routingMode = ActorRoutingMode::DEFAULT;
   KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(r, o.retry) {
+      retryPolicy = toUserDefinedRetryPolicy(r);
+    }
     KJ_IF_SOME(rm, o.routingMode) {
       JSG_REQUIRE(rm == "primary-only", RangeError, "unknown routingMode: ", rm);
       routingMode = ActorRoutingMode::PRIMARY_ONLY;

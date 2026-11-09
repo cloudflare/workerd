@@ -111,6 +111,116 @@ class TransferredSocketStream final: public kj::AsyncIoStream {
   kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> output;
 };
 
+// Forwards to the connection, recording the errno name of the first recognized read and write
+// failure so that node:net can report it the way Node.js does.
+class ErrnoRecordingStream final: public kj::AsyncIoStream {
+ public:
+  ErrnoRecordingStream(kj::Rc<kj::AsyncIoStream> inner, kj::Rc<SocketStreamErrnos> errnos)
+      : inner(kj::mv(inner)),
+        errnos(kj::mv(errnos)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes)
+        .catch_([errnos = errnos.addRef()](kj::Exception&& e) mutable -> kj::Promise<size_t> {
+      record(errnos->read, e);
+      return kj::mv(e);
+    });
+  }
+  kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    try {
+      return inner->tryReadSync(buffer, minBytes);
+    } catch (...) {
+      auto e = kj::getCaughtExceptionAsKj();
+      record(errnos->read, e);
+      kj::throwFatalException(kj::mv(e));
+    }
+  }
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner->tryGetLength();
+  }
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    return inner->pumpTo(output, amount);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return recordWrite(inner->write(buffer));
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return recordWrite(inner->write(pieces));
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    try {
+      return inner->tryWriteSync(buffer);
+    } catch (...) {
+      auto e = kj::getCaughtExceptionAsKj();
+      record(errnos->write, e);
+      kj::throwFatalException(kj::mv(e));
+    }
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    try {
+      return inner->tryWriteSync(pieces);
+    } catch (...) {
+      auto e = kj::getCaughtExceptionAsKj();
+      record(errnos->write, e);
+      kj::throwFatalException(kj::mv(e));
+    }
+  }
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& input, uint64_t amount) override {
+    return inner->tryPumpFrom(input, amount);
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+  void abortWrite(kj::Exception&& exception) override {
+    inner->abortWrite(kj::mv(exception));
+  }
+
+  void shutdownWrite() override {
+    inner->shutdownWrite();
+  }
+  void abortRead() override {
+    inner->abortRead();
+  }
+  void getsockopt(int level, int option, void* value, uint* length) override {
+    inner->getsockopt(level, option, value, length);
+  }
+  void setsockopt(int level, int option, const void* value, uint length) override {
+    inner->setsockopt(level, option, value, length);
+  }
+  void getsockname(struct sockaddr* addr, uint* length) override {
+    inner->getsockname(addr, length);
+  }
+  void getpeername(struct sockaddr* addr, uint* length) override {
+    inner->getpeername(addr, length);
+  }
+  kj::Maybe<int> getFd() const override {
+    return inner->getFd();
+  }
+  kj::Maybe<void*> getWin32Handle() const override {
+    return inner->getWin32Handle();
+  }
+
+ private:
+  kj::Rc<kj::AsyncIoStream> inner;
+  kj::Rc<SocketStreamErrnos> errnos;
+
+  static void record(kj::Maybe<kj::StringPtr>& slot, const kj::Exception& e) {
+    if (slot == kj::none) {
+      slot = connectErrnoName(e);
+    }
+  }
+
+  kj::Promise<void> recordWrite(kj::Promise<void> promise) {
+    return promise.catch_(
+        [errnos = errnos.addRef()](kj::Exception&& e) mutable -> kj::Promise<void> {
+      record(errnos->write, e);
+      return kj::mv(e);
+    });
+  }
+};
+
 // This function performs some basic length and characters checks, it does not guarantee that
 // the specified host is a valid domain. It should only be used to reject malicious
 // hosts.
@@ -644,8 +754,11 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   closedPrPair.promise.markAsHandled(js);
 
   kj::Rc<kj::AsyncIoStream> refcountedConnection(kj::mv(connection));
+  auto streamErrnos = kj::rc<SocketStreamErrnos>();
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(refcountedConnection.addRef(), ioContext);
+  auto sysStreams = newSystemMultiStream(
+      kj::rc<ErrnoRecordingStream>(refcountedConnection.addRef(), streamErrnos.addRef()),
+      ioContext);
   auto readable = JsReadableStream::create(js, ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
@@ -665,6 +778,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
       kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
       protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 
+  result->setStreamErrnos(kj::mv(streamErrnos));
   result->wireClosedToDisconnect(js, kj::mv(disconnected));
   KJ_IF_SOME(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(p));
@@ -1204,6 +1318,8 @@ kj::Maybe<kj::StringPtr> osErrorErrnoName(int code) {
   switch (code) {
     case 10061:  // WSAECONNREFUSED
       return "ECONNREFUSED"_kj;
+    case 10054:  // WSAECONNRESET
+      return "ECONNRESET"_kj;
     case 10060:  // WSAETIMEDOUT
       return "ETIMEDOUT"_kj;
     case 10065:  // WSAEHOSTUNREACH
@@ -1220,6 +1336,10 @@ kj::Maybe<kj::StringPtr> osErrorErrnoName(int code) {
   switch (code) {
     case ECONNREFUSED:
       return "ECONNREFUSED"_kj;
+    case ECONNRESET:
+      return "ECONNRESET"_kj;
+    case EPIPE:
+      return "EPIPE"_kj;
     case ETIMEDOUT:
       return "ETIMEDOUT"_kj;
     case EHOSTUNREACH:
@@ -1252,6 +1372,8 @@ kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
     }
   }
   if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
+  if (description.contains("Connection reset by peer"_kj)) return "ECONNRESET"_kj;
+  if (description.contains("Broken pipe"_kj)) return "EPIPE"_kj;
   // Linux and macOS spellings of strerror(ETIMEDOUT).
   if (description.contains("Connection timed out"_kj) ||
       description.contains("Operation timed out"_kj)) {
@@ -1712,6 +1834,30 @@ jsg::Optional<kj::StringPtr> SocketsModule::getConnectFailureCode(
   return socket->getConnectErrno();
 }
 
+namespace {
+kj::Maybe<jsg::Ref<Socket>> tryUnwrapSocket(jsg::Lock& js, jsg::JsValue value) {
+  KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
+    return object.tryUnwrapAs<Socket>(js);
+  }
+  return kj::none;
+}
+}  // namespace
+
+jsg::Optional<kj::StringPtr> SocketsModule::getReadFailureCode(jsg::Lock& js, jsg::JsValue socket) {
+  KJ_IF_SOME(s, tryUnwrapSocket(js, socket)) {
+    return s->getReadErrno();
+  }
+  return kj::none;
+}
+
+jsg::Optional<kj::StringPtr> SocketsModule::getWriteFailureCode(
+    jsg::Lock& js, jsg::JsValue socket) {
+  KJ_IF_SOME(s, tryUnwrapSocket(js, socket)) {
+    return s->getWriteErrno();
+  }
+  return kj::none;
+}
+
 kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {
   auto listeners = Worker::Api::current().getInboundListeners();
   return KJ_MAP(l, listeners) {
@@ -1813,6 +1959,10 @@ class StreamWorkerInterface final: public WorkerInterface {
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     KJ_UNIMPLEMENTED("runAlarm() not supported on StreamWorkerInterface");
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_UNIMPLEMENTED("abandonAlarm() not supported on StreamWorkerInterface");
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {

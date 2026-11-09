@@ -2226,6 +2226,156 @@ KJ_TEST("JsReadableStream text() rejects a declared length over the limit before
       e.getDescription());
 }
 
+// A source that delivers `data` while declaring a total of `declared` bytes, if any, which may
+// be untrue. Records the minimum of each read and the reason it is canceled with.
+class DeclaringSource final: public ReadableStreamSource {
+ public:
+  DeclaringSource(kj::ArrayPtr<const kj::byte> data,
+      kj::Maybe<uint64_t> declared,
+      kj::Vector<size_t>& minimums,
+      kj::Maybe<kj::Exception>& canceled)
+      : data(data),
+        declared(declared),
+        minimums(minimums),
+        canceled(canceled) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    minimums.add(minBytes);
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount)
+        .copyFrom(data.slice(offset, offset + amount));
+    offset += amount;
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding != StreamEncoding::IDENTITY) return kj::none;
+    return declared.map([&](uint64_t total) { return total - kj::min(total, offset); });
+  }
+
+  void cancel(kj::Exception reason) override {
+    canceled = kj::mv(reason);
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> data;
+  kj::Maybe<uint64_t> declared;
+  size_t offset = 0;
+  kj::Vector<size_t>& minimums;
+  kj::Maybe<kj::Exception>& canceled;
+};
+
+// Consumes a native TypeScript stream over a DeclaringSource with arrayBuffer() and reports
+// the rejection's description, or the bytes it resolves with.
+struct DeclaringConsumption {
+  kj::Vector<size_t> minimums;
+  kj::Maybe<kj::Exception> canceled;
+  kj::Maybe<kj::String> rejection;
+  kj::Maybe<kj::Array<kj::byte>> bytes;
+  bool lockedAfter = false;
+  bool disturbedAfter = false;
+};
+
+DeclaringConsumption consumeDeclaring(
+    kj::ArrayPtr<const kj::byte> data, kj::Maybe<uint64_t> declared, uint64_t limit) {
+  auto fixture = makeTsStreamsFixture();
+  DeclaringConsumption result;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(js, env.context,
+        kj::heap<DeclaringSource>(data, declared, result.minimums, result.canceled));
+    auto promise = stream.arrayBuffer(js, limit).then(
+        js, [&result](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+      result.bytes = kj::heapArray(buffer.getHandle(js).asArrayPtr().asConst());
+    }, [&result](jsg::Lock& js, jsg::Value exception) {
+      result.rejection = kj::str(js.exceptionToKj(kj::mv(exception)).getDescription());
+    });
+    result.lockedAfter = stream.isLocked(js);
+    result.disturbedAfter = stream.isDisturbed(js);
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  return result;
+}
+
+KJ_TEST("JsReadableStream consumption collects a native TypeScript stream from its source") {
+  // The bytes are collected in C++ straight from the source, in reads of the whole declared
+  // length (the JavaScript conduit asks for at least one byte at a time), and the stream is
+  // handed off: locked and disturbed from the start of the consumption.
+  auto result = consumeDeclaring(kData.asBytes(), kData.size(), kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.bytes).asPtr() == kData.asBytes());
+  KJ_ASSERT(result.minimums.size() == 1, result.minimums.size());
+  KJ_EXPECT(result.minimums[0] > kData.size(), result.minimums[0]);
+  KJ_EXPECT(result.lockedAfter);
+  KJ_EXPECT(result.disturbedAfter);
+  KJ_EXPECT(result.canceled == kj::none);
+
+  // Without a declared length, the reads are bounded by the read size, not the limit.
+  auto undeclared = consumeDeclaring(kData.asBytes(), kj::none, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == kData.asBytes());
+}
+
+KJ_TEST("JsReadableStream consumption reads a declared length of up to 512 KiB at once") {
+  // As the legacy AllReader does. Without a declaration, the same bytes take 128 KiB reads.
+  auto data = kj::heapArray<kj::byte>(300 * 1024);
+  data.asPtr().fill('x');
+  auto declared = consumeDeclaring(data, data.size(), kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(declared.bytes).asPtr() == data.asPtr());
+  KJ_ASSERT(declared.minimums.size() == 1, declared.minimums.size());
+  KJ_EXPECT(declared.minimums[0] == data.size() + 1, declared.minimums[0]);
+
+  auto undeclared = consumeDeclaring(data, kj::none, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(undeclared.bytes).asPtr() == data.asPtr());
+  KJ_EXPECT(undeclared.minimums.size() == 3, undeclared.minimums.size());
+}
+
+KJ_TEST("JsReadableStream consumption of a native stream holds it to its declared length") {
+  // As the native conduit does: more bytes than declared, or fewer, fail the consumption
+  // without canceling the source.
+  auto over = consumeDeclaring(kData.asBytes(), 5, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(over.rejection) ==
+          "jsg.RangeError: native source delivered more bytes than its declared expectedLength",
+      over.rejection);
+  KJ_EXPECT(over.canceled == kj::none);
+
+  auto under = consumeDeclaring(kData.asBytes(), kData.size() + 5, kLimit);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(under.rejection) ==
+          "jsg.RangeError: native source closed before producing its declared expectedLength",
+      under.rejection);
+  KJ_EXPECT(under.canceled == kj::none);
+}
+
+KJ_TEST("JsReadableStream consumption of a native stream over the limit cancels its source") {
+  auto result = consumeDeclaring(kData.asBytes(), kj::none, kData.size() - 1);
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(result.rejection) == "jsg.TypeError: Memory limit exceeded before EOF.",
+      result.rejection);
+  auto& e = KJ_ASSERT_NONNULL(result.canceled);
+  KJ_EXPECT(e.getDescription().contains("Memory limit exceeded before EOF."), e.getDescription());
+}
+
+KJ_TEST("JsReadableStream text() of a native stream strips a BOM across several reads") {
+  // Longer than one read, so the collected bytes come in several buffers.
+  auto data = kj::heapArray<kj::byte>(UTF8_BOM_SIZE + 600 * 1024);
+  data.first(UTF8_BOM_SIZE).copyFrom(kj::arrayPtr(UTF8_BOM, UTF8_BOM_SIZE));
+  data.slice(UTF8_BOM_SIZE).fill('x');
+  for (auto declared: {kj::Maybe<uint64_t>(data.size()), kj::Maybe<uint64_t>(kj::none)}) {
+    auto fixture = makeTsStreamsFixture();
+    kj::Vector<size_t> minimums;
+    kj::Maybe<kj::Exception> canceled;
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto stream = JsReadableStream::create(
+          js, env.context, kj::heap<DeclaringSource>(data, declared, minimums, canceled));
+      auto promise = stream.text(js, kLimit).then(js, [&](jsg::Lock& js, kj::String text) {
+        KJ_EXPECT(text.size() == data.size() - UTF8_BOM_SIZE, text.size());
+        KJ_EXPECT(text.asBytes() == data.slice(UTF8_BOM_SIZE).asConst());
+      });
+      return env.context.awaitJs(js, kj::mv(promise));
+    });
+    KJ_EXPECT(minimums.size() > 1, minimums.size());
+  }
+}
+
 KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
   auto fixture = makeTsStreamsFixture();
   kj::Vector<kj::byte> collected;
@@ -2472,6 +2622,41 @@ KJ_TEST("TypeScript native stream waits out a pull its reader abandoned") {
         const { done, value } = await read;
         assert(!done && value[0] === 7, `${outcome}: the new read missed the next chunk`);
       }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream starts every pull with an unaborted signal") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // A pull whose signal settles unaborted hands it on to the next pull; a pull after an
+    // aborted one gets a new signal.
+    return runConduitScript(env, R"js(
+      const { source, pulls } = scriptedSource();
+      const stream = new ReadableStream(source);
+      let reader = stream.getReader();
+      for (let i = 0; i < 2; i++) {
+        const read = reader.read();
+        pulls[i].controller.enqueue(new Uint8Array([i]));
+        pulls[i].resolve();
+        assert((await read).value[0] === i, `read ${i} missed its chunk`);
+      }
+      assert(pulls[1].signal === pulls[0].signal, 'a settled pull did not hand on its signal');
+      const abandoned = reader.read().then(() => undefined, () => undefined);
+      reader.releaseLock();
+      await abandoned;
+      assert(pulls[2].signal === pulls[1].signal && pulls[2].signal.aborted,
+        'releasing the reader did not abort the reused signal');
+      reader = stream.getReader();
+      const read = reader.read();
+      pulls[2].resolve();
+      await microtasks();
+      assert(pulls.length === 4, 'the new read did not pull');
+      assert(pulls[3].signal !== pulls[2].signal && !pulls[3].signal.aborted,
+        'the pull after an abort did not get a new signal');
+      pulls[3].controller.enqueue(new Uint8Array([3]));
+      pulls[3].resolve();
+      assert((await read).value[0] === 3, 'the new read missed its chunk');
     )js"_kj);
   });
 }
@@ -3438,9 +3623,10 @@ KJ_TEST("JsReadableStream onEof fires for DrainingReader consumption of a native
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    // S1 semantics: C++ consumption reads through the conduit rather than detaching the
-    // source, so the EOF signal fires. (Deliberate divergence from the legacy arm, whose
-    // readAllBytes detaches the source before EOF; see the plan's decision log.)
+    // S1 semantics: the EOF signal fires when C++ consumption reaches the source's EOF,
+    // whether the conduit reads it or the bridge collects the extracted source. (Deliberate
+    // divergence from the legacy arm, whose readAllBytes detaches the source before EOF; see
+    // the plan's decision log.)
     auto stream = JsReadableStream::create(js, env.context, kj::heap<ContentSource>(kData));
     stream.onEof(js).then(js, [&fired](jsg::Lock&) { fired = true; }).markAsHandled(js);
 
@@ -3827,9 +4013,11 @@ KJ_TEST("JsReadableStream pipeThrough pipes TypeScript-backed endpoints") {
     auto promise = result.text(js, kLimit).then(js, [](jsg::Lock& js, kj::String text) {
       KJ_EXPECT(text == "pair"_kj);
     });
-    return env.context.awaitJs(js, kj::mv(promise));
+    // The pipe, marked handled by pipeThrough, settles on its own: wait until nothing else is
+    // left to run.
+    return env.context.awaitJs(js, kj::mv(promise)).then([]() { return kj::evalLast([]() {}); });
   });
-  // The pipe (marked handled by pipeThrough) pumped this stream into the pair's writable.
+  // The pipe pumped this stream into the pair's writable.
   KJ_EXPECT(collected.asPtr() == kData.asBytes());
   KJ_EXPECT(ended);
 }

@@ -9,7 +9,6 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <kj/async-io.h>
 #include <kj/test.h>
@@ -413,18 +412,11 @@ enum class ActorFetchBodyKind {
   STREAMING,
 };
 
-enum class UserDefinedRetryPolicyEnabled {
-  DISABLED,
-  ENABLED,
-};
-
 kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     kj::Maybe<kj::StringPtr> body,
     ActorFetchKind kind,
     ActorFetchBodyKind bodyKind = ActorFetchBodyKind::NULL_OR_BUFFERED,
-    kj::Maybe<UserDefinedRetryPolicy> retryPolicy = kj::none,
-    UserDefinedRetryPolicyEnabled userDefinedRetryPolicyEnabled =
-        UserDefinedRetryPolicyEnabled::DISABLED) {
+    kj::Maybe<UserDefinedRetryPolicy> retryPolicy = kj::none) {
   kj::TimerImpl timer(kj::origin<kj::TimePoint>());
   DeterministicTimerChannel timerChannel(timer);
   state.timerChannel = timerChannel;
@@ -449,11 +441,6 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  kj::Vector<kj::StringPtr> autogates;
-  if (userDefinedRetryPolicyEnabled == UserDefinedRetryPolicyEnabled::ENABLED) {
-    autogates.add("durable-object-retries-userland"_kj);
-  }
-  util::Autogate::initAutogateNamesForTest(autogates.asPtr(), util::IgnoreAllAutogatesEnv::YES);
   kj::Maybe<kj::Exception> failure;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -497,10 +484,8 @@ kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
 kj::Maybe<kj::Exception> runActorFetch(ReplayState& state,
     kj::Maybe<kj::StringPtr> body,
     ActorFetchKind kind,
-    kj::Maybe<UserDefinedRetryPolicy> retryPolicy,
-    UserDefinedRetryPolicyEnabled userDefinedRetryPolicyEnabled) {
-  return runActorFetch(state, body, kind, ActorFetchBodyKind::NULL_OR_BUFFERED, retryPolicy,
-      userDefinedRetryPolicyEnabled);
+    kj::Maybe<UserDefinedRetryPolicy> retryPolicy) {
+  return runActorFetch(state, body, kind, ActorFetchBodyKind::NULL_OR_BUFFERED, retryPolicy);
 }
 
 void runActorFetchUntilCanceled(ReplayState& state, kj::Promise<void> pauseStarted) {
@@ -518,7 +503,6 @@ void runActorFetchUntilCanceled(ReplayState& state, kj::Promise<void> pauseStart
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -687,7 +671,6 @@ KJ_TEST("fetch generates actor retry metadata for a supported outgoing factory")
   kj::Date beforeFetch = kj::UNIX_EPOCH;
   kj::Date afterFetch = kj::UNIX_EPOCH;
   TestFixture fixture;
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -989,7 +972,6 @@ KJ_TEST("actor fetch abort before the first retry does not report an outcome") {
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -1065,7 +1047,6 @@ KJ_TEST("dropping actor fetch during a later backoff reports other") {
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) mutable {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -1138,22 +1119,6 @@ KJ_TEST("actor fetch makes a redirected streaming request retryable") {
   KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
 }
 
-KJ_TEST("actor fetch ignores configured retry count while the userland retry gate is disabled") {
-  ReplayState state{
-    .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS,
-        ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS),
-  };
-
-  KJ_EXPECT(
-      runActorFetch(state, kj::none, ActorFetchKind::HTTP, UserDefinedRetryPolicy{.maxRetries = 0},
-          UserDefinedRetryPolicyEnabled::DISABLED) != kj::none);
-  KJ_EXPECT(state.requestCount == 5);
-  KJ_EXPECT(state.retryCount == 4);
-  KJ_EXPECT(state.observedRetryCount == 4);
-  KJ_ASSERT(state.outcomes.size() == 1);
-  KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
-}
-
 KJ_TEST("actor fetch uses the system default retry count when the binding sets none") {
   auto checkFiveAttempts = [](kj::Maybe<UserDefinedRetryPolicy> retryPolicy) {
     ReplayState state{
@@ -1161,8 +1126,7 @@ KJ_TEST("actor fetch uses the system default retry count when the binding sets n
           ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS),
     };
 
-    KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP, retryPolicy,
-                  UserDefinedRetryPolicyEnabled::ENABLED) != kj::none);
+    KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP, retryPolicy) != kj::none);
     KJ_EXPECT(state.requestCount == 5);
     KJ_EXPECT(state.retryCount == 4);
     KJ_EXPECT(state.observedRetryCount == 4);
@@ -1171,7 +1135,7 @@ KJ_TEST("actor fetch uses the system default retry count when the binding sets n
   };
 
   // No policy on the binding falls back to the system default. A policy with only defaults set
-  // behaves the same, so enabling the userland gate changes nothing for existing bindings.
+  // behaves the same.
   checkFiveAttempts(kj::none);
   checkFiveAttempts(UserDefinedRetryPolicy{});
 }
@@ -1179,15 +1143,13 @@ KJ_TEST("actor fetch uses the system default retry count when the binding sets n
 KJ_TEST("actor fetch honors the configured retry count") {
   ReplayState attemptsDisabled{.actions = kj::arr(ReplayAction::AMBIGUOUS)};
   KJ_EXPECT(runActorFetch(attemptsDisabled, kj::none, ActorFetchKind::HTTP,
-                UserDefinedRetryPolicy{.maxRetries = 0},
-                UserDefinedRetryPolicyEnabled::ENABLED) != kj::none);
+                UserDefinedRetryPolicy{.maxRetries = 0}) != kj::none);
   KJ_EXPECT(attemptsDisabled.requestCount == 1);
   KJ_EXPECT(attemptsDisabled.retryCount == 0);
 
   ReplayState oneRetry{.actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::AMBIGUOUS)};
   KJ_EXPECT(runActorFetch(oneRetry, kj::none, ActorFetchKind::HTTP,
-                UserDefinedRetryPolicy{.maxRetries = 1},
-                UserDefinedRetryPolicyEnabled::ENABLED) != kj::none);
+                UserDefinedRetryPolicy{.maxRetries = 1}) != kj::none);
   KJ_EXPECT(oneRetry.requestCount == 2);
   KJ_EXPECT(oneRetry.retryCount == 1);
 }
@@ -1197,9 +1159,8 @@ KJ_TEST("configured retry count resets after a redirect") {
     .actions = kj::arr(ReplayAction::AMBIGUOUS, ReplayAction::REDIRECT, ReplayAction::AMBIGUOUS),
   };
 
-  KJ_EXPECT(
-      runActorFetch(state, kj::none, ActorFetchKind::HTTP, UserDefinedRetryPolicy{.maxRetries = 1},
-          UserDefinedRetryPolicyEnabled::ENABLED) == kj::none);
+  KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP,
+                UserDefinedRetryPolicy{.maxRetries = 1}) == kj::none);
   KJ_EXPECT(state.requestCount == 4);
   KJ_EXPECT(state.retryCount == 2);
   KJ_ASSERT(state.outcomes.size() == 2);
@@ -1267,20 +1228,6 @@ KJ_TEST("actor fetch does not start a retry after the start budget") {
   KJ_EXPECT(state.outcomes.size() == 0);
 }
 
-KJ_TEST(
-    "actor fetch ignores a configured retry timeout while the userland retry gate is disabled") {
-  ReplayState state{
-    .actions = kj::arr(ReplayAction::RETRY_DELAY_EXCEEDS_BUDGET),
-    .retryTimeoutDelay = 501 * kj::MILLISECONDS,
-  };
-
-  KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP,
-                UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS},
-                UserDefinedRetryPolicyEnabled::DISABLED) == kj::none);
-  KJ_EXPECT(state.requestCount == 2);
-  KJ_EXPECT(state.retryCount == 1);
-}
-
 KJ_TEST("handled actor fetch rejection after a configured retry timeout is not unhandled") {
   ReplayState state{
     .actions = kj::arr(ReplayAction::RETRY_DELAY_EXCEEDS_BUDGET),
@@ -1288,8 +1235,7 @@ KJ_TEST("handled actor fetch rejection after a configured retry timeout is not u
   };
 
   auto failure = KJ_REQUIRE_NONNULL(runActorFetch(state, kj::none, ActorFetchKind::HTTP,
-      UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS},
-      UserDefinedRetryPolicyEnabled::ENABLED));
+      UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS}));
   KJ_EXPECT(failure.getType() == kj::Exception::Type::DISCONNECTED, failure);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.acceptedRetryCount == 1);
@@ -1303,8 +1249,7 @@ KJ_TEST("actor fetch lets a slow initial attempt finish after a configured retry
   };
 
   KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP,
-                UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS},
-                UserDefinedRetryPolicyEnabled::ENABLED) == kj::none);
+                UserDefinedRetryPolicy{.timeout = 500 * kj::MILLISECONDS}) == kj::none);
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
 }
@@ -1326,8 +1271,6 @@ void runActorFetchAfterLongGateWait(ReplayState& state, UserDefinedRetryPolicy r
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto gatePaf = kj::newPromiseAndFulfiller<void>();
@@ -1379,7 +1322,6 @@ KJ_TEST("replica actor fetch retries a request-level disconnect on its primary c
   }),
     .checkedSubrequestCount = checkedSubrequestCount,
   });
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
@@ -1484,12 +1426,6 @@ KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for
   });
 }
 
-CompatibilityFlags::Reader makeExperimentalFlags(capnp::MallocMessageBuilder& message) {
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkerdExperimental(true);
-  return flags.asReader();
-}
-
 // Runs `ns.get(id, <options>)` as a worker would, so that JSG converts the options. The result is
 // the stub, or the error get() threw as "<name>: <message>".
 jsg::JsValue getWithOptions(
@@ -1529,10 +1465,7 @@ kj::String retryErrorFor(jsg::Lock& js, jsg::Ref<DurableObjectNamespace>& ns, kj
 }
 
 KJ_TEST("DurableObjectNamespace.get() gives the stub the retry policy it was passed") {
-  capnp::MallocMessageBuilder flagsMessage;
-  TestFixture fixture({.featureFlags = makeExperimentalFlags(flagsMessage)});
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
+  TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
@@ -1571,46 +1504,6 @@ KJ_TEST("DurableObjectNamespace.get() gives the stub the retry policy it was pas
       KJ_EXPECT(retryErrorFor(js, ns, kj::str("{ timeoutMs: ", value, " }")) ==
           "RangeError: retry.timeoutMs must be an integer between 500 and 60000");
     }
-  });
-}
-
-KJ_TEST("DurableObjectNamespace.get() validates but doesn't apply the retry option while the "
-        "userland gate is off") {
-  capnp::MallocMessageBuilder flagsMessage;
-  TestFixture fixture({.featureFlags = makeExperimentalFlags(flagsMessage)});
-  util::Autogate::initAutogateNamesForTest({}, util::IgnoreAllAutogatesEnv::YES);
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& js = env.js;
-    auto ns = js.alloc<DurableObjectNamespace>(static_cast<uint>(1), kj::heap<MockActorIdFactory>(),
-        ActorCallRetriesAllowed::YES, Persistent::NO);
-
-    KJ_EXPECT(retryPolicyFor(js, ns, "{ maxRetries: 1 }") == kj::none);
-    KJ_EXPECT(retryErrorFor(js, ns, "{ maxRetries: 11 }") ==
-        "RangeError: retry.maxRetries must be an integer between 0 and 10");
-    KJ_EXPECT(retryErrorFor(js, ns, "{ timeoutMs: 0.5 }") ==
-        "RangeError: retry.timeoutMs must be an integer between 500 and 60000");
-    KJ_EXPECT(retryErrorFor(js, ns, "{ maxRetries: '1' }").startsWith("TypeError"));
-  });
-}
-
-KJ_TEST("DurableObjectNamespace.get() ignores the retry option without the experimental flag") {
-  TestFixture fixture;
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& js = env.js;
-    auto ns = js.alloc<DurableObjectNamespace>(static_cast<uint>(1), kj::heap<MockActorIdFactory>(),
-        ActorCallRetriesAllowed::YES, Persistent::NO);
-
-    // The option isn't converted, so even values that would fail conversion don't throw.
-    for (const auto& retry: {"{ maxRetries: 1 }"_kj, "{ maxRetries: 11 }"_kj,
-           "{ maxRetries: '1' }"_kj, "null"_kj, "5"_kj}) {
-      KJ_EXPECT(retryPolicyFor(js, ns, retry) == kj::none);
-    }
-    // The property isn't read either, so a getter doesn't run.
-    KJ_EXPECT(policyForOptions(js, ns, "{ get retry() { throw new Error('read'); } }") == kj::none);
   });
 }
 
@@ -1806,8 +1699,6 @@ kj::Maybe<kj::Exception> runFetchWithLostFirstResponse(
     return kj::refcounted<RetryRecordingObserver>(state);
   }),
   });
-  util::Autogate::initAutogateNamesForTest(
-      {"durable-object-retries-userland"_kj}, util::IgnoreAllAutogatesEnv::YES);
   kj::Maybe<kj::Exception> failure;
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {

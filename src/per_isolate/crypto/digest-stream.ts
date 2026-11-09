@@ -74,6 +74,8 @@ const {
   createDigestContext,
 } = utils;
 
+const { kNullProtoObject, kEnumerable } = require('webstreams/common');
+
 const { WritableStream } = require('webstreams/writable') as {
   WritableStream: typeof WritableStreamType;
 };
@@ -244,7 +246,7 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
     // before any stream exists, as in C++.
     const state = createDigestState(algorithm, options);
     const sink = {
-      __proto__: null,
+      __proto__: kNullProtoObject,
       write(chunk: ArrayBuffer | ArrayBufferView): void {
         digestWrite(state, chunk);
       },
@@ -287,11 +289,11 @@ class DigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
 }
 
 ObjectDefineProperties(DigestStream.prototype, {
-  __proto__: null,
-  digest: { __proto__: null, enumerable: true },
-  bytesWritten: { __proto__: null, enumerable: true },
+  __proto__: kNullProtoObject,
+  digest: kEnumerable,
+  bytesWritten: kEnumerable,
   [SymbolToStringTag]: {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     value: 'DigestStream',
     writable: false,
     enumerable: false,

@@ -44,6 +44,12 @@ pub fn is_attr(attr: &syn::Attribute, name: &str) -> bool {
 /// When set, `#[jsg_resource]` on a struct suppresses the auto-generated `Traced`
 /// impl, letting the user write their own.
 pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
+    has_flag(attr, "custom_trace")
+}
+
+/// Returns `true` if the bare word `name` is present in the comma-separated attribute token
+/// stream.
+pub fn has_flag(attr: &TokenStream, name: &str) -> bool {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
@@ -56,7 +62,7 @@ pub fn has_custom_trace_flag(attr: &TokenStream) -> bool {
 
     parsed
         .iter()
-        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident("custom_trace")))
+        .any(|meta| matches!(meta, Meta::Path(path) if path.is_ident(name)))
 }
 
 /// Emits a `compile_error!` token stream anchored to `tokens` with message `msg`.
@@ -121,6 +127,39 @@ pub fn is_result_type(ty: &syn::Type) -> bool {
     false
 }
 
+/// Returns true if `ty` is a promise: a `jsg::Promise<T>`, or a `v8::Local` of a `v8::Promise`,
+/// alone or as the `T` of a `Result<T, E>` or `jsg::Result<T>`. C++ JSG rejects the promise of a
+/// method or property of such a type with what it throws, under `capture_async_api_throws`
+/// (`LiftKj_<v8::Local<v8::Promise>>` in `src/workerd/jsg/util.h`).
+pub fn is_promise_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+    let first_type_argument = || match &segment.arguments {
+        syn::PathArguments::AngleBracketed(args) => args.args.iter().find_map(|arg| match arg {
+            syn::GenericArgument::Type(ty) => Some(ty),
+            _ => None,
+        }),
+        _ => None,
+    };
+    if segment.ident == "Promise" {
+        return true;
+    }
+    if segment.ident == "Local" {
+        return first_type_argument().is_some_and(|inner| {
+            matches!(inner, syn::Type::Path(path)
+                if path.path.segments.last().is_some_and(|s| s.ident == "Promise"))
+        });
+    }
+    if segment.ident == "Result" {
+        return first_type_argument().is_some_and(is_promise_type);
+    }
+    false
+}
+
 /// Returns true if the type is `&mut Lock` or `&mut jsg::Lock`.
 ///
 /// When a method's first typed parameter matches this pattern, the macro passes the
@@ -142,6 +181,32 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
         // `&mut jsg::Lock` — fully qualified path
         2 => segments[0].ident == "jsg" && segments[1].ident == "Lock",
         _ => false,
+    }
+}
+
+/// Returns `T` if `ty` is `jsg::Arguments<T>` or `Arguments<T>`, a rest parameter.
+pub fn arguments_element(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    if type_path.qself.is_some() {
+        return None;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" => last,
+        _ => return None,
+    };
+    if last.ident != "Arguments" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    match args.args.iter().collect::<Vec<_>>().as_slice() {
+        [syn::GenericArgument::Type(element)] => Some(element),
+        _ => None,
     }
 }
 
@@ -296,8 +361,8 @@ fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
 ///
 /// The caller omits a method's `this: jsg::Rc<Self>` receiver. Constructors have no such
 /// receiver, so their parameters named `this` are JavaScript arguments. A leading
-/// `&mut Lock` is not a JavaScript argument.
-/// Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
+/// `&mut Lock` is not a JavaScript argument, and neither is a trailing `jsg::Arguments<T>`, as
+/// in C++ JSG. Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
 pub fn required_argument_count<'a>(
     inputs: impl Iterator<Item = &'a syn::FnArg>,
 ) -> proc_macro2::TokenStream {
@@ -310,7 +375,9 @@ pub fn required_argument_count<'a>(
     if params.peek().is_some_and(|ty| is_lock_ref(ty)) {
         params.next();
     }
-    let types = params.map(elide_named_lifetimes);
+    let types = params
+        .take_while(|ty| arguments_element(ty).is_none())
+        .map(elide_named_lifetimes);
     quote::quote! {{
         let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
         let mut length = 0u32;
