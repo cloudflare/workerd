@@ -37,7 +37,7 @@
 //      paced by the nodes' readiness, fails, loses and replays no request.
 //  13. KV: a namespace is seen from every node, its large values are in the
 //      bucket and cached on each node's disk, and it survives its owner.
-//  13. A cron trigger runs once a minute, through its schedule owner's death
+//  14. A cron trigger runs once a minute, through its schedule owner's death
 //      (cluster-cron-test, whose config, cluster-cron.wd-test, has one).
 //
 // A takeover waits out a dead owner's 20 s lease, so each one here costs

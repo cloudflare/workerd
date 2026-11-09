@@ -113,6 +113,11 @@ export const theLWAndHashForms = test(() => {
   assert.strictEqual(after('0 0 L-3W * *', at(2026, 8, 1)), at(2026, 8, 28));
   // October 2026 ends on Saturday the 31st.
   assert.strictEqual(after('0 0 LW * *', at(2026, 10, 1)), at(2026, 10, 30));
+  // `L-7W` is Saturday the 24th, so Friday the 23rd and not the Monday too.
+  assert.strictEqual(after('0 0 L-7W * *', at(2026, 10, 1)), at(2026, 10, 23));
+  assert.strictEqual(after('0 0 L-7W * *', at(2026, 10, 23)), at(2026, 11, 23));
+  // September 2026 has no 31st, so `31W` waits for October's.
+  assert.strictEqual(after('0 0 31W * *', at(2026, 9, 1)), at(2026, 10, 30));
   // The 15th of November 2026 is a Sunday.
   assert.strictEqual(after('0 0 15W * *', at(2026, 11, 1)), at(2026, 11, 16));
   // The 1st of August 2026 is a Saturday: `1W` stays in August.
@@ -145,6 +150,7 @@ export const whatCloudflareRefusesIsRefused = test(() => {
     '0 0 1W,15 * *',
     '0 0 * * 3,L',
     '0 0 * * MON#6',
+    '0 0 * * 1#2#3',
     '0 0 L-31 * *',
     // Saffron accepts these two, with readings refused here.
     '30-10 * * * *',

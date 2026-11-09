@@ -42,9 +42,9 @@ const DAY_MS = 86_400_000;
 // One Gregorian cycle: the calendar repeats every 400 years, so a walk this
 // long sees every (month, day, weekday) there is.
 const LOOKAHEAD_DAYS = 146_097;
-// Failures of one occurrence before its retries stop, and the backoff: the
-// nth retry waits BACKOFF_MS * 2 ** min(n, 6).
-const RETRY_CEILING = 6;
+// A failed occurrence is retried up to RETRIES times, the nth retry
+// BACKOFF_MS * 2 ** (n - 1) after the attempt before it failed.
+const RETRIES = 6;
 const BACKOFF_MS = 2_000;
 
 const field = (name, min, max, names = []) => ({ name, min, max, names });
@@ -133,17 +133,20 @@ function dayOfMonth(text) {
     if (offset[2] === '') return (d, w, last) => d + n === last;
     return (d, w, last) =>
       (!weekend(w) && d + n === last) ||
-      (w === 1 && d + n > last && d + n - last < 3) ||
+      (w === 1 && d + n === last + 1) ||
+      (w === 1 && d === 3 && last - n === 1) ||
       (w === 5 && d + n + 1 === last);
   }
   if (text.endsWith('W')) {
     const t = value(text.slice(0, -1), DAY_OF_MONTH);
+    // A day past the month's end matches nothing in that month.
     return (d, w, last) =>
-      (!weekend(w) && d === t) ||
-      (w === 1 && d - 1 === t) ||
-      (w === 1 && d === 3 && t === 1) ||
-      (w === 5 && d + 1 === t) ||
-      (w === 5 && d + 2 === t && t === last);
+      t <= last &&
+      ((!weekend(w) && d === t) ||
+        (w === 1 && d - 1 === t) ||
+        (w === 1 && d === 3 && t === 1) ||
+        (w === 5 && d + 1 === t) ||
+        (w === 5 && d + 2 === t && t === last));
   }
   const days = list(text, DAY_OF_MONTH);
   return (d) => days.has(d);
@@ -158,10 +161,12 @@ function dayOfWeek(text) {
     return (d, w, last) => w === want && d + 7 > last;
   }
   if (text.includes('#')) {
-    const [day, nth] = text.split('#');
+    const [day, nth, more] = text.split('#');
     const want = value(day, DAY_OF_WEEK) - 1;
     const n = digits(nth);
-    if (!(n >= 1 && n <= 5)) throw new Error(`day of week field has ${text}`);
+    if (more !== undefined || !(n >= 1 && n <= 5)) {
+      throw new Error(`day of week field has ${text}`);
+    }
     return (d, w) => w === want && Math.floor((d - 1) / 7) + 1 === n;
   }
   const days = list(text, DAY_OF_WEEK);
@@ -236,9 +241,7 @@ export function plan(crons, fired, now, retry, failed) {
   const nexts = crons.map((c) => next(c, now)).filter((t) => t !== null);
   const occurrence = nexts.length > 0 ? Math.min(...nexts) : null;
   const retryAt =
-    failed && retry < RETRY_CEILING
-      ? now + BACKOFF_MS * 2 ** Math.min(retry, 6)
-      : null;
+    failed && retry < RETRIES ? now + BACKOFF_MS * 2 ** retry : null;
   const armAt =
     occurrence === null || retryAt === null
       ? (occurrence ?? retryAt)
@@ -250,15 +253,27 @@ export function plan(crons, fired, now, retry, failed) {
   };
 }
 
-// A bad expression fails the config when it loads.
-const crons = (name) => (env.CRONS?.[name] ?? []).map(parse);
-for (const name of Object.keys(env.CRONS ?? {})) crons(name);
+// The schedules, parsed once: a bad expression, or a name with no service
+// binding to run, fails the config when it loads.
+const schedules = Object.fromEntries(
+  Object.entries(env.CRONS ?? {}).map(([name, expressions]) => {
+    if (typeof env[name]?.scheduled !== 'function') {
+      throw new Error(
+        `cron triggers of "${name}": no service binding "${name}"`
+      );
+    }
+    return [name, expressions.map(parse)];
+  })
+);
+const crons = (name) => schedules[name] ?? [];
 
 export default {
   async scheduled(controller, env) {
-    for (const name of Object.keys(env.CRONS)) {
-      await env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name);
-    }
+    await Promise.all(
+      Object.keys(schedules).map((name) =>
+        env.SCHEDULE.get(env.SCHEDULE.idFromName(name)).arm(name)
+      )
+    );
   },
 };
 

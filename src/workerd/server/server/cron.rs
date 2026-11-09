@@ -32,7 +32,7 @@ const MODULE: &str = "/workerd/cron.js";
 const ATTEMPTS: u32 = 5;
 const BACKOFF: Duration = Duration::from_secs(1);
 
-/// The Workers that use the module.
+/// The Workers whose main (first) module is the module.
 fn cron_workers(config: config::Reader<'_>) -> capnp::Result<Vec<String>> {
     let mut out = Vec::new();
     for s in config.get_services()? {
@@ -42,19 +42,18 @@ fn cron_workers(config: config::Reader<'_>) -> capnp::Result<Vec<String>> {
         let worker_capnp::Which::Modules(modules) = w?.which()? else {
             continue;
         };
-        for m in modules? {
-            if let module::Which::Bundled(name) = m.which()?
-                && name?.to_str()? == MODULE
-            {
-                out.push(s.get_name()?.to_string()?);
-            }
+        if let Some(m) = modules?.iter().next()
+            && let module::Which::Bundled(name) = m.which()?
+            && name?.to_str()? == MODULE
+        {
+            out.push(s.get_name()?.to_string()?);
         }
     }
     Ok(out)
 }
 
-/// Arms each cron Worker in the background, retried with backoff and then
-/// logged; `workerd test` arms none.
+/// Arms each cron Worker in the background, each on its own, retried with
+/// backoff and then logged; `workerd test` arms none.
 ///
 /// If there is any, a listener that ends with draining: schedules serve until
 /// the server drains, sockets or not.
@@ -76,12 +75,12 @@ pub fn start(
     if channels.is_empty() {
         return Ok(None);
     }
-    let factory_ = Rc::clone(&context.factory);
-    context.factory.spawn_detached(async move {
-        for (name, channel) in &channels {
+    for (name, channel) in channels {
+        let factory_ = Rc::clone(&context.factory);
+        context.factory.spawn_detached(async move {
             let mut delay = BACKOFF;
             for attempt in 1..=ATTEMPTS {
-                match arm(&**channel).await {
+                match arm(&*channel).await {
                     Ok(()) => break,
                     Err(e) if attempt == ATTEMPTS => {
                         tracing::error!("cron \"{name}\" not armed: {}", e.description());
@@ -92,8 +91,8 @@ pub fn start(
                     }
                 }
             }
-        }
-    });
+        });
+    }
     let mut draining = context.draining.clone();
     Ok(Some(Box::pin(async move {
         let _ = draining.wait_for(|drained| *drained).await;
