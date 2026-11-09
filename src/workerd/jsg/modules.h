@@ -825,6 +825,8 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 
   kj::Maybe<v8::Local<v8::Module>> tryTakeSnapshotModule(
       Lock& js, const kj::Path& specifier) override {
+    // Nothing is seeded outside a Worker started from a snapshot.
+    if (snapshotSeeds.size() == 0) return kj::none;
     KJ_IF_SOME(seeds,
         snapshotSeeds.find(SnapshotSeedKey{.specifier = specifier.clone(), .type = Type::BUNDLE})) {
       if (!seeds.module.IsEmpty()) {
