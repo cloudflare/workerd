@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-jwk-export-fast-struct",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-jwk-export-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "enable_fast_jsg_struct"],
+      )
+    ),
+    ( name = "crypto-jwk-export-slow-struct",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-jwk-export-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "webcrypto_modern_algorithms", "disable_fast_jsg_struct"],
+      )
+    ),
+  ],
+);

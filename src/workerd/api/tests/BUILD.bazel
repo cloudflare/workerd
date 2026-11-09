@@ -822,6 +822,11 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-jwk-export-test.wd-test",
+    data = ["crypto-jwk-export-test.js"],
+)
+
+wd_test(
     src = "crypto-sha3-test.wd-test",
     data = ["crypto-sha3-test.js"],
 )
